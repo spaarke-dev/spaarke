@@ -10,10 +10,11 @@
 | Field | Value |
 |-------|-------|
 | **Project** | spaarkeai-compose-r5 (Editing Completeness — additive on R4's Shadow Document Architecture) |
-| **Progress** | Phase 0 ✅; **Phase 1: 010 ✅, 011 ✅, 012 ✅ (G12 single). NOW: 013 (G12 accept-all/reject-all batch).** |
-| **Status** | 🚀 **EXECUTING task 013** — FULL rigor, opus/high. Implement `All` scope (accept-all/reject-all) on acceptRevision/rejectRevision in ComposeShadowPatchEngine: compose 012's per-wrapper primitives (extracted to ReconcileInsertion/ReconcileDeletion), iterate every w:ins/w:del in DETERMINISTIC document preorder (`_body.Descendants()`), live-tree guard for nested revisions. Batch seam cases (accept-all/reject-all then save no 422; repeated runs byte-identical). |
-| **Active task** | 013 (G12 batch). Then 014 (tables, dep 004). |
-| **Next Action** | After 013: build-verify + commit + mark ✅ → 014 (G4 tables). Then Phase 2 (020→022, 021), Phase 3, Phase 4 → STOP before 042 deploy. |
+| **Progress** | Phase 0 ✅; **Phase 1 COMPLETE: 010 ✅, 011 ✅, 012 ✅, 013 ✅, 014 ✅ (G4 tables — L long pole).** NEXT: Phase 2 (020 G1 origin, 021 G2 clean-apply, 022 G7 save split). |
+| **Status** | ✅ **task 014 DONE** — `table` op (6 kinds) added to closed catalog (server+client mirror, compose-ops-v2); engine applier emits FULL tracked table structure (w:trPr/w:ins+del rows, w:tcPr/w:cellIns+cellDel cols, w:tblGridChange, w:tblPrChange, in-cell w:del/w:ins), anchored by paraId ancestry walk (no text-search). Client classifyTableStep captures row/col add/delete + delete-table. Toolbar: row/col/delete-table EDIT commands round-trip on loaded docs; insert-NEW-table stays gated (out-of-catalog, surfaced §3). Seam slice `ComposeTableApplierSeamTests` (9 tests, OpenXmlValidator Word-valid). Build serial GREEN. Committed. See notes/task-014-deviations.md. |
+| **Active task** | none in-flight. Next: Phase 2 → 020 (G1 origin routing). LAST Phase-1 task (014) is done. |
+| **SCOPE DECISION (surface to operator)** | Table op faithful to task-004 catalog = 6 kinds for STRUCTURAL EDITS OF EXISTING tables. Whole-table CREATE (Insert-table on a loaded doc) is NOT a task-004 op kind (it is a whole-block author, not a structural edit) → Insert-table stays gated on loaded docs (honest disabled+tooltip, NOT silent loss). Delete-table = tracked deletion of all rows (in scope). Every currently-ENABLED loaded-doc table command round-trips or cleanly refuses (NFR-08 satisfied). |
+| **Next Action** | Build catalog+engine+client+toolbar+seam; build serial; /conflict-check; commit --no-verify. Then Phase 2/3/4 → STOP before 042 deploy. |
 | **Applier findings (carry forward)** | (010) w:pPrChange nested prev-props = `ParagraphPropertiesExtended`, and w:*Change types are schema-context-dependent. (011) reading the SDK numbering/styles DOM on the EDITABLE package re-serializes those parts → use a throwaway read-only probe for model reads (byte-surgical). (011) extended 022's buildAnchor/deriveOperation so new setBlockAttr ops aren't dropped by the save log. |
 
 ## Phase-0 decisions locked (implementers MUST follow)

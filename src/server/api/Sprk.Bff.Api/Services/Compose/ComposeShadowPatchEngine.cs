@@ -251,10 +251,15 @@ public sealed class ComposeShadowPatchEngine
                         break;
 
                     // Task 031 — the four structural paragraph ops are collected and applied LAST (below).
+                    // R5 task 014 (G4) — the table op is ALSO structural (it adds/removes rows/cells and mints
+                    // new cell paragraphs) so it runs in the SAME last pass, in log order: a table op never
+                    // shifts an inline op's run-local-offset anchor because table structure is addressed by
+                    // paraId-ancestry + (row,column), never by paragraph-run offsets.
                     case SplitParagraphOperation:
                     case MergeParagraphOperation:
                     case InsertParagraphOperation:
                     case DeleteParagraphOperation:
+                    case TableOperation:
                         structural.Add(op);
                         break;
 
@@ -319,6 +324,9 @@ public sealed class ComposeShadowPatchEngine
                         break;
                     case DeleteParagraphOperation dp:
                         ApplyDeleteParagraph(dp);
+                        break;
+                    case TableOperation tbl:
+                        ApplyTableOperation(tbl);
                         break;
                 }
             }
@@ -1107,6 +1115,477 @@ public sealed class ComposeShadowPatchEngine
             pPrChange.AppendChild(previousProps);
             pPr.AppendChild(pPrChange);
         }
+
+        // =============================================================================================
+        // Table structural ops (R5 task 014 / G4 / FR-04) — FULL tracked table structure. Anchored by the base
+        // paraId = a w14:paraId of a paragraph INSIDE the target table; resolved O(1) then the OpenXml ancestry
+        // w:p -> w:tc -> w:tr -> w:tbl is walked to reach the w:tbl (NO table-id, NO text-search — I-7 / NFR-02).
+        // Every kind emits Word-valid TRACKED markup: an inserted row carries w:trPr/w:ins (+ inserted cell
+        // paragraph marks); a deleted row w:trPr/w:del (+ struck content, deleted marks); an inserted column a
+        // w:tcPr/w:cellIns per row (+ a w:gridCol + w:tblGridChange recording the prior grid); a deleted column
+        // w:tcPr/w:cellDel per row (+ struck content); a cell-content set is an in-cell w:del(old)+w:ins(new); a
+        // table-prop change a w:tblPrChange recording the prior props. Merged/spanned columns (w:gridSpan) that
+        // make cell-index != grid-column are REFUSED deterministically rather than mis-addressed (FR-05).
+        // Whole-table CREATE is intentionally out of scope (task-004 catalog) — a table op only edits an
+        // EXISTING table.
+        // =============================================================================================
+
+        private void ApplyTableOperation(TableOperation op)
+        {
+            var para = Resolve(op.ParaId); // O(1) paraId lookup — no text-search (I-7).
+            var cell = para.Ancestors<TableCell>().FirstOrDefault()
+                ?? throw TableRefused(op.ParaId, ComposePatchErrorKind.TableNotFound,
+                    "the anchor paragraph is not inside a table cell (w:tc) — a table op's paraId must address a paragraph within the target table");
+            var table = cell.Ancestors<Table>().FirstOrDefault()
+                ?? throw TableRefused(op.ParaId, ComposePatchErrorKind.TableNotFound,
+                    "the anchor paragraph's cell has no table (w:tbl) ancestor");
+
+            switch (op.Kind)
+            {
+                case ComposeTableOpKind.InsertRow: ApplyTableInsertRow(op, table); break;
+                case ComposeTableOpKind.DeleteRow: ApplyTableDeleteRow(op, table); break;
+                case ComposeTableOpKind.InsertColumn: ApplyTableInsertColumn(op, table); break;
+                case ComposeTableOpKind.DeleteColumn: ApplyTableDeleteColumn(op, table); break;
+                case ComposeTableOpKind.SetCellContent: ApplyTableSetCellContent(op, table); break;
+                case ComposeTableOpKind.SetTableProps: ApplyTableSetProps(op, table); break;
+                default:
+                    throw TableRefused(op.ParaId, ComposePatchErrorKind.StructuralOperationRefused,
+                        $"unhandled table op kind '{op.Kind}'");
+            }
+        }
+
+        private static List<TableRow> TableRows(Table table) => table.Elements<TableRow>().ToList();
+
+        /// <summary>The direct-child cells (column slots) of a row. Refuses a row carrying a horizontal span
+        /// (<c>w:gridSpan</c> &gt; 1) so cell-index stays == grid-column (unspanned tables only; a spanned table
+        /// is refused, never mis-indexed).</summary>
+        private static List<TableCell> RowCells(string paraId, TableRow row)
+        {
+            var cells = row.Elements<TableCell>().ToList();
+            foreach (var c in cells)
+            {
+                if (c.TableCellProperties?.GetFirstChild<GridSpan>()?.Val?.Value is > 1)
+                {
+                    throw TableRefused(paraId, ComposePatchErrorKind.StructuralOperationRefused,
+                        "the table has horizontally-merged cells (w:gridSpan) — column addressing by cell index is ambiguous; refused rather than mis-placed");
+                }
+            }
+
+            return cells;
+        }
+
+        // -- InsertRow (w:trPr/w:ins + inserted cell paragraph marks) ---------------------------------
+
+        private void ApplyTableInsertRow(TableOperation op, Table table)
+        {
+            var rows = TableRows(table);
+            var rowIndex = RequireIndex(op.ParaId, op.Row, 0, rows.Count - 1, "row");
+            var position = op.Position
+                ?? throw TableRefused(op.ParaId, ComposePatchErrorKind.StructuralOperationRefused, "InsertRow requires a position (Before/After)");
+            var reference = rows[rowIndex];
+            var refCells = RowCells(op.ParaId, reference);
+            var columnCount = refCells.Count;
+
+            if (op.NewParaIds.Count != columnCount)
+            {
+                throw TableRefused(op.ParaId, ComposePatchErrorKind.TableIndexOutOfRange,
+                    $"InsertRow needs one newParaId per column ({columnCount}); got {op.NewParaIds.Count}");
+            }
+
+            RequireFreshParaIds(op.ParaId, op.NewParaIds);
+
+            var newRow = new TableRow();
+            var trPr = new TableRowProperties();
+            newRow.AppendChild(trPr);
+
+            for (var c = 0; c < columnCount; c++)
+            {
+                var newCell = new TableCell();
+                if (refCells[c].TableCellProperties is { } srcTcPr)
+                {
+                    var tcPr = (TableCellProperties)srcTcPr.CloneNode(true);
+                    tcPr.RemoveAllChildren<CellInsertion>();
+                    tcPr.RemoveAllChildren<CellDeletion>();
+                    newCell.AppendChild(tcPr);
+                }
+
+                var p = new Paragraph { ParagraphId = op.NewParaIds[c] };
+                MarkParagraphMark(p, inserted: true);
+                newCell.AppendChild(p);
+                newRow.AppendChild(newCell);
+                _byParaId[op.NewParaIds[c]] = p;
+            }
+
+            // Mark the whole row INSERTED — w:trPr/w:ins (CT_TrPr is an unordered choice, so position is free).
+            trPr.AppendChild(new Inserted { Id = NextId(), Author = _author, Date = _date });
+
+            if (position == ComposeParagraphPosition.Before)
+            {
+                reference.InsertBeforeSelf(newRow);
+            }
+            else
+            {
+                reference.InsertAfterSelf(newRow);
+            }
+        }
+
+        // -- DeleteRow (w:trPr/w:del + struck content, deleted marks) ---------------------------------
+
+        private void ApplyTableDeleteRow(TableOperation op, Table table)
+        {
+            var rows = TableRows(table);
+            var rowIndex = RequireIndex(op.ParaId, op.Row, 0, rows.Count - 1, "row");
+            var target = rows[rowIndex];
+
+            var trPr = target.TableRowProperties ??= new TableRowProperties();
+            if (trPr.GetFirstChild<Deleted>() is null && trPr.GetFirstChild<Inserted>() is null)
+            {
+                trPr.AppendChild(new Deleted { Id = NextId(), Author = _author, Date = _date });
+            }
+
+            foreach (var c in RowCells(op.ParaId, target))
+            {
+                StrikeCellContent(c);
+            }
+        }
+
+        // -- InsertColumn (w:tcPr/w:cellIns per row + w:gridCol + w:tblGridChange) ---------------------
+
+        private void ApplyTableInsertColumn(TableOperation op, Table table)
+        {
+            var rows = TableRows(table);
+            if (rows.Count == 0)
+            {
+                throw TableRefused(op.ParaId, ComposePatchErrorKind.TableIndexOutOfRange, "the table has no rows to add a column to");
+            }
+
+            var colCount = RowCells(op.ParaId, rows[0]).Count;
+            var colIndex = RequireIndex(op.ParaId, op.Column, 0, colCount - 1, "column");
+            var position = op.Position
+                ?? throw TableRefused(op.ParaId, ComposePatchErrorKind.StructuralOperationRefused, "InsertColumn requires a position (Before/After)");
+
+            if (op.NewParaIds.Count != rows.Count)
+            {
+                throw TableRefused(op.ParaId, ComposePatchErrorKind.TableIndexOutOfRange,
+                    $"InsertColumn needs one newParaId per row ({rows.Count}); got {op.NewParaIds.Count}");
+            }
+
+            RequireFreshParaIds(op.ParaId, op.NewParaIds);
+
+            for (var r = 0; r < rows.Count; r++)
+            {
+                var cells = RowCells(op.ParaId, rows[r]);
+                var refCell = cells[Math.Min(colIndex, cells.Count - 1)];
+                var newCell = new TableCell();
+                var tcPr = refCell.TableCellProperties is { } src ? (TableCellProperties)src.CloneNode(true) : new TableCellProperties();
+                tcPr.RemoveAllChildren<CellInsertion>();
+                tcPr.RemoveAllChildren<CellDeletion>();
+                tcPr.AppendChild(new CellInsertion { Id = NextId(), Author = _author, Date = _date });
+                newCell.AppendChild(tcPr);
+
+                var p = new Paragraph { ParagraphId = op.NewParaIds[r] };
+                MarkParagraphMark(p, inserted: true);
+                newCell.AppendChild(p);
+                _byParaId[op.NewParaIds[r]] = p;
+
+                if (position == ComposeParagraphPosition.Before)
+                {
+                    refCell.InsertBeforeSelf(newCell);
+                }
+                else
+                {
+                    refCell.InsertAfterSelf(newCell);
+                }
+            }
+
+            // Grid: add a w:gridCol at the column position + record w:tblGridChange with the PRIOR grid.
+            if (table.GetFirstChild<TableGrid>() is { } grid)
+            {
+                var priorCols = grid.Elements<GridColumn>().Select(c => (GridColumn)c.CloneNode(true)).ToList();
+                var cols = grid.Elements<GridColumn>().ToList();
+                if (cols.Count > 0)
+                {
+                    var anchorCol = cols[Math.Min(colIndex, cols.Count - 1)];
+                    var newCol = new GridColumn();
+                    if (anchorCol.Width is { } w)
+                    {
+                        newCol.Width = w;
+                    }
+
+                    if (position == ComposeParagraphPosition.Before)
+                    {
+                        anchorCol.InsertBeforeSelf(newCol);
+                    }
+                    else
+                    {
+                        anchorCol.InsertAfterSelf(newCol);
+                    }
+
+                    grid.RemoveAllChildren<TableGridChange>();
+                    var change = new TableGridChange { Id = NextId() };
+                    var prevGrid = new PreviousTableGrid();
+                    foreach (var col in priorCols)
+                    {
+                        prevGrid.AppendChild(col);
+                    }
+
+                    change.AppendChild(prevGrid);
+                    grid.AppendChild(change); // w:tblGridChange is the LAST child of CT_TblGrid.
+                }
+            }
+        }
+
+        // -- DeleteColumn (w:tcPr/w:cellDel per row + struck content) ----------------------------------
+
+        private void ApplyTableDeleteColumn(TableOperation op, Table table)
+        {
+            var rows = TableRows(table);
+            if (rows.Count == 0)
+            {
+                throw TableRefused(op.ParaId, ComposePatchErrorKind.TableIndexOutOfRange, "the table has no rows");
+            }
+
+            var colCount = RowCells(op.ParaId, rows[0]).Count;
+            var colIndex = RequireIndex(op.ParaId, op.Column, 0, colCount - 1, "column");
+
+            foreach (var row in rows)
+            {
+                var cells = RowCells(op.ParaId, row);
+                if (colIndex >= cells.Count)
+                {
+                    continue; // ragged row — no cell at this column slot
+                }
+
+                var cell = cells[colIndex];
+                var tcPr = cell.TableCellProperties ??= new TableCellProperties();
+                if (tcPr.GetFirstChild<CellDeletion>() is null && tcPr.GetFirstChild<CellInsertion>() is null)
+                {
+                    tcPr.AppendChild(new CellDeletion { Id = NextId(), Author = _author, Date = _date });
+                }
+
+                StrikeCellContent(cell);
+            }
+        }
+
+        // -- SetCellContent (in-cell w:del(old) + w:ins(new)) -----------------------------------------
+
+        private void ApplyTableSetCellContent(TableOperation op, Table table)
+        {
+            var rows = TableRows(table);
+            var rowIndex = RequireIndex(op.ParaId, op.Row, 0, rows.Count - 1, "row");
+            var cells = RowCells(op.ParaId, rows[rowIndex]);
+            var colIndex = RequireIndex(op.ParaId, op.Column, 0, cells.Count - 1, "column");
+
+            if (op.Text is null)
+            {
+                throw TableRefused(op.ParaId, ComposePatchErrorKind.StructuralOperationRefused, "SetCellContent requires a non-null text");
+            }
+
+            var cell = cells[colIndex];
+            var target = cell.Elements<Paragraph>().FirstOrDefault();
+            if (target is null)
+            {
+                target = new Paragraph();
+                cell.AppendChild(target);
+            }
+
+            RunProperties? template = null;
+            foreach (var slot in FlattenEditorRuns(target))
+            {
+                if (!slot.IsAtom && slot.TrackChange == RunTrackChange.None && slot.PhysicalRun is { } run)
+                {
+                    template ??= run.RunProperties;
+                    WrapRunAsDeleted(run);
+                }
+            }
+
+            if (op.Text.Length > 0)
+            {
+                var ins = NewInsertedRun();
+                ins.AppendChild(BuildRun(template, op.Text, op.Marks));
+                var firstInline = target.Elements().FirstOrDefault(IsInlineContainer);
+                if (firstInline is not null)
+                {
+                    firstInline.InsertBeforeSelf(ins);
+                }
+                else
+                {
+                    target.AppendChild(ins);
+                }
+            }
+        }
+
+        // -- SetTableProps (w:tblPrChange recording the prior props) ----------------------------------
+
+        private void ApplyTableSetProps(TableOperation op, Table table)
+        {
+            if (op.TableProp is not { } prop)
+            {
+                throw TableRefused(op.ParaId, ComposePatchErrorKind.StructuralOperationRefused, "SetTableProps requires a tableProp");
+            }
+
+            var tblPr = table.GetFirstChild<TableProperties>();
+            if (tblPr is null)
+            {
+                tblPr = new TableProperties();
+                table.PrependChild(tblPr); // w:tblPr is the FIRST child of w:tbl.
+            }
+
+            var previous = SnapshotPriorTblPr(tblPr);
+
+            switch (prop)
+            {
+                case ComposeTableProp.Alignment:
+                    tblPr.TableJustification = new TableJustification { Val = ParseTableAlignment(op) };
+                    break;
+                case ComposeTableProp.Width:
+                    tblPr.TableWidth = ParseTableWidth(op);
+                    break;
+                case ComposeTableProp.Borders:
+                    ApplyTableBorders(op, tblPr);
+                    break;
+            }
+
+            // w:tblPrChange never stacks; it is the LAST child of CT_TblPr.
+            tblPr.RemoveAllChildren<TablePropertiesChange>();
+            var change = new TablePropertiesChange { Id = NextId(), Author = _author, Date = _date };
+            change.AppendChild(previous);
+            tblPr.AppendChild(change);
+        }
+
+        /// <summary>Clones the table's CURRENT direct properties (every child EXCEPT an existing
+        /// <c>w:tblPrChange</c>) into a <see cref="PreviousTableProperties"/> — the "changed from" state a tracked
+        /// <c>w:tblPrChange</c> records so Word's "Reject" restores exactly what was there (the table analogue of
+        /// <see cref="SnapshotPriorPPr"/>).</summary>
+        private static PreviousTableProperties SnapshotPriorTblPr(TableProperties tblPr)
+        {
+            var previous = new PreviousTableProperties();
+            foreach (var child in tblPr.ChildElements)
+            {
+                if (child is TablePropertiesChange)
+                {
+                    continue;
+                }
+
+                previous.AppendChild(child.CloneNode(true));
+            }
+
+            return previous;
+        }
+
+        private static TableRowAlignmentValues ParseTableAlignment(TableOperation op) => op.Value switch
+        {
+            "Left" => TableRowAlignmentValues.Left,
+            "Center" => TableRowAlignmentValues.Center,
+            "Right" => TableRowAlignmentValues.Right,
+            _ => throw InvalidTablePropValue(op),
+        };
+
+        private static TableWidth ParseTableWidth(TableOperation op)
+        {
+            var value = op.Value;
+            if (string.Equals(value, "auto", StringComparison.OrdinalIgnoreCase))
+            {
+                return new TableWidth { Type = TableWidthUnitValues.Auto, Width = "0" };
+            }
+
+            // Format "unit:number" (pct:NN | dxa:NNNN) — parsed by Split + equality on the UNIT token, never a
+            // content-locating string API (I-7 write-path audit bans StartsWith/IndexOf/Contains/EndsWith).
+            var parts = value?.Split(':');
+            if (parts is { Length: 2 } && int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var number))
+            {
+                if (string.Equals(parts[0], "pct", StringComparison.Ordinal))
+                {
+                    // w:tblW pct is expressed in fiftieths of a percent (5000 == 100%).
+                    return new TableWidth { Type = TableWidthUnitValues.Pct, Width = (number * 50).ToString(CultureInfo.InvariantCulture) };
+                }
+
+                if (string.Equals(parts[0], "dxa", StringComparison.Ordinal))
+                {
+                    return new TableWidth { Type = TableWidthUnitValues.Dxa, Width = number.ToString(CultureInfo.InvariantCulture) };
+                }
+            }
+
+            throw InvalidTablePropValue(op);
+        }
+
+        private static void ApplyTableBorders(TableOperation op, TableProperties tblPr)
+        {
+            tblPr.RemoveAllChildren<TableBorders>();
+            switch (op.Value)
+            {
+                case "None":
+                    return; // borders cleared
+                case "Single":
+                    tblPr.TableBorders = BuildUniformBorders(BorderValues.Single);
+                    break;
+                case "Double":
+                    tblPr.TableBorders = BuildUniformBorders(BorderValues.Double);
+                    break;
+                default:
+                    throw InvalidTablePropValue(op);
+            }
+        }
+
+        private static TableBorders BuildUniformBorders(BorderValues style) => new(
+            new TopBorder { Val = style, Size = 4, Space = 0 },
+            new LeftBorder { Val = style, Size = 4, Space = 0 },
+            new BottomBorder { Val = style, Size = 4, Space = 0 },
+            new RightBorder { Val = style, Size = 4, Space = 0 },
+            new InsideHorizontalBorder { Val = style, Size = 4, Space = 0 },
+            new InsideVerticalBorder { Val = style, Size = 4, Space = 0 });
+
+        /// <summary>Strikes a cell's settled content: every settled (non-atom, non-tracked) run becomes a tracked
+        /// deletion and each of the cell's paragraph marks is marked deleted, so accept removes the cell content
+        /// with the row/column and reject restores it.</summary>
+        private void StrikeCellContent(TableCell cell)
+        {
+            foreach (var p in cell.Elements<Paragraph>())
+            {
+                foreach (var slot in FlattenEditorRuns(p))
+                {
+                    if (!slot.IsAtom && slot.TrackChange == RunTrackChange.None && slot.PhysicalRun is { } run)
+                    {
+                        WrapRunAsDeleted(run);
+                    }
+                }
+
+                MarkParagraphMark(p, inserted: false);
+            }
+        }
+
+        private static int RequireIndex(string paraId, int? value, int min, int max, string what)
+        {
+            if (value is not { } v || v < min || v > max)
+            {
+                throw TableRefused(paraId, ComposePatchErrorKind.TableIndexOutOfRange,
+                    $"{what} index {(value?.ToString(CultureInfo.InvariantCulture) ?? "null")} is out of range [{min},{max}] for the resolved table");
+            }
+
+            return v;
+        }
+
+        private void RequireFreshParaIds(string paraId, IReadOnlyList<string> ids)
+        {
+            foreach (var id in ids)
+            {
+                if (string.IsNullOrEmpty(id) || _byParaId.ContainsKey(id))
+                {
+                    throw TableRefused(paraId, ComposePatchErrorKind.StructuralOperationRefused,
+                        $"newParaId '{id}' is empty or already exists in the document (a table insert must mint fresh ids)");
+                }
+            }
+        }
+
+        private static ComposePatchException TableRefused(string paraId, ComposePatchErrorKind kind, string why) =>
+            new(kind,
+                $"Table op on paraId '{paraId}' refused: {why}. Targets are resolved by paraId ancestry + (row,column), " +
+                "never by text-search (I-7); an edit the engine cannot represent as valid tracked OOXML is refused rather " +
+                "than emitted as a package Word would repair (project ordering rule / FR-05).");
+
+        private static ComposePatchException InvalidTablePropValue(TableOperation op) =>
+            new(ComposePatchErrorKind.InvalidBlockAttrValue,
+                $"table SetTableProps {op.TableProp} on paraId '{op.ParaId}' carries an unrecognized value '{op.Value}'.");
 
         // -- structural helpers -----------------------------------------------------------------------
 
@@ -2185,6 +2664,14 @@ public enum ComposePatchErrorKind
     /// <c>w:ins</c>/<c>w:del</c> with that <c>w:id</c> in the target paragraph (no text-search fallback — G12/I-7)
     /// → 422.</summary>
     RevisionNotFound,
+
+    /// <summary>A <c>table</c> op's <c>paraId</c> resolves to a paragraph that is NOT inside a table cell/table
+    /// (no text-search fallback — G4/I-7) → 422.</summary>
+    TableNotFound,
+
+    /// <summary>A <c>table</c> op's <c>row</c>/<c>column</c> index (or <c>newParaIds</c> count) is out of range for
+    /// the resolved table's dimensions → 422.</summary>
+    TableIndexOutOfRange,
 }
 
 /// <summary>

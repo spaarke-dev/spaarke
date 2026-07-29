@@ -142,7 +142,7 @@ public enum ComposeBlockAttr
 }
 
 /// <summary>
-/// Base of the CLOSED operation discriminated union (FR-11). Exactly twelve derived
+/// Base of the CLOSED operation discriminated union (FR-11). Exactly thirteen derived
 /// types, tagged by the <c>type</c> discriminator with the FR-11 literal names.
 /// Every op carries a <see cref="ParaId"/> — the durable <c>w14:paraId</c> coarse
 /// anchor. System.Text.Json polymorphic (de)serialization is driven by
@@ -162,6 +162,7 @@ public enum ComposeBlockAttr
 [JsonDerivedType(typeof(SetBlockAttrOperation), "setBlockAttr")]
 [JsonDerivedType(typeof(AcceptRevisionOperation), "acceptRevision")]
 [JsonDerivedType(typeof(RejectRevisionOperation), "rejectRevision")]
+[JsonDerivedType(typeof(TableOperation), "table")]
 public abstract record ComposeOperation
 {
     /// <summary>
@@ -427,6 +428,114 @@ public sealed record RejectRevisionOperation : ComposeOperation
     /// <see cref="ComposeRevisionScope.All"/>.</summary>
     [JsonPropertyName("revisionId")]
     public string? RevisionId { get; init; }
+}
+
+/// <summary>
+/// The closed set of STRUCTURAL table edits a <see cref="TableOperation"/> may express (G4 / FR-04, R5 task
+/// 014). Serialized as its PascalCase member name (same convention as <see cref="ComposeBlockAttr"/> /
+/// <see cref="ComposeRevisionScope"/>); the client union mirrors the literals. Each kind maps to a Word-valid
+/// TRACKED table-structure edit on the imported/tracked path — insert/delete a row (<c>w:trPr/w:ins</c> /
+/// <c>w:trPr/w:del</c>), insert/delete a column (<c>w:tcPr/w:cellIns</c> / <c>w:tcPr/w:cellDel</c> per row +
+/// <c>w:tblGridChange</c>), set a cell's content (in-cell <c>w:ins</c>/<c>w:del</c>), or change table-level
+/// properties (<c>w:tblPrChange</c>). Whole-table CREATE is intentionally NOT a kind here — a brand-new table on
+/// a tracked baseline is a whole-block author, out of this catalog's structural-edit scope (task-004 design §2).
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ComposeTableOpKind
+{
+    /// <summary>Insert a new row (<c>w:tr</c> with <c>w:trPr/w:ins</c>) before/after <see cref="TableOperation.Row"/>.</summary>
+    InsertRow,
+
+    /// <summary>Delete a row (mark the target <c>w:tr</c> with <c>w:trPr/w:del</c> + strike its cell content).</summary>
+    DeleteRow,
+
+    /// <summary>Insert a new column (a <c>w:tc</c> per row with <c>w:tcPr/w:cellIns</c>) before/after <see cref="TableOperation.Column"/>.</summary>
+    InsertColumn,
+
+    /// <summary>Delete a column (mark each row's target <c>w:tc</c> with <c>w:tcPr/w:cellDel</c> + strike its content).</summary>
+    DeleteColumn,
+
+    /// <summary>Replace a cell's content as a tracked change (existing runs → <c>w:del</c>, new text → <c>w:ins</c>).</summary>
+    SetCellContent,
+
+    /// <summary>Change a table-level property recorded as a tracked <c>w:tblPrChange</c>.</summary>
+    SetTableProps,
+}
+
+/// <summary>
+/// The closed set of table-level properties a <see cref="ComposeTableOpKind.SetTableProps"/> op may change
+/// (G4 / FR-04). Kept intentionally small + closed; new props are added by the same catalog-extension process,
+/// never by a free-form bag. The op <see cref="TableOperation.Value"/> is interpreted per member (mirrors the
+/// <see cref="SetBlockAttrOperation"/> <c>attr</c>/<c>value</c> pattern). Serialized as its PascalCase member name.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ComposeTableProp
+{
+    /// <summary>Table alignment; value = <c>Left</c>/<c>Center</c>/<c>Right</c>.</summary>
+    Alignment,
+
+    /// <summary>Table width; value = <c>"auto"</c> | <c>"pct:NN"</c> | <c>"dxa:NNNN"</c>.</summary>
+    Width,
+
+    /// <summary>Table borders; value = <c>None</c>/<c>Single</c>/<c>Double</c>.</summary>
+    Borders,
+}
+
+/// <summary>
+/// <c>table</c> — a STRUCTURAL edit to a table on the imported/tracked path (G4 / FR-04, R5 task 014). The op is
+/// anchored by the base <see cref="ComposeOperation.ParaId"/>, which is the <c>w14:paraId</c> of a paragraph
+/// INSIDE the target table (canonical: the table's first cell's first paragraph — cell paragraphs are
+/// paraId-stamped exactly like body paragraphs). The applier resolves that paragraph O(1) by paraId, then walks
+/// the OpenXml ancestry <c>w:p → w:tc → w:tr → w:tbl</c> to reach the <c>w:tbl</c> — <b>no table-id, no new anchor
+/// type, and NEVER a text/content search</b> (invariant I-7 / NFR-02). <see cref="Row"/>/<see cref="Column"/>
+/// coordinates address the cell WITHIN the resolved table (0-based). The applier emits Word-valid TRACKED table
+/// structure per <see cref="Kind"/>; clean-vs-tracked is an engine-mode concern (G2), not a per-op field.
+/// </summary>
+public sealed record TableOperation : ComposeOperation
+{
+    /// <summary>Which structural table edit to apply (closed enum).</summary>
+    [JsonPropertyName("kind")]
+    public required ComposeTableOpKind Kind { get; init; }
+
+    /// <summary>0-based row index within the table (required for InsertRow/DeleteRow/SetCellContent; <c>null</c>
+    /// for column-only / table-prop ops).</summary>
+    [JsonPropertyName("row")]
+    public int? Row { get; init; }
+
+    /// <summary>0-based grid-column index within the table (required for InsertColumn/DeleteColumn/SetCellContent;
+    /// <c>null</c> for row-only / table-prop ops).</summary>
+    [JsonPropertyName("column")]
+    public int? Column { get; init; }
+
+    /// <summary>For InsertRow/InsertColumn — insert the new row/column BEFORE or AFTER
+    /// <see cref="Row"/>/<see cref="Column"/>. Reuses the existing <see cref="ComposeParagraphPosition"/> enum.</summary>
+    [JsonPropertyName("position")]
+    public ComposeParagraphPosition? Position { get; init; }
+
+    /// <summary>The minted <c>w14:paraId</c>s stamped on the NEW cells' paragraphs, ordered by grid position
+    /// (InsertRow → one per column, left→right; InsertColumn → one per row, top→bottom). Follows the
+    /// <see cref="SplitParagraphOperation.NewParaId"/> minted-durable-id precedent — lets subsequent ops target
+    /// the new cells. Empty for non-insert kinds.</summary>
+    [JsonPropertyName("newParaIds")]
+    public IReadOnlyList<string> NewParaIds { get; init; } = Array.Empty<string>();
+
+    /// <summary>For SetCellContent — the cell's new text content (Tier 3 — document content). <c>null</c> otherwise.</summary>
+    [JsonPropertyName("text")]
+    public string? Text { get; init; }
+
+    /// <summary>For SetCellContent — optional inline marks on the set content. Empty = inherit. Reuses
+    /// <see cref="ComposeMarkType"/>.</summary>
+    [JsonPropertyName("marks")]
+    public IReadOnlyList<ComposeMarkType> Marks { get; init; } = Array.Empty<ComposeMarkType>();
+
+    /// <summary>For SetTableProps — which table-level property to change (closed enum). <c>null</c> otherwise.</summary>
+    [JsonPropertyName("tableProp")]
+    public ComposeTableProp? TableProp { get; init; }
+
+    /// <summary>For SetTableProps — the property value, interpreted per <see cref="TableProp"/> (mirrors the
+    /// <see cref="SetBlockAttrOperation"/> <c>value</c> pattern). <c>null</c> clears to the style default.</summary>
+    [JsonPropertyName("value")]
+    public string? Value { get; init; }
 }
 
 /// <summary>

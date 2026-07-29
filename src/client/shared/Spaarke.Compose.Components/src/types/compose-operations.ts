@@ -65,6 +65,8 @@ export const COMPOSE_OPERATION_TYPES = [
   // R5 task 012 (G12 / FR-11) — imported-revision reconciliation (accept/reject by native w:id).
   'acceptRevision',
   'rejectRevision',
+  // R5 task 014 (G4 / FR-04) — structural table edit (row/column add/remove, cell content, table props).
+  'table',
 ] as const;
 
 /** The op-type discriminator union (the `type` field of every {@link ComposeOperation}). */
@@ -123,6 +125,29 @@ export type ComposeParagraphPosition = 'Before' | 'After';
  * member-name serialization. R5 task 012 emits `Single`; `All` (batch) is task 013.
  */
 export type ComposeRevisionScope = 'Single' | 'All';
+
+/**
+ * The closed set of STRUCTURAL table edits a {@link TableOperation} may express (mirrors the server
+ * `ComposeTableOpKind` enum; G4 / FR-04, R5 task 014). PascalCase literals match the server member-name
+ * serialization. Whole-table CREATE is intentionally NOT a kind — a brand-new table on a tracked baseline is a
+ * whole-block author, out of this catalog's structural-edit scope (task-004 design §2).
+ */
+export type ComposeTableOpKind =
+  | 'InsertRow'
+  | 'DeleteRow'
+  | 'InsertColumn'
+  | 'DeleteColumn'
+  | 'SetCellContent'
+  | 'SetTableProps';
+
+/**
+ * The closed set of table-level properties a `SetTableProps` {@link TableOperation} may change (mirrors the
+ * server `ComposeTableProp` enum). The op `value` is interpreted per member:
+ *  - `Alignment` → `Left`/`Center`/`Right`
+ *  - `Width`     → `"auto"` | `"pct:NN"` | `"dxa:NNNN"`
+ *  - `Borders`   → `None`/`Single`/`Double`
+ */
+export type ComposeTableProp = 'Alignment' | 'Width' | 'Borders';
 
 /** Fields common to every operation. Every op carries the durable `w14:paraId` coarse anchor. */
 interface ComposeOperationBase {
@@ -262,7 +287,36 @@ export interface RejectRevisionOperation extends ComposeOperationBase {
 }
 
 /**
- * The CLOSED discriminated union of exactly twelve operations (FR-11). Narrow on `type`
+ * `table` — a STRUCTURAL edit to a table on the imported/tracked path (mirrors the server `TableOperation`
+ * record; G4 / FR-04, R5 task 014). Anchored by the base `paraId` = the `w14:paraId` of a paragraph INSIDE the
+ * target table (canonical: first cell's first paragraph); the server resolves that paragraph O(1) then walks the
+ * ancestry `w:p → w:tc → w:tr → w:tbl` — NEVER a text/content search (I-7 / NFR-02). `row`/`column` address the
+ * cell within the resolved table (0-based).
+ */
+export interface TableOperation extends ComposeOperationBase {
+  type: 'table';
+  /** Which structural table edit to apply (closed set). */
+  kind: ComposeTableOpKind;
+  /** 0-based row index (InsertRow/DeleteRow/SetCellContent); `null` for column-only / table-prop ops. */
+  row?: number | null;
+  /** 0-based grid-column index (InsertColumn/DeleteColumn/SetCellContent); `null` for row-only / table-prop ops. */
+  column?: number | null;
+  /** For InsertRow/InsertColumn — insert the new row/column before/after `row`/`column`. */
+  position?: ComposeParagraphPosition | null;
+  /** Minted `w14:paraId`s for the NEW cells' paragraphs (InsertRow → per column L→R; InsertColumn → per row T→B). */
+  newParaIds?: string[];
+  /** For SetCellContent — the cell's new text content (Tier 3 — document content). */
+  text?: string | null;
+  /** For SetCellContent — optional inline marks on the set content. Omit/empty = inherit. */
+  marks?: ComposeMarkType[];
+  /** For SetTableProps — which table-level property to change. */
+  tableProp?: ComposeTableProp | null;
+  /** For SetTableProps — the property value, interpreted per `tableProp`; `null` clears to style default. */
+  value?: string | null;
+}
+
+/**
+ * The CLOSED discriminated union of exactly thirteen operations (FR-11). Narrow on `type`
  * before reading op-specific fields.
  */
 export type ComposeOperation =
@@ -277,7 +331,8 @@ export type ComposeOperation =
   | DeleteParagraphOperation
   | SetBlockAttrOperation
   | AcceptRevisionOperation
-  | RejectRevisionOperation;
+  | RejectRevisionOperation
+  | TableOperation;
 
 /**
  * The op-log ENVELOPE (FR-11): an ORDERED sequence of `operations` plus the

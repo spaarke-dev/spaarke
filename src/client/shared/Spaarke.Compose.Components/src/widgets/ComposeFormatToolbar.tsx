@@ -457,8 +457,18 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
   //   - R5 task 010 (G3 alignment): alignment RE-ENABLED on loaded docs (tracked w:pPrChange).
   //   - R5 task 011 (G3 heading/list): heading + bullet/ordered list RE-ENABLED on loaded docs (tracked
   //     w:pPrChange for Style/ListOrdered/ListLevel; list numbering reuses R4.5's numbering engine).
-  //   - Table-insert remains loaded-gated until R5 task 014 (G4 table op) — the engine has no table op yet
-  //     and would silently drop a loaded-doc table. (Born-in-editor tables stay enabled — renderer authors them.)
+  //   - R5 task 014 (G4 table op): STRUCTURAL EDITS of an existing table — add/delete row, add/delete column,
+  //     delete table, and cell-content edits — now RE-ENABLED + round-tripping on loaded docs (the client
+  //     captures them as the closed-catalog `table` op; the engine emits full tracked table structure —
+  //     w:trPr/w:ins+del, w:tcPr/w:cellIns+cellDel, w:tblGridChange, w:tblPrChange). These edit buttons are
+  //     already gated only by the read-only `controlDisabled` + `editor.can()` (in-a-table) checks — no
+  //     isLoadedBaseline gate — so on a loaded doc they were reachable-but-silently-dropped before task 014;
+  //     they now round-trip.
+  //   - Insert-table (a BRAND-NEW table) stays loaded-gated: whole-table CREATE is a whole-block author, NOT a
+  //     structural edit of an existing table, and is deliberately OUTSIDE the task-004 closed table-op catalog
+  //     (which covers InsertRow/DeleteRow/InsertColumn/DeleteColumn/SetCellContent/SetTableProps). Enabling it
+  //     on a loaded doc would reintroduce the exact silent-loss NFR-08 forbids, so it remains disabled (honest
+  //     "future release" tooltip). Born-in-editor tables stay enabled — the renderer authors them cleanly.
   //   - Hyperlinks remain unrepresentable in BOTH modes until R5 G5 (no mark op, no content-model href).
   const isLoadedBaseline = hasLoadedBaseline === true;
   /** Hover tooltip on a control disabled because its feature is deferred to a future release. */
@@ -468,7 +478,10 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
   const headingListEditDisabled = controlDisabled;
   // Alignment — re-enabled on loaded docs (R5 task 010); read-only gate still applies.
   const alignmentEditDisabled = controlDisabled;
-  // Table-insert — still loaded-gated (R5 task 014). Enabled born-in-editor, disabled loaded.
+  // Insert-table (whole-table CREATE) — still loaded-gated (out of the R5 task-014 closed table-op catalog:
+  // that op covers structural EDITS of an existing table, not authoring a new one). Enabled born-in-editor
+  // (renderer), disabled loaded. Row/column/delete-table EDIT commands are NOT gated here — they round-trip
+  // via the table op (G4).
   const tableInsertDisabled = controlDisabled || isLoadedBaseline;
   // Hyperlinks are not representable in EITHER mode in R4 (R5 G5).
   const hyperlinkDisabled = true;

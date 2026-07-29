@@ -60,6 +60,8 @@ import type {
   ComposeMarkType,
   ComposeBlockAttr,
   ComposeRevisionScope,
+  ComposeTableOpKind,
+  ComposeParagraphPosition,
 } from '../types/compose-operations';
 
 // ---------------------------------------------------------------------------
@@ -723,6 +725,199 @@ function classifyBlockAttrStep(step: Step, docBefore: PMNode): StepClassificatio
 }
 
 // ---------------------------------------------------------------------------
+// Table structural step → table op synthesis (R5 task 014 — G4/FR-04)
+// ---------------------------------------------------------------------------
+//
+// A table row/column add/delete (addRowAfter / deleteRow / addColumnAfter / deleteColumn / deleteTable) arrives
+// as a ReplaceStep/ReplaceAroundStep that changes the TABLE structure (row or column count) rather than a
+// paragraph's inline text. Before task 014 these fell through to `classifyStructuralStep` and were DEFERRED
+// (`defer-structural` — the R4 SDL-3 silent-loss path). Task 014 diffs the table's cell-paraId grid BEFORE vs
+// AFTER the step and emits the closed-catalog `table` op (kind + row/column + newParaIds), anchored by an
+// EXISTING cell's durable `w14:paraId` so the server locates the table by paraId-ancestry, never text-search
+// (I-7). Cell-content edits inside an existing cell are NOT table ops — they are ordinary inline
+// insertText/deleteRange on the cell paragraph's paraId (they reach the inline path above, not here).
+// Whole-table CREATE (insertTable) is out of the closed catalog's structural-edit scope and stays gated in the
+// toolbar; it is never emitted here (returns null → the caller surfaces it, never silently drops it).
+
+const TABLE_NODE = 'table';
+const TABLE_ROW_NODE = 'tableRow';
+const TABLE_CELL_NODES = ['tableCell', 'tableHeader'];
+
+/** A table's cell-paraId grid + an existing (durable) cell paraId to anchor the server-side table lookup. */
+interface TableSnapshot {
+  /** Row-major grid of each cell's first paraId-block paraId (null for a cell with no stamped paraId — e.g. a
+   *  brand-new cell created by the very step being classified). */
+  grid: (string | null)[][];
+  /** Any EXISTING (non-null) cell paraId in the table — the durable anchor that locates the table server-side. */
+  anchor: string | null;
+}
+
+/** The first paraId-bearing block's paraId anywhere inside a table cell (descends through nested wrappers). */
+function firstCellParaId(cell: PMNode): string | null {
+  let found: string | null = null;
+  cell.descendants(node => {
+    if (found) return false;
+    if ((PARAID_NODE_TYPES as readonly string[]).includes(node.type.name)) {
+      const pid = (node.attrs as { paraId?: unknown }).paraId;
+      if (typeof pid === 'string' && pid.length > 0) {
+        found = pid;
+        return false;
+      }
+    }
+    return true;
+  });
+  return found;
+}
+
+/** Snapshot every table's cell-paraId grid in document order (positional identity across a single step). */
+function tableSnapshots(doc: PMNode): TableSnapshot[] {
+  const tables: TableSnapshot[] = [];
+  doc.descendants(node => {
+    if (node.type.name !== TABLE_NODE) return true;
+    const grid: (string | null)[][] = [];
+    let anchor: string | null = null;
+    node.forEach(row => {
+      if (row.type.name !== TABLE_ROW_NODE) return;
+      const cells: (string | null)[] = [];
+      row.forEach(cell => {
+        if (!TABLE_CELL_NODES.includes(cell.type.name)) return;
+        const pid = firstCellParaId(cell);
+        if (pid && !anchor) anchor = pid;
+        cells.push(pid);
+      });
+      grid.push(cells);
+    });
+    tables.push({ grid, anchor });
+    return false; // a nested table is a rare edge — treat the outer table only (defer if it doesn't diff cleanly)
+  });
+  return tables;
+}
+
+/** Two cell-paraId rows are equal iff same length and same paraId at every position (identity match). */
+function rowsEqual(a: (string | null)[], b: (string | null)[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/** First row index where `longer` (one extra row) stops matching `shorter` positionally — the inserted/removed row. */
+function firstDifferingRow(shorter: (string | null)[][], longer: (string | null)[][]): number {
+  for (let i = 0; i < shorter.length; i++) if (!rowsEqual(shorter[i], longer[i])) return i;
+  return shorter.length; // diverges only at the tail — the extra row is last
+}
+
+/** First column index where `narrower` (one fewer column) stops matching `wider` on row 0 — the inserted/removed col. */
+function firstDifferingCol(narrower: (string | null)[][], wider: (string | null)[][]): number {
+  const n = narrower[0] ?? [];
+  const w = wider[0] ?? [];
+  for (let c = 0; c < n.length; c++) if (n[c] !== w[c]) return c;
+  return n.length; // diverges only at the tail — the extra column is last
+}
+
+/** Mint fresh ids for any null (brand-new) cell paraId; keep a client-assigned id so client/server ids align. */
+function newCellParaIds(cells: (string | null)[]): string[] {
+  return cells.map(pid => pid ?? mintParaId());
+}
+
+/** Build a closed-catalog `table` op (row/column/newParaIds carried in the properties slot; anchored by paraId). */
+function tableOp(
+  kind: ComposeTableOpKind,
+  paraId: string,
+  props: {
+    row?: number;
+    column?: number;
+    position?: ComposeParagraphPosition;
+    newParaIds?: string[];
+  }
+): ComposeOperation {
+  return { type: 'table', paraId, kind, ...props };
+}
+
+/** Diff a single table's grid BEFORE vs AFTER → the one row/column op it performed, or null if not a clean single edit. */
+function diffTableGrids(before: TableSnapshot, after: TableSnapshot): ComposeOperation | null {
+  const anchor = before.anchor;
+  if (!anchor) return null; // no durable existing cell to locate the table → defer rather than mis-address
+  const bRows = before.grid.length;
+  const aRows = after.grid.length;
+  const bCols = bRows > 0 ? before.grid[0].length : 0;
+  const aCols = aRows > 0 ? after.grid[0].length : 0;
+
+  // Row inserted (same column count, one more row).
+  if (aRows === bRows + 1 && aCols === bCols) {
+    const i = firstDifferingRow(before.grid, after.grid);
+    const row = i === 0 ? 0 : i - 1;
+    const position: ComposeParagraphPosition = i === 0 ? 'Before' : 'After';
+    return tableOp('InsertRow', anchor, { row, position, newParaIds: newCellParaIds(after.grid[i]) });
+  }
+
+  // Row deleted (same column count, one fewer row).
+  if (aRows === bRows - 1 && aCols === bCols) {
+    const j = firstDifferingRow(after.grid, before.grid);
+    return tableOp('DeleteRow', anchor, { row: j });
+  }
+
+  // Column inserted (same row count, one more column per row).
+  if (aRows === bRows && aCols === bCols + 1 && bRows > 0) {
+    const c = firstDifferingCol(before.grid, after.grid);
+    const column = c === 0 ? 0 : c - 1;
+    const position: ComposeParagraphPosition = c === 0 ? 'Before' : 'After';
+    const newParaIds = after.grid.map(rowCells => rowCells[c] ?? mintParaId());
+    return tableOp('InsertColumn', anchor, { column, position, newParaIds });
+  }
+
+  // Column deleted (same row count, one fewer column per row).
+  if (aRows === bRows && aCols === bCols - 1 && bRows > 0) {
+    const c = firstDifferingCol(after.grid, before.grid);
+    return tableOp('DeleteColumn', anchor, { column: c });
+  }
+
+  return null;
+}
+
+/**
+ * Classify a table structural step (R5 task 014). Returns an `ops` classification for a clean single row/column
+ * add/delete or a whole-table delete (→ one DeleteRow per row); returns null for anything that is NOT a clean
+ * table-structure edit (a table insert, a multi-table change, a cell-content edit, or a non-table step), so the
+ * caller falls through to the existing classifiers. Anchored by an EXISTING cell paraId — never text-search (I-7).
+ */
+function classifyTableStep(step: Step, docBefore: PMNode): StepClassification | null {
+  const applied = step.apply(docBefore);
+  if (applied.failed || !applied.doc) return null;
+
+  const before = tableSnapshots(docBefore);
+  const after = tableSnapshots(applied.doc);
+
+  // Whole-table delete → the table count dropped by one. Emit one DeleteRow per row of the removed table (the
+  // engine marks each w:trPr as deleted without shifting indices, so the original 0..N-1 indices all apply).
+  if (after.length === before.length - 1) {
+    const removed = before.find((b, i) => !after[i] || !rowsEqual(b.grid[0] ?? [], after[i]?.grid[0] ?? []))
+      ?? before[before.length - 1];
+    if (!removed?.anchor || removed.grid.length === 0) return null;
+    const ops: ComposeOperation[] = removed.grid.map((_, rowIndex) =>
+      tableOp('DeleteRow', removed.anchor as string, { row: rowIndex }));
+    return { kind: 'ops', ops };
+  }
+
+  // A table was ADDED (insertTable) or the table count changed by more than one → not a structural EDIT of an
+  // existing table. Return null so the caller surfaces it (defer-structural) rather than this path guessing.
+  if (after.length !== before.length) return null;
+
+  // Same table count — find the one table whose grid changed and map it to a single row/column op.
+  for (let t = 0; t < before.length; t++) {
+    const b = before[t];
+    const a = after[t];
+    const changed = b.grid.length !== a.grid.length
+      || (b.grid[0]?.length ?? 0) !== (a.grid[0]?.length ?? 0)
+      || !b.grid.every((row, r) => rowsEqual(row, a.grid[r] ?? []));
+    if (!changed) continue;
+    const op = diffTableGrids(b, a); // may be null (not a clean single edit) → caller surfaces it
+    return op ? { kind: 'ops', ops: [op] } : null;
+  }
+
+  return null; // no table changed here — not a table step
+}
+
+// ---------------------------------------------------------------------------
 // Step → operation classification
 // ---------------------------------------------------------------------------
 
@@ -814,6 +1009,11 @@ export function classifyStep(
     const blockAttr = classifyBlockAttrStep(step, docBefore);
     if (blockAttr) return blockAttr;
 
+    // A table structural edit (row/column add/delete, whole-table delete) → emit the table op (R5 task 014,
+    // removes the SDL-3 silent-loss path). Tried BEFORE the structural classifier, which would otherwise defer.
+    const tableStep = classifyTableStep(step, docBefore);
+    if (tableStep) return tableStep;
+
     // Cross-paragraph or block-boundary ReplaceStep (split/merge/para insert/delete) → synthesize the
     // structural op (task 031). Whole-paragraph delete/merge is captured here (closes task 023's gap).
     return classifyStructuralStep(step, docBefore, 'replace-step-structural');
@@ -857,6 +1057,9 @@ export function classifyStep(
     // Heading toggle (setBlockType) + list wrap/unwrap/re-nest arrive here → setBlockAttr (R5 task 011).
     const blockAttr = classifyBlockAttrStep(step, docBefore);
     if (blockAttr) return blockAttr;
+    // A table row/column edit can also arrive as a ReplaceAroundStep → table op (R5 task 014).
+    const tableStep = classifyTableStep(step, docBefore);
+    if (tableStep) return tableStep;
     return classifyStructuralStep(step, docBefore, 'replace-around-step');
   }
 
@@ -1166,6 +1369,17 @@ function buildAnchor(op: ComposeOperation, step: Step, mapping: Mapping, stepInd
     return null;
   }
 
+  if (op.type === 'table') {
+    // R5 task 014 (G4): a table op is table-scoped (its durable payload = an existing cell paraId + row/column +
+    // minted newParaIds, captured at classify time). Anchor at the step's block-boundary position so the rebasing
+    // pass still flags it if a later edit deletes that position (never-silently-drop) — matches setBlockAttr /
+    // structural handling above. Table edits arrive as a ReplaceStep or ReplaceAroundStep (both carry `from`).
+    if (step instanceof ReplaceStep || step instanceof ReplaceAroundStep) {
+      return { kind: 'block', point: toFinal(step.from, -1) };
+    }
+    return null;
+  }
+
   if (step instanceof ReplaceStep) {
     if (op.type === 'insertText') {
       // The insertion point sticks to content BEFORE it (assoc -1) — a caret-position anchor that
@@ -1231,6 +1445,11 @@ function deriveOperation(op: ComposeOperation, anchor: ComposeOpAnchor, doc: PMN
       // R5 task 012 (G12): accept/reject-revision carry a durable paraId + native revisionId in their payload,
       // captured from the pre-step doc — the revision is addressed by its native OOXML id, NOT by a live
       // document position. Return as-captured; the rebasing `deletedContentFlag` still guards it.
+      return op;
+    case 'table':
+      // R5 task 014 (G4): a table op carries a durable existing-cell paraId + (row,column) + minted newParaIds in
+      // its payload, captured from the pre-step doc — the table is located by paraId-ancestry server-side, NOT by
+      // a live document position. Return as-captured; the rebasing `deletedContentFlag` still guards it.
       return op;
     default:
       return null;

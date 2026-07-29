@@ -4,7 +4,7 @@
     <title>G4 tables (full tracked structure) — table op + client capture + engine applier emitting w:tblPrChange + row/cell w:ins/w:del</title>
     <phase>1 Edit-path ops</phase>
     <gate>dep:004</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New op on the closed catalog + client capture + the most complex engine applier (full tracked table structure). Highest-risk L-item; Word-valid tracked-table markup correctness bar. Save/apply change requires ADR-038 seam DoD + byte-diff no-regression.</rigor-reason>
     <model-tier>opus</model-tier>

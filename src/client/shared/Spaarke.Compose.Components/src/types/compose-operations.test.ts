@@ -25,7 +25,7 @@ import type { ComposeOperation, ComposeOperationLog } from './compose-operations
 // contracts module — importing from there must resolve the same symbols, not a fork).
 import { COMPOSE_OPERATION_SCHEMA_VERSION as VERSION_VIA_CONTRACTS } from './compose-contracts';
 
-/** A canonical op log exercising ALL TWELVE op types + the structural-op second-paragraph references. */
+/** A canonical op log exercising ALL THIRTEEN op types + the structural-op second-paragraph references. */
 function buildCanonicalLog(): ComposeOperationLog {
   const operations: ComposeOperation[] = [
     {
@@ -67,12 +67,21 @@ function buildCanonicalLog(): ComposeOperationLog {
     // R5 task 012 (G12) — imported-revision reconciliation ops (Single scope, addressed by native w:id).
     { type: 'acceptRevision', paraId: 'DEADBEEF', scope: 'Single', revisionId: '17' },
     { type: 'rejectRevision', paraId: 'CAFEF00D', scope: 'Single', revisionId: '18' },
+    // R5 task 014 (G4) — structural table edit (insert a row after row 0, minting the new cells' paraIds).
+    {
+      type: 'table',
+      paraId: '0AA00001',
+      kind: 'InsertRow',
+      row: 0,
+      position: 'After',
+      newParaIds: ['0AC00001', '0AC00002'],
+    },
   ];
   return { schemaVersion: COMPOSE_OPERATION_SCHEMA_VERSION, operations };
 }
 
 describe('compose-operations schema (FR-11)', () => {
-  it('COMPOSE_OPERATION_TYPES is the exact closed set of twelve op discriminators', () => {
+  it('COMPOSE_OPERATION_TYPES is the exact closed set of thirteen op discriminators', () => {
     expect([...COMPOSE_OPERATION_TYPES]).toEqual([
       'insertText',
       'deleteRange',
@@ -86,11 +95,12 @@ describe('compose-operations schema (FR-11)', () => {
       'setBlockAttr',
       'acceptRevision',
       'rejectRevision',
+      'table',
     ]);
-    expect(COMPOSE_OPERATION_TYPES).toHaveLength(12);
+    expect(COMPOSE_OPERATION_TYPES).toHaveLength(13);
   });
 
-  it('a full twelve-op log round-trips JSON.stringify → JSON.parse without loss', () => {
+  it('a full thirteen-op log round-trips JSON.stringify → JSON.parse without loss', () => {
     const log = buildCanonicalLog();
 
     const json1 = JSON.stringify(log);
@@ -99,7 +109,7 @@ describe('compose-operations schema (FR-11)', () => {
 
     expect(json2).toBe(json1);
     expect(roundTripped).toEqual(log);
-    expect(roundTripped.operations).toHaveLength(12);
+    expect(roundTripped.operations).toHaveLength(13);
     expect(roundTripped.schemaVersion).toBe('compose-ops-v2');
   });
 
