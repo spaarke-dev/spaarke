@@ -118,3 +118,26 @@ export function usePaneEventBus(): PaneEventBus {
 
   return bus;
 }
+
+// ---------------------------------------------------------------------------
+// useOptionalPaneEventBus (optional, non-throwing variant)
+// ---------------------------------------------------------------------------
+
+/**
+ * Non-throwing counterpart to {@link usePaneEventBus}: returns the PaneEventBus
+ * when a `<PaneEventBusProvider>` is present, or `null` when it is not — instead
+ * of throwing at render.
+ *
+ * This exists for **dual-use widgets** (Pattern D — see
+ * `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` §4) that render in
+ * BOTH the SpaarkeAi shell (bus present) AND a LegalWorkspace section / MDA / dev
+ * host (bus absent). The throwing `usePaneEventBus` would crash such a widget at
+ * render in the bus-less host. This mirrors the OPTIONAL `useContext(AiSessionContext)`
+ * read `DataverseEntityViewWidget` already uses for the same dual-use reason.
+ *
+ * Consumers that must dispatch should prefer {@link useOptionalDispatchPaneEvent}
+ * (which builds a no-op-when-absent dispatch on top of this).
+ */
+export function useOptionalPaneEventBus(): PaneEventBus | null {
+  return useContext(PaneEventBusContext);
+}

@@ -87,8 +87,8 @@ import type { ActionCardProps, AssociationResult } from '@spaarke/ui-components'
 import { buildBffApiUrl } from '@spaarke/auth';
 
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
-import { useDispatchPaneEvent } from '../../events/useDispatchPaneEvent';
-import { useAiSession } from '../../providers/useAiSession';
+import { useOptionalDispatchPaneEvent } from '../../events/useDispatchPaneEvent';
+import { AiSessionContext } from '../../providers/AiSessionProvider';
 import { DataverseEntityViewWidget } from './DataverseEntityViewWidget';
 import type { CreateAnalysisWizardData } from './CreateAnalysisWizardWidget';
 import type { DocumentViewerWidgetData } from './DocumentViewerWidget';
@@ -146,6 +146,28 @@ const ANALYSIS_HUB_GRID_CONFIG_ID = '00000000-0000-0000-0000-000000000000';
 
 /** Widget-type string passed to the nested `DataverseEntityViewWidget` for debug/sub-routing only. */
 const ANALYSIS_HUB_GRID_WIDGET_TYPE = 'analysis-hub-grid';
+
+/**
+ * Max characters for a reopened-analysis workspace-tab title (owner UX, 2026-07-29:
+ * "the tab does not have much real estate; we can try a concat of the name"). The
+ * tab strip is narrow, so the Analysis `sprk_name` is truncated with an ellipsis for
+ * the visible tab label; the full name is preserved as the tab's hover title/tooltip
+ * by the WorkspaceTabManager (it uses the same `displayName` for both, and the tab
+ * chrome truncates visually — this cap keeps the tab from over-claiming strip width).
+ */
+const TAB_TITLE_MAX_CHARS = 24;
+
+/**
+ * Truncate an Analysis name to {@link TAB_TITLE_MAX_CHARS} for a workspace-tab label,
+ * appending a single-character ellipsis when clipped. Falls back to 'Analysis' for an
+ * empty/missing name so the tab is never blank.
+ */
+function toTabTitle(name: string | undefined): string {
+  const trimmed = (name ?? '').trim();
+  if (trimmed.length === 0) return 'Analysis';
+  if (trimmed.length <= TAB_TITLE_MAX_CHARS) return trimmed;
+  return `${trimmed.slice(0, TAB_TITLE_MAX_CHARS - 1)}…`;
+}
 
 // ---------------------------------------------------------------------------
 // Row reopen — session lookup + file resolution (task 031, spec FR-11)
@@ -322,8 +344,17 @@ const useStyles = makeStyles({
  */
 export const AnalysisHubWidget: React.FC<WorkspaceWidgetProps<AnalysisHubWidgetData>> = ({ data, className }) => {
   const styles = useStyles();
-  const dispatch = useDispatchPaneEvent();
-  const { bffBaseUrl, authenticatedFetch, entityContext } = useAiSession();
+  // Pattern D dual-use (docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md §4):
+  // this widget renders as BOTH a Direct workspace widget (SpaarkeAi shell — providers
+  // present) AND a LegalWorkspace `analysis` section (bus/session may be absent in a
+  // non-SpaarkeAi host / MDA / dev). Read BOTH the PaneEventBus and the AI session
+  // OPTIONALLY so the widget degrades gracefully instead of throwing at render —
+  // mirroring DataverseEntityViewWidget's optional `useContext(AiSessionContext)` read.
+  const dispatch = useOptionalDispatchPaneEvent();
+  const session = React.useContext(AiSessionContext);
+  const bffBaseUrl = session?.bffBaseUrl;
+  const authenticatedFetch = session?.authenticatedFetch;
+  const entityContext = session?.entityContext;
 
   const gridConfigId = data?.configId ?? ANALYSIS_HUB_GRID_CONFIG_ID;
 
@@ -409,8 +440,17 @@ export const AnalysisHubWidget: React.FC<WorkspaceWidgetProps<AnalysisHubWidgetD
     (recordId: string, record: Record<string, unknown>): void => {
       setReopenNotice(null);
 
+      // Dual-use guard: reopening resolves the bound session over the BFF, which
+      // requires the AI session context (authenticatedFetch + bffBaseUrl). In a
+      // bus-less / session-less host (standalone LegalWorkspace section / MDA / dev)
+      // that context is absent — degrade with a notice rather than crash.
+      if (!bffBaseUrl || !authenticatedFetch) {
+        setReopenNotice('Reopening an analysis is available in the Assistant workspace.');
+        return;
+      }
+
       void (async (): Promise<void> => {
-        let session: AnalysisSessionLookupResponse;
+        let sessionLookup: AnalysisSessionLookupResponse;
         try {
           const lookupUrl = buildBffApiUrl(
             bffBaseUrl,
@@ -426,7 +466,7 @@ export const AnalysisHubWidget: React.FC<WorkspaceWidgetProps<AnalysisHubWidgetD
             setReopenNotice('Could not reopen this analysis — please try again.');
             return;
           }
-          session = (await response.json()) as AnalysisSessionLookupResponse;
+          sessionLookup = (await response.json()) as AnalysisSessionLookupResponse;
         } catch {
           setReopenNotice('Could not reopen this analysis — please try again.');
           return;
@@ -435,7 +475,7 @@ export const AnalysisHubWidget: React.FC<WorkspaceWidgetProps<AnalysisHubWidgetD
         // Steps 2 + 3 — switch the already-open three-pane to this session, in place.
         dispatch('conversation', {
           type: 'session_switch',
-          sessionId: session.sessionId,
+          sessionId: sessionLookup.sessionId,
         });
 
         // Step 4 — restore the linked file, if any (ADR-007 hop; graceful no-file no-op).
@@ -462,11 +502,15 @@ export const AnalysisHubWidget: React.FC<WorkspaceWidgetProps<AnalysisHubWidgetD
             },
           };
 
+          // Owner UX (2026-07-29): the reopened analysis surfaces as a workspace tab
+          // titled with the analysis's own name (truncated for the narrow tab strip),
+          // NOT the raw filename. The viewer still shows the linked document; only the
+          // tab label reflects the analysis identity.
           dispatch('workspace', {
             type: 'widget_load',
             widgetType: 'document-viewer',
             widgetData,
-            displayName: documentInfo.documentName,
+            displayName: toTabTitle(record['sprk_name'] as string | undefined),
           });
         }
       })();
