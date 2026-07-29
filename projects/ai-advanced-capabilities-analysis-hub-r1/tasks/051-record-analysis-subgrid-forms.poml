@@ -4,7 +4,7 @@
     <title>Record→analysis 1:N + Analysis subgrid/tab on Matter/Project forms</title>
     <phase>5 Entry model + record integration</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Net-new Dataverse relationship model (record→analysis 1:N) + form customization; regarding-integrity is a correctness invariant (single-valued, NFR-05); realizes the §12.2 record-integration model.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -121,6 +121,69 @@
   <notes>
     spec §12.2 / FR-15 / §13.4. Depends on the owner-created regarding field-set consumed in task 012. Subgrid
     open/launch wiring lands in task 052 (`openSpaarkeAi` ribbon launcher). Completion summary appended here when done.
+
+    COMPLETED 2026-07-29.
+
+    **1:N relationships**: confirmed already live (no new relationship authored, per §11 reuse-first). Verified via
+    Dataverse Web API `EntityDefinitions(LogicalName='sprk_matter')/OneToManyRelationships` (and `sprk_project`
+    equivalent), filtered to `ReferencingEntity eq 'sprk_analysis'`:
+    - `sprk_analysis_RegardingMatter_sprk_matter` — ReferencingAttribute `sprk_regardingmatter`
+    - `sprk_analysis_RegardingProject_sprk_project` — ReferencingAttribute `sprk_regardingproject`
+    Both auto-created the moment the owner added the two lookup columns (task 010/012 schema prerequisite); this
+    task authored no schema.
+
+    **Form customization — applied live, not deferred**: the POML's fallback clause ("if the live subgrid placement
+    cannot be fully applied without maker-portal interaction... hand to task 071") did NOT trigger. The Dataverse
+    Web API form-customization path (explicitly permitted as an alternative to the ribbon-edit PAC-export/import
+    flow) was fully scriptable in this environment:
+      1. Located both main forms via `systemform` query (Matter formid `4fa382f2-c273-f011-b4cb-6045bdd6a665`,
+         Project formid `5aa00242-5212-f111-8342-7ced8d1dc988`).
+      2. Fetched live FormXml via Web API, inspected existing subgrid tabs (`tab_projects`, `tab_todos_sprk_project`,
+         `tab_reportcard`, etc.) to mirror the established structural convention exactly (same tab/section/row/cell
+         shape, same subgrid classid `{E7A81278-8635-4D9E-8D4D-59480B391C5B}`).
+      3. Identified the correct subgrid view via `savedquery` (querytype=2 "Analysis Associated View",
+         id `4ef7e264-a43f-4d9c-ad56-e48c561ad30e`) — the canonical Dataverse view for a child-entity subgrid,
+         same pattern as every other live subgrid on these two forms.
+      4. Authored two new tab fragments (new GUIDs, no collision with any existing tab/control id — checked against
+         the full existing tab/control inventory on both forms) and inserted each before its form's `</tabs>` via a
+         string-level PATCH — the underlying FormXml is otherwise byte-identical to what was live before.
+      5. PATCHed `systemforms({id})` for both forms, then called `PublishXml` (entities: sprk_matter, sprk_project).
+      6. Verified post-publish: re-fetched both forms, confirmed `tab_analyses_sprk_matter` /
+         `tab_analyses_sprk_project` and the correct `RelationshipName` values are present, and confirmed both
+         FormXml documents are still well-formed XML.
+      7. Checked-in artifacts (durable record + what 071 should verify rather than re-apply):
+         - `src/solutions/SpaarkeCore/entities/sprk_matter/FormXml/analyses/matter-analyses-tab.xml`
+         - `src/solutions/SpaarkeCore/entities/sprk_project/FormXml/analyses/project-analyses-tab.xml`
+         (mirrors the existing `matter-reportcard-tab.xml` precedent from `x-matter-performance-KPI-r1` task 044).
+
+    **Deployment note for task 071**: the Analysis subgrid/tab is ALREADY LIVE on both `sprk_matter` and
+    `sprk_project` main forms in spaarkedev1 as of this task. Task 071 step 3 ("deploy... the Analysis subgrid/tab
+    form customizations") should VERIFY presence (e.g. re-run the same `systemforms` query and grep for
+    `tab_analyses_sprk_matter` / `tab_analyses_sprk_project`) rather than re-apply — re-applying would either be a
+    no-op (idempotent string search finds the tab already present) or, if attempted via a fresh solution-export/
+    import flow, could risk a duplicate-tab conflict. No action needed if the environment is unchanged between now
+    and 071's execution.
+
+    **Single-valued regarding invariant**: NOT re-implemented here (out of this task's scope — already enforced at
+    the application layer by task 012's `analysisRegardingResolver.ts`, which flags/rejects zero- or multi-populated
+    regarding). This task only adds the *display* of the 1:N relationship on the parent forms; Dataverse itself has
+    no platform-native mutual-exclusivity constraint across the two lookup columns, so the invariant continues to
+    depend on task 012's resolver + write-path discipline (RegardingResolver PCF / PolymorphicResolverService),
+    exactly as ADR-024 specifies.
+
+    **Subgrid open path**: no ribbon button, JavaScript, or launch logic was added by this task — the subgrid is a
+    stock Dataverse display control with no custom open/launch wiring, so there is nothing here that could violate
+    ADR-039 by hard-coding a `surfaceLaunchRegistry`-style open. Task 052 (ribbon launcher / `openSpaarkeAi`) is the
+    task that will wire any custom open behavior, per the constraint.
+
+    **Gates**: adr-check (ADR-024, ADR-039) — 0 violations. code-review — both FormXml fragments well-formed
+    (validated via XML parse pre- and post-live-publish), no id/name collisions against the full existing
+    tab/control inventory on both forms, structure mirrors the live "To Dos" (`tab_todos_sprk_project`) and
+    "Report Card" (`tab_reportcard`) precedents exactly. No `.cs`/`.ts`/`.tsx` touched — SpaarkeAi/src/client/shared
+    surfaces (owned by task 040) were not modified, per this task's constraint.
+
+    No deviation from the POML's directional steps or escalation trigger (no multi-populated-regarding need
+    surfaced).
   </notes>
 
   <execution>

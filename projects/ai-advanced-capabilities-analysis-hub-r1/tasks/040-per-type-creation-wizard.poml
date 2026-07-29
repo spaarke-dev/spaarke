@@ -4,7 +4,7 @@
     <title>Per-type creation wizard (3 steps; Create*Wizard + Field Mapping)</title>
     <phase>4 Wizard</phase>
     <gate>deps 011,012 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Net-new frontend/fluent-ui wizard (.tsx) that creates a Dataverse record + runs analysis + loads a tab, wiring the Field Mapping engine; user-facing, multi-step; FULL per §8 (frontend/fluent-ui + NEW-surface).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -157,6 +157,36 @@
     Spec FR-12 (§131-136). Reuse-first per CLAUDE.md §11 — CreateRecordWizard + AssociateToStep + FieldMappingService,
     wired the way the 7 existing Create*Wizard services use them. Work-type card registry + coming-soon cards are the
     net-new surface shared with the hub (task 030). Tool-palette scoping on launch is task 041.
+
+    COMPLETED (2026-07-29). Delivered:
+    - src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateAnalysisWizardWidget.tsx (new) — 3-step wizard
+      (Add file(s): upload OR select-existing Document → Analysis Details: access/owner + inline compact AssociateToStep
+      + name + description → Next Steps: Send Email / Create To Do via config.followOnCards). onFinish creates
+      sprk_analysis (name/description/sprk_worktype/ownerid/ADR-024 resolver fields/sprk_documentid), applies
+      applyFieldMappings for associate-to inheritance (parent→sprk_analysis) and Send Email enrichment
+      (sprk_analysis→sprk_communication); Create To Do reuses createTodoRegardingChild (already Field-Mapping-driven
+      internally, task 021); marks sprk_analysisstatus=InProgress and dispatches the existing `document-viewer`
+      workspace widget (widget_load) to load the file to a tab. NOT registered in register-workspace-widgets.ts
+      (task 030 owns that file per the parallel-execution constraint) — exported default+named for 030/050 to consume.
+    - src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/{types.ts,CreateRecordWizard.tsx}
+      (additive extension) — new opt-in `existingRecordPicker` config (Step 1 "select existing Document" alongside
+      upload) + `IFinishContext.selectedExistingRecord`. Backward compatible: all 4 pre-existing CreateRecordWizard
+      test suites (hideFilesStep/lockAssociation/groundingOptional) pass unmodified; new sibling test
+      `CreateRecordWizard.existingRecordPicker.test.tsx` added.
+    - src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/__tests__/CreateAnalysisWizardWidget.test.tsx (new,
+      6 tests) — 3-step navigation, negative (missing document blocks Finish with a message), successful create with
+      full payload assertion, associate-to Field-Mapping wiring, Send Email Field-Mapping enrichment (mapped
+      subject/body override user input), ADR-021 light+dark render.
+    Deviations documented in notes/task-040-deviations.md: "run the analysis" scoped to InProgress status + file-tab
+    load (session/AI-execution binding is tasks 020-025, out of this task's declared deps 011/012); "Access" mapped to
+    the OOB Dataverse ownerid field (no sprk_access column exists in the verified schema).
+    Gates: code-review (2 Warnings addressed — magic numbers extracted to named constants, missing Send-Email
+    Field-Mapping test added; 1 Suggestion left as-is, matches CreateInvoiceWizard.onFinish precedent) + adr-check
+    (0 violations — ADR-007/012/021/024 all compliant) both clean. Builds green: Spaarke.UI.Components (zero errors),
+    Spaarke.AI.Widgets (zero errors), SpaarkeAi tsc-surface-gate (0 surface-owned errors). Full test suites: UI.Components
+    176 suites (11 pre-existing unrelated failures, confirmed via `git status` zero-diff on those files — not caused by
+    this task); AI.Widgets 37 suites (1 pre-existing unrelated failure — stale displayName assertion in
+    register-workspace-widgets.test.ts, a file this task never touched).
   </notes>
 
   <execution>

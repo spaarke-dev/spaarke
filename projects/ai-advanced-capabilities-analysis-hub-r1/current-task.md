@@ -3,10 +3,11 @@
 > Active-task tracker. History lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 **Status**: in-progress
-**Active task**: W4a — 040 (wizard) ∥ 051 (Matter/Project subgrid), parallel
-**Next action**: W4a (040∥051) → W4b (030 hub ∥ 041 activeWorkType) → W4c (031 reopen). Session phase DONE. Done: 001 ✅ 010 ✅ 011–013 ✅ 020–025 ✅. Publish 46.16 MB.
+**Active task**: W4b — 030 (hub widget) ∥ 041 (activeWorkType tool-scoping), parallel
+**Next action**: W4b → W4c (031 reopen) → W5 (050 → 052 → 053 entry) → W6 (retirement) → W7 (deploy/test/wrap). Done: 001 ✅ 010 ✅ 011–013 ✅ 020–025 ✅ 040 ✅ 051 ✅. Publish 46.16 MB.
 
-> W4 sequencing: wizard (040) built BEFORE hub (030) so the hub's "Create new" cards wire to the real wizard (avoids a hub↔wizard integration race + register-workspace-widgets.ts contention). 051 (Dataverse forms) is fully independent → parallel with 040.
+> 030 wires "Create new" cards to the real CreateAnalysisWizardWidget (040) + owns register-workspace-widgets.ts. 041 (activeWorkType→getToolsForSurface) is a distinct host-prop/tool-palette surface → parallel with 030.
+> WATCH: 040 scoped "run the analysis" to a status flip + file-load handoff — verify the wizard→three-pane execution launch actually fires at 050 (entry matrix).
 
 > W3 tail (024, 025) stays SERIAL — both touch the SpaarkeAi conversation/session client surface (ConversationPane hotspot); real fan-out resumes at W4.
 
