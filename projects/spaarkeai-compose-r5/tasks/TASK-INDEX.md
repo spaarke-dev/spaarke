@@ -25,7 +25,7 @@
 | 011 | G3 heading/list applier (reuse numbering engine) | 1 Edit-path ops | ✅ | FULL | opus/high | 005,010 | ❌ shared engine |
 | 012 | G12 accept/reject-revision single-by-id (ET-2) | 1 Edit-path ops | ✅ | FULL | opus/xhigh | 004 | ❌ shared engine+catalog |
 | 013 | G12 accept-all/reject-all batch | 1 Edit-path ops | ✅ | FULL | opus/high | 012 | ❌ shared engine |
-| 014 | G4 tables — full tracked structure (L long pole) | 1 Edit-path ops | 🔲 | FULL | opus/xhigh | 004 | ❌ shared engine+catalog |
+| 014 | G4 tables — full tracked structure (L long pole) | 1 Edit-path ops | ✅ | FULL | opus/xhigh | 004 | ❌ shared engine+catalog |
 | 020 | G1 origin routing (LoadAsync/SaveAsync + client) | 2 Lifecycle | 🔲 | FULL | sonnet/high | 002 | ❌ shared service+workspace |
 | 021 | G2 clean-apply implementation | 2 Lifecycle | 🔲 | FULL | opus/xhigh | 003 | ❌ shared engine/service |
 | 022 | G7 Save-Version / Save-New split-button | 2 Lifecycle | 🔲 | FULL | sonnet/high | 020 | ❌ shared service+workspace |
