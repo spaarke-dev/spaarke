@@ -174,12 +174,56 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
             "Archiving session {SessionId} in Dataverse (tenant={TenantId})",
             sessionId, tenantId);
 
-        // Mark the session summary record as archived
-        // Note: We need the Dataverse record GUID to update. In Phase D, this would be cached.
-        // For now, we log and proceed — the session will simply expire from Redis.
-        // The AddMessageAsync path already has the GUID; ArchiveSession would need a lookup.
-        // This is a known limitation addressed in AIPL-054 (ChatEndpoints) via summary GUID caching.
-        await Task.CompletedTask;
+        // AIPL-054 durable-archive (ai-advanced-capabilities-analysis-hub-r1 task 022, spec FR-06):
+        // this method previously logged only — it lacked the sprk_aichatsummary record GUID needed
+        // to flip sprk_isarchived (the "missing cached summary GUID" gap that deferred a durable
+        // archive to task 022). Rather than a broad summary-GUID caching refactor across
+        // ChatSessionManager, we close the gap in-place: sprk_sessionid is already a queryable key
+        // on the summary row (CreateSessionAsync writes it), so ONE tenant-scoped query resolves the
+        // GUID and a sparse UpdateAsync durably flips the flag.
+        //
+        // Tenant-scoped (ADR-014/ADR-028): mirrors every sibling read on this interface — a
+        // cross-tenant sessionId guess must not flip another tenant's archive flag.
+        //
+        // ADR-040 Path A: this is a MARKER update only. The Cosmos transcript is the store-of-record
+        // and is NEVER deleted here — the archived prior session stays retrievable / switchable-back
+        // (no transcript data loss). No second transcript store is created.
+        var query = new QueryExpression(SummaryEntityName)
+        {
+            ColumnSet = new ColumnSet("sprk_isarchived"),
+            TopCount = 1,
+            NoLock = true,
+        };
+        query.Criteria.AddCondition("sprk_sessionid", ConditionOperator.Equal, sessionId);
+        query.Criteria.AddCondition("sprk_tenantid", ConditionOperator.Equal, tenantId);
+
+        var results = await _genericEntityService.RetrieveMultipleAsync(query, ct);
+        var record = results.Entities.FirstOrDefault();
+
+        if (record is null)
+        {
+            // No sprk_aichatsummary anchor row (e.g. a session whose cold-tier create was skipped
+            // or failed — CreateSessionAsync tolerates a Dataverse write failure and continues on
+            // Redis only). There is no row to flip; the Cosmos transcript remains the store-of-record
+            // (ADR-040 Path A) and is still retrievable. Non-fatal — matches the tolerant create path.
+            _logger.LogWarning(
+                "ArchiveSessionAsync: no sprk_aichatsummary row for session {SessionId} (tenant={TenantId}) — " +
+                "sprk_isarchived not flipped. Cosmos transcript stays the store-of-record; no data lost.",
+                sessionId, tenantId);
+            return;
+        }
+
+        // Durable flip: sprk_isarchived = true (sparse update — only the changed field).
+        await _genericEntityService.UpdateAsync(
+            SummaryEntityName,
+            record.Id,
+            new Dictionary<string, object> { ["sprk_isarchived"] = true },
+            ct);
+
+        _logger.LogInformation(
+            "Archived session {SessionId}: sprk_isarchived flipped true on sprk_aichatsummary {RecordId} " +
+            "(tenant={TenantId}). Cosmos transcript preserved (ADR-040 Path A — retrievable/switchable-back).",
+            sessionId, record.Id, tenantId);
     }
 
     /// <inheritdoc />

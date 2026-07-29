@@ -249,4 +249,119 @@ public class ChatDataverseRepositoryTests
         // Assert
         results.Should().BeEmpty();
     }
+
+    // =========================================================================
+    // ArchiveSessionAsync — durable sprk_isarchived flip (task 022, AIPL-054, spec FR-06)
+    // Option B: resolve the sprk_aichatsummary GUID via a tenant-scoped sprk_sessionid query,
+    // then sparse-update sprk_isarchived = true. Cosmos transcript is the store-of-record
+    // (ADR-040 Path A) and is NEVER deleted here — this is a marker update only.
+    // =========================================================================
+
+    [Fact]
+    public async Task ArchiveSessionAsync_WhenSummaryRecordExists_DurablyFlipsIsArchivedTenantScoped()
+    {
+        // Arrange — a persisted session summary row for this tenant.
+        var sessionId = Guid.NewGuid().ToString("N");
+        var recordId = Guid.NewGuid();
+        var summaryRow = new Entity("sprk_aichatsummary", recordId)
+        {
+            ["sprk_isarchived"] = false
+        };
+
+        QueryExpression? capturedQuery = null;
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<QueryExpression, CancellationToken>((q, _) => capturedQuery = q)
+            .ReturnsAsync(new EntityCollection(new List<Entity> { summaryRow }));
+
+        string? updatedEntity = null;
+        Guid updatedId = Guid.Empty;
+        Dictionary<string, object>? updatedFields = null;
+        _entityServiceMock
+            .Setup(s => s.UpdateAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((name, id, fields, _) =>
+            {
+                updatedEntity = name;
+                updatedId = id;
+                updatedFields = fields;
+            })
+            .Returns(Task.CompletedTask);
+
+        // Act
+        await _sut.ArchiveSessionAsync(TenantId, sessionId);
+
+        // Assert — GUID resolved via a tenant-scoped query on sprk_sessionid (ADR-014/ADR-028:
+        // a cross-tenant sessionId guess must not flip another tenant's flag).
+        capturedQuery.Should().NotBeNull();
+        capturedQuery!.EntityName.Should().Be("sprk_aichatsummary");
+        capturedQuery.Criteria.Conditions.Should().HaveCount(2);
+
+        var sessionCondition = capturedQuery.Criteria.Conditions.Single(c => c.AttributeName == "sprk_sessionid");
+        sessionCondition.Operator.Should().Be(ConditionOperator.Equal);
+        sessionCondition.Values.Should().ContainSingle().Which.Should().Be(sessionId);
+
+        var tenantCondition = capturedQuery.Criteria.Conditions.Single(c => c.AttributeName == "sprk_tenantid");
+        tenantCondition.Operator.Should().Be(ConditionOperator.Equal);
+        tenantCondition.Values.Should().ContainSingle().Which.Should().Be(TenantId);
+
+        // Assert — sprk_isarchived durably flipped true on the resolved record (sparse update).
+        updatedEntity.Should().Be("sprk_aichatsummary");
+        updatedId.Should().Be(recordId);
+        updatedFields.Should().NotBeNull();
+        updatedFields!.Should().ContainKey("sprk_isarchived");
+        updatedFields!["sprk_isarchived"].Should().Be(true);
+    }
+
+    [Fact]
+    public async Task ArchiveSessionAsync_NeverDeletesTheCosmosTranscript_MarkerUpdateOnly()
+    {
+        // Arrange — ADR-040 Path A: archive is a Dataverse MARKER flip. The repository must never
+        // issue a delete (the transcript store-of-record is Cosmos, owned by ChatSessionManager,
+        // not this cold-tier repo). Guards against a regression to a hard-delete archive.
+        var sessionId = Guid.NewGuid().ToString("N");
+        var summaryRow = new Entity("sprk_aichatsummary", Guid.NewGuid()) { ["sprk_isarchived"] = false };
+
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { summaryRow }));
+        _entityServiceMock
+            .Setup(s => s.UpdateAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        await _sut.ArchiveSessionAsync(TenantId, sessionId);
+
+        // Assert — no DeleteAsync ever issued from the archive path (transcript preserved).
+        _entityServiceMock.Verify(
+            s => s.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _entityServiceMock.Verify(
+            s => s.UpdateAsync("sprk_aichatsummary", It.IsAny<Guid>(),
+                It.Is<Dictionary<string, object>>(f => f.ContainsKey("sprk_isarchived") && (bool)f["sprk_isarchived"]),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ArchiveSessionAsync_WhenNoSummaryRow_DoesNotThrowAndDoesNotUpdate()
+    {
+        // Arrange — no cold-tier anchor row (CreateSessionAsync tolerates a Dataverse write failure
+        // and continues Redis-only). Archive must be non-fatal: no throw, no blind update; the Cosmos
+        // transcript remains the store-of-record and retrievable.
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>()));
+
+        // Act
+        var act = async () => await _sut.ArchiveSessionAsync(TenantId, Guid.NewGuid().ToString("N"));
+
+        // Assert
+        await act.Should().NotThrowAsync();
+        _entityServiceMock.Verify(
+            s => s.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(),
+                It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
 }

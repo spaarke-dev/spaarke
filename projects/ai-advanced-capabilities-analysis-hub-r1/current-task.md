@@ -3,8 +3,8 @@
 > Active-task tracker. History lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 **Status**: in-progress
-**Active task**: W3 — 022 (archive durability — durable sprk_isarchived flip), serial
-**Next action**: 022 → 023 → 024 → 025. Done: 001 ✅ 010 ✅ 011 ✅ 012 ✅ 013 ✅ 020 ✅ 021 ✅. Publish 47.51 MB (delta 0). Fork endpoint POST /api/ai/analysis/fork live; archive preserves Cosmos + Dataverse marker; 022 makes sprk_isarchived durable.
+**Active task**: W3 — 023 (two-tier session model — loose vs Analysis-owned + promotion), serial
+**Next action**: 023 → 024 → 025 close session phase, then W4 (030 ∥ 040 ∥ 051 fan-out). Done: 001 ✅ 010 ✅ 011 ✅ 012 ✅ 013 ✅ 020 ✅ 021 ✅ 022 ✅. Publish 47.51 MB. AIPL-054 archive gap closed (Option B durable flip).
 
 ## Pipeline progress (2026-07-28)
 

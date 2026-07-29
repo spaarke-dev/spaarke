@@ -4,7 +4,7 @@
     <title>Archive-durability decision + impl (AIPL-054 stub)</title>
     <phase>2 Session</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF session archive path + Dataverse durability semantics; a data-durability decision (potential data loss) with an escalation boundary; tags bff/session/dataverse.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -124,6 +124,35 @@
     spec.md FR-06 risk / PLAN §2.3 / AIPL-054. Owner-locked storage model = Cosmos store-of-record (Path A), which
     makes option A the lower-risk default unless durable Dataverse archive is explicitly needed. `/conflict-check` before the BFF PR.
   </notes>
+
+  <completion status="completed" date="2026-07-28">
+    DECISION: **Option B — durable Dataverse archive** (owner-directed). `ChatDataverseRepository.ArchiveSessionAsync`
+    (was the AIPL-054 logging-only stub, lines 168–183) now durably flips `sprk_isarchived = true` on the prior
+    session's `sprk_aichatsummary` record. The "missing cached summary GUID" gap is closed IN-PLACE — a single
+    tenant-scoped QueryExpression on `sprk_sessionid` + `sprk_tenantid` (TopCount 1, NoLock) resolves the record GUID
+    (mirrors the sibling `GetSessionsByAnalysisAsync`), then a sparse `IGenericEntityService.UpdateAsync` flips the flag.
+    NO ChatSessionManager summary-GUID caching refactor, NO new persistence infra, NO schema change → escalation
+    trigger did NOT fire.
+
+    ADR-040 Path A honored: archive is a MARKER update only — the Cosmos transcript is NEVER deleted here; the archived
+    prior session stays retrievable / switchable-back (no transcript data loss). Non-fatal when no cold-tier anchor row
+    exists (CreateSessionAsync tolerates Dataverse write failure → Redis-only): logs a warning, no throw, no blind update.
+
+    FILES: src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs (ArchiveSessionAsync rewrite);
+    tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ChatDataverseRepositoryTests.cs (+3 tests: durable flip + tenant-scoped
+    query shape; marker-only never DeleteAsync + exactly one sprk_isarchived=true update; no-summary-row non-fatal);
+    projects/ai-advanced-capabilities-analysis-hub-r1/notes/task-022-archive-durability-decision.md (decision record).
+
+    Placement Justification (§10): modification of an EXISTING repository method — no new service/endpoint/DI/package/job.
+    Injects IGenericEntityService only (no AI-internal types; Services/Ai orchestration untouched).
+
+    GATES (Step 9.5): build green (0 errors); ChatDataverseRepositoryTests 10/10 pass; code-review PASS (0 Critical/0 Warning/1
+    Suggestion); adr-check CLEAN (ADR-040/013/014/028/010/002 compliant). /conflict-check soft pass (BFF hot-path; zero
+    Services/Ai orchestration edits; origin/master holds only the pre-020 baseline of this file — no competing ArchiveSessionAsync edit).
+
+    PUBLISH-SIZE: 47.51 MB compressed (zip, Optimal) — delta 0.00 MB vs 021 baseline 47.51 MB; well under 60 MB HARD ceiling.
+    CVE: no NEW HIGH (only pre-existing System.Security.Cryptography.Xml 8.0.3 transitive). ESCALATION: none.
+  </completion>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
