@@ -390,7 +390,8 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     // Catalog: infra/dataverse/actions/compose-make-concise.action.json (+ binding row).
     id: 'compose-make-concise',
     label: 'Make more concise',
-    tooltip: 'Rewrite this clause to be more concise, preserving its exact legal meaning. Produces a pending track-change you can accept or reject.',
+    tooltip:
+      'Rewrite this clause to be more concise, preserving its exact legal meaning. Produces a pending track-change you can accept or reject.',
     bindingId: '',
     placement: 'primary',
     materializesInEditor: true,
@@ -403,7 +404,8 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     // Catalog: infra/dataverse/actions/compose-rewrite-instruction.action.json (+ binding row).
     id: 'compose-rewrite-instruction',
     label: 'Describe a change',
-    tooltip: 'Describe a change in your own words (e.g. "make this mutual", "add a 30-day cure period"). Produces a pending track-change you can accept or reject.',
+    tooltip:
+      'Describe a change in your own words (e.g. "make this mutual", "add a 30-day cure period"). Produces a pending track-change you can accept or reject.',
     bindingId: '',
     placement: 'primary',
     materializesInEditor: true,
