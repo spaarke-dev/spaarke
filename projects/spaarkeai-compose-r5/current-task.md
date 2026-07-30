@@ -1,7 +1,9 @@
 # Current Task State — Spaarke Compose R5
 
-> **Last Updated**: 2026-07-29 (pipeline complete — spec + plan + 22 tasks generated; execution HELD on Phase-0 human gates)
-> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-compose-r5`.
+> **Last Updated**: 2026-07-30 (by context-handoff — task 022 BLOCKED on human Dataverse gate; pre-compaction)
+> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-compose-r5`. Working tree CLEAN, all pushed (tip `92b99e0d4`).
+>
+> **▶ NEXT ACTION (post-compaction):** Ask the operator if the `sprk_composetransientkey` field + `sprk_composetransientkey_uk` alt-key are Active on `sprk_document`. When YES → resume task 022 by implementing **exactly** per [`notes/g7-transient-key-schema.md`](notes/g7-transient-key-schema.md) "Implementation plan" (client transient-key mint+send + Save split-button; server transient-key dedup in PromoteIfEphemeral + Save-New fork; seam incl. 8-duplicate; verify + Step 9.5 gates). Do NOT re-investigate — the subagent findings + file:line anchors are in that note. Then 030–033, 040–042, 090. Deploy (042) HOLDS for operator.
 
 ---
 
