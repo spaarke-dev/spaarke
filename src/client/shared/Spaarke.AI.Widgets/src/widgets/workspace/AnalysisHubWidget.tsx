@@ -82,8 +82,8 @@ import { Badge, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-c
 import { DocumentAddRegular, DocumentMultipleRegular, DocumentSearchRegular } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 
-import { ActionCard, SprkAnalysisWorkType, ANALYSIS_REGARDING_TARGETS } from '@spaarke/ui-components';
-import type { ActionCardProps, AssociationResult } from '@spaarke/ui-components';
+import { ActionCard, SprkAnalysisWorkType, ANALYSIS_REGARDING_TARGETS, resolveAnalysisFilePreview } from '@spaarke/ui-components';
+import type { ActionCardProps, AssociationResult, ISprkAnalysisRecord } from '@spaarke/ui-components';
 import { buildBffApiUrl } from '@spaarke/auth';
 
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
@@ -174,36 +174,9 @@ interface AnalysisSessionLookupResponse {
   createdOn: string | null;
 }
 
-/**
- * Reads the `sprk_documentid` → `sprk_document` file-hop fields directly off the grid row
- * (ADR-007) — one field access, no SPE pointer is ever read off `sprk_analysis`.
- *
- * Restated locally rather than imported from
- * `src/solutions/SpaarkeAi/src/services/analysisFileResolution.ts` — that module is
- * SpaarkeAi-solution-owned and this shared-lib widget cannot import it (ADR-012:
- * dependency direction is solution → shared lib, never the reverse; the shared analysis
- * ENUMS/catalog are imported from `@spaarke/ui-components`, but this read-side field-hop
- * helper stays local as it reads raw grid-row OData keys). Returns
- * `null` when the Analysis has no linked document — callers MUST treat that as "no file",
- * never fabricate a pointer.
- */
-function resolveRowDocumentInfo(record: Record<string, unknown>): { documentId: string; documentName: string } | null {
-  const documentId = record['_sprk_documentid_value'];
-  if (typeof documentId !== 'string' || documentId.length === 0) {
-    return null;
-  }
-
-  const formattedName = record['_sprk_documentid_value@OData.Community.Display.V1.FormattedValue'];
-  const rowName = record['sprk_name'];
-  const documentName =
-    typeof formattedName === 'string' && formattedName.length > 0
-      ? formattedName
-      : typeof rowName === 'string' && rowName.length > 0
-        ? rowName
-        : 'Document';
-
-  return { documentId, documentName };
-}
+// File open/preview on reopen uses the SHARED `resolveAnalysisFilePreview`
+// (`@spaarke/ui-components`, hoisted 2026-07-29) — the SAME `sprk_documentid` →
+// `sprk_document` hop + preview-url closure (ADR-007), no local restatement.
 
 // ---------------------------------------------------------------------------
 // Data contract
@@ -464,27 +437,22 @@ export const AnalysisHubWidget: React.FC<WorkspaceWidgetProps<AnalysisHubWidgetD
         });
 
         // Step 4 — restore the linked file, if any (ADR-007 hop; graceful no-file no-op).
-        const documentInfo = resolveRowDocumentInfo(record);
-        if (documentInfo) {
+        // Shared resolver (@spaarke/ui-components) — the grid row carries the same OData
+        // keys as ISprkAnalysisRecord (_sprk_documentid_value [+ FormattedValue], sprk_name).
+        const filePreview = resolveAnalysisFilePreview(
+          record as Pick<
+            ISprkAnalysisRecord,
+            '_sprk_documentid_value' | '_sprk_documentid_value@OData.Community.Display.V1.FormattedValue' | 'sprk_name'
+          >,
+          { bffBaseUrl, authenticatedFetch }
+        );
+        if (filePreview.status === 'resolved') {
           const widgetData: DocumentViewerWidgetData = {
-            filename: documentInfo.documentName,
+            filename: filePreview.documentName,
             contentType: 'application/octet-stream',
             textContent: '',
-            documentId: documentInfo.documentId,
-            fetchPreviewUrl: async (): Promise<string | null> => {
-              try {
-                const previewUrlEndpoint = buildBffApiUrl(
-                  bffBaseUrl,
-                  `/documents/${encodeURIComponent(documentInfo.documentId)}/preview-url`
-                );
-                const previewResponse = await authenticatedFetch(previewUrlEndpoint);
-                if (!previewResponse.ok) return null;
-                const previewData = (await previewResponse.json()) as { previewUrl?: string | null };
-                return previewData.previewUrl ?? null;
-              } catch {
-                return null;
-              }
-            },
+            documentId: filePreview.documentId,
+            fetchPreviewUrl: filePreview.fetchPreviewUrl,
           };
 
           // Owner UX (2026-07-29): the reopened analysis surfaces as a workspace tab

@@ -75,9 +75,17 @@ import { openSpaarkeAi } from "../utils/launch-resolver";
  * @param primaryControl - The Xrm FormContext passed by the ribbon framework via
  *   the PrimaryControl CrmParameter. Supplies the open record's id + logical name.
  * @param worktype - Analysis work type (Choice value, e.g. `SprkAnalysisWorkType`)
- *   supplied by the ribbon command's StaticValue CrmParameter. This function does
- *   not choose or default the value — that decision lives in the ribbon/catalog
- *   data (task 071), never in this invocation-only script.
+ *   supplied by the ribbon command's StaticValue CrmParameter.
+ *
+ *   ⚠️ SEAM NOTE (2026-07-29 audit): the specific VALUE is not yet load-bearing.
+ *   `openSpaarkeAi` / `main.tsx` treat any NON-EMPTY `worktype` as "open the hub in
+ *   new-analysis mode", and `AnalysisHubWidget` always renders all three cards — it
+ *   does NOT pre-select a card from this value. So today this parameter functions as
+ *   a boolean "new mode" flag; a Matter/Project ribbon button's StaticValue only needs
+ *   to be non-empty. Making a button open a SPECIFIC work-type card (owner design
+ *   intent — the "Create Analysis" card-selector) is a future change that would consume
+ *   this value in the hub's card-render path. This function does not choose or default
+ *   the value — that decision lives in the ribbon/catalog data, never in this script.
  */
 export function openNewAnalysisFromRecord(
   primaryControl: Xrm.FormContext,
