@@ -76,7 +76,9 @@ export type AnalysisFilePreviewResolution = AnalysisFilePreviewNoDocument | Anal
  * The ENTIRE "document hop" read — one field access, no SPE pointer field is
  * read from `sprk_analysis` (ADR-007).
  */
-export function resolveAnalysisDocumentId(analysis: Pick<ISprkAnalysisRecord, '_sprk_documentid_value'>): string | null {
+export function resolveAnalysisDocumentId(
+  analysis: Pick<ISprkAnalysisRecord, '_sprk_documentid_value'>
+): string | null {
   const id = analysis._sprk_documentid_value;
   return typeof id === 'string' && id.length > 0 ? id : null;
 }
