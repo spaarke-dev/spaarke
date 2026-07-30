@@ -704,7 +704,16 @@ public class ComposeService : IComposeService
         // mode selection) — but it is PERSISTED onto sprk_document ONLY at create-on-save (see the
         // PromoteComposeDocumentRequest.Origin wiring below); a replace-path save of an already-promoted
         // document never mutates the stored value.
-        var origin = request.ContentModel is not null ? ComposeOrigin.Authored : ComposeOrigin.Imported;
+        // UAT #1A hardening (task 050): Authored requires a ContentModel AND no retained original bytes — i.e. a
+        // genuine born-in-editor doc with no baseline to delta onto. A save that carries retained original bytes
+        // (Content) is IMPORTED even if a ContentModel is also (erroneously) present, so a client-side routing
+        // slip can never durably mis-stamp an imported doc Authored (which would force every later op-log save
+        // onto the clean branch and silently drop redlines — the SEV-1 UAT regression). ContentModel absent →
+        // Imported. Still resolved ONLY from server-side request shape — never from SPE-id presence or a
+        // content/text match (NFR-02, I-7).
+        var origin = request.ContentModel is not null && request.Content.IsEmpty
+            ? ComposeOrigin.Authored
+            : ComposeOrigin.Imported;
 
         // G2 (FR-02, task 021 / R5-D2 Candidate A): the CLEAN-APPLY decision for the op-log/engine path.
         // A reopened AUTHORED doc sends an op-log (ContentModel null) — the ContentModel discriminant above

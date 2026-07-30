@@ -1096,7 +1096,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // anchor landed in later-deleted content (`deletedContentFlag`) are surfaced by the snapshot and EXCLUDED
       // from what we apply — never-silently-dropped, but not re-applied onto content a later edit removed. The
       // born-in-editor create-on-save path authors the whole document via `contentModel`, so it sends no op-log.
-      const opLogSnapshot = !isTransientCreate && editorIsDirty ? editorRef.current.serializeOperationLog() : null;
+      // UAT #1A fix (task 050): an IMPORTED transient mount (Browse/upload — `state.docxBytes` present) that is
+      // dirty ALSO captures the op-log, so its create-on-save applies TRACKED redlines via the engine (not the
+      // renderer). Only a true born-in-editor doc (`!state.docxBytes`) skips the op-log on the transient path.
+      const opLogSnapshot =
+        editorIsDirty && (!isTransientCreate || !!state.docxBytes)
+          ? editorRef.current.serializeOperationLog()
+          : null;
       const operationLog = opLogSnapshot
         ? {
             schemaVersion: COMPOSE_OPERATION_SCHEMA_VERSION,
@@ -1152,16 +1158,24 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // redlines ride the ID-anchored `operationLog` (case 1 only — see below).
       let requestBody: Record<string, unknown>;
       if (isTransientCreate) {
-        // A born-in-editor create-on-save: an AI-draft/blank/EDITED mount RENDERS from the content model;
-        // an UNEDITED browse-local mount with retained bytes persists them byte-identical (FR-06a).
-        const bornInEditorRender = editorIsDirty || !state.docxBytes;
+        // UAT #1A fix (task 050): the born-in-editor discriminant is retained-bytes presence ONLY — the SAME
+        // signal the replace path uses (`bornInEditor = !state.docxBytes`). Previously this ALSO OR'd in
+        // `editorIsDirty`, so a DIRTY imported transient (Browse/upload mount WITH original bytes) rendered from
+        // the content model → plain untracked runs → NO redline in Word, and the server stamped it Authored
+        // (which then forced every later reopen-save onto the clean branch). Now an imported transient (has
+        // bytes) sends its retained original + the tracked op-log so the engine applies w:ins/w:del
+        // (create-on-save carries no DocumentRecordId → cleanApply is false → trackChanges true). Only a TRUE
+        // born-in-editor doc (no retained bytes) renders from the content model.
+        const bornInEditorRender = !state.docxBytes;
         requestBody = {
           containerId: saveContainerId,
           tenantId,
           sessionId: state.sessionId,
           displayName: state.documentRef.fileName ?? null,
           comments: anchoredComments,
-          // C2: the baseline paraId map (harmless on the born-in-editor path — the server skips the stamp there).
+          // C2: the baseline paraId map — needed on the imported-transient op-log branch so the server can stamp
+          // client-minted ids onto the retained baseline before the engine resolves anchors (harmless on the
+          // born-in-editor render branch — the server skips the stamp when ContentModel is present).
           paraIdMap,
           // G7 (task 022): the transient dedup key (repeated create-on-save → ONE record) + the Save-New
           // fork flag (forkNew=true skips dedup → a deliberately new record). effectiveTransientKey is the
@@ -1170,7 +1184,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           forkNew,
           ...(bornInEditorRender
             ? { contentModel: editorRef.current.buildContentModel() }
-            : { content: encodeRetained(state.docxBytes!) }),
+            : {
+                // Imported transient (Browse/upload-mounted, has original bytes): send the retained ORIGINAL
+                // bytes as the baseline + the tracked op-log so the server applies redlines via
+                // ComposeShadowPatchEngine — NOT the renderer. operationLog is undefined on a clean mount →
+                // the server persists the retained bytes byte-identical (FR-06a).
+                content: encodeRetained(state.docxBytes!),
+                operationLog,
+              }),
         };
       } else {
         // task 039 (UAT round 1+2, born-in-editor 2nd-save fix): a BORN-IN-EDITOR doc (blank page / AI-draft)

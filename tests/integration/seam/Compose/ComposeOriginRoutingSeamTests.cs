@@ -228,6 +228,106 @@ public sealed class ComposeOriginRoutingSeamTests : IClassFixture<ComposeFidelit
     }
 
     [Fact]
+    public async Task Save_ImportedTransient_CreateOnSave_OperationLogPath_StaysTracked_PersistsImportedMarker_ThroughTheWire()
+    {
+        // UAT #1A regression (task 050): an IMPORTED doc mounted transiently (Browse/upload) whose user makes
+        // a tracked edit and Saves for the FIRST time (create-on-save). The client now sends the retained
+        // ORIGINAL bytes (content) + the tracked operation log (NO content model) — the SAME imported shape the
+        // replace path uses. The server MUST apply the op via ComposeShadowPatchEngine as a native tracked
+        // change (w:ins, so Word shows the redline) and stamp sprk_composeorigin=Imported onto the NEW row —
+        // NOT route to the renderer (plain runs, no redline) and NOT stamp Authored. The pre-fix defect saved
+        // this through the ContentModel/renderer path (plain runs) and durably mis-stamped it Authored.
+        _fixture.ResetBoundaries();
+
+        const string containerId = "b!container-050-imported";
+        const string mintedSpeItemId = "spe-item-050-imported-001";
+        const string resolvedDriveId = "drive-050-imported-001";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+        var newDocumentId = Guid.NewGuid();
+        var original = BuildDocxWithParaIds(Paragraphs, ParaIds);
+
+        _fixture.SpeMock
+            .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(resolvedDriveId);
+
+        byte[]? persisted = null;
+        _fixture.SpeMock
+            .Setup(s => s.UploadSmallAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+            {
+                using var ms = new MemoryStream();
+                stream.CopyTo(ms);
+                persisted = ms.ToArray();
+            })
+            .ReturnsAsync(BuildFileHandle(mintedSpeItemId, resolvedDriveId, original.Length, "\"v1-etag\""));
+
+        // No existing row → create fires. Capture the created entity to assert the persisted origin marker.
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveByAlternateKeyAsync(
+                It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity)null!);
+        Entity? createdEntity = null;
+        _fixture.DataverseMock
+            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => createdEntity = e)
+            .ReturnsAsync(newDocumentId);
+
+        _fixture.IndexingMock
+            .Setup(i => i.EnqueueIfApplicableAsync(
+                It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        // Imported transient create-on-save: retained original bytes + tracked op-log, NO content model.
+        var operationLog = new
+        {
+            schemaVersion = "compose-ops-v2",
+            operations = new object[]
+            {
+                new { type = "insertText", paraId = ParaIds[0], at = new { runIndex = 0, offset = 0 }, text = "[UAT-050-IMPORTED-TRACKED]" },
+            },
+        };
+
+        var response = await client.PostAsJsonAsync("/api/compose/documents/create-on-save", new
+        {
+            containerId,
+            tenantId = tenant,
+            sessionId = string.Empty,
+            displayName = "imported-upload.docx",
+            content = original,
+            operationLog,
+            comments = (object?)null,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, $"an imported transient create-on-save with an op-log must succeed — body: {body}");
+
+        using (var doc = JsonDocument.Parse(body))
+        {
+            doc.RootElement.GetProperty("origin").GetString().Should().Be("imported",
+                "a create-on-save carrying retained original bytes + an op-log (no content model) is IMPORTED — never mis-stamped Authored (UAT #1A)");
+        }
+
+        // Stays TRACKED: the edit landed as a native w:ins on the retained baseline, NOT a plain rendered run.
+        persisted.Should().NotBeNull("the SPE facade must have captured the uploaded bytes on create-on-save");
+        using var patchedDoc = WordprocessingDocument.Open(new MemoryStream(persisted!, writable: false), isEditable: false);
+        var editedPara = patchedDoc.MainDocumentPart!.Document!.Body!.Descendants<Paragraph>()
+            .Single(p => string.Equals(p.ParagraphId?.Value, ParaIds[0], StringComparison.OrdinalIgnoreCase));
+        editedPara.Descendants<InsertedRun>().SelectMany(i => i.Descendants<Text>()).Select(t => t.Text)
+            .Should().Contain("[UAT-050-IMPORTED-TRACKED]",
+                "an imported transient edit must persist as a tracked change (w:ins) — the create-on-save must apply the op-log via the engine, NOT render plain runs (UAT #1A regression)");
+
+        // The durable marker is PERSISTED as Imported onto the NEW row (never Authored for an imported doc).
+        createdEntity.Should().NotBeNull("a new sprk_document row must be created on first Save");
+        createdEntity!.Contains(ComposeOriginAttribute).Should().BeTrue("create-on-save must stamp sprk_composeorigin");
+        ((OptionSetValue)createdEntity[ComposeOriginAttribute]).Value.Should().Be(ImportedOptionValue,
+            "an imported doc persists sprk_composeorigin=Imported (100000001) — so a later reopen routes tracked, never clean (UAT #1A)");
+    }
+
+    [Fact]
     public async Task Save_BornInEditor_CreateOnSave_ContentModel_ResolvesAuthored_PersistsAuthoredMarker_ThroughTheWire()
     {
         _fixture.ResetBoundaries();
