@@ -30,8 +30,8 @@ namespace Sprk.Bff.Api.Tests.Seam.Communication;
 /// already prove. Specifically, this file closes:
 ///
 /// <list type="bullet">
-/// <item><b>Full 11-entity by-regarding pass</b> — the unit suite explicitly covers 4 of the 11 ADR-024 regarding
-/// families (≥3 required by spec); this file data-drives ALL 11 straight from <see cref="RegardingFieldMap.All"/>
+/// <item><b>Full 12-entity by-regarding pass</b> — the unit suite explicitly covers 4 of the 12 ADR-024 regarding
+/// families (≥3 required by spec); this file data-drives ALL 12 straight from <see cref="RegardingFieldMap.All"/>
 /// (the single source of truth), closing the "11-entity theory if cheap" ask without hand-listing families twice.</item>
 /// <item><b>All-facets-composed filtered query</b> — the unit suite asserts each facet independently (plus one
 /// 2-facet AND for channel+participant); this file composes FIVE facets (thread, channel, from, to, participant)
@@ -107,7 +107,7 @@ public class CommunicationWorkspaceReadSeamTests
         new(new ClaimsIdentity(new[] { new Claim("oid", Guid.NewGuid().ToString()) }, "test"));
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════════
-    // A. Full 11-entity by-regarding pass (composition gap — the unit suite covers 4 of 11 explicitly)
+    // A. Full 12-entity by-regarding pass (composition gap — the unit suite covers 4 of 12 explicitly)
     // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
     // Deliberately HARD-CODED (not derived from RegardingFieldMap.All at test time) so this is a genuine
@@ -116,7 +116,7 @@ public class CommunicationWorkspaceReadSeamTests
     // expected value from the same map the production code reads would only prove "the service calls the map",
     // never that the map itself is right — a mirror-test/tautology risk (ADR-038 §7 B6) the code-review pass
     // for this task explicitly caught and fixed. Values verified 1:1 against RegardingFieldMap.All as of task 080.
-    public static IEnumerable<object[]> AllElevenAdr024RegardingFamilies() => new[]
+    public static IEnumerable<object[]> AllTwelveAdr024RegardingFamilies() => new[]
     {
         new object[] { "sprk_matter", "sprk_regardingmatter" },
         new object[] { "sprk_project", "sprk_regardingproject" },
@@ -125,6 +125,7 @@ public class CommunicationWorkspaceReadSeamTests
         new object[] { "sprk_workassignment", "sprk_regardingworkassignment" },
         new object[] { "sprk_event", "sprk_regardingevent" },
         new object[] { "sprk_budget", "sprk_regardingbudget" },
+        new object[] { "sprk_reportcard", "sprk_regardingreportcard" },
         new object[] { "sprk_analysis", "sprk_regardinganalysis" },
         new object[] { "sprk_organization", "sprk_regardingorganization" },
         new object[] { "account", "sprk_regardingaccount" },
@@ -132,8 +133,8 @@ public class CommunicationWorkspaceReadSeamTests
     };
 
     [Theory]
-    [MemberData(nameof(AllElevenAdr024RegardingFamilies))]
-    public async Task ReadByRegardingAsync_AllElevenAdr024Families_ResolvesOwnTypedLookupAndBehavesIdentically(
+    [MemberData(nameof(AllTwelveAdr024RegardingFamilies))]
+    public async Task ReadByRegardingAsync_AllTwelveAdr024Families_ResolvesOwnTypedLookupAndBehavesIdentically(
         string entityType, string regardingField)
     {
         var threadId = Guid.NewGuid();
@@ -149,7 +150,7 @@ public class CommunicationWorkspaceReadSeamTests
         var result = await Sut().ReadByRegardingAsync(entityType, RecordId, Caller(), CancellationToken.None);
 
         // The ONLY per-family difference is which typed thread-regarding lookup is filtered on — proven for
-        // ALL 11 families here (data-driven off the same map the production code reads, so a future 12th family
+        // ALL 12 families here (data-driven off the same map the production code reads, so a future 12th family
         // is covered automatically without a 12th hand-written test case).
         threadQuery.Should().Contain($"_{regardingField}_value eq {RecordId}",
             $"family '{entityType}' must resolve its OWN typed regarding lookup, not another family's");
@@ -159,13 +160,13 @@ public class CommunicationWorkspaceReadSeamTests
     }
 
     [Fact]
-    public void AllElevenAdr024RegardingFamilies_StaysInSyncWith_RegardingFieldMapAll()
+    public void AllTwelveAdr024RegardingFamilies_StaysInSyncWith_RegardingFieldMapAll()
     {
         // Closes the loop on the hard-coded table above: THIS check catches drift the other direction (someone
         // adds/removes/renames a family in RegardingFieldMap.All without updating the literal test table), while
         // the Theory above catches drift in the map's actual VALUES. Together they give two-way regression
         // protection without either direction being a tautology.
-        var expected = AllElevenAdr024RegardingFamilies()
+        var expected = AllTwelveAdr024RegardingFamilies()
             .Select(row => ((string)row[0], (string)row[1]))
             .OrderBy(x => x.Item1, StringComparer.Ordinal)
             .ToList();

@@ -171,7 +171,8 @@ public class SignalEvaluationServiceTests : IDisposable
             It.Is<Dictionary<string, object?>>(f =>
                 (int)f["sprk_signaltype"]! == expectedSignalType &&
                 (int)f["sprk_severity"]! == expectedSeverity),
-            It.IsAny<CancellationToken>()),
+            It.IsAny<CancellationToken>(),
+            It.IsAny<Guid?>()),
             times ?? Times.Once());
     }
 
@@ -184,7 +185,8 @@ public class SignalEvaluationServiceTests : IDisposable
             "sprk_spendsignal",
             It.IsAny<Guid>(),
             It.IsAny<Dictionary<string, object?>>(),
-            It.IsAny<CancellationToken>()),
+            It.IsAny<CancellationToken>(),
+            It.IsAny<Guid?>()),
             Times.Never());
     }
 

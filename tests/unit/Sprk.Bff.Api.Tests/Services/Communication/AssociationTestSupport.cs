@@ -16,18 +16,21 @@ internal static class AssociationTestSupport
     public static AutoFileGate Gate(
         bool enabled = true,
         double threshold = 0.85,
-        Dictionary<string, AutoFileTenantOverride>? tenants = null)
+        Dictionary<string, AutoFileTenantOverride>? tenants = null,
+        bool rung2And3AutoFileEnabled = false)
     {
         var options = new AutoFileOptions
         {
             Enabled = enabled,
             Threshold = threshold,
+            Rung2And3AutoFileEnabled = rung2And3AutoFileEnabled,
             Tenants = tenants ?? new Dictionary<string, AutoFileTenantOverride>(StringComparer.OrdinalIgnoreCase),
         };
         var monitor = Mock.Of<IOptionsMonitor<AutoFileOptions>>(m => m.CurrentValue == options);
         return new AutoFileGate(monitor);
     }
 
-    public static AssociationStatusMapper Mapper(bool enabled = true, double threshold = 0.85) =>
-        new(Gate(enabled, threshold), NullLogger<AssociationStatusMapper>.Instance);
+    public static AssociationStatusMapper Mapper(
+        bool enabled = true, double threshold = 0.85, bool rung2And3AutoFileEnabled = false) =>
+        new(Gate(enabled, threshold, rung2And3AutoFileEnabled: rung2And3AutoFileEnabled), NullLogger<AssociationStatusMapper>.Instance);
 }

@@ -111,12 +111,14 @@ describe('EmailBodyView — .eml render branch (sandboxed iframe)', () => {
 });
 
 describe('EmailBodyView — degradation branch (sprk_body, no archive)', () => {
-  it('degrades to client-sanitized sprk_body with a "full history unavailable" note and NO error, without fetching', () => {
+  it('degrades to client-sanitized sprk_body with an unobtrusive "full history unavailable" (i) affordance and NO error, without fetching', () => {
     renderBody({ emlDocumentId: null, body: '<p>Latest message body</p>' });
 
-    // Degradation is a normal state: note shown, no error, no iframe, no fetch.
-    expect(screen.getByTestId('email-body-fallback-note')).toBeInTheDocument();
-    expect(screen.getByText('Full history unavailable')).toBeInTheDocument();
+    // Degradation is a normal state: the (i) affordance is shown (label, not a
+    // full banner), no error, no iframe, no fetch.
+    const info = screen.getByTestId('email-body-fallback-note');
+    expect(info).toBeInTheDocument();
+    expect(info).toHaveAttribute('aria-label', 'Full history unavailable');
     expect(screen.getByText('Latest message body')).toBeInTheDocument();
     expect(screen.queryByTestId('email-body-error')).not.toBeInTheDocument();
     expect(screen.queryByTestId('email-body-iframe')).not.toBeInTheDocument();

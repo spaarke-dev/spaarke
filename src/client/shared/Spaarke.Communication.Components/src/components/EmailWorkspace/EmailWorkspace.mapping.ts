@@ -15,7 +15,12 @@
 import type { IDataService } from '@spaarke/ui-components';
 import { sanitizeEmailHtml } from '@spaarke/ui-components';
 import type { IAccessPermissionOption } from '@spaarke/ui-components';
-import { COMMUNICATION_REGARDING_FIELDS, type FiledAssociation } from '../../logic/connections';
+import {
+  COMMUNICATION_REGARDING_FIELDS,
+  derivePrimaryReview,
+  summarizePrimaryReview,
+  type FiledAssociation,
+} from '../../logic/connections';
 import type { EmailCardItem } from '../EmailCardList/EmailCardList.types';
 import { EMAIL_COMMUNICATION_TYPE } from '../EmailCardList/EmailCardList.types';
 
@@ -102,7 +107,30 @@ export function mapRowToEmailCardItem(row: Record<string, unknown>): EmailCardIt
       asNullableString(row['sprk_receiveddate']) ?? asNullableString(row['sprk_sentat']) ?? asString(row['createdon']),
     isUnread: false,
     communicationType,
+    reviewTone: deriveCardReviewTone(row),
   };
+}
+
+/**
+ * Derive the left-of-sender status dot tone (🔴/🟡/🟢) for a card from the row's
+ * association fields — using the SAME `derivePrimaryReview` the reading pane uses,
+ * so the card dot and the open email's section dot never disagree. Returns
+ * `undefined` when the row carries NO association data (a view whose FetchXML
+ * omits the association columns → no dot, rather than a misleading all-red list).
+ */
+function deriveCardReviewTone(row: Record<string, unknown>): 'red' | 'yellow' | 'green' | undefined {
+  const filed = readFiledAssociations(row);
+  const hasAssociationData =
+    row['sprk_associationstatus'] != null ||
+    (typeof row['sprk_associationprovenance'] === 'string' && row['sprk_associationprovenance'].length > 0) ||
+    filed.length > 0;
+  if (!hasAssociationData) return undefined;
+  return summarizePrimaryReview(
+    derivePrimaryReview(asNullableString(row['sprk_associationprovenance']), asNullableNumber(row['sprk_associationstatus']), filed, {
+      recordName: asNullableString(row['sprk_regardingrecordname']),
+      recordNumber: asNullableString(row['sprk_regardingrecordnumber']),
+    })
+  ).tone;
 }
 
 /** Strip tags from already-sanitized HTML and collapse whitespace into a short plain-text preview (never used with `dangerouslySetInnerHTML`). */
@@ -140,10 +168,31 @@ export function readFiledAssociations(raw: RawCommunicationRecord): FiledAssocia
   return filed;
 }
 
-/** Envelope/association/tracking fields this workspace derives from one `retrieveRecord` (no `$select`) call per selection. */
+/**
+ * Envelope/association/tracking fields this workspace derives from one
+ * `retrieveRecord` (no `$select`) call per selection.
+ *
+ * `subject`/`from`/`to`/`cc`/`bcc`/`sentAt`/`receivedDate` were added
+ * (email-communication-solution-r5, reading-pane layout redesign) to retire
+ * `EmailReadingHeader`'s OWN internal `retrieveRecord(..., HEADER_SELECT)`
+ * call — that second read used a `$select` string against `sprk_communication`
+ * and failed at runtime ("Could not load this email header"). These fields
+ * are read DEFENSIVELY (`asNullableString`) from the SAME no-`$select` record
+ * this hook already fetches, so a field absent on a given deployment degrades
+ * to `null` rather than throwing — there is exactly ONE per-selection read in
+ * this component tree now.
+ */
 export interface EmailWorkspaceRecordState {
+  subject: string | null;
+  from: string | null;
+  to: string | null;
+  cc: string | null;
+  bcc: string | null;
+  sentAt: string | null;
+  receivedDate: string | null;
   sprk_body: string;
   regardingRecordName: string | null;
+  regardingRecordNumber: string | null;
   associationStatus: number | null;
   associationProvenanceJson: string | null;
   filedAssociations: FiledAssociation[];
@@ -155,8 +204,16 @@ export interface EmailWorkspaceRecordState {
 /** Derive the full workspace record state from one raw `retrieveRecord` payload. */
 export function toWorkspaceRecordState(raw: RawCommunicationRecord): EmailWorkspaceRecordState {
   return {
+    subject: asNullableString(raw['sprk_subject']),
+    from: asNullableString(raw['sprk_from']),
+    to: asNullableString(raw['sprk_to']),
+    cc: asNullableString(raw['sprk_cc']),
+    bcc: asNullableString(raw['sprk_bcc']),
+    sentAt: asNullableString(raw['sprk_sentat']),
+    receivedDate: asNullableString(raw['sprk_receiveddate']),
     sprk_body: asString(raw['sprk_body']),
     regardingRecordName: asNullableString(raw['sprk_regardingrecordname']),
+    regardingRecordNumber: asNullableString(raw['sprk_regardingrecordnumber']),
     associationStatus: asNullableNumber(raw['sprk_associationstatus']),
     associationProvenanceJson: asNullableString(raw['sprk_associationprovenance']),
     filedAssociations: readFiledAssociations(raw),

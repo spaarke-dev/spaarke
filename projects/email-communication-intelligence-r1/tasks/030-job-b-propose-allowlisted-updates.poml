@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>Job B propose — Action proposes allow-listed field updates (reads `sprk_emailupdatefield`), old→new, cited source + confidence, stored as pending (NOT applied)</title>
+    <phase>P3 — Job B record currency</phase>
+    <gate>after:020,022,001</gate>
+    <status>completed</status>
+    <tags>bff-api, catalog, communication</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Record-currency proposal generation on the correctness-critical Job B path. Reads the `sprk_emailupdatefield` allow-list and produces field-update proposals that a human will later confirm and apply (031). The allow-list gate + citation + verify-cited-text + confidence obligations (NFR-06 / ADR-015) are load-bearing trust properties — a non-allow-listed field proposed, or a citation that does not exist in the source, is a defect. BFF-touching (Services/Communication + Services/Ai via PublicContracts): publish-size + CVE + bff-extensions Placement Justification required; code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Trust-critical proposal generation with an allow-list gate, citation verification, and confidence scoring on a record-mutating path; reasoning quality on "propose only what is enabled + cited + real" is the exact failure mode that erodes trust if reasoned sloppily.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares the Job B proposal surface + `Services/Communication/` + `Services/Ai/PublicContracts/` seams with 031/032; never run concurrently with other shared `Services/Communication/` writers. `/conflict-check` before the PR.</parallel-reason>
+    <dependencies>020, 022, 001</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement **Job B — propose** (FR-09): the triage/action path proposes **allow-listed** field updates on the record the email is associated to (from the 7-entity identifier rung, 020), each proposal carrying **old value → new value, the cited source text (email body or attachment + locator), and a confidence score**, stored as a **pending proposal** — NOT applied. Application is a separate, human-confirmed step (031).
+
+    The allow-list is authoritative and read-only to r1: read `sprk_emailupdatefield` (created + seeded by the operator; verified in 001). Job B may propose an update to a `(sprk_targetentity, sprk_targetfield)` pair **ONLY** when there is an **enabled** row for it (`sprk_enabled = true`). A field with no enabled row is **never** proposed — no exceptions, no arbitrary column writes. Honor the per-row coercion hint (`sprk_fieldtype`) and extraction guidance (`sprk_extractionguidance`); `sprk_requireconfirm` is true in P1 (every proposal requires human confirm at 031).
+
+    Reach AI **only** through `Services/Ai/PublicContracts/` (ADR-013 facade) and produce the proposal via a **code-directed Action + Binding** (ADR-039). MUST NOT land capability on the frozen node-graph playbook engine (`PlaybookOrchestrationService` / `UpdateRecordNodeExecutor` / `IInvokePlaybookAi` — deleted). Reuse the classification signal already produced on the enrichment path (022) — do not run a second full LLM pass where the triage/classification output already exists.
+
+    **Trust invariants (NFR-06 / ADR-015):** every proposal carries a plain-language reason + a citation to exact source text, and the system **verifies the cited text actually exists** in the source communication/attachment before storing the proposal (a proposal whose cited text cannot be located is dropped, not stored). Nothing deadline-bearing / privilege-adjacent auto-finalizes; privilege is flagged, never decided. **NFR-04:** proposal generation MUST be best-effort / non-fatal — it MUST NOT fail the capture or send path.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication + Ai domains. Authority on the Job B proposal path, the `Services/Ai/PublicContracts/` facade (ADR-013), Action + Binding authoring (ADR-039), the `sprk_emailupdatefield` allow-list contract (C-4 / FR-11), and the NFR-06 / ADR-015 trust-and-audit obligations. Fluent in the r5 feed/apply coordination contract (`notes/email-intelligence-r1-coordination.md`).
+  </role>
+
+  <goal>
+    Given an email associated to a record (020) with triage output already produced (022), Job B generates zero-or-more **pending** field-update proposals — each with old→new value, a verified citation (source + locator), a plain-language reason, and a confidence — restricted to `(entity, field)` pairs that have an **enabled** row in `sprk_emailupdatefield`. Proposals are stored (not applied) in a shape the 031 apply endpoint and the 032 queue-feed can consume and r5 can render. A non-allow-listed / disabled field is never proposed. A proposal whose cited text cannot be located in the source is never stored. Proposal generation is non-fatal to capture/send. Build clean; unit + seam tests pass; publish-size delta + CVE + Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      r1 makes matched records **current from email**. Job B is FULL depth (propose → confirm → apply → audit; owner-locked). This task is the **propose** half: it reads the operator-owned allow-list and emits pending proposals; 031 applies a confirmed one under OBO and writes the audit row; 032 exposes the ranked exceptions feed r5 renders. r1 builds no UI — the confirm/apply card is r5's (C-3); r1 supplies the stored proposals + apply endpoint (coordination doc).
+
+      The allow-list (`sprk_emailupdatefield`, C-4 / FR-11) is the safety boundary: `sprk_targetentity` → `sprk_recordtype_ref`, `sprk_targetfield`, `sprk_enabled`, `sprk_fieldtype` (coercion hint), `sprk_requireconfirm` (=true in P1), `sprk_extractionguidance`. Without it, Job B could propose arbitrary column writes — unsafe. r1 reads it defensively; it is operator-created (verified in 001).
+
+      Reuse-first: the classification/triage signal from 022 already exists on the enrichment path — Job B grounds proposals in it and in the associated record's current field values (old→new needs the current value). No second full LLM pass.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionSeam.cs (REUSE — the write-core facade seam; Job B propose consumes the Action path here, not internals)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ActionCore/UpdateRecordActionCore.cs (REFERENCE — the update-record write core the propose shape targets; 031 invokes it, 030 shapes the proposal for it)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ICommunicationClassificationAi.cs (REUSE — classification facade; reuse the existing signal, no 2nd full LLM pass)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/AiClassificationRung.cs (REFERENCE — the classification substrate produced on the enrichment path, 022)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs (REFERENCE — enrichment path where triage output is produced; propose runs best-effort here, NFR-04)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs (REFERENCE — the endpoint family 031/032 extend; 030 stores proposals these read)</file>
+      <file>sprk_emailupdatefield (Dataverse — operator-owned allow-list; READ-ONLY to r1; verified in 001; governs what may be proposed)</file>
+      <file>sprk_emailreviewlog (Dataverse — append-only audit; 031 writes the human-decision row; 030's proposal is the "AI proposed" source of that row)</file>
+      <file>infra/dataverse/sprk_playbookconsumer-rows.json (REFERENCE — Binding row shape for the propose Action)</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md (Action + Binding authoring; PublicContracts facade path)</file>
+      <file>projects/email-communication-intelligence-r1/notes/email-intelligence-r1-coordination.md (r5 feed/apply contract — the stored-proposal shape r5 renders)</file>
+    </relevant-files>
+    <dependencies>020 (the association that supplies the target record), 022 (the triage/classification signal to reuse), 001 (verifies `sprk_emailupdatefield` exists + seeded).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-09">Scope: propose allow-listed field updates on the associated record; each proposal carries old→new value, cited source text (email/attachment + locator), a plain-language reason, and confidence; stored as PENDING (not applied). A non-allow-listed / disabled field is NEVER proposed.</constraint>
+    <constraint source="FR-11 / C-4">Scope: the `sprk_emailupdatefield` allow-list is authoritative + READ-ONLY to r1; propose ONLY for `(sprk_targetentity, sprk_targetfield)` pairs with `sprk_enabled = true`; honor `sprk_fieldtype` coercion + `sprk_extractionguidance`; `sprk_requireconfirm` is true in P1. Do NOT create/modify the table.</constraint>
+    <constraint source="NFR-06 / ADR-015">Scope: every proposal carries a plain-language reason + citation to exact source text; the system MUST verify the cited text exists in the source before storing (drop, do not store, if unlocatable). Nothing deadline-bearing / privilege-adjacent auto-finalizes; privilege is flagged, never decided.</constraint>
+    <constraint source="ADR-039">Scope: proposal generation is a code-directed Action + Binding via catalog data; MUST NOT land capability on the frozen node-graph engine (`PlaybookOrchestrationService` / `UpdateRecordNodeExecutor` / `IInvokePlaybookAi` — deleted).</constraint>
+    <constraint source="ADR-013 / NFR-03">Scope: reach AI ONLY via `Services/Ai/PublicContracts/`; MUST NOT inject `IOpenAiClient` / `IPlaybookService` into Communication code.</constraint>
+    <constraint source="NFR-04 / ADR-045">Scope: proposal generation is best-effort / non-fatal — it MUST NOT fail the capture or send path; a proposal failure logs + degrades, never throws up the enrichment path.</constraint>
+    <constraint source="project §10">Scope: BFF Hygiene — load `.claude/constraints/bff-extensions.md` before designing; state Placement Justification in the PR (extends the Communication + Ai domains, reuses the PublicContracts facade, no new top-level service); report publish-size delta vs ~49.63 MB baseline (incl. PDBs; expected ≈0, no new heavy dep); no new HIGH CVE; update tests in `tests/unit/Sprk.Bff.Api.Tests/` + seam tests (ADR-038).</constraint>
+    <constraint source="project §11">Scope: Component Justification — the pending-proposal store is new only because there is no existing per-email proposal record; state the concrete FR-09 failure mode prevented (Job B could write arbitrary columns) with grep evidence.</constraint>
+    <constraint source="NFR-07 / ADR-039">Scope: the propose Action/Binding adds a golden-utterance eval case (blocking merge gate).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>projects/email-communication-intelligence-r1/notes/email-intelligence-r1-coordination.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionSeam.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ActionCore/UpdateRecordActionCore.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ICommunicationClassificationAi.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>infra/dataverse/sprk_playbookconsumer-rows.json</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-015-ai-data-governance.md</file>
+      <file>docs/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Allow-list-gated proposal" location="sprk_emailupdatefield (Dataverse)">
+        Read the enabled rows for the associated entity; propose ONLY `(entity, field)` pairs present + enabled; coerce per `sprk_fieldtype`; ground extraction in `sprk_extractionguidance`. No enabled row → no proposal.
+      </pattern>
+      <pattern name="Verify-cited-text" location="Services/Communication/">
+        For each candidate proposal, locate the cited span in the source communication/attachment text; if not found, DROP the proposal (never store an unverifiable citation).
+      </pattern>
+      <pattern name="Reuse classification signal" location="Services/Communication/Engine/Rungs/AiClassificationRung.cs">
+        Ground the proposal in the triage/classification output already produced on the enrichment path (022) + the record's current field values (for old→new); no second full LLM pass.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `.claude/constraints/bff-extensions.md` (§F/§G + §11), `docs/guides/ai-guide-consumer-wiring.md`, ADR-039 (code-directed Action + Binding), ADR-013 (PublicContracts facade), ADR-015 (privilege flagged never decided), and the coordination doc (stored-proposal shape r5 renders).</step>
+    <step order="2">Read `IActionSeam.cs`, `UpdateRecordActionCore.cs`, `ICommunicationClassificationAi.cs`, and the enrichment path — identify the facade entry point, the update-record write-core shape 031 will invoke, and where the triage/classification signal (022) is available on the enrichment path.</step>
+    <step order="3">Author the propose Action + Binding (catalog data + PublicContracts) that, given the associated record + reused classification signal, emits candidate `(field, oldValue, newValue, citation{source, locator}, reason, confidence)` proposals. Grep to confirm no existing per-email proposal store exists (§11 evidence).</step>
+    <step order="4">Read `sprk_emailupdatefield` defensively; filter candidates to `(sprk_targetentity, sprk_targetfield)` pairs with `sprk_enabled = true`; apply `sprk_fieldtype` coercion + `sprk_extractionguidance`. Drop any candidate for a non-listed/disabled field.</step>
+    <step order="5">Verify-cited-text: for each surviving candidate, confirm the cited span exists in the source communication/attachment; DROP any whose citation cannot be located (NFR-06). Attach the plain-language reason + confidence.</step>
+    <step order="6">Store surviving proposals as PENDING (not applied), in the shape the 031 apply endpoint + 032 queue-feed + r5 consume (per coordination doc). Run the whole propose step best-effort on the enrichment path (NFR-04) — log + degrade on failure, never throw up capture/send.</step>
+    <step order="7">Add the golden-utterance eval case (NFR-07) for the propose Action/Binding. Write unit + seam tests: (a) an enabled allow-list field with a cited fact yields a pending proposal (old→new + citation + confidence); (b) NEGATIVE — a non-allow-listed / disabled field is NEVER proposed; (c) NEGATIVE — a candidate whose cited text is absent from the source is NOT stored; (d) proposal generation failure does not fail the enrichment path (NFR-04).</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + targeted `dotnet test`; run the BFF publish-size check (report absolute + delta vs ~49.63 MB) + `dotnet list package --vulnerable --include-transitive`.</step>
+    <step order="9.5">FULL-rigor gates: `code-review` (focus allow-list gate, verify-cited-text, no frozen-engine landing, facade discipline, non-fatal); `adr-check` against ADR-039 / ADR-013 / ADR-015 + spec FR-09 / FR-11 / NFR-04 / NFR-06 / NFR-07. Address Critical findings; cite Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (shared `Services/Communication/` + `Services/Ai/PublicContracts/`).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (030 ✅) + `current-task.md`; record decisions (proposal store shape, allow-list read point, verify-cited-text approach) for 031/032.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If reusing the classification signal (022) proves insufficient to produce a defensible old→new proposal without a second full LLM pass — or if the allow-list contract (`sprk_emailupdatefield`) as verified in 001 cannot express a required coercion/guidance the propose path needs — STOP and surface per root §6 / §6.5 rather than adding a second LLM pass or writing to the operator-owned table.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No existing per-email field-update proposal record; `sprk_emailreviewlog` (012) is the append-only audit, not a pending-proposal store; the Field Mapping Framework is creation-time value copy (different intent).</existing>
+    <extension>No — the audit log records decisions after the fact and cannot hold a pending, human-confirmable proposal with citation + confidence; the propose surface is a new stored shape produced by a code-directed Action, reusing the PublicContracts facade + the update-record write core (not forked).</extension>
+    <cost-of-doing-nothing>Without the allow-list-gated pending-proposal store, Job B could either propose arbitrary column writes (unsafe) or have nothing for r5 to render + 031 to apply — FR-09 fails and the record-currency pillar (G-5 / Success Criterion 6) does not ship.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="read">Inspect the facade seam, update-record core, classification facade, enrichment path, endpoints, allow-list contract, coordination doc</tool>
+    <tool name="grep">Confirm no existing per-email proposal store (§11 evidence); confirm no `IOpenAiClient`/`IPlaybookService` injected into Communication code</tool>
+    <tool name="edit">Author the propose Action/Binding + proposal store + enrichment-path wiring</tool>
+    <tool name="bash">Build, unit/seam tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ + Services/Ai/PublicContracts/ (UPDATED — Job B propose path: allow-list-gated, cited, confidence-scored pending proposals via a code-directed Action, best-effort on enrichment)</output>
+    <output type="config">infra/dataverse/ (Action + Binding catalog rows for the propose Action + input/output schema)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ + tests/integration/seam/ — enabled-field proposal + non-allow-listed-never-proposed + unverifiable-citation-not-stored + non-fatal negatives; golden-utterance eval case</output>
+    <output type="docs">PR description with §11 Component Justification + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an email associated to a record with an enabled `sprk_emailupdatefield` row and a cited fact ("closing moved to Aug 15"), Job B stores a PENDING proposal for that field with old→new value, citation (source + locator), a plain-language reason, and confidence.</criterion>
+    <criterion testable="true">NEGATIVE: a field with no enabled `sprk_emailupdatefield` row is NEVER proposed (allow-list is the sole gate).</criterion>
+    <criterion testable="true">NEGATIVE: a candidate proposal whose cited text cannot be located in the source communication/attachment is NOT stored (verify-cited-text, NFR-06).</criterion>
+    <criterion testable="true">Proposals are stored PENDING (not applied); nothing is written to the target record by this task (application is 031).</criterion>
+    <criterion testable="true">Proposal generation is best-effort: a proposal failure does NOT fail the capture or send / enrichment path (NFR-04).</criterion>
+    <criterion testable="true">AI is reached only via `Services/Ai/PublicContracts/`; no `IOpenAiClient`/`IPlaybookService` injected; no capability landed on the frozen node-graph engine (grep-verifiable).</criterion>
+    <criterion testable="true">A golden-utterance eval case exists for the propose Action/Binding (NFR-07).</criterion>
+    <criterion testable="true">`dotnet build` clean; tests pass; publish-size delta ≈0 vs ~49.63 MB reported; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Blocks 031 (apply consumes the stored proposal) + 032 (queue-feed ranks stored proposals). r1 builds no UI — the confirm/apply card is r5's; r1 supplies the stored-proposal shape (coordination doc). The allow-list is operator-owned and READ-ONLY to r1. Run `/conflict-check` before the PR (shared `Services/Communication/`).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files. Apply FULL rigor — Step 9.5 gates REQUIRED (trust-critical, record-currency). Per §10 + §11: publish-size delta (baseline ~49.63 MB) + CVE + Placement + Component Justification in the PR. `/conflict-check` before the PR. Model tier `opus` @ effort `high`.</protocol>
+  </execution>
+</task>

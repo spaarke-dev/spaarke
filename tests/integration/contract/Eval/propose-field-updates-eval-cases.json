@@ -1,0 +1,77 @@
+{
+  "$comment": "email-communication-intelligence-r1 task 030 (NFR-07 blocking merge gate) — the email-propose (Job B) eval family, joined to the SAME Category=GoldenUtteranceEval merge gate via ProposeFieldUpdatesEvalTests.cs (identical net-new-family pattern as the triage-email / NDA-review / Assistant-Enhancements-R1 families in this directory — no shared golden-utterances.json edit for the family, no CI-YAML change; the trait IS the registration). Like TRIAGE-EMAIL, PROPOSE-FIELD-UPDATES is NOT chat/loop-projectable — it is invoked directly off the Communication enrichment path (CommunicationEnrichmentService.RunEmailProposeAsync via the ICommunicationProposeAi PublicContracts facade), so 'channel' is uniformly 'event' and 'utterance' is the event/affordance descriptor, not NL phrasing. Four families: structured-output (the Action's own worked example → the proposals[] output shape {field, newValue, citation{source, locator, quotedText}, reason, confidence}, cross-checked against BOTH the action file and this seed so either drifting fails a test), verify-cited-text (NFR-06 — the CitationVerifier drops a fabricated quote, keeps a verbatim span), binding-resolution (the email-propose Binding resolves through the REAL ConsumerRoutingService to the propose-field-updates Action), no-second-pass (FR-05/FR-09 — the facade has NO classification dependency; the triage output is grounding only).",
+  "schemaVersion": "propose-field-updates-eval@v1",
+  "cases": [
+    {
+      "caseId": "PROPOSE-001",
+      "family": "structured-output",
+      "ucId": "UC-F-1",
+      "channel": "event",
+      "utterance": "[email-propose] inbound message enrichment proposes an allow-listed field update after the record is associated (task 020) and triaged (task 023)",
+      "notes": "The representative proposal from infra/dataverse/actions/propose-field-updates.action.json's own worked example (examples[0]) — asserts the Action's declared output shape (proposals[] of {field, newValue, citation{source, locator, quotedText}, reason, confidence}) and that the worked example populates every field with the expected values.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-propose",
+        "consumerCode": "default",
+        "catalogStatus": "mirrored",
+        "mirroredBy": "task 030 (infra/dataverse/sprk_playbookconsumer-rows.json)",
+        "actionCode": "propose-field-updates",
+        "exampleProposal": {
+          "field": "sprk_closingdate",
+          "newValue": "2026-08-15",
+          "citation": {
+            "source": "body",
+            "locator": "body: sentence 1",
+            "quotedText": "the closing has been moved to August 15, 2026"
+          },
+          "reason": "The email states the matter's closing date changed to August 15, 2026.",
+          "confidence": 0.9
+        }
+      }
+    },
+    {
+      "caseId": "PROPOSE-002",
+      "family": "verify-cited-text",
+      "ucId": "UC-F-1",
+      "channel": "event",
+      "utterance": "[email-propose] NFR-06 — a proposal whose quotedText IS a verbatim span of the source is kept; a fabricated quotedText is dropped",
+      "notes": "Demonstrates the verify-cited-text trust gate structurally (mechanical, no live model): CitationVerifier.IsCitedTextPresent returns true when the quotedText is a whitespace/case-normalized substring of the source communication/attachment, and false when it is not — the exact gate CommunicationEnrichmentService applies before storing a Proposed row. A fabricated (hallucinated) citation is never stored.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-propose",
+        "consumerCode": "default",
+        "verifiedVsFabricatedDiffers": true
+      }
+    },
+    {
+      "caseId": "PROPOSE-003",
+      "family": "binding-resolution",
+      "ucId": "UC-F-1",
+      "channel": "event",
+      "utterance": "[email-propose] CommunicationEnrichmentService resolves the PROPOSE-FIELD-UPDATES Action via IActionResolver -> IConsumerRoutingService.ResolveActionAsync('email-propose')",
+      "notes": "The exact read the Linear AI Consumer primitives perform (ActionResolver.ResolveAsync -> ConsumerRoutingService.ResolveActionAsync), read from the REAL mirror file — a drift in the mirror row (consumerType/actionCode typo) fails here, same mechanical posture as the triage-email family's routing fact.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-propose",
+        "consumerCode": "default",
+        "catalogStatus": "mirrored",
+        "mirroredBy": "task 030 (infra/dataverse/sprk_playbookconsumer-rows.json)",
+        "actionCode": "propose-field-updates"
+      }
+    },
+    {
+      "caseId": "PROPOSE-004",
+      "family": "no-second-pass",
+      "ucId": "UC-F-1",
+      "channel": "event",
+      "utterance": "[email-propose] the propose Action is Job B's OWN targeted field-value extraction — never a second classification pass",
+      "notes": "Structural proof (FR-05/FR-09): CommunicationProposeAi's constructor has NO dependency on ICommunicationClassificationAi/IOpenAiClient (it cannot invoke a classification even by mistake); the already-produced triage output is passed IN as optional grounding (CommunicationProposeRequest.Triage), never re-derived. A single, legitimate targeted-extraction Action call.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-propose",
+        "consumerCode": "default",
+        "noSecondClassificationPass": true
+      }
+    }
+  ]
+}

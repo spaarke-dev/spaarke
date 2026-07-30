@@ -149,11 +149,16 @@ public class DataverseWebApiService : IDataverseService
     }
 
     /// <summary>
-    /// Sends a PATCH request with JSON body and per-request auth headers.
+    /// Sends a PATCH request with JSON body and per-request auth headers. When
+    /// <paramref name="impersonateSystemUserId"/> is a real Dataverse <c>systemuserid</c>, the PATCH runs AS that
+    /// user (<c>MSCRMCallerID</c> impersonation — effective privileges = intersection of app user + impersonated
+    /// user, honest <c>modifiedby</c>); null/empty = app-only (existing callers byte-unchanged). This is the
+    /// write-plane counterpart of the impersonated read (<see cref="RetrieveMultipleImpersonatedAsync"/>), added
+    /// for the Job B apply path (task 031).
     /// </summary>
-    private async Task<HttpResponseMessage> SendPatchAsJsonAsync<T>(string url, T payload, CancellationToken ct = default)
+    private async Task<HttpResponseMessage> SendPatchAsJsonAsync<T>(string url, T payload, CancellationToken ct = default, Guid? impersonateSystemUserId = null)
     {
-        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Patch, url, ct);
+        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Patch, url, ct, impersonateSystemUserId);
         request.Content = JsonContent.Create(payload);
         return await _httpClient.SendAsync(request, ct);
     }
@@ -2064,7 +2069,8 @@ public class DataverseWebApiService : IDataverseService
         string entityLogicalName,
         Guid recordId,
         Dictionary<string, object?> fields,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Guid? impersonateSystemUserId = null)
     {
 
 
@@ -2076,9 +2082,12 @@ public class DataverseWebApiService : IDataverseService
 
         var entitySetName = await GetEntitySetNameAsync(entityLogicalName, ct);
 
-        _logger.LogInformation("Updating record fields: {Entity}({Id}), {FieldCount} fields", entityLogicalName, recordId, fields.Count);
+        _logger.LogInformation(
+            "Updating record fields: {Entity}({Id}), {FieldCount} fields{Impersonation}",
+            entityLogicalName, recordId, fields.Count,
+            impersonateSystemUserId is { } imp && imp != Guid.Empty ? $" (impersonating {imp})" : string.Empty);
 
-        var response = await SendPatchAsJsonAsync($"{entitySetName}({recordId})", fields, ct);
+        var response = await SendPatchAsJsonAsync($"{entitySetName}({recordId})", fields, ct, impersonateSystemUserId);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -2649,6 +2658,19 @@ public class DataverseWebApiService : IDataverseService
     {
         throw new NotImplementedException(
             "QueryRecordTypeRefAsync is implemented in DataverseServiceClientImpl.");
+    }
+
+    public Task<IReadOnlyList<Entity>> QueryAllRecordTypeRefsAsync(CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "QueryAllRecordTypeRefsAsync is implemented in DataverseServiceClientImpl.");
+    }
+
+    public Task<IReadOnlyList<Entity>> QueryRecordsByNumberFieldAsync(
+        string entityLogicalName, string numberFieldLogicalName, string value, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "QueryRecordsByNumberFieldAsync is implemented in DataverseServiceClientImpl.");
     }
 
     public Task<Guid?> QuerySystemUserByAzureAdOidAsync(string azureAdObjectId, CancellationToken ct = default)

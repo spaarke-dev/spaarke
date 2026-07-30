@@ -40,6 +40,12 @@ export interface EmailCardItem {
   /** Read/unread signal driving the bold + dot unread visual. */
   isUnread: boolean;
   /**
+   * Association review state for the left-of-sender status dot:
+   * 🔴 requires review · 🟡 needs confirmation · 🟢 confirmed. `undefined` when
+   * the row carries no association data (no dot rendered).
+   */
+  reviewTone?: 'red' | 'yellow' | 'green';
+  /**
    * `sprk_communicationtype` option-set value. `<EmailCardList />` renders a
    * card ONLY when this equals `EMAIL_COMMUNICATION_TYPE` — any other value is
    * skipped (FR-03 invariant), regardless of whether the host pre-filtered.

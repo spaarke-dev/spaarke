@@ -27,16 +27,9 @@
  * Web resource: sprk_emailpage (see package.json build script rename step).
  */
 
-import * as React from "react";
-import { createRoot } from "react-dom/client";
-import {
-  FluentProvider,
-  Spinner,
-  Text,
-  Button,
-  makeStyles,
-  tokens,
-} from "@fluentui/react-components";
+import * as React from 'react';
+import { createRoot } from 'react-dom/client';
+import { FluentProvider, Spinner, Text, Button, makeStyles, tokens } from '@fluentui/react-components';
 import {
   resolveCodePageTheme,
   setupCodePageThemeListener,
@@ -44,35 +37,37 @@ import {
   AppInsightsService,
   createXrmDataService,
   createXrmNavigationService,
+  createXrmEmailComposeHandlers,
+  searchUsersAndContacts,
   XrmDataverseClient,
   getXrm,
-} from "@spaarke/ui-components";
-import { resolveRuntimeConfig, getAuthProvider } from "@spaarke/auth";
-import { EmailWorkspace, type EmailWorkspaceWebApi } from "@spaarke/communication-components";
-import { setRuntimeConfig, getBffBaseUrl } from "./config/runtimeConfig";
-import { ensureAuthInitialized, authenticatedFetch } from "./services/authInit";
+} from '@spaarke/ui-components';
+import { resolveRuntimeConfig, getAuthProvider } from '@spaarke/auth';
+import { EmailWorkspace, type EmailWorkspaceWebApi } from '@spaarke/communication-components';
+import { setRuntimeConfig, getBffBaseUrl } from './config/runtimeConfig';
+import { ensureAuthInitialized, authenticatedFetch } from './services/authInit';
 
 // ai-spaarke-ai-workspace-UI-r1 brittleness Phase D (2026-06-09) precedent:
 // Initialize Application Insights so AppErrorBoundary.componentDidCatch can
 // route errors to the "Failures" pane via reportClientError(). Key is sourced
 // from a build-time Vite env var; absent in dev → no-op (boundary still logs
 // to console). Override: VITE_APP_INSIGHTS_KEY=<key> npm run build
-const _appInsightsKey: string = import.meta.env.VITE_APP_INSIGHTS_KEY ?? "";
+const _appInsightsKey: string = import.meta.env.VITE_APP_INSIGHTS_KEY ?? '';
 if (_appInsightsKey) {
   AppInsightsService.initialize(_appInsightsKey);
 }
 
 const useStyles = makeStyles({
   centered: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
-    width: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    width: '100%',
     gap: tokens.spacingVerticalM,
     padding: tokens.spacingHorizontalXXL,
-    boxSizing: "border-box",
+    boxSizing: 'border-box',
   },
 });
 
@@ -104,9 +99,7 @@ function buildXrmWebApi(): EmailWorkspaceWebApi {
   function requireXrmWebApi() {
     const xrm = getXrm();
     if (!xrm?.WebApi) {
-      throw new Error(
-        "Xrm.WebApi is not available. The Email code page requires a Dataverse-hosted context."
-      );
+      throw new Error('Xrm.WebApi is not available. The Email code page requires a Dataverse-hosted context.');
     }
     return xrm.WebApi;
   }
@@ -130,7 +123,7 @@ const EmailPageLoading: React.FC = () => {
     </div>
   );
 };
-EmailPageLoading.displayName = "EmailPageLoading";
+EmailPageLoading.displayName = 'EmailPageLoading';
 
 /**
  * Fail-closed error state (NFR-07). Rendered instead of `EmailWorkspace` when
@@ -144,16 +137,14 @@ const EmailPageAuthError: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
       <Text weight="semibold" size={500}>
         Unable to load Email
       </Text>
-      <Text>
-        Sign-in could not be verified for this session. Retry, or reopen this page from Spaarke navigation.
-      </Text>
+      <Text>Sign-in could not be verified for this session. Retry, or reopen this page from Spaarke navigation.</Text>
       <Button appearance="primary" onClick={onRetry}>
         Retry
       </Button>
     </div>
   );
 };
-EmailPageAuthError.displayName = "EmailPageAuthError";
+EmailPageAuthError.displayName = 'EmailPageAuthError';
 
 function Root() {
   const [theme, setTheme] = React.useState(resolveCodePageTheme);
@@ -172,8 +163,8 @@ function Root() {
       .then(() => {
         if (!cancelled) setBffBaseUrl(getBffBaseUrl());
       })
-      .catch((err) => {
-        console.warn("[EmailPage] Auth bootstrap failed — Email workspace unavailable:", err);
+      .catch(err => {
+        console.warn('[EmailPage] Auth bootstrap failed — Email workspace unavailable:', err);
         if (!cancelled) setBootstrapError(err);
       });
     return () => {
@@ -190,7 +181,30 @@ function Root() {
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
   const webApi = React.useMemo(() => buildXrmWebApi(), []);
 
-  const handleRetry = React.useCallback(() => setAttempt((n) => n + 1), []);
+  // Composer parity wiring (compose-wiring fixes #1/#2/#3/#5): recipient
+  // typeahead + the Xrm-backed advanced-lookup handlers (people picker, record
+  // lookup, add-relationship) + the Dataverse URL used for attachment
+  // deep-links. Same handlers the CommunicationActions PCF builds — lifted into
+  // the shared `createXrmEmailComposeHandlers` factory so both mounts stay in
+  // parity (NFR-06).
+  const handleSearchRecipients = React.useCallback(
+    (query: string) => searchUsersAndContacts(dataService, query),
+    [dataService]
+  );
+  // Pass auth + BFF URL so the factory also builds `onUploadLocalAttachment` (item 9b):
+  // new-file attachments upload to the deployment SPE container (resolved from the
+  // user's BU) and become governed `sprk_document`s. Re-memoized when bffBaseUrl resolves.
+  const composeHandlers = React.useMemo(
+    () =>
+      createXrmEmailComposeHandlers({
+        authenticatedFetch,
+        bffBaseUrl: bffBaseUrl ?? undefined,
+      }),
+    [authenticatedFetch, bffBaseUrl]
+  );
+  const dataverseUrl = React.useMemo(() => getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '', []);
+
+  const handleRetry = React.useCallback(() => setAttempt(n => n + 1), []);
 
   let body: React.ReactNode;
   if (bootstrapError) {
@@ -206,18 +220,25 @@ function Root() {
         webApi={webApi}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={bffBaseUrl}
+        onSearchRecipients={handleSearchRecipients}
+        onLookupRecipients={composeHandlers.onLookupRecipients}
+        recordLookupCatalog={composeHandlers.recordLookupCatalog}
+        onLookupRecord={composeHandlers.onLookupRecord}
+        onAddRelationship={composeHandlers.onAddRelationship}
+        onUploadLocalAttachment={composeHandlers.onUploadLocalAttachment}
+        dataverseUrl={dataverseUrl}
       />
     );
   }
 
   return (
-    <FluentProvider theme={theme} style={{ height: "100%" }}>
+    <FluentProvider theme={theme} style={{ height: '100%' }}>
       <AppErrorBoundary surfaceName="Email">{body}</AppErrorBoundary>
     </FluentProvider>
   );
 }
 
-const rootElement = document.getElementById("root");
+const rootElement = document.getElementById('root');
 if (rootElement) {
   createRoot(rootElement).render(
     <React.StrictMode>
@@ -226,5 +247,5 @@ if (rootElement) {
   );
 } else {
   // eslint-disable-next-line no-console
-  console.error("[EmailPage] Root element not found");
+  console.error('[EmailPage] Root element not found');
 }

@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>Implement shared/group mailbox capture coverage — extend `GraphSubscriptionManager` per the 050 finding (GATED on 050)</title>
+    <phase>P5 — FR-15 capture (parallel, spike-first)</phase>
+    <gate>after:050</gate>
+    <status>not-started</status>
+    <tags>bff-api, communication</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Extends the capture path (`GraphSubscriptionManager`) to subscribe to shared + M365-group mailboxes under app-only auth — a security-relevant change to what the app can read, scoped by Exchange `ApplicationAccessPolicy`. Modifies shared `Services/Communication/`; capture is the ingest source for the whole intelligence spine, so a regression breaks everything downstream. BFF-touching: publish-size + CVE + Placement Justification; code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The design decisions were made in the 050 spike; this task implements the sized, specified delta against the existing manager — well-specified execution, not novel design (any residual design decision was escalated in 050).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies the shared `Services/Communication/GraphSubscriptionManager.cs` capture path; never concurrent with other shared `Services/Communication/` writers. `/conflict-check` before the PR. Gated on 050.</parallel-reason>
+    <dependencies>050</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement shared + M365-group mailbox capture coverage (FR-15) by extending `Services/Communication/GraphSubscriptionManager.cs` **exactly per the 050 spike finding** — the subscription model, the app-only permission model, the Exchange `ApplicationAccessPolicy` scoping, and the concrete `GraphSubscriptionManager` delta the finding specified. Do NOT re-derive the model here; follow the finding. If the finding's escalation trigger fired (a design decision beyond sizing), that decision MUST be resolved before this task proceeds.
+
+    An email to a shared/group mailbox MUST be captured, then flow through the SAME downstream path as a user-mailbox email — associated (020), triaged (022), and RI-scored — with no forked capture pipeline. Reuse the existing subscription create/renew + notification-handling machinery; add the shared/group enumeration + subscription + the `ApplicationAccessPolicy`-scoped app-only read per the finding.
+
+    Auth is app-only background (ADR-028), least-privilege via `ApplicationAccessPolicy` (scoped to the intended mailboxes, not tenant-wide). Characterization-guard the existing user-mailbox capture: it MUST stay green before + after. Report the operator permission-grant prerequisites the finding identified.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the communication capture layer, authoritative on `GraphSubscriptionManager`, Graph change-notification subscriptions, Exchange `ApplicationAccessPolicy` least-privilege scoping, and ADR-028 app-only background auth. Implements the 050-sized delta; does not re-decide the model.
+  </role>
+
+  <goal>
+    `GraphSubscriptionManager` subscribes to shared + M365-group mailboxes per the 050 finding; an email to a shared/group mailbox is captured and flows through the same downstream association + triage + RI path as a user-mailbox email (no forked pipeline). App-only reads are scoped least-privilege via `ApplicationAccessPolicy`. Existing user-mailbox capture is characterization-pinned green. Operator permission-grant prerequisites are documented. Build clean; unit + seam tests (incl. the capture characterization guard) pass; publish-size + CVE + Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      050 sized the work: the subscription model (shared vs group vs user), the app-only permission + `ApplicationAccessPolicy` posture, and the concrete `GraphSubscriptionManager` delta. This task implements that delta. FR-15 acceptance: an email to a shared/group mailbox is captured, associated, and triaged like a user mailbox — so the capture extension must feed the SAME downstream path (the whole point of not forking).
+
+      r1 owns FR-15 (r4 capture is archived). This track is parallel to the intelligence spine but its output (captured shared/group email) is what Success Criterion 8 exercises end-to-end. Characterization-guard the existing user-mailbox capture — a regression here breaks all downstream intelligence.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/GraphSubscriptionManager.cs (EXTEND — add shared/group enumeration + subscription + ApplicationAccessPolicy-scoped app-only read per the 050 finding)</file>
+      <file>projects/email-communication-intelligence-r1/notes/050-fr15-mailbox-capture-spike.md (THE SPECIFICATION — implement exactly this; do not re-derive the model)</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md (app-only background auth; least-privilege ApplicationAccessPolicy scoping)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs (REFERENCE — the downstream path captured shared/group email must flow through unchanged)</file>
+    </relevant-files>
+    <dependencies>050 (the spike finding that specifies this implementation; GATED — do not start until 050's finding exists + any escalated decision is resolved).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-15">Scope: an email to a shared/group mailbox is captured, associated, and triaged like a user mailbox; capture feeds the SAME downstream path (no forked pipeline).</constraint>
+    <constraint source="project (gated on 050)">Scope: implement EXACTLY the 050 finding's specified delta + permission model; do NOT re-derive the subscription/permission model; if 050's escalation fired, the decision MUST be resolved first.</constraint>
+    <constraint source="ADR-028">Scope: app-only background auth; least-privilege via Exchange `ApplicationAccessPolicy` scoped to the intended mailboxes (NOT tenant-wide); do NOT `new` a credential — inject the central mechanism.</constraint>
+    <constraint source="NFR-04 / ADR-045">Scope: capture is the ingest path — extend it without breaking user-mailbox capture; characterization-guard the existing behavior green before + after; a shared/group capture failure MUST NOT break user-mailbox capture.</constraint>
+    <constraint source="project §10">Scope: BFF Hygiene — load `.claude/constraints/bff-extensions.md`; state Placement Justification (extends `GraphSubscriptionManager`, no new service, no forked pipeline); publish-size delta vs ~49.63 MB (expected ≈0); no new HIGH CVE; update tests in `tests/unit/Sprk.Bff.Api.Tests/` + seam tests (ADR-038).</constraint>
+    <constraint source="root §11">Scope: extend the one capture manager — do NOT add a second subscription mechanism / capture pipeline.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>projects/email-communication-intelligence-r1/notes/050-fr15-mailbox-capture-spike.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/GraphSubscriptionManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </files>
+    <patterns>
+      <pattern name="Implement the 050 delta" location="src/server/api/Sprk.Bff.Api/Services/Communication/GraphSubscriptionManager.cs">
+        Add shared/group mailbox enumeration + subscription create/renew + ApplicationAccessPolicy-scoped app-only read exactly as the 050 finding specifies; reuse the existing notification-handling machinery.
+      </pattern>
+      <pattern name="Same downstream path" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs">
+        Captured shared/group email flows through the SAME association + triage + RI path as user-mailbox email — no forked enrichment.
+      </pattern>
+      <pattern name="Characterization guard" location="src/server/api/Sprk.Bff.Api/Services/Communication/GraphSubscriptionManager.cs">
+        Pin the existing user-mailbox capture green before extending; assert it stays green after (NFR-04).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the 050 finding (`notes/050-fr15-mailbox-capture-spike.md`) — the subscription model, permission model, `ApplicationAccessPolicy` posture, the concrete `GraphSubscriptionManager` delta, and any escalated decision (must be resolved before proceeding). Read `.claude/constraints/bff-extensions.md` + ADR-028.</step>
+    <step order="2">Characterization guard FIRST: pin the existing user-mailbox capture behavior green as the baseline (NFR-04).</step>
+    <step order="3">Read `GraphSubscriptionManager.cs` to identify the existing subscription create/renew + notification-handling seams to reuse.</step>
+    <step order="4">Implement the delta per the finding: shared/group mailbox enumeration + subscription create/renew + `ApplicationAccessPolicy`-scoped app-only read; reuse the existing notification handling — no forked pipeline.</step>
+    <step order="5">Verify captured shared/group email flows through the SAME downstream path (association 020 + triage 022 + RI) as user-mailbox email.</step>
+    <step order="6">Write unit + seam tests: (a) a shared-mailbox email is captured + flows downstream (associated + triaged); (b) an M365-group-mailbox email is captured + flows downstream; (c) app-only reads are scoped via `ApplicationAccessPolicy` (least-privilege, not tenant-wide); (d) NEGATIVE — a shared/group capture failure does not break user-mailbox capture (characterization stays green). ADR-038 boundary mocks only.</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` + targeted `dotnet test`; publish-size (report absolute + delta vs ~49.63 MB) + CVE scan.</step>
+    <step order="9.5">FULL-rigor gates: `code-review` (focus least-privilege ApplicationAccessPolicy scoping, no forked pipeline, characterization green, app-only auth); `adr-check` against ADR-028 / ADR-045 + spec FR-15 / NFR-04. Address Critical findings; cite Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (shared `Services/Communication/` capture path).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (051 ✅) + `current-task.md`; document the operator permission-grant prerequisites (from the 050 finding) as an owner-handoff.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the 050 finding's escalation trigger fired and the design decision is NOT yet resolved, STOP — this task is gated and MUST NOT proceed on an unresolved model. Additionally, if implementing the delta reveals the sized model does not hold in practice (the shared/group subscription/permission behavior diverges from the finding), STOP and surface per root §6 / §6.5 rather than improvising a capture path.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="read">Read the 050 finding, `GraphSubscriptionManager.cs`, the enrichment path, ADR-028</tool>
+    <tool name="edit">Extend `GraphSubscriptionManager` with the shared/group delta per the finding</tool>
+    <tool name="bash">Build, unit/seam tests (incl. characterization), publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/GraphSubscriptionManager.cs (UPDATED — shared + M365-group mailbox subscription coverage per the 050 finding; ApplicationAccessPolicy-scoped app-only read; same downstream path)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ + tests/integration/seam/ — shared-mailbox-captured + group-mailbox-captured + least-privilege-scoped + user-capture-characterization-green</output>
+    <output type="docs">PR description with §11 Placement Justification + publish-size delta + CVE result + the operator permission-grant prerequisites (owner-handoff)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An email to a shared mailbox is captured and flows through the same downstream path (associated 020 + triaged 022 + RI-scored) as a user-mailbox email.</criterion>
+    <criterion testable="true">An email to an M365-group mailbox is captured and flows through the same downstream path.</criterion>
+    <criterion testable="true">App-only reads are scoped least-privilege via Exchange `ApplicationAccessPolicy` (the intended mailboxes, not tenant-wide); auth is app-only background (ADR-028).</criterion>
+    <criterion testable="true">The implementation extends the one `GraphSubscriptionManager` — no second subscription mechanism / forked capture pipeline (grep-verifiable).</criterion>
+    <criterion testable="true">NEGATIVE: existing user-mailbox capture is characterization-pinned and stays green before + after; a shared/group capture failure does not break it (NFR-04).</criterion>
+    <criterion testable="true">The operator permission-grant prerequisites (from the 050 finding) are documented as an owner-handoff; `dotnet build` clean; tests pass; publish-size delta ≈0 vs ~49.63 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    GATED on 050 — implement the finding's sized delta; do not re-derive the model. If 050's escalation fired, resolve the decision before starting. Extend the one capture manager (no forked pipeline). Characterization-guard user-mailbox capture. The operator must perform the `ApplicationAccessPolicy` + permission grants the finding identified (owner-handoff). Run `/conflict-check` before the PR (shared `Services/Communication/`).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files (esp. the 050 finding). Apply FULL rigor — Step 9.5 gates REQUIRED. Per §10 + §11: publish-size delta (baseline ~49.63 MB) + CVE + Placement Justification in the PR. `/conflict-check` before the PR. Model tier `sonnet` @ effort `high`.</protocol>
+  </execution>
+</task>
