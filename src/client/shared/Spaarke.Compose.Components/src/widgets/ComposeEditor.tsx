@@ -639,6 +639,11 @@ export interface ComposeEditorProps {
    *  Word-web edit. The host honors the dirty-guard before discarding unsaved edits. */
   onReloadFromSource?: () => void;
 
+  /** "Open Document" handler. Renders the toolbar button when set (the host wires it only for a doc with a
+   *  preview source — a promoted sprk_document). Opens the source Dataverse Document in the shared preview
+   *  modal (RichFilePreviewDialog + BFF preview-url). Pure forwarder — the host owns the modal. */
+  onOpenDocument?: () => void;
+
   /** UAT #9 (task 054): true while a manual profile re-run is in flight — the toolbar shows a spinner on the
    *  Refresh-Profile button so the click gives visible feedback (the re-run is otherwise a silent 202). */
   isRefreshingProfile?: boolean;
@@ -1628,6 +1633,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       isSaving,
       onRefreshProfile,
       onReloadFromSource,
+      onOpenDocument,
       isRefreshingProfile,
       commentAuthor = 'You',
       reviewSummary,
@@ -2661,6 +2667,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           isSaving={isSaving}
           onRefreshProfile={onRefreshProfile}
           onReloadFromSource={onReloadFromSource}
+          onOpenDocument={onOpenDocument}
           isRefreshingProfile={isRefreshingProfile}
           trackChangesEnabled={trackChangesEnabled}
           onToggleTrackChanges={toggleTrackChanges}

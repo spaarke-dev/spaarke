@@ -74,9 +74,22 @@ public static class ComposeOperationSchema
 /// </summary>
 /// <param name="RunIndex">0-based index of the run within its paragraph.</param>
 /// <param name="Offset">Run-local character offset within that run (0-based).</param>
+/// <param name="ParaOffset">
+/// ROBUST ANCHOR (task 055 — ADDITIVE, backward-compatible). The PARAGRAPH-RELATIVE
+/// character offset (0-based) the client measured over its editor-visible run flatten
+/// (<c>stepOperationInterceptor.runLocalPoint</c>'s input <c>k</c>). Optional/nullable
+/// so a pre-fix op log (or any producer that omits it) round-trips unchanged. When
+/// present, the engine resolves the real OOXML <c>(run, run-local-offset)</c> by walking
+/// THIS paragraph's editor-run flatten to <see cref="ParaOffset"/> — the anchor stays
+/// stable across the TipTap↔OOXML run-merge boundary (TipTap merges same-format runs,
+/// so the client <see cref="RunIndex"/> may not match OOXML's fine-grained runs). When
+/// absent (null) the engine falls back to <see cref="RunIndex"/>/<see cref="Offset"/>
+/// EXACTLY as before. Still purely a numeric offset — never a text/content match (I-7).
+/// </param>
 public sealed record ComposeRunPoint(
     [property: JsonPropertyName("runIndex")] int RunIndex,
-    [property: JsonPropertyName("offset")] int Offset);
+    [property: JsonPropertyName("offset")] int Offset,
+    [property: JsonPropertyName("paraOffset")] int? ParaOffset = null);
 
 /// <summary>
 /// A RUN-LOCAL range anchor within a SINGLE paragraph, from <paramref name="Start"/>

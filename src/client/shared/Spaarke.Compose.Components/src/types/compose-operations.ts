@@ -82,6 +82,17 @@ export interface ComposeRunPoint {
   runIndex: number;
   /** Run-local character offset within that run (0-based). */
   offset: number;
+  /**
+   * ROBUST ANCHOR (task 055 — ADDITIVE, backward-compatible). The PARAGRAPH-RELATIVE character offset
+   * (0-based) measured over the editor-visible run flatten (the `k` input to
+   * `stepOperationInterceptor.runLocalPoint`). Mirrors the server `ComposeRunPoint.ParaOffset`. Every op the
+   * interceptor emits now carries BOTH the legacy `(runIndex, offset)` AND this `paraOffset`; the server, when
+   * `paraOffset` is present, resolves the real OOXML `(run, run-local-offset)` by walking the paragraph's runs
+   * to `paraOffset` — stable across the TipTap↔OOXML run-merge boundary (TipTap merges same-format runs, so
+   * `runIndex` can disagree with OOXML's fine-grained runs). Omitted ⇒ server falls back to `(runIndex, offset)`
+   * exactly as before. Still a pure numeric offset — never a text/content match (I-7).
+   */
+  paraOffset?: number;
 }
 
 /**

@@ -106,6 +106,7 @@ import {
   ClipboardTaskListLtr24Regular,
   DocumentSync24Regular,
   ArrowClockwise24Regular,
+  DocumentText24Regular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -233,6 +234,10 @@ export interface ComposeFormatToolbarProps {
    *  for a doc with an SPE source). Pulls the latest SPE bytes on demand — e.g. after an external Word-web
    *  edit the change-check missed. Distinct from Refresh Profile (which re-profiles, not reloads bytes). */
   onReloadFromSource?: () => void;
+  /** "Open Document" handler. Renders the button when set (the host wires it only for a doc with a preview
+   *  source — a promoted sprk_document). Opens the source Dataverse Document in the shared preview modal.
+   *  Undefined → the button hides (mirrors the onRefreshProfile gating pattern). */
+  onOpenDocument?: () => void;
   /** UAT #9 (task 054): true while a manual profile re-run is in flight — shows a spinner on the
    *  Refresh-Profile button so the (otherwise silent 202) click gives visible feedback. */
   isRefreshingProfile?: boolean;
@@ -367,6 +372,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     isSaving,
     onRefreshProfile,
     onReloadFromSource,
+    onOpenDocument,
     isRefreshingProfile,
     trackChangesEnabled,
     onToggleTrackChanges,
@@ -846,6 +852,22 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
             disabled={controlDisabled}
             onClick={onToggleTrackChanges}
             data-testid="compose-format-track-changes"
+          />
+        </Tooltip>
+      ) : null}
+
+      {/* ---- Open Document — right-aligned; only for a doc with a preview source (a promoted
+              sprk_document). Opens the source Dataverse Document in the shared preview modal
+              (RichFilePreviewDialog + BFF preview-url), wired by the host. Hidden when no handler. ---- */}
+      {onOpenDocument ? (
+        <Tooltip content="Open document" relationship="label" withArrow>
+          <ToolbarButton
+            appearance="subtle"
+            icon={<DocumentText24Regular />}
+            aria-label="Open document"
+            disabled={controlDisabled}
+            onClick={onOpenDocument}
+            data-testid="compose-format-open-document"
           />
         </Tooltip>
       ) : null}

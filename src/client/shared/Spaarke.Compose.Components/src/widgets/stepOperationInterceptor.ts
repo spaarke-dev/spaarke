@@ -361,19 +361,24 @@ export function runsOfBlock(block: PMNode): RunSpan[] {
  * Boundary convention (deterministic + documented): an offset that falls exactly on a
  * run boundary resolves to the TRAILING edge of the EARLIER run (`offset === run length`)
  * — the first run whose cumulative end is `>= k`. An empty paragraph yields `(0, 0)`.
+ *
+ * ROBUST ANCHOR (task 055): the produced point ALSO carries `paraOffset: k` — the raw
+ * paragraph-relative offset the walk consumed. This is the additive, run-merge-stable
+ * anchor the server prefers (it re-resolves the real OOXML run from `k`); the legacy
+ * `(runIndex, offset)` stays as the backward-compatible fallback.
  */
 export function runLocalPoint(block: PMNode, k: number): ComposeRunPoint {
   const runs = runsOfBlock(block);
-  if (runs.length === 0) return { runIndex: 0, offset: 0 };
+  if (runs.length === 0) return { runIndex: 0, offset: 0, paraOffset: k };
   let acc = 0;
   for (let i = 0; i < runs.length; i++) {
     const len = runs[i].length;
-    if (k <= acc + len) return { runIndex: i, offset: k - acc };
+    if (k <= acc + len) return { runIndex: i, offset: k - acc, paraOffset: k };
     acc += len;
   }
   // k beyond the paragraph's content (defensive) — clamp to the trailing edge of the last run.
   const last = runs.length - 1;
-  return { runIndex: last, offset: runs[last].length };
+  return { runIndex: last, offset: runs[last].length, paraOffset: k };
 }
 
 /**
@@ -391,7 +396,8 @@ export function resolveRunAnchor(doc: PMNode, pos: number): ComposeAnchor | null
   // parentOffset is the char offset within the textblock's inline content — exactly the
   // paragraph-local `k` the run walk expects (NOT an absolute position).
   const point = runLocalPoint(parent, $pos.parentOffset);
-  return { paraId, runIndex: point.runIndex, offset: point.offset };
+  // task 055: thread the robust `paraOffset` (= k) onto the anchor alongside the legacy (runIndex, offset).
+  return { paraId, runIndex: point.runIndex, offset: point.offset, paraOffset: point.paraOffset };
 }
 
 // ---------------------------------------------------------------------------
@@ -1076,9 +1082,14 @@ export function classifyStep(
   return { kind: 'defer-structural', step, reason: `unhandled-step:${step.constructor?.name ?? 'unknown'}` };
 }
 
-/** Narrow a {@link ComposeAnchor} to its {@link ComposeRunPoint} (drops the paraId, which lives on the op base). */
+/** Narrow a {@link ComposeAnchor} to its {@link ComposeRunPoint} (drops the paraId, which lives on the op base).
+ * task 055: preserves the robust `paraOffset` so every emitted op's `at`/`range` point carries it. */
 function pointOf(anchor: ComposeAnchor): ComposeRunPoint {
-  return { runIndex: anchor.runIndex, offset: anchor.offset };
+  return {
+    runIndex: anchor.runIndex,
+    offset: anchor.offset,
+    ...(anchor.paraOffset !== undefined ? { paraOffset: anchor.paraOffset } : {}),
+  };
 }
 
 /** Shared classifier for Add/Remove mark steps → setMark / clearMark. */

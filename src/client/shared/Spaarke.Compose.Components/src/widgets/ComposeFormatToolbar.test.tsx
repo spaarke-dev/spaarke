@@ -561,6 +561,43 @@ describe('ComposeFormatToolbar — Reload from source button (UAT #5 task 053)',
 });
 
 // ---------------------------------------------------------------------------
+// 6c. Open Document button — opens the source Dataverse Document in the shared
+//     preview modal (RichFilePreviewDialog + BFF preview-url), wired by the host.
+//     Gated by `onOpenDocument`: rendered only when the host wires a handler
+//     (a doc with a preview source is loaded); hidden otherwise. Mirrors the
+//     onRefreshProfile / onReloadFromSource gating pattern.
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Open Document button', () => {
+  it('is not rendered when no onOpenDocument handler is wired (no previewable document)', () => {
+    renderFormatToolbar();
+    expect(screen.queryByTestId('compose-format-open-document')).not.toBeInTheDocument();
+  });
+
+  it('renders and fires onOpenDocument when clicked (doc with a preview source)', async () => {
+    const user = userEvent.setup();
+    const onOpenDocument = jest.fn();
+    renderFormatToolbar({}, { props: { onOpenDocument } });
+
+    const btn = screen.getByTestId('compose-format-open-document');
+    expect(btn).toBeInTheDocument();
+    expect(btn).toHaveAttribute('aria-label', 'Open document');
+    await user.click(btn);
+    expect(onOpenDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it('is disabled when the toolbar is read-only (disabled prop)', () => {
+    renderFormatToolbar({}, { props: { onOpenDocument: jest.fn(), disabled: true } });
+    expect(screen.getByTestId('compose-format-open-document')).toBeDisabled();
+  });
+
+  it('ADR-021: renders under a dark theme', () => {
+    renderFormatToolbar({}, { theme: webDarkTheme, props: { onOpenDocument: jest.fn() } });
+    expect(screen.getByTestId('compose-format-open-document')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 6b. Track Changes toggle (item 4, UAT round-4)
 // ---------------------------------------------------------------------------
 

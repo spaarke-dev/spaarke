@@ -99,7 +99,12 @@ import { authenticatedFetch, ApiError } from '@spaarke/auth';
 // `DataverseLookupField` and the 1c ribbon launcher (`DocumentComposeLaunch.ts`)
 // already use. No new lookup UI, no new BFF endpoint (ADR-039: this is a data query,
 // not a dispatch).
-import { createXrmNavigationService, createXrmDataService, type LookupResult } from '@spaarke/ui-components';
+import {
+  createXrmNavigationService,
+  createXrmDataService,
+  RichFilePreviewDialog,
+  type LookupResult,
+} from '@spaarke/ui-components';
 
 // FIX #5 (UAT): the separate `ComposeToolbar` command bar (Open-in-Word + Save +
 // Push) was folded into the consolidated single-row `ComposeFormatToolbar` that
@@ -604,6 +609,34 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const notifyComposeSaveCompleted = useComposeSaveCompleted();
   const notifyComposeSaveCompletedRef = React.useRef(notifyComposeSaveCompleted);
   notifyComposeSaveCompletedRef.current = notifyComposeSaveCompleted;
+
+  // -------------------------------------------------------------------------
+  // "Open Document" — preview the source Dataverse Document in a modal.
+  // Reuses the SHARED `RichFilePreviewDialog` (@spaarke/ui-components) + the BFF
+  // `GET /api/documents/{id}/preview-url` endpoint — the SAME mechanism the
+  // ConversationPane "Open preview" chat affordance (FIX #7a) uses. No new
+  // component and no new endpoint (§11 reuse / §10 BFF hygiene). The button on the
+  // format toolbar opens this modal, keyed off the current doc's sprk_document id.
+  // -------------------------------------------------------------------------
+  const previewNavigationService = React.useMemo(() => createXrmNavigationService(), []);
+  const [documentPreviewOpen, setDocumentPreviewOpen] = React.useState(false);
+  // Fetch the ephemeral iframe preview URL for the current document (RichFilePreview's
+  // `fetchPreviewUrl` contract). ADR-028: goes through `@spaarke/auth` authenticatedFetch —
+  // no raw fetch/bearer. Non-fatal on failure (the modal shows its own fallback).
+  const fetchDocumentPreviewUrl = React.useCallback(async (): Promise<string | null> => {
+    const docId = state.documentRef?.sprkDocumentId;
+    if (!docId || !bffBaseUrl) return null;
+    try {
+      const response = await authenticatedFetch(
+        `${bffBaseUrl}/api/documents/${encodeURIComponent(docId)}/preview-url`,
+        { method: 'GET' }
+      );
+      const data = (await response.json()) as { previewUrl?: string };
+      return data.previewUrl ?? null;
+    } catch {
+      return null;
+    }
+  }, [state.documentRef?.sprkDocumentId, bffBaseUrl]);
 
   // -------------------------------------------------------------------------
   // FR-29 / FR-33 (R2, tasks 060/102) — anchored annotations + defined-terms +
@@ -2481,6 +2514,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // Toolbar documentId (Open-in-Word handoff) — accepts SPE id or sprk_documentid.
   const toolbarDocumentId = state.documentRef?.sprkDocumentId ?? state.documentRef?.speDriveItemId ?? '';
 
+  // "Open Document" preview gating — the BFF preview-url endpoint resolves a document
+  // by its sprk_document id, so the button appears only for a PROMOTED doc (one with a
+  // sprk_document record) and a configured BFF base URL. Undefined handler → button hidden
+  // (mirrors the onRefreshProfile gating pattern).
+  const previewDocumentId = state.documentRef?.sprkDocumentId ?? '';
+  const canPreviewDocument = previewDocumentId.length > 0 && bffBaseUrl.length > 0;
+
   // FR-05 (task 100, gap 1.5): a transient (Browse/Upload) draft has no SPE pointer yet — the Save
   // button must be enabled for it (create-on-save) even though its editor dirty flag is false for
   // an unedited mount (FR-06a keeps the original bytes). A draft exists whenever the workspace is
@@ -2729,6 +2769,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               // sprk_document to re-profile). Undefined for a transient/unpromoted mount → the button hides.
               onRefreshProfile={state.documentRef?.sprkDocumentId ? () => void triggerRefreshProfile() : undefined}
               isRefreshingProfile={isRefreshingProfile}
+              // "Open Document" — opens the source Dataverse Document in the shared preview modal
+              // (RichFilePreviewDialog + BFF preview-url). Wired only for a doc with a preview
+              // source (a promoted sprk_document); undefined → the toolbar button hides.
+              onOpenDocument={canPreviewDocument ? () => setDocumentPreviewOpen(true) : undefined}
               // UAT #5 (task 053): always-available "Reload from source" — pulls the latest SPE bytes (e.g.
               // after an external Word-web edit that the change-check missed, or on demand). Gated on having an
               // SPE source (speDriveItemId); undefined for a born-in-editor doc with no source to reload from.
@@ -2767,6 +2811,28 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             />
           </div>
         </>
+      ) : null}
+
+      {/* "Open Document" preview modal — opened from the format toolbar's "Open Document"
+          button. Reuses the shared RichFilePreviewDialog + the BFF
+          GET /api/documents/{id}/preview-url endpoint (the SAME mechanism the ConversationPane
+          "Open preview" chat affordance uses — no new component/endpoint, §11 reuse). Keyed off
+          the current doc's sprk_document id; theme-aware via the dialog's semantic tokens (ADR-021).
+          Rendered only once the doc is promoted (canPreviewDocument). */}
+      {canPreviewDocument ? (
+        <RichFilePreviewDialog
+          open={documentPreviewOpen}
+          documentId={previewDocumentId}
+          documentName={state.documentRef?.fileName ?? 'Document'}
+          onClose={() => setDocumentPreviewOpen(false)}
+          fetchPreviewUrl={fetchDocumentPreviewUrl}
+          onOpenFile={() => undefined}
+          onEmailDocument={() => undefined}
+          onCopyLink={() => undefined}
+          onOpenRecord={() => {
+            void previewNavigationService.openRecord('sprk_document', previewDocumentId);
+          }}
+        />
       ) : null}
 
       {/*

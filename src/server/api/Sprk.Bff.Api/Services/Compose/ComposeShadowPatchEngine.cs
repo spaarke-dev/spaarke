@@ -2,6 +2,7 @@ using System.Globalization;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Services.Compose.Operations;
 
 namespace Sprk.Bff.Api.Services.Compose;
@@ -90,6 +91,23 @@ public sealed class ComposeShadowPatchEngine
     private const string DefaultAuthor = "Spaarke Compose";
 
     /// <summary>
+    /// Optional diagnostic logger (task 055). When resolved by DI it lets an anchor/offset REFUSAL
+    /// (<see cref="ComposePatchErrorKind.RunIndexOutOfRange"/> / <see cref="ComposePatchErrorKind.OffsetOutOfRange"/>)
+    /// self-explain by logging the failing op's anchor + the target paragraph's per-run editor-length
+    /// breakdown. Optional/defaulted so the engine stays trivially <c>new</c>-able in seam tests (ADR-010
+    /// stateless singleton) — logging is a diagnostic side-channel, never a behavior change.
+    /// </summary>
+    private readonly ILogger? _logger;
+
+    /// <summary>DI ctor — the optional <paramref name="logger"/> is injected by the container
+    /// (<c>ILogger&lt;ComposeShadowPatchEngine&gt;</c> is always registered) and defaults to <c>null</c> for
+    /// a bare <c>new ComposeShadowPatchEngine()</c> in tests.</summary>
+    public ComposeShadowPatchEngine(ILogger<ComposeShadowPatchEngine>? logger = null)
+    {
+        _logger = logger;
+    }
+
+    /// <summary>
     /// Applies <paramref name="operationLog"/> (and any <paramref name="comments"/>) onto
     /// <paramref name="retainedBytes"/> and returns the patched <c>.docx</c> bytes. A no-op (empty log,
     /// no comments) returns <paramref name="retainedBytes"/> unchanged (byte-identical). Nothing is
@@ -176,7 +194,7 @@ public sealed class ComposeShadowPatchEngine
             var body = mainPart.Document?.Body
                 ?? throw new ComposePatchException(ComposePatchErrorKind.MalformedDocument, "The .docx main document part has no body.");
 
-            var session = new PatchSession(mainPart, body, retainedBytes, author ?? DefaultAuthor, (timestamp ?? DateTimeOffset.UtcNow).UtcDateTime, trackChanges);
+            var session = new PatchSession(mainPart, body, retainedBytes, author ?? DefaultAuthor, (timestamp ?? DateTimeOffset.UtcNow).UtcDateTime, trackChanges, _logger);
             session.Execute(ops, anchoredComments);
 
             mainPart.Document!.Save();
@@ -199,6 +217,7 @@ public sealed class ComposeShadowPatchEngine
         // G2 (FR-02, task 021): false = clean-apply mode (authored-origin path) — plain runs, physical
         // deletes, no w:pPrChange/tracked para-marks. Default true = the shipped tracked path (imported).
         private readonly bool _trackChanges;
+        private readonly ILogger? _logger;
         private readonly Dictionary<string, Paragraph> _byParaId;
         private int _idCounter;
         private WordprocessingCommentsPart? _commentsPart;
@@ -214,7 +233,7 @@ public sealed class ComposeShadowPatchEngine
         // the model must be read from the (now-modified) editable part rather than the pristine retained bytes.
         private bool _numberingAuthored;
 
-        public PatchSession(MainDocumentPart mainPart, Body body, byte[] retainedBytes, string author, DateTime date, bool trackChanges)
+        public PatchSession(MainDocumentPart mainPart, Body body, byte[] retainedBytes, string author, DateTime date, bool trackChanges, ILogger? logger = null)
         {
             _mainPart = mainPart;
             _body = body;
@@ -222,6 +241,7 @@ public sealed class ComposeShadowPatchEngine
             _author = author;
             _date = date;
             _trackChanges = trackChanges;
+            _logger = logger;
             _byParaId = BuildParaIdIndex(body);
             _idCounter = SeedRevisionId(mainPart, body);
         }
@@ -2044,6 +2064,19 @@ public sealed class ComposeShadowPatchEngine
         private int ToAbsoluteOffset(Paragraph para, string paraId, ComposeRunPoint point)
         {
             var slots = FlattenEditorRuns(para);
+
+            // ROBUST ANCHOR (task 055 — ADDITIVE). When the op carries the paragraph-relative char offset k,
+            // resolve the absolute editor offset by walking THIS paragraph's REAL OOXML editor-run flatten to
+            // k. The client measured k over its editor-visible run flatten, but TipTap MERGES same-format runs,
+            // so the client's runIndex can disagree with OOXML's fine-grained runs (the 74-run / offset-45
+            // 422 root cause). Walking to k realigns the anchor by numeric offset ONLY — never a text match
+            // (I-7). Only the run the offset lands in is later split (I-4). Falls back to (RunIndex, Offset)
+            // when ParaOffset is absent — byte-identical to the pre-fix behavior.
+            if (point.ParaOffset is int k)
+            {
+                return ResolveAbsoluteFromParaOffset(slots, k);
+            }
+
             if (point.RunIndex < 0 || point.RunIndex >= slots.Count)
             {
                 // A point.RunIndex == slots.Count with offset 0 could address the paragraph end; support
@@ -2053,6 +2086,7 @@ public sealed class ComposeShadowPatchEngine
                     return slots[^1].StartOffset + slots[^1].Length;
                 }
 
+                LogAnchorRefusal(paraId, point, slots);
                 throw new ComposePatchException(
                     ComposePatchErrorKind.RunIndexOutOfRange,
                     $"runIndex {point.RunIndex} is out of range for paraId '{paraId}' (paragraph has {slots.Count} editor-visible runs).");
@@ -2061,6 +2095,7 @@ public sealed class ComposeShadowPatchEngine
             var slot = slots[point.RunIndex];
             if (point.Offset < 0 || point.Offset > slot.Length)
             {
+                LogAnchorRefusal(paraId, point, slots);
                 throw new ComposePatchException(
                     ComposePatchErrorKind.OffsetOutOfRange,
                     $"run-local offset {point.Offset} is out of range for runIndex {point.RunIndex} on paraId '{paraId}' " +
@@ -2068,6 +2103,73 @@ public sealed class ComposeShadowPatchEngine
             }
 
             return slot.StartOffset + point.Offset;
+        }
+
+        /// <summary>
+        /// Resolve a PARAGRAPH-RELATIVE char offset <paramref name="k"/> to an absolute paragraph editor
+        /// offset by walking <paramref name="slots"/> in document order, accumulating each slot's
+        /// editor-visible length and picking the FIRST slot whose cumulative end covers <paramref name="k"/>
+        /// (<c>k &lt;= acc + len</c>) — mirroring the client's boundary convention
+        /// (<c>stepOperationInterceptor.runLocalPoint</c>: an offset on a run boundary resolves to the
+        /// trailing edge of the earlier run). <paramref name="k"/> beyond the paragraph's content clamps to
+        /// the trailing edge of the last slot (an at-end insert). Purely numeric (I-7). Since slots are
+        /// contiguous (<c>slot.StartOffset == running cumulative</c>), the returned absolute offset equals
+        /// <paramref name="k"/> clamped to <c>[0, total editor length]</c>; the walk is retained so the
+        /// clamp + boundary semantics are explicit and match the client exactly.
+        /// </summary>
+        private static int ResolveAbsoluteFromParaOffset(IReadOnlyList<EditorRunSlot> slots, int k)
+        {
+            if (slots.Count == 0)
+            {
+                return 0;
+            }
+
+            if (k < 0)
+            {
+                k = 0;
+            }
+
+            var acc = 0;
+            foreach (var slot in slots)
+            {
+                var len = slot.Length;
+                if (k <= acc + len)
+                {
+                    return slot.StartOffset + (k - acc);
+                }
+
+                acc += len;
+            }
+
+            // k beyond the paragraph's content — clamp to the trailing edge of the last slot (at-end insert).
+            var last = slots[^1];
+            return last.StartOffset + last.Length;
+        }
+
+        /// <summary>
+        /// Diagnostic (task 055) — logs the failing op's anchor (runIndex/offset/paraOffset) + the target
+        /// paragraph's per-run editor-length breakdown so a subsequent
+        /// <see cref="ComposePatchException"/> anchor/offset refusal self-explains. Log-only; no behavior
+        /// change. No document content is logged (Tier-1 anchor metadata only).
+        /// </summary>
+        private void LogAnchorRefusal(string paraId, ComposeRunPoint point, IReadOnlyList<EditorRunSlot> slots)
+        {
+            if (_logger is null || !_logger.IsEnabled(LogLevel.Warning))
+            {
+                return;
+            }
+
+            var breakdown = string.Join(", ", slots.Select((s, i) => $"run[{i}]={s.Length}"));
+            _logger.LogWarning(
+                "Compose anchor refusal on paraId {ParaId}: runIndex={RunIndex}, offset={Offset}, paraOffset={ParaOffset}; " +
+                "paragraph has {RunCount} editor-visible runs [{RunBreakdown}]. A paraOffset-bearing op resolves robustly; " +
+                "a (runIndex,offset)-only op can refuse when TipTap-merged run indices disagree with the OOXML run flatten.",
+                paraId,
+                point.RunIndex,
+                point.Offset,
+                point.ParaOffset,
+                slots.Count,
+                breakdown);
         }
 
         // -- run surgery ------------------------------------------------------------------------------
