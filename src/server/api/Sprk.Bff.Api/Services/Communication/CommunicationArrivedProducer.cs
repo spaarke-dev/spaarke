@@ -340,7 +340,14 @@ public sealed class CommunicationArrivedProducer
     /// Builds a model-driven-app record deep-link (the canonical <c>appnotification.data.actions[].data.url</c>
     /// form) for the notification's clickable "Open" action. The URL is a plain navigation target — NOT a
     /// pre-authorized token (NFR-02/03); the click re-enters an access-checked record surface.
+    /// <para>
+    /// Round-7 item 11: appends <c>sprk_openconversation=1</c> so the <c>CommunicationConversationPanel</c> PCF on
+    /// the target record form auto-opens the Messages modal on load (the PCF reads this off the top-window URL).
+    /// This is best-effort: if the MDA strips the custom param, the click still lands on the record (graceful
+    /// degradation — the panel just isn't auto-opened). Navigating to the record + opening the conversation is far
+    /// more useful than deep-linking to a single message (operator decision, round 7).
+    /// </para>
     /// </summary>
     private static string BuildRecordDeepLink(string entityType, Guid id) =>
-        $"/main.aspx?pagetype=entityrecord&etn={entityType}&id={id:D}";
+        $"/main.aspx?pagetype=entityrecord&etn={entityType}&id={id:D}&sprk_openconversation=1";
 }

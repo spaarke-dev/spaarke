@@ -132,6 +132,65 @@ export interface IPickedRecord {
   sizeBytes?: number;
 }
 
+/**
+ * A selectable email template (Wave E, owner UAT 2026-07-30). Minimal shape the compose
+ * template picker needs to LIST OOB Dataverse `template` records — the host resolves these
+ * via `Xrm.WebApi` (see `createXrmEmailComposeHandlers.onListEmailTemplates`).
+ */
+export interface IEmailTemplateSummary {
+  /** Dataverse `template` row id (`templateid`). */
+  id: string;
+  /** Display title (`title`). */
+  name: string;
+}
+
+/**
+ * The RENDERED template (Wave E). Returned by the host's render callback, which calls the
+ * BFF `POST /api/communications/template/render` so `{!entity.field}` field codes merge from
+ * the confirmed PRIMARY regarding record. `isHtml` drives the composer body format.
+ */
+export interface IEmailTemplateRenderResult {
+  subject: string;
+  body: string;
+  isHtml: boolean;
+}
+
+/**
+ * One AI-draft quick action offered by the compose "sparkle" menu (Wave E). `intent` is a stable
+ * key the host maps to a server-side prompt (admin-editable — the label is UI-only). The engine
+ * ships a default set; a host may override via {@link IEmailComposerProps.aiDraftActions}.
+ */
+export interface IEmailAiDraftAction {
+  /** Stable intent key sent to the host (e.g. 'reply', 'concise', 'formal'). */
+  intent: string;
+  /** Menu label shown to the user. */
+  label: string;
+}
+
+/**
+ * Request the composer hands to the host's AI-draft callback (Wave E). The host builds the actual
+ * prompt server-side from `intent` (+ `userInstruction` for the free-text "Enter prompt" action)
+ * and the supplied body/subject context, calls the BFF, and returns the drafted text.
+ */
+export interface IEmailAiDraftRequest {
+  /** The picked action's {@link IEmailAiDraftAction.intent}, or `'custom'` for the free-text prompt. */
+  intent: string;
+  /** Free-text instruction for the `'custom'` intent (the "Enter prompt" action). */
+  userInstruction?: string;
+  /** Current message body (HTML or plain per {@link isHtml}) — the text to refine or reply to. */
+  currentBody: string;
+  /** Whether {@link currentBody} is HTML (drives how the host frames the prompt + reads the result). */
+  isHtml: boolean;
+  /** Current subject, for context. */
+  subject?: string;
+}
+
+/** The AI-drafted body (Wave E). `isHtml` drives the composer body format; defaults to the request's when omitted. */
+export interface IEmailAiDraftResult {
+  text: string;
+  isHtml?: boolean;
+}
+
 /** Files a hosting wizard has already uploaded, offered as a pre-checked attachment source. */
 export interface IWizardContext {
   uploadedFiles: {
@@ -275,6 +334,7 @@ export type EmailComposerAction =
   | { type: 'TOGGLE_ATTACHMENT_SELECTED'; id: string }
   | { type: 'TOGGLE_ATTACHMENT_LINK'; id: string }
   | { type: 'ADD_ASSOCIATION'; association: ICommunicationAssociation }
+  | { type: 'SET_PRIMARY_ASSOCIATION'; association: ICommunicationAssociation }
   | { type: 'REMOVE_ASSOCIATION'; entityType: string; entityId: string }
   | { type: 'SET_VALIDATION_ERRORS'; result: IValidationResult }
   | { type: 'BEGIN_SEND' }
@@ -412,8 +472,54 @@ export interface IEmailComposerProps {
    */
   onAddRelationship?: () => Promise<IPickedRecord | null>;
 
+  // — Template picker (Wave E, owner UAT 2026-07-30) — additive/optional —
+  /**
+   * Lists selectable email templates (OOB Dataverse `template` records). Host-resolved via
+   * `Xrm.WebApi`. The toolbar template button renders ONLY when BOTH this and
+   * {@link onRenderEmailTemplate} are supplied AND the composer is editable; omit either → hidden.
+   */
+  onListEmailTemplates?: () => Promise<IEmailTemplateSummary[]>;
+  /**
+   * Renders a chosen template — the host calls the BFF `POST /api/communications/template/render`,
+   * passing the confirmed PRIMARY regarding (`associations[0]`) so `{!entity.field}` codes merge
+   * from that record — and returns the subject/body to fill. Context-agnostic (ADR-012): the host
+   * owns auth + the BFF URL.
+   */
+  onRenderEmailTemplate?: (args: {
+    templateId: string;
+    regardingEntityType?: string;
+    regardingRecordId?: string;
+  }) => Promise<IEmailTemplateRenderResult>;
+
+  // — AI draft "sparkle" (Wave E, owner UAT 2026-07-30) — additive/optional —
+  /**
+   * Generates/refines the message body via AI. The toolbar sparkle button renders ONLY when this
+   * is supplied AND the composer is editable; omit → hidden. The host owns the BFF call + prompt
+   * text (the intents are stable keys, the prompts are server-side/admin-editable). Context-agnostic
+   * (ADR-012): the engine passes the current body/subject and applies the returned text.
+   */
+  onDraftWithAi?: (req: IEmailAiDraftRequest) => Promise<IEmailAiDraftResult>;
+  /**
+   * Overrides the default sparkle quick-actions (Draft a reply / Summarize the thread / Make it
+   * concise / Formal tone / Friendly tone / Fix grammar & tone). The free-text "Enter prompt" action
+   * is always appended. Optional — omit to use the defaults.
+   */
+  aiDraftActions?: IEmailAiDraftAction[];
+
   // — Send-side behavior —
+  /**
+   * FIXES the send mode + hides the From switcher (host-locked). Use when the caller
+   * mandates one mailbox. For a DEFAULT that the user can still change, use
+   * {@link defaultSendMode} instead.
+   */
   sendMode?: CommunicationSendMode;
+  /**
+   * Seeds the INITIAL send mode while leaving the From switcher interactive (owner UAT
+   * 2026-07-30, item 3). The email surface passes `'user'` so a reply/new defaults to
+   * sending from the signed-in user, switchable to the Spaarke shared mailbox. Ignored
+   * when {@link sendMode} is set (that path locks the mode). Default `'sharedMailbox'`.
+   */
+  defaultSendMode?: CommunicationSendMode;
   fromMailbox?: string;
   /** Archive sent `.eml` to SPE. Default `true`. */
   archiveToSpe?: boolean;
@@ -446,6 +552,18 @@ export interface IEmailComposerProps {
 
   /** Optional className applied to the root layout container. */
   className?: string;
+
+  // — Dialog maximize/restore (owner UAT 2026-07-30, item 11) — additive/optional —
+  /**
+   * When supplied, the chromed header renders a maximize/restore button next to the
+   * close (X) affordance. The host (e.g. `SendEmailDialog`) owns the actual surface
+   * sizing — the engine only surfaces the toggle click. Omitted → no button (every
+   * existing caller is unaffected). Context-agnostic (ADR-012): the engine never sizes
+   * a host surface itself.
+   */
+  onToggleMaximize?: () => void;
+  /** Current maximize state — drives the button's icon + label. Only meaningful with {@link onToggleMaximize}. */
+  isMaximized?: boolean;
 
   /**
    * Optional override for the chromed (page/dialog mount) header title. When

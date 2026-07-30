@@ -95,6 +95,27 @@ public interface IThreadResolver
     /// </summary>
     Task<Guid> CreateRecordThreadAsync(
         Guid ownerSystemUserId, string? name, RecordThreadAnchor regarding, CancellationToken ct = default);
+
+    /// <summary>
+    /// Round-7 item 7 soft-delete: DEACTIVATES a thread (<c>sprk_communicationthread</c>) by setting its
+    /// <c>statecode</c>=Inactive (<c>statuscode</c>=Inactive) rather than physically deleting it — reversible +
+    /// preserves audit/archive history (operator decision, round 7). The deactivated thread drops out of the
+    /// impersonated list/read on the next load. User action, NOT best-effort (mirrors <see cref="SetPinnedAsync"/>):
+    /// a write failure propagates to the endpoint. This BFF write is the only thread-deactivate path — no Dataverse
+    /// plugin. The endpoint authorizes the caller against the thread (impersonated visibility) BEFORE calling this.
+    /// </summary>
+    Task DeactivateThreadAsync(Guid threadId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Round-7 item 8 soft-delete: DEACTIVATES a single message (<c>sprk_communication</c>) by setting its
+    /// <c>statecode</c>=Inactive (<c>statuscode</c>=Inactive) rather than physically deleting it — reversible +
+    /// preserves the communication record (operator decision, round 7). The deactivated message drops out of the
+    /// impersonated thread read on the next poll. User action, NOT best-effort. This lives on the thread-resolver
+    /// as the single communication-write seam (alongside rename/pin/create). The endpoint authorizes the caller
+    /// against the message (impersonated visibility) BEFORE calling this. Email-type deletion is NOT routed here —
+    /// the client only offers this for message-type rows (email deletion is owned by the email surface).
+    /// </summary>
+    Task DeactivateMessageAsync(Guid communicationId, CancellationToken ct = default);
 }
 
 /// <summary>

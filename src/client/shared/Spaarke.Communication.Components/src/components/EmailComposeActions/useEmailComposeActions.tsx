@@ -71,6 +71,11 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
     onLookupRecord,
     onAddRelationship,
     onUploadLocalAttachment,
+    onListEmailTemplates,
+    onRenderEmailTemplate,
+    onDraftWithAi,
+    aiDraftActions,
+    fromMailbox,
     dataverseUrl,
     associations,
     onSent,
@@ -199,6 +204,12 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
       onLookupRecord={onLookupRecord}
       onAddRelationship={onAddRelationship}
       onUploadLocalAttachment={onUploadLocalAttachment}
+      onListEmailTemplates={onListEmailTemplates}
+      onRenderEmailTemplate={onRenderEmailTemplate}
+      onDraftWithAi={onDraftWithAi}
+      aiDraftActions={aiDraftActions}
+      defaultSendMode="user"
+      fromMailbox={fromMailbox}
       associations={isRecordScoped ? associations : undefined}
       initialAttachments={isRecordScoped ? dialogState?.initialAttachments : undefined}
       titleOverride={titleOverride}

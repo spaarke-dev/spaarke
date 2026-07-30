@@ -20,7 +20,15 @@
 import { getXrm } from '../../services/xrmGlobal';
 import { EntityCreationService, type AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
-import type { IRecordLookupTarget, IPickedRecord, IRecipient } from './EmailComposer.types';
+import type {
+  IRecordLookupTarget,
+  IPickedRecord,
+  IRecipient,
+  IEmailTemplateSummary,
+  IEmailTemplateRenderResult,
+  IEmailAiDraftRequest,
+  IEmailAiDraftResult,
+} from './EmailComposer.types';
 
 /**
  * Record-lookup targets offered by the composer's "insert a link to a record" /
@@ -69,6 +77,28 @@ export interface XrmEmailComposeHandlers {
    * container per deployment, resolved from the current user's owning BU).
    */
   onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
+  /**
+   * List OOB Dataverse `template` records for the compose template picker (Wave E). Xrm-only —
+   * always present. The composer's template button also needs {@link onRenderEmailTemplate}
+   * (auth + BFF), so the button stays hidden when render is unavailable (e.g. the harness).
+   */
+  onListEmailTemplates: () => Promise<IEmailTemplateSummary[]>;
+  /**
+   * Render a chosen template via the BFF (`POST /api/communications/template/render`), merging
+   * `{!entity.field}` codes from the primary regarding. Only present when `authenticatedFetch` +
+   * `bffBaseUrl` are supplied — omitted otherwise (composer hides the template button).
+   */
+  onRenderEmailTemplate?: (args: {
+    templateId: string;
+    regardingEntityType?: string;
+    regardingRecordId?: string;
+  }) => Promise<IEmailTemplateRenderResult>;
+  /**
+   * Generate/refine the message body via AI (Wave E). Calls the BFF
+   * `POST /api/communications/draft`. Only present when `authenticatedFetch` + `bffBaseUrl` are
+   * supplied — omitted otherwise (composer hides the sparkle button).
+   */
+  onDraftWithAi?: (req: IEmailAiDraftRequest) => Promise<IEmailAiDraftResult>;
 }
 
 /** Best-effort SPE upload never reads this — map for display parity only, default 'pdf'. */
@@ -84,6 +114,26 @@ function deriveUploadedFileType(mimeType: string): UploadedFileType {
  * used to build record deep-link URLs for the picked records (best-effort;
  * absent → a relative link is omitted).
  */
+/**
+ * Resolve the signed-in user's mailbox address (item 3) for the compose "From:" row.
+ * Walks `Xrm.Utility.getGlobalContext().userSettings.userId` → `systemuser.internalemailaddress`.
+ * Returns `undefined` outside an MDA host or if the email is unset — callers then fall back
+ * to a generic label. Best-effort; never throws.
+ */
+export async function resolveCurrentUserEmail(): Promise<string | undefined> {
+  try {
+    const xrm = getXrm();
+    const userId: string | undefined = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userId;
+    if (!xrm?.WebApi || !userId) return undefined;
+    const clean = String(userId).replace(/[{}]/g, '');
+    const rec = await xrm.WebApi.retrieveRecord('systemuser', clean, '?$select=internalemailaddress');
+    const email = rec?.internalemailaddress;
+    return typeof email === 'string' && email.includes('@') ? email : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function createXrmEmailComposeHandlers(options?: {
   clientUrl?: string;
   /** Auth-aware fetch (ADR-028) — required to enable new-file upload (item 9b). */
@@ -222,11 +272,83 @@ export function createXrmEmailComposeHandlers(options?: {
         }
       : undefined;
 
+  // Template picker (Wave E): LIST the OOB `template` records via Xrm.WebApi (host-only, no auth),
+  // and RENDER a chosen one via the BFF so `{!entity.field}` codes merge from the primary regarding.
+  const onListEmailTemplates = async (): Promise<IEmailTemplateSummary[]> => {
+    const xrm = getXrm();
+    if (!xrm?.WebApi) return [];
+    try {
+      const res = await xrm.WebApi.retrieveMultipleRecords('template', '?$select=templateid,title&$orderby=title asc');
+      return (res?.entities ?? [])
+        .map((e: Record<string, unknown>) => ({
+          id: String(e.templateid ?? ''),
+          name: (e.title as string) || '(untitled)',
+        }))
+        .filter((t: IEmailTemplateSummary) => t.id.length > 0);
+    } catch (err) {
+      console.warn('[EmailCompose] template list failed:', err);
+      return [];
+    }
+  };
+
+  const onRenderEmailTemplate =
+    authenticatedFetch && bffBaseUrl
+      ? async (args: {
+          templateId: string;
+          regardingEntityType?: string;
+          regardingRecordId?: string;
+        }): Promise<IEmailTemplateRenderResult> => {
+          const base = bffBaseUrl.replace(/\/+$/, '');
+          const resp = await authenticatedFetch(`${base}/api/communications/template/render`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              templateId: args.templateId,
+              regardingEntityType: args.regardingEntityType,
+              regardingRecordId: args.regardingRecordId,
+            }),
+          });
+          if (!resp.ok) {
+            throw new Error(`Template render failed (${resp.status})`);
+          }
+          const data = (await resp.json()) as Partial<IEmailTemplateRenderResult>;
+          return { subject: data.subject ?? '', body: data.body ?? '', isHtml: !!data.isHtml };
+        }
+      : undefined;
+
+  // AI "sparkle" draft (Wave E): POST the intent + current body/subject to the BFF, which owns the
+  // prompt text (admin-editable growth path) and calls Azure OpenAI. Only wired with auth + BFF URL.
+  const onDraftWithAi =
+    authenticatedFetch && bffBaseUrl
+      ? async (req: IEmailAiDraftRequest): Promise<IEmailAiDraftResult> => {
+          const base = bffBaseUrl.replace(/\/+$/, '');
+          const resp = await authenticatedFetch(`${base}/api/communications/draft`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              intent: req.intent,
+              userInstruction: req.userInstruction,
+              currentBody: req.currentBody,
+              isHtml: req.isHtml,
+              subject: req.subject,
+            }),
+          });
+          if (!resp.ok) {
+            throw new Error(`AI draft failed (${resp.status})`);
+          }
+          const data = (await resp.json()) as Partial<IEmailAiDraftResult>;
+          return { text: data.text ?? '', isHtml: data.isHtml };
+        }
+      : undefined;
+
   return {
     recordLookupCatalog: EMAIL_RECORD_LOOKUP_CATALOG,
     onLookupRecipients,
     onLookupRecord,
     onAddRelationship,
     onUploadLocalAttachment,
+    onListEmailTemplates,
+    onRenderEmailTemplate,
+    onDraftWithAi,
   };
 }

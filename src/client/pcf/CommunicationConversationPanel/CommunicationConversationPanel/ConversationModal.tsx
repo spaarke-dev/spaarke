@@ -44,8 +44,8 @@
 
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
-import { Button, FluentProvider, webLightTheme, makeStyles, tokens } from '@fluentui/react-components';
-import { DismissRegular } from '@fluentui/react-icons';
+import { Button, FluentProvider, webLightTheme, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { ArrowMaximizeRegular, ArrowMinimizeRegular, DismissRegular } from '@fluentui/react-icons';
 import {
   ConversationWorkspace,
   ConversationView,
@@ -93,6 +93,23 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
+  },
+  // Round-7 item 10: "expand" fills the app CONTAINER (not OS-fullscreen). The
+  // overlay is `position:fixed; inset:0`, so 96vw × 94vh fills the visible app
+  // area with a thin margin, matching the OOB `navigateTo` Layout-1 footprint —
+  // never a literal 100vw/100vh takeover.
+  surfaceExpanded: {
+    width: '96vw',
+    maxWidth: '96vw',
+    height: '94vh',
+    maxHeight: '94vh',
+  },
+  // Expand/collapse toggle pinned left of the close "x".
+  expandButton: {
+    position: 'absolute',
+    top: tokens.spacingVerticalM,
+    right: `calc(${tokens.spacingHorizontalM} + 40px)`,
+    zIndex: 1,
   },
   title: {
     display: 'flex',
@@ -147,6 +164,9 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
   onOpenRecord,
 }) => {
   const s = useStyles();
+
+  // Round-7 item 10: expand the modal to fill the app container (toggle).
+  const [expanded, setExpanded] = React.useState(false);
 
   // Record-lookup service for the shell's built-in New-conversation modal (round
   // 4 PCF item 3 — the ＋ was inert because the PCF host never wired it). The
@@ -206,7 +226,23 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
 
   const overlay = (
     <div className={s.overlay} onMouseDown={handleOverlayMouseDown}>
-      <div ref={surfaceRef} className={s.surface} role="dialog" aria-modal="true" aria-label="Messages" tabIndex={-1}>
+      <div
+        ref={surfaceRef}
+        className={mergeClasses(s.surface, expanded && s.surfaceExpanded)}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Messages"
+        tabIndex={-1}
+      >
+        {/* Round-7 item 10: expand/collapse the modal to fill the app container. */}
+        <Button
+          appearance="subtle"
+          className={s.expandButton}
+          aria-label={expanded ? 'Collapse conversations' : 'Expand conversations'}
+          title={expanded ? 'Collapse' : 'Expand'}
+          icon={expanded ? <ArrowMinimizeRegular /> : <ArrowMaximizeRegular />}
+          onClick={() => setExpanded(v => !v)}
+        />
         {/* §B1 (UAT): close "x" pinned to the surface's literal upper-right corner. */}
         <Button
           appearance="subtle"

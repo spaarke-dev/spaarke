@@ -63,7 +63,8 @@ function renderDialog(overrides: Partial<ISendEmailDialogProps> = {}, theme: typ
 describe('SendEmailDialog — renders composer (baseline)', () => {
   it('renders the dialog with the composer recipient + subject fields populated from initial* props', () => {
     renderDialog();
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    // modalType="alert" (item 12 — no light dismiss) renders role="alertdialog", not "dialog".
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument();
     expect(screen.getByText('alice@example.com')).toBeInTheDocument(); // RecipientField chip text
     expect(screen.getByDisplayValue('Documents for review')).toBeInTheDocument();
@@ -146,7 +147,8 @@ describe('SendEmailDialog — send-path invocation (NOT covered by wrappers.test
     await waitFor(() => expect(onError).toHaveBeenCalled());
     expect(onSent).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    // modalType="alert" (item 12 — no light dismiss) renders role="alertdialog", not "dialog".
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
   });
 });
 
@@ -158,7 +160,8 @@ describe('SendEmailDialog — prop contract (task 020 extends additively)', () =
       attachmentSources: [],
       onSearchRecipients,
     });
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    // modalType="alert" (item 12 — no light dismiss) renders role="alertdialog", not "dialog".
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Composer actions' })).toBeInTheDocument();
   });
 
@@ -173,7 +176,8 @@ describe('SendEmailDialog — prop contract (task 020 extends additively)', () =
 describe('SendEmailDialog — Dark Mode Compliance (ADR-021)', () => {
   it('renders under a dark-theme FluentProvider without hand-authored inline colors', () => {
     const { container } = renderDialog({}, webDarkTheme);
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    // modalType="alert" (item 12 — no light dismiss) renders role="alertdialog", not "dialog".
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
     // Fluent tokens apply via CSS classes (Griffel/makeStyles), not inline styles —
     // pin the absence of hardcoded inline color/background-color per ADR-021.
     const styledEls = container.querySelectorAll<HTMLElement>('[style]');

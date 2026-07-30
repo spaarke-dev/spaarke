@@ -65,3 +65,16 @@ export interface EmailCardListProps {
   /** Fired when a card is clicked or keyboard-activated (Enter/Space). */
   onSelect: (id: string) => void;
 }
+
+/**
+ * Stable key for one Outlook-style date bucket (newest → oldest render order).
+ * See `bucketEmailsByDate` in `EmailCardList.tsx` for the boundary definitions.
+ */
+export type EmailDateBucketKey = 'today' | 'yesterday' | 'thisWeek' | 'thisMonth' | 'older';
+
+/** A non-empty date bucket: its stable key, human label, and the cards in original order. */
+export interface EmailDateBucket {
+  key: EmailDateBucketKey;
+  label: string;
+  items: EmailCardItem[];
+}
