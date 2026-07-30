@@ -1,9 +1,13 @@
 # Current Task State — Spaarke Compose R5
 
-> **Last Updated**: 2026-07-30 (by context-handoff — task 022 BLOCKED on human Dataverse gate; pre-compaction)
-> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-compose-r5`. Working tree CLEAN, all pushed (tip `92b99e0d4`).
+> **Last Updated**: 2026-07-30 (by context-handoff — ALL impl+hardening done; AT deploy gate; pre-compaction)
+> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-compose-r5`. Working tree CLEAN, all pushed (tip `23b676a57`).
 >
-> **▶ NEXT ACTION (2026-07-30):** ⏸ **AT THE DEPLOY GATE — awaiting operator.** ALL implementation + hardening tasks COMPLETE: **022 ✅ 030 ✅ 031 ✅ 032 ✅ 033 ✅ 040 ✅ 041 ✅** (Phases 2/3/4). Tip `6d2c514ac`, all pushed, working tree clean. **042 (deploy) HOLDS for operator** (shared `sprk_spaarkeai` + `spaarke-bff-dev`, last-deploy-wins) — the technical deploy gate is CLEARED (notes/hardening-report.md: byte-diff 24/24, Compose 821/821, publish 48.13 MB ≤60, zero new package). **090 (wrap-up + /test-diet) depends on 042** — runs after deploy. To deploy: operator coordinates timing, then run task-execute 042. Pre-existing (NOT R5) 5 `Services.Communication.*` sender-identity test failures — **RESOLVED 2026-07-30** (operator-requested pre-deploy; stale tests aligned to the messaging-r3 FormattedValue read; test-only, full BFF suite now 9319/0/101).
+> **▶ NEXT ACTION (post-compaction):** ⏸ **AT THE DEPLOY GATE — awaiting operator.** ALL R5 implementation + hardening COMPLETE (**010–014, 020, 021, 022, 030, 031, 032, 033, 040, 041 ✅**). Branch fully GREEN end-to-end. Only two tasks remain, both operator-sequenced:
+> 1. **042 (deploy) — HOLDS for operator.** Technical deploy gate CLEARED (`notes/hardening-report.md`). Deploy is operator-coordinated (shared `sprk_spaarkeai` web resource + `spaarke-bff-dev`, last-deploy-wins). **Deploy the BFF + the `sprk_spaarkeai` client TOGETHER** (G5/G7 catalog changes are additive/no version bump — safe only if client+server ship together). When operator gives the go: `task-execute 042`.
+> 2. **090 (wrap-up) — depends on 042.** Runs AFTER deploy: `/test-diet` (reconcile R5 tests vs the 17-ban classifier), `/code-review` + `/adr-check` final sweep, close-out, then `/merge-to-master`.
+>
+> **Do NOT deploy autonomously.** Wait for the operator's explicit go on 042.
 
 ---
 
@@ -12,12 +16,13 @@
 | Field | Value |
 |-------|-------|
 | **Project** | spaarkeai-compose-r5 (Editing Completeness — additive on R4's Shadow Document Architecture) |
-| **Progress** | Phase 0 ✅; Phase 1 ✅ (010–014); **Phase 2: 020 ✅ (G1 origin), 021 ✅ (G2 clean-apply, Candidate A).** NEXT: 022 (G7 save split). |
-| **Status** | ✅ **task 014 DONE** — `table` op (6 kinds) added to closed catalog (server+client mirror, compose-ops-v2); engine applier emits FULL tracked table structure (w:trPr/w:ins+del rows, w:tcPr/w:cellIns+cellDel cols, w:tblGridChange, w:tblPrChange, in-cell w:del/w:ins), anchored by paraId ancestry walk (no text-search). Client classifyTableStep captures row/col add/delete + delete-table. Toolbar: row/col/delete-table EDIT commands round-trip on loaded docs; insert-NEW-table stays gated (out-of-catalog, surfaced §3). Seam slice `ComposeTableApplierSeamTests` (9 tests, OpenXmlValidator Word-valid). Build serial GREEN. Committed. See notes/task-014-deviations.md. |
-| **Active task** | **022 (G7) — ⛔ BLOCKED on human Dataverse gate (Option B chosen 2026-07-30).** Operator adding `sprk_composetransientkey` (text 100, Optional) + alt-key `sprk_composetransientkey_uk` to the `sprk_document` table. FULL implementation plan + schema spec in `notes/g7-transient-key-schema.md`. **When field is Active → implement per that note** (client transient-key mint+send + Save split-button; server transient-key dedup in PromoteIfEphemeral + Save-New fork; seam incl. 8-duplicate; verify + gates). |
-| **SCOPE DECISION (surface to operator)** | Table op faithful to task-004 catalog = 6 kinds for STRUCTURAL EDITS OF EXISTING tables. Whole-table CREATE (Insert-table on a loaded doc) is NOT a task-004 op kind (it is a whole-block author, not a structural edit) → Insert-table stays gated on loaded docs (honest disabled+tooltip, NOT silent loss). Delete-table = tracked deletion of all rows (in scope). Every currently-ENABLED loaded-doc table command round-trips or cleanly refuses (NFR-08 satisfied). |
-| **Next Action** | Build catalog+engine+client+toolbar+seam; build serial; /conflict-check; commit --no-verify. Then Phase 2/3/4 → STOP before 042 deploy. |
-| **Applier findings (carry forward)** | (010) w:pPrChange nested prev-props = `ParagraphPropertiesExtended`, and w:*Change types are schema-context-dependent. (011) reading the SDK numbering/styles DOM on the EDITABLE package re-serializes those parts → use a throwaway read-only probe for model reads (byte-surgical). (011) extended 022's buildAnchor/deriveOperation so new setBlockAttr ops aren't dropped by the save log. |
+| **Progress** | Phase 0 ✅ · Phase 1 ✅ (010–014) · Phase 2 ✅ (020 G1, 021 G2, 022 G7) · Phase 3 ✅ (030 G8, 031 G9, 032 G11, 033 G5) · Phase 4: 040 ✅ (G10), 041 ✅ (hardening PASS). **NEXT: 042 deploy (operator gate) → 090 wrap-up.** |
+| **Branch state** | tip `23b676a57`, pushed to `origin/work/spaarkeai-compose-r5`, working tree CLEAN. NOT merged to master (090 does that). |
+| **Full-suite state** | byte-diff **24/24** · Compose C# **821/821** · full BFF **9319 passed / 0 failed / 101 skipped** · client suites green · ArchTests **3 pre-existing only** (ADR-007, ADR-010×2; Tier-1 no-AI passes) · publish **48.13 MB compressed incl PDBs** (≤60) · zero new runtime package. |
+| **This-session tasks (022→041 + comm fix)** | 022 G7 dedup+split-button (`410b08669`) · 030 G8 banner+webhook seam (`9a9346dd9`) · 031 G9 scroll-sync (`26990ba10`) · 032 G11 redline-visibility lock (`3e5746690`) · 033 G5 hyperlinks both paths (`485ca406f`) · 040 G10 profile re-run (`d5bad935c`) · 041 hardening PASS (`6d2c514ac`) · checkpoint (`c5349d5cd`) · Communication stale-test fix (`23b676a57`). Each has a `notes/task-0NN-deviations.md`. |
+| **Next Action** | **STOP — await operator go on 042 (deploy).** Then `task-execute 042`, then `task-execute 090` (/test-diet + review + merge-to-master). |
+| **Deploy-together reminder** | G5 (hyperlink) + G7 (Link mark / transient key) extended the closed op catalog ADDITIVELY on `compose-ops-v2` (NO version bump — safe because client+server share the constant + deploy together). At deploy: ship BFF + `sprk_spaarkeai` client together (rationale: `notes/task-033-deviations.md`). |
+| **Operator did (Dataverse gate, cleared)** | `sprk_composetransientkey` (Single-line text 100, Optional) + alt-key `sprk_composetransientkey_uk` on `sprk_document` — created + Active (G7/022 depends on it). |
 
 ## Phase-0 decisions locked (implementers MUST follow)
 - **002 — origin field** ✅: `sprk_composeorigin` Authored=100000000, Imported=100000001, default Imported, null→Imported (notes/g1-origin-field-asbuilt.md).
