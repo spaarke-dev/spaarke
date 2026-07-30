@@ -467,6 +467,45 @@ public class IncomingAssociationResolverTests
     }
 
     // =========================================================================
+    // P2 (FR-12 UAT): the denormalized PRIMARY Regarding is substantive-only (never a fallback)
+    // =========================================================================
+
+    [Fact]
+    public async Task P2_FallbackContactOnly_DoesNotPopulateDenormalizedPrimaryRegarding()
+    {
+        // A fallback identity match (contact/org/account) must NOT become the denormalized headline
+        // "Regarding record". Before P2, a contact-only match populated sprk_regardingrecordtype/id/name with
+        // the contact — and, when the substantive matters went Ambiguous, a spurious sub-threshold invoice
+        // (the UAT misfile). The typed sprk_regardingperson lookup is still written (the review surface uses
+        // it); only the misleading denormalized PRIMARY is withheld.
+        var contactId = Guid.NewGuid();
+        var contactEntity = new DataverseEntity("contact") { Id = contactId };
+        _dataverseServiceMock
+            .Setup(d => d.QueryContactByEmailAsync("jane@external.com", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(contactEntity);
+        _dataverseServiceMock
+            .Setup(d => d.QueryAccountByDomainAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DataverseEntity?)null);
+        _dataverseServiceMock
+            .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var envelope = CreateEnvelope("Hello", "jane@external.com");
+
+        await _resolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
+
+        _dataverseServiceMock.Verify(d => d.UpdateAsync(
+            "sprk_communication",
+            TestCommunicationId,
+            It.Is<Dictionary<string, object>>(fields =>
+                fields.ContainsKey("sprk_regardingperson") &&        // typed lookup still written
+                !fields.ContainsKey("sprk_regardingrecordtype") &&   // but NO denormalized headline
+                !fields.ContainsKey("sprk_regardingrecordid") &&
+                !fields.ContainsKey("sprk_regardingrecordname")),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // =========================================================================
     // Test Helpers
     // =========================================================================
 

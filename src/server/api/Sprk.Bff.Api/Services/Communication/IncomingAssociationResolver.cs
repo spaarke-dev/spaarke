@@ -356,17 +356,38 @@ public sealed class IncomingAssociationResolver
     ///   - sprk_regardingrecordnumber (Text — parent reference number, when the entity has one)
     ///   - sprk_regardingrecordurl    (URL — clickable link to parent record)
     /// </summary>
+    /// <summary>
+    /// Identity "fallback" regarding fields (contact / organization / account) — matching a sender/recipient
+    /// is NOT what an email is <i>about</i>. Mirrors <see cref="Engine.AssociationStatusMapper"/>'s
+    /// <c>FallbackFields</c>. A fallback must never become the denormalized <b>primary</b> Regarding (P2, FR-12
+    /// UAT): before P1/P2, when the substantive matters went Ambiguous (not written), the primary-pick fell
+    /// through priority order to a written fallback (contact) — or a spurious sub-threshold invoice — and put a
+    /// misleading headline "Regarding" on the record.
+    /// </summary>
+    private static readonly HashSet<string> FallbackRegardingFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_regardingperson",       // contact
+        "sprk_regardingorganization", // organization
+        "sprk_regardingaccount",      // account
+    };
+
     private async Task PopulateResolverFieldsAsync(
         Dictionary<string, object> fields,
         CancellationToken ct)
     {
         // Find the primary regarding entity (highest priority field that was set). Priority order is the
         // single source of truth in RegardingFieldMap.All (ADR-024) — the rungs write the same fields.
+        // P2 (FR-12 UAT): consider SUBSTANTIVE fields only — a fallback identity match (contact/org/account)
+        // must never be the headline Regarding. When the substantive matters conflict (Ambiguous → not
+        // written), leaving the denormalized fields unset is the correct outcome: the record shows no headline
+        // Regarding and the review surface resolves the candidates from provenance.
         EntityReference? primaryRef = null;
         string? primaryEntityLogicalName = null;
 
         foreach (var (entityLogicalName, fieldName) in RegardingFieldMap.All)
         {
+            if (FallbackRegardingFields.Contains(fieldName))
+                continue;
             if (fields.TryGetValue(fieldName, out var value) && value is EntityReference entityRef)
             {
                 primaryRef = entityRef;
