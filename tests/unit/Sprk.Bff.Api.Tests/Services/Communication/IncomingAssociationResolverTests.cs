@@ -63,6 +63,7 @@ public class IncomingAssociationResolverTests
         var parentComm = new DataverseEntity("sprk_communication");
         parentComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", parentMatterId);
         parentComm["sprk_regardingorganization"] = new EntityReference("account", parentOrgId);
+        parentComm["sprk_associationstatus"] = new OptionSetValue(100000000); // P3: Resolved parent ⇒ reply inherits at 1.0 (auto-file)
 
         _dataverseServiceMock
             .Setup(d => d.GetCommunicationByGraphMessageIdAsync("<parent-msg-id@contoso.com>", It.IsAny<CancellationToken>()))
@@ -258,6 +259,7 @@ public class IncomingAssociationResolverTests
 
         var parentComm = new DataverseEntity("sprk_communication");
         parentComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", parentMatterId);
+        parentComm["sprk_associationstatus"] = new OptionSetValue(100000000); // P3: Resolved parent ⇒ reply inherits at 1.0
 
         _dataverseServiceMock
             .Setup(d => d.GetCommunicationByGraphMessageIdAsync("<parent@contoso.com>", It.IsAny<CancellationToken>()))
@@ -348,6 +350,7 @@ public class IncomingAssociationResolverTests
         var parentMatterId = Guid.NewGuid();
         var parentComm = new DataverseEntity("sprk_communication");
         parentComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", parentMatterId);
+        parentComm["sprk_associationstatus"] = new OptionSetValue(100000000); // P3: Resolved parent ⇒ reply inherits at 1.0
 
         _dataverseServiceMock
             .Setup(d => d.GetCommunicationByGraphMessageIdAsync("<p@contoso.com>", It.IsAny<CancellationToken>()))
@@ -379,6 +382,7 @@ public class IncomingAssociationResolverTests
         var parentMatterId = Guid.NewGuid();
         var parentComm = new DataverseEntity("sprk_communication");
         parentComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", parentMatterId);
+        parentComm["sprk_associationstatus"] = new OptionSetValue(100000000); // P3: Resolved parent (pre-kill-switch state)
 
         _dataverseServiceMock
             .Setup(d => d.GetCommunicationByGraphMessageIdAsync("<p2@contoso.com>", It.IsAny<CancellationToken>()))
@@ -502,6 +506,49 @@ public class IncomingAssociationResolverTests
                 !fields.ContainsKey("sprk_regardingrecordtype") &&   // but NO denormalized headline
                 !fields.ContainsKey("sprk_regardingrecordid") &&
                 !fields.ContainsKey("sprk_regardingrecordname")),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // =========================================================================
+    // P3 (FR-12 UAT): a thread reply does not auto-file off an UNCONFIRMED parent
+    // =========================================================================
+
+    [Fact]
+    public async Task P3_ThreadParentNotResolved_ReplyDoesNotAutoFile_SurfacesSuggested()
+    {
+        // The parent carries a matter but its own association is only Suggested (unconfirmed). Inheriting it at
+        // 1.0 would amplify an unconfirmed association into an auto-file across the thread — the misfile
+        // propagation the UAT flagged as "as bad as mis-associating the primary record". The reply must inherit
+        // the matter as a SURFACED candidate (Suggested), never Resolved.
+        var parentMatterId = Guid.NewGuid();
+        var parentComm = new DataverseEntity("sprk_communication");
+        parentComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", parentMatterId);
+        parentComm["sprk_associationstatus"] = new OptionSetValue(100000003); // Suggested — UNCONFIRMED parent
+
+        _dataverseServiceMock
+            .Setup(d => d.GetCommunicationByGraphMessageIdAsync("<unconfirmed-parent@contoso.com>", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(parentComm);
+        _dataverseServiceMock
+            .Setup(d => d.QueryContactByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DataverseEntity?)null);
+        _dataverseServiceMock
+            .Setup(d => d.QueryAccountByDomainAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DataverseEntity?)null);
+        _dataverseServiceMock
+            .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var envelope = CreateEnvelope("Re: ongoing", "someone@external.com", inReplyTo: "<unconfirmed-parent@contoso.com>");
+
+        await _resolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
+
+        _dataverseServiceMock.Verify(d => d.UpdateAsync(
+            "sprk_communication",
+            TestCommunicationId,
+            It.Is<Dictionary<string, object>>(fields =>
+                fields.ContainsKey("sprk_regardingmatter") &&                          // inherited matter still surfaced
+                ((EntityReference)fields["sprk_regardingmatter"]).Id == parentMatterId &&
+                ((OptionSetValue)fields["sprk_associationstatus"]).Value == 100000003), // Suggested, NOT Resolved
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
