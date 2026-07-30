@@ -10,7 +10,7 @@
 |---|------|----------|--------|---------|
 | 1 | **Corpus byte-diff harness (NFR-01)** | R4 24/24 | **24/24** (`ComposeShadowPatchEngineByteDiffSeamTests`) | ✅ no regression |
 | 2 | **Full Compose seam + unit suite** | 739 (task 001) | **821/821** (0 failed) | ✅ green (+82 across R5) |
-| 3 | **Full BFF test suite (cross-cutting)** | — | **9314 passed / 5 failed / 101 skipped** | ✅ see note below |
+| 3 | **Full BFF test suite (cross-cutting)** | — | **9319 passed / 0 failed / 101 skipped** | ✅ green (5 pre-existing Communication fails resolved 2026-07-30) |
 | 4 | **ADR gates (Tier-1 + ADR-049)** | 3 pre-existing ArchTest fails | **3 pre-existing** (ADR-007, ADR-010 ×2); **Tier-1 no-AI PASSES** | ✅ zero new |
 | 5 | **BFF publish size (NFR-04)** | ~46.11–46.75 MB compressed | **48.13 MB compressed (incl PDBs)** | ✅ ≤60 ceiling |
 | 6 | **No new runtime package (NFR-03)** | — | **zero** new NuGet/npm dep; no `@tiptap-pro/*` | ✅ confirmed |
@@ -28,15 +28,20 @@ Includes the R5 additions: G7 transient-key dedup (3 seam), G8 webhook receiver 
 (5 byte-author), G10 refresh-profile (2 seam), G11/G3/G4/G12 appliers, clean-apply, origin routing, +
 the R4.5 numbering/citation/projection seams (non-regression). 0 failed.
 
-### 3. Full BFF suite — 5 pre-existing failures, ZERO from R5
-`Failed: 5, Passed: 9314, Skipped: 101 / 9420 total`. All 5 failures are in
-`Services.Communication.*` (`CommunicationThreadReadServiceTests`, `CommunicationByRegardingReadTests`,
-`CommunicationFilteredQueryTests` — sender-identity/read projection). **Proven unrelated to R5**:
-`git diff --name-only 8a440ddac..HEAD` (the full 31-file session diff) touches **zero** Communication
-files — every R5 change is under `Services/Compose/`, `Api/ComposeEndpoints.cs`, the op catalog, or the
-`Spaarke.Compose.Components` client. These are a pre-existing Communication-module issue, out of R5 scope.
-> **Follow-up recommended** (not an R5 blocker): file/track the 5 Communication sender-identity test
-> failures as a separate issue — they predate this project.
+### 3. Full BFF suite — now 0 failed (the 5 pre-existing Communication fails were resolved)
+Initial run: `Failed: 5, Passed: 9314` — all 5 in `Services.Communication.*`
+(`CommunicationThreadReadServiceTests`, `CommunicationByRegardingReadTests`,
+`CommunicationFilteredQueryTests` — sender-identity/read projection), proven unrelated to R5 (zero
+Communication files in the R5 session diff).
+
+**Resolved 2026-07-30 (operator-requested, pre-deploy)**: root cause was **stale tests**, not a
+production bug. The read service was deliberately changed (messaging-r3, 2026-07-22) to read the sender
+display name from the `_sprk_sentby_value@OData.Community.Display.V1.FormattedValue` lookup annotation
+instead of the denormalized `sprk_sentbyname` column (broken in the env — `IsValidODataAttribute=false`,
+400s the whole read). The three test `MessageRow` helpers still populated the old `sprk_sentbyname` key,
+and one `$select` assertion still expected it. Fix (TEST-ONLY — production untouched): the helpers now set
+the `_sprk_sentby_value@…FormattedValue` annotation, and the assertion now asserts `sprk_sentbyname` is NOT
+selected. Re-run: **9319 passed / 0 failed / 101 skipped**.
 
 ### 4. ADR gates
 - **ArchTests**: 3 failures — ADR-007 (Graph isolation), ADR-010 (concrete services), ADR-010 (Options) —

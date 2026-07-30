@@ -131,7 +131,12 @@ public class CommunicationFilteredQueryTests
         var result = await sut.QueryCommunicationsAsync(
             ThreadId.ToString(), null, null, null, null, null, Caller(), CancellationToken.None);
 
-        _messageQuery.Should().Contain("sprk_direction").And.Contain("_sprk_sentby_value").And.Contain("sprk_sentbyname");
+        // The $select carries sprk_direction + the _sprk_sentby_value lookup (whose FormattedValue annotation
+        // supplies SentByName); sprk_sentbyname is deliberately NOT selected — broken in the env
+        // (IsValidODataAttribute=false) → messaging-r3 2026-07-22.
+        _messageQuery.Should().Contain("sprk_direction").And.Contain("_sprk_sentby_value");
+        _messageQuery.Should().NotContain("sprk_sentbyname",
+            "the broken denormalized column must not be selected (it 400s the whole read)");
         var msg = result.Messages.Single();
         msg.Direction.Should().Be(100000000);
         msg.SentBy.Should().Be(sender);
@@ -340,7 +345,9 @@ public class CommunicationFilteredQueryTests
         };
         if (direction is not null) row["sprk_direction"] = El(direction.Value);
         if (sentBy is not null) row["_sprk_sentby_value"] = El(sentBy.Value.ToString());
-        if (sentByName is not null) row["sprk_sentbyname"] = El(sentByName);
+        // Sender name rides the _sprk_sentby_value FormattedValue annotation (not the broken
+        // sprk_sentbyname column) — the service reads SentByName from THIS key (messaging-r3 2026-07-22).
+        if (sentByName is not null) row["_sprk_sentby_value@OData.Community.Display.V1.FormattedValue"] = El(sentByName);
         return row;
     }
 
