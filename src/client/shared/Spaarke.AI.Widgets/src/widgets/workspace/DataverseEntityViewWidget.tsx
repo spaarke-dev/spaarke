@@ -103,6 +103,16 @@ export interface DataverseEntityViewWidgetData {
    * Assignments) is unaffected.
    */
   onRecordOpen?: (recordId: string, record: Record<string, unknown>, ctx: DataGridHostContext) => void;
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1: OPTIONAL override for the DataGrid's
+   * `+ New` (`create-form`) command. Forwarded verbatim to `<DataGrid onCreateNew={...} />`.
+   * When supplied, New calls this INSTEAD of opening the OOB create form — the Analysis
+   * hub grid routes it to the tabbed Quick Start modal (via a PaneEventBus dispatch).
+   * Extends this widget's existing pass-through pattern (`pageSize`, `availableViews`,
+   * `onRecordOpen`) rather than forking DataGrid (CLAUDE.md §11). Absent = OOB create
+   * form (unchanged for every other `DataverseEntityViewWidget` consumer).
+   */
+  onCreateNew?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +282,7 @@ export const DataverseEntityViewWidget: React.FC<WorkspaceWidgetProps<DataverseE
           pageSize={data.pageSize}
           availableViewsAllowlist={data.availableViews}
           onRecordOpen={data.onRecordOpen}
+          onCreateNew={data.onCreateNew}
         />
       </div>
     </div>

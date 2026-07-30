@@ -35,18 +35,22 @@ import {
   createXrmDataService,
   createXrmNavigationService,
   searchUsersAndContacts,
+  ANALYSIS_REGARDING_TARGETS,
 } from "@spaarke/ui-components";
+import type { AssociationResult } from "@spaarke/ui-components";
 import {
   usePaneEvent,
   useDispatchPaneEvent,
   resolveWorkspaceWidget,
   getWorkspaceWidgetMetadata,
   useAiSession,
+  CreateAnalysisWizardWidget,
 } from "@spaarke/ai-widgets";
 import type {
   WorkspacePaneEvent,
   ConversationPaneEvent,
   WorkspaceWidgetComponent,
+  CreateAnalysisWizardData,
 } from "@spaarke/ai-widgets";
 // R6 Hotfix Wave B-G9c2 (2026-06-10): the previously-eager Summary tab
 // auto-install (R5 task 038) was removed. Each summarize invocation now
@@ -317,6 +321,35 @@ export function WorkspacePane(): React.JSX.Element {
     (query: string) => searchUsersAndContacts(analysisWizardDataService, query),
     [analysisWizardDataService],
   );
+
+  // ---------------------------------------------------------------------------
+  // Create Analysis wizard MODAL host (ai-advanced-capabilities-analysis-hub-r1
+  // tabbed Quick Start). The Quick Start "Agreement Review" card dispatches
+  // `open_create_analysis_wizard`; we host `CreateAnalysisWizardWidget` here as a
+  // MODAL (`embedded: false`) — it does NOT take a workspace tab, and on finish it
+  // opens its result tab exactly as today. WorkspacePane already injects the
+  // wizard's Xrm services (above) and is where the result tab lands, so it is the
+  // correct host.
+  // ---------------------------------------------------------------------------
+  const [createAnalysisModal, setCreateAnalysisModal] = React.useState<{
+    open: boolean;
+    workTypeValue?: number;
+    workTypeLabel?: string;
+  }>({ open: false });
+
+  // Regarding pre-set: resolve from the host entityContext (the record the
+  // SpaarkeAi surface was launched in — e.g. a Matter/Project modal). Mirrors the
+  // logic the retired AnalysisHub cards used; only the supported ADR-024 targets
+  // (Matter/Project/Document) force a regarding. Absent/unsupported host → no
+  // forced regarding (the wizard opens with an empty, user-editable lookup).
+  const analysisInitialAssociation = React.useMemo<AssociationResult | undefined>(() => {
+    const entityType = entityContext?.entityType;
+    const recordId = entityContext?.entityId;
+    if (!entityType || !recordId) return undefined;
+    const supported = ANALYSIS_REGARDING_TARGETS.some((t) => t.entityType === entityType);
+    if (!supported) return undefined;
+    return { entityType, recordId, recordName: recordId };
+  }, [entityContext?.entityType, entityContext?.entityId]);
 
   // Task 025 (FR-09): the Analysis-record anchor tab persistence keys on — see the
   // module-scope block above. Memoized on the entity identity fields (entityContext
@@ -1121,6 +1154,19 @@ export function WorkspacePane(): React.JSX.Element {
   usePaneEvent("workspace", (event: WorkspacePaneEvent): void => {
     const manager = managerRef.current;
 
+    // ai-advanced-capabilities-analysis-hub-r1 (tabbed Quick Start): open the
+    // Create Analysis wizard AS A MODAL (not a tab). Just flip state; the modal
+    // render below injects the Xrm services + regarding and, on finish, the wizard
+    // opens its own result tab (document-viewer) exactly as before.
+    if (event.type === "open_create_analysis_wizard") {
+      setCreateAnalysisModal({
+        open: true,
+        workTypeValue: event.analysisWorkType,
+        workTypeLabel: event.analysisWorkTypeLabel,
+      });
+      return;
+    }
+
     // FR-34 D-F3 (task 071): the deferred CONTENT-render ack. ComposeWorkspace emits
     // `compose_content_rendered` once a seeded draft actually renders in the editor.
     // If we deferred an ack for this ledgerRef on the originating `workspace_open_tab`
@@ -1777,6 +1823,34 @@ export function WorkspacePane(): React.JSX.Element {
         // above the header definition for rationale + widget-add contract.
         hideTabBar={isComposeLaunchMode}
       />
+
+      {/* ai-advanced-capabilities-analysis-hub-r1 (tabbed Quick Start): the Create
+          Analysis wizard hosted AS A MODAL. Mounted only while open; `embedded:false`
+          makes CreateRecordWizard render its own Fluent Dialog (portal). On close/finish
+          `onRequestClose` unmounts it; on finish the wizard also opens its result tab. */}
+      {createAnalysisModal.open && (
+        <CreateAnalysisWizardWidget
+          widgetType="create-analysis-wizard"
+          data={
+            {
+              embedded: false,
+              workTypeValue: createAnalysisModal.workTypeValue,
+              workTypeLabel: createAnalysisModal.workTypeLabel,
+              dataService: analysisWizardDataService,
+              navigationService: analysisWizardNavigationService,
+              searchUsers: analysisWizardSearchUsers,
+              searchAssignees: analysisWizardSearchUsers,
+              authenticatedFetch,
+              bffBaseUrl,
+              ...(chatSessionId ? { sessionId: chatSessionId } : {}),
+              ...(analysisInitialAssociation
+                ? { initialAssociation: analysisInitialAssociation }
+                : {}),
+              onRequestClose: () => setCreateAnalysisModal({ open: false }),
+            } as CreateAnalysisWizardData
+          }
+        />
+      )}
     </div>
   );
 }

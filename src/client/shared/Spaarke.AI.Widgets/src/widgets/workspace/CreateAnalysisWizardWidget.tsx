@@ -189,6 +189,22 @@ export interface CreateAnalysisWizardData {
   initialAssociation?: AssociationResult;
   /** Optional session id for correlation on the dispatched document-viewer event. */
   sessionId?: string;
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1 (tabbed Quick Start): render mode.
+   * `true` (default) = full-page embedded tab (the original task-040 behavior);
+   * `false` = the wizard renders as its OWN Fluent Dialog (a MODAL) via
+   * `CreateRecordWizard embedded={false}`. WorkspacePane sets `false` when it
+   * hosts the wizard from the Quick Start "Agreement Review" card so the wizard
+   * does NOT occupy a workspace tab — on finish it opens its result tab as usual.
+   */
+  embedded?: boolean;
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1: called when the wizard closes in
+   * MODAL mode (`embedded === false`) so the host can UNMOUNT it. No-op / unused
+   * in embedded/tab mode (the tab persists its own completion panel). Provided by
+   * WorkspacePane's Create Analysis modal host.
+   */
+  onRequestClose?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -312,10 +328,16 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
   const [isCompleted, setIsCompleted] = useState(false);
   const [completedName, setCompletedName] = useState('');
 
+  const embedded = data?.embedded ?? true;
+  const onRequestClose = data?.onRequestClose;
+
   const handleClose = useCallback(() => {
     setIsOpen(false);
     setIsCompleted(true);
-  }, []);
+    // Modal mode: ask the host (WorkspacePane) to unmount us. No-op in tab mode
+    // (onRequestClose is only supplied by the modal host).
+    onRequestClose?.();
+  }, [onRequestClose]);
 
   // ── Derived config (search callbacks, webApi adapter) ───────────────────
   const dataService = data?.dataService;
@@ -702,6 +724,27 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
     data?.sessionId,
     handleClose,
   ]);
+
+  // ── Render: modal mode (embedded === false) ──────────────────────────────
+  // Render ONLY the wizard's own Fluent Dialog (a portal) — NO full-height
+  // wrapper — so the host (WorkspacePane) can overlay this without a stray
+  // background box and unmount on close via onRequestClose. This branch runs
+  // BEFORE the loading/error/completed wrappers below so none of them flash a
+  // full-height panel behind the modal. The modal host injects services
+  // synchronously, so `config` is ready before the modal opens; any not-ready
+  // state degrades to null (nothing rendered).
+  if (!embedded) {
+    if (isLoading || error || isCompleted || !config) return null;
+    return (
+      <CreateRecordWizard
+        open={isOpen}
+        onClose={handleClose}
+        webApi={webApiAdapter!}
+        config={config}
+        embedded={false}
+      />
+    );
+  }
 
   // ── Render: loading ──────────────────────────────────────────────────────
   if (isLoading) {

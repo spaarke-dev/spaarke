@@ -1,35 +1,30 @@
 /**
- * AnalysisHubWidget — unit tests (task 030)
+ * AnalysisHubWidget — unit tests
  *
- * Exercises the widget's own contribution — the 3-card row + the DataGrid
- * composition wiring — per the task's ui-tests + acceptance criteria:
+ * As of the tabbed-Quick-Start UX change (ai-advanced-capabilities-analysis-hub-r1,
+ * 2026-07-29/30) this widget is a PLAIN dataset-grid widget: grid + toolbar only.
+ * The prior create-analysis cards were relocated to `AnalysisCardsWidget` (the
+ * Quick Start "Analysis" tab) and the task-031 in-place reopen was dropped
+ * (row-click = the DataGrid default OOB form). So these tests exercise:
  *
- *   1. Exactly three cards render; Agreement Review is actionable, Legal
- *      Research + Patent Application are disabled with a visible "Coming
- *      soon" badge affordance.
- *   2. Clicking Agreement Review dispatches a `widget_load` PaneEventBus
- *      event opening `create-analysis-wizard` with the Agreement Review
- *      work-type value.
- *   3. Negative: clicking a disabled coming-soon card performs no dispatch
- *      and surfaces no error.
- *   4. The Analysis grid is composed via `<DataverseEntityViewWidget>` (the
+ *   1. The Analysis grid is composed via `<DataverseEntityViewWidget>` (the
  *      canonical `<DataGrid configId=… />` wrapper) — NOT a bespoke table —
- *      with the hub's configId threaded through.
- *   5. ADR-021: renders under both light and dark Fluent themes.
+ *      with the seeded configId threaded through, and NO `onRecordOpen` override
+ *      (row-click uses the DataGrid default).
+ *   2. A caller-supplied `configId` override is honored.
+ *   3. `+ New` (the DataGrid `onCreateNew` override) dispatches the
+ *      `conversation.open_quick_start` intent with `quickStartTab: 'analysis'`.
+ *   4. ADR-021: renders under both light and dark Fluent themes.
  *
- * `DataverseEntityViewWidget` is mocked at the module boundary: it is an
- * ALREADY-TESTED shared-lib component (owns its own Xrm frame-walk +
- * `<DataGrid configId=… />` render — see its own file header) and this
- * widget's job is composition/wiring, not re-deriving DataGrid's internal
- * behavior. The mock lets these tests assert the wiring contract (configId +
- * widgetType passed through) without needing a full Xrm.WebApi + saved-query
- * mock harness — the same "mock the reused, already-tested component"
- * convention `CreateAnalysisWizardWidget.test.tsx` uses for `applyFieldMappings`.
+ * `DataverseEntityViewWidget` is mocked at the module boundary (an already-tested
+ * shared-lib component) so the tests assert the wiring contract without a full
+ * Xrm.WebApi + saved-query harness — and so the test can invoke the passed
+ * `onCreateNew` to simulate the `+ New` toolbar click.
  */
 
 import '@testing-library/jest-dom';
 import * as React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 
 // ---------------------------------------------------------------------------
@@ -38,31 +33,39 @@ import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-com
 
 const mockDispatch = jest.fn();
 jest.mock('../../../events/useDispatchPaneEvent', () => ({
-  useDispatchPaneEvent: () => mockDispatch,
+  // The widget reads the bus OPTIONALLY (Pattern D dual-use). The test provides a
+  // dispatch so the `+ New` override can be asserted.
+  useOptionalDispatchPaneEvent: () => mockDispatch,
 }));
 
-// task 031 (FR-11 reopen): the widget now reads bffBaseUrl/authenticatedFetch from
-// useAiSession() for the row-open BFF lookups. Mocked here (not exercised by task-030's
-// card/grid-composition tests) so this suite keeps rendering without a real
-// AiSessionProvider ancestor — mirrors the useDispatchPaneEvent mock above.
-jest.mock('../../../providers/useAiSession', () => ({
-  useAiSession: () => ({
-    bffBaseUrl: 'https://bff.example.com',
-    authenticatedFetch: jest.fn(),
-  }),
-}));
+// Captures the props the hub hands to the (mocked) grid wrapper — notably
+// `onCreateNew` (the `+ New` override) and the absence of `onRecordOpen`.
+let lastGridProps: {
+  data?: { configId?: string; onCreateNew?: () => void; onRecordOpen?: unknown };
+  widgetType: string;
+} | null = null;
 
 jest.mock('../DataverseEntityViewWidget', () => ({
-  DataverseEntityViewWidget: (props: { data?: { configId?: string }; widgetType: string }) => (
-    <div
-      data-testid="mock-dataverse-entity-view-widget"
-      data-config-id={props.data?.configId}
-      data-widget-type={props.widgetType}
-    />
-  ),
+  DataverseEntityViewWidget: (props: {
+    data?: { configId?: string; onCreateNew?: () => void; onRecordOpen?: unknown };
+    widgetType: string;
+  }) => {
+    lastGridProps = props;
+    return (
+      <div
+        data-testid="mock-dataverse-entity-view-widget"
+        data-config-id={props.data?.configId}
+        data-widget-type={props.widgetType}
+        data-has-create-new={props.data?.onCreateNew ? 'yes' : 'no'}
+        data-has-record-open={props.data?.onRecordOpen ? 'yes' : 'no'}
+      />
+    );
+  },
 }));
 
 import { AnalysisHubWidget } from '../AnalysisHubWidget';
+
+const SEEDED_CONFIG_ID = 'e7c8126a-968b-f111-8077-7ced8ddc4a05';
 
 // ---------------------------------------------------------------------------
 // Test harness
@@ -78,6 +81,7 @@ function renderHub(theme: typeof webLightTheme = webLightTheme) {
 
 beforeEach(() => {
   mockDispatch.mockClear();
+  lastGridProps = null;
 });
 
 // ---------------------------------------------------------------------------
@@ -85,69 +89,17 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('AnalysisHubWidget', () => {
-  it('renders exactly three work-type cards — Agreement Review actionable, two disabled with a coming-soon affordance', () => {
-    renderHub();
-
-    expect(screen.getByTestId('analysis-hub-card-agreement-review')).toBeInTheDocument();
-    expect(screen.getByTestId('analysis-hub-card-legal-research')).toBeInTheDocument();
-    expect(screen.getByTestId('analysis-hub-card-patent-application')).toBeInTheDocument();
-
-    const agreementButton = screen.getByRole('button', { name: /Agreement Review/i });
-    expect(agreementButton).toHaveAttribute('aria-disabled', 'false');
-
-    const legalResearchButton = screen.getByRole('button', { name: /Legal Research.*coming soon/i });
-    expect(legalResearchButton).toHaveAttribute('aria-disabled', 'true');
-
-    const patentButton = screen.getByRole('button', { name: /Patent Application.*coming soon/i });
-    expect(patentButton).toHaveAttribute('aria-disabled', 'true');
-
-    // Visible "Coming soon" affordance — exactly the two disabled cards.
-    const badges = screen.getAllByText('Coming soon');
-    expect(badges).toHaveLength(2);
-  });
-
-  it('dispatches a widget_load event opening create-analysis-wizard when Agreement Review is clicked', () => {
-    renderHub();
-
-    const agreementButton = screen.getByRole('button', { name: /Agreement Review/i });
-    fireEvent.click(agreementButton);
-
-    expect(mockDispatch).toHaveBeenCalledTimes(1);
-    expect(mockDispatch).toHaveBeenCalledWith('workspace', {
-      type: 'widget_load',
-      widgetType: 'create-analysis-wizard',
-      widgetData: {
-        workTypeValue: 100000000,
-        workTypeLabel: 'Agreement Review',
-      },
-      displayName: 'Create Agreement Review Analysis',
-    });
-  });
-
-  it('negative: clicking a disabled coming-soon card performs no dispatch and surfaces no error', () => {
-    renderHub();
-
-    const legalResearchButton = screen.getByRole('button', { name: /Legal Research.*coming soon/i });
-    const patentButton = screen.getByRole('button', { name: /Patent Application.*coming soon/i });
-
-    expect(() => {
-      fireEvent.click(legalResearchButton);
-      fireEvent.click(patentButton);
-    }).not.toThrow();
-
-    expect(mockDispatch).not.toHaveBeenCalled();
-    // No error state rendered.
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-  });
-
-  it('composes the Analysis grid via <DataverseEntityViewWidget> (the DataGrid framework wrapper), threading the hub configId — not a bespoke table', () => {
+  it('composes the Analysis grid via <DataverseEntityViewWidget> with the seeded configId and NO row-open override', () => {
     renderHub();
 
     const mockGrid = screen.getByTestId('mock-dataverse-entity-view-widget');
     expect(mockGrid).toBeInTheDocument();
     expect(mockGrid).toHaveAttribute('data-widget-type', 'analysis-hub-grid');
-    // Placeholder constant until task 071 seeds the real sprk_gridconfiguration GUID.
-    expect(mockGrid.getAttribute('data-config-id')).toBe('00000000-0000-0000-0000-000000000000');
+    expect(mockGrid).toHaveAttribute('data-config-id', SEEDED_CONFIG_ID);
+    // Row-click uses the DataGrid DEFAULT (OOB form) — no custom onRecordOpen.
+    expect(mockGrid).toHaveAttribute('data-has-record-open', 'no');
+    // No create-analysis cards on this surface any more.
+    expect(screen.queryByTestId('analysis-hub-card-agreement-review')).not.toBeInTheDocument();
   });
 
   it('honors a caller-supplied configId override for the Analysis grid', () => {
@@ -163,15 +115,30 @@ describe('AnalysisHubWidget', () => {
     );
   });
 
+  it('`+ New` dispatches conversation.open_quick_start on the Analysis tab', () => {
+    renderHub();
+
+    const mockGrid = screen.getByTestId('mock-dataverse-entity-view-widget');
+    expect(mockGrid).toHaveAttribute('data-has-create-new', 'yes');
+
+    // Simulate the DataGrid `+ New` toolbar click by invoking the override.
+    expect(lastGridProps?.data?.onCreateNew).toBeDefined();
+    lastGridProps!.data!.onCreateNew!();
+
+    expect(mockDispatch).toHaveBeenCalledTimes(1);
+    expect(mockDispatch).toHaveBeenCalledWith('conversation', {
+      type: 'open_quick_start',
+      quickStartTab: 'analysis',
+    });
+  });
+
   it('ADR-021: renders correctly under both light and dark Fluent themes', () => {
     const { unmount } = renderHub(webLightTheme);
     expect(screen.getByTestId('analysis-hub-widget')).toBeInTheDocument();
-    expect(screen.getAllByText('Coming soon')).toHaveLength(2);
     unmount();
 
     renderHub(webDarkTheme);
     expect(screen.getByTestId('analysis-hub-widget')).toBeInTheDocument();
-    expect(screen.getAllByText('Coming soon')).toHaveLength(2);
-    expect(screen.getByRole('button', { name: /Agreement Review/i })).toHaveAttribute('aria-disabled', 'false');
+    expect(screen.getByTestId('mock-dataverse-entity-view-widget')).toBeInTheDocument();
   });
 });

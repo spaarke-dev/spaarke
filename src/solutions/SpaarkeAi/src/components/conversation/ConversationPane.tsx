@@ -540,6 +540,10 @@ export function ConversationPane(): React.JSX.Element {
   // (the playbook library is retired). Owned here so the `openLibraryModalRef` the chips
   // reach through (below) points at this modal instead of the library modal.
   const [quickStartOpen, setQuickStartOpen] = React.useState(false);
+  // ai-advanced-capabilities-analysis-hub-r1: which Quick Start tab opens. The
+  // Assistant menu / chips "More…" open 'create'; the Analysis grid `+ New`
+  // (via the `open_quick_start` intent below) opens 'analysis'.
+  const [quickStartTab, setQuickStartTab] = React.useState<"create" | "analysis">("create");
   // UAT 2026-07-21 (#8): "What the Assistant remembers about you" review/delete dialog (host-owned so
   // it has authenticatedFetch + bffBaseUrl), opened from the ⋮ Assistant Tools "Memory" entry.
   const [memoryOpen, setMemoryOpen] = React.useState(false);
@@ -1571,7 +1575,10 @@ export function ConversationPane(): React.JSX.Element {
   // specific candidate-confidence flow (mirrors useCommandRouting's
   // `openLibraryModal([])` call for the same reason).
   // P1-8: the SNS/post-upload "More…" card opens Quick Start (was the retired playbook library).
-  openLibraryModalRef.current = () => setQuickStartOpen(true);
+  openLibraryModalRef.current = () => {
+    setQuickStartTab("create");
+    setQuickStartOpen(true);
+  };
   const commands = useCommandRouting({
     bffBaseUrl,
     authenticatedFetch,
@@ -1861,6 +1868,12 @@ export function ConversationPane(): React.JSX.Element {
   usePaneEvent("conversation", (event) => {
     if (event.type === "session_switch" && event.sessionId) {
       handleSelectHistorySession(event.sessionId);
+    } else if (event.type === "open_quick_start") {
+      // ai-advanced-capabilities-analysis-hub-r1: the Analysis grid `+ New`
+      // asks us to open the ONE Quick Start modal on a given tab. Default to
+      // 'create' if unspecified.
+      setQuickStartTab(event.quickStartTab ?? "create");
+      setQuickStartOpen(true);
     }
   });
 
@@ -2012,7 +2025,10 @@ export function ConversationPane(): React.JSX.Element {
               // file context + email handler + the R7-2 next-step injection, and — because opening it
               // never remounts SprkChat — the follow-up suggestion pills survive (the dual-modal path
               // was the one that lost them). AssistantToolMenu delegates to this prop when supplied.
-              onQuickStart={() => setQuickStartOpen(true)}
+              onQuickStart={() => {
+                setQuickStartTab("create");
+                setQuickStartOpen(true);
+              }}
               onMyAssistant={myAssistant.openDialog}
               highlightMyAssistant={myAssistant.needsProfile}
               // #8 (UAT 2026-07-21): the "Memory" entry opens the remembers-about-you review dialog.
@@ -2081,7 +2097,10 @@ export function ConversationPane(): React.JSX.Element {
             onCreateMatter={handleWelcomeCreateMatter}
             onCompose={handleWelcomeCompose}
             // R4-2 (UAT 2026-07-19): "More…" opens the Quick Start modal (same modal the ⋮ menu uses).
-            onMore={() => setQuickStartOpen(true)}
+            onMore={() => {
+              setQuickStartTab("create");
+              setQuickStartOpen(true);
+            }}
           />
         )}
 
@@ -2254,6 +2273,20 @@ export function ConversationPane(): React.JSX.Element {
       <QuickStartModal
         open={quickStartOpen}
         onClose={() => setQuickStartOpen(false)}
+        initialTab={quickStartTab}
+        // ai-advanced-capabilities-analysis-hub-r1: the Analysis tab's "Agreement Review"
+        // card. Close Quick Start, then ask WorkspacePane (which injects the wizard's
+        // Xrm services + resolves regarding from the host record) to host the Create
+        // Analysis wizard AS A MODAL. The wizard does not take a tab; on finish it opens
+        // its result tab as today.
+        onCreateAnalysis={(workTypeValue, workTypeLabel) => {
+          setQuickStartOpen(false);
+          dispatch("workspace", {
+            type: "open_create_analysis_wizard",
+            analysisWorkType: workTypeValue,
+            analysisWorkTypeLabel: workTypeLabel,
+          });
+        }}
         getFileContext={getQuickStartFileContext}
         // R5-9: Quick Start "Send Email" opens the shared Email Compose modal (blank), not the
         // playbook-library web resource. Close Quick Start first so the two modals don't stack.

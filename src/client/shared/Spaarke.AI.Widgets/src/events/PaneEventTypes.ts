@@ -360,7 +360,16 @@ export interface WorkspacePaneEvent {
     //    Reuses the existing `ledgerRef` + `sessionId` fields (identifiers only,
     //    Tier-1 safe — ADR-015); additive discriminant (ADR-030), no new channel,
     //    no `any`. See ComposeWorkspace.tsx (emitter) + WorkspacePane.tsx (ack site).
-    | 'compose_content_rendered';
+    | 'compose_content_rendered'
+    // ── Tabbed Quick Start → Create Analysis wizard modal
+    //    (ai-advanced-capabilities-analysis-hub-r1) ── Conversation → Workspace.
+    //    The Quick Start "Agreement Review" card asks WorkspacePane to host the
+    //    Create Analysis wizard AS A MODAL (`CreateRecordWizard embedded={false}`),
+    //    injecting the Xrm-coupled services + regarding from the host context. On
+    //    finish the wizard opens its result tab exactly as today. Additive
+    //    discriminant (ADR-030); carries `analysisWorkType` + `analysisWorkTypeLabel`
+    //    only (a Choice integer + display string — Tier-1 safe, ADR-015).
+    | 'open_create_analysis_wizard';
 
   /** Identifies the widget kind (e.g. `"document-summary"`, `"clause-list"`). */
   widgetType?: string;
@@ -900,6 +909,27 @@ export interface WorkspacePaneEvent {
    * `advisoryComments[].riskLevel` in that case (see `NdaReviewSummaryPanel.tsx`).
    */
   overallRisk?: string;
+
+  // ── Tabbed Quick Start → Create Analysis wizard modal fields ──────────────
+  //
+  // Carried by the `open_create_analysis_wizard` discriminant ONLY. Both are
+  // configuration metadata (a Choice integer + its display string) — Tier-1
+  // safe under ADR-015. `regarding` is intentionally NOT carried: WorkspacePane
+  // resolves it from the host `entityContext` it already holds (the record the
+  // SpaarkeAi surface was launched in), so no user-content identity crosses the
+  // bus.
+
+  /**
+   * `sprk_worktype` Choice integer for `type === 'open_create_analysis_wizard'`.
+   * Optional — WorkspacePane defaults to Agreement Review when absent. Tier-1 safe.
+   */
+  analysisWorkType?: number;
+
+  /**
+   * Display label for the analysis work type (`type === 'open_create_analysis_wizard'`),
+   * used in the wizard title. Optional. Tier-1 safe.
+   */
+  analysisWorkTypeLabel?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1439,7 +1469,13 @@ export interface ConversationPaneEvent {
     | 'compose_selection_offer'
     | 'compose_context_offer'
     // ── Session switch (ai-advanced-capabilities-analysis-hub-r1 task 031, FR-11) ──
-    | 'session_switch';
+    | 'session_switch'
+    // ── Tabbed Quick Start (ai-advanced-capabilities-analysis-hub-r1) ──
+    // The Analysis grid's `+ New` toolbar (`AnalysisHubWidget`, WORKSPACE pane)
+    // asks ConversationPane — which owns the single `QuickStartModal` — to open
+    // that modal on a specified tab (`create` | `analysis`). Additive
+    // discriminant per ADR-030; existing subscribers ignore it.
+    | 'open_quick_start';
 
   /** Human-readable suggestion text when `type === 'suggestion'`. */
   suggestionText?: string;
@@ -1479,6 +1515,13 @@ export interface ConversationPaneEvent {
 
   /** Structured refinement instruction payload for `refine_request`. */
   refineData?: unknown;
+
+  /**
+   * Which Quick Start tab to open when `type === 'open_quick_start'`:
+   * `'create'` (the 7 GetStarted cards) | `'analysis'` (the analysis cards).
+   * Absent → the host defaults to `'create'`. Tier-1 safe.
+   */
+  quickStartTab?: 'create' | 'analysis';
 
   // ── Compose flow fields (spaarkeai-compose-r2 task 104) ───────────────────
   //

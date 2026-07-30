@@ -414,6 +414,13 @@ export type { PlaybookGalleryData, PlaybookSummary } from './widgets/context/Pla
 export { GetStartedCardsWidget } from './widgets/context/GetStartedCardsWidget';
 export type { GetStartedCardId, GetStartedCardsWidgetProps } from './widgets/context/GetStartedCardsWidget';
 
+// Widgets: AnalysisCardsWidget — the 3 analysis work-type launch cards for the
+// tabbed Quick Start modal's "Analysis" tab (ai-advanced-capabilities-analysis-hub-r1).
+// Layout mirror of GetStartedCardsWidget; consumed by SpaarkeAi's QuickStartModal.
+// ---------------------------------------------------------------------------
+export { AnalysisCardsWidget } from './widgets/context/AnalysisCardsWidget';
+export type { AnalysisCardId, AnalysisCardsWidgetProps } from './widgets/context/AnalysisCardsWidget';
+
 // R6 Pillar 7 / task 096 — export PinnedMemoryListWidget so the SpaarkeAi
 // shell can mount it inline in the Context pane (selectedTool ===
 // 'pinned-memory'). Owns its own BFF fetch (GET /api/memory/pins).
