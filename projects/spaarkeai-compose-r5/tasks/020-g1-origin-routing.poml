@@ -4,7 +4,7 @@
     <title>G1 — Cross-session authored-vs-imported origin routing (persist + return marker; client clean-path routing)</title>
     <phase>2 Authored-doc lifecycle</phase>
     <gate>dep:002</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF save/load orchestration (`ComposeService.cs`) plus client save routing (`ComposeWorkspace.tsx`), tags include bff-api/frontend, and changes the load/save contract. Touches R4.5-owned contended files. FULL per CLAUDE.md §8 (code implementation + `.cs`/`.tsx` change + contract change).</rigor-reason>
     <model-tier>sonnet</model-tier>
