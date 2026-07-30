@@ -189,6 +189,13 @@ public static class CommunicationModule
         // is NOT auto-file-eligible, so it never auto-files. Registered unconditionally; self-gated by
         // Communication:ContactNameMatch:Enabled.
         services.AddSingleton<IAssociationRung, ContactNameMatchRung>();       // rung 3.6 — contact-name match
+        // rung 3.7 — attachment→document association (email-communication-intelligence-r1 061 UAT / F1). Matches
+        // an incoming attachment to an existing sprk_document (by sprk_filename today; by the AI-populated
+        // sprk_globalsearchextender content field as that project lands) and surfaces the document's OWN
+        // matter/project/invoice links as candidates. SUGGEST-ONLY: RungKind.DocumentAssociation is not in the
+        // mapper's auto-file-eligible/deterministic-write sets, so it can only add review candidates, never
+        // auto-file. Takes the singleton IGenericEntityService (no captive dependency). Registered unconditionally (ADR-010).
+        services.AddSingleton<IAssociationRung, AttachmentDocumentAssociationRung>(); // rung 3.7 — attachment→document
         // rung 4 — semantic record match (FR-14). AI-tier: the engine evaluates it only when the
         // deterministic pass did not auto-file, and the mapper caps it to Suggested (never auto-files).
         // Consumes the IRecordMatchingAi facade (ADR-013) from a per-evaluation scope (facade is scoped,
