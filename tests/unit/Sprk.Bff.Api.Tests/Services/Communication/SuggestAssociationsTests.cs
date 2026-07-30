@@ -97,6 +97,7 @@ public class SuggestAssociationsTests
         var parentMatterId = Guid.NewGuid();
         var parentComm = new DataverseEntity("sprk_communication");
         parentComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", parentMatterId);
+        parentComm["sprk_associationstatus"] = new OptionSetValue(100000000); // P3: Resolved parent ⇒ reply inherits at 1.0
 
         var dv = new Mock<IDataverseService>();
         dv.Setup(d => d.GetCommunicationByInternetMessageIdAsync("<parent@contoso.com>", It.IsAny<CancellationToken>()))
@@ -175,6 +176,7 @@ public class SuggestAssociationsTests
 
         var parentComm = new DataverseEntity("sprk_communication");
         parentComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", parentMatterId);
+        parentComm["sprk_associationstatus"] = new OptionSetValue(100000000); // P3: Resolved parent ⇒ reply inherits at 1.0
         dv.Setup(d => d.GetCommunicationByInternetMessageIdAsync("<parent@contoso.com>", It.IsAny<CancellationToken>()))
             .ReturnsAsync(parentComm);
 

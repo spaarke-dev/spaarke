@@ -78,6 +78,19 @@ public sealed class ThreadContinuityRung : IAssociationRung
 
     private static List<RungMatch> CopyParentRegarding(Entity parent, string matchedMessageId)
     {
+        // P3 (FR-12 UAT, 2026-07-30): inherit at FULL (auto-file) confidence ONLY from a parent whose own
+        // association was trustworthy — Resolved (auto-filed or human-confirmed). A parent that is merely
+        // Suggested / Ambiguous / Pending is itself unconfirmed; copying it at 1.0 would AMPLIFY a weak or
+        // wrong parent association into an auto-file across every reply in the thread (misfile propagation —
+        // "as bad as mis-associating the primary record"). From a non-Resolved parent, inherit at a suggest-
+        // band confidence so the reply SURFACES the thread association for review (and can still reinforce with
+        // the reply's own independent matches) rather than auto-filing off an unconfirmed parent. The parent's
+        // sprk_associationstatus is already fetched by GetCommunicationBy*IdAsync (no extra query).
+        var parentStatus = parent.GetAttributeValue<OptionSetValue>("sprk_associationstatus")?.Value;
+        var parentResolved = parentStatus == AssociationStatusCodes.Resolved;
+        var confidence = parentResolved ? 1.0 : InheritFromUnconfirmedParentConfidence;
+        var statusNote = parentResolved ? "resolved" : "unconfirmed";
+
         var matches = new List<RungMatch>();
         foreach (var field in RegardingFieldMap.AllRegardingFields)
         {
@@ -87,8 +100,8 @@ public sealed class ThreadContinuityRung : IAssociationRung
                 {
                     RegardingFieldName = field,
                     Target = parentRef,
-                    Confidence = 1.0,
-                    Provenance = $"thread:ancestor:{matchedMessageId}→parent:{parent.Id}:{field}",
+                    Confidence = confidence,
+                    Provenance = $"thread:ancestor:{matchedMessageId}→parent:{parent.Id}:{field}:parent={statusNote}",
                     Rung = RungKind.ThreadContinuity,
                 });
             }
@@ -96,4 +109,11 @@ public sealed class ThreadContinuityRung : IAssociationRung
 
         return matches;
     }
+
+    /// <summary>
+    /// Suggest-band confidence (below the 0.85 auto-file threshold) used when the thread parent's own
+    /// association is NOT Resolved — the reply surfaces the inherited association for review and can reinforce
+    /// with its own independent matches, but never auto-files off an unconfirmed parent (P3 misfile guard).
+    /// </summary>
+    private const double InheritFromUnconfirmedParentConfidence = 0.65;
 }

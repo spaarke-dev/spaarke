@@ -72,9 +72,23 @@ public class RecordNameMatchOptions
     // attachment noise below the 0.85 conflict floor so it stops spuriously triggering Ambiguous, and (c) gives
     // each candidate a human, location-based match reason for the review UI.
 
-    /// <summary>Confidence for a verified reference-NUMBER appearance (0–1, default 0.97) — the most discriminating signal.</summary>
+    /// <summary>
+    /// Confidence for a verified reference-NUMBER appearance in the SUBJECT (0–1, default 0.97) — the most
+    /// discriminating signal in the strongest location. E1 (FR-12 UAT): number matches are now location-tiered
+    /// like name matches (subject &gt; body &gt; attachment) so the record the email is REALLY about — the one
+    /// cited in the subject — outranks a number merely mentioned in an older thread body. (Property name kept as
+    /// <c>NumberConfidence</c> for config back-compat; it is the SUBJECT tier.)
+    /// </summary>
     [Range(0.0, 1.0)]
     public double NumberConfidence { get; set; } = 0.97;
+
+    /// <summary>Confidence for a reference-NUMBER matched in the BODY (0–1, default 0.90) — strong, but ranks below a subject number (E1).</summary>
+    [Range(0.0, 1.0)]
+    public double BodyNumberConfidence { get; set; } = 0.90;
+
+    /// <summary>Confidence for a reference-NUMBER matched ONLY in an ATTACHMENT (0–1, default 0.82) — ranks below a body number (E1).</summary>
+    [Range(0.0, 1.0)]
+    public double AttachmentNumberConfidence { get; set; } = 0.82;
 
     /// <summary>Confidence for a name matched in the SUBJECT (0–1, default 0.95) — strongest name signal.</summary>
     [Range(0.0, 1.0)]
