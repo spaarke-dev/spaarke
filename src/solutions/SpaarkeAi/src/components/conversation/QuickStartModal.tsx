@@ -145,15 +145,19 @@ export interface QuickStartModalProps {
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
+  // FIXED-size surface (ai-advanced-capabilities-analysis-hub-r1 UAT #1): the modal
+  // must NOT resize when switching tabs (Create has 7 cards, Analysis has 3). The
+  // width lives on the SURFACE (Fluent's DialogSurface defaults to ~600px max, which
+  // is narrower than the 3-column card grid → the cards used to overflow the modal).
+  // A fixed 720px surface fully contains the grid; the content fills it.
+  surface: {
+    width: '720px',
+    maxWidth: '720px',
+  },
   content: {
     display: 'flex',
     flexDirection: 'column',
-    // FIXED size (ai-advanced-capabilities-analysis-hub-r1 UAT #1): the modal must
-    // NOT resize when switching tabs (Create has 7 cards, Analysis has 3). A fixed
-    // width + height keeps the dialog stable; each tab's card grid scrolls internally
-    // (the card widgets own `overflowY: auto`), so the shorter Analysis tab simply
-    // shows empty space below rather than shrinking the modal.
-    width: '640px',
+    width: '100%',
     height: '460px',
     padding: 0,
     overflow: 'hidden',
@@ -307,7 +311,7 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({
       }}
       modalType="modal"
     >
-      <DialogSurface data-testid="quick-start-modal">
+      <DialogSurface className={styles.surface} style={{ maxWidth: '720px', width: '720px' }} data-testid="quick-start-modal">
         <DialogBody>
           <DialogTitle className={styles.title}>Quick Start</DialogTitle>
           <DialogContent className={styles.content}>

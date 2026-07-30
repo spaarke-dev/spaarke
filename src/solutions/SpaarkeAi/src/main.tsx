@@ -574,9 +574,32 @@ async function bootstrap(): Promise<void> {
   // the deterministic CODE path (openSpaarkeAi deep-link + main.tsx mode
   // routing), NOT the reactive in-chat surface-launch registry.
   // -------------------------------------------------------------------------
+  // UAT round 3 (2026-07-30): when SpaarkeAi is embedded as a web resource on the
+  // OOB `sprk_analysis` FORM (row-click / ribbon "Open" → the Analysis form), Dataverse
+  // does NOT pass the record id via URL/`data` params, so the page cold-loaded the
+  // default workspace (Daily Briefing) instead of THAT analysis. Frame-walk the parent
+  // form context: if the host form is a `sprk_analysis` record, adopt its id as the
+  // analysisId (existing-mode). An explicit URL/`data` `analysisId` still wins.
+  const readParentFormAnalysisId = (): string | undefined => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm: any = (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+      const entity = xrm?.Page?.data?.entity;
+      if (entity && typeof entity.getEntityName === "function" && entity.getEntityName() === "sprk_analysis") {
+        const raw: string | undefined = entity.getId?.();
+        const id = raw ? raw.replace(/^\{|\}$/g, "").toLowerCase() : undefined;
+        return id && id.length > 0 ? id : undefined;
+      }
+    } catch {
+      /* cross-origin / no Xrm — standalone or non-form host */
+    }
+    return undefined;
+  };
+
   const analysisId =
     searchParams.get("analysisId") ??
     dataParams.get("analysisId") ??
+    readParentFormAnalysisId() ??
     undefined;
 
   const worktype =

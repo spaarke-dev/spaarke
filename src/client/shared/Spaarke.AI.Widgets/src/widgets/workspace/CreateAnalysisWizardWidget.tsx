@@ -82,7 +82,13 @@ import {
   mergeClasses,
   tokens,
 } from '@fluentui/react-components';
-import { CalendarCheckmarkRegular, CheckmarkCircleFilled, MailRegular } from '@fluentui/react-icons';
+import {
+  CalendarCheckmarkRegular,
+  CheckmarkCircleFilled,
+  DismissRegular,
+  MailRegular,
+  SearchRegular,
+} from '@fluentui/react-icons';
 
 // NOTE: barrel imports only (not deep `@spaarke/ui-components/components/...`
 // paths) — this package's jest config maps only the exact `@spaarke/
@@ -240,6 +246,15 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
+  // Assigned Attorney / Paralegal share one row (UAT round 3).
+  assignRow: {
+    display: 'flex',
+    gap: tokens.spacingHorizontalM,
+  },
+  assignField: {
+    flex: 1,
+    minWidth: 0,
+  },
   stepTitle: {
     color: tokens.colorNeutralForeground1,
     marginBottom: tokens.spacingVerticalXS,
@@ -257,11 +272,12 @@ const useStyles = makeStyles({
 const EMPTY_SEARCH = () => Promise.resolve([] as ILookupItem[]);
 
 /**
- * Read-only lookup control that opens the OOB right-side Dataverse lookup pane
- * (via the caller's `onPick`, which calls `navigationService.openLookup`) rather
- * than an inline typeahead. Shows the picked record's name + a Clear button once
- * selected; a "Select…" button otherwise. Used for Assigned Attorney / Paralegal
- * (both `contact` lookups) per UAT #6.
+ * Standard Fluent lookup field (ai-advanced-capabilities-analysis-hub-r1 UAT round 3):
+ * a read-only `Input` that shows the picked record's name (or a `---` placeholder) with
+ * a trailing lookup (search) icon — the same affordance as an OOB Dataverse lookup. The
+ * whole field OR the icon opens the OOB right-side lookup pane (caller's `onPick` →
+ * `navigationService.openLookup`); once selected, the trailing icon becomes a Clear (×).
+ * Used for Assigned Attorney / Paralegal (both `contact` lookups).
  */
 interface ContactLookupControlProps {
   value: ILookupItem | null;
@@ -271,25 +287,43 @@ interface ContactLookupControlProps {
   placeholder?: string;
 }
 
-const ContactLookupControl: React.FC<ContactLookupControlProps> = ({ value, onPick, onClear, disabled, placeholder }) => {
-  if (value) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
-        <Text size={300} weight="semibold">
-          {value.name}
-        </Text>
-        <Button appearance="subtle" size="small" onClick={onClear} disabled={disabled} aria-label="Clear selection">
-          Clear
-        </Button>
-      </div>
-    );
-  }
-  return (
-    <Button appearance="secondary" onClick={onPick} disabled={disabled}>
-      {placeholder ?? 'Select…'}
-    </Button>
-  );
-};
+const ContactLookupControl: React.FC<ContactLookupControlProps> = ({ value, onPick, onClear, disabled, placeholder }) => (
+  <Input
+    readOnly
+    value={value?.name ?? ''}
+    placeholder={placeholder ?? '---'}
+    disabled={disabled}
+    onClick={disabled ? undefined : onPick}
+    input={{ style: { cursor: disabled ? 'default' : 'pointer' } }}
+    contentAfter={
+      value ? (
+        <Button
+          appearance="transparent"
+          size="small"
+          icon={<DismissRegular />}
+          aria-label="Clear selection"
+          disabled={disabled}
+          onClick={e => {
+            e.stopPropagation();
+            onClear();
+          }}
+        />
+      ) : (
+        <Button
+          appearance="transparent"
+          size="small"
+          icon={<SearchRegular />}
+          aria-label="Open lookup"
+          disabled={disabled}
+          onClick={e => {
+            e.stopPropagation();
+            onPick();
+          }}
+        />
+      )
+    }
+  />
+);
 
 /** Adapt IDataService to the webApi shape CreateRecordWizard/PolymorphicResolverService expect. */
 function buildWebApiAdapter(dataService: IDataService) {
@@ -532,25 +566,25 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
               />
             </Field>
 
-            <Field label="Assigned Attorney">
-              <ContactLookupControl
-                value={attorney}
-                onPick={() => handlePickContact(setAttorney)}
-                onClear={() => setAttorney(null)}
-                disabled={!navigationService}
-                placeholder="Select an attorney…"
-              />
-            </Field>
+            <div className={styles.assignRow}>
+              <Field label="Assigned Attorney" className={styles.assignField}>
+                <ContactLookupControl
+                  value={attorney}
+                  onPick={() => handlePickContact(setAttorney)}
+                  onClear={() => setAttorney(null)}
+                  disabled={!navigationService}
+                />
+              </Field>
 
-            <Field label="Assigned Paralegal">
-              <ContactLookupControl
-                value={paralegal}
-                onPick={() => handlePickContact(setParalegal)}
-                onClear={() => setParalegal(null)}
-                disabled={!navigationService}
-                placeholder="Select a paralegal…"
-              />
-            </Field>
+              <Field label="Assigned Paralegal" className={styles.assignField}>
+                <ContactLookupControl
+                  value={paralegal}
+                  onPick={() => handlePickContact(setParalegal)}
+                  onClear={() => setParalegal(null)}
+                  disabled={!navigationService}
+                />
+              </Field>
+            </div>
           </div>
         ),
       },
@@ -779,8 +813,18 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         setCompletedName(finishName);
 
         const hasWarnings = warnings.length > 0;
+        // "View" opens the new Analysis as a MODAL (UAT round 3): the OOB
+        // `sprk_analysis` form at 85%×85% (openRecordModal), consistent with the
+        // grid row-click. Falls back to a plain openRecord when the host adapter
+        // doesn't implement the modal variant. The embedded SpaarkeAi on that form
+        // now resolves the record via the parent-form frame-walk (main.tsx), so the
+        // modal shows THIS analysis rather than the cold workspace.
         const viewAnalysis = () => {
-          navigationService?.openRecord?.('sprk_analysis', analysisId);
+          if (navigationService?.openRecordModal) {
+            void navigationService.openRecordModal('sprk_analysis', analysisId);
+          } else {
+            void navigationService?.openRecord?.('sprk_analysis', analysisId);
+          }
           handleClose();
         };
 
