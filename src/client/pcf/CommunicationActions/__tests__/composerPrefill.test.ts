@@ -4,7 +4,7 @@
  * Forward carries the body with "Fwd:", Draft keeps the record's recipients.
  */
 
-import { deriveComposerFields, splitRecipients } from '../CommunicationActions/composerPrefill';
+import { deriveComposerFields, splitRecipients } from '@spaarke/communication-components/logic/actions';
 
 const record = {
   from: 'sender@contoso.com',

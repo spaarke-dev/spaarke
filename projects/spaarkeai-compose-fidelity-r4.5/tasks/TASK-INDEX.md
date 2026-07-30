@@ -31,7 +31,7 @@
 | 051 | WS-5 spike — Word-service eval + NFR-03 licensing | 5 Page/Line | WS-5 | opus | high | STANDARD | — | ✔ | ✅ (2 license items → human sign-off @ 052) |
 | 052 | WS-5 decision record — ship vs fast-follow | 5 Page/Line | WS-5 | opus | high | STANDARD | 050,051 | ✘ | ✅ **DEFER** (2 licensing sign-offs → human @ fast-follow) |
 | 043 | WS-4 payoff: review-note label cites computed legal number (`ndaClauseLocation`) | 4 Reference | WS-4 | sonnet | high | FULL | 042 | ✘ | ✅ (dev-UAT fix — "Para 3" → "Sec 2"; deployed) |
-| 090 | Project wrap-up (status / lessons / test-diet / archive) | 9 Wrap-up | — | sonnet | med | MINIMAL | all | ✘ | 🔲 |
+| 090 | Project wrap-up (status / lessons / test-diet / archive) | 9 Wrap-up | — | sonnet | med | MINIMAL | all | ✘ | ✅ (README→Complete; lessons-learned; test-diet; issues #696-699 filed; archived) |
 
 ## Parallel Execution Groups
 

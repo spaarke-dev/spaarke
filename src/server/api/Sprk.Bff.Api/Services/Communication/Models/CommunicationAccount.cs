@@ -57,6 +57,18 @@ public sealed class CommunicationAccount
     };
 
     /// <summary>
+    /// Decides whether incoming mail for this (receive-enabled / monitored) account is archived
+    /// as a full-body <c>.eml</c> to SPE. FR-17 contract: archiving is <b>default-on, forward-only</b>
+    /// for monitored accounts. Returns true unless the account has EXPLICITLY opted out
+    /// (<see cref="ArchiveIncomingOptIn"/> == <c>false</c>) — an unset flag (<c>null</c>) is the intended
+    /// default and archives. This is the single source of truth for the archive gate in
+    /// <c>IncomingCommunicationProcessor</c> Step 6; the "monitored" scope is enforced upstream by
+    /// <c>CommunicationAccountService.QueryReceiveEnabledAccountsAsync</c>. Forward-only: no historical
+    /// mail is backfilled by this decision.
+    /// </summary>
+    public bool ShouldArchiveIncoming() => ArchiveIncomingOptIn != false;
+
+    /// <summary>
     /// Derives subscription status from SubscriptionId presence and expiry.
     /// </summary>
     public SubscriptionStatus DeriveSubscriptionStatus()

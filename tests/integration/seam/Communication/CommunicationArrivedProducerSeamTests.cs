@@ -5,6 +5,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Identity;
@@ -60,10 +61,12 @@ public sealed class CommunicationArrivedProducerSeamTests
         public required CommunicationArrivedProducer Producer { get; init; }
         public required RecordingDelivery Delivery { get; init; }
         public required List<DataverseEntity> OutboxWrites { get; init; }
+        public required List<CreateNotificationRequest> Notifications { get; init; }
         public required List<string> Events { get; init; }
         public required Guid CommunicationId { get; init; }
         public required Guid ThreadId { get; init; }
         public required Guid Recipient { get; init; }
+        public required Guid MatterId { get; init; }
     }
 
     /// <summary>
@@ -76,12 +79,15 @@ public sealed class CommunicationArrivedProducerSeamTests
         var communicationId = Guid.NewGuid();
         var threadId = Guid.NewGuid();
         var recipient = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
         var outboxWrites = new List<DataverseEntity>();
         var events = new List<string>();
 
         var entity = new Mock<IGenericEntityService>(MockBehavior.Strict);
 
-        // Re-read the persisted communication (the producer's projection contract).
+        // Re-read the persisted communication (the producer's projection contract). The TYPED ADR-024 regarding
+        // lookup (sprk_regardingmatter) is the reliable source of the Q2 deep-link entity type — the string
+        // sprk_regardingrecordtype is a lookup, not a usable type name.
         var message = new DataverseEntity("sprk_communication", communicationId)
         {
             ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", threadId),
@@ -89,8 +95,8 @@ public sealed class CommunicationArrivedProducerSeamTests
             ["sprk_direction"] = new OptionSetValue(direction),
             ["sprk_isinternalonly"] = false,
             ["createdon"] = DateTime.UtcNow,
-            ["sprk_regardingrecordid"] = "00000000-0000-0000-0000-0000000000aa",
-            ["sprk_regardingrecordtype"] = "sprk_matter",
+            ["sprk_regardingrecordid"] = matterId.ToString(),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId),
         };
         entity
             .Setup(s => s.RetrieveAsync("sprk_communication", communicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
@@ -154,18 +160,32 @@ public sealed class CommunicationArrivedProducerSeamTests
         var outbox = new OutboxService(entity.Object, NullLogger<OutboxService>.Instance); // REAL outbox
         var delivery = new RecordingDelivery(events);
 
+        // IActionSeam boundary (Layer-A facade) — records the Q2 app-notification requests, returns success.
+        var notifications = new List<CreateNotificationRequest>();
+        var seam = new Mock<IActionSeam>();
+        seam
+            .Setup(s => s.CreateNotificationAsync(It.IsAny<CreateNotificationRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<CreateNotificationRequest, CancellationToken>((req, _) =>
+            {
+                notifications.Add(req);
+                events.Add($"notify:{req.RecipientId}");
+            })
+            .ReturnsAsync(new CreateNotificationResult(true, Guid.NewGuid(), false, null));
+
         var producer = new CommunicationArrivedProducer(
-            entity.Object, fanout, outbox, delivery, NullLogger<CommunicationArrivedProducer>.Instance);
+            entity.Object, fanout, outbox, delivery, seam.Object, NullLogger<CommunicationArrivedProducer>.Instance);
 
         return new Harness
         {
             Producer = producer,
             Delivery = delivery,
             OutboxWrites = outboxWrites,
+            Notifications = notifications,
             Events = events,
             CommunicationId = communicationId,
             ThreadId = threadId,
             Recipient = recipient,
+            MatterId = matterId,
         };
     }
 
@@ -207,8 +227,8 @@ public sealed class CommunicationArrivedProducerSeamTests
         ping.Kind.Should().Be(NotificationKind.CommunicationArrived);
         ping.OutboxRowId.Should().NotBe(Guid.Empty, "the ping carries the outbox row id from the prior write");
 
-        // Outbox BEFORE ping — the write-before-ping invariant (ADR-041/043), asserted on the ordering log.
-        h.Events.Should().Equal("outbox-write", $"ping:{h.Recipient}");
+        // Outbox BEFORE ping — the write-before-ping invariant (ADR-041/043) — then the Q2 app-notification mirror.
+        h.Events.Should().Equal("outbox-write", $"ping:{h.Recipient}", $"notify:{h.Recipient}");
     }
 
     // ── NFR-05: a producer failure (here, the durable outbox write) is non-fatal — it never throws back into the
@@ -225,5 +245,33 @@ public sealed class CommunicationArrivedProducerSeamTests
             "NFR-05: a producer exception must never fail the persist call that triggered it");
         h.Delivery.Pings.Should().BeEmpty(
             "no live ping is sent when the durable outbox write failed (write-before-ping)");
+    }
+
+    // ── Q2 (2026-07-28): each fan-out recipient ALSO gets a persistent, clickable Dataverse app-notification,
+    //    deep-linked to the regarding record (which hosts the conversation panel), deduped per thread. Proves the
+    //    producer composes the IActionSeam request correctly — the sanctioned CommunicationRiActionService mirror
+    //    pattern generalized to the fan-out set. ──
+
+    [Fact]
+    public async Task EmitCommunicationArrived_MirrorsClickableAppNotification_PerRecipient_DeepLinkedToRegardingRecord()
+    {
+        var h = BuildHarness(TypeEmail, DirectionIncoming);
+
+        await h.Producer.EmitCommunicationArrivedAsync(h.CommunicationId);
+
+        // One recipient → one bell notification.
+        h.Notifications.Should().ContainSingle();
+        var n = h.Notifications[0];
+
+        n.RecipientId.Should().Be(h.Recipient);
+        n.Category.Should().Be("communication");
+        n.RegardingId.Should().Be(h.ThreadId, "idempotency dedups per (recipient + category + thread) — one unread bell per thread");
+        n.RegardingType.Should().Be("sprk_communicationthread");
+        n.ToastType.Should().Be(200_000_000, "Timed toast emits the clickable Open action (Hidden would suppress it)");
+        n.ActionUrl.Should().Be(
+            $"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={h.MatterId:D}",
+            "the bell deep-links to the regarding record (resolved from the TYPED lookup), which hosts the conversation panel");
+        n.CorrelationId.Should().Be(h.CommunicationId.ToString());
+        n.Title.Should().Be("New email", "signal-only channel label — never an address or content (NFR-02/03)");
     }
 }

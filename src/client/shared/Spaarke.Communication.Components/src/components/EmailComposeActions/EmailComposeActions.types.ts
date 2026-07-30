@@ -1,0 +1,107 @@
+/**
+ * EmailComposeActions.types.ts
+ *
+ * Dependency-injection contract for `useEmailComposeActions` (email-
+ * communication-solution-r5 task 036, FR-09/FR-10/FR-15). This module wires
+ * the task-032 reading-pane toolbar's `EmailToolbarActionHandlers` dispatch
+ * seam to the CANONICAL `EmailComposer`/`SendEmailDialog` — it does NOT fork
+ * a new composer, does NOT add a new BFF endpoint, and does NOT import Xrm
+ * directly (ADR-012 context-agnostic): the host (task 040 assembly / the
+ * Email code page) injects `dataService` / `navigationService` via
+ * `createXrmDataService()` / `createXrmNavigationService()`
+ * (`@spaarke/ui-components`), mirroring `sprk_communicationconversationpage`'s
+ * `App.tsx` pattern.
+ */
+import type * as React from 'react';
+import type {
+  AuthenticatedFetchFn,
+  IDataService,
+  INavigationService,
+  ILookupItem,
+  ICommunicationAssociation,
+  SendCommunicationError,
+  ISendEmailDialogProps,
+} from '@spaarke/ui-components';
+import type { EmailToolbarActionHandlers } from '../EmailReadingPaneShell';
+import type { ComposerFields } from '../../logic/actions';
+
+/**
+ * `ISendEmailDialogProps` (the wrapper's DECLARED type) omits `initialCc` —
+ * the wrapper forwards any extra props straight through to the underlying
+ * `<EmailComposer/>` engine via `...composerProps`, and the engine's own
+ * `IEmailComposerProps` DOES accept `initialCc`. This intersection reflects
+ * the TRUE forwarded prop surface without editing `SendEmailDialog.tsx`
+ * (`@spaarke/ui-components` source is out of this task's edit scope) — it
+ * only widens the TYPE this package uses for the element it builds.
+ */
+export type SendEmailDialogElementProps = ISendEmailDialogProps & Pick<ComposerFields, 'initialCc'>;
+
+/**
+ * Injected dependencies. All context-agnostic (ADR-012) — the host resolves
+ * the concrete Xrm/BFF bridge and hands typed services/callbacks in.
+ */
+export interface EmailComposeActionsDeps {
+  /** Auth-aware fetch (ADR-028) — forwarded verbatim to the canonical composer's EXISTING send path. */
+  authenticatedFetch: AuthenticatedFetchFn;
+  /** BFF host base URL (no `/api` suffix) — forwarded verbatim to the composer. */
+  bffBaseUrl: string;
+  /**
+   * Reads the `sprk_communication` fields (`sprk_from`/`sprk_to`/`sprk_cc`/
+   * `sprk_subject`/`sprk_body`/`createdon`) needed to derive Reply/Reply
+   * All/Forward pre-fill via the task-022 `deriveComposerFields`. The host
+   * supplies `createXrmDataService()` — this module never touches
+   * `Xrm.WebApi` itself.
+   */
+  dataService: IDataService;
+  /**
+   * Resolves "Open full form" (FR-15) as an 85% `navigateTo` modal
+   * (`openRecordModal`) per `docs/standards/MODAL-DECISION-CRITERIA.md`. The
+   * host supplies `createXrmNavigationService()`.
+   */
+  navigationService: INavigationService;
+  /** Recipient directory typeahead — forwarded to the composer's `RecipientField`. */
+  onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
+  /**
+   * Associations to carry onto Reply/Reply All/Forward (e.g. the parent's
+   * inherited regarding records). Ignored for New (blank compose). Optional —
+   * association inheritance itself is out of this task's scope; the host may
+   * supply an already-computed list.
+   */
+  associations?: ICommunicationAssociation[];
+  /**
+   * Fired after a successful send with the new `sprk_communication` id — the
+   * host's responsibility to refresh the reading pane / re-select the record
+   * (this module owns compose dispatch only, not list/record refresh).
+   */
+  onSent?: (communicationId: string) => void;
+  /** Fired on a send error (surfacing — e.g. a MessageBar — is the host's responsibility). */
+  onError?: (err: SendCommunicationError) => void;
+}
+
+export interface UseEmailComposeActionsResult {
+  /**
+   * Pass straight through to `<EmailReadingPaneShell actions={...} />`
+   * (task 032 seam). Implements `onReply`/`onReplyAll`/`onForward`/`onNew`
+   * ONLY — this task's scope (FR-09/FR-10). `onArchive`/`onCreate` are
+   * deliberately left `undefined`; wiring them is a different task's concern
+   * and the shell already degrades an unwired handler to a console-warned
+   * no-op.
+   */
+  actions: EmailToolbarActionHandlers;
+  /**
+   * Render this once, anywhere below the host's `FluentProvider` — owns the
+   * canonical `SendEmailDialog`'s open/close lifecycle. Always the SAME
+   * element type (`SendEmailDialog`) regardless of mode — no forked/second
+   * composer is ever introduced.
+   */
+  composerDialog: React.ReactElement<SendEmailDialogElementProps>;
+  /**
+   * FR-15 — opens the OOB `sprk_communication` Email main form for
+   * `communicationId` as an 85% `navigateTo` modal
+   * (`INavigationService.openRecordModal`). Wire this to whichever "Open
+   * full form" trigger the assembling host renders (e.g. the task-034 header
+   * slot, via the exported `OpenFullFormButton`) — `EmailToolbar.tsx`
+   * (task 032) is out of this task's edit scope.
+   */
+  openFullForm: (communicationId: string) => Promise<void>;
+}

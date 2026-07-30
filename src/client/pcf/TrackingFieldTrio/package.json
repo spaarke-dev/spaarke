@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "description": "PCF field control that combines Monitor + High Priority toggles with an Access Permission segmented picker in a compact 3-column layout",
   "scripts": {
+    "prebuild": "node ../../shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js",
     "build": "pcf-scripts build",
+    "prebuild:prod": "node ../../shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js",
     "build:prod": "pcf-scripts build --buildMode production",
     "clean": "pcf-scripts clean",
     "lint": "pcf-scripts lint",
@@ -14,6 +16,7 @@
     "refreshTypes": "pcf-scripts refreshTypes"
   },
   "dependencies": {
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
     "ajv": "^8.20.0"
   },
   "devDependencies": {

@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="email-communication-solution-r5">
+  <metadata>
+    <title>FR-13/FR-14/FR-19: reading-pane interactive association review (ConnectionsEditor logic, additive write) + tracking-flags view</title>
+    <phase>3 Layer-2 React 19 views + reading-pane shell</phase>
+    <gate>after:020,023,032</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Interactive write path to the Association Engine — MUST use the existing additive write (`applyRegardingSelection`), MUST NOT clear-and-set, and MUST consume the PRODUCTION ConnectionsEditor logic (task 020), not the stale CommunicationPage stub. Getting the write semantics wrong silently corrupts record associations. Tags include frontend/fluent-ui; the sibling-preservation + inherited-regarding cases are DoD. FULL gate.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Correctness of the additive-write contract matters, but the write handler is already extracted (task 020) and this task consumes it — no novel access-model reasoning. Sonnet @ high with a FULL gate is sufficient; the production-vs-stub trap is called out explicitly.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct reading-pane sub-view (associations + tracking); shares only the shell mount contract with 033/034/036. Separate view files.</parallel-reason>
+    <deps>020,023,032</deps>
+    <tags>frontend, fluent-ui, react</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the reading-pane ASSOCIATION-REVIEW + TRACKING sub-view (React 19 Layer-2). The association section is a React 19 review view over the PRODUCTION `ConnectionsEditor` Layer-1 logic (task 020): INTERACTIVE confirm / change / dismiss / link-another via the existing additive write path (`applyRegardingSelection` — MUST NOT clear-and-set). Reply-chain auto-association (`ThreadContinuityRung`, applied server-side at ingestion) is DISPLAYED, not recomputed. Low-confidence matches render as "Needs your decision" / "Suggested" groups (provenance — FR-19 uncertainty). Also render the `TrackingFieldTrio` view (task 023 core) — monitor / high-priority / access flags (read + write). Compose into the reading-pane shell (task 032).</prompt>
+  <role>SPAARKE platform developer. Expert in React 19 + Fluent UI v9 and the Spaarke Association Engine additive-regarding write model. Follow ADRs strictly (ADR-045 communication/association, ADR-021 Fluent v9/dark).</role>
+  <goal>A React 19 sub-view in `@spaarke/communication-components` that: (1) renders the selected email's record associations from the production `ConnectionsEditor` Layer-1 logic (task 020) — grouping low-confidence matches into "Needs your decision" / "Suggested" per provenance; (2) supports interactive confirm / change / dismiss / link-another, each persisting via `applyRegardingSelection` (ADDITIVE — siblings preserved, no clear-and-set); (3) displays reply-chain auto-association (`ThreadContinuityRung`) as already-applied "Filed automatically" — display only; (4) renders the `TrackingFieldTrio` view (task 023 core, options passed in) for monitor / high-priority / access flags with read+write. No `as React.ComponentType` cast (NFR-05); dark-mode correct (ADR-021).</goal>
+
+  <context>
+    <background>Spec FR-13 + FR-14 + FR-19. The reading pane surfaces the email's record associations for interactive review and its tracking flags. The interactive logic + additive write handler already exist in the PRODUCTION `ConnectionsEditor` (PCF) — extracted to shared Layer-1 in task 020. Reply-chain inheritance runs server-side at ingestion (`ThreadContinuityRung.CopyParentRegarding`) and is display-only here (ADR-045: association is server-owned; the client displays + reuses the additive write path, adds no new association logic). ⚠ There is a STALE `CommunicationPage/.../ConnectionsEditor.tsx` copy — this task MUST use the production-extracted logic (task 020), NOT the stub. Tracking flags come from the `TrackingFieldTrio` generic core lifted in task 023 (options passed in, entity-agnostic).</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/reading-pane/EmailAssociationsAndTracking.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/reading-pane/ReadingPaneShell.tsx</file>
+      <file role="canonical-reference">src/client/pcf/CommunicationConnections/CommunicationConnections/ConnectionsEditor.tsx</file>
+      <file role="canonical-reference">src/client/pcf/CommunicationConnections/CommunicationConnections/handlers/ConnectionsWriteHandler.ts</file>
+      <file role="canonical-reference">src/client/pcf/CommunicationConnections/CommunicationConnections/provenance.ts</file>
+      <file role="canonical-reference">src/client/pcf/TrackingFieldTrio/TrackingFieldTrioApp.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">Extracted PRODUCTION `ConnectionsEditor` Layer-1 logic (`provenance` + `ConnectionsWriteHandler.applyRegardingSelection`) in shared — the review view consumes this (NOT the stale `CommunicationPage` stub).</dependency>
+      <dependency task="023" status="pending">Lifted `TrackingFieldTrio` generic core in `@spaarke/ui-components` (options passed in) — the tracking view consumes this.</dependency>
+      <dependency task="032" status="pending">Reading-pane shell — the mount point; supplies the selected record.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Additive write ONLY (FR-13, spec MUST): confirm/change/dismiss/link-another MUST persist via the existing `applyRegardingSelection` additive path — siblings preserved. MUST NOT clear-and-set the regarding.</constraint>
+    <constraint source="project">Production logic (spec MUST): consume the task-020 production-extracted `ConnectionsEditor` Layer-1 logic — MUST NOT reuse the stale `CommunicationPage/.../ConnectionsEditor.tsx` stub.</constraint>
+    <constraint source="ADR-045">Association is server-owned; this client view DISPLAYS associations (incl. reply-chain `ThreadContinuityRung` inheritance applied at ingestion) and reuses the additive write path — it introduces NO new client-side association-resolution logic. Thread-entity inheritance gap stays deferred, not worked around.</constraint>
+    <constraint source="project">Uncertainty state (FR-19): low-confidence/AI-suggested matches render in distinct "Needs your decision" / "Suggested" groups per `sprk_associationprovenance` / `sprk_associationstatus`; auto-filed matches render as "Filed automatically".</constraint>
+    <constraint source="ADR-021">Fluent v9 only; association groups + tracking toggles render correctly in dark mode via the host `FluentProvider`.</constraint>
+    <constraint source="NFR-05">React 19 Layer-2 view consuming React-agnostic Layer-1 logic only; no `as React.ComponentType` cast introduced.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>React 19 view · Association Engine additive regarding · provenance grouping · tracking flags</topic>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-components.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+    </files>
+    <patterns>
+      <pattern name="Additive regarding write" location="src/client/pcf/CommunicationConnections/CommunicationConnections/handlers/ConnectionsWriteHandler.ts">`applyRegardingSelection` is the additive write (siblings preserved); the file explicitly warns against clear-and-set. Consume via the task-020 shared extraction.</pattern>
+      <pattern name="Provenance grouping" location="src/client/pcf/CommunicationConnections/CommunicationConnections/provenance.ts">Maps association status/provenance → "Filed automatically" / "Needs your decision" / "Suggested" groups. Reuse for the FR-19 uncertainty state.</pattern>
+      <pattern name="Tracking trio" location="src/client/pcf/TrackingFieldTrio/TrackingFieldTrioApp.tsx">The generic core lifted in task 023; pass options in (entity-agnostic) for monitor / high-priority / access flags.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load CLAUDE.md, spec FR-13/FR-14/FR-19, ADR-045/ADR-021. Declare RIGOR LEVEL: FULL (interactive association write). Confirm tasks 020 (production logic) + 023 (tracking core) + 032 landed; verify you are wiring the task-020 extraction, NOT the `CommunicationPage` stub.</step>
+    <step order="1">Render the association review from the task-020 Layer-1 logic: group matches via `provenance` into "Filed automatically" / "Needs your decision" / "Suggested".</step>
+    <step order="2">Wire interactive confirm / change / dismiss / link-another, each persisting via `applyRegardingSelection` (additive; siblings preserved). Do NOT clear-and-set.</step>
+    <step order="3">Display reply-chain auto-association (`ThreadContinuityRung`, applied at ingestion) as "Filed automatically" — display only; do not recompute inheritance client-side.</step>
+    <step order="4">Render the `TrackingFieldTrio` view (task 023 core, options passed in) for monitor / high-priority / access flags; wire read + write.</step>
+    <step order="5">Compose into `ReadingPaneShell.tsx` at the associations + tracking slots.</step>
+    <step order="6">Add `&lt;ui-tests&gt;` incl. dark-mode + sibling-preservation + inherited-regarding + ambiguous-group. Build + typecheck (no `as React.ComponentType`).</step>
+    <step order="N-1">Update `projects/email-communication-solution-r5/tasks/TASK-INDEX.md`: set 035 to ✅.</step>
+    <step order="N">Document any deviation in `projects/email-communication-solution-r5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If achieving correct interactive review appears to require NEW client-side association-resolution logic (beyond displaying + calling `applyRegardingSelection`), STOP and escalate per root CLAUDE.md §6/§6.5 — association is server-owned (ADR-045); the thread-entity inheritance gap is DEFERRED, not to be worked around here.</trigger>
+    <trigger>If only the stale `CommunicationPage` `ConnectionsEditor` stub is available (task 020 not landed / not exporting the production logic), STOP — do NOT wire the stub.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Production `ConnectionsEditor` logic + `applyRegardingSelection` (task-020 extraction) and the `TrackingFieldTrio` core (task-023 lift) already exist. Grep: `src/client/pcf/CommunicationConnections/.../ConnectionsEditor.tsx`, `.../handlers/ConnectionsWriteHandler.ts`, `src/client/pcf/TrackingFieldTrio/TrackingFieldTrioApp.tsx`.</existing>
+    <extension>Yes — this task builds a React 19 review VIEW over already-extracted Layer-1 logic and composes into the reading-pane shell (task 032, the §11-justified surface). No new association or tracking business logic is introduced.</extension>
+    <cost-of-doing-nothing>Without it the reading pane cannot review/confirm record associations or read/set tracking flags — FR-13 and FR-14 fail; ambiguous auto-associations (FR-19) would never surface for a user decision.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Interactive confirm persists additively">
+      <steps><step>Select an email with an existing regarding sibling.</step><step>Confirm/link-another an additional record.</step></steps>
+      <expected>The new association persists via `applyRegardingSelection`; the pre-existing sibling regarding is preserved (no clear-and-set).</expected>
+    </test>
+    <test name="Reply shows inherited parent regarding">
+      <steps><step>Select a reply to an already-filed email.</step></steps>
+      <expected>The parent's regarding shows as "Filed automatically" (ThreadContinuityRung, applied at ingestion) — display only, not recomputed.</expected>
+    </test>
+    <test name="Ambiguous associations grouped">
+      <steps><step>Select an email with low-confidence/AI-suggested matches.</step></steps>
+      <expected>Matches render in distinct "Needs your decision" / "Suggested" groups per provenance (FR-19).</expected>
+    </test>
+    <test name="Tracking flags read/write">
+      <steps><step>Toggle monitor / high-priority / access flags in the tracking view.</step></steps>
+      <expected>Current values render from the record; toggles write back correctly.</expected>
+    </test>
+    <test name="Dark mode (ADR-021)">
+      <steps><step>Toggle the host `FluentProvider` to dark theme.</step><step>View association groups + tracking toggles.</step></steps>
+      <expected>All render correctly in dark mode with no hardcoded colors.</expected>
+    </test>
+  </ui-tests>
+
+  <tools><tool name="npm">Build/typecheck the shared TS package</tool><tool name="terminal">shell</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/reading-pane/EmailAssociationsAndTracking.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/reading-pane/ReadingPaneShell.tsx</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/reading-pane/__tests__/EmailAssociationsAndTracking.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an email with an existing regarding sibling, when the user confirms/links another record, then the new association persists via `applyRegardingSelection` and the sibling is preserved (additive; no clear-and-set).</criterion>
+    <criterion testable="true">Given a reply to an already-filed email, when selected, then the parent's inherited regarding shows as "Filed automatically" (display only).</criterion>
+    <criterion testable="true">Given low-confidence/AI-suggested matches, when the association view renders, then they appear in "Needs your decision" / "Suggested" groups per provenance (FR-19).</criterion>
+    <criterion testable="true">Given the tracking view, when monitor / high-priority / access flags are toggled, then current values read from the record and changes write back.</criterion>
+    <criterion testable="true">Negative: the view consumes the task-020 production logic, NOT the stale `CommunicationPage` `ConnectionsEditor` stub (verified by import path).</criterion>
+    <criterion testable="true">Negative: a dismiss action removes only the targeted association, leaving other regarding siblings intact (additive semantics hold on removal).</criterion>
+    <criterion testable="true">Association groups + tracking toggles render correctly in dark mode (ADR-021); no `as React.ComponentType` cast introduced (NFR-05); package build + typecheck green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference spec FR-13, FR-14, FR-19; design.md Lens 2 (uncertainty state) + Lens 4 (ConnectionsEditor is the source, NOT RegardingResolver; stale `CommunicationPage` copy is a stub — replace). ADR-045: association server-owned; thread-entity inheritance deferred. Run `/conflict-check` before PR (touches `@spaarke/communication-components` + `@spaarke/ui-components`). Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

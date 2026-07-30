@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="email-communication-solution-r5">
+  <metadata>
+    <title>FR-04: ViewSelector integration over sprk_communication saved views — default "Email — Inbox", view-switch re-runs FetchXML + re-populates the card list; optional List/Thread toggle (only if cheap)</title>
+    <phase>3 Layer-2 views</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Reuse-heavy wiring of the existing `ViewSelector` + `IDataverseClient.retrieveSavedQueriesForEntity` over `sprk_communication`; no net-new component surface, no security/access-model reasoning, no BFF/plugin/auth edits. STANDARD per CLAUDE.md §8 (tasks with constraints, no new correctness-critical surface). Quality gates skipped, but still uses task-execute.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Straightforward integration against a documented, presentational reuse target with an exact signature (`retrieveSavedQueriesForEntity(entityName)` → `onViewChange(viewId)`). Sonnet default.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Adds a small wiring module/hook alongside 030; only shares the `@spaarke/communication-components` barrel export line with 030 (coordinate that one edit). No shared internal state.</parallel-reason>
+    <deps>none</deps>
+    <tags>frontend, fluent-ui</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Wire the existing (reused-as-is) `ViewSelector` over `sprk_communication` saved views for the Email surface. Use `IDataverseClient.retrieveSavedQueriesForEntity('sprk_communication')` to fetch the saved-view list, default the selection to the "Email — Inbox" saved view, and when the user changes the view, re-run that view's FetchXML and re-populate the `EmailCardList` (task 030). Include the OPTIONAL "View by List / View by Thread" toggle (thread = group by `sprk_communicationthread`) ONLY if it is inexpensive to add on top of the same data path; if it is not cheap, OMIT it and record the deferral in notes (spec: included only if cheap).</prompt>
+  <role>SPAARKE platform developer. Expert in React 19 + Fluent v9 data-surface wiring and the `IDataverseClient` (Xrm/BFF) adapter. Follow ADRs strictly (ADR-012 reuse, ADR-021 Fluent v9, ADR-028 auth).</role>
+  <goal>An Email view-selection wiring layer (a hook + a thin container, e.g. `useEmailViews` + `EmailViewSelector`) in `@spaarke/communication-components` that: (1) on mount calls `IDataverseClient.retrieveSavedQueriesForEntity('sprk_communication')` and maps the result to `ViewSelector`'s `SavedView[]`; (2) resolves the default selection to the "Email — Inbox" saved view (by name, falling back to the entity default when absent); (3) renders the reused `ViewSelector` (from `@spaarke/ui-components`) with those views; (4) on `onViewChange(viewId)`, re-runs the selected view's FetchXML via the injected `IDataverseClient` and returns the resulting Email-filtered rows so the host can re-populate `EmailCardList`; (5) OPTIONALLY renders a "View by List / View by Thread" toggle that groups the same rows by `sprk_communicationthread` — included ONLY if it reuses the already-fetched rows with no extra query and trivial grouping code, else omitted + deferred.</goal>
+
+  <context>
+    <background>Spec FR-04 + design Lens 2/Lens 4: the left pane's ViewSelector is REUSE (wired, not net-new). Makers author `sprk_communication` system saved views pre-filtered to `sprk_communicationtype = Email` ("Email — Inbox / Sent / Drafts / By Matter / All Email"); the FetchXML provides the Email filter, so non-Email views are excluded by the query, not by client code. `ViewSelector` is purely presentational — it takes a `views` array and emits `onViewChange(viewId)`; the host owns the fetch + refetch. This task supplies that host wiring for the Email surface and feeds task 030's `EmailCardList`. The default view is "Email — Inbox". The List/Thread toggle is explicitly optional (spec Assumptions: "included only if inexpensive").</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/EmailViewSelector/useEmailViews.ts</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/EmailViewSelector/EmailViewSelector.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/index.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/ViewSelector.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/services/IDataverseClient.ts</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/services/XrmDataverseClient.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">`EmailCardList` — this wiring re-populates that list on view change; the two share the `@spaarke/communication-components` barrel export. 031 can START before 030 lands (contract-only) but integrates against it.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">REUSE `ViewSelector` from `@spaarke/ui-components` AS-IS — do NOT fork, re-implement, or copy it. This task supplies host wiring (fetch + default + refetch) only; the picker UI is the existing component.</constraint>
+    <constraint source="project">Saved-view source: fetch via `IDataverseClient.retrieveSavedQueriesForEntity('sprk_communication')`. The Email filter is carried by each view's FetchXML (`sprk_communicationtype = Email`), NOT re-implemented in client code — do not add a client-side Email predicate on top of a view.</constraint>
+    <constraint source="project">Default selection MUST resolve to the "Email — Inbox" saved view by name on open; if that named view is absent, fall back to the entity's default view (`SavedView.isDefault`) — never crash on a missing named view.</constraint>
+    <constraint source="project">On `onViewChange(viewId)`, re-run the selected view's FetchXML through the injected `IDataverseClient` and surface the resulting rows to the host so the card list re-populates. The wiring MUST accept the `IDataverseClient` by injection (works under both the Xrm and BFF adapters) — do NOT call `Xrm.WebApi` directly.</constraint>
+    <constraint source="project">OPTIONAL List/Thread toggle: include ONLY if it groups the already-fetched rows by `sprk_communicationthread` with no additional Dataverse query and trivial code. If it would require a second query or non-trivial grouping/pagination work, OMIT it and record the deferral in `notes/` (spec Assumptions — cheap-only).</constraint>
+    <constraint source="ADR-021">Any wiring-level UI (the optional toggle) uses Fluent v9 tokens and renders correctly in dark mode via the host `FluentProvider`.</constraint>
+    <constraint source="ADR-022,NFR-05">React 19 code-page-tier work; introduce NO `as React.ComponentType` cast.</constraint>
+    <constraint source="ADR-028">All Dataverse access flows through the injected `IDataverseClient` (Xrm host-context or BFF `authenticatedFetch` adapter) — no bespoke auth surface.</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`ViewSelector` (`src/client/shared/Spaarke.UI.Components/src/components/DataGrid/ViewSelector.tsx`) + `IDataverseClient.retrieveSavedQueriesForEntity` — both exist and are reused AS-IS; the only new files are a thin host hook (`useEmailViews.ts`) + container (`EmailViewSelector.tsx`) that bind them to `sprk_communication`.</existing>
+    <extension>Reuse, not new surface — the picker component and the saved-query adapter are consumed unchanged; the new files are the per-surface wiring (fetch + "Email — Inbox" default + refetch) that every ViewSelector host must supply, not a new abstraction.</extension>
+    <cost-of-doing-nothing>Without this wiring the Email surface has no way to list/select `sprk_communication` saved views or default to "Email — Inbox", and the card list (030) has nothing to populate from — FR-04 fails.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <topic>Saved-view resolution + reused ViewSelector wiring</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Host fetches views, ViewSelector is presentational" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/ViewSelector.tsx">Header comment states hosts fetch the view list once via `retrieveSavedQueriesForEntity` and pass down `views`; `onViewChange(viewId)` re-fetches. Mirror exactly for the Email surface.</pattern>
+      <pattern name="Saved-view → FetchXML resolution" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts">Reference for resolving a savedquery to its FetchXML + running it via `IDataverseClient`; reuse the same resolution path for the Email view switch.</pattern>
+      <pattern name="IDataverseClient adapters" location="src/client/shared/Spaarke.UI.Components/src/services/IDataverseClient.ts">`retrieveSavedQueriesForEntity(entityName): Promise&lt;SavedQuerySummary[]&gt;`; inject the client so the wiring works under both Xrm and BFF adapters.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML + spec FR-04 + design Lens 2. Declare RIGOR LEVEL: STANDARD with reason. Confirm `ViewSelector` + `IDataverseClient` signatures.</step>
+    <step order="1">Implement `useEmailViews(client: IDataverseClient)`: on mount call `retrieveSavedQueriesForEntity('sprk_communication')`, map to `SavedView[]` (id, name, isDefault), and resolve the initial `selectedViewId` to the "Email — Inbox" view by name (fallback to `isDefault`). Expose `{ views, selectedViewId, setSelectedViewId, rows, isLoading, error }`.</step>
+    <step order="2">On selection change, resolve the selected view's FetchXML and run it via the injected client; store the resulting rows (already Email-filtered by the view's FetchXML) and expose them for `EmailCardList`. Surface a view-load error (FR-19 error banner) rather than throwing.</step>
+    <step order="3">Implement `EmailViewSelector` container: render the reused `&lt;ViewSelector views=… activeViewId=selectedViewId onViewChange=setSelectedViewId /&gt;`. Do NOT re-implement the picker.</step>
+    <step order="4">Evaluate the OPTIONAL List/Thread toggle: if grouping the already-fetched rows by `sprk_communicationthread` is trivial and needs no extra query, add a Fluent v9 toggle that switches the host between flat and thread-grouped rendering. If not cheap, OMIT and write a one-line deferral in `notes/defer-issues.md` (and file via `/defer`).</step>
+    <step order="5">Export `useEmailViews` + `EmailViewSelector` from `src/index.ts` (coordinate the barrel edit with 030).</step>
+    <step order="6">Add tests: default view loads on open; switching the view triggers a re-run of that view's FetchXML and yields a new row set; a non-Email view/row is excluded by FetchXML (assert the wiring passes the view's FetchXML through unmodified and does not add its own Email predicate).</step>
+    <step order="7">Run `npm run build` + tests for `@spaarke/communication-components`.</step>
+    <step order="8">Update `projects/email-communication-solution-r5/tasks/TASK-INDEX.md`: set task 031 status to ✅.</step>
+    <step order="9">Document the toggle include/omit decision and any contract notes in `projects/email-communication-solution-r5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If no "Email — Inbox" saved view (nor any `sprk_communication` Email view) exists in the target environment such that the default cannot resolve, STOP and escalate per root CLAUDE.md §6 — the saved views are a maker/config prerequisite (spec Lens 5), not something this task should hardcode a FetchXML for.</trigger>
+  </escalation>
+
+  <notes>ViewSelector is REUSED as-is (`src/client/shared/Spaarke.UI.Components/src/components/DataGrid/ViewSelector.tsx`) — no `&lt;justification&gt;` block: this task adds no net-new §11 surface, only host wiring around an existing presentational component and the `IDataverseClient.retrieveSavedQueriesForEntity` adapter. Reference spec FR-04 + design Lens 2 (view dropdown defaulted to "Email — Inbox") + Lens 5 (saved-view source policy; the Email filter lives in each view's FetchXML). The List/Thread toggle is included ONLY if cheap (spec Assumptions). Non-Email exclusion is achieved by the views' FetchXML, reinforced by task 030's in-component guard. Completion summary appended here when done.</notes>
+
+  <ui-tests>
+    <test name="Default view loads on open">
+      <steps>
+        <step>Mount `EmailViewSelector` with a stub `IDataverseClient` returning saved views including "Email — Inbox".</step>
+      </steps>
+      <expected>ViewSelector shows "Email — Inbox" as the active/selected view; its FetchXML rows load into the list on first render.</expected>
+    </test>
+    <test name="View switch re-populates">
+      <steps>
+        <step>Change the selection to "Email — Sent" via the ViewSelector menu.</step>
+      </steps>
+      <expected>The Sent view's FetchXML runs and the returned rows replace the list; the wiring does not add its own Email predicate on top of the view.</expected>
+    </test>
+    <test name="Dark-mode theming (ADR-021)">
+      <steps>
+        <step>Render the container (and the optional toggle, if included) inside a `FluentProvider` using `webDarkTheme`.</step>
+      </steps>
+      <expected>The reused ViewSelector and any toggle render legibly in dark mode using theme tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools><tool name="npm">Build/test shared-lib (npm run build)</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/EmailViewSelector/useEmailViews.ts</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/EmailViewSelector/EmailViewSelector.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/components/EmailViewSelector/__tests__/useEmailViews.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the surface opens, when views load, then the "Email — Inbox" saved view is selected by default and its FetchXML rows populate the card list (falling back to the entity default view if "Email — Inbox" is absent).</criterion>
+    <criterion testable="true">Given the user changes the view in the reused `ViewSelector`, when `onViewChange(viewId)` fires, then the selected view's FetchXML is re-run via the injected `IDataverseClient` and the card list re-populates with the new rows.</criterion>
+    <criterion testable="true">Given the saved views carry the Email filter in FetchXML, when a view runs, then only Email-type `sprk_communication` rows are returned — the wiring passes the view's FetchXML through unmodified (no client-added Email predicate) and adds no non-Email rows.</criterion>
+    <criterion testable="true">Given a view-load failure, when the fetch rejects, then the wiring surfaces a view-load error state (FR-19) rather than throwing/crashing.</criterion>
+    <criterion testable="true">The reused `ViewSelector` is imported from `@spaarke/ui-components` and NOT re-implemented or forked; no `as React.ComponentType` cast is introduced (NFR-05).</criterion>
+    <criterion testable="true">The List/Thread toggle is either included (grouping already-fetched rows by `sprk_communicationthread`, no extra query) OR omitted with a deferral recorded in `notes/` — decision documented.</criterion>
+    <criterion testable="true">`npm run build` for `@spaarke/communication-components` is green and all new tests pass.</criterion>
+  </acceptance-criteria>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute.</protocol></execution>
+</task>

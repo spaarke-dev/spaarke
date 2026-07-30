@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="email-communication-solution-r5">
+  <metadata>
+    <title>FR-16 / NFR-03: Shared hardened `sanitizeEmailHtml` in `@spaarke/ui-components` + retrofit `MessageRow`/`MessageBubble` off the permissive DOMPurify profile</title>
+    <phase>0 Foundations</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-sensitive (XSS defense on the untrusted-email-HTML render path); modifies `.tsx` shared-lib files consumed across surfaces; the malicious-HTML neutralization cases are non-negotiable (NFR-03). FULL gate (code-review + adr-check at Step 9.5).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>XSS allow-list authoring is correctness-critical: an under-scoped allow-list (e.g. permitting `javascript:` schemes, event-handler attributes, or `&lt;script&gt;`/`&lt;iframe&gt;`) is a latent security hole. This is exactly the reasoning-sloppiness failure mode Opus is tiered for (project CLAUDE.md — security-sensitive sanitizer).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend, security, shared-lib</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build one shared, hardened `sanitizeEmailHtml(html: string): string` in `@spaarke/ui-components` (`src/utils/`) that wraps DOMPurify with an explicit allow-list — permitted tags/attributes only, NO `&lt;script&gt;`/`&lt;iframe&gt;`/`&lt;object&gt;` and NO event-handler attributes (`on*`), URL schemes restricted to `http`/`https`/`mailto`, and every anchor forced to `rel="noopener noreferrer" target="_blank"`. Then RETROFIT the two existing permissive call sites — `CommunicationTimeline/subcomponents/MessageRow.tsx` and `ConversationView/subcomponents/MessageBubble.tsx` — moving them OFF `DOMPurify.sanitize(message.body, { USE_PROFILES: { html: true } })` onto the shared util. This closes a latent XSS hole: field-rendered email bodies are today sanitized with a permissive profile that does not harden schemes/links.</prompt>
+  <role>SPAARKE platform developer. Front-end security expertise (DOMPurify allow-listing, XSS defense, Fluent v9 React). Follow ADRs strictly.</role>
+  <goal>A new `src/client/shared/Spaarke.UI.Components/src/utils/sanitizeEmailHtml.ts` exporting `sanitizeEmailHtml(html: string): string` — an allow-list DOMPurify wrapper (ALLOWED_TAGS / ALLOWED_ATTR closed lists; `FORBID_TAGS` for script/iframe/object/embed; `ALLOWED_URI_REGEXP` restricting to http/https/mailto; a DOMPurify `afterSanitizeAttributes` hook that stamps `rel="noopener noreferrer" target="_blank"` on `&lt;a&gt;`) — re-exported from the `src/utils` barrel and `src/index.ts`. Both `MessageRow.tsx` and `MessageBubble.tsx` import and call `sanitizeEmailHtml(message.body)` instead of the inline permissive `DOMPurify.sanitize(..., { USE_PROFILES: { html: true } })`. Unit tests prove `&lt;script&gt;`, `onerror=`, and `javascript:` payloads are neutralized while legitimate formatting/inline images survive.</goal>
+
+  <context>
+    <background>Spec FR-16 + NFR-03 + design Lens 4 ("Client HTML-sanitize + render pattern" = REUSE-dep, but PERMISSIVE). Today two components render untrusted email HTML via `dangerouslySetInnerHTML` after `DOMPurify.sanitize(message.body, { USE_PROFILES: { html: true } })` — `MessageRow.tsx:111`/`:166` and `MessageBubble.tsx:175`/`:208`. The `USE_PROFILES:{html:true}` profile allows a broad tag/attr set and does NOT restrict URL schemes or harden links, so a `javascript:` href or a data-exfil link renders unmodified. This task factors that usage into ONE hardened util and retrofits both call sites — the field-body sanitization layer of the r5 two-path XSS defense (the `.eml` path is server-side in task 010; the sandboxed iframe is defense-in-depth). This is a Phase-0 foundation because the reading-pane field-body fallback (task 033) depends on it.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/utils/sanitizeEmailHtml.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/utils/__tests__/sanitizeEmailHtml.test.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/utils/index.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/MessageRow.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/ConversationView/subcomponents/MessageBubble.tsx</file>
+    </relevant-files>
+    <dependencies>none (independent of BFF work; runs in parallel group P0).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE = field-rendered email HTML only. `sanitizeEmailHtml` MUST use an explicit closed allow-list (ALLOWED_TAGS / ALLOWED_ATTR), MUST forbid `script`/`iframe`/`object`/`embed`/`form` and every `on*` event-handler attribute, MUST restrict URL schemes to http/https/mailto (DOMPurify `ALLOWED_URI_REGEXP`), and MUST force `rel="noopener noreferrer" target="_blank"` on all anchors. It MUST NOT introduce a new sanitizer dependency — reuse the existing `dompurify ^3.4` already in `@spaarke/ui-components`.</constraint>
+    <constraint source="project">SCOPE = retrofit only the two named call sites. `MessageRow.tsx` and `MessageBubble.tsx` MUST call `sanitizeEmailHtml` and MUST NOT retain any inline `DOMPurify.sanitize(..., { USE_PROFILES: { html: true } })`. Their render behavior for legitimate content MUST be unchanged (no visual regression); only the security posture tightens. Do NOT alter their `dangerouslySetInnerHTML` structure beyond swapping the sanitize source.</constraint>
+    <constraint source="ADR-021">SCOPE = both retrofitted components. Fluent v9 + dark mode via host `FluentProvider` MUST remain intact — the sanitizer operates on body HTML only and MUST NOT strip inline `style`/`class` in a way that breaks dark-mode token rendering of the surrounding component chrome. Verify dark mode is unaffected.</constraint>
+    <constraint source="ADR-022">SCOPE = the new util. `sanitizeEmailHtml` MUST be React-agnostic (pure TS, no React import, no React-18/19 runtime API) so it is Layer-1-safe and reusable by any surface incl. PCFs under platform React. No `as React.ComponentType` cast introduced.</constraint>
+    <constraint source="project">Barrel discipline: export `sanitizeEmailHtml` from `src/utils/index.ts` so it flows through the existing `src/index.ts` `export * from './utils'`. Run `/conflict-check` before PR — `@spaarke/ui-components` + `CommunicationTimeline`/`ConversationView` are shared with messaging-r1/r2/r3, notification-spine-r1, email-r4.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Client-side XSS sanitization for untrusted email HTML (Fluent v9 shared lib)</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>.claude/constraints/theme-consistency.md</file>
+    </files>
+    <patterns>
+      <pattern name="Permissive DOMPurify usage to harden + share" location="src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/MessageRow.tsx">Lines 23 (import), 111 (`DOMPurify.sanitize(message.body, { USE_PROFILES: { html: true } })`), 166 (`dangerouslySetInnerHTML={{ __html: sanitizedHtml }}`). This is the exact pattern to replace with `sanitizeEmailHtml(message.body)`; `MessageBubble.tsx:175/:208` is identical.</pattern>
+      <pattern name="Utils barrel" location="src/client/shared/Spaarke.UI.Components/src/utils/index.ts">Add `export * from './sanitizeEmailHtml';` alongside the existing util exports; `src/index.ts` already re-exports the whole `./utils` barrel.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML + spec FR-16/NFR-03 + the ADR/constraint knowledge files. Declare RIGOR LEVEL FULL, model-tier opus, effort high, per project CLAUDE.md.</step>
+    <step order="1">Author `src/utils/sanitizeEmailHtml.ts`: a pure-TS function wrapping DOMPurify with an explicit `ALLOWED_TAGS` allow-list (block/inline formatting, tables, lists, anchors, `img`, `blockquote`, `span`/`div`, `br`, `hr`), an explicit `ALLOWED_ATTR` list (incl. `href`, `src`, `alt`, `title`, `style`, `class`, `width`, `height` — NOT `on*`), `FORBID_TAGS` for `script`/`iframe`/`object`/`embed`/`form`/`style`/`link`/`meta`, and `ALLOWED_URI_REGEXP` restricting schemes to `http|https|mailto` (and preserving `data:` for inline images if the reading-pane path passes data-URI `img src` — scope-decide and document). Register a DOMPurify `afterSanitizeAttributes` hook that, for every `&lt;a&gt;`, sets `rel="noopener noreferrer" target="_blank"`.</step>
+    <step order="2">Export `sanitizeEmailHtml` from `src/utils/index.ts` (verify it flows through `src/index.ts`).</step>
+    <step order="3">Retrofit `MessageRow.tsx`: replace the inline `DOMPurify.sanitize(message.body, { USE_PROFILES: { html: true } })` with `sanitizeEmailHtml(message.body)`; remove the now-unused direct `DOMPurify` import if nothing else uses it; leave the `dangerouslySetInnerHTML` render untouched.</step>
+    <step order="4">Retrofit `MessageBubble.tsx` identically.</step>
+    <step order="5">Write `__tests__/sanitizeEmailHtml.test.ts`: assert `&lt;script&gt;alert(1)&lt;/script&gt;` is stripped; an `&lt;img onerror="alert(1)"&gt;` loses the `onerror` attribute; an `&lt;a href="javascript:alert(1)"&gt;` loses/neutralizes the `javascript:` href; a benign `&lt;a href="https://x"&gt;` gains `rel="noopener noreferrer" target="_blank"`; legitimate `&lt;b&gt;`/`&lt;table&gt;`/inline `&lt;img src="https://..."&gt;` survive.</step>
+    <step order="6">Build `@spaarke/ui-components` (`npm run build`) + run the unit tests (`npm test`). Confirm no type errors and no new React-version cast.</step>
+    <step order="7">Update `projects/email-communication-solution-r5/tasks/TASK-INDEX.md`: set 001 status to ✅.</step>
+    <step order="8">Document the allow-list decisions (esp. the `data:` scheme decision for inline images) + any deviation in `projects/email-communication-solution-r5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If hardening the allow-list would visibly break legitimate rendering in `MessageRow`/`MessageBubble` (e.g. their existing content relies on a tag/attr the safe allow-list must forbid), STOP and escalate per root CLAUDE.md §6 rather than widening the allow-list to the permissive profile. The security posture (NFR-03) is non-negotiable; a rendering trade-off is an owner decision.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Permissive `DOMPurify.sanitize(message.body, { USE_PROFILES: { html: true } })` inlined in `MessageRow.tsx:111` and `MessageBubble.tsx:175` — the only email-HTML sanitization in the client today.</existing>
+    <extension>Yes — factor + harden the existing permissive usage into one shared util and retrofit both call sites. This is the spec §11 "extend" verdict; no competing sanitizer exists.</extension>
+    <cost-of-doing-nothing>Rendering raw inbound email HTML through the permissive profile is a live XSS hole: a `javascript:` href or event-handler attribute in a `sprk_body` field body executes in the user's session. The reading-pane field-body fallback (task 033) would inherit this hole with no hardened util to call.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Malicious HTML neutralized on field-render path">
+      <steps>
+        <step>Render a `MessageRow`/`MessageBubble` whose `message.body` contains `&lt;script&gt;alert(1)&lt;/script&gt;`, `&lt;img src=x onerror="alert(1)"&gt;`, and `&lt;a href="javascript:alert(1)"&gt;click&lt;/a&gt;`.</step>
+      </steps>
+      <expected>No script executes; the `&lt;script&gt;` node is absent from the DOM; `onerror` is stripped; the anchor's `javascript:` href is neutralized. Legitimate `&lt;b&gt;`/`&lt;a href="https://..."&gt;`/inline `&lt;img src="https://..."&gt;` render, and the anchor carries `rel="noopener noreferrer" target="_blank"`.</expected>
+    </test>
+    <test name="Dark mode unaffected (ADR-021)">
+      <steps>
+        <step>Render both retrofitted components under the host `FluentProvider` in dark theme with a normal HTML body.</step>
+      </steps>
+      <expected>Body text + surrounding component chrome render correctly in dark mode; no token/contrast regression versus the pre-retrofit permissive behavior.</expected>
+    </test>
+  </ui-tests>
+
+  <tools><tool name="npm">Build shared lib + run unit tests (`npm run build`, `npm test`)</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/utils/sanitizeEmailHtml.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/utils/index.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/MessageRow.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ConversationView/subcomponents/MessageBubble.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/utils/__tests__/sanitizeEmailHtml.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given HTML containing `&lt;script&gt;`, when passed to `sanitizeEmailHtml`, then the returned string contains no `&lt;script&gt;`/`&lt;iframe&gt;`/`&lt;object&gt;` node.</criterion>
+    <criterion testable="true">Given an element with an `on*` event-handler attribute (e.g. `onerror`), when sanitized, then the attribute is removed.</criterion>
+    <criterion testable="true">Given an anchor with a `javascript:` (or non-http/https/mailto) href, when sanitized, then the unsafe href is neutralized/removed.</criterion>
+    <criterion testable="true">Given a benign `&lt;a href="https://..."&gt;`, when sanitized, then the output anchor carries `rel="noopener noreferrer"` and `target="_blank"`.</criterion>
+    <criterion testable="true">Given legitimate formatting (`&lt;b&gt;`, `&lt;table&gt;`, `&lt;ul&gt;`, inline `&lt;img src="https://..."&gt;`), when sanitized, then that content is preserved.</criterion>
+    <criterion testable="true">`MessageRow.tsx` and `MessageBubble.tsx` call `sanitizeEmailHtml` and contain NO inline `USE_PROFILES: { html: true }` DOMPurify call.</criterion>
+    <criterion testable="true">Negative/regression: legitimate email content renders identically to the pre-retrofit output (no visual regression); dark mode unaffected (ADR-021).</criterion>
+    <criterion testable="true">`sanitizeEmailHtml` imports no React and introduces no `as React.ComponentType` cast (React-agnostic, ADR-022).</criterion>
+    <criterion testable="true">`@spaarke/ui-components` builds green; all unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-16 + NFR-03; design Lens 2 ("Sanitization") + Lens 4 ("Client HTML-sanitize + render pattern"). The `.eml` path is sanitized server-side (task 010) and the sandboxed iframe is defense-in-depth; this task hardens the field-body (`sprk_body` fallback) path only. Decide + document whether `data:` image URIs are allowed (the reading-pane fallback renders `sprk_body`, which is unlikely to carry data-URIs, but the util may be reused by the `.eml` render branch's client display). Run `/conflict-check` before PR (shared `@spaarke/ui-components`).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute (FULL rigor — code-review + adr-check at Step 9.5).</protocol></execution>
+</task>

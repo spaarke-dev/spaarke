@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="email-communication-solution-r5">
+  <metadata>
+    <title>FR-08/FR-18: Extract `CommunicationActions` Layer-1 — action-bar / composer-prefill / suggested-create logic into `@spaarke/communication-components`; PCF view unchanged; feeds the Phase-3 full-width toolbar</title>
+    <phase>2 Layer-1 extraction</phase>
+    <gate>after:020</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Brownfield extraction across the PCF boundary into a shared lib touching a live PCF; NFR-04 (PCF + OOB form regression-free) is non-negotiable; the extracted prefill logic feeds the reader-pane compose path (FR-09/FR-10) so recipient-prefill correctness matters; modifies `.ts`/`.tsx`, tags refactor/shared-lib. FULL gate.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified extraction: `composerPrefill.ts` / `launchCreate.ts` / `attachmentsSource.ts` are already discrete modules with named exports and interface-abstracted seams; the reference scaffold (task 020) is named. No cross-file correctness reasoning of the 020 kind.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct source files from 021/023 (Actions PCF only). Shares ONE serialization point with 021: the `@spaarke/communication-components` barrel `src/index.ts` — add the actions export as a discrete line; if 021 is landing concurrently, coordinate/rebase the barrel edit (do not clobber 020's connections or 021's attachments exports).</parallel-reason>
+    <deps>020</deps>
+    <tags>frontend, shared-lib, refactor</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extract the React-agnostic action-bar logic from the `CommunicationActions` PCF into shared `@spaarke/communication-components`: `composerPrefill.ts` (`deriveComposerFields`, `splitRecipients`, `ComposerMode`, `RecordPrefill`, `ComposerFields` — Reply/ReplyAll/Forward recipient + subject + quoted-thread derivation), `launchCreate.ts` (`launchCreate`, `CreateKind`, `CreateLaunchTarget`, `CREATE_LAUNCH_TARGETS` — the suggested-create seam for Event/To Do/Invoice), and `attachmentsSource.ts` (`fetchSourceAttachments`, `IActionsWebApi`, `ISourceAttachmentRecord` — carry-forward attachments on reply/forward). BOTH the OOB-form PCF and the Phase-3 full-width reading-pane toolbar (task 036 compose + task 032 toolbar) consume this one copy. The PCF re-imports the extracted logic; its React 16 view (hosting the canonical `SendEmailPage`) is UNCHANGED. Mirror task 020's shared-lib logic-export scaffold + barrel wiring.</prompt>
+  <role>SPAARKE platform developer. Expert in TypeScript module boundaries, PCF virtual controls (ADR-022), the canonical email-compose flow, and the OOB `Xrm.Navigation` modal seam. Follow ADRs strictly.</role>
+  <goal>`composerPrefill.ts`, `launchCreate.ts`, and `attachmentsSource.ts` (all exports verbatim, no behavior change) live under `src/client/shared/Spaarke.Communication.Components/src/logic/actions/` and are re-exported from the barrel. The `CommunicationActions` PCF imports them from `@spaarke/communication-components` instead of its local copies, builds clean via `npm run build:prod`, and behaves identically (action bar dispatches; Reply/ReplyAll/Forward prefill; create-from-email launch). The extracted logic modules contain NO React import (pure TS) and NO `as React.ComponentType` cast; any host dependency (Dataverse read, `Xrm.Navigation`) stays behind the existing injected interface / global seam (not React).</goal>
+
+  <context>
+    <background>Spec FR-08 (full-width toolbar reusing extracted `CommunicationActionBar` logic) + FR-18 (two-layer extraction) + design Lens 4 ("Action bar — LOGIC — COMPLETE: extract Layer-1 logic; build React 19 toolbar view; PCF keeps its view"). The Phase-3 reading pane builds a React 19 full-width toolbar (task 032) whose Reply/ReplyAll/Forward/New actions (task 036) reuse the canonical `EmailComposer`/`SendEmailDialog`, pre-filled by `deriveComposerFields`, and whose "Create" actions reuse `launchCreate`. The three logic modules are already discrete: `composerPrefill.ts` is pure (recipient split + "Re:"/"Fwd:" subject + quoted-thread blockquote), `attachmentsSource.ts` takes an injected `IActionsWebApi` (host-abstracted read), and `launchCreate.ts` calls OOB `Xrm.Navigation.navigateTo` (a host GLOBAL, not React) via a single seam. This makes them Layer-1-ready. Task 020 established the `src/logic/` + barrel scaffold; mirror it.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/pcf/CommunicationActions/CommunicationActions/composerPrefill.ts</file>
+      <file role="canonical-reference">src/client/pcf/CommunicationActions/CommunicationActions/launchCreate.ts</file>
+      <file role="canonical-reference">src/client/pcf/CommunicationActions/CommunicationActions/attachmentsSource.ts</file>
+      <file role="modify">src/client/pcf/CommunicationActions/CommunicationActions/CommunicationActionsApp.tsx</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/logic/actions/composerPrefill.ts</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/logic/actions/launchCreate.ts</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/logic/actions/attachmentsSource.ts</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/logic/actions/index.ts</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/index.ts</file>
+      <file role="reuse">@spaarke/ui-components → SendEmailPage / canonical EmailComposer — hosted by the PCF view (unchanged); the extracted logic only PREFILLS it, does not fork it</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">Establishes the `@spaarke/communication-components` `src/logic/` folder + barrel export convention this task mirrors.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-05">Layer-1 = React-agnostic. The extracted `composerPrefill.ts`, `launchCreate.ts`, `attachmentsSource.ts` MUST contain no `import ... from 'react'`, no React runtime API (`createRoot`, `use()`, Actions), and no `as React.ComponentType` cast. Grep-provable. `launchCreate`'s use of the `Xrm.Navigation` global and `attachmentsSource`'s injected `IActionsWebApi` are host seams, not React — keep them as-is; do NOT introduce a React dependency to "clean them up".</constraint>
+    <constraint source="NFR-04">Zero regression: the `CommunicationActions` PCF keeps its existing React 16 view (which hosts the canonical `SendEmailPage` in a Dialog and wires the action bar); only its IMPORTS of the three logic modules change (local → `@spaarke/communication-components`). Action dispatch + prefill + create-launch behavior must be identical. Do NOT rewrite the PCF view.</constraint>
+    <constraint source="project">Canonical compose is CONSUMED, not extended: the extracted prefill logic only computes `ComposerFields`; it MUST NOT fork a composer. Reply/ReplyAll/Forward/New continue to open the canonical `EmailComposer`/`SendEmailDialog`/`SendEmailPage` (FR-09/FR-10) — the reading pane (task 036) reuses the SAME derivation.</constraint>
+    <constraint source="project">`launchCreate` keeps the OOB `Xrm.Navigation.navigateTo` modal seam + `CREATE_LAUNCH_TARGETS` (event→`sprk_event`, todo→`sprk_todo`, invoice→`sprk_invoice`) exactly; do not change the create-from-email contract.</constraint>
+    <constraint source="ADR-022">Slim-first two-layer split: share LOGIC (pure TS), not React components; the PCF stays a virtual control on platform React (no bundled React).</constraint>
+    <constraint source="project">Barrel coordination: add the actions exports to `@spaarke/communication-components/src/index.ts` as a discrete line without disturbing 020's connections or 021's attachments exports. Barrel edits SERIALIZE with task 021 — if concurrent, rebase the barrel edit. Run `/conflict-check` before the PR (shared `@spaarke/communication-components`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>PCF→shared action/prefill logic extraction; canonical compose reuse</topic>
+    <files>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Layer-1 scaffold to mirror" location="src/client/shared/Spaarke.Communication.Components/src/logic/connections/">Task 020's export folder + `logic/*/index.ts` re-export + barrel entry. Mirror the shape for `logic/actions/`.</pattern>
+      <pattern name="Pure prefill derivation" location="src/client/pcf/CommunicationActions/CommunicationActions/composerPrefill.ts">`deriveComposerFields`/`splitRecipients` — Reply→sender+"Re:", Forward→"Fwd:", ReplyAll→To+Cc, quoted-thread blockquote. Pure; move verbatim; the reader-pane compose (task 036) reuses it.</pattern>
+      <pattern name="Injected-webApi / global-Xrm seams" location="src/client/pcf/CommunicationActions/CommunicationActions/attachmentsSource.ts + launchCreate.ts">`attachmentsSource` takes `IActionsWebApi`; `launchCreate` uses `Xrm.Navigation.navigateTo`. Both are host seams (not React) — preserve exactly.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this task + spec FR-08/FR-18 + design Lens 4 + ADRs. Declare RIGOR FULL / model sonnet / effort high. Confirm task 020's barrel scaffold exists and mirror its `src/logic/connections/` shape.</step>
+    <step order="1">Create `src/client/shared/Spaarke.Communication.Components/src/logic/actions/` and move `composerPrefill.ts`, `launchCreate.ts`, `attachmentsSource.ts` there verbatim (all exports unchanged). Add `logic/actions/index.ts` re-exporting them.</step>
+    <step order="2">Wire the barrel: add `export * from './logic/actions';` to `@spaarke/communication-components/src/index.ts` (discrete line; do not disturb 020/021 exports).</step>
+    <step order="3">Update the PCF: repoint `CommunicationActionsApp.tsx` to import `deriveComposerFields`/`splitRecipients`/`launchCreate`/`CREATE_LAUNCH_TARGETS`/`fetchSourceAttachments` etc. from `@spaarke/communication-components`. Keep the `SendEmailPage` import from `@spaarke/ui-components` as-is. DELETE the now-duplicate local logic modules. Do NOT change the PCF view's rendering or action dispatch.</step>
+    <step order="4">Grep-verify: the three extracted modules contain no `from 'react'`; no `as React.ComponentType`; the `Xrm.Navigation` + `IActionsWebApi` seams are intact (no React introduced).</step>
+    <step order="5">Build the shared lib (`npm run build`) + the PCF (`npm run build:prod`) — both clean. Run existing `CommunicationActions` tests; they pass.</step>
+    <step order="6">Update `projects/email-communication-solution-r5/tasks/TASK-INDEX.md`: set 022 → ✅.</step>
+    <step order="7">Note the shared export paths + the barrel-serialization coordination with 021 + any deviation in `projects/email-communication-solution-r5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the action-bar prefill/launch logic turns out to be entangled with the PCF's React state (e.g. `deriveComposerFields` reaches into component hooks/refs) such that extraction would require rewriting the PCF view and risking NFR-04 regression, STOP and escalate per root CLAUDE.md §6.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build shared lib (`npm run build`) + PCF (`npm run build:prod`); installs use `npm install --legacy-peer-deps --no-audit --no-fund`.</tool>
+    <tool name="terminal">grep for React imports/casts; run PCF unit tests.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/logic/actions/composerPrefill.ts</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/logic/actions/launchCreate.ts</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/logic/actions/attachmentsSource.ts</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/index.ts</output>
+    <output type="code">src/client/pcf/CommunicationActions/CommunicationActions/CommunicationActionsApp.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the extracted `composerPrefill.ts`/`launchCreate.ts`/`attachmentsSource.ts`, when grepped, then none contains `import ... from 'react'`, any React runtime API, or an `as React.ComponentType` cast (React-agnostic Layer-1, NFR-05).</criterion>
+    <criterion testable="true">Given the `CommunicationActions` PCF, when built with `npm run build:prod`, then it compiles clean importing the three logic modules from `@spaarke/communication-components`, its local duplicates are deleted, and its React 16 view is unchanged (regression-free, NFR-04).</criterion>
+    <criterion testable="true">Given `deriveComposerFields` in Reply / Reply All / Forward mode, when invoked on a record, then recipients + subject ("Re:"/"Fwd:") + quoted-thread body are derived identically to pre-extraction (feeds FR-09 reader-pane compose without forking the composer).</criterion>
+    <criterion testable="true">Given a create-from-email action, when `launchCreate` runs, then it opens the OOB `Xrm.Navigation.navigateTo` modal for the correct target (`CREATE_LAUNCH_TARGETS`: event/todo/invoice) — contract unchanged.</criterion>
+    <criterion testable="true">Given the shared barrel, when imported, then it re-exports the actions logic without disturbing the connections (020) / attachments (021) exports; no business logic duplicated between PCF and shared lib.</criterion>
+    <criterion testable="true">Negative: the extracted logic does NOT construct or fork a composer — grep confirms no new composer component; it only computes `ComposerFields` consumed by the canonical `SendEmailPage`/`EmailComposer`.</criterion>
+    <criterion testable="true">Shared lib build + PCF `build:prod` both green; existing `CommunicationActions` unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Cite spec FR-18 + FR-08 + NFR-04 + NFR-05 in the PR. EXTRACTION of existing code (COMPLETE-class) — no §11 `&lt;justification&gt;` (modify/refactor exempt). Barrel edits serialize with 021 — coordinate the `src/index.ts` edit. Run `/conflict-check` before the PR (shared `@spaarke/communication-components`, contended with messaging-r2/r3, notification-spine-r1, email-r4). Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute.</protocol></execution>
+</task>

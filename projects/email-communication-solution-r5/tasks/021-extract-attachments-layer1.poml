@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="email-communication-solution-r5">
+  <metadata>
+    <title>FR-12/FR-18: Extract `CommunicationAttachments` Layer-1 — promote the PCF-free `AttachmentList` presentational core + its data/BFF service adapters into `@spaarke/communication-components`; PCF view unchanged</title>
+    <phase>2 Layer-1 extraction</phase>
+    <gate>after:020</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Brownfield extraction across the PCF boundary into a shared lib touching a live PCF; NFR-04 (PCF + OOB form regression-free) is non-negotiable; modifies `.ts`/`.tsx`, tags refactor/shared-lib. FULL gate.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified extraction: `AttachmentList.tsx` is already PCF-free/presentational and the adapters are already interface-abstracted; the reference impl (task 020's scaffold) is named. No cross-file correctness reasoning of the 020 kind.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct source files from 022/023 (Attachments PCF only). Shares ONE serialization point with 022: the `@spaarke/communication-components` barrel `src/index.ts` — add the attachments export as a discrete line; if 022 is landing concurrently, coordinate/rebase the barrel edit (do not clobber the connections export from 020).</parallel-reason>
+    <deps>020</deps>
+    <tags>frontend, shared-lib, refactor</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Promote the PCF-free `AttachmentList` presentational core and its Layer-1 data/BFF service adapters — `CommunicationAttachmentsService.ts` (pure `sprk_communicationattachment` projection/filter helpers) and `AttachmentApiService.ts` (BFF adapter over `authenticatedFetch` → `/api/documents/{id}/preview-url` + `/open-links`) — from the `CommunicationAttachments` PCF into shared `@spaarke/communication-components`, so BOTH the OOB-form PCF and the Phase-3 reading-pane attachments view (task 034) consume one copy. Inline-image attachment types stay filtered; row click opens the REUSED `RichFilePreviewDialog` from `@spaarke/ui-components`. The PCF re-imports the promoted core; its React 16 view otherwise UNCHANGED. Mirror the shared-lib logic-export scaffold + barrel wiring established by task 020.</prompt>
+  <role>SPAARKE platform developer. Expert in TypeScript module boundaries, PCF virtual controls (ADR-022), and the BFF document facade (`authenticatedFetch`, ADR-028). Follow ADRs strictly.</role>
+  <goal>`AttachmentList.tsx` (presentational, `IAttachmentItem[]` + `uploadStatusColorToken`) and its adapters `CommunicationAttachmentsService.ts` (`cleanGuid`, `projectAttachmentRecord`, `isEmailMessageAttachment`, `fileTypeLabel`, the `sprk_communicationattachment` query/projection) + `AttachmentApiService.ts` (`AttachmentApiService`, `PreviewUrlResponse`, `OpenLinksResponse`) + `types.ts` live under `src/client/shared/Spaarke.Communication.Components/src/logic/attachments/` (adapters) and a shared presentational location, re-exported from the barrel. The `CommunicationAttachments` PCF imports them from `@spaarke/communication-components` instead of its local copies, builds clean via `npm run build:prod`, and behaves identically (list renders, inline images filtered, click opens `RichFilePreviewDialog`). The extracted service/adapter modules contain NO React import (pure TS); the promoted `AttachmentList` uses no React-18/19-only runtime API and no `as React.ComponentType` cast (renders under both React 16/17 and React 19).</goal>
+
+  <context>
+    <background>Spec FR-12 (attachments: promote `AttachmentList` to shared; inline images filtered; click → `RichFilePreviewDialog`) + FR-18 (two-layer extraction) + design Lens 4 ("Attachment list — presentational core + LOGIC — COMPLETE: promote list + data/BFF adapters (Layer 1)"). `AttachmentList.tsx` is already header-documented as PCF-free (no PCF/generated-types dependency), `CommunicationAttachmentsService.ts` already isolates the Dataverse read (host `context.webAPI.retrieveMultipleRecords`) behind pure helpers, and `AttachmentApiService.ts` already isolates the BFF calls behind `authenticatedFetch` — so this is a clean Layer-1 promotion. The Phase-3 reading pane (task 034) renders a React 19 attachments view over the SAME core. `RichFilePreviewDialog` is reused as-is from `@spaarke/ui-components` (NOTE per design: its generic SPE iframe does NOT render `.eml` as email — that is the separate task-010 endpoint; here it previews normal attachment files). Task 020 established the `src/logic/` + barrel scaffold; mirror it.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/pcf/CommunicationAttachments/CommunicationAttachments/AttachmentList.tsx</file>
+      <file role="canonical-reference">src/client/pcf/CommunicationAttachments/CommunicationAttachments/services/CommunicationAttachmentsService.ts</file>
+      <file role="canonical-reference">src/client/pcf/CommunicationAttachments/CommunicationAttachments/services/AttachmentApiService.ts</file>
+      <file role="modify">src/client/pcf/CommunicationAttachments/CommunicationAttachments/types.ts</file>
+      <file role="modify">src/client/pcf/CommunicationAttachments/CommunicationAttachments/CommunicationAttachmentsApp.tsx</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/logic/attachments/CommunicationAttachmentsService.ts</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/logic/attachments/AttachmentApiService.ts</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/logic/attachments/index.ts</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/AttachmentList/AttachmentList.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/index.ts</file>
+      <file role="reuse">@spaarke/ui-components → RichFilePreviewDialog (FilePreview/RichFilePreviewDialog) — reused as-is, NOT re-implemented</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">Establishes the `@spaarke/communication-components` `src/logic/` folder + barrel export convention this task mirrors.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-05">Layer-1 = React-agnostic. The extracted service/adapter modules (`CommunicationAttachmentsService.ts`, `AttachmentApiService.ts`) MUST contain no `import ... from 'react'` (grep-provable). The promoted `AttachmentList` presentational MUST use no React-18/19-only runtime API (`createRoot`, `use()`, Actions) and introduce no `as React.ComponentType` cast, so a PCF under React 16/17 AND the code page under React 19 both render it.</constraint>
+    <constraint source="NFR-04">Zero regression: the `CommunicationAttachments` PCF keeps its existing React 16 view; only its IMPORTS change (local → `@spaarke/communication-components`). Inline-image filtering (`isEmailMessageAttachment`/InlineImage exclusion) and row-click → `RichFilePreviewDialog` behavior must be identical. Do NOT rewrite the PCF view.</constraint>
+    <constraint source="project">Reuse, don't re-implement: row-click preview MUST reuse `RichFilePreviewDialog` from `@spaarke/ui-components`. Do NOT fork a preview dialog. Inline-image attachment types stay filtered out of the list (FR-12).</constraint>
+    <constraint source="ADR-028">The BFF adapter `AttachmentApiService` MUST call the document endpoints via `@spaarke/auth` `authenticatedFetch` (no new auth surface); no client-supplied caller identity.</constraint>
+    <constraint source="ADR-022">Slim-first two-layer split: share the presentational core + adapters as version-agnostic modules; the PCF stays a virtual control on platform React (no bundled React).</constraint>
+    <constraint source="project">Barrel coordination: add the attachments exports to `@spaarke/communication-components/src/index.ts` as a discrete line without disturbing 020's connections export. Barrel edits SERIALIZE with task 022 — if concurrent, rebase the barrel edit. Run `/conflict-check` before the PR (shared `@spaarke/communication-components`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>PCF→shared presentational + adapter promotion; BFF document facade</topic>
+    <files>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Layer-1 scaffold to mirror" location="src/client/shared/Spaarke.Communication.Components/src/logic/connections/">Task 020's export folder + `logic/*/index.ts` re-export + barrel entry. Mirror the shape for `logic/attachments/`.</pattern>
+      <pattern name="PCF-free presentational core" location="src/client/pcf/CommunicationAttachments/CommunicationAttachments/AttachmentList.tsx">Header states "no PCF / generated-types dependency"; renders `IAttachmentItem[]`. Move as a shared presentational component.</pattern>
+      <pattern name="Interface-abstracted adapters" location="src/client/pcf/CommunicationAttachments/CommunicationAttachments/services/">`CommunicationAttachmentsService.ts` (host webApi read + pure helpers) and `AttachmentApiService.ts` (`authenticatedFetch` BFF adapter) are already isolated — move verbatim.</pattern>
+      <pattern name="Reused preview dialog" location="@spaarke/ui-components → FilePreview/RichFilePreviewDialog">Opened on row click in `CommunicationAttachmentsApp.tsx`. Reuse the import from ui-components; do not re-home it.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this task + spec FR-12/FR-18 + design Lens 4 + ADRs. Declare RIGOR FULL / model sonnet / effort high. Confirm task 020's barrel scaffold exists and read its `src/logic/connections/` shape to mirror.</step>
+    <step order="1">Create `src/client/shared/Spaarke.Communication.Components/src/logic/attachments/` and move `CommunicationAttachmentsService.ts` + `AttachmentApiService.ts` there verbatim (exports unchanged: `cleanGuid`, `projectAttachmentRecord`, `isEmailMessageAttachment`, `fileTypeLabel`, `AttachmentApiService`, `PreviewUrlResponse`, `OpenLinksResponse`). Add `logic/attachments/index.ts` re-exporting them. Move the shared `types.ts` attachment types (e.g. `IAttachmentItem`) alongside or into the logic folder.</step>
+    <step order="2">Move `AttachmentList.tsx` to a shared presentational location (`src/components/AttachmentList/AttachmentList.tsx`), keeping `AttachmentList` + `uploadStatusColorToken` exports and its Fluent-only + `./types` + service-helper imports (repoint the service import to the new logic path).</step>
+    <step order="3">Wire the barrel: add the attachments logic + `AttachmentList` exports to `@spaarke/communication-components/src/index.ts` (discrete lines; do not disturb the connections export from 020).</step>
+    <step order="4">Update the PCF: repoint `CommunicationAttachmentsApp.tsx` (and any host file) to import `AttachmentList`, the services, and the types from `@spaarke/communication-components`. Keep the `RichFilePreviewDialog` import from `@spaarke/ui-components` as-is. DELETE the now-duplicate local copies. Do NOT change the PCF view's rendering, inline-image filtering, or preview-open behavior.</step>
+    <step order="5">Grep-verify: the two adapter modules contain no `from 'react'`; no `as React.ComponentType` on any promoted code; the promoted `AttachmentList` uses no React-18/19-only runtime API.</step>
+    <step order="6">Build the shared lib (`npm run build`) + the PCF (`npm run build:prod`) — both clean. Run existing `CommunicationAttachments` tests (incl. the `richFilePreviewDialog` mock); they pass.</step>
+    <step order="7">Update `projects/email-communication-solution-r5/tasks/TASK-INDEX.md`: set 021 → ✅.</step>
+    <step order="8">Note the shared export paths + any deviation (esp. the barrel-serialization coordination with 022) in `projects/email-communication-solution-r5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `AttachmentList.tsx` turns out NOT to be genuinely PCF-free (hidden dependency on PCF generated types or `ComponentFramework`) such that promotion would require rewriting the PCF view and risking NFR-04 regression, STOP and escalate per root CLAUDE.md §6.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Attachments list + inline-image filter">
+      <steps><step>Render the promoted `AttachmentList` with a mixed set incl. an `InlineImage`-type attachment.</step><step>Inspect the rendered rows.</step></steps>
+      <expected>Non-inline attachments list with file-type labels; the inline-image attachment is excluded (FR-12).</expected>
+    </test>
+    <test name="Row click opens reused preview">
+      <steps><step>Click an attachment row.</step></steps>
+      <expected>`RichFilePreviewDialog` (from `@spaarke/ui-components`) opens for that document — no forked dialog.</expected>
+    </test>
+    <test name="Dark-mode (ADR-021)">
+      <steps><step>Render `AttachmentList` under a dark `FluentProvider` theme.</step></steps>
+      <expected>Rows/labels/status tokens render legibly in dark mode; no hardcoded light-only colors.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build shared lib (`npm run build`) + PCF (`npm run build:prod`); installs use `npm install --legacy-peer-deps --no-audit --no-fund`.</tool>
+    <tool name="terminal">grep for React imports/casts; run PCF unit tests.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/logic/attachments/CommunicationAttachmentsService.ts</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/logic/attachments/AttachmentApiService.ts</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/AttachmentList/AttachmentList.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/index.ts</output>
+    <output type="code">src/client/pcf/CommunicationAttachments/CommunicationAttachments/CommunicationAttachmentsApp.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the extracted `CommunicationAttachmentsService.ts` + `AttachmentApiService.ts`, when grepped, then neither contains `import ... from 'react'` (React-agnostic adapters, NFR-05); the promoted `AttachmentList` uses no React-18/19-only runtime API and no `as React.ComponentType` cast.</criterion>
+    <criterion testable="true">Given the `CommunicationAttachments` PCF, when built with `npm run build:prod`, then it compiles clean importing `AttachmentList` + services from `@spaarke/communication-components`, its local duplicates are deleted, and its React 16 view is unchanged (regression-free, NFR-04).</criterion>
+    <criterion testable="true">Given a mixed attachment set, when the list renders, then inline-image attachment types are filtered out and remaining files list with type labels (FR-12) — behavior identical to pre-extraction.</criterion>
+    <criterion testable="true">Given an attachment row click, when activated, then the REUSED `RichFilePreviewDialog` from `@spaarke/ui-components` opens (no forked preview dialog).</criterion>
+    <criterion testable="true">Given the shared barrel, when imported, then it re-exports the attachments core + adapters without disturbing the connections export from task 020; no business logic is duplicated between PCF and shared lib.</criterion>
+    <criterion testable="true">Negative: `AttachmentApiService` issues its BFF calls via `authenticatedFetch` (ADR-028) — grep confirms no raw `fetch(` to the document endpoints and no client-supplied identity.</criterion>
+    <criterion testable="true">Shared lib build + PCF `build:prod` both green; existing `CommunicationAttachments` unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Cite spec FR-18 + FR-12 + NFR-04 + NFR-05 in the PR. EXTRACTION of existing code (COMPLETE-class) — no §11 `&lt;justification&gt;` (modify/refactor exempt). Barrel edits serialize with 022 — coordinate the `src/index.ts` edit. Run `/conflict-check` before the PR (shared `@spaarke/communication-components`, contended with messaging-r2/r3, notification-spine-r1, email-r4). Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute.</protocol></execution>
+</task>

@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="email-communication-solution-r5">
+  <metadata>
+    <title>Project wrap-up — README → Complete, lessons-learned, `/test-diet` (project-close gate), deferral reconciliation, INDEX.md, archive</title>
+    <phase>5 Integration &amp; verification</phase>
+    <gate>after:051</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation + reconciliation close-out (README/notes/INDEX + skill invocations); authors no application surface. MINIMAL — but the `/test-diet` project-close gate (CLAUDE.md §7) is mandatory and runs regardless.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Procedural close-out: run the close skills, flip statuses, write lessons-learned. Low ambiguity. Sonnet @ medium.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final gate — must run after every prior task; touches README, TASK-INDEX, notes, projects/INDEX.md.</parallel-reason>
+    <deps>051</deps>
+    <tags>docs, wrap-up</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>MANDATORY final task. Close the project cleanly: set README status → Complete (check all graduation/Success criteria, add Completed Date + changelog); write `notes/lessons-learned.md`; invoke `/test-diet` (project-close test-reconciliation gate per ADR-038 — task-execute Step 11) and CITE the report in the wrap-up PR; reconcile deferrals via `/project-defer-issue-tracking` (the documented follow-ups: server `.eml` render cache, remote-image privacy gate, thread-entity association inheritance, historical `.eml` backfill); update this project's row status in `projects/INDEX.md`; verify every TASK-INDEX row is ✅; archive artifacts. Prescriptive sequence.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly.</role>
+  <goal>The project is closed: README = Complete (Completed Date + changelog, all graduation/Success criteria checked or deferred-with-rationale); `notes/lessons-learned.md` written; `/test-diet` run with `notes/test-diet-report.md` cited in the wrap-up PR; the four documented follow-ups reconciled to both `notes/defer-issues.md` and GitHub Issues via `/project-defer-issue-tracking`; `projects/INDEX.md` row updated; every TASK-INDEX row ✅; `current-task.md` reset to "none".</goal>
+
+  <context>
+    <background>This is the `090-wrapup` task, so task-execute Step 11 invokes `/test-diet` BEFORE marking the project complete (CLAUDE.md §7 project-close test-diet gate); the wrap-up PR MUST cite the test-diet report or document the skip rationale. Tests were added/modified in 010 (endpoint) + 050 (XSS/regression) — these are reconciled against the ADR-038 build-vs-maintain classifier. The design records four documented follow-ups explicitly out of r5 scope (spec §Unresolved Questions / design §Resolved Owner Clarifications): server-side `.eml` render cache, remote-image privacy gate, thread-entity association inheritance (server round), historical `.eml` backfill — these are reconciled as deferrals, not silently dropped.</background>
+    <relevant-files>
+      <file role="modify">projects/email-communication-solution-r5/README.md</file>
+      <file role="modify">projects/email-communication-solution-r5/tasks/TASK-INDEX.md</file>
+      <file role="modify">projects/email-communication-solution-r5/current-task.md</file>
+      <file role="new">projects/email-communication-solution-r5/notes/lessons-learned.md</file>
+      <file role="modify">projects/INDEX.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="051" status="pending">All surfaces deployed + verified before close.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md-§7">Run `/test-diet` before marking the project complete (project-close gate); the wrap-up PR MUST cite `notes/test-diet-report.md` or document the skip rationale.</constraint>
+    <constraint source="ADR-038">`/test-diet` reconciles the tests added/modified in 010 + 050 against the build-vs-maintain classifier; MAINTAIN-class tests stay at KEEP path, SCAFFOLDING-class are removed; the skill is read-only (emits `git rm`/`git mv` for the reviewer).</constraint>
+    <constraint source="project">Reconcile ALL four documented follow-ups (server `.eml` cache, remote-image gate, thread-entity inheritance, historical backfill) via `/project-defer-issue-tracking` — written to BOTH `notes/defer-issues.md` AND GitHub Issues (never notes-only; §11 rule: each entry names a concrete failing behavior/contract, not "flexibility").</constraint>
+    <constraint source="graduation">Set README Status = Complete only after all graduation/Success criteria (spec §Success Criteria 1–10) are checked or documented as deferred-with-rationale. Add Completed Date + changelog entry.</constraint>
+    <constraint source="no-new-surface">This task authors no new application surface → no §11 justification and no publish-size gate here (051 owns the release NFR verification).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project close-out + test-diet + deferral tracking</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/email-communication-solution-r5/spec.md (§Success Criteria)</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/project-defer-issue-tracking/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="project-close" location="task-execute Step 11 + test-diet + project-defer-issue-tracking skills">Run test-diet → reconcile deferrals → mark Complete → lessons-learned → INDEX.md.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load spec §Success Criteria + CLAUDE.md §7. Declare RIGOR LEVEL: MINIMAL with reason. Confirm 051 is ✅ and every prior TASK-INDEX row is ✅.</step>
+    <step order="1">Run `/test-diet` (project-close gate) — reconcile the tests added/modified in 010 + 050 against the ADR-038 classifier; capture the report to `notes/test-diet-report.md`; the wrap-up PR cites it.</step>
+    <step order="2">Reconcile the four documented follow-ups via `/project-defer-issue-tracking` (server `.eml` render cache, remote-image privacy gate, thread-entity association inheritance, historical `.eml` backfill) → `notes/defer-issues.md` + GitHub Issues; each entry names a concrete failing behavior.</step>
+    <step order="3">Verify spec §Success Criteria 1–10; check each graduation criterion in README (mark any deferred item with explicit rationale).</step>
+    <step order="4">Set README Status = Complete; add Completed Date + a changelog entry.</step>
+    <step order="5">Write `projects/email-communication-solution-r5/notes/lessons-learned.md` (what worked, what to change — two-layer split, `.eml`-as-sent posture, Communication-cluster contention/merge-after-email-r4, dual-mount parity).</step>
+    <step order="6">Update this project's row status in `projects/INDEX.md` to Complete.</step>
+    <step order="7">Verify every TASK-INDEX row is ✅ (or explicitly deferred-with-rationale); reset `current-task.md` to "none"; archive artifacts. Document any deviation in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `/test-diet` or the Success-criteria check surfaces an unmet graduation criterion that is NOT a documented deferral, STOP and escalate per root CLAUDE.md §6 rather than marking the project Complete.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="test-diet">Project-close test reconciliation</tool>
+    <tool name="project-defer-issue-tracking">Reconcile deferrals to notes + GitHub</tool>
+    <tool name="terminal">shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/email-communication-solution-r5/README.md (Status = Complete)</output>
+    <output type="doc">projects/email-communication-solution-r5/notes/lessons-learned.md</output>
+    <output type="doc">projects/email-communication-solution-r5/notes/test-diet-report.md</output>
+    <output type="doc">projects/INDEX.md (row updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">README Status = Complete with Completed Date + changelog; all spec §Success Criteria 1–10 checked or deferred-with-rationale.</criterion>
+    <criterion testable="true">`/test-diet` ran; `notes/test-diet-report.md` exists and the wrap-up PR cites it.</criterion>
+    <criterion testable="true">All four documented follow-ups are reconciled via `/project-defer-issue-tracking` to BOTH `notes/defer-issues.md` AND GitHub Issues (no notes-only entry).</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` is written; this project's row in `projects/INDEX.md` is updated to Complete.</criterion>
+    <criterion testable="true">Every TASK-INDEX row is ✅ (or explicitly deferred/dropped with rationale); `current-task.md` is reset to "none".</criterion>
+  </acceptance-criteria>
+
+  <notes>Final gate. No new BFF surface authored → no publish-size gate here (051 owns the release NFR). Reference spec §Success Criteria + CLAUDE.md §7 project-close test-diet gate. The four documented follow-ups are design-time deferrals (spec §Unresolved Questions), not new discoveries — reconcile them honestly. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge first; follow task-execute (incl. Step 11 test-diet gate).</protocol></execution>
+</task>

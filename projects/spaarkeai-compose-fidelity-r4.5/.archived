@@ -1,0 +1,16 @@
+Archived: 2026-07-29
+Final status: Completed
+Closing PR: none — merged to master via direct fast-forward (unprotected master); R4.5 commits 62d659ac5..81f64dad0
+Worktree: c:/code_files/spaarke-wt-spaarkeai-compose-fidelity-r4.5 (PRESERVED — not removed by this archive; clean up separately if/when desired)
+Remote branch: work/spaarkeai-compose-fidelity-r4.5 (preserved on origin)
+Issue: none — project was NOT portfolio-registered (no Project Issue; the /project-pipeline portfolio hook was a no-op at init because README had no pointer block). Run /devops-project-register --from-folder if a portfolio record is wanted retroactively.
+
+Summary:
+- Read/reference fidelity (WS-1 one-reader · WS-2 harden-read · WS-3 numbering engine · WS-4 reference/citation layer · WS-5 page/line spike DEFERRED).
+- Merged to master + deployed to dev (spaarke-bff-dev BFF + sprk_spaarkeai web resource on spaarkedev1). 739 Compose tests green; all 6 spec success criteria met.
+- Docs complete: ADR-049 R4.5 companion + docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md + root CLAUDE.md §17 pointer.
+- Follow-up task 043 (review-note label cites computed legal number) shipped + deployed.
+
+Deferred / handed off (see notes/defer-issues.md):
+- DEF-01 (advisory-comment placement) → handed to ai-advanced-capabilities-agreements-r1 (HANDOFF note committed).
+- DEF-02 (payload-size hardening), ADR-007 GraphIsolation (pre-existing/unrelated), 042 citation-contract confirm + corpus gap → to be filed as GitHub issues by wrap-up 090.

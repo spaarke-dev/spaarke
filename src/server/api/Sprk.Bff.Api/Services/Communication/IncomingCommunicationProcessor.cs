@@ -377,8 +377,12 @@ public sealed class IncomingCommunicationProcessor
         }
 
         // ── Step 6: Archive .eml to SPE (best-effort, if opt-in) ─────────────────
-        // Default to archiving if ArchiveIncomingOptIn is not set (null) or is true.
-        if (account?.ArchiveIncomingOptIn != false)
+        // FR-17: archiving is DEFAULT-ON, forward-only for monitored (receive-enabled) accounts.
+        // The gate archives unless the account has EXPLICITLY opted out (ArchiveIncomingOptIn == false);
+        // an unset flag (null) is the intended default and archives. An unresolved account (null) also
+        // defaults to archiving. Decision lives in CommunicationAccount.ShouldArchiveIncoming() so the
+        // default-on contract is pinned by unit test. No historical mail is backfilled (forward-only).
+        if (account?.ShouldArchiveIncoming() ?? true)
         {
             try
             {

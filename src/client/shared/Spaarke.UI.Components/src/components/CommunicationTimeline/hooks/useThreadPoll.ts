@@ -35,7 +35,15 @@ export interface UseThreadPollOptions {
   sinceCursorRef: React.MutableRefObject<string | undefined>;
   /** Current last-seen watermark — read fresh each tick, same reasoning. */
   unreadSinceRef: React.MutableRefObject<string | undefined>;
-  onMessages: (messages: TimelineMessage[]) => void;
+  /**
+   * Hands the polled messages back. `isInitialLoad` is `true` for the full,
+   * cursor-less load that fires on mount AND whenever `threadId` changes — the
+   * consumer MUST treat that batch as the AUTHORITATIVE set for the new thread
+   * (replace, not merge), otherwise switching threads unions the new thread's
+   * messages into the previous thread's (RB R3 UAT 2026-07-28). Delta ticks
+   * (`false`) carry only messages newer than the cursor and are merged.
+   */
+  onMessages: (messages: TimelineMessage[], isInitialLoad: boolean) => void;
   onUnread: (unreadCount: number) => void;
   onError?: (error: unknown) => void;
   /** Set false to suspend polling entirely (e.g. missing threadId). Default true. */
@@ -76,7 +84,7 @@ export function useThreadPoll(options: UseThreadPollOptions): UseThreadPollResul
           getUnreadCount(threadId, { since: unreadSinceRef.current }, { authenticatedFetch, bffBaseUrl }),
         ]);
 
-        onMessages(threadResult.messages.map(mapThreadMessageDtoToTimelineMessage));
+        onMessages(threadResult.messages.map(mapThreadMessageDtoToTimelineMessage), isInitialLoad);
         onUnread(unreadResult.unreadCount);
       } catch (err) {
         onError?.(err);
