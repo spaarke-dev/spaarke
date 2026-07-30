@@ -49,6 +49,12 @@ public sealed class CommunicationThreadReadService
     // sprk_communication columns (as-built, notes/messaging-schema-spec.md).
     private const string ThreadLookupValue = "_sprk_communicationthread_value"; // message → thread lookup
     private const string PkField = "sprk_communicationid";
+    // Round-8 UAT fix: soft-delete (deactivate) sets statecode=1 (Inactive), but Dataverse RetrieveMultiple returns
+    // inactive rows unless the query excludes them — so a deactivated thread/message reappeared on the next poll
+    // ("delete didn't work"). Every read below filters `statecode eq 0` (Active) so deactivated rows drop out. Both
+    // sprk_communication and sprk_communicationthread carry the OOB `statecode` attribute.
+    private const string StateCodeField = "statecode";
+    private const string ActiveOnlyClause = "statecode eq 0";
     private const string BodyField = "sprk_body";
     private const string BodyFormatField = "sprk_bodyformat";
     private const string TypeField = "sprk_communicationtype";
@@ -144,7 +150,7 @@ public sealed class CommunicationThreadReadService
             DirectionField, SentByValue,
             SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, IsPrivateField,
         });
-        var filter = new StringBuilder($"{ThreadLookupValue} eq {threadId}");
+        var filter = new StringBuilder($"{ThreadLookupValue} eq {threadId} and {ActiveOnlyClause}");
         if (since is { } s)
             filter.Append($" and {CreatedOnField} gt {FormatOData(s)}");
 
@@ -199,7 +205,7 @@ public sealed class CommunicationThreadReadService
         var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, ct);
 
         var select = string.Join(',', new[] { PkField, InternalOnlyField, PrivilegeField });
-        var filter = new StringBuilder($"{ThreadLookupValue} eq {threadId}");
+        var filter = new StringBuilder($"{ThreadLookupValue} eq {threadId} and {ActiveOnlyClause}");
         if (since is { } s)
             filter.Append($" and {CreatedOnField} gt {FormatOData(s)}");
 
@@ -254,7 +260,7 @@ public sealed class CommunicationThreadReadService
         // PinnedField added (task 041 / FR-24) so the record-mode thread list can mark/sort pinned threads too.
         var threadSelect = string.Join(',', new[] { ThreadPkField, ThreadNameField, PinnedField });
         var threadOData =
-            $"$select={threadSelect}&$filter=_{regardingField}_value eq {recordId}" +
+            $"$select={threadSelect}&$filter=_{regardingField}_value eq {recordId} and {ActiveOnlyClause}" +
             $"&$orderby={CreatedOnField} asc&$top={MaxThreads}";
         var threadRows = await _query.QueryAsync(ThreadSet, threadOData, callerSystemUserId, ct);
 
@@ -336,7 +342,8 @@ public sealed class CommunicationThreadReadService
         var pageSize = NormalizeThreadListPageSize(top);
 
         // Build the filter: NO regarding scoping (record-less inclusion) + optional name search + keyset cursor.
-        var clauses = new List<string>();
+        // Active-only (round-8): deactivated (soft-deleted) threads must drop out of the list.
+        var clauses = new List<string> { ActiveOnlyClause };
         if (!string.IsNullOrWhiteSpace(search))
         {
             // Two-stage escape: (1) double single quotes so the value cannot break out of the OData string literal;
@@ -638,7 +645,9 @@ public sealed class CommunicationThreadReadService
             DirectionField, SentByValue,
             SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, IsPrivateField, ThreadLookupValue,
         });
-        var odata = $"$select={select}&$filter={odataFilter}&$orderby={CreatedOnField} asc&$top={top}";
+        // Active-only (round-8): deactivated (soft-deleted) messages must drop out of every by-regarding / filtered
+        // read that composes onto this shared pipeline. Wrap the caller filter so the AND binds correctly.
+        var odata = $"$select={select}&$filter=({odataFilter}) and {ActiveOnlyClause}&$orderby={CreatedOnField} asc&$top={top}";
         var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct);
 
         // #675 / ISS-006: authoritative per-caller internal/external bit (fail-closed external) on the SHARED read
