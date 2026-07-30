@@ -108,6 +108,7 @@ import {
   applyResolverFields,
   createTodoRegardingChild,
   discoverNavProps,
+  resolveAnalysisFilePreview,
 } from '@spaarke/ui-components';
 import type {
   AssociationResult,
@@ -800,14 +801,29 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         }
 
         // -- Load the file to a workspace tab (existing document-viewer widget) --
+        // Build the FULL DocumentViewerWidgetData shape (UAT round 4): the previous
+        // `{ documentId, title, sessionId }` payload was missing the required
+        // `filename` / `contentType` / `textContent` and a `fetchPreviewUrl`, so the
+        // viewer rendered "Unknown file / Preview not available". Reuse the shared
+        // resolver by treating the just-created document id as the analysis's
+        // `sprk_documentid` value (it IS the linked document).
+        const createdFilePreview = resolveAnalysisFilePreview(
+          { _sprk_documentid_value: documentId, sprk_name: documentName },
+          { bffBaseUrl: bffBaseUrl ?? '', authenticatedFetch: authFetch ?? (globalThis.fetch as typeof fetch) }
+        );
         dispatch('workspace', {
           type: 'widget_load',
           widgetType: 'document-viewer',
           widgetData: {
+            filename: documentName,
+            contentType: 'application/octet-stream',
+            textContent: '',
             documentId,
-            title: documentName,
-            sessionId: data?.sessionId,
+            ...(createdFilePreview.status === 'resolved'
+              ? { fetchPreviewUrl: createdFilePreview.fetchPreviewUrl }
+              : {}),
           },
+          displayName: documentName,
         });
 
         setCompletedName(finishName);

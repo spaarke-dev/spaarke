@@ -36,6 +36,7 @@ import {
   createXrmNavigationService,
   searchUsersAndContacts,
   ANALYSIS_REGARDING_TARGETS,
+  resolveAnalysisFilePreview,
 } from "@spaarke/ui-components";
 import type { AssociationResult } from "@spaarke/ui-components";
 import {
@@ -968,12 +969,16 @@ export function WorkspacePane(): React.JSX.Element {
       return () => window.clearTimeout(timerId);
     }
 
-    // mode === 'existing' — resolve the bound session, then switch to it in place.
+    // mode === 'existing' — load the analysis's latest conversation history (if a
+    // session is bound) AND surface the analysis's document. UAT round 4: for an
+    // analysis with no bound session yet (e.g. freshly created), the modal must still
+    // SHOW the analysis (its linked document) rather than an empty workspace.
     const analysisId = analysisLaunch.analysisId;
     if (!analysisId || !bffBaseUrl) return;
     let cancelled = false;
     const timerId = window.setTimeout(() => {
       void (async () => {
+        let sessionRestored = false;
         try {
           const lookupUrl = buildBffApiUrl(
             bffBaseUrl,
@@ -983,18 +988,53 @@ export function WorkspacePane(): React.JSX.Element {
             headers: { Accept: "application/json" },
           });
           if (cancelled) return;
-          // 404 (no session ever bound) / any non-OK → graceful no-op. The modal
-          // renders the default welcome; never mint an empty session (task 031
-          // escalation contract).
-          if (!response.ok) return;
-          const session = (await response.json()) as { sessionId?: string };
-          if (cancelled || !session.sessionId) return;
-          dispatch("conversation", {
-            type: "session_switch",
-            sessionId: session.sessionId,
+          // 404 (no session ever bound) / any non-OK → fall through to the
+          // document-only surface below; never mint an empty session (task 031).
+          if (response.ok) {
+            const session = (await response.json()) as { sessionId?: string };
+            if (!cancelled && session.sessionId) {
+              sessionRestored = true;
+              // Restores the transcript (Assistant history) + the session-keyed
+              // review/findings widgets (which include the analysis's document).
+              dispatch("conversation", {
+                type: "session_switch",
+                sessionId: session.sessionId,
+              });
+            }
+          }
+        } catch {
+          // Network/parse failure — fall through to the document-only surface.
+        }
+
+        // No bound session → open the analysis's linked document so the workspace
+        // shows THIS analysis (ADR-007 `sprk_documentid` → `sprk_document` hop).
+        if (cancelled || sessionRestored) return;
+        try {
+          const rec = (await analysisWizardDataService.retrieveRecord(
+            "sprk_analysis",
+            analysisId,
+            "?$select=sprk_name,_sprk_documentid_value&$expand=sprk_documentid($select=sprk_documentname)",
+          )) as Record<string, unknown>;
+          if (cancelled) return;
+          const preview = resolveAnalysisFilePreview(
+            rec as Parameters<typeof resolveAnalysisFilePreview>[0],
+            { bffBaseUrl, authenticatedFetch },
+          );
+          if (preview.status !== "resolved") return;
+          dispatch("workspace", {
+            type: "widget_load",
+            widgetType: "document-viewer",
+            widgetData: {
+              filename: preview.documentName,
+              contentType: "application/octet-stream",
+              textContent: "",
+              documentId: preview.documentId,
+              fetchPreviewUrl: preview.fetchPreviewUrl,
+            },
+            displayName: preview.documentName,
           });
         } catch {
-          // Network/parse failure — graceful no-op (the modal shows the default surface).
+          // Could not resolve the document — leave the workspace to the default surface.
         }
       })();
     }, 0);
@@ -1003,9 +1043,9 @@ export function WorkspacePane(): React.JSX.Element {
       window.clearTimeout(timerId);
     };
     // Run once per mount when auth + restore are ready; the ref guard prevents
-    // re-runs. authenticatedFetch is a stable module-level reference.
+    // re-runs. authenticatedFetch + analysisWizardDataService are stable refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysisLaunch, isAuthenticated, tabRestoreSettled, bffBaseUrl]);
+  }, [analysisLaunch, isAuthenticated, tabRestoreSettled, bffBaseUrl, analysisWizardDataService]);
 
   // ---------------------------------------------------------------------------
   // Auto-open pinned workspaces — task 092 / round 5 / task 101 fix
