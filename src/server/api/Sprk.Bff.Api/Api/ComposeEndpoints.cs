@@ -1283,6 +1283,10 @@ public static class ComposeEndpoints
             // C2 (UAT 2026-07-20): the client paraId map → stamp minted ids onto the baseline before the engine
             // resolves each op's anchor.
             ParaIdMap = body.ParaIdMap,
+            // G7 (task 022): forwarded for symmetry (ignored on the replace path — a promoted doc already has
+            // its SPE id; the dedup only runs in the transient-create branch).
+            TransientKey = body.TransientKey,
+            ForkNew = body.ForkNew,
         };
 
         return await ExecuteSaveAsync(request, documentSpeId, composeService, logger, httpContext, ct).ConfigureAwait(false);
@@ -1352,6 +1356,11 @@ public static class ComposeEndpoints
             // C2 (UAT 2026-07-20): the client paraId map — carried for symmetry (the stamper is a no-op on the
             // born-in-editor ContentModel path, where the renderer already mints ids into the bytes it authors).
             ParaIdMap = body.ParaIdMap,
+            // G7 (task 022): the transient-key dedup identity + Save-New fork flag — the whole point of this
+            // route (the transient-create branch). transientKey dedups repeated create-on-save to ONE record;
+            // forkNew forces a fresh record ("Save New Document").
+            TransientKey = body.TransientKey,
+            ForkNew = body.ForkNew,
         };
 
         return await ExecuteSaveAsync(request, documentSpeId: null, composeService, logger, httpContext, ct).ConfigureAwait(false);
@@ -2042,7 +2051,16 @@ public sealed record SaveComposeDocumentBody(
     /// physically onto the baseline's id-less paragraphs before the synthesizer resolves (see
     /// <see cref="SaveComposeDocumentRequest.ParaIdMap"/> / <c>ComposeBaselineParaIdStamper</c>).
     /// Optional — an older client omits it and the stamp is skipped.</summary>
-    [property: JsonPropertyName("paraIdMap")] IReadOnlyList<ComposeBaselineParaId>? ParaIdMap = null);
+    [property: JsonPropertyName("paraIdMap")] IReadOnlyList<ComposeBaselineParaId>? ParaIdMap = null,
+    /// <summary>G7 (FR-06, task 022): the client-minted stable transient-draft key (<c>crypto.randomUUID()</c>,
+    /// minted once at mount) sent on every create-on-save so repeated calls dedup to ONE record via the
+    /// <c>sprk_composetransientkey_uk</c> alt-key instead of minting duplicates (the 8-duplicate fix). Null on
+    /// the replace path / older clients. See <see cref="SaveComposeDocumentRequest.TransientKey"/>.</summary>
+    [property: JsonPropertyName("transientKey")] string? TransientKey = null,
+    /// <summary>G7 (FR-06, task 022): the deliberate <b>Save New Document</b> fork — <c>true</c> skips the
+    /// transient-key dedup and mints a fresh record. Default <c>false</c> = <b>Save Version</b> (replace/dedup).
+    /// See <see cref="SaveComposeDocumentRequest.ForkNew"/>.</summary>
+    [property: JsonPropertyName("forkNew")] bool ForkNew = false);
 
 /// <summary>Request body for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
 public sealed record PromoteComposeDocumentBody(

@@ -645,6 +645,31 @@ public sealed record SaveComposeDocumentRequest
     /// behavior.
     /// </summary>
     public NdaReviewSummaryPageInput? SummaryPage { get; init; }
+
+    /// <summary>
+    /// G7 (FR-06, task 022): a CLIENT-MINTED stable key for a TRANSIENT (not-yet-promoted) Compose draft,
+    /// minted once (<c>crypto.randomUUID()</c>) when the draft is mounted and sent on every create-on-save.
+    /// It is the durable dedup identity that fixes the 8-duplicate defect: a transient draft has no SPE
+    /// drive-item id until its first save mints one, and the transient create-on-save branch minted a NEW
+    /// SPE item on EVERY call, so lost/raced round-trips (concurrent saves, a re-created mount, a new tab)
+    /// each produced another SPE item → another <c>sprk_document</c> row. Persisted onto the
+    /// <c>sprk_composetransientkey</c> column (single-column alt-key <c>sprk_composetransientkey_uk</c>) at
+    /// create-on-save; on a subsequent create-on-save with the SAME key, <see cref="SaveAsync"/> resolves the
+    /// existing record BY THIS KEY (never by content — I-7/NFR-02) and REPLACES its SPE item in place instead
+    /// of minting a duplicate. Null on the replace path (a promoted doc already has its SPE id) and for older
+    /// clients that predate G7 (behavior unchanged — no dedup, R1 mint-each-call).
+    /// </summary>
+    public string? TransientKey { get; init; }
+
+    /// <summary>
+    /// G7 (FR-06, task 022): the deliberate <b>Save New Document</b> fork. When <c>true</c>, a create-on-save
+    /// SKIPS the <see cref="TransientKey"/> dedup lookup and always mints a fresh SPE item + a fresh
+    /// <c>sprk_document</c> row — the user explicitly asked for a NEW document, not a new version of the
+    /// existing one. The client pairs this with a freshly-minted <see cref="TransientKey"/> so the forked
+    /// document gets its own dedup identity going forward. Default <c>false</c> = <b>Save Version</b> (replace
+    /// in place / dedup — the primary action).
+    /// </summary>
+    public bool ForkNew { get; init; }
 }
 
 /// <summary>Save outcome — new SPE version id + resolved <c>sprk_documentid</c>.</summary>
@@ -754,6 +779,16 @@ public sealed record PromoteComposeDocumentRequest
     /// standalone <c>/promote</c> call that predates G1) supplies none.
     /// </summary>
     public ComposeOrigin? Origin { get; init; }
+
+    /// <summary>
+    /// G7 (FR-06, task 022): the client-minted transient dedup key to STAMP onto <c>sprk_composetransientkey</c>
+    /// WHEN a new <c>sprk_document</c> row is created by this call (threaded from
+    /// <see cref="ComposeService.SaveAsync"/>). Ignored on the idempotent existing-row path (the key is set
+    /// ONCE, at create-on-save). Null for a replace-path save or an older client that predates G7. Enables the
+    /// next create-on-save with the same key to resolve THIS record via the <c>sprk_composetransientkey_uk</c>
+    /// alt-key and replace in place instead of minting a duplicate. See <see cref="SaveComposeDocumentRequest.TransientKey"/>.
+    /// </summary>
+    public string? TransientKey { get; init; }
 }
 
 /// <summary>Promote outcome — resolved <c>sprk_documentid</c> + a flag distinguishing

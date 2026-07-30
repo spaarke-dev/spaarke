@@ -4,7 +4,7 @@
     <title>G7 — Save-Version vs Save-New-Document split-button + create-vs-replace routing (transient/upload path)</title>
     <phase>2 Authored-doc lifecycle</phase>
     <gate>dep:020</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF save routing (`ComposeService.cs` create-vs-replace) plus a client toolbar control on a contended file (`ComposeWorkspace.tsx`), tags include bff-api/frontend/fluent-ui, changes the save contract, and fixes a UAT duplicate-record defect. FULL per CLAUDE.md §8.</rigor-reason>
     <model-tier>sonnet</model-tier>

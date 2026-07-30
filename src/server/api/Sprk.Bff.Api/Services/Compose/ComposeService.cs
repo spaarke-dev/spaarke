@@ -65,6 +65,13 @@ public class ComposeService : IComposeService
     // (PromoteIfEphemeralAsync) and read on Path A loads (LoadAsync) — see ComposeOrigin remarks for the
     // AS-BUILT integer values + BINDING null-handling contract.
     private const string ComposeOriginAttribute = "sprk_composeorigin";
+    // G7 (FR-06, task 022): the client-minted transient dedup key (owner-created Single-line-text column +
+    // single-column alt-key sprk_composetransientkey_uk; notes/g7-transient-key-schema.md). Stamped ONLY at
+    // create-on-save (PromoteIfEphemeralAsync). Resolved via the alt-key in TryFindDocumentByTransientKeyAsync
+    // BEFORE minting a transient SPE item, so repeated create-on-save calls with the same key replace one
+    // record in place instead of minting duplicates (the 8-duplicate defect). Resolve by KEY, never by
+    // content (I-7/NFR-02).
+    private const string ComposeTransientKeyAttribute = "sprk_composetransientkey";
 
     // FR-05 create-on-save backbone — the consumer-declared ordered step set the
     // JobAwareCompletionStateProjector projects (container → record → profile-analysis → indexing).
@@ -865,37 +872,82 @@ public class ComposeService : IComposeService
 
         if (isTransientCreate)
         {
-            if (string.IsNullOrWhiteSpace(request.ContainerId))
+            // ─── G7 (FR-06, task 022): transient-key dedup — the 8-duplicate fix ───
+            // A transient draft has no SPE id until its first save mints one; this branch minted a NEW SPE
+            // item on EVERY create-on-save call, so a lost/raced round-trip (concurrent saves, a re-created
+            // mount, a new tab) produced another item → another sprk_document row. The client mints a stable
+            // transient key once at mount and sends it on every create-on-save; BEFORE minting, resolve it
+            // against the durable sprk_composetransientkey_uk alt-key. A hit REUSES the existing record's SPE
+            // item (replace in place, no new mint, no new row). Save-New (ForkNew) deliberately SKIPS the
+            // dedup to fork a fresh record. Resolves by KEY, never by content (I-7/NFR-02).
+            TransientKeyMatch? dedupMatch = null;
+            if (!request.ForkNew && !string.IsNullOrWhiteSpace(request.TransientKey))
             {
-                _logger.LogWarning(
-                    "Compose create-on-save: transient draft with no client-supplied ContainerId — failing the '{Step}' step honestly (session={SessionId}). No server-side BU→container resolver (multi-container INV-7).",
-                    StepContainer, request.SessionId);
-                return BuildContainerFailedResult(request, observedAt);
+                dedupMatch = await TryFindDocumentByTransientKeyAsync(request.TransientKey!, cancellationToken)
+                    .ConfigureAwait(false);
             }
 
-            // Fork B: mint the SPE drive-item in the supplied container under the user's OBO
-            // identity (the Compose user holds the file ACL; MI does not — same constraint that
-            // deferred profile). Idempotency: this branch only runs when DocumentSpeId is absent;
-            // once created, the client re-Saves with the returned id → the replace path below, so
-            // the drive-item is never double-created.
-            var driveId = await _spe.ResolveDriveIdAsync(request.ContainerId, cancellationToken).ConfigureAwait(false);
-            using var createStream = new MemoryStream(contentToPersist, writable: false);
-            var created = await _spe.UploadSmallAsUserAsync(
-                    httpContext, driveId, fileName, createStream, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (created is null || string.IsNullOrEmpty(created.Id))
+            if (dedupMatch is { } match
+                && !string.IsNullOrWhiteSpace(match.SpeId)
+                && !string.IsNullOrWhiteSpace(match.DriveId))
             {
-                _logger.LogError(
-                    "Compose create-on-save: SPE drive-item creation returned null/empty for container={ContainerId} — failing the '{Step}' step (session={SessionId}).",
-                    request.ContainerId, StepContainer, request.SessionId);
-                return BuildContainerFailedResult(request, observedAt);
-            }
+                // Dedup hit: the transient key already resolved to a record with a live SPE item — replace
+                // that item's content in place. No new mint, no new row (the promote step below finds the
+                // existing record by sprk_graphitemid → idempotent no-op).
+                using var replaceStream = new MemoryStream(contentToPersist, writable: false);
+                var replaced = await _spe.ReplaceFileContentAsUserAsync(
+                        httpContext, match.DriveId!, match.SpeId!, replaceStream, cancellationToken)
+                    .ConfigureAwait(false);
 
-            saved = created;
-            effectiveSpeId = created.Id;
-            effectiveDriveId = created.DriveId ?? driveId;
-            fileName = created.Name ?? fileName;
+                if (replaced is null || string.IsNullOrEmpty(replaced.Id))
+                {
+                    throw new InvalidOperationException(
+                        $"Compose transient-key dedup: SPE replace failed for existing item drive={match.DriveId} item={match.SpeId} (transientKey matched record {match.RecordId}).");
+                }
+
+                saved = replaced;
+                effectiveSpeId = match.SpeId!;
+                effectiveDriveId = match.DriveId;
+                fileName = replaced.Name ?? fileName;
+
+                _logger.LogInformation(
+                    "Compose create-on-save: transientKey matched existing sprk_document {DocumentRecordId} (driveItem={DocumentSpeId}) — replaced in place, no duplicate mint (session={SessionId}).",
+                    match.RecordId, match.SpeId, request.SessionId);
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(request.ContainerId))
+                {
+                    _logger.LogWarning(
+                        "Compose create-on-save: transient draft with no client-supplied ContainerId — failing the '{Step}' step honestly (session={SessionId}). No server-side BU→container resolver (multi-container INV-7).",
+                        StepContainer, request.SessionId);
+                    return BuildContainerFailedResult(request, observedAt);
+                }
+
+                // Fork B: mint the SPE drive-item in the supplied container under the user's OBO identity
+                // (the Compose user holds the file ACL; MI does not — same constraint that deferred profile).
+                // First save of this transient key (or a deliberate Save-New fork): once created, the record
+                // is stamped with the transient key (promote step below) so the NEXT create-on-save with the
+                // same key takes the dedup replace path above — never a double mint.
+                var driveId = await _spe.ResolveDriveIdAsync(request.ContainerId, cancellationToken).ConfigureAwait(false);
+                using var createStream = new MemoryStream(contentToPersist, writable: false);
+                var created = await _spe.UploadSmallAsUserAsync(
+                        httpContext, driveId, fileName, createStream, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (created is null || string.IsNullOrEmpty(created.Id))
+                {
+                    _logger.LogError(
+                        "Compose create-on-save: SPE drive-item creation returned null/empty for container={ContainerId} — failing the '{Step}' step (session={SessionId}).",
+                        request.ContainerId, StepContainer, request.SessionId);
+                    return BuildContainerFailedResult(request, observedAt);
+                }
+
+                saved = created;
+                effectiveSpeId = created.Id;
+                effectiveDriveId = created.DriveId ?? driveId;
+                fileName = created.Name ?? fileName;
+            }
         }
         else
         {
@@ -954,6 +1006,10 @@ public class ComposeService : IComposeService
             // G1 (FR-01, task 020): persisted onto sprk_composeorigin ONLY when this call actually
             // creates the row (PromoteIfEphemeralAsync's idempotent existing-row branch ignores it).
             Origin = origin,
+            // G7 (FR-06, task 022): stamped onto sprk_composetransientkey ONLY when this call creates the
+            // row, so the next create-on-save with the same key dedups via the alt-key (see the transient
+            // branch above). Null on the replace path / older clients — no dedup identity, unchanged behavior.
+            TransientKey = request.TransientKey,
         };
 
         var promotion = await PromoteIfEphemeralAsync(promoteRequest, httpContext, cancellationToken)
@@ -1645,6 +1701,16 @@ public class ComposeService : IComposeService
         // never left unset, so a fresh row is never silently null-origin.
         entity[ComposeOriginAttribute] = new OptionSetValue((int)(request.Origin ?? ComposeOrigin.Imported));
 
+        // G7 (FR-06, task 022): stamp the client-minted transient dedup key ONLY at create (this branch;
+        // the idempotent existing-row branch above never reaches here). The single-column alt-key
+        // sprk_composetransientkey_uk makes this the durable dedup identity for repeated create-on-save
+        // calls (see TryFindDocumentByTransientKeyAsync + the SaveAsync transient branch). Omitted for a
+        // replace-path save or an older client that predates G7 (nulls are not enforced-unique).
+        if (!string.IsNullOrWhiteSpace(request.TransientKey))
+        {
+            entity[ComposeTransientKeyAttribute] = request.TransientKey!;
+        }
+
         if (request.FileSize.HasValue)
         {
             // sprk_filesize is a Whole Number (int) column; the OrganizationService write path is
@@ -1671,13 +1737,26 @@ public class ComposeService : IComposeService
         }
         catch (InvalidOperationException ex)
         {
-            // Narrow race — concurrent Save promoted first. Re-resolve.
+            // Narrow race — a concurrent Save promoted first. Re-resolve by BOTH keys:
+            //   • sprk_graphitemid_uk — the classic case (two saves of the SAME minted SPE item), OR
+            //   • G7 (task 022) sprk_composetransientkey_uk — two truly-concurrent FIRST saves of the same
+            //     transient draft each minted their OWN SPE item (different graphitemid) but carry the SAME
+            //     transient key, so the loser's create fails the transient-key unique constraint. Re-resolving
+            //     by the transient key lands the loser on the winner's record → ONE record, no duplicate
+            //     (the loser's minted item is orphaned, an acceptable rare edge — never a duplicate ROW).
             _logger.LogWarning(ex,
-                "Compose promote: create failed for driveItem={DocumentSpeId} — likely concurrent promotion. Re-resolving via alternate key.",
+                "Compose promote: create failed for driveItem={DocumentSpeId} — likely concurrent promotion. Re-resolving via alternate key (graphItemId, then transientKey).",
                 request.DocumentSpeId);
 
             var raceWinnerId = await TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
                 .ConfigureAwait(false);
+
+            if (!raceWinnerId.HasValue && !string.IsNullOrWhiteSpace(request.TransientKey))
+            {
+                var transientKeyWinner = await TryFindDocumentByTransientKeyAsync(request.TransientKey!, cancellationToken)
+                    .ConfigureAwait(false);
+                raceWinnerId = transientKeyWinner?.RecordId;
+            }
 
             if (!raceWinnerId.HasValue)
             {
@@ -2234,6 +2313,57 @@ public class ComposeService : IComposeService
             _logger.LogDebug(ex,
                 "Compose promote alt-key lookup threw InvalidOperationException for driveItem={DocumentSpeId} — treating as not-found",
                 driveItemId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// G7 (FR-06, task 022): the resolved dedup identity for a transient key — the <c>sprk_document</c> row id
+    /// plus the SPE pointer (<c>sprk_graphitemid</c> + <c>sprk_graphdriveid</c>) needed to REPLACE its content
+    /// in place instead of minting a duplicate. <see cref="SpeId"/>/<see cref="DriveId"/> are <c>null</c> only
+    /// for a row that somehow carries a transient key but no SPE pointer (a G7-created row always has both) —
+    /// the caller then falls back to minting.
+    /// </summary>
+    private sealed record TransientKeyMatch(Guid RecordId, string? SpeId, string? DriveId);
+
+    /// <summary>
+    /// G7 (FR-06, task 022): looks up an existing <c>sprk_document</c> row by the client-minted transient key
+    /// via the <c>sprk_composetransientkey_uk</c> alternate key, returning its id + SPE pointer (so the caller
+    /// can replace in place). Returns <c>null</c> when no row carries the key (the first save of this draft,
+    /// or a Save-New fork). Resolves by KEY, never by content (I-7/NFR-02). Mirrors
+    /// <see cref="TryFindDocumentByGraphItemIdAsync"/> exactly (same best-effort not-found on a thrown
+    /// InvalidOperationException).
+    /// </summary>
+    private async Task<TransientKeyMatch?> TryFindDocumentByTransientKeyAsync(
+        string transientKey,
+        CancellationToken cancellationToken)
+    {
+        var key = new KeyAttributeCollection
+        {
+            { ComposeTransientKeyAttribute, transientKey },
+        };
+
+        try
+        {
+            var entity = await _dataverse.RetrieveByAlternateKeyAsync(
+                DocumentLogicalName,
+                key,
+                new[] { DocumentIdAttribute, GraphItemIdAttribute, GraphDriveIdAttribute },
+                cancellationToken).ConfigureAwait(false);
+
+            if (entity is null)
+            {
+                return null;
+            }
+
+            var speId = entity.Contains(GraphItemIdAttribute) ? entity[GraphItemIdAttribute] as string : null;
+            var driveId = entity.Contains(GraphDriveIdAttribute) ? entity[GraphDriveIdAttribute] as string : null;
+            return new TransientKeyMatch(entity.Id, speId, driveId);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogDebug(ex,
+                "Compose transient-key alt-key lookup threw InvalidOperationException for transientKey — treating as not-found");
             return null;
         }
     }

@@ -17,7 +17,7 @@
  */
 
 import * as React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import type { Editor } from '@tiptap/react';
@@ -438,28 +438,55 @@ describe('ComposeFormatToolbar — alignment controls (R5 task 010, ET-1 guard r
 });
 
 // ---------------------------------------------------------------------------
-// 6. Save button — right-aligned icon button honoring canSave / isSaving
+// 6. Save split-button (G7 task 022) — "Save Version" primary + "Save New Document" menu item
 // ---------------------------------------------------------------------------
 
-describe('ComposeFormatToolbar — Save button', () => {
-  it('is enabled and fires onSave when canSave is true', async () => {
+describe('ComposeFormatToolbar — Save split-button (G7 task 022)', () => {
+  // The SplitButton root carries the testid; its first inner <button> is the primary action.
+  const getPrimary = () => within(screen.getByTestId('compose-format-save')).getAllByRole('button')[0];
+
+  it('renders "Save Version" as the primary action and "Save New Document" in the caret menu', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true } });
+
+    // Primary action = Save Version (the default / replace-in-place choice).
+    expect(screen.getByRole('button', { name: /save version/i })).toBeInTheDocument();
+    // The caret menu opens the deliberate-fork item.
+    await user.click(screen.getByRole('button', { name: /save options/i }));
+    expect(await screen.findByTestId('compose-format-save-new')).toBeInTheDocument();
+  });
+
+  it('the primary action fires onSave("version")', async () => {
     const user = userEvent.setup();
     const onSave = jest.fn();
     renderFormatToolbar({}, { props: { onSave, canSave: true } });
 
-    const save = screen.getByTestId('compose-format-save');
-    expect(save).not.toBeDisabled();
-    await user.click(save);
-    expect(onSave).toHaveBeenCalledTimes(1);
+    await user.click(getPrimary());
+    expect(onSave).toHaveBeenCalledWith('version');
   });
 
-  it('is disabled when canSave is false or a save is in flight', () => {
+  it('the caret-menu "Save New Document" fires onSave("new")', async () => {
+    const user = userEvent.setup();
+    const onSave = jest.fn();
+    renderFormatToolbar({}, { props: { onSave, canSave: true } });
+
+    await user.click(screen.getByRole('button', { name: /save options/i }));
+    await user.click(await screen.findByTestId('compose-format-save-new'));
+    expect(onSave).toHaveBeenCalledWith('new');
+  });
+
+  it('the primary action is disabled when canSave is false or a save is in flight', () => {
     const { unmount } = renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: false } });
-    expect(screen.getByTestId('compose-format-save')).toBeDisabled();
+    expect(getPrimary()).toBeDisabled();
     unmount();
 
     renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true, isSaving: true } });
-    expect(screen.getByTestId('compose-format-save')).toBeDisabled();
+    expect(getPrimary()).toBeDisabled();
+  });
+
+  it('ADR-021: renders the split-button under a dark theme (theme tokens, no crash)', () => {
+    renderFormatToolbar({}, { theme: webDarkTheme, props: { onSave: jest.fn(), canSave: true } });
+    expect(screen.getByRole('button', { name: /save version/i })).toBeInTheDocument();
   });
 });
 

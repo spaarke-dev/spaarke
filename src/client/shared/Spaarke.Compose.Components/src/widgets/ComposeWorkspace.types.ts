@@ -216,6 +216,10 @@ export type ComposeWorkspaceAction =
       containerId?: string;
       sessionId?: string;
       projection?: ComposeServerProjection | null;
+      // G7 (FR-06, task 022): the client-minted stable transient-draft dedup key
+      // (mintTransientKey). Carried onto documentRef.transientKey so every create-on-save sends it →
+      // repeated saves dedup to ONE record. Omitted by an older caller → no dedup (unchanged behavior).
+      transientKey?: string;
     }
   // ── DEF-08: AI-drafted full-document seed mount (create-on-save, like mountTransient) ──
   // Item 6 (UAT round-4): `sessionId` carries a MINTED document session id for born-in-editor mounts
@@ -223,7 +227,7 @@ export type ComposeWorkspaceAction =
   // AI toolbar thread `documentSessionId: ''` → a "Draft alternative" is reclassified as informational
   // prose instead of an in-editor redline, and `materializeComposeDraftFromLedger` aborts. Same
   // NEVER-'' invariant as `mountTransient`.
-  | { kind: 'mountDraftHtml'; html: string; fileName?: string; containerId?: string; sessionId?: string }
+  | { kind: 'mountDraftHtml'; html: string; fileName?: string; containerId?: string; sessionId?: string; transientKey?: string }
   | { kind: 'requestSave' }
   // FR-05 (task 100): create-on-save mints a NEW SPE drive-item; `documentSpeId` carries the
   // server-minted id back so a second Save targets the real item (the replace path), not the
@@ -364,7 +368,9 @@ export function composeWorkspaceReducer(
         etag: null,
         versionId: null,
         sessionId: action.sessionId ?? state.sessionId,
-        documentRef: { speDriveItemId: '', fileName: action.fileName, containerId: action.containerId },
+        // G7 (FR-06, task 022): stamp the client-minted transient dedup key onto documentRef so every
+        // create-on-save sends it (triggerSave) → repeated transient saves dedup to ONE record.
+        documentRef: { speDriveItemId: '', fileName: action.fileName, containerId: action.containerId, transientKey: action.transientKey },
         checkoutStatus: 'skipped',
         // A transient (Browse / assistant-upload) mount has no server pre-parse — there is no
         // stored-document Load response to source imports from. Explicitly clear rather than
@@ -402,7 +408,9 @@ export function composeWorkspaceReducer(
         // server round-trip to supply one). Fall back to the existing state.sessionId for the Part-A
         // ledger draft path, which already set it via `requestUploadMount` before this action.
         sessionId: action.sessionId ?? state.sessionId,
-        documentRef: { speDriveItemId: '', fileName: action.fileName, containerId: action.containerId },
+        // G7 (FR-06, task 022): same transient dedup key stamp as mountTransient (born-in-editor drafts
+        // create-on-save on first Save, so they need the same repeat-save dedup identity).
+        documentRef: { speDriveItemId: '', fileName: action.fileName, containerId: action.containerId, transientKey: action.transientKey },
         checkoutStatus: 'skipped',
         // An AI-drafted seed has no server pre-parse either — same rationale as `mountTransient`.
         paraIdMap: [],

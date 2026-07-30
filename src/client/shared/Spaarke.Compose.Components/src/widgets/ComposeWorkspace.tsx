@@ -141,6 +141,8 @@ import type {
   // FR-03 (task 011, spaarkeai-compose-fidelity-r4.5): shared normalize-target type for the
   // Load/Upload/Browse->project projection hydration sites (see `normalizeProjection` below).
   ComposeServerProjection,
+  // G7 (task 022): the Save split-button choice threaded into triggerSave.
+  ComposeSaveMode,
 } from '../types/compose-contracts';
 // R4 FR-06 (task 032, the write-path cutover): the op-log schema constant stamped on the operation log
 // `triggerSave` sends — the server (ComposeShadowPatchEngine) validates it against the version it compiles
@@ -192,6 +194,22 @@ function mintDocumentSessionId(): string {
     return c.randomUUID();
   }
   return `compose-doc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * G7 (FR-06, task 022): mint the stable transient-draft dedup key, ONCE per transient mount. Sent on
+ * every create-on-save so repeated calls (concurrent saves, a re-created mount, a new tab) dedup to ONE
+ * `sprk_document` record via the server `sprk_composetransientkey_uk` alt-key instead of minting
+ * duplicates (the 8-duplicate defect). Minted at the mount dispatch site (never per-save — a per-save
+ * mint would BE the bug) and carried on `documentRef.transientKey`. Same `crypto.randomUUID()`-preferring
+ * shape as {@link mintDocumentSessionId} so jsdom/older runtimes still mint a stable value.
+ */
+function mintTransientKey(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c?.randomUUID) {
+    return c.randomUUID();
+  }
+  return `compose-tk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 // ASP.NET Core deserializes byte[] request-body fields from a base64 string (System.Text.Json
@@ -973,14 +991,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // -------------------------------------------------------------------------
   // BFF Save — POST /api/compose/documents/{speId}/save
   // -------------------------------------------------------------------------
-  const triggerSave = React.useCallback(async (): Promise<void> => {
+  const triggerSave = React.useCallback(async (saveMode: ComposeSaveMode = 'version'): Promise<void> => {
     if (state.status !== 'loaded') return;
     if (!state.documentRef || !editorRef.current) return;
 
+    // G7 (FR-06, task 022): "Save New Document" (fork) forces the create-on-save path — a brand-new
+    // sprk_document record — EVEN when the doc already has a real SPE item. A fresh transient key is
+    // minted so the fork gets its OWN dedup identity, and `forkNew` tells the server to SKIP the
+    // transient-key dedup lookup for this call (a deliberate new document, not a new version).
+    const forkNew = saveMode === 'new';
     // FR-05 (task 100): a TRANSIENT (Browse/Upload) draft has NO SPE drive-item — it persists via
     // create-on-save into the client-resolved BU container, not the replace path. Branch on the
-    // absence of a real speDriveItemId (mountTransient sets it to '').
-    const isTransientCreate = !state.documentRef.speDriveItemId;
+    // absence of a real speDriveItemId (mountTransient sets it to ''), OR on a deliberate Save-New fork.
+    const isTransientCreate = forkNew || !state.documentRef.speDriveItemId;
+    // G7: the dedup key to send on a create-on-save. A fork mints a fresh key (its own identity going
+    // forward); a normal transient save reuses the mount-time key so repeated saves dedup to ONE record.
+    const effectiveTransientKey = forkNew ? mintTransientKey() : state.documentRef.transientKey;
     const saveContainerId = state.documentRef.containerId ?? containerIdRef.current;
     // UAT 2026-07-19 P2: prefer the drive the document actually lives in (captured from the save
     // response after a create-on-save — the born-in-editor doc lands in the BU container's drive,
@@ -1101,6 +1127,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           comments: anchoredComments,
           // C2: the baseline paraId map (harmless on the born-in-editor path — the server skips the stamp there).
           paraIdMap,
+          // G7 (task 022): the transient dedup key (repeated create-on-save → ONE record) + the Save-New
+          // fork flag (forkNew=true skips dedup → a deliberately new record). effectiveTransientKey is the
+          // mount-time key for a normal transient save, or a freshly-minted one for a fork.
+          transientKey: effectiveTransientKey,
+          forkNew,
           ...(bornInEditorRender
             ? { contentModel: editorRef.current.buildContentModel() }
             : { content: encodeRetained(state.docxBytes!) }),
@@ -1803,6 +1834,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           containerId: containerIdRef.current,
           sessionId: browseDocumentSessionId,
           projection,
+          // G7 (task 022): mint the transient dedup key once for this Browse mount → every create-on-save
+          // sends it so repeated saves target ONE record (no duplicate mint).
+          transientKey: mintTransientKey(),
         });
         // A freshly Browse-mounted file is unsaved by definition — mark dirty so Save
         // (create-on-save, task 013) is enabled immediately.
@@ -1846,6 +1880,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       fileName,
       containerId: containerIdRef.current,
       sessionId: mintDocumentSessionId(),
+      // G7 (task 022): transient dedup key for this born-in-editor mount.
+      transientKey: mintTransientKey(),
     });
     // A freshly-created born-in-editor doc is unsaved by definition — enable Save (create-on-save).
     setIsDirty(true);
@@ -2113,6 +2149,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // FR-05 (task 100): thread the host-resolved BU container for create-on-save.
           containerId: containerIdRef.current,
           projection: hydratedUploadProjection,
+          // G7 (task 022): transient dedup key for this assistant-upload mount.
+          transientKey: mintTransientKey(),
         });
         // A freshly-mounted upload is unsaved by definition — mark dirty so Save
         // (create-on-save, task 013) is enabled immediately.
@@ -2175,6 +2213,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         fileName: initialDraftRef.fileName,
         containerId: containerIdRef.current,
         sessionId: draftDocumentSessionId,
+        // G7 (task 022): transient dedup key for this inline (Part B) draft mount.
+        transientKey: mintTransientKey(),
       });
       setIsDirty(true);
       return;
@@ -2245,6 +2285,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           html: bodyHtml,
           fileName: match?.payload?.title,
           containerId: containerIdRef.current,
+          // G7 (task 022): transient dedup key for this ledger-resolved (Part A) draft mount.
+          transientKey: mintTransientKey(),
         });
         // A freshly-seeded draft is unsaved by definition — mark dirty so Save (create-on-save) is
         // enabled immediately.
@@ -2508,8 +2550,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 void openInWordFlushed('desktop');
               }}
               wordActionsDisabled={wordActionsDisabled}
-              onSave={() => {
-                void triggerSave();
+              // G7 (task 022): the toolbar Save split-button threads its choice ('version' default /
+              // 'new' fork) into triggerSave. Ctrl+S / the cross-pane bridge call triggerSave() → 'version'.
+              onSave={(mode) => {
+                void triggerSave(mode ?? 'version');
               }}
               canSave={canSaveNow}
               isSaving={isSavingNow}

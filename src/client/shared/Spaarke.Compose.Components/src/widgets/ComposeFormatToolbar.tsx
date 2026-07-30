@@ -57,6 +57,7 @@ import {
   Toolbar,
   ToolbarButton,
   Button,
+  SplitButton,
   Tooltip,
   makeStyles,
   tokens,
@@ -69,7 +70,10 @@ import {
   PopoverTrigger,
   PopoverSurface,
   Text,
+  type MenuButtonProps,
 } from '@fluentui/react-components';
+// G7 (task 022): the Save split-button choice ('version' | 'new').
+import type { ComposeSaveMode } from '../types/compose-contracts';
 import {
   TextBold24Regular,
   TextItalic24Regular,
@@ -211,9 +215,10 @@ export interface ComposeFormatToolbarProps {
    */
   hasLoadedBaseline?: boolean;
 
-  // ---- Save (FIX #5) — icon button, right-aligned; rendered only when `onSave` set ----
-  /** Save handler (create-on-save first Save, or update). */
-  onSave?: () => void;
+  // ---- Save (FIX #5 / G7 task 022) — split-button, right-aligned; rendered only when `onSave` set ----
+  /** Save handler. G7 (task 022): receives the split-button choice — `'version'` (default, replace/dedup)
+   *  or `'new'` (fork a new document). */
+  onSave?: (mode?: ComposeSaveMode) => void;
   /** True when Save should be enabled (unsaved edit OR unpersisted transient draft). */
   canSave?: boolean;
   /** True while a save is in flight. */
@@ -702,19 +707,34 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               {/* UX-1 (UAT 2026-07-19): a deliberate DUPLICATE of the right-aligned Save
                   button — users instinctively look in the Word menu to save. Same handler
                   (`onSave`) + same enable predicate (`saveDisabled`); rendered only when
-                  the host wires Save. */}
+                  the host wires Save. G7 (task 022): the Word-menu "Save" is the Save-Version
+                  (replace/dedup) instinct; the fork lives on the main split-button's "Save New
+                  Document" item + is mirrored here for parity. */}
               {onSave ? (
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  className={styles.wordMenuItem}
-                  icon={<SaveRegular />}
-                  disabled={saveDisabled}
-                  onClick={onSave}
-                  data-testid="compose-format-word-save"
-                >
-                  {isSaving ? 'Saving…' : 'Save'}
-                </Button>
+                <>
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    className={styles.wordMenuItem}
+                    icon={<SaveRegular />}
+                    disabled={saveDisabled}
+                    onClick={() => onSave('version')}
+                    data-testid="compose-format-word-save"
+                  >
+                    {isSaving ? 'Saving…' : 'Save Version'}
+                  </Button>
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    className={styles.wordMenuItem}
+                    icon={<SaveRegular />}
+                    disabled={saveDisabled}
+                    onClick={() => onSave('new')}
+                    data-testid="compose-format-word-save-new"
+                  >
+                    Save New Document
+                  </Button>
+                </>
               ) : null}
               {onOpenInWord ? (
                 <Button
@@ -813,18 +833,42 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         </Tooltip>
       ) : null}
 
-      {/* ---- Save (icon-only, right-aligned) ---- */}
+      {/* ---- Save split-button (G7 task 022) — right-aligned ---- */}
+      {/* Primary action = "Save Version" (replace in place / transient-key dedup); the caret menu
+          carries "Save New Document" (a deliberate fork). Fluent v9 SplitButton, theme tokens only
+          (ADR-021 dark-mode). Mirrors the blessed ComposerActionBar Send split-button pattern. */}
       {onSave ? (
-        <Tooltip content={isSaving ? 'Saving…' : 'Save changes'} relationship="label" withArrow>
-          <ToolbarButton
-            appearance="subtle"
-            icon={<SaveRegular />}
-            aria-label={isSaving ? 'Saving' : 'Save changes'}
-            disabled={saveDisabled}
-            onClick={onSave}
-            data-testid="compose-format-save"
-          />
-        </Tooltip>
+        <Menu positioning="below-end">
+          <MenuTrigger disableButtonEnhancement>
+            {(triggerProps: MenuButtonProps) => (
+              <SplitButton
+                appearance="subtle"
+                data-testid="compose-format-save"
+                menuButton={{ ...triggerProps, 'aria-label': 'Save options' }}
+                primaryActionButton={{
+                  onClick: () => onSave('version'),
+                  disabled: saveDisabled,
+                  icon: <SaveRegular />,
+                  'aria-label': isSaving ? 'Saving' : 'Save version',
+                }}
+              >
+                {isSaving ? 'Saving…' : 'Save Version'}
+              </SplitButton>
+            )}
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              <MenuItem
+                icon={<SaveRegular />}
+                disabled={saveDisabled}
+                onClick={() => onSave('new')}
+                data-testid="compose-format-save-new"
+              >
+                Save New Document
+              </MenuItem>
+            </MenuList>
+          </MenuPopover>
+        </Menu>
       ) : null}
 
       {/* ---- Undo / Redo (icon-only, right-aligned) ---- */}
