@@ -70,6 +70,7 @@ import {
   PopoverTrigger,
   PopoverSurface,
   Text,
+  Spinner,
   type MenuButtonProps,
 } from '@fluentui/react-components';
 // G7 (task 022): the Save split-button choice ('version' | 'new').
@@ -232,6 +233,9 @@ export interface ComposeFormatToolbarProps {
    *  for a doc with an SPE source). Pulls the latest SPE bytes on demand — e.g. after an external Word-web
    *  edit the change-check missed. Distinct from Refresh Profile (which re-profiles, not reloads bytes). */
   onReloadFromSource?: () => void;
+  /** UAT #9 (task 054): true while a manual profile re-run is in flight — shows a spinner on the
+   *  Refresh-Profile button so the (otherwise silent 202) click gives visible feedback. */
+  isRefreshingProfile?: boolean;
 
   // ---- Review (ai-advanced-capabilities-nda-r1 UAT round-2 items #1/#2) — icon-only dropdown,
   //      right-aligned, rendered ONLY when an NDA advisory review is present. Two independent
@@ -363,6 +367,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     isSaving,
     onRefreshProfile,
     onReloadFromSource,
+    isRefreshingProfile,
     trackChangesEnabled,
     onToggleTrackChanges,
     hasReview,
@@ -861,14 +866,19 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         </Tooltip>
       ) : null}
 
-      {/* ---- Refresh Profile (G10 task 040) — right-aligned; only for a promoted doc ---- */}
+      {/* ---- Refresh Profile (G10 task 040) — right-aligned; only for a promoted doc. UAT #9 (task 054):
+              a brief spinner while the re-run is in flight gives the otherwise-silent 202 visible feedback. ---- */}
       {onRefreshProfile ? (
-        <Tooltip content="Refresh document profile" relationship="label" withArrow>
+        <Tooltip
+          content={isRefreshingProfile ? 'Refreshing document profile…' : 'Refresh document profile'}
+          relationship="label"
+          withArrow
+        >
           <ToolbarButton
             appearance="subtle"
-            icon={<DocumentSync24Regular />}
-            aria-label="Refresh document profile"
-            disabled={controlDisabled}
+            icon={isRefreshingProfile ? <Spinner size="tiny" /> : <DocumentSync24Regular />}
+            aria-label={isRefreshingProfile ? 'Refreshing document profile' : 'Refresh document profile'}
+            disabled={controlDisabled || isRefreshingProfile}
             onClick={onRefreshProfile}
             data-testid="compose-format-refresh-profile"
           />

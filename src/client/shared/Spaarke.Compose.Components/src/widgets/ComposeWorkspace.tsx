@@ -1394,9 +1394,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // doc (it has a sprk_document record to profile). Fire-and-forget on the server (202); best-effort here —
   // a failure is non-fatal (the profile is background/best-effort anyway). Only meaningful once the doc is
   // promoted, so the button is wired (below) only when sprkDocumentId exists.
+  // UAT #9 (task 054): transient "profiling…" spinner state so the manual click gives visible feedback.
+  const [isRefreshingProfile, setIsRefreshingProfile] = React.useState(false);
   const triggerRefreshProfile = React.useCallback(async (): Promise<void> => {
     const recordId = state.documentRef?.sprkDocumentId;
     if (!recordId || !bffBaseUrl || !tenantId) return;
+    // UAT #9 (task 054): the profile re-run is a fire-and-forget 202 with no server-visible result. Surface
+    // a brief "profiling…" spinner on the button so the user SEES that the click did something (the UAT
+    // complaint was that neither the automatic re-trigger nor the manual button gave any visible signal).
+    setIsRefreshingProfile(true);
     try {
       await authenticatedFetch(
         `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(recordId)}/refresh-profile`,
@@ -1410,7 +1416,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           }),
         }
       );
+      // Keep the spinner visible briefly so a fast 202 still registers as a deliberate action.
+      window.setTimeout(() => setIsRefreshingProfile(false), 1500);
     } catch (err) {
+      setIsRefreshingProfile(false);
       // eslint-disable-next-line no-console
       console.warn('[ComposeWorkspace] refresh-profile request failed (non-fatal):', err);
     }
@@ -2686,6 +2695,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               // G10 (task 040): the manual "Refresh Profile" button — only for a PROMOTED doc (there is a
               // sprk_document to re-profile). Undefined for a transient/unpromoted mount → the button hides.
               onRefreshProfile={state.documentRef?.sprkDocumentId ? () => void triggerRefreshProfile() : undefined}
+              isRefreshingProfile={isRefreshingProfile}
               // UAT #5 (task 053): always-available "Reload from source" — pulls the latest SPE bytes (e.g.
               // after an external Word-web edit that the change-check missed, or on demand). Gated on having an
               // SPE source (speDriveItemId); undefined for a born-in-editor doc with no source to reload from.

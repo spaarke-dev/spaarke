@@ -516,6 +516,14 @@ describe('ComposeFormatToolbar — Refresh Profile button (G10 task 040)', () =>
     renderFormatToolbar({}, { theme: webDarkTheme, props: { onRefreshProfile: jest.fn() } });
     expect(screen.getByTestId('compose-format-refresh-profile')).toBeInTheDocument();
   });
+
+  it('UAT #9 (task 054): disables the button and shows a spinner while a refresh is in flight', () => {
+    renderFormatToolbar({}, { props: { onRefreshProfile: jest.fn(), isRefreshingProfile: true } });
+    const btn = screen.getByTestId('compose-format-refresh-profile');
+    expect(btn).toBeInTheDocument();
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute('aria-label', 'Refreshing document profile');
+  });
 });
 
 // ---------------------------------------------------------------------------

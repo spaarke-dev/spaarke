@@ -639,6 +639,10 @@ export interface ComposeEditorProps {
    *  Word-web edit. The host honors the dirty-guard before discarding unsaved edits. */
   onReloadFromSource?: () => void;
 
+  /** UAT #9 (task 054): true while a manual profile re-run is in flight — the toolbar shows a spinner on the
+   *  Refresh-Profile button so the click gives visible feedback (the re-run is otherwise a silent 202). */
+  isRefreshingProfile?: boolean;
+
   /**
    * FR-23 (task 044) — display name attributed to comment threads/replies the CURRENT user creates
    * via the comment-thread panel. Resolved by the host (no network call happens here — ADR-028);
@@ -1624,6 +1628,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       isSaving,
       onRefreshProfile,
       onReloadFromSource,
+      isRefreshingProfile,
       commentAuthor = 'You',
       reviewSummary,
       activeWorkType = '*',
@@ -2656,6 +2661,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           isSaving={isSaving}
           onRefreshProfile={onRefreshProfile}
           onReloadFromSource={onReloadFromSource}
+          isRefreshingProfile={isRefreshingProfile}
           trackChangesEnabled={trackChangesEnabled}
           onToggleTrackChanges={toggleTrackChanges}
           // UAT round-2 items #1/#2 — the "Review" dropdown. Shown only when an NDA advisory review is
