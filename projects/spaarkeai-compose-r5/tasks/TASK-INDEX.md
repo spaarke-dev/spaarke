@@ -35,8 +35,15 @@
 | 033 | G5 hyperlinks (authored render + edit op, both paths) | 3 Concurrency/UX | ✅ | FULL | opus/high | 004 | ❌ shared renderer+catalog+engine |
 | 040 | G10 profile re-run (reload + manual button) | 4 Hardening | ✅ | FULL | sonnet/high | 020 | ❌ shared service |
 | 041 | No-regression + publish-size hardening gate | 4 Hardening | ✅ | STANDARD | sonnet/high | 010,011,012,013,014,020,021,022,030,031,032,033,040 | ❌ aggregates all |
-| 042 | Deploy (master-with-R4.5) + operator UAT | 4 Hardening | 🔲 | FULL | sonnet/high | 041 | ❌ deploy |
-| 090 | Project wrap-up (/test-diet + review + close) | 4 Wrap-up | 🔲 | FULL | sonnet/high | 042 | ❌ terminal |
+| 042 | Deploy (master-with-R4.5) + operator UAT | 4 Hardening | ✅ | FULL | sonnet/high | 041 | ❌ deploy |
+| 050 | UAT #1A redline routing + origin fix (SEV-1) | 5 UAT remediation | 🔲 | FULL | opus/xhigh | 042 | ❌ shared ComposeService |
+| 051 | UAT #1B persist computed numbering to OOXML | 5 UAT remediation | 🔲 | FULL | opus/xhigh | 050 | ❌ shared engine/projection |
+| 052 | UAT #10/#11 Word/WOPI unlock affordance | 5 UAT remediation | 🔲 | FULL | opus/high | 042 | ❌ shared endpoints+workspace |
+| 053 | UAT #5 external-change visibilitychange + reload button | 5 UAT remediation | 🔲 | FULL | sonnet/high | 042 | ❌ shared workspace/toolbar |
+| 054 | UAT #9 refresh-profile button gate relax | 5 UAT remediation | 🔲 | STANDARD | sonnet/high | 042 | ❌ shared workspace/toolbar |
+| 090 | Project wrap-up (/test-diet + review + close) | 4 Wrap-up | 🔲 | FULL | sonnet/high | 050,051,052,053,054 | ❌ terminal |
+
+> **Phase 5 (UAT remediation, added 2026-07-30)** — task 042 deploy surfaced 11 UAT findings; 5 are R5-owned (see [`../notes/uat-remediation-r5.md`](../notes/uat-remediation-r5.md)). Fix order (serial, shared Compose files): **050 → 051 → 052 → 053 → 054**, then re-verify (byte-diff + build + publish) → operator re-deploy + re-UAT → 090. The other 6 findings are out of R5 scope (captured in the remediation note; no issues filed per owner decision).
 
 Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ completed · ⛔ blocked.
 
