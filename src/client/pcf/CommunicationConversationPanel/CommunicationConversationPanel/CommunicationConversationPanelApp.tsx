@@ -68,6 +68,33 @@ function getHostEntityName(): string | undefined {
   return undefined;
 }
 
+/**
+ * Round-7 item 11: detects the `sprk_openconversation=1` deep-link param the
+ * CommunicationArrived notification appends, so clicking the MDA bell lands on the
+ * record AND auto-opens this Messages modal (not a single message — far more
+ * useful). The PCF runs in an iframe, so the record-form URL lives on the TOP
+ * window; we read top → parent → self, each in its own try (cross-frame access can
+ * throw). Best-effort: if the MDA stripped the param, this returns false and the
+ * panel simply doesn't auto-open (graceful degradation — the click still landed on
+ * the record).
+ */
+function shouldAutoOpenConversation(): boolean {
+  const searches: Array<() => string | undefined> = [
+    () => window.top?.location?.search,
+    () => window.parent?.location?.search,
+    () => window.location.search,
+  ];
+  for (const get of searches) {
+    try {
+      const search = get();
+      if (search && new URLSearchParams(search).get('sprk_openconversation') === '1') return true;
+    } catch {
+      /* cross-frame access denied — try the next scope */
+    }
+  }
+  return false;
+}
+
 /** OOB record open via the sanctioned Layout 1 (`Xrm.Navigation.navigateTo`, target 2, 85% × 85%). */
 function openRecordViaXrm(entityType: string, id: string): void {
   const xrm = getXrm();
@@ -148,6 +175,20 @@ export const CommunicationConversationPanelApp: React.FC<ICommunicationConversat
   const [result, setResult] = React.useState<IRegardingReadResultDto | null>(null);
   const [readError, setReadError] = React.useState<string | null>(null);
   const [modalOpen, setModalOpen] = React.useState(false);
+
+  // Round-7 item 11: auto-open the Messages modal once when arrived via the
+  // notification deep-link (`sprk_openconversation=1`). The record IS the target
+  // (the PCF is on the navigated-to form), so the param's presence alone is the
+  // signal — no id match needed. Guarded so it fires at most once per mount (a
+  // manual close must not be undone by a re-render).
+  const autoOpenedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (autoOpenedRef.current || !authReady || !regardingContext) return;
+    if (shouldAutoOpenConversation()) {
+      autoOpenedRef.current = true;
+      setModalOpen(true);
+    }
+  }, [authReady, regardingContext]);
 
   // Session-local "New" affordance (UAT §A3): there is no persisted per-user
   // last-seen watermark for threads (documented KNOWN LIMITATION in

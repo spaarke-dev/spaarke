@@ -5,6 +5,28 @@
 
 ---
 
+## Round 8 UAT — in progress (2026-07-30)
+
+**11 UAT items** being implemented in one pass. Code COMPLETE for 10/11; item 1 deferred (needs pointer). Deploy pending.
+
+Decisions (operator): soft-delete = **deactivate** (statecode/statuscode Inactive, reversible); item 11 = **full** (new PCF v1.9.0 auto-opens modal from deep-link param); **all 11 one pass**.
+
+Done + verified (shared-lib tsc 0 errors, BFF build 0 errors, ConversationView 66/67 — 1 pre-existing forward-attachment fail):
+- **2** thread card +2px pad · **3** dot↔name space · **4** pin show-on-select · **5** no mouse-focus dark border (keyboard `:focus-visible` only) · **6** row dividers (Email-style) · **7** delete-thread trash+confirm · in `ThreadList.tsx` + shell wiring `ConversationWorkspace.tsx`
+- **8** delete-message (non-email) hover + confirm · **9** thread name in tools row · in `ConversationView.tsx` (self-owned deactivate)
+- **10** modal expand-to-container toggle · `ConversationModal.tsx` (PCF)
+- **11** notif deep-link `&sprk_openconversation=1` (`CommunicationArrivedProducer.BuildRecordDeepLink`) + PCF auto-open (`CommunicationConversationPanelApp.tsx shouldAutoOpenConversation`)
+- **BFF delete backend**: `DELETE /api/communications/threads/{id}` + `DELETE /api/communications/{id}` (soft-delete); `IThreadResolver.DeactivateThread/MessageAsync`; `CanCallerSeeMessageAsync` gate. Client: `deactivateThread` (communicationThreadListApi), `deactivateMessage` (communicationTimelineApi).
+- **PCF v1.8.0→1.9.0** bumped (manifest, index.ts, pack.ps1, solution.xml).
+
+**Item 1 (widget "Messages ⌄" header elevation/font)** — DEFERRED: could not conclusively locate the shared tab-header component; changing blind risks regressing every workspace tab. Needs operator pointer to the exact component.
+
+**Remaining deploy steps**: rebuild shared lib (done pre-titleLink-fix; REBUILD needed) → BFF publish+deploy → SpaarkeAi build+deploy → conversation code page build+deploy → PCF prod build + pack v1.9.0 zip (hand to operator).
+
+**§10 test obligation**: BFF Services/ modified → add delete-endpoint seam test before PR (deferred to post-UAT commit).
+
+---
+
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |

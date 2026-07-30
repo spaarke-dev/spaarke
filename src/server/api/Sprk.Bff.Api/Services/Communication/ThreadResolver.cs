@@ -361,6 +361,39 @@ public sealed class ThreadResolver : IThreadResolver
         return pinned;
     }
 
+    // Dataverse state fields for soft-delete (round 7 items 7/8). statecode=1 (Inactive) + statuscode=2 (the default
+    // "Inactive" reason on the OOB two-option state) deactivate a row without physically deleting it.
+    private const string StateCodeField = "statecode";
+    private const string StatusCodeField = "statuscode";
+    private const int StateInactive = 1;
+    private const int StatusInactive = 2;
+
+    /// <inheritdoc />
+    public async Task DeactivateThreadAsync(Guid threadId, CancellationToken ct = default)
+    {
+        // User-initiated write, NOT best-effort — a failure must surface to the endpoint (mirrors SetPinnedAsync).
+        await _entityService.UpdateAsync(
+            "sprk_communicationthread",
+            threadId,
+            new Dictionary<string, object> { [StateCodeField] = StateInactive, [StatusCodeField] = StatusInactive },
+            ct);
+
+        _logger.LogInformation("Deactivated (soft-deleted) thread {ThreadId}", threadId);
+    }
+
+    /// <inheritdoc />
+    public async Task DeactivateMessageAsync(Guid communicationId, CancellationToken ct = default)
+    {
+        // User-initiated write, NOT best-effort — a failure must surface to the endpoint.
+        await _entityService.UpdateAsync(
+            "sprk_communication",
+            communicationId,
+            new Dictionary<string, object> { [StateCodeField] = StateInactive, [StatusCodeField] = StatusInactive },
+            ct);
+
+        _logger.LogInformation("Deactivated (soft-deleted) communication {CommunicationId}", communicationId);
+    }
+
     /// <inheritdoc />
     public async Task<Guid> CreateRecordThreadAsync(
         Guid ownerSystemUserId, string? name, RecordThreadAnchor regarding, CancellationToken ct = default)
