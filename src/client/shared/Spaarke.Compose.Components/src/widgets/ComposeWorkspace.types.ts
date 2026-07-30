@@ -162,10 +162,23 @@ export interface ComposeWorkspaceState {
    * clean-vs-tracked routing on a REOPENED document — see the `bornInEditor` discriminant.
    */
   origin: ComposeDocumentOrigin | null;
+  /**
+   * G8 (FR-07, task 030): an external change to the underlying document (a new SPE version landed
+   * from the document-management system — e.g. an Office edit) was detected and not yet dismissed/
+   * reloaded. Drives the non-blocking "Document updated from document management system version"
+   * banner. For a CLEAN editor the parent transparently remounts (requestLoad carries the flag
+   * forward so the banner still shows post-reload); for a DIRTY editor the parent sets this WITHOUT
+   * remounting (NFR-08 — the banner offers an explicit Reload so unsaved edits are never silently
+   * dropped). Cleared on dismiss or on a fresh mount.
+   */
+  externalChangePending: boolean;
 }
 
 export type ComposeWorkspaceAction =
-  | { kind: 'requestLoad'; documentRef: ComposeDocumentRef; sessionId: string }
+  // G8 (FR-07, task 030): `externalChange` (default false) carries the external-change flag THROUGH a
+  // remount — a clean-editor auto-remount dispatches requestLoad with externalChange:true so the
+  // banner still renders after loadSucceeded. Every other requestLoad (initial open / Search) omits it.
+  | { kind: 'requestLoad'; documentRef: ComposeDocumentRef; sessionId: string; externalChange?: boolean }
   | {
       kind: 'loadSucceeded';
       docxBytes: ArrayBuffer;
@@ -266,7 +279,13 @@ export type ComposeWorkspaceAction =
   | { kind: 'checkoutProbeRequested' }
   | { kind: 'checkoutSameUserConflict'; checkedOutAt: string | null }
   | { kind: 'checkoutDiscarding' }
-  | { kind: 'checkoutCancelled' };
+  | { kind: 'checkoutCancelled' }
+  // ── G8 (FR-07, task 030): external-change detection → banner ──────────────
+  // Set when check-changes/webhook reports the underlying document changed AND the editor is DIRTY
+  // (the parent defers the remount to protect unsaved edits). A CLEAN editor uses requestLoad
+  // (externalChange:true) instead, which remounts + carries the flag forward.
+  | { kind: 'externalChangeDetected' }
+  | { kind: 'externalChangeDismissed' };
 
 export const INITIAL_STATE: ComposeWorkspaceState = {
   status: 'empty',
@@ -289,6 +308,7 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   checkoutFailureMessage: null,
   saveSuccessToken: 0,
   origin: null,
+  externalChangePending: false,
 };
 
 export function composeWorkspaceReducer(
@@ -302,6 +322,10 @@ export function composeWorkspaceReducer(
         status: 'loading',
         documentRef: action.documentRef,
         sessionId: action.sessionId,
+        // G8 (task 030): carry the external-change flag through a clean-editor auto-remount so the
+        // banner still renders after loadSucceeded (which spreads ...state). Defaults false for every
+        // normal load (initial open / Search).
+        externalChangePending: action.externalChange ?? false,
       };
     case 'loadSucceeded':
       return {
@@ -549,6 +573,11 @@ export function composeWorkspaceReducer(
         sameUserConflictInfo: null,
         checkoutFailureMessage: null,
       };
+    // ── G8 (task 030): external-change banner ────────────────────────────────
+    case 'externalChangeDetected':
+      return { ...state, externalChangePending: true };
+    case 'externalChangeDismissed':
+      return { ...state, externalChangePending: false };
     default:
       return state;
   }

@@ -3,7 +3,7 @@
 > **Last Updated**: 2026-07-30 (by context-handoff — task 022 BLOCKED on human Dataverse gate; pre-compaction)
 > **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-compose-r5`. Working tree CLEAN, all pushed (tip `92b99e0d4`).
 >
-> **▶ NEXT ACTION (post-compaction):** ✅ **GATE CLEARED 2026-07-30** — operator confirmed `sprk_composetransientkey` field + `sprk_composetransientkey_uk` alt-key are created/Active on `sprk_document`. **Resume task 022 immediately by implementing exactly per** [`notes/g7-transient-key-schema.md`](notes/g7-transient-key-schema.md) "Implementation plan" (client transient-key mint+send + Save split-button; server transient-key dedup in PromoteIfEphemeral + Save-New fork; seam incl. 8-duplicate; verify + Step 9.5 gates). Do NOT re-investigate — subagent findings + file:line anchors are in that note. Then 030–033, 040–042, 090. Deploy (042) HOLDS for operator.
+> **▶ NEXT ACTION (autonomous run 2026-07-30):** Phase 2 COMPLETE — **020 ✅, 021 ✅, 022 ✅** (G7 transient-key dedup + Save split-button; commit `410b08669`; 810/810 Compose, byte-diff 24/24, publish 48.13 MB). **NOW running Phase 3 autonomously: 030 (G8) → 031 (G9) → 032 (G11) → 033 (G5) → 040 (G10) → 041 (hardening).** STOP before **042 (deploy — HOLDS for operator)**. Then 090 wrap-up (/test-diet). Each task via task-execute FULL rigor + Step 9.5 gates.
 
 ---
 

@@ -4,7 +4,7 @@
     <title>G8 — External-change refresh + remount banner (webhook delivery leg + client remount)</title>
     <phase>3 Concurrency + UX</phase>
     <gate>dep:020</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Touches the BFF (webhook delivery/subscription leg) AND the client mount lifecycle in Spaarke.Compose.Components; a remount that mishandles unsaved edits is a data-loss path (NFR-08). Tags include bff-api/frontend; modifies .cs/.tsx; carries a judgment boundary. Code-review + adr-check run at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>

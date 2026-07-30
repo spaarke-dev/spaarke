@@ -114,6 +114,7 @@ import { ComposeEmptyState } from './ComposeEmptyState';
 import { ComposeConflictDialog } from './ComposeConflictDialog';
 // Return-from-Word re-anchor UX (task 054 — BUILT; mounted here by task 103, gap 3.5).
 import { ComposeReanchorBanner } from './ComposeReanchorBanner';
+import { ComposeExternalChangeBanner } from './ComposeExternalChangeBanner';
 import { ComposeReanchorConflictPanel } from './ComposeReanchorConflictPanel';
 import { useComposeReanchor } from './useComposeReanchor';
 import type { ReanchorResolutionDecision } from './ComposeReanchor.types';
@@ -909,13 +910,34 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // 3.5 — re-anchor the prior Compose anchors against the updated document → banner/panel.
       const priorAnchors = anchoredAnnotationsToPriorAnchors(anchoredAnnotations);
       await runReanchor({ documentSpeId: speId, driveId: effectiveDriveId, tenantId, priorAnchors });
+
+      // G8 (FR-07, task 030): surface the external change + refresh the projection. Detection resolved
+      // by document/version identity (checkChanges above), never content match (NFR-02/I-7).
+      //   • CLEAN editor → remount transparently from the server-authoritative bytes. requestLoad
+      //     carries externalChange:true so the "Document updated…" banner still renders post-reload.
+      //   • DIRTY editor → do NOT remount (NFR-08 — that would silently discard unsaved edits). Set the
+      //     banner flag instead; the banner offers an explicit Reload the user chooses (discard-and-
+      //     remount is a user action, never silent). This is the guarded path the escalation trigger
+      //     requires — a dirty doc is deferred to the user, not silently remounted.
+      const editorDirty = editorRef.current?.isDirty() ?? false;
+      if (editorDirty) {
+        dispatch({ kind: 'externalChangeDetected' });
+      } else if (state.documentRef) {
+        dispatch({
+          kind: 'requestLoad',
+          documentRef: state.documentRef,
+          sessionId: state.sessionId,
+          externalChange: true,
+        });
+      }
     } catch {
       // Poll/reanchor failures are non-fatal — the editing session continues.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     state.status,
-    state.documentRef?.speDriveItemId,
+    state.documentRef,
+    state.sessionId,
     effectiveDriveId,
     bffBaseUrl,
     tenantId,
@@ -2478,6 +2500,25 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             summary={reanchorSummary}
             onReview={() => setReanchorPanelOpen(true)}
             onDismiss={resetReanchor}
+          />
+
+          {/* G8 (FR-07, task 030) — external-change refresh banner. A CLEAN editor was already
+              remounted transparently (this is the informational confirmation); a DIRTY editor shows
+              the explicit Reload action so unsaved edits are never silently discarded (NFR-08). */}
+          <ComposeExternalChangeBanner
+            pending={state.externalChangePending}
+            hasUnsavedEdits={isDirty}
+            onReload={() => {
+              if (state.documentRef) {
+                dispatch({
+                  kind: 'requestLoad',
+                  documentRef: state.documentRef,
+                  sessionId: state.sessionId,
+                  externalChange: true,
+                });
+              }
+            }}
+            onDismiss={() => dispatch({ kind: 'externalChangeDismissed' })}
           />
 
           {/* Banner stack — errors / warnings / checkout status / assistant pending */}
