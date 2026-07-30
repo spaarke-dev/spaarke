@@ -500,6 +500,19 @@ export function emailComposerReducer(state: EmailComposerState, action: EmailCom
       return { ...state, associations: [...state.associations, action.association], isDirty: true };
     }
 
+    case 'REMOVE_ASSOCIATION': {
+      // Owner UAT 2026-07-30 (item 10): a parent-inherited (or manually-linked) association
+      // may not actually belong on this email — the user can delete it from "Related to".
+      const key = `${action.entityType}:${action.entityId}`.toLowerCase();
+      return {
+        ...state,
+        associations: state.associations.filter(
+          a => `${a.entityType}:${a.entityId}`.toLowerCase() !== key
+        ),
+        isDirty: true,
+      };
+    }
+
     case 'REMOVE_ATTACHMENT':
       return { ...state, attachments: state.attachments.filter(a => a.id !== action.id), isDirty: true };
 
@@ -514,7 +527,14 @@ export function emailComposerReducer(state: EmailComposerState, action: EmailCom
         ...state,
         attachments: state.attachments.map(a =>
           a.id === action.id
-            ? { ...a, documentId: action.documentId, driveItemId: action.driveItemId ?? a.driveItemId }
+            ? {
+                ...a,
+                documentId: action.documentId,
+                driveItemId: action.driveItemId ?? a.driveItemId,
+                // linkUrl lights up the per-row Link toggle (item 9b). Only set when the
+                // host resolved one; never clobber an existing value with undefined.
+                linkUrl: action.linkUrl ?? a.linkUrl,
+              }
             : a
         ),
       };

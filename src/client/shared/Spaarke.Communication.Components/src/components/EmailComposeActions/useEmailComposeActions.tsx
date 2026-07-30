@@ -70,6 +70,7 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
     recordLookupCatalog,
     onLookupRecord,
     onAddRelationship,
+    onUploadLocalAttachment,
     dataverseUrl,
     associations,
     onSent,
@@ -197,6 +198,7 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
       recordLookupCatalog={recordLookupCatalog}
       onLookupRecord={onLookupRecord}
       onAddRelationship={onAddRelationship}
+      onUploadLocalAttachment={onUploadLocalAttachment}
       associations={isRecordScoped ? associations : undefined}
       initialAttachments={isRecordScoped ? dialogState?.initialAttachments : undefined}
       titleOverride={titleOverride}

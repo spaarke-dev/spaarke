@@ -18,6 +18,8 @@
  * the engine.
  */
 import { getXrm } from '../../services/xrmGlobal';
+import { EntityCreationService, type AuthenticatedFetchFn } from '../../services/EntityCreationService';
+import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
 import type { IRecordLookupTarget, IPickedRecord, IRecipient } from './EmailComposer.types';
 
 /**
@@ -59,6 +61,21 @@ export interface XrmEmailComposeHandlers {
   onLookupRecipients: (field: 'to' | 'cc' | 'bcc') => Promise<IRecipient[] | null>;
   onLookupRecord: (entityType: string) => Promise<IPickedRecord | null>;
   onAddRelationship: () => Promise<IPickedRecord | null>;
+  /**
+   * Upload a locally-picked file to SPE + create a governed `sprk_document`, so it
+   * flows into the send payload (owner UAT 2026-07-30, item 9b). Only present when
+   * `authenticatedFetch` + `bffBaseUrl` are supplied — omitted otherwise (local
+   * picks stay display-only). Reuses the proven wizard upload path (single SPE
+   * container per deployment, resolved from the current user's owning BU).
+   */
+  onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
+}
+
+/** Best-effort SPE upload never reads this — map for display parity only, default 'pdf'. */
+function deriveUploadedFileType(mimeType: string): UploadedFileType {
+  if (mimeType.includes('spreadsheet') || mimeType.includes('excel')) return 'xlsx';
+  if (mimeType.includes('word') || mimeType.includes('document')) return 'docx';
+  return 'pdf';
 }
 
 /**
@@ -67,7 +84,13 @@ export interface XrmEmailComposeHandlers {
  * used to build record deep-link URLs for the picked records (best-effort;
  * absent → a relative link is omitted).
  */
-export function createXrmEmailComposeHandlers(options?: { clientUrl?: string }): XrmEmailComposeHandlers {
+export function createXrmEmailComposeHandlers(options?: {
+  clientUrl?: string;
+  /** Auth-aware fetch (ADR-028) — required to enable new-file upload (item 9b). */
+  authenticatedFetch?: AuthenticatedFetchFn;
+  /** BFF base URL (no `/api` suffix) — required to enable new-file upload (item 9b). */
+  bffBaseUrl?: string;
+}): XrmEmailComposeHandlers {
   const resolveClientUrl = (): string => {
     if (options?.clientUrl) return options.clientUrl;
     try {
@@ -145,5 +168,65 @@ export function createXrmEmailComposeHandlers(options?: { clientUrl?: string }):
     return { entityType: picked.entityType, id, name: picked.name, url: buildRecordUrl(picked.entityType, id) };
   };
 
-  return { recordLookupCatalog: EMAIL_RECORD_LOOKUP_CATALOG, onLookupRecipients, onLookupRecord, onAddRelationship };
+  // New-file upload (item 9b): a locally-picked file → SPE bytes → governed
+  // `sprk_document`, so it becomes send-eligible (the send path is documentId-only,
+  // ADR-045 — there is no raw-bytes attach). Reuses the wizard's proven services.
+  // Only wired when the host supplies auth + BFF URL (else local picks stay display-only).
+  const { authenticatedFetch, bffBaseUrl } = options ?? {};
+  const onUploadLocalAttachment =
+    authenticatedFetch && bffBaseUrl
+      ? async (file: File): Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }> => {
+          const xrm = getXrm();
+          if (!xrm?.WebApi) throw new Error('Dataverse is unavailable — cannot upload the attachment.');
+
+          // Single SPE container per deployment, resolved from the current user's owning
+          // Business Unit (`businessunit.sprk_containerid`). No per-record container.
+          const userId: string | undefined = xrm.Utility?.getGlobalContext?.()?.userSettings?.userId;
+          if (!userId) throw new Error('Could not resolve the current user for upload.');
+          const bu = await EntityCreationService.resolveUserBuDefaults(xrm.WebApi, userId);
+          if (!bu.containerId) {
+            throw new Error('No document storage container is configured for your business unit.');
+          }
+
+          const svc = new EntityCreationService(xrm.WebApi, authenticatedFetch, bffBaseUrl);
+          const uploaded: IUploadedFile = {
+            id: `email-attach:${file.name}:${file.size}`,
+            name: file.name,
+            sizeBytes: file.size,
+            fileType: deriveUploadedFileType(file.type),
+            file,
+          };
+          const uploadResult = await svc.uploadFilesToSpe(bu.containerId, [uploaded]);
+          const meta = uploadResult.uploadedFiles[0];
+          if (!meta) throw new Error(uploadResult.errors[0]?.error ?? 'File upload failed.');
+
+          // Create the governed `sprk_document` UNASSOCIATED (the email may have no persisted
+          // regarding yet). Canonical container field is `sprk_graphdriveid`; `sprk_containerid`
+          // stays NULL on the document (design INV). Mirrors DocumentRecordService's unassociated payload.
+          const payload: Record<string, unknown> = {
+            sprk_documentname: meta.name,
+            sprk_filename: meta.name,
+            sprk_filesize: meta.size,
+            sprk_graphitemid: meta.id,
+            sprk_graphdriveid: bu.containerId,
+            sprk_filepath: meta.webUrl ?? null,
+            sprk_hasfile: true,
+          };
+          if (bu.searchIndexName) payload.sprk_searchindexname = bu.searchIndexName;
+          if (bu.searchIndexId) {
+            payload['sprk_AI_Search_Index@odata.bind'] = `/sprk_aisearchindexes(${bu.searchIndexId})`;
+          }
+          const documentId = await svc.createEntityRecord('sprk_document', payload);
+
+          return { documentId, driveItemId: meta.id, linkUrl: meta.webUrl };
+        }
+      : undefined;
+
+  return {
+    recordLookupCatalog: EMAIL_RECORD_LOOKUP_CATALOG,
+    onLookupRecipients,
+    onLookupRecord,
+    onAddRelationship,
+    onUploadLocalAttachment,
+  };
 }

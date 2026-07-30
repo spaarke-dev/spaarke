@@ -84,6 +84,13 @@ export interface EmailComposeActionsDeps {
    */
   onAddRelationship?: () => Promise<IPickedRecord | null>;
   /**
+   * New-file upload (item 9b): resolve a locally-picked file to a governed
+   * `sprk_document` so it becomes send-eligible. Forwarded verbatim to the
+   * composer. Optional (host-supplied Xrm handler via `createXrmEmailComposeHandlers`);
+   * omitted → local picks stay display-only.
+   */
+  onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
+  /**
    * Dataverse client URL (no trailing slash) used to build attachment
    * deep-links when carrying a parent email's attachments onto reply/forward.
    * Optional — absent → a relative document link is omitted (attachments still

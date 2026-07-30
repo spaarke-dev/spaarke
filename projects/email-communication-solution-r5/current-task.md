@@ -11,9 +11,16 @@
 | Field | Value |
 |-------|-------|
 | **Work** | Email reading-pane + composer UAT iteration (owner-driven, live in harness) |
-| **Last checkpoint** | Pushed commit **`643f63c00`** → `origin/work/email-communication-solution-r5` (resolver redesign + reading-pane polish; all green) |
-| **Status** | Checkpoint pushed. NEXT wave = compose-engine items **9/10/11/12** (fully scoped below) |
-| **Next Action** | Implement **10 + 11 first** (compose "Related to": deletable parent chips + Link tile; remove connect icon), then **9a/12** (verify), then **9b** (wire `onUploadLocalAttachment`). Start by reading `EmailComposer.tsx` L721–745 (Related-to render) + L432/L490 (connect gating). |
+| **Last checkpoint** | Compose-engine wave **9/10/11/12 SHIPPED** (see below). Prior checkpoint `643f63c00` (resolver + reading-pane polish). |
+| **Status** | ✅ Compose-engine wave done + all packages typecheck/jest green. Remaining: formal pipeline **051 Deploy** + **090 Wrap-up** once UAT settles. |
+| **Next Action** | UAT the compose wave in harness/deployed. Then run **051 Deploy** (BFF+code page+widget; publish-size report). |
+
+### Compose-engine wave — SHIPPED 2026-07-30
+- **10 + 11**: compose "Related to" = **deletable parent chips** (`AssociationChips` gains `onRemove` → `REMOVE_ASSOCIATION` reducer action) + **"Link another record" tile** (empty → only tile); **connector toolbar icon removed** (relate via the tile now, reusing `handleAddRelationship`).
+- **9a**: verified — paperclip "Link documents" → `onLookupRecord(sprk_document)` → attachment with documentId+linkUrl (already worked).
+- **12**: verified — `AttachmentList` Attach|Link per row (Link gated on `linkUrl`) already worked.
+- **9b**: **wired `onUploadLocalAttachment`** in `createXrmEmailComposeHandlers` (now takes `authenticatedFetch`+`bffBaseUrl`). Flow: resolve **single deployment SPE container** from the user's owning BU (`EntityCreationService.resolveUserBuDefaults` → `businessunit.sprk_containerid`) → `uploadFilesToSpe` → create **unassociated** `sprk_document` (`sprk_graphdriveid`=container; `sprk_containerid` stays NULL) → return `{documentId, driveItemId, linkUrl}`. Engine seam extended to carry `linkUrl` (lights the per-row Link toggle). Threaded through SendEmailDialog → EmailComposeActions deps → EmailWorkspace → both mounts (EmailPage/main.tsx + EmailWorkspaceWidget). **No new BFF endpoint** (reused `PUT /api/obo/containers/{id}/files/{name}` + Dataverse create). **Key correction:** the send path is documentId-only (ADR-045, no raw-bytes attach) — so new-file attach REQUIRES the upload; it was silently dropping before. See memory `spe-single-container-per-deployment`.
+- **Files:** `EmailComposer.{tsx,types.ts,reducer.ts}`, `createXrmEmailComposeHandlers.ts`, `AssociationChips.tsx`, `SendEmailDialog.tsx`, `EmailComposeActions.types.ts`, `useEmailComposeActions.tsx`, `EmailWorkspace.{tsx,types.ts}`, `EmailPage/main.tsx`, `EmailWorkspaceWidget.tsx`, `EmailComposer.reducer.test.ts`.
 | **Harness** | `http://localhost:5175/` — run `SPAARKE_REPO_ROOT="c:/code_files/spaarke-wt-email-communication-solution-r5" npm run dev` in `c:/code_files/spaarke-prototype/projects/email-communication-solution-r5-uat` (HMR views this worktree's source). |
 
 ### Verify/build commands (this package)

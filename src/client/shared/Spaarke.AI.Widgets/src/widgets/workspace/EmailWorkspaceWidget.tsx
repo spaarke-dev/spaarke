@@ -78,7 +78,13 @@ export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
     (query: string) => searchUsersAndContacts(dataService, query),
     [dataService]
   );
-  const composeHandlers = React.useMemo(() => createXrmEmailComposeHandlers(), []);
+  // Pass auth + BFF URL so the factory also builds `onUploadLocalAttachment` (item 9b):
+  // new-file attachments upload to the deployment SPE container (resolved from the
+  // user's BU) and become governed `sprk_document`s.
+  const composeHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: bffBaseUrl ?? undefined }),
+    [authenticatedFetch, bffBaseUrl]
+  );
   const dataverseUrl = React.useMemo(
     () => getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '',
     []
@@ -105,6 +111,7 @@ export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
       recordLookupCatalog={composeHandlers.recordLookupCatalog}
       onLookupRecord={composeHandlers.onLookupRecord}
       onAddRelationship={composeHandlers.onAddRelationship}
+      onUploadLocalAttachment={composeHandlers.onUploadLocalAttachment}
       dataverseUrl={dataverseUrl}
     />
   );

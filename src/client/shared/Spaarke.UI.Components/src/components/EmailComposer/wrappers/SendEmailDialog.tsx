@@ -116,6 +116,12 @@ export interface ISendEmailDialogProps {
    */
   onAddRelationship?: () => Promise<IPickedRecord | null>;
   /**
+   * Resolve a locally-picked file to a governed `sprk_document` (item 9b) so it
+   * flows into the send payload. Forwarded verbatim to the engine via the
+   * `...composerProps` spread; omitted → local picks stay display-only.
+   */
+  onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
+  /**
    * Optional header-title override forwarded to the engine (e.g.
    * `Reply: <subject>`). Additive/optional; omitted → the engine's mode-derived
    * title ('Reply'/'Forward'/'New Email'/…) is used, unchanged.
