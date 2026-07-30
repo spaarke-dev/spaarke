@@ -63,6 +63,7 @@ public class IncomingAssociationResolverTests
         var parentComm = new DataverseEntity("sprk_communication");
         parentComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", parentMatterId);
         parentComm["sprk_regardingorganization"] = new EntityReference("account", parentOrgId);
+        parentComm["sprk_associationstatus"] = new OptionSetValue(100000000); // P3: Resolved parent ⇒ reply inherits at 1.0 (auto-file)
 
         _dataverseServiceMock
             .Setup(d => d.GetCommunicationByGraphMessageIdAsync("<parent-msg-id@contoso.com>", It.IsAny<CancellationToken>()))
@@ -258,6 +259,7 @@ public class IncomingAssociationResolverTests
 
         var parentComm = new DataverseEntity("sprk_communication");
         parentComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", parentMatterId);
+        parentComm["sprk_associationstatus"] = new OptionSetValue(100000000); // P3: Resolved parent ⇒ reply inherits at 1.0
 
         _dataverseServiceMock
             .Setup(d => d.GetCommunicationByGraphMessageIdAsync("<parent@contoso.com>", It.IsAny<CancellationToken>()))
@@ -348,6 +350,7 @@ public class IncomingAssociationResolverTests
         var parentMatterId = Guid.NewGuid();
         var parentComm = new DataverseEntity("sprk_communication");
         parentComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", parentMatterId);
+        parentComm["sprk_associationstatus"] = new OptionSetValue(100000000); // P3: Resolved parent ⇒ reply inherits at 1.0
 
         _dataverseServiceMock
             .Setup(d => d.GetCommunicationByGraphMessageIdAsync("<p@contoso.com>", It.IsAny<CancellationToken>()))
@@ -379,6 +382,7 @@ public class IncomingAssociationResolverTests
         var parentMatterId = Guid.NewGuid();
         var parentComm = new DataverseEntity("sprk_communication");
         parentComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", parentMatterId);
+        parentComm["sprk_associationstatus"] = new OptionSetValue(100000000); // P3: Resolved parent (pre-kill-switch state)
 
         _dataverseServiceMock
             .Setup(d => d.GetCommunicationByGraphMessageIdAsync("<p2@contoso.com>", It.IsAny<CancellationToken>()))
@@ -464,6 +468,152 @@ public class IncomingAssociationResolverTests
                 fields.ContainsKey("sprk_regardingrecordnumber") &&
                 (string)fields["sprk_regardingrecordnumber"] == "LITG-119896"),
             It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // =========================================================================
+    // P2 (FR-12 UAT): the denormalized PRIMARY Regarding is substantive-only (never a fallback)
+    // =========================================================================
+
+    [Fact]
+    public async Task P2_FallbackContactOnly_DoesNotPopulateDenormalizedPrimaryRegarding()
+    {
+        // A fallback identity match (contact/org/account) must NOT become the denormalized headline
+        // "Regarding record". Before P2, a contact-only match populated sprk_regardingrecordtype/id/name with
+        // the contact — and, when the substantive matters went Ambiguous, a spurious sub-threshold invoice
+        // (the UAT misfile). The typed sprk_regardingperson lookup is still written (the review surface uses
+        // it); only the misleading denormalized PRIMARY is withheld.
+        var contactId = Guid.NewGuid();
+        var contactEntity = new DataverseEntity("contact") { Id = contactId };
+        _dataverseServiceMock
+            .Setup(d => d.QueryContactByEmailAsync("jane@external.com", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(contactEntity);
+        _dataverseServiceMock
+            .Setup(d => d.QueryAccountByDomainAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DataverseEntity?)null);
+        _dataverseServiceMock
+            .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var envelope = CreateEnvelope("Hello", "jane@external.com");
+
+        await _resolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
+
+        _dataverseServiceMock.Verify(d => d.UpdateAsync(
+            "sprk_communication",
+            TestCommunicationId,
+            It.Is<Dictionary<string, object>>(fields =>
+                fields.ContainsKey("sprk_regardingperson") &&        // typed lookup still written
+                !fields.ContainsKey("sprk_regardingrecordtype") &&   // but NO denormalized headline
+                !fields.ContainsKey("sprk_regardingrecordid") &&
+                !fields.ContainsKey("sprk_regardingrecordname")),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // =========================================================================
+    // P3 (FR-12 UAT): a thread reply does not auto-file off an UNCONFIRMED parent
+    // =========================================================================
+
+    [Fact]
+    public async Task P3_ThreadParentNotResolved_ReplyDoesNotAutoFile_SurfacesSuggested()
+    {
+        // The parent carries a matter but its own association is only Suggested (unconfirmed). Inheriting it at
+        // 1.0 would amplify an unconfirmed association into an auto-file across the thread — the misfile
+        // propagation the UAT flagged as "as bad as mis-associating the primary record". The reply must inherit
+        // the matter as a SURFACED candidate (Suggested), never Resolved.
+        var parentMatterId = Guid.NewGuid();
+        var parentComm = new DataverseEntity("sprk_communication");
+        parentComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", parentMatterId);
+        parentComm["sprk_associationstatus"] = new OptionSetValue(100000003); // Suggested — UNCONFIRMED parent
+
+        _dataverseServiceMock
+            .Setup(d => d.GetCommunicationByGraphMessageIdAsync("<unconfirmed-parent@contoso.com>", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(parentComm);
+        _dataverseServiceMock
+            .Setup(d => d.QueryContactByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DataverseEntity?)null);
+        _dataverseServiceMock
+            .Setup(d => d.QueryAccountByDomainAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DataverseEntity?)null);
+        _dataverseServiceMock
+            .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var envelope = CreateEnvelope("Re: ongoing", "someone@external.com", inReplyTo: "<unconfirmed-parent@contoso.com>");
+
+        await _resolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
+
+        _dataverseServiceMock.Verify(d => d.UpdateAsync(
+            "sprk_communication",
+            TestCommunicationId,
+            It.Is<Dictionary<string, object>>(fields =>
+                fields.ContainsKey("sprk_regardingmatter") &&                          // inherited matter still surfaced
+                ((EntityReference)fields["sprk_regardingmatter"]).Id == parentMatterId &&
+                ((OptionSetValue)fields["sprk_associationstatus"]).Value == 100000003), // Suggested, NOT Resolved
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // =========================================================================
+    // P2b (061 UAT round-2): Ambiguous decision does NOT crown a denormalized headline
+    // =========================================================================
+
+    [Fact]
+    public async Task P2b_AmbiguousMattersWithLeftoverInvoice_DoesNotPopulateDenormalizedHeadline()
+    {
+        // The UAT misfile: two matters CONFLICT (Ambiguous → not written) while an incidental invoice is
+        // written non-conflicting. The denormalized "primary Regarding" headline (record type/id/name) must
+        // NOT be crowned with that leftover invoice — Ambiguous means "the reviewer decides", so no headline.
+        // The typed sprk_regardinginvoice lookup is still written for the review surface.
+        var matterA = Guid.NewGuid();
+        var matterB = Guid.NewGuid();
+        var invoiceId = Guid.NewGuid();
+        var conflictRung = new StubConflictingMattersPlusInvoiceRung(matterA, matterB, invoiceId);
+
+        _dataverseServiceMock
+            .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var resolver = new IncomingAssociationResolver(
+            new IAssociationRung[] { conflictRung },
+            _dataverseServiceMock.Object,
+            _dataverseServiceMock.Object,
+            AssociationTestSupport.Mapper(),
+            Mock.Of<ILogger<IncomingAssociationResolver>>());
+
+        var envelope = CreateEnvelope("Two matters and an invoice", "clerk@court.gov");
+
+        await resolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
+
+        _dataverseServiceMock.Verify(d => d.UpdateAsync(
+            "sprk_communication",
+            TestCommunicationId,
+            It.Is<Dictionary<string, object>>(fields =>
+                ((OptionSetValue)fields["sprk_associationstatus"]).Value == 100000004 && // Ambiguous
+                fields.ContainsKey("sprk_regardinginvoice") &&        // typed lookup still written
+                !fields.ContainsKey("sprk_regardingrecordtype") &&    // but NO denormalized headline
+                !fields.ContainsKey("sprk_regardingrecordid") &&
+                !fields.ContainsKey("sprk_regardingrecordname")),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>Emits two conflicting matters (same field, each ≥ threshold ⇒ Ambiguous) plus one
+    /// non-conflicting invoice — reproducing the UAT shape where a leftover record could be crowned.</summary>
+    private sealed class StubConflictingMattersPlusInvoiceRung : IAssociationRung
+    {
+        private readonly Guid _matterA, _matterB, _invoiceId;
+        public StubConflictingMattersPlusInvoiceRung(Guid matterA, Guid matterB, Guid invoiceId)
+        {
+            _matterA = matterA; _matterB = matterB; _invoiceId = invoiceId;
+        }
+        public RungKind Kind => RungKind.ExplicitReference;
+        public int Order => 0;
+        public Task<IReadOnlyList<RungMatch>> EvaluateAsync(
+            NormalizedMessage message, AssociationContext context, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<RungMatch>>(new[]
+            {
+                new RungMatch { RegardingFieldName = "sprk_regardingmatter", Target = new EntityReference("sprk_matter", _matterA), Confidence = 0.9, Provenance = "explicit:test:A", Rung = RungKind.ExplicitReference },
+                new RungMatch { RegardingFieldName = "sprk_regardingmatter", Target = new EntityReference("sprk_matter", _matterB), Confidence = 0.9, Provenance = "explicit:test:B", Rung = RungKind.ExplicitReference },
+                new RungMatch { RegardingFieldName = "sprk_regardinginvoice", Target = new EntityReference("sprk_invoice", _invoiceId), Confidence = 0.65, Provenance = "explicit:test:inv", Rung = RungKind.ExplicitReference },
+            });
     }
 
     // =========================================================================

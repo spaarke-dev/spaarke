@@ -325,7 +325,19 @@ public sealed class RecordNameMatchRung : IAssociationRung
                         : c.AttachmentCollapsed.Contains(collapsed, StringComparison.Ordinal) ? "attachment"
                         : null;
                 if (loc is not null)
-                    return new VerifiedMatch(opts.NumberConfidence, loc, "number", refNum);
+                {
+                    // E1 (FR-12 UAT): location-tier the number confidence (subject > body > attachment), exactly
+                    // as name matches already are — so a reference cited in the SUBJECT (the record the email is
+                    // really about) outranks the same-strength number merely mentioned in an older thread body.
+                    // FR-12 still independently gates auto-file; this only changes RANKING among candidates.
+                    var numberConfidence = loc switch
+                    {
+                        "subject" => opts.NumberConfidence,
+                        "body" => opts.BodyNumberConfidence,
+                        _ => opts.AttachmentNumberConfidence,
+                    };
+                    return new VerifiedMatch(numberConfidence, loc, "number", refNum);
+                }
             }
         }
 
