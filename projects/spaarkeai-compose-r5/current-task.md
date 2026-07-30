@@ -8,9 +8,12 @@
 > - **053 ✅** UAT #5 external-change on visibilitychange + Reload-from-source button — committed `1abd5785f`. Toolbar 46/46.
 > - **054 ✅** UAT #9 profile-button (gate already correct; added spinner feedback) — committed `bf3104e86`. Toolbar 47/47.
 > - **051 ⛔🔔 ESCALATED** UAT #1B persist computed numbering — feasibility investigation contradicts the premise; escalation trigger fired. **Awaiting owner decision** (options A/B/C in `notes/task-051-deviations.md`; recommend A = reduced scope, 050 already preserves numbering byte-identical).
-> - **052 🔲 REMAINING** UAT #10/#11 Word/WOPI unlock (SEV-1) — net-new SPE facade primitive + endpoint + client 423 branch + "Unlock & Save" button. Root cause + exact file:line in `notes/uat-remediation-r5.md`. **Platform caveat**: Graph has no universal WOPI unlock; discardCheckout releases a genuine checkout but a transient co-auth lock may still need to time out — build the affordance + honest UX. Ready to execute via `task-execute 052`.
+> - **052 ✅** UAT #10/#11 honest Word co-authoring lock UX — committed `2ed296f0c`. Confirmed (Microsoft docs) NO Graph unlock for co-auth locks → honest 423 copy + Retry + Reload-from-Word (no fake Unlock). DEF-14 regression updated; banner 7/7; Compose 822/822.
+> - **Directive #2 ✅** checkout-retirement plan drafted (`notes/checkout-retirement-plan.md`) — cross-cutting (10 files incl. non-Compose FileAccess/DocumentOperations); promote to its own project.
 >
-> **After 052 + 051 decision**: re-verify (byte-diff + full BFF suite + publish ≤60) → **operator re-deploys BFF + `sprk_spaarkeai` client together** → re-UAT → then 090 wrap-up (/test-diet + review + merge-to-master).
+> **Re-verify (2026-07-30):** Compose suite **822/822**; full BFF **9544 passed / 3 failed / 101 skipped**. The **3 failures are PRE-EXISTING from the master merge** (`AnalysisEndpointsExecuteDispatchContractTests` — analysis-hub/ai-redesign/email dispatch; R5 hardening baseline was 9319/0/101 before the merges; R5 diff is 100% Compose). **NOT R5** — flag to those project owners (same family as out-of-scope UAT #7/#8). Publish ~46.84 MB (052 server delta = one message string). BFF build 0 errors.
+>
+> **NEXT:** (1) owner picks **051** option A/B/C (`notes/task-051-deviations.md`; recommend A). (2) Operator **re-deploys BFF + `sprk_spaarkeai` client together** → re-UAT the 4 fixes. (3) Then 090 wrap-up (/test-diet + review + merge-to-master) — the 3 pre-existing analysis failures should be resolved by their owners or accepted before the master-merge gate.
 > **Out-of-scope UAT items (#2,3,4,7,8)** captured in `notes/uat-remediation-r5.md` (other projects; no issues filed per owner). **Do NOT deploy autonomously.**
 
 ---
