@@ -155,10 +155,13 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
     public async Task<AnalysisEntity?> GetAnalysisAsync(string id, CancellationToken ct = default)
     {
+        // task 064 (ADR-040 Path A, spec §13.5 / FR-22): sprk_chathistory is no longer selected —
+        // AnalysisDocumentLoader.GetOrReloadFromDataverseAsync (the last reader) was repointed to
+        // rely on Cosmos as the transcript store-of-record. sprk_analysis is anchor + outputs only.
         var entity = await _serviceClient.RetrieveAsync(
             "sprk_analysis",
             Guid.Parse(id),
-            new ColumnSet("sprk_name", "sprk_workingdocument", "sprk_chathistory",
+            new ColumnSet("sprk_name", "sprk_workingdocument",
                          "statuscode", "createdon", "modifiedon", "sprk_documentid"),
             ct);
 
@@ -171,7 +174,6 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             Name = entity.GetAttributeValue<string>("sprk_name"),
             DocumentId = entity.GetAttributeValue<EntityReference>("sprk_documentid")?.Id ?? Guid.Empty,
             WorkingDocument = entity.GetAttributeValue<string>("sprk_workingdocument"),
-            ChatHistory = entity.GetAttributeValue<string>("sprk_chathistory"),
             StatusCode = entity.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 0,
             CreatedOn = entity.GetAttributeValue<DateTime>("createdon"),
             ModifiedOn = entity.GetAttributeValue<DateTime>("modifiedon")

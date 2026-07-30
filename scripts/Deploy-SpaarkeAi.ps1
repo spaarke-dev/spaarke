@@ -12,7 +12,7 @@
     3. Create or update the sprk_spaarkeai web resource
     4. Publish customizations
 
-    Follows the same pattern as Deploy-AnalysisWorkspace.ps1.
+    Follows the standard code-page web-resource deploy pattern (build → upload → publish).
 
 .PARAMETER DataverseUrl
     Target Dataverse environment URL.

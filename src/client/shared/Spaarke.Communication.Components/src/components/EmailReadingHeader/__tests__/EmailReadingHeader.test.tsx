@@ -30,9 +30,7 @@ function renderWithProvider(ui: React.ReactElement, theme = webLightTheme) {
 
 function makeDataService(record: Record<string, unknown> | Error): IEmailHeaderDataService {
   return {
-    retrieveRecord: jest.fn(() =>
-      record instanceof Error ? Promise.reject(record) : Promise.resolve(record)
-    ),
+    retrieveRecord: jest.fn(() => (record instanceof Error ? Promise.reject(record) : Promise.resolve(record))),
   };
 }
 
@@ -63,7 +61,7 @@ describe('EmailReadingHeader', () => {
     expect(screen.getByText('Bcc')).toBeInTheDocument();
     expect(screen.getByText('Sent')).toBeInTheDocument();
     expect(screen.getByText('Received')).toBeInTheDocument();
-    expect((dataService.retrieveRecord as jest.Mock)).toHaveBeenCalledWith(
+    expect(dataService.retrieveRecord as jest.Mock).toHaveBeenCalledWith(
       'sprk_communication',
       'comm-1',
       expect.stringContaining('sprk_subject')
@@ -72,9 +70,7 @@ describe('EmailReadingHeader', () => {
 
   it('re-fetches when selectedId changes', async () => {
     const dataService = makeDataService({ sprk_subject: 'First' });
-    const { rerender } = renderWithProvider(
-      <EmailReadingHeader selectedId="comm-1" dataService={dataService} />
-    );
+    const { rerender } = renderWithProvider(<EmailReadingHeader selectedId="comm-1" dataService={dataService} />);
     await waitFor(() => expect(screen.getByText('First')).toBeInTheDocument());
 
     (dataService.retrieveRecord as jest.Mock).mockResolvedValueOnce({ sprk_subject: 'Second' });
@@ -85,7 +81,7 @@ describe('EmailReadingHeader', () => {
     );
 
     await waitFor(() => expect(screen.getByText('Second')).toBeInTheDocument());
-    expect((dataService.retrieveRecord as jest.Mock)).toHaveBeenCalledTimes(2);
+    expect(dataService.retrieveRecord as jest.Mock).toHaveBeenCalledTimes(2);
   });
 
   it('shows a skeleton while loading', () => {

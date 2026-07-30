@@ -160,6 +160,21 @@ interface InnerWidgetWithLinkProps<T> {
   className?: string;
   /** Citation link handler — call with citationId (and optional selectionRef) on anchor click. */
   onLink?: CitationClickHandler;
+  /**
+   * Task 025 (spec FR-09) — id of the workspace tab this widget instance is mounted in.
+   * Forwarded verbatim from the wrapper's own `tabId` prop (see WorkspaceWidgetProps.tabId).
+   * Most R1 widgets ignore this; it exists for widgets (e.g. AnalysisEditorWidget) that need to
+   * report live edit-state patches back to their own tab via `onDataChange`.
+   */
+  tabId?: string;
+  /** Task 025 — forwarded verbatim from the wrapper's own `isActiveTab` prop. */
+  isActiveTab?: boolean;
+  /**
+   * Task 025 (spec FR-09) — forwarded verbatim from the wrapper's own `onDataChange` prop
+   * (WorkspaceWidgetProps.onDataChange) so a widget with live, unsaved edit state can persist it
+   * through the existing tab-persistence write-through. Most R1 widgets ignore this.
+   */
+  onDataChange?: (patch: Partial<T>) => void;
 }
 
 /**
@@ -198,6 +213,9 @@ export function createWorkspaceWrapper<T = unknown>(
     restoredLayout,
     onRegisterHandle,
     onLink: onLinkProp,
+    tabId,
+    isActiveTab,
+    onDataChange,
   }: WorkspaceWidgetWrapperProps<T>): React.ReactElement {
     const styles = useStyles();
 
@@ -347,7 +365,16 @@ export function createWorkspaceWrapper<T = unknown>(
     // when a user clicks a bracketed citation reference. Inner widgets that do
     // not support citation linking safely ignore this extra prop.
     return (
-      <WrappedComponent data={data} isLoading={isLoadingProp} error={errorProp} className={className} onLink={onLink} />
+      <WrappedComponent
+        data={data}
+        isLoading={isLoadingProp}
+        error={errorProp}
+        className={className}
+        onLink={onLink}
+        tabId={tabId}
+        isActiveTab={isActiveTab}
+        onDataChange={onDataChange}
+      />
     );
   }
 

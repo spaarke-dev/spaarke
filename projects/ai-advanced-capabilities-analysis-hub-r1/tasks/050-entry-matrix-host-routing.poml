@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Entry matrix 2a–2d host routing + context pre-set</title>
+    <phase>5 Entry model + record integration</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend host-routing across 4 entry cases + code-page modal that MUST honor the 21-MUST embedded-mode contract (NFR-02); modifies .tsx surface; drives all record-driven + workspace entry UX.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified routing over an existing surface (launch-resolver + main.tsx mode routing already model the pattern); no novel architecture — literal wiring of 4 documented cases.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Repoints the shared main.tsx mode-routing seam consumed by 052/053; author before the ribbon launcher + ADR-039 enforcement fan-out.</parallel-reason>
+    <deps>030,040</deps>
+    <tags>frontend, spaarkeai, launch</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Wire the entry matrix (spec §12 / FR-14): route each of the four entry cases to the correct SpaarkeAi host with the
+    correct pre-set context. 2a (new-in-workspace) runs in the SpaarkeAi workspace surface; 2b (new-in-record) opens the
+    wizard, then a code-page modal with regarding pre-set to the parent record AND the "Create new" cards showing; 2c
+    (existing-in-workspace) opens in the workspace; 2d (existing-in-record) opens as a code-page modal. Only 2b pre-sets
+    regarding=parent + shows Create-new cards. The 2b/2d modal host MUST honor the LegalWorkspace embedded-mode contract
+    (NFR-02, 21 MUSTs). Sonnet 5 follows literally: do not add cases beyond these four.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the SpaarkeAi Code Page (`main.tsx` mode routing), the `launch-resolver`
+    modal-open primitive, the LegalWorkspace embedded-mode host contract, and Fluent v9 (ADR-021). Follow ADRs strictly.
+  </role>
+
+  <goal>
+    Each of the four entry cases (2a/2b/2c/2d) deterministically opens the correct host (workspace surface vs code-page
+    modal) with the correct pre-set context; only 2b pre-sets regarding=parent and shows the Create-new cards; the 2b/2d
+    code-page modal host initializes per the embedded-mode contract (config, theme, sessionStorage sentinels, webApi shim,
+    mount semantics, lifecycle hooks). Build is green; the routing is covered by the ui-tests below.
+  </goal>
+
+  <context>
+    <background>
+      spec §12 defines the entry matrix; FR-14 is the acceptance. §13.3 fixes the modal-open primitive as
+      `openSpaarkeAi(params, target=2)` and forbids `surfaceLaunchRegistry` for record-driven opens. `main.tsx` already
+      routes on a URL `composeMode` param (searchParams/dataParams) into ComposeWorkspace vs the standard three-pane shell —
+      this is the exact mode-routing seam to extend for the analysis entry cases. The hub widget (task 030) supplies the
+      Create-new cards + grid; the per-type wizard (task 040) is the 2b intermediate step. NFR-02 binds the 2b/2d modal host
+      to `LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` (21 testable MUSTs). ADR-039 keeps record-driven opens in CODE.
+    </background>
+    <relevant-files>
+      <file role="modify">src/solutions/SpaarkeAi/src/main.tsx</file>
+      <file role="canonical-reference">src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</file>
+      <file role="canonical-reference">docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file role="canonical-reference">docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">Analysis hub widget — the workspace surface (2a/2c) + the Create-new cards shown in the 2b modal.</dependency>
+      <dependency task="040" status="pending">Per-type creation wizard — the 2b new-in-record intermediate step before the modal opens.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">SCOPE: for these four entry cases only — record-driven opens (2b/2d) resolve in CODE via `openSpaarkeAi`/`main.tsx` mode routing; MUST NOT route any of the four cases through `surfaceLaunchRegistry` (that is the reactive in-chat path, out of scope here).</constraint>
+    <constraint source="project">SCOPE: 2b is the ONLY case that pre-sets regarding=parent AND shows the Create-new cards; 2a/2c open the workspace without a forced regarding; 2d opens the existing analysis as a modal without the Create-new cards. Do not cross-wire the context across cases.</constraint>
+    <constraint source="NFR-02">SCOPE: the 2b/2d code-page modal host only — it MUST honor `LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` (config init, theme ownership, sessionStorage sentinels, webApi shim, mount semantics, lifecycle hooks — 21 MUSTs). Do not introduce a second modal host abstraction; reuse the existing SpaarkeAi mount.</constraint>
+    <constraint source="ADR-021">SCOPE: any Fluent v9 surface touched by the routing (cards, modal chrome) — dark mode MUST render correctly; no hard-coded light-only colors.</constraint>
+    <constraint source="project">SCOPE: main.tsx mode routing — mirror the existing `composeMode` searchParams/dataParams read; do not invent a new URL-param convention divergent from the shipped one.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+    </files>
+    <patterns>
+      <pattern name="main.tsx composeMode routing" location="src/solutions/SpaarkeAi/src/main.tsx:506,515">
+        Read the URL mode param from searchParams ?? dataParams and branch the mounted surface; extend the same branch for the analysis entry cases rather than adding a parallel router.
+      </pattern>
+      <pattern name="openSpaarkeAi modal primitive" location="src/solutions/SpaarkeAi/src/utils/launch-resolver.ts:198,268">
+        `navigateTo({pageType:'webresource', webresourceName:'sprk_spaarkeai', data}, {target:2, 80%×80%})`; the 2b/2d modal reuses this primitive with pre-set context in `data`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; load ADR-039, ADR-021, the embedded-mode contract, and the surface-launch mechanism doc.</step>
+    <step order="1">Study `main.tsx` mode routing (`composeMode` read at ~506/515) and `launch-resolver.ts` (`openSpaarkeAi`/`openSpaarkeAiCompose`); map each of the 4 entry cases to a host + context.</step>
+    <step order="2">Implement 2a (new-in-workspace) → SpaarkeAi workspace surface; 2c (existing-in-workspace) → workspace with the existing analysis loaded — no forced regarding, no Create-new cards.</step>
+    <step order="3">Implement 2b (new-in-record) → wizard, then code-page modal with regarding pre-set to the parent AND Create-new cards shown; 2d (existing-in-record) → code-page modal opening the existing analysis, no Create-new cards.</step>
+    <step order="4">Ensure the 2b/2d modal host initializes per the embedded-mode contract (config init, theme ownership, sessionStorage sentinels, webApi shim, mount semantics, lifecycle hooks); reuse the existing SpaarkeAi mount, add no second host.</step>
+    <step order="5">Run the ui-tests (incl. ADR-021 dark-mode); build `npm run build:prod` clean.</step>
+    <step order="6">Update TASK-INDEX.md: set task 050 status to ✅.</step>
+    <step order="7">Document any deviation in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If honoring all 21 embedded-mode-contract MUSTs for the 2b/2d modal host is not achievable by reusing the existing SpaarkeAi mount (i.e. it appears to require a new host abstraction or a contract MUST cannot be met), STOP and escalate per CLAUDE.md §6 — do not ship a partial-contract modal host or a divergent second host.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="2a new-in-workspace">
+      <steps><step>Trigger new-in-workspace entry from the SpaarkeAi workspace.</step></steps>
+      <expected>The workspace surface opens; no code-page modal; no forced regarding; Create-new cards available in-workspace.</expected>
+    </test>
+    <test name="2b new-in-record pre-set">
+      <steps><step>Trigger new-in-record from a parent (Matter/Project) context; complete the wizard.</step></steps>
+      <expected>The code-page modal opens with regarding pre-set to the parent AND the Create-new cards showing.</expected>
+    </test>
+    <test name="2c existing-in-workspace">
+      <steps><step>Open an existing analysis from the workspace hub grid.</step></steps>
+      <expected>The analysis opens in the workspace surface (not a modal); no Create-new cards forced.</expected>
+    </test>
+    <test name="2d existing-in-record">
+      <steps><step>Open an existing analysis from a record context.</step></steps>
+      <expected>The analysis opens as a code-page modal; no Create-new cards; regarding reflects the record.</expected>
+    </test>
+    <test name="dark-mode (ADR-021)">
+      <steps><step>Switch the host theme to dark and re-open the 2b modal + cards.</step></steps>
+      <expected>Modal chrome, cards, and text render correctly in dark mode; no light-only hard-coded colors.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build the SpaarkeAi code page (`npm run build:prod`).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/main.tsx (entry-case mode routing)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/utils/launch-resolver.ts (if a case needs a context-pre-set param)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given 2a (new-in-workspace), when triggered, then the SpaarkeAi workspace surface opens with no code-page modal and no forced regarding.</criterion>
+    <criterion testable="true">Given 2b (new-in-record), when the wizard completes, then a code-page modal opens with regarding pre-set to the parent AND the Create-new cards showing.</criterion>
+    <criterion testable="true">Given 2c (existing-in-workspace), when an existing analysis is opened, then it opens in the workspace surface (not a modal).</criterion>
+    <criterion testable="true">Given 2d (existing-in-record), when an existing analysis is opened, then it opens as a code-page modal with no Create-new cards.</criterion>
+    <criterion testable="true">The 2b/2d modal host satisfies the embedded-mode contract's 21 MUSTs (config init, theme, sessionStorage sentinels, webApi shim, mount semantics, lifecycle hooks).</criterion>
+    <criterion testable="true">Negative: only 2b pre-sets regarding=parent + Create-new cards — 2a/2c/2d do NOT force the parent regarding nor show the Create-new cards in the 2d modal.</criterion>
+    <criterion testable="true">Negative: no entry case routes through `surfaceLaunchRegistry` (grep-clean).</criterion>
+    <criterion testable="true">All four cases render correctly in dark mode (ADR-021); `npm run build:prod` is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec §12 (entry matrix) / FR-14 / §13.3. The context-pre-set param plumbing (analysisId/worktype/regarding) on
+    `openSpaarkeAi` is authored in task 052; 050 consumes the existing `openSpaarkeAi` + main.tsx mode-routing seam and
+    establishes the four-case host mapping.
+
+    COMPLETED 2026-07-29. Four-case host mapping wired via a NEW URL-param interpretation chain (no new
+    convention — mirrors the shipped `composeMode` read): main.tsx parses `analysisId`/`worktype`/`regarding` →
+    App props → ThreePaneShell `AnalysisLaunchContext` → WorkspacePane analysis auto-install effect.
+    - 2a (worktype, no record ctx) → `analysis-hub` tab in workspace, no forced regarding.
+    - 2b (worktype + entityLogicalName/entityId) → `analysis-hub` tab, regarding=parent pre-set (AnalysisHubWidget
+      reads entityContext → threads `initialAssociation` to the wizard; only 2b, structurally), cards showing.
+    - 2c (hub grid row) → task-031 reopen, unchanged.
+    - 2d (analysisId) → resolve bound session via GET /ai/chat/sessions/by-analysis/{id} → `session_switch`, no cards.
+    Three convergent threads: (1) wizard deep-service injection at the SpaarkeAi shell (WorkspacePane) via the
+    existing createXrmDataService/createXrmNavigationService/searchUsersAndContacts factories — makes 2a end-to-end;
+    (2) wizard-finish execution launch is COMPLETED BY thread 1 (the document-viewer dispatch was always present, it
+    just could not fire without the services); (3) activeWorkType connected live at the entry (main.tsx maps the
+    Agreement worktype 100000000 → 'agreement-analysis' through the shipped 041 chain).
+    ADR-039 grep-clean (CODE path, not surfaceLaunchRegistry); NFR-02 satisfied by reusing the existing SpaarkeAi
+    mount (no second host); ADR-021/012/028/030 compliant. Escalation trigger did NOT fire. No BFF touched.
+    Gates: typecheck clean (surface-owned 0 errors), code-review + adr-check PASS. New tests:
+    AnalysisHubWidget.regarding-preset.test.tsx (5), WorkspacePane.analysis-entry.test.tsx (3). Full WorkspacePane
+    (30) + AnalysisHubWidget (12) suites green. Deviations: notes/task-050-deviations.md.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL: code-review + adr-check).</protocol>
+  </execution>
+</task>

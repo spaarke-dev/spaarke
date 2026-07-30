@@ -139,29 +139,12 @@ public class AnalysisOrchestrationServiceTests
     // (which now exercises `IPlaybookOrchestrationService.ExecuteAsync` via the migrated
     // endpoint). See task 040 audit for the deletion-scope inventory.
 
-    #region ContinueAnalysisAsync Tests
-
-    [Fact]
-    public async Task ContinueAnalysisAsync_AnalysisNotFound_ThrowsKeyNotFoundException()
-    {
-        // Arrange
-        var analysisId = Guid.NewGuid();
-
-        // Act & Assert
-        var chunks = new List<AnalysisStreamChunk>();
-        var act = async () =>
-        {
-            await foreach (var chunk in _service.ContinueAnalysisAsync(analysisId, "Continue", _mockHttpContext, CancellationToken.None))
-            {
-                chunks.Add(chunk);
-            }
-        };
-
-        await act.Should().ThrowAsync<KeyNotFoundException>()
-            .WithMessage($"*{analysisId}*not found*");
-    }
-
-    #endregion
+    // ai-advanced-capabilities-analysis-hub-r1 task 062 (spec §13.5 / FR-20, 2026-07-29) — the
+    // ContinueAnalysisAsync Tests region (1 test) was DELETED here: the legacy in-memory session
+    // production method was deleted in the same task (superseded by ChatEndpoints Redis→Cosmos
+    // model per task 020), so the test could no longer defend any contract. Per ADR-038 §7
+    // build-vs-maintain criteria — this test lived outside the 7 KEEP paths (build-class), so no
+    // same-PR replacement is required.
 
     #region SaveWorkingDocumentAsync Tests
 
@@ -181,6 +164,47 @@ public class AnalysisOrchestrationServiceTests
 
         await act.Should().ThrowAsync<KeyNotFoundException>()
             .WithMessage($"*{analysisId}*not found*");
+    }
+
+    // task 064 (ADR-040 Path A, spec §13.5 / FR-22): regression test for the sprk_chathistory
+    // read drop. AnalysisEntity no longer carries a ChatHistory property at all — this test
+    // pins the behavior that SaveWorkingDocumentAsync succeeds purely off WorkingDocument, with
+    // no chat-history column required on the Dataverse record.
+    [Fact]
+    public async Task SaveWorkingDocumentAsync_AnalysisFoundWithNoChatHistoryColumn_SavesSuccessfully()
+    {
+        // Arrange
+        var analysisId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        _dataverseServiceMock
+            .Setup(x => x.GetAnalysisAsync(analysisId.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AnalysisEntity
+            {
+                Id = analysisId,
+                DocumentId = documentId,
+                Name = "Test Analysis",
+                WorkingDocument = "# Working draft",
+                StatusCode = 0,
+                CreatedOn = DateTime.UtcNow.AddMinutes(-10),
+                ModifiedOn = DateTime.UtcNow
+            });
+        _workingDocumentServiceMock
+            .Setup(x => x.SaveToSpeAsync(analysisId, "output.md", It.IsAny<byte[]>(), "text/markdown", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SavedDocumentResult
+            {
+                DocumentId = documentId,
+                DriveId = "drive-1",
+                ItemId = "item-1",
+                WebUrl = "https://example.com/output.md"
+            });
+        var request = new AnalysisSaveRequest { FileName = "output.md", Format = SaveDocumentFormat.Md };
+
+        // Act
+        var result = await _service.SaveWorkingDocumentAsync(analysisId, request, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.DocumentId.Should().Be(documentId);
     }
 
     #endregion
@@ -204,6 +228,41 @@ public class AnalysisOrchestrationServiceTests
             .WithMessage($"*{analysisId}*not found*");
     }
 
+    // task 064: ExportAnalysisAsync's ExportContext never read ChatHistory even before the
+    // read-drop (it only uses WorkingDocument/FinalOutput/DocumentName) — this pins that the
+    // shared loader change does not regress export: the analysis loads and export proceeds
+    // (format-not-supported here only because the test registry has no export services wired,
+    // per the constructor's `ExportServiceRegistry(Array.Empty<IExportService>())` setup — the
+    // KeyNotFoundException path is what would fire if the loader still required chat history).
+    [Fact]
+    public async Task ExportAnalysisAsync_AnalysisFoundWithNoChatHistoryColumn_LoadsWithoutThrowing()
+    {
+        // Arrange
+        var analysisId = Guid.NewGuid();
+        _dataverseServiceMock
+            .Setup(x => x.GetAnalysisAsync(analysisId.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AnalysisEntity
+            {
+                Id = analysisId,
+                DocumentId = Guid.NewGuid(),
+                Name = "Test Analysis",
+                WorkingDocument = "# Working draft",
+                StatusCode = 0,
+                CreatedOn = DateTime.UtcNow.AddMinutes(-10),
+                ModifiedOn = DateTime.UtcNow
+            });
+        var request = new AnalysisExportRequest { Format = ExportFormat.Email };
+
+        // Act
+        var result = await _service.ExportAnalysisAsync(analysisId, request, CancellationToken.None);
+
+        // Assert — the analysis loaded (no KeyNotFoundException); the registry has no export
+        // services wired in this test fixture, so the format-not-supported result is expected.
+        result.Should().NotBeNull();
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("not supported");
+    }
+
     #endregion
 
     #region GetAnalysisAsync Tests
@@ -219,6 +278,39 @@ public class AnalysisOrchestrationServiceTests
 
         await act.Should().ThrowAsync<KeyNotFoundException>()
             .WithMessage($"*{analysisId}*not found*");
+    }
+
+    // task 064 (ADR-040 Path A, spec §13.5 / FR-22): pins that GET /{id} returns the anchor +
+    // outputs with an empty ChatHistory — the transcript is no longer sourced from Dataverse
+    // (AnalysisEntity has no ChatHistory property to read); Cosmos is the transcript
+    // store-of-record, reachable via the separate by-analysis session endpoint (task 031).
+    [Fact]
+    public async Task GetAnalysisAsync_AnalysisFoundWithNoChatHistoryColumn_ReturnsEmptyChatHistory()
+    {
+        // Arrange
+        var analysisId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        _dataverseServiceMock
+            .Setup(x => x.GetAnalysisAsync(analysisId.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AnalysisEntity
+            {
+                Id = analysisId,
+                DocumentId = documentId,
+                Name = "Test Analysis",
+                WorkingDocument = "# Working draft",
+                StatusCode = 0,
+                CreatedOn = DateTime.UtcNow.AddMinutes(-10),
+                ModifiedOn = DateTime.UtcNow
+            });
+
+        // Act
+        var result = await _service.GetAnalysisAsync(analysisId, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.DocumentId.Should().Be(documentId);
+        result.WorkingDocument.Should().Be("# Working draft");
+        result.ChatHistory.Should().BeEmpty();
     }
 
     #endregion

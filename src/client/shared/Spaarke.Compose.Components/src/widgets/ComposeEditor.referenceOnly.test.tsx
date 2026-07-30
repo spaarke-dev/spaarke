@@ -109,13 +109,17 @@ describe('ComposeEditor — Wave 6 (DEF-G) non-docx reference-only guard', () =>
   });
 
   it('DOCX buffer (PK\\x03\\x04 zip signature) WITH a server projection: renders the editable editor, NOT the reference-only state', async () => {
-    renderEditor(bufferFrom(DOCX_SIGNATURE), { speDriveItemId: 'matter-doc-9', fileName: 'contract.docx' }, {
-      status: 'success',
-      canEdit: true,
-      html: '<p data-paraid="AB12CD34">Loaded document body</p>',
-      warnings: [],
-      schemaVersion: 'compose-html-v1',
-    });
+    renderEditor(
+      bufferFrom(DOCX_SIGNATURE),
+      { speDriveItemId: 'matter-doc-9', fileName: 'contract.docx' },
+      {
+        status: 'success',
+        canEdit: true,
+        html: '<p data-paraid="AB12CD34">Loaded document body</p>',
+        warnings: [],
+        schemaVersion: 'compose-html-v1',
+      }
+    );
 
     // The editable editor mounts via the server projection — the DOCX-only signature gate passed.
     await screen.findByRole('textbox');

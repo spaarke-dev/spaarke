@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Analyses Tab - Matter Entity Form
+
+  Purpose: Displays the AI Analysis records regarding this Matter in a subgrid (record→analysis 1:N).
+  Entity: sprk_matter (parent)
+  Related Entity: sprk_analysis (child via sprk_regardingmatter lookup, ADR-024 dual-field resolver pattern)
+  Relationship (verified live, 2026-07-29 via EntityDefinitions OneToManyRelationships):
+    SchemaName: sprk_analysis_RegardingMatter_sprk_matter
+    ReferencingAttribute: sprk_regardingmatter
+    ReferencingEntity: sprk_analysis / ReferencedEntity: sprk_matter
+  View used: "Analysis Associated View" (querytype=2, id 4ef7e264-a43f-4d9c-ad56-e48c561ad30e) -
+    the canonical Dataverse subgrid view for sprk_analysis.
+
+  Task: 051 - Record→analysis 1:N + Analyses subgrid/tab on Matter/Project forms
+  Project: ai-advanced-capabilities-analysis-hub-r1
+  Spec: FR-15 / §12.2
+
+  Applied directly to the live Matter main form (formid 4fa382f2-c273-f011-b4cb-6045bdd6a665) via
+  Dataverse Web API (systemforms PATCH + PublishXml) on 2026-07-29. This checked-in fragment is the
+  durable record of the change (mirrors the src/solutions/SpaarkeCore/entities/sprk_matter/FormXml/reportcard/
+  matter-reportcard-tab.xml precedent from matter-performance-KPI-r1 task 044) and is what task 071
+  (deploy) should verify is present rather than re-apply.
+
+  Modeled on the live "To Dos" subgrid tab precedent (tab_todos_sprk_project on the Project form) -
+  same section/row/cell/subgrid-control shape, RecordsPerPage=30, AutoExpand=Auto, EnableViewPicker=true.
+-->
+<tab name="tab_analyses_sprk_matter" id="cb380cc1-a61d-407b-aff7-17b0bbadf1b8" IsUserDefined="0" locklevel="0" showlabel="true" expanded="false">
+  <labels>
+    <label description="Analyses" languagecode="1033" />
+  </labels>
+  <columns>
+    <column width="100%">
+      <sections>
+        <section name="tab_analyses_section" id="d6b6c94b-e070-456f-b3a6-634aa5a8d91b" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+          <labels>
+            <label description="ANALYSES" languagecode="1033" />
+          </labels>
+          <rows>
+            <row />
+            <row>
+              <cell locklevel="0" id="{f9160e39-92a5-4bdd-844e-d2e113ec7e7b}" rowspan="4" colspan="1" auto="true" showlabel="false">
+                <labels>
+                  <label description="Analyses Subgrid" languagecode="1033" />
+                </labels>
+                <control indicationOfSubgrid="true" id="subgrid_analyses" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                  <parameters>
+                    <RecordsPerPage>30</RecordsPerPage>
+                    <AutoExpand>Auto</AutoExpand>
+                    <EnableQuickFind>false</EnableQuickFind>
+                    <EnableViewPicker>true</EnableViewPicker>
+                    <EnableChartPicker>false</EnableChartPicker>
+                    <ChartGridMode>Both</ChartGridMode>
+                    <RelationshipName>sprk_analysis_RegardingMatter_sprk_matter</RelationshipName>
+                    <TargetEntityType>sprk_analysis</TargetEntityType>
+                    <ViewId>{4EF7E264-A43F-4D9C-AD56-E48C561AD30E}</ViewId>
+                    <ViewIds>{4EF7E264-A43F-4D9C-AD56-E48C561AD30E}</ViewIds>
+                  </parameters>
+                </control>
+              </cell>
+            </row>
+          </rows>
+        </section>
+      </sections>
+    </column>
+  </columns>
+</tab>

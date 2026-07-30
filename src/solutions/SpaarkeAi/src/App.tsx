@@ -104,6 +104,32 @@ export interface AppProps {
   speDriveId?: string;
   /** Display name of the document for the workspace title (Compose-only). */
   speFileName?: string;
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1 task 041 (FR-13): the ACTIVE work type the launch
+   * is scoped to (e.g. `"agreement-analysis"` for an Agreement Review; Compose-only). Forwarded
+   * to `ThreePaneShell` → `ComposeLaunchContext` → `ComposeWorkspace` → `ComposeEditor`, scoping
+   * the inline AI toolbar via `getToolsForSurface`. Omitted preserves the unscoped `'*'` default.
+   */
+  activeWorkType?: string;
+
+  // ---------------------------------------------------------------------------
+  // Analysis entry-matrix params (task 050 — spec §12 / FR-14).
+  //
+  // Parsed by main.tsx from the URL and forwarded to ThreePaneShell, which
+  // publishes them as an AnalysisLaunchContext consumed by WorkspacePane:
+  //   - analysisMode='new'      → open the Analysis hub (Create-new cards). With a
+  //                               record context present (entityLogicalName/entityId)
+  //                               the hub pre-sets regarding=parent (2b); else 2a.
+  //   - analysisMode='existing' → open the existing analysis by id (2d/2c), no cards.
+  // Omitted for every non-analysis launch (Compose, session-restore, plain).
+  // ---------------------------------------------------------------------------
+
+  /** Analysis entry mode: 'new' opens the hub, 'existing' opens an analysis by id. */
+  analysisMode?: "new" | "existing";
+  /** `sprk_analysis` GUID to open (analysisMode='existing'). */
+  analysisId?: string;
+  /** `sprk_worktype` Choice value for a new analysis (analysisMode='new'). */
+  worktype?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +227,10 @@ function AppWithAuth(props: AppProps): React.JSX.Element {
           composeMode={props.composeMode}
           composeDocument={initialComposeDocument}
           composeDriveId={props.speDriveId ?? ""}
+          activeWorkType={props.activeWorkType}
+          analysisMode={props.analysisMode}
+          analysisId={props.analysisId}
+          worktype={props.worktype}
         />
       </div>
     </div>

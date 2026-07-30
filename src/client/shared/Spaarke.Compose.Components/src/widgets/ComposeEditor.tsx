@@ -1724,9 +1724,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // (F-2 — exactly one docx→editor reader). There is nothing left to fall back to, so the editor
     // surfaces this explicit, calm error/unavailable state — NEVER a silent blank editor and NEVER a
     // second client-side docx parser. `fileName` is the UI label only (Tier 1 identifier).
-    const [projectionUnavailable, setProjectionUnavailable] = React.useState<{ fileName?: string } | null>(
-      null
-    );
+    const [projectionUnavailable, setProjectionUnavailable] = React.useState<{ fileName?: string } | null>(null);
 
     // ----- Task 111 — right-click (context-menu) AI-toolbar trigger --------
     // The screen point (viewport coords) of the last suppressed native context
@@ -2606,11 +2604,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           aria-label={projectionUnavailable.fileName ?? 'Compose editor'}
           data-compose-editor-spe-id={documentRef?.speDriveItemId ?? ''}
         >
-          <div
-            className={styles.referenceOnly}
-            role="status"
-            data-testid="compose-projection-unavailable"
-          >
+          <div className={styles.referenceOnly} role="status" data-testid="compose-projection-unavailable">
             <ErrorCircle24Regular className={styles.projectionUnavailableIcon} aria-hidden="true" />
             <Text weight="semibold">
               {projectionUnavailable.fileName
@@ -2618,9 +2612,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
                 : 'Couldn’t prepare this document for editing'}
             </Text>
             <Text size={200} className={styles.referenceOnlyDetail}>
-              Something went wrong preparing this document — try opening it again. This file is still
-              available to the Assistant for reference — ask it to summarize, extract from, or answer
-              questions about it.
+              Something went wrong preparing this document — try opening it again. This file is still available to the
+              Assistant for reference — ask it to summarize, extract from, or answer questions about it.
             </Text>
           </div>
         </div>

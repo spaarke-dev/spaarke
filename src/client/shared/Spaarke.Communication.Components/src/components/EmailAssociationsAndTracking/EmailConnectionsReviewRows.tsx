@@ -31,7 +31,10 @@ export function DecisionBlock({
   onConfirm: (conn: Connection, chosen: { targetEntity: string; targetId: string; targetName?: string }) => void;
   s: ConnectionsReviewStyles;
 }): React.ReactElement {
-  const groups: CandidateGroup[] = React.useMemo(() => groupCandidatesByName(conn.alternatives ?? []), [conn.alternatives]);
+  const groups: CandidateGroup[] = React.useMemo(
+    () => groupCandidatesByName(conn.alternatives ?? []),
+    [conn.alternatives]
+  );
   const [selected, setSelected] = React.useState<string | null>(null);
   const nameOf = (g: CandidateGroup) =>
     resolveDisplayName?.(g.candidates[0].targetEntity, g.candidates[0].targetId) ?? g.targetName;
