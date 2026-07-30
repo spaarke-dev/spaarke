@@ -38,7 +38,7 @@
 | 042 | Deploy (master-with-R4.5) + operator UAT | 4 Hardening | ✅ | FULL | sonnet/high | 041 | ❌ deploy |
 | 050 | UAT #1A redline routing + origin fix (SEV-1) | 5 UAT remediation | ✅ | FULL | opus/xhigh | 042 | ❌ shared ComposeService |
 | 051 | UAT #1B persist computed numbering to OOXML | 5 UAT remediation | ⛔🔔 | FULL | opus/xhigh | 050 | ❌ shared engine/projection |
-| 052 | UAT #10/#11 Word/WOPI unlock affordance | 5 UAT remediation | 🔲 | FULL | opus/high | 042 | ❌ shared endpoints+workspace |
+| 052 | UAT #10/#11 Word/WOPI lock — honest UX + Retry/Reload | 5 UAT remediation | ✅ | FULL | opus/high | 042 | ❌ shared endpoints+workspace |
 | 053 | UAT #5 external-change visibilitychange + reload button | 5 UAT remediation | ✅ | FULL | sonnet/high | 042 | ❌ shared workspace/toolbar |
 | 054 | UAT #9 refresh-profile button gate relax | 5 UAT remediation | ✅ | STANDARD | sonnet/high | 042 | ❌ shared workspace/toolbar |
 | 090 | Project wrap-up (/test-diet + review + close) | 4 Wrap-up | 🔲 | FULL | sonnet/high | 050,051,052,053,054 | ❌ terminal |

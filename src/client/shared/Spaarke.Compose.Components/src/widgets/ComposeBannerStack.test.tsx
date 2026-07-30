@@ -52,6 +52,35 @@ describe('ComposeBannerStack — DEF-15 dismissible simplification warning', () 
     expect(screen.getByLabelText('Dismiss')).toBeInTheDocument();
   });
 
+  // UAT #10/#11 (task 052) — Word co-authoring lock (423) honest banner.
+  it('shows the generic Save-error bar when errorMessage is set and it is NOT a lock', () => {
+    renderStack({ errorMessage: 'Failed to save document (HTTP 500).' });
+    expect(screen.getByTestId('compose-workspace-error-banner')).toBeInTheDocument();
+    expect(screen.queryByTestId('compose-workspace-word-lock-banner')).not.toBeInTheDocument();
+  });
+
+  it('shows the honest "Open in Word" bar with Retry + Reload when the save failed with a Word lock', async () => {
+    const user = userEvent.setup();
+    const onRetrySave = jest.fn();
+    const onReloadFromWord = jest.fn();
+    renderStack({
+      errorMessage: 'This document is open in Word — close it there, then Retry.',
+      saveErrorIsLock: true,
+      onRetrySave,
+      onReloadFromWord,
+    });
+
+    expect(screen.getByTestId('compose-workspace-word-lock-banner')).toBeInTheDocument();
+    expect(screen.getByText('Open in Word')).toBeInTheDocument();
+    // NOT the generic error bar (no misleading "checked out — check it in").
+    expect(screen.queryByTestId('compose-workspace-error-banner')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('compose-word-lock-retry'));
+    expect(onRetrySave).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByTestId('compose-word-lock-reload'));
+    expect(onReloadFromWord).toHaveBeenCalledTimes(1);
+  });
+
   it('hides the warning after the dismiss control is clicked (per-mount)', async () => {
     const user = userEvent.setup();
     renderStack({ importWarnings: TWO_WARNINGS });

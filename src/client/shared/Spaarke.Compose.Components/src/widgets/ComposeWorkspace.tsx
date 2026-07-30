@@ -1293,6 +1293,21 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         } catch {
           detail = (await response.text().catch(() => '')).slice(0, 400);
         }
+        // UAT #10/#11 (task 052): a 423 means the doc is held by a Word-for-web CO-AUTHORING lock (Spaarke
+        // never does a formal checkout, so a 423 is ALWAYS co-authoring). There is no programmatic unlock —
+        // flag it so the banner shows the honest "Open in Word" bar with Retry + Reload-from-Word (not a fake
+        // Unlock, and not the old misleading "checked out — check it in" copy). The server detail already
+        // carries the honest message.
+        if (response.status === 423) {
+          dispatch({
+            kind: 'saveFailed',
+            errorMessage:
+              detail ||
+              'This document is open in Word — close it there, then Retry. It also releases automatically within a few minutes. Your Compose changes are safe and still pending.',
+            isLock: true,
+          });
+          return;
+        }
         const msg =
           response.status === 403
             ? `You do not have permission to save this document. ${detail}`.trim()
@@ -2616,6 +2631,24 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           {/* Banner stack — errors / warnings / checkout status / assistant pending */}
           <ComposeBannerStack
             errorMessage={state.errorMessage}
+            // UAT #10/#11 (task 052): when the save failed with a Word co-authoring lock (423), show the
+            // honest "Open in Word" bar with Retry (re-run the save once Word is closed) + Reload-from-Word
+            // (pull Word's latest version as the new baseline). No fake "Unlock" — none exists.
+            saveErrorIsLock={state.saveErrorIsLock}
+            onRetrySave={() => void triggerSave()}
+            onReloadFromWord={
+              state.documentRef?.speDriveItemId
+                ? () => {
+                    if (!state.documentRef) return;
+                    dispatch({
+                      kind: 'requestLoad',
+                      documentRef: state.documentRef,
+                      sessionId: state.sessionId,
+                      externalChange: true,
+                    });
+                  }
+                : undefined
+            }
             checkoutStatus={state.checkoutStatus}
             checkoutLockedBy={state.checkoutLockedBy}
             checkoutFailureMessage={state.checkoutFailureMessage}

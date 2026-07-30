@@ -44,6 +44,14 @@ import type { ComposeAssistantToWorkspaceFlow } from '../types/compose-contracts
 
 export interface ComposeBannerStackProps {
   errorMessage: string | null;
+  /** UAT #10/#11 (task 052): when true, the errorMessage is a Word co-authoring lock (HTTP 423). Render the
+   *  honest "Open in Word" bar (warning intent) with Retry + Reload-from-Word actions instead of the generic
+   *  save-error bar. There is no programmatic unlock — the actions are retry + pull-Word's-version. */
+  saveErrorIsLock?: boolean;
+  /** Retry the save (used by the lock bar — succeeds once Word is closed). */
+  onRetrySave?: () => void;
+  /** Reload the latest SPE bytes (used by the lock bar — pulls Word's version as the new baseline). */
+  onReloadFromWord?: () => void;
   checkoutStatus: ComposeCheckoutStatus;
   checkoutLockedBy: ComposeCheckoutLockedByInfo | null;
   checkoutFailureMessage: string | null;
@@ -124,6 +132,9 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
   const styles = useStyles();
   const {
     errorMessage,
+    saveErrorIsLock = false,
+    onRetrySave,
+    onReloadFromWord,
     checkoutStatus,
     checkoutLockedBy,
     checkoutFailureMessage,
@@ -203,7 +214,28 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
         </MessageBar>
       ) : null}
 
-      {errorMessage ? (
+      {errorMessage && saveErrorIsLock ? (
+        // UAT #10/#11 (task 052): honest Word co-authoring lock bar. No programmatic unlock exists — offer
+        // Retry (works once Word is closed) + Reload from Word (pull Word's version as the new baseline).
+        <MessageBar intent="warning" data-testid="compose-workspace-word-lock-banner" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Open in Word</MessageBarTitle>
+            {errorMessage}
+          </MessageBarBody>
+          <MessageBarActions>
+            {onRetrySave ? (
+              <Button size="small" appearance="primary" onClick={onRetrySave} data-testid="compose-word-lock-retry">
+                Retry Save
+              </Button>
+            ) : null}
+            {onReloadFromWord ? (
+              <Button size="small" onClick={onReloadFromWord} data-testid="compose-word-lock-reload">
+                Reload from Word
+              </Button>
+            ) : null}
+          </MessageBarActions>
+        </MessageBar>
+      ) : errorMessage ? (
         <MessageBar intent="error" data-testid="compose-workspace-error-banner" aria-live="polite">
           <MessageBarBody>
             <MessageBarTitle>Save error</MessageBarTitle>

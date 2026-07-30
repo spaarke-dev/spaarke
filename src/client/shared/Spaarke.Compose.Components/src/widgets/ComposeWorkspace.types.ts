@@ -135,6 +135,10 @@ export interface ComposeWorkspaceState {
   projection: ComposeServerProjection | null;
   /** User-facing error message (NOT a Tier 3 sink). */
   errorMessage: string | null;
+  /** UAT #10/#11 (task 052): true when the last save failed with HTTP 423 (the doc is open in Word — a
+   *  co-authoring lock). Flips the error banner to the honest "Open in Word" bar with Retry + Reload-from-Word
+   *  actions (there is no programmatic unlock). Reset on save-start / success / load. */
+  saveErrorIsLock: boolean;
   /** Last assistant-inserted draft staged for confirm (Flow 5 R1 manual-confirm gate). */
   pendingAssistantInsert: ComposeAssistantToWorkspaceFlow | null;
   /** SPE check-out lifecycle (Task 050 / Spike #3 §9; Task 051 multi-tab UX). */
@@ -264,7 +268,7 @@ export type ComposeWorkspaceAction =
       // by an older BFF response that omits the field; see the reducer).
       origin?: ComposeDocumentOrigin | null;
     }
-  | { kind: 'saveFailed'; errorMessage: string }
+  | { kind: 'saveFailed'; errorMessage: string; isLock?: boolean }
   | { kind: 'reset' }
   | { kind: 'importWarnings'; warnings: Array<{ type: string; message: string }> }
   | { kind: 'pendingAssistantInsert'; payload: ComposeAssistantToWorkspaceFlow }
@@ -301,6 +305,7 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   importedComments: [],
   projection: null,
   errorMessage: null,
+  saveErrorIsLock: false,
   pendingAssistantInsert: null,
   checkoutStatus: 'idle',
   checkoutLockedBy: null,
@@ -451,7 +456,7 @@ export function composeWorkspaceReducer(
       };
     case 'requestSave':
       if (state.status !== 'loaded') return state;
-      return { ...state, status: 'saving', errorMessage: null };
+      return { ...state, status: 'saving', errorMessage: null, saveErrorIsLock: false };
     case 'saveSucceeded':
       return {
         ...state,
@@ -490,7 +495,7 @@ export function composeWorkspaceReducer(
           : state.documentRef,
       };
     case 'saveFailed':
-      return { ...state, status: 'loaded', errorMessage: action.errorMessage };
+      return { ...state, status: 'loaded', errorMessage: action.errorMessage, saveErrorIsLock: action.isLock ?? false };
     case 'reset':
       return INITIAL_STATE;
     case 'importWarnings':
