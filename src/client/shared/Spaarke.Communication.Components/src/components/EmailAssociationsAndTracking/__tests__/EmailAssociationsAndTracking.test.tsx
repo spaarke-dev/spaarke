@@ -212,7 +212,10 @@ describe('EmailConnectionsReview (single-primary redesign 2026-07-29)', () => {
         {...baseProps({
           associationStatus: STATUS_RESOLVED,
           associationProvenanceJson: provenance([
-            cand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Acme v Beta', 0.95, { number: 'MAT-1', written: true }),
+            cand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Acme v Beta', 0.95, {
+              number: 'MAT-1',
+              written: true,
+            }),
           ]),
           filedAssociations: [{ entityType: 'sprk_matter', recordId: 'mtr-1', recordName: 'Acme v Beta' }],
         })}
@@ -233,6 +236,19 @@ describe('EmailConnectionsReview (single-primary redesign 2026-07-29)', () => {
       </FluentProvider>
     );
     expect(screen.queryByRole('button', { name: /Link another record/i })).not.toBeInTheDocument();
+  });
+
+  it('a SINGLE click on the "Link another record" tile opens the record-type dropdown directly — no intermediate step (owner UAT #6)', async () => {
+    renderWithProvider(<EmailConnectionsReview {...baseProps()} />);
+
+    // One click on the tile opens the type dropdown (a Fluent Menu) directly.
+    fireEvent.click(screen.getByRole('button', { name: /link another record/i }));
+    const items = await screen.findAllByRole('menuitem');
+    expect(items.length).toBeGreaterThan(0);
+
+    // Non-MDA / dev host: `Xrm.Utility.lookupObjects` is absent, so picking a
+    // type is a silent no-op (no throw) — the expected dev-host behavior.
+    expect(() => fireEvent.click(items[0])).not.toThrow();
   });
 
   it('renders correctly under a dark FluentProvider theme (ADR-021) with no console errors', () => {

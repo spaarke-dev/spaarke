@@ -21,9 +21,12 @@
  *      4. RECIPIENTS — From/To always; Cc/Bcc only when non-empty (`EmailRecipients`).
  *      5. ATTACHMENTS — collapsible (COLLAPSED by default), header count
  *         "Attachments (N)" → `EmailReadingAttachments`.
- *      6. RELATED TO — collapsible (COLLAPSED), confirmed associations as pills
- *         (`EmailRelatedToPills`) — confirmed-state display ONLY.
- *      7. BODY — `EmailBodyView`, placed AFTER the Related-to section.
+ *      6. RELATED TO — the merged single-primary resolver (`EmailConnectionsReview`
+ *         + a confirmed `ConfirmedChip` in the header). OPEN by default while it
+ *         still needs action (🔴 requires-review / 🟡 needs-confirmation), and
+ *         COLLAPSED once the primary is 🟢 confirmed (owner UAT #7).
+ *      7. SUBJECT + BODY — the email subject line (owner UAT #4) directly above
+ *         `EmailBodyView`, both placed AFTER the Related-to section.
  *   (The old Tracking trio — monitor/high-priority/access — is REMOVED from the
  *   reading pane entirely per the redesign.)
  *
@@ -37,7 +40,7 @@
  * standard hooks only, no `as React.ComponentType` cast.
  */
 import * as React from 'react';
-import { makeStyles, tokens } from '@fluentui/react-components';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
 import type { ICommunicationAssociation } from '@spaarke/ui-components';
 import { EmailViewSelector, useEmailViews } from '../EmailViewSelector';
 import { EmailReadingPaneShell } from '../EmailReadingPaneShell';
@@ -94,6 +97,18 @@ const useStyles = makeStyles({
   recipientsWrap: {
     paddingBlock: tokens.spacingVerticalM,
     paddingInline: tokens.spacingHorizontalXL,
+  },
+  // Subject line shown directly ABOVE the message body (owner UAT #4) — mirrors
+  // Outlook, where the subject sits right above the message. Same value as the
+  // title bar; semibold. Semantic tokens only (ADR-021).
+  bodySubject: {
+    display: 'block',
+    paddingInline: tokens.spacingHorizontalXL,
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalS,
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase400,
+    color: tokens.colorNeutralForeground1,
   },
 });
 
@@ -291,6 +306,11 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
                   · 🟢 confirmed) AND resolves it. Replaces the old split of a
                   top "Association" resolver + a separate read-only pills list. */}
               <CollapsibleSection
+                // Re-key on the confirmed boundary so the section adopts the
+                // correct default open-state when the async record load resolves
+                // (or when the user confirms): 🟢 confirmed → collapsed; 🔴/🟡 →
+                // open so the user can still act (owner UAT #7).
+                key={`related-to-${primaryModel.state === 'confirmed' ? 'confirmed' : 'active'}`}
                 id="related-to"
                 title="Related to"
                 status={{ tone: associationSummary.tone, label: associationSummary.label }}
@@ -314,7 +334,7 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
                     />
                   ) : undefined
                 }
-                defaultOpen
+                defaultOpen={primaryModel.state !== 'confirmed'}
               >
                 <EmailConnectionsReview
                   communicationId={id}
@@ -329,6 +349,13 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
                   onAssociationsChanged={record.reload}
                 />
               </CollapsibleSection>
+
+              {/* Subject line directly above the message body (owner UAT #4) —
+                  same value the title bar shows; gives the reader the subject
+                  right above the message, Outlook-style. */}
+              <Text as="h2" className={s.bodySubject} data-testid="email-body-subject" truncate wrap={false}>
+                {record.recordState?.subject || '(no subject)'}
+              </Text>
 
               <EmailBodyView
                 selectedId={id}
