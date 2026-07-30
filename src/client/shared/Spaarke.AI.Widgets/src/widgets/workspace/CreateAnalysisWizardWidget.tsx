@@ -116,6 +116,7 @@ import type {
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import type { WidgetState } from '../../types/shared';
 import { useDispatchPaneEvent } from '../../events/useDispatchPaneEvent';
+import { buildBffApiUrl } from '@spaarke/auth';
 
 // ---------------------------------------------------------------------------
 // Analysis-scoped regarding targets (ADR-024) — Matter / Project / Document
@@ -501,7 +502,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           }
           formData.append('title', context.uploadedFiles[0]?.name ?? finishName);
 
-          const uploadResponse = await authFetch(`${bffBaseUrl}/documents/upload`, {
+          const uploadResponse = await authFetch(buildBffApiUrl(bffBaseUrl, '/documents/upload'), {
             method: 'POST',
             body: formData,
           });
