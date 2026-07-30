@@ -126,10 +126,15 @@ function deriveCardReviewTone(row: Record<string, unknown>): 'red' | 'yellow' | 
     filed.length > 0;
   if (!hasAssociationData) return undefined;
   return summarizePrimaryReview(
-    derivePrimaryReview(asNullableString(row['sprk_associationprovenance']), asNullableNumber(row['sprk_associationstatus']), filed, {
-      recordName: asNullableString(row['sprk_regardingrecordname']),
-      recordNumber: asNullableString(row['sprk_regardingrecordnumber']),
-    })
+    derivePrimaryReview(
+      asNullableString(row['sprk_associationprovenance']),
+      asNullableNumber(row['sprk_associationstatus']),
+      filed,
+      {
+        recordName: asNullableString(row['sprk_regardingrecordname']),
+        recordNumber: asNullableString(row['sprk_regardingrecordnumber']),
+      }
+    )
   ).tone;
 }
 

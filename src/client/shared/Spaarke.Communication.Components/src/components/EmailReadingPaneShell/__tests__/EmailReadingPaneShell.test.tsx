@@ -86,7 +86,9 @@ describe('EmailReadingPaneShell', () => {
 
     // Layout order: header band, then the full-width toolbar, then the body region.
     const readingPane = screen.getByTestId('email-reading-pane');
-    const nodes = Array.from(readingPane.querySelectorAll('[data-testid="header-slot"], [role="toolbar"], [data-testid="body-slot"]'));
+    const nodes = Array.from(
+      readingPane.querySelectorAll('[data-testid="header-slot"], [role="toolbar"], [data-testid="body-slot"]')
+    );
     expect(nodes.map(n => n.getAttribute('data-testid') ?? n.getAttribute('role'))).toEqual([
       'header-slot',
       'toolbar',

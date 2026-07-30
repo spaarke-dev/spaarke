@@ -18,9 +18,7 @@ function renderWithProvider(ui: React.ReactElement, theme = webLightTheme) {
 
 describe('EmailRecipients', () => {
   it('always renders From and To rows, even when Cc/Bcc are omitted', () => {
-    renderWithProvider(
-      <EmailRecipients from="jane.doe@example.com" to="john.smith@example.com" />
-    );
+    renderWithProvider(<EmailRecipients from="jane.doe@example.com" to="john.smith@example.com" />);
 
     expect(screen.getByTestId('email-recipients')).toBeInTheDocument();
     expect(screen.getByText('From')).toBeInTheDocument();
@@ -33,12 +31,7 @@ describe('EmailRecipients', () => {
 
   it('renders Cc/Bcc rows only when they have a value', () => {
     renderWithProvider(
-      <EmailRecipients
-        from="jane.doe@example.com"
-        to="john.smith@example.com"
-        cc="legal-team@example.com"
-        bcc={null}
-      />
+      <EmailRecipients from="jane.doe@example.com" to="john.smith@example.com" cc="legal-team@example.com" bcc={null} />
     );
 
     expect(screen.getByText('Cc')).toBeInTheDocument();
