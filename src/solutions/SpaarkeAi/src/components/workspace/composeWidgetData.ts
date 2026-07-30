@@ -39,6 +39,15 @@ export interface ComposeWidgetSeed {
     html?: string;
     fileName?: string | null;
   };
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1 task 041 (FR-13): the ACTIVE work type the launch
+   * carries (e.g. `'agreement-analysis'`). Cross-cutting — applies regardless of which of the
+   * three mutually-exclusive door shapes above is present. Threaded to
+   * `ComposeLaunchContextValue.activeWorkType` by `buildLaunchFromSeed`, then to
+   * `<ComposeWorkspace activeWorkType>` so the AI toolbar scopes via `getToolsForSurface`.
+   * Absent for every pre-existing seed — no regression (ComposeEditor defaults to `'*'`).
+   */
+  activeWorkType?: string;
 }
 
 /** Tab `widgetData` shape for the `'compose'` Direct widget. */

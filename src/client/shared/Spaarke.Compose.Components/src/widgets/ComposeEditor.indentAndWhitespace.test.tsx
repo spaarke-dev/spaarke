@@ -89,9 +89,7 @@ describe('ComposeEditor — FR-07 w:ind rendering (task 021)', () => {
   });
 
   it('a hanging-indented paragraph renders margin-left AND a negative text-indent together', async () => {
-    renderEditor(
-      '<p data-paraid="00E10002" style="margin-left: 36pt; text-indent: -18pt">Hanging clause text</p>'
-    );
+    renderEditor('<p data-paraid="00E10002" style="margin-left: 36pt; text-indent: -18pt">Hanging clause text</p>');
 
     const editor = await screen.findByRole('textbox');
     await waitFor(() => expect(editor).toHaveTextContent('Hanging clause text'));
@@ -105,9 +103,7 @@ describe('ComposeEditor — FR-07 w:ind rendering (task 021)', () => {
     // mergeAttributes (tiptap core) combines composeIndentExtension's `style` output with the LOCKED
     // TextAlign extension's — this proves the two additive extensions coexist on one node without one
     // clobbering the other's `style` contribution.
-    renderEditor(
-      '<p data-paraid="00E10003" style="text-align: center; margin-left: 36pt">Aligned and indented</p>'
-    );
+    renderEditor('<p data-paraid="00E10003" style="text-align: center; margin-left: 36pt">Aligned and indented</p>');
 
     const editor = await screen.findByRole('textbox');
     await waitFor(() => expect(editor).toHaveTextContent('Aligned and indented'));
@@ -136,19 +132,22 @@ describe('ComposeEditor — FR-08 preserved-whitespace CSS (task 021)', () => {
   it.each([
     ['light', webLightTheme],
     ['dark', webDarkTheme],
-  ])('the .ProseMirror content surface does not collapse consecutive whitespace in %s mode (ADR-021)', async (_label, theme) => {
-    renderEditor('<p data-paraid="00E10004">Text&nbsp;&nbsp;&nbsp;with preserved spacing</p>', theme);
+  ])(
+    'the .ProseMirror content surface does not collapse consecutive whitespace in %s mode (ADR-021)',
+    async (_label, theme) => {
+      renderEditor('<p data-paraid="00E10004">Text&nbsp;&nbsp;&nbsp;with preserved spacing</p>', theme);
 
-    const editor = await screen.findByRole('textbox');
-    await waitFor(() => expect(editor).toHaveTextContent(/Text/));
+      const editor = await screen.findByRole('textbox');
+      await waitFor(() => expect(editor).toHaveTextContent(/Text/));
 
-    // `editor` IS the `.ProseMirror` div (editorProps.attributes.role='textbox' is set directly on it) —
-    // the same element `editorSurface['& .ProseMirror']` in useStyles targets.
-    expect(editor.className).toContain('ProseMirror');
-    const computed = getComputedStyle(editor);
-    expect(PRESERVING_WHITE_SPACE_VALUES).toContain(computed.whiteSpace);
-    expect(computed.whiteSpace).not.toBe('normal');
-  });
+      // `editor` IS the `.ProseMirror` div (editorProps.attributes.role='textbox' is set directly on it) —
+      // the same element `editorSurface['& .ProseMirror']` in useStyles targets.
+      expect(editor.className).toContain('ProseMirror');
+      const computed = getComputedStyle(editor);
+      expect(PRESERVING_WHITE_SPACE_VALUES).toContain(computed.whiteSpace);
+      expect(computed.whiteSpace).not.toBe('normal');
+    }
+  );
 
   it('the editorSurface Griffel rule for .ProseMirror white-space is present with higher specificity than the default', async () => {
     // Direct CSSOM assertion (independent of jsdom's cascade-resolution behavior above): the app-level
@@ -164,9 +163,7 @@ describe('ComposeEditor — FR-08 preserved-whitespace CSS (task 021)', () => {
         return [];
       }
     });
-    const rule = cssTexts.find(
-      text => / \.ProseMirror\s*\{/.test(text) && text.includes('white-space: pre-wrap')
-    );
+    const rule = cssTexts.find(text => / \.ProseMirror\s*\{/.test(text) && text.includes('white-space: pre-wrap'));
     expect(rule).toBeDefined();
   });
 

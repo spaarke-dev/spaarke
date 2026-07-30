@@ -10,7 +10,7 @@
 | Field | Value |
 |-------|-------|
 | **Active work** | UAT iteration on the Communications conversation UI (widget + `sprk_communicationconversationpage` modal code page + `CommunicationConversationPanel` PCF) + backend thread-creation bug fixes. Direct UAT loop, NOT a POML task. |
-| **Status** | Round 5 UAT + create-thread-500 fix: **committed, pushed, merged to master, BFF DEPLOYED.** Auto-threading fix (`60f3ea0fd`): **pushed + BFF DEPLOYED 2026-07-25** (branch synced current with master via merge `bf371c05d`; deploy hash-verified, 47.49 MB, smoke 401/200). **NOT yet merged to master** — held for a normal PR with `/conflict-check` on shared `ThreadResolver.cs`. |
+| **Status** | ✅ **RESOLVED 2026-07-28** — all fixes MERGED TO MASTER (PR #691, merge `cf12cee96`) and **BFF DEPLOYED FROM MASTER** (hash-verified 4/4, 47.51 MB, smoke `POST /threads`→401 + `/healthz`→200). Create-thread 500 cleared at the source: master no longer has the bad `sprk_regardingrecordtype` writes. Prior branch-only dev deploys kept getting reverted by other projects' shared-BFF deploys from master — landing on master is what made it durable. |
 | **Branch / HEAD** | `work/messaging-communication-app-r3` @ **`bf371c05d`** (pushed, 0 behind master). Working tree clean. |
 | **Next Action** | **Open PR to land the auto-threading fix to master** — run `/conflict-check` first (shared `ThreadResolver.cs`, co-edited by r1/r2/email-r4). Also: operator uploads PCF v1.6.0 zip; re-UAT the ＋ New Thread button + modal centering. |
 | **Deploy** | BFF + code pages: I deploy directly (`Deploy-BffApi.ps1`, `Deploy-WebResourceInline.ps1`, `Deploy-SpaarkeAi.ps1`). **PCF: I build + hand the zip; operator uploads to Dataverse.** |

@@ -122,7 +122,7 @@ beforeAll(() => {
         bindingId: DRAFT_BINDING,
         turn: 1,
         disposition: 'compose',
-        payload: { target_text: 'the prior clause', new_text: NEW_TEXT, match_mode: 'strict', rationale: 'clearer' },
+        payload: { target_text: 'the prior clause', new_text: NEW_TEXT, match_mode: 'strict', rationale: RATIONALE },
       };
       ledger.set(session, [...(ledger.get(session) ?? []), entry]);
       return sseCompleteResponse(entry.payload);
@@ -218,6 +218,15 @@ jest.mock('../../shell/ThreePaneShell', () => ({
 // Import AFTER mocks.
 import { ConversationPane, COMPOSE_EDIT_CONFIRMATION } from '../ConversationPane';
 
+// UAT round-8 #7 (ConversationPane.tsx dispatchComposeAction) appends a
+// "**What I changed:**" explanation line — sourced from the dispatched ledger
+// payload's `rationale` field ('clearer', set below) — onto the base
+// summary-only confirmation. This is the current, correct, reviewer-approved
+// contract; the confirmation is no longer a bare COMPOSE_EDIT_CONFIRMATION
+// string when an explanation is present.
+const RATIONALE = 'clearer';
+const EXPECTED_CONFIRMATION = `${COMPOSE_EDIT_CONFIRMATION}\n\n**What I changed:** ${RATIONALE}`;
+
 // ---------------------------------------------------------------------------
 // Harness — REAL bus + REAL bridge + REAL workspace receiver (the shipped Flow-5
 // receiver, editor stubbed via spy) co-mounted with the REAL ConversationPane,
@@ -304,9 +313,10 @@ describe('DEF-09: Compose "Draft alternative" routes to the DOCUMENT session (tw
     expect(flow5.ledgerRef).toBe(`${DRAFT_BINDING}@t1`);
     expect(flow5.sessionId).toBe(DOC_SESSION);
 
-    // (3) The Assistant got a CONFIRMATION-only line — NOT the proposed-text prose.
+    // (3) The Assistant got a CONFIRMATION-only line (base copy + the UAT round-8 #7
+    // "What I changed" explanation from the ledger's `rationale`) — NOT the proposed-text prose.
     const contents = injectedMessages.map((m) => m.content);
-    expect(contents).toContain(COMPOSE_EDIT_CONFIRMATION);
+    expect(contents).toContain(EXPECTED_CONFIRMATION);
     expect(contents.every((c) => !c.includes(NEW_TEXT))).toBe(true);
     expect(contents.every((c) => !c.includes('**Proposed text:**'))).toBe(true);
     expect(injectedMessages.every((m) => m.role === 'Assistant')).toBe(true);

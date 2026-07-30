@@ -1,11 +1,28 @@
 /**
  * QuickStartModal.tsx — the Assistant "Quick Start" modal (task 041 / FR-F2).
  *
- * Hosts the existing `GetStartedCardsWidget` (the shared `@spaarke/ai-widgets`
- * 7-card wizard library, FR-18/FR-19) inside a Fluent v9 `<Dialog>` launched
- * from `AssistantToolMenu`'s "Quick Start" entry (task 040). Per CLAUDE.md §11
- * (component justification — default to reuse) this file is a THIN host:
- * no new card grid, no new launch mechanism.
+ * Hosts the shared `@spaarke/ai-widgets` card libraries inside a Fluent v9
+ * `<Dialog>`, launched from `AssistantToolMenu`'s "Quick Start" entry (task 040)
+ * AND from the Analysis grid's `+ New` toolbar (ai-advanced-capabilities-analysis-hub-r1).
+ * Per CLAUDE.md §11 (component justification — default to reuse) this file is a THIN
+ * host: no new card grid, no new launch mechanism.
+ *
+ * Tabbed surface (ai-advanced-capabilities-analysis-hub-r1)
+ * ========================================================
+ * A single Fluent v9 `TabList` with two tabs (the SAME `Dialog` + `TabList`
+ * primitives `PlaybookLibraryShell` composes — there is no generic modal-shell
+ * component):
+ *   - **Create**   — the existing `GetStartedCardsWidget` 7-card grid (unchanged).
+ *   - **Analysis** — the `AnalysisCardsWidget` 3-card grid (Agreement Review live;
+ *                    Legal Research + Patent "coming soon"), identical layout.
+ * `initialTab` selects which tab opens: the Assistant menu opens "Create"; the
+ * Analysis grid `+ New` opens "Analysis". There is exactly ONE Quick Start modal —
+ * the Analysis tab EXTENDS it, it is not a second copy.
+ *
+ * Agreement Review card → `onCreateAnalysis(workTypeValue, workTypeLabel)` + close.
+ * The host (ConversationPane) closes Quick Start and dispatches
+ * `open_create_analysis_wizard` so WorkspacePane opens the Create Analysis wizard
+ * AS A MODAL — the two modals never stack (MODAL-DECISION-CRITERIA anti-pattern #5).
  *
  * Card → launch mapping
  * ======================
@@ -48,16 +65,23 @@ import {
   DialogBody,
   DialogTitle,
   DialogContent,
+  TabList,
+  Tab,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { GetStartedCardsWidget } from '@spaarke/ai-widgets';
-import type { GetStartedCardId } from '@spaarke/ai-widgets';
+import type { SelectTabEvent, SelectTabData, TabValue } from '@fluentui/react-components';
+import { GetStartedCardsWidget, AnalysisCardsWidget } from '@spaarke/ai-widgets';
+import type { GetStartedCardId, AnalysisCardId } from '@spaarke/ai-widgets';
 import {
   launchSurface,
   launchPlaybookIntent,
+  SprkAnalysisWorkType,
 } from '@spaarke/ui-components';
 import { getBffBaseUrl } from '../../config/runtimeConfig';
+
+/** Which Quick Start tab is active. */
+export type QuickStartTab = 'create' | 'analysis';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -100,6 +124,20 @@ export interface QuickStartModalProps {
    * Omitted → no next-step injected (back-compat / test override).
    */
   onCardLaunched?: (cardId: GetStartedCardId) => void;
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1: which tab opens. `'create'` (default)
+   * = the 7 GetStarted cards; `'analysis'` = the 3 analysis cards. The Assistant
+   * menu opens `'create'`; the Analysis grid `+ New` opens `'analysis'`.
+   */
+  initialTab?: QuickStartTab;
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1: fired when the user picks a LIVE
+   * analysis card (currently only "Agreement Review"). Receives the `sprk_worktype`
+   * Choice value + display label. The host closes Quick Start and dispatches
+   * `open_create_analysis_wizard` so WorkspacePane hosts the wizard as a modal.
+   * Omitted → the analysis cards render but selecting one is a no-op (test override).
+   */
+  onCreateAnalysis?: (workTypeValue: number, workTypeLabel: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +157,16 @@ const useStyles = makeStyles({
   title: {
     color: tokens.colorNeutralForeground1,
   },
+  tabList: {
+    marginBottom: tokens.spacingVerticalS,
+  },
+  // Each tab panel fills the content area so its card grid scrolls internally.
+  tabPanel: {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: 1,
+    minHeight: 0,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -129,8 +177,38 @@ const useStyles = makeStyles({
  * `QuickStartModal` — Fluent v9 Dialog hosting `GetStartedCardsWidget`.
  * Launched from `AssistantToolMenu`'s "Quick Start" entry.
  */
-export const QuickStartModal: React.FC<QuickStartModalProps> = ({ open, onClose, getFileContext, onSendEmail, onCardLaunched }) => {
+export const QuickStartModal: React.FC<QuickStartModalProps> = ({
+  open,
+  onClose,
+  getFileContext,
+  onSendEmail,
+  onCardLaunched,
+  initialTab = 'create',
+  onCreateAnalysis,
+}) => {
   const styles = useStyles();
+
+  // Active tab. Re-seeded from `initialTab` every time the modal (re)opens so the
+  // grid `+ New` lands on Analysis and the Assistant menu lands on Create.
+  const [selectedTab, setSelectedTab] = React.useState<TabValue>(initialTab);
+  React.useEffect(() => {
+    if (open) setSelectedTab(initialTab);
+  }, [open, initialTab]);
+
+  const handleTabSelect = React.useCallback((_ev: SelectTabEvent, data: SelectTabData) => {
+    setSelectedTab(data.value);
+  }, []);
+
+  // Analysis tab: only "Agreement Review" is live. Selecting it closes Quick Start
+  // and hands the work type to the host, which dispatches `open_create_analysis_wizard`.
+  const handleAnalysisCardClick = React.useCallback(
+    (cardId: AnalysisCardId): void => {
+      if (cardId !== 'agreement-review') return; // coming-soon cards are disabled anyway
+      onCreateAnalysis?.(SprkAnalysisWorkType.AgreementAnalysis, 'Agreement Review');
+      onClose();
+    },
+    [onCreateAnalysis, onClose],
+  );
 
   const handleCardClick = React.useCallback(
     (cardId: GetStartedCardId): void => {
@@ -229,7 +307,30 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({ open, onClose,
         <DialogBody>
           <DialogTitle className={styles.title}>Quick Start</DialogTitle>
           <DialogContent className={styles.content}>
-            <GetStartedCardsWidget onCardClick={handleCardClick} />
+            <TabList
+              className={styles.tabList}
+              selectedValue={selectedTab}
+              onTabSelect={handleTabSelect}
+              appearance="subtle"
+              data-testid="quick-start-tablist"
+            >
+              <Tab value="create" data-testid="quick-start-tab-create">
+                Create
+              </Tab>
+              <Tab value="analysis" data-testid="quick-start-tab-analysis">
+                Analysis
+              </Tab>
+            </TabList>
+
+            {selectedTab === 'create' ? (
+              <div className={styles.tabPanel} role="tabpanel" aria-label="Create">
+                <GetStartedCardsWidget onCardClick={handleCardClick} />
+              </div>
+            ) : (
+              <div className={styles.tabPanel} role="tabpanel" aria-label="Analysis">
+                <AnalysisCardsWidget onCardClick={handleAnalysisCardClick} />
+              </div>
+            )}
           </DialogContent>
         </DialogBody>
       </DialogSurface>

@@ -13,7 +13,12 @@
  *     never throws
  */
 import { renderHook, waitFor, act } from '@testing-library/react';
-import type { IDataverseClient, SavedQuerySummary, SavedQueryResult, FetchMultipleResult } from '@spaarke/ui-components';
+import type {
+  IDataverseClient,
+  SavedQuerySummary,
+  SavedQueryResult,
+  FetchMultipleResult,
+} from '@spaarke/ui-components';
 import { useEmailViews, EMAIL_INBOX_VIEW_NAME } from '../useEmailViews';
 
 /** Builds a stub `IDataverseClient` — only the 3 methods `useEmailViews` calls are exercised. */
@@ -75,7 +80,8 @@ describe('useEmailViews', () => {
         { id: inboxId, name: EMAIL_INBOX_VIEW_NAME, isDefault: false, queryType: 0 },
       ],
       fetchXmlByViewId: {
-        [inboxId]: '<fetch><entity name="sprk_communication"><filter><condition attribute="sprk_communicationtype" operator="eq" value="100000000" /></filter></entity></fetch>',
+        [inboxId]:
+          '<fetch><entity name="sprk_communication"><filter><condition attribute="sprk_communicationtype" operator="eq" value="100000000" /></filter></entity></fetch>',
         [sentId]: '<fetch><entity name="sprk_communication" /></fetch>',
       },
       rowsByViewId: {
@@ -115,10 +121,11 @@ describe('useEmailViews', () => {
     expect(result.current.error).toBeNull();
   });
 
-  it('re-runs the newly selected view\'s FetchXML and re-populates rows on view switch', async () => {
+  it("re-runs the newly selected view's FetchXML and re-populates rows on view switch", async () => {
     const inboxId = 'view-inbox';
     const sentId = 'view-sent';
-    const sentFetchXml = '<fetch><entity name="sprk_communication"><filter><condition attribute="sprk_communicationtype" operator="eq" value="100000000" /><condition attribute="sprk_direction" operator="eq" value="100000001" /></filter></entity></fetch>';
+    const sentFetchXml =
+      '<fetch><entity name="sprk_communication"><filter><condition attribute="sprk_communicationtype" operator="eq" value="100000000" /><condition attribute="sprk_direction" operator="eq" value="100000001" /></filter></entity></fetch>';
     const client = makeStubClient({
       savedQueries: [
         { id: inboxId, name: EMAIL_INBOX_VIEW_NAME, isDefault: false, queryType: 0 },

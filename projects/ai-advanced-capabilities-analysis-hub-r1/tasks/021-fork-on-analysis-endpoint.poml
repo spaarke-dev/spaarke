@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Fork-on-analysis BFF endpoint `POST /api/ai/analysis/fork` (UQ-1 Option B)</title>
+    <phase>2 Session</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>NEW BFF surface (new endpoint) touching auth, session persistence, and atomic multi-write composition; §6.5 Path A owner-approved exception; highest-blast-radius task in the project.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Atomic fork (create Analysis + mint session + bind FK + archive prior + snapshot transcript) with a partial-failure/compensation story is high-judgment composition across server-owned services — architectural, not mechanical.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>New endpoint composing the same session code as 020/022; collides with `Services/Ai/` (redesign-r2 sole owner); serial within Phase 2; `/conflict-check` before the BFF PR.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff, ai, session</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Author a new BFF endpoint `POST /api/ai/analysis/fork` (UQ-1 Option B, owner-approved §6.5 Path A) whose single
+    handler atomically composes: (1) create a `sprk_analysis` via `IAnalysisDataverseService.CreateAnalysisAsync`,
+    (2) mint a new session via `ChatSessionManager`, (3) bind the new session to the new Analysis FK (task-020 path),
+    (4) archive the prior session to history, (5) snapshot the prior transcript. It returns
+    `{ analysisId, newSessionId, archivedSessionId }`. The client's only job is to store `newSessionId` and show the
+    warning. Compose server-owned services only — do NOT fork `Services/Ai/`.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in BFF Minimal-API endpoint definition, server-side session minting
+    (`ChatSessionManager`), the ADR-013 `PublicContracts/` facade, and atomic/compensating multi-write composition.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    A new authenticated endpoint `POST /api/ai/analysis/fork` exists that atomically creates an Analysis + new bound
+    session, archives + snapshots the prior session, and returns `{ analysisId, newSessionId, archivedSessionId }`;
+    a mid-sequence failure leaves NO orphaned Analysis/session/prior-session; build + tests green; Placement
+    Justification + publish-size ≤60 MB + no new HIGH CVE reported in the PR.
+  </goal>
+
+  <context>
+    <background>
+      UQ-1 resolved (2026-07-28) to Option B — a new BFF endpoint — because session GUIDs are minted 100% server-side
+      (`ChatSessionManager.cs:108`); the client only reads back the id, so atomic fork MUST be server-side. This is a
+      §6.5 Path A project-scoped exception to §10/ADR-013 (owner-approved): one handler reusing DI'd services, ~0
+      publish-size delta, consuming `Services/Ai/PublicContracts/` (no `Services/Ai/` fork). Task 020 supplies the
+      session→Analysis FK bind. Archive-durability semantics (AIPL-054 stub) are decided in task 022; this task
+      performs the archive call + transcript snapshot on whatever archive contract exists, and 022 hardens durability.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Endpoints/ (new fork endpoint registration; mirror ChatEndpoints.cs:345 create shape)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Ai/ (fork handler composing create+mint+bind+archive+snapshot)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs (line 108 — server-minted GUID; DeleteSessionAsync/ArchiveSessionAsync)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs (task-020 FK bind path)</file>
+      <file role="canonical-reference">IAnalysisDataverseService.CreateAnalysisAsync (Analysis create seam)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (fork endpoint + compensation tests)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">Session→Analysis FK bind path in `ChatDataverseRepository` (the fork reuses it for the new session).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">SCOPE: the fork handler. Compose `Services/Ai/PublicContracts/` seams + `IAnalysisDataverseService` + `ChatSessionManager` only; MUST NOT inject AI-internal types or fork `Services/Ai/` (sole-owned by redesign-r2).</constraint>
+    <constraint source="ADR-028">SCOPE: the new endpoint. Registered behind Spaarke Auth v2 (`authenticatedFetch`/`DefaultAzureCredential`); an unauthenticated caller MUST get 401 before any Dataverse write.</constraint>
+    <constraint source="ADR-040">SCOPE: fork persistence. New session is bound to the new Analysis anchor; prior transcript snapshot uses the Cosmos store-of-record (Path A) — do NOT introduce a second transcript store.</constraint>
+    <constraint source="ADR-029">SCOPE: this NEW BFF surface. State the Placement Justification in the PR (per `.claude/constraints/bff-extensions.md`), report `dotnet publish` compressed size + diff vs ~49.63 MB baseline (≤60 MB), confirm no new HIGH CVE.</constraint>
+    <constraint source="project">SCOPE: fork atomicity. A mid-sequence failure MUST NOT leave an orphan (dangling Analysis, unbound new session, or a prior session archived-but-transcript-lost) — implement a compensation/consistent partial-failure story and cover it with a test.</constraint>
+    <constraint source="project">SCOPE: server/client split. The client's only responsibility is to store `newSessionId` + show the warning; do NOT push fork orchestration to the client (session GUIDs are server-minted).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF Minimal-API endpoint + atomic session composition</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/patterns/ai/public-contracts-facade.md</file>
+      <file>.claude/patterns/ai/endpoint-di-symmetry.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+    </files>
+    <patterns>
+      <pattern name="Chat create endpoint" location="src/server/api/Sprk.Bff.Api/Endpoints/ChatEndpoints.cs:345">
+        Mirror the authenticated create-endpoint registration shape; the fork endpoint is a sibling that additionally creates the Analysis + archives the prior session.
+      </pattern>
+      <pattern name="Endpoint/DI symmetry" location=".claude/patterns/ai/endpoint-di-symmetry.md">
+        An unconditionally-mapped endpoint needs unconditional service registration (ADR-032 Null-Object if any dependency is feature-gated).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor + reason; load knowledge; confirm task 020 FK bind exists; grep to confirm no fork endpoint/handler already exists (justification evidence).</step>
+    <step order="1">Design the handler flow: create Analysis → mint session → bind FK → archive prior → snapshot prior transcript; define the ordering so each step is compensable if a later step fails.</step>
+    <step order="2">Register `POST /api/ai/analysis/fork` (auth-required) mirroring `ChatEndpoints.cs:345`; define request (prior sessionId + context) and response `{ analysisId, newSessionId, archivedSessionId }`.</step>
+    <step order="3">Implement the handler composing `IAnalysisDataverseService.CreateAnalysisAsync`, `ChatSessionManager` mint, the task-020 FK bind, the archive call, and the transcript snapshot — via `PublicContracts/` seams only.</step>
+    <step order="4">Implement the compensation/partial-failure story (roll back or mark-inconsistent so no orphan remains); log a correlation id.</step>
+    <step order="5">Add unit tests: happy path returns the triple; unauthenticated → 401; mid-sequence failure (e.g. bind fails after mint) leaves no orphan.</step>
+    <step order="6">`/conflict-check` vs redesign-r2; `dotnet build` + `dotnet test`; `dotnet publish -c Release` size + CVE report in notes; write the Placement Justification for the PR.</step>
+    <step order="7">Update TASK-INDEX.md: set 021 status to ✅.</step>
+    <step order="8">Document any deviation in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If atomic fork appears to require modifying `Services/Ai/` internals (not just composing them via `PublicContracts/`), STOP and escalate per CLAUDE.md §6.5 — the no-fork rule binds (`Services/Ai/` sole-owned by redesign-r2).</trigger>
+    <trigger>If a genuinely atomic (all-or-nothing) multi-write cannot be achieved with the available seams and the compensation story leaves a residual inconsistency window, STOP and escalate for an owner decision on acceptable partial-failure semantics.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>None — grep for `fork`/`AnalysisFork`/`/fork` across `Services/Ai/` and `Endpoints/` returns no fork orchestration; client routing has `composeReviseRouting.ts`/`composeDraftRouting.ts` but no fork/bind path (spec §11.3, CLAUDE.md Reuse reference: "No `fork` exists").</existing>
+    <extension>No — there is no existing endpoint or service that creates-Analysis + mints-session + binds + archives atomically; the closest neighbors (`ChatEndpoints` create, `IAnalysisDataverseService.CreateAnalysisAsync`) are the composed parts, not an extensible fork. Session GUIDs are server-minted, so the composition MUST be server-side.</extension>
+    <cost-of-doing-nothing>Without one atomic handler, fork is non-atomic across client calls: a partial failure orphans the Analysis, the new session, or the prior session (archived but transcript lost), violating §3 rule #4 ("launching an analysis packages file+analysis+history together") and losing user transcripts.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test BFF; `dotnet publish -c Release` for the size report; `dotnet list package --vulnerable`.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/ (fork endpoint)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (fork handler)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (fork + compensation tests)</output>
+    <output type="doc">projects/ai-advanced-capabilities-analysis-hub-r1/notes/ (Placement Justification + publish-size + CVE)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an authenticated fork request with a prior sessionId + context, when `POST /api/ai/analysis/fork` runs, then a new `sprk_analysis` + new session are created, the session is bound to the Analysis FK, the prior session is archived + snapshotted, and the response is `{ analysisId, newSessionId, archivedSessionId }`.</criterion>
+    <criterion testable="true">Given a successful fork, when the prior session is queried from history, then its transcript is retrievable (archived, switchable back).</criterion>
+    <criterion testable="true">Negative: an unauthenticated call returns 401 before any Dataverse write.</criterion>
+    <criterion testable="true">Negative: a mid-sequence failure (e.g. FK bind fails after session mint) leaves NO orphan — no dangling Analysis, no unbound session, no transcript-lost prior session (compensation verified by test).</criterion>
+    <criterion testable="true">The handler composes `PublicContracts/` + `IAnalysisDataverseService` + `ChatSessionManager` only; no `Services/Ai/` fork, no AI-internal type injection.</criterion>
+    <criterion testable="true">BFF publish-size ≤60 MB compressed (diff reported); no new HIGH CVE; Placement Justification stated in the PR; all unit tests pass; build green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-06 + ADR Tensions row 2 (owner-approved Path A) + UQ-1. Archive durability is hardened in task 022;
+    this task performs the archive/snapshot on the current contract. `/conflict-check` before the BFF PR.
+
+    === COMPLETION (2026-07-28, FULL rigor, opus/xhigh) ===
+    Endpoint: POST /api/ai/analysis/fork — ONE authenticated minimal-API handler in Api/Ai/AnalysisEndpoints.cs
+    composing existing seams (IAnalysisDataverseService.CreateAnalysisAsync + ChatSessionManager mint/read +
+    IChatDataverseRepository.ArchiveSessionAsync + IGenericEntityService.DeleteAsync for compensation). Returns
+    { analysisId, newSessionId, archivedSessionId } (201). New session bound to the new Analysis via
+    ChatHostContext(EntityType="sprk_analysisoutput", EntityId=analysisId) → task-020 sprk_analysis FK fires.
+
+    Files: Api/Ai/AnalysisEndpoints.cs (handler+registration+helpers), Api/Ai/AnalysisForkContracts.cs (new DTOs),
+    tests/integration/contract/Api/Ai/AnalysisForkEndpointContractTests.cs (new, 4 tests all pass).
+    Full write-up: projects/ai-advanced-capabilities-analysis-hub-r1/notes/task-021-fork-endpoint.md.
+
+    PLACEMENT JUSTIFICATION (§10 / bff-extensions.md): server-side is mandatory (session GUIDs minted server-side,
+    ChatSessionManager.cs:108) → UQ-1 Option B / §6.5 Path A (owner-approved). One handler, NO new service, NO new
+    DI registration, NO new package. ADR-013 honored: injects analysis-CRUD + session-lifecycle seams only, NOT
+    AI-internal orchestration types; ZERO edits to Services/Ai/ (redesign-r2 sole-owned) — verified via git status +
+    /conflict-check. Endpoint/DI symmetry (ADR-032): all deps unconditionally registered → no Null-Object needed.
+
+    PUBLISH-SIZE (§10/NFR-01): 47.51 MB compressed = baseline 47.51 MB, delta 0.00 MB (no package added). ≤60 MB ✅.
+    CVE: only pre-existing HIGH System.Security.Cryptography.Xml 8.0.3 (known/unrelated); NO new HIGH CVE.
+
+    ARCHIVE DESIGN DECISION (surfaced): did NOT call ChatSessionManager.DeleteSessionAsync (it hard-deletes the
+    Cosmos transcript → the forbidden "archived-but-transcript-lost" orphan + ADR-040 violation). Instead archive =
+    Dataverse archive-marker seam while PRESERVING the Cosmos transcript (store-of-record). The GetSessionAsync read
+    IS the snapshot; prior session stays retrievable/switchable-back. Durable sprk_isarchived flip = task 022 (AIPL-054).
+    No escalation fired — atomicity achieved by composition; no residual-inconsistency window.
+
+    COMPENSATION: reordered (directional mode) to existence-check→create-Analysis→mint→archive so a missing prior
+    never orphans an Analysis; if the mint throws after Analysis create, the Analysis is deleted (CancellationToken.None)
+    → 500, no orphan. FK-bind failure inside the mint is tolerated (Redis authoritative), mirroring CreateSessionAsync.
+
+    GATES: build green; 4/4 tests pass (happy+401+404-no-orphan+compensation); code-review PASS (0 critical);
+    adr-check CLEAN; /conflict-check soft-pass (no Services/Ai edit, no PR overlap). Tests placed under compiled
+    tests/integration/contract/** (ADR-038/tests/CLAUDE.md KEEP path) rather than tests/unit/ — binding KEEP-path
+    rule supersedes the POML's tests/unit hint (data-mutation/** is not compiled by any csproj in this repo state).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL: code-review + adr-check).</protocol>
+  </execution>
+</task>

@@ -88,9 +88,7 @@ describe('TrackingFieldTrio', () => {
 
     it('fires onAccessPermissionChange with the selected segment value when a segment is picked', () => {
       const onAccessPermissionChange = jest.fn();
-      renderWithTheme(
-        <TrackingFieldTrio {...makeProps({ accessPermission: 100000000, onAccessPermissionChange })} />
-      );
+      renderWithTheme(<TrackingFieldTrio {...makeProps({ accessPermission: 100000000, onAccessPermissionChange })} />);
 
       fireEvent.click(screen.getByRole('radio', { name: 'Restricted' }));
 

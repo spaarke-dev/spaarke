@@ -242,9 +242,10 @@ public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDispos
         builder.Services.AddSingleton(Mock.Of<IGenericEntityService>());
         builder.Services.AddSingleton<NotificationService>();
 
-        // Sibling endpoints in the same MapAnalysisEndpoints group (continue/save/export/
-        // get/resume) — parameter inference at map time requires the service type to be
-        // registered even though these tests never invoke those routes.
+        // Sibling endpoints in the same MapAnalysisEndpoints group (save/export/get) —
+        // parameter inference at map time requires the service type to be registered even
+        // though these tests never invoke those routes. (continue/resume retired —
+        // ai-advanced-capabilities-analysis-hub-r1 task 062, spec §13.5/FR-20, 2026-07-29.)
         builder.Services.AddSingleton(Mock.Of<IAnalysisOrchestrationService>());
 
         builder.WebHost.UseTestServer();

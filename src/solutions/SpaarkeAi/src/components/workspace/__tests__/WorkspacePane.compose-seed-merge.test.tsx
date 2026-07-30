@@ -81,6 +81,7 @@ jest.mock('@spaarke/ai-widgets', () => {
 });
 
 jest.mock('../../shell/ThreePaneShell', () => ({
+  useAnalysisLaunch: () => null,
   usePaneCollapseContext: () => null,
   useComposeLaunch: () => null,
 }));

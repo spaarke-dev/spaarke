@@ -499,13 +499,27 @@ export class WorkspaceTabManager {
    * A no-op if the tab id is not found — callers do not need to guard against
    * stale updates.
    *
+   * Task 025 (FR-09) fix: this method previously did NOT call
+   * `_notifyPersistChange()` — the one mutating method that didn't, unlike
+   * addTab/closeTab/setActiveTab/clearAllTabs. That meant a widget's live data
+   * update (e.g. AnalysisEditorWidget's in-progress edit draft, propagated via a
+   * `widget_update` PaneEventBus event) never reached the persisted tab
+   * snapshot — the edit was visible in the live UI but silently lost on tab
+   * close/reopen or page refresh. Emitting the persist-change signal here
+   * closes that gap by reusing the SAME write-through pipeline every other
+   * mutation already relies on (no new persistence mechanism).
+   *
    * @param tabId      - The id of the tab to update.
    * @param widgetData - New data payload to pass to the widget component.
    */
   updateTab(tabId: string, widgetData: unknown): void {
+    const exists = this._tabs.some((t) => t.id === tabId);
+    if (!exists) return;
+
     this._tabs = this._tabs.map((t) =>
       t.id === tabId ? { ...t, widgetData } : t
     );
+    this._notifyPersistChange();
   }
 
   // -------------------------------------------------------------------------

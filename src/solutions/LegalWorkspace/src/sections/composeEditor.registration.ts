@@ -202,6 +202,11 @@ const ComposeSectionMount: React.FC<ComposeSectionMountProps> = ({ bffBaseUrl })
     // FR-13 (task 046): thread the Assistant queue ONLY when registered — else
     // omit so ComposeAiToolbar falls back to its own dispatcher (standalone).
     enqueueComposeAction: bridge?.hasDispatcher ? bridge.enqueue : undefined,
+    // ai-advanced-capabilities-analysis-hub-r1 task 041 (FR-13): forward the launch's active
+    // work type (e.g. 'agreement-analysis') so getToolsForSurface scopes the inline AI toolbar.
+    // Undefined on standalone LegalWorkspace / non-work-type launches — ComposeEditor's own '*'
+    // default applies.
+    activeWorkType: composeLaunch?.activeWorkType,
   });
 };
 

@@ -62,22 +62,77 @@ import DOMPurify from 'dompurify';
  */
 const ALLOWED_TAGS: string[] = [
   // headings + paragraphs + line/section breaks
-  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-  'p', 'br', 'hr', 'div', 'span', 'section', 'article', 'header', 'footer',
-  'address', 'center', 'pre',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'p',
+  'br',
+  'hr',
+  'div',
+  'span',
+  'section',
+  'article',
+  'header',
+  'footer',
+  'address',
+  'center',
+  'pre',
   // inline text semantics
-  'a', 'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'del', 'ins', 'mark',
-  'small', 'sub', 'sup', 'q', 'cite', 'abbr', 'code', 'kbd', 'samp', 'var',
-  'font', 'wbr', 'bdi', 'bdo', 'time',
+  'a',
+  'b',
+  'strong',
+  'i',
+  'em',
+  'u',
+  's',
+  'strike',
+  'del',
+  'ins',
+  'mark',
+  'small',
+  'sub',
+  'sup',
+  'q',
+  'cite',
+  'abbr',
+  'code',
+  'kbd',
+  'samp',
+  'var',
+  'font',
+  'wbr',
+  'bdi',
+  'bdo',
+  'time',
   // lists
-  'ul', 'ol', 'li', 'dl', 'dt', 'dd',
+  'ul',
+  'ol',
+  'li',
+  'dl',
+  'dt',
+  'dd',
   // quotes
   'blockquote',
   // tables
-  'table', 'caption', 'colgroup', 'col', 'thead', 'tbody', 'tfoot',
-  'tr', 'th', 'td',
+  'table',
+  'caption',
+  'colgroup',
+  'col',
+  'thead',
+  'tbody',
+  'tfoot',
+  'tr',
+  'th',
+  'td',
   // media
-  'img', 'picture', 'source', 'figure', 'figcaption',
+  'img',
+  'picture',
+  'source',
+  'figure',
+  'figcaption',
 ];
 
 /**
@@ -89,11 +144,32 @@ const ALLOWED_TAGS: string[] = [
 const ALLOWED_ATTR: string[] = [
   // links + media (NO `srcset` — comma-separated URL list not scheme-checked by
   // DOMPurify; inline email images use `src`)
-  'href', 'src', 'alt', 'title', 'target', 'rel',
+  'href',
+  'src',
+  'alt',
+  'title',
+  'target',
+  'rel',
   // presentation (non-executable)
-  'style', 'class', 'id', 'dir', 'lang',
-  'width', 'height', 'align', 'valign', 'bgcolor', 'color', 'face', 'size',
-  'border', 'cellpadding', 'cellspacing', 'span', 'colspan', 'rowspan',
+  'style',
+  'class',
+  'id',
+  'dir',
+  'lang',
+  'width',
+  'height',
+  'align',
+  'valign',
+  'bgcolor',
+  'color',
+  'face',
+  'size',
+  'border',
+  'cellpadding',
+  'cellspacing',
+  'span',
+  'colspan',
+  'rowspan',
 ];
 
 /**
@@ -101,9 +177,7 @@ const ALLOWED_ATTR: string[] = [
  * (anything absent is already dropped) but restated for defense-in-depth and
  * to make the security intent auditable at a glance (NFR-03).
  */
-const FORBID_TAGS: string[] = [
-  'script', 'iframe', 'object', 'embed', 'form', 'style', 'link', 'meta', 'base',
-];
+const FORBID_TAGS: string[] = ['script', 'iframe', 'object', 'embed', 'form', 'style', 'link', 'meta', 'base'];
 
 /**
  * URL schemes restricted to `http`, `https`, and `mailto`. Anything else

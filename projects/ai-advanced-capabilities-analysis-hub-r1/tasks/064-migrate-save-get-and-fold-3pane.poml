@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="064" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Migrate /save + GET /{id} (drop chathistory) + generalize NDA hooks → work-type + fold 3-pane</title>
+    <phase>6 Retirement</phase>
+    <gate>blocked — 062 (legacy session path retired first)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies surviving BFF endpoints (/save, GET /{id}) + generalizes conversation hooks + folds 3-pane behavior into SpaarkeAi; bff+frontend blast radius; test updates required.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Keep-with-changes migration against named surviving endpoints + a work-type parameterization with clear reference impls; bounded, no new architecture.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 062 having removed the sprk_chathistory read; touches BFF (AnalysisEndpoints) + SpaarkeAi three-pane — shared surfaces coordinated via /conflict-check.</parallel-reason>
+    <deps>062</deps>
+    <tags>bff, frontend, migration</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Migrate (keep-with-changes) the two surviving analysis endpoints: POST /{id}/save and GET /{id} are retained but drop
+    the sprk_chathistory read (transcript now comes from Cosmos). Generalize the NDA-specific conversation hooks so they are
+    work-type-parameterized. Fold the AnalysisWorkspace 3-pane behavior into SpaarkeAi. The shared widgets (FindingsWidget,
+    AnalysisEditorWidget, NdaReviewSummaryPanel) survive unchanged.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the analysis persistence endpoints, the SpaarkeAi three-pane workspace, and the
+    work-type parameterization pattern (sprk_worktype). Follow ADRs strictly; do NOT fork Services/Ai (redesign-r2 sole
+    owner).
+  </role>
+
+  <goal>
+    POST /{id}/save and GET /{id} work correctly without any sprk_chathistory read; the previously NDA-specific conversation
+    hooks are parameterized by work-type; the AnalysisWorkspace 3-pane behavior is folded into SpaarkeAi (using the shared
+    ThreePaneLayout); FindingsWidget/AnalysisEditorWidget/NdaReviewSummaryPanel still render unchanged; BFF + client build
+    green.
+  </goal>
+
+  <context>
+    <background>
+      Per spec §13.5 / FR-22, two endpoints are migrated (keep-with-changes) rather than retired: POST /{id}/save
+      (AnalysisEndpoints.cs ~81-94) and GET /{id} (~111-120). After task 062 removed the legacy sprk_chathistory read, these
+      must operate purely on Cosmos-backed transcript + the sprk_analysis anchor/outputs (ADR-040 Path A). Separately, the
+      NDA vertical's conversation hooks are generalized to work-type so the hub serves Agreement/NDA/etc. via sprk_worktype,
+      and the AnalysisWorkspace three-pane behavior is folded into SpaarkeAi using the already-hoisted shared ThreePaneLayout.
+      The output widgets FindingsWidget, AnalysisEditorWidget, and NdaReviewSummaryPanel survive unchanged (they are shared
+      lib) — this task must not alter their contracts.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/ThreePaneLayout/ThreePaneLayout.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/widgets/NdaReviewSummaryPanel.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.AI.Widgets/src/widgets/context/FindingsWidget.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.AI.Outputs/src/output-widgets/AnalysisEditorWidget.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="062" status="pending">Removed the legacy sprk_chathistory read + retired /continue,/resume — /save + GET /{id} now stand on Cosmos-backed transcript only.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: keep POST /{id}/save + GET /{id}; ONLY change is dropping the sprk_chathistory read. Do NOT re-add the legacy read that task 062 removed, and do NOT touch the surviving KEEP endpoints create/execute/export.</constraint>
+    <constraint source="ADR-040">SCOPE: transcript is read from Cosmos (store-of-record, Path A); GET /{id} returns the sprk_analysis anchor + outputs, not a Dataverse chat blob.</constraint>
+    <constraint source="project">SCOPE: generalize the NDA-specific conversation hooks to be work-type-parameterized (sprk_worktype); do NOT hardcode NDA. The shared widgets FindingsWidget/AnalysisEditorWidget/NdaReviewSummaryPanel MUST render unchanged — do not alter their props/contracts.</constraint>
+    <constraint source="project">SCOPE: fold the 3-pane behavior into SpaarkeAi by consuming the already-hoisted shared ThreePaneLayout/useTwoPanelLayout; do NOT reintroduce or depend on the deleted AnalysisWorkspace tree.</constraint>
+    <constraint source="ADR-013">SCOPE: any CRUD→AI capability the migrated endpoints need goes via Services/Ai/PublicContracts/; do NOT inject AI-internal types or fork Services/Ai.</constraint>
+    <constraint source="ADR-029">SCOPE: BFF-touching — report publish-size absolute + diff vs ~49.63 MB baseline; no new HIGH CVE.</constraint>
+    <constraint source="ADR-021">SCOPE: the folded 3-pane in SpaarkeAi honors Fluent v9 + dark-mode conventions and the LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT host requirements (NFR-02).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-013-ai-facade.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+    </files>
+    <patterns>
+      <pattern name="Shared ThreePaneLayout (fold target)" location="src/client/shared/Spaarke.UI.Components/src/components/ThreePaneLayout/ThreePaneLayout.tsx">
+        Consume the hoisted ThreePaneLayout + useTwoPanelLayout inside SpaarkeAi to reproduce the AnalysisWorkspace 3-pane behavior without the deleted tree.
+      </pattern>
+      <pattern name="Surviving shared widgets (unchanged)" location="src/client/shared/Spaarke.Compose.Components/src/widgets/NdaReviewSummaryPanel.tsx">
+        FindingsWidget/AnalysisEditorWidget/NdaReviewSummaryPanel are shared-lib — reference their existing props; do not modify their contracts.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor + reason; confirm 062 is ✅ (sprk_chathistory read removed); /conflict-check vs redesign-r2 before BFF edit.</step>
+    <step order="1">In AnalysisEndpoints.cs, adjust POST /{id}/save (~81-94) + GET /{id} (~111-120) to operate without any sprk_chathistory read; GET returns the sprk_analysis anchor + outputs, transcript sourced from Cosmos.</step>
+    <step order="2">Identify the NDA-specific conversation hooks and generalize them to accept a work-type (sprk_worktype) parameter; verify the hook still works for NDA and now also for Agreement/other work-types.</step>
+    <step order="3">Fold the AnalysisWorkspace 3-pane behavior into SpaarkeAi by wiring the shared ThreePaneLayout/useTwoPanelLayout into the SpaarkeAi surface; confirm the deleted tree is not referenced.</step>
+    <step order="4">Confirm FindingsWidget/AnalysisEditorWidget/NdaReviewSummaryPanel render unchanged in the folded 3-pane (no contract changes).</step>
+    <step order="5">Update/add tests for /save + GET /{id} (no-chathistory paths) and the work-type-parameterized hook; build BFF + client.</step>
+    <step order="6">Run publish-size + CVE checks; record absolute + diff in notes.</step>
+    <step order="7">Update TASK-INDEX.md: set task 064 status to ✅.</step>
+    <step order="8">Document any deviation in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If dropping the sprk_chathistory read from GET /{id} leaves a consumer without transcript access that Cosmos does not yet serve for this analysis, STOP and escalate per CLAUDE.md §6 rather than re-adding the Dataverse read that 062 removed.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Folded 3-pane renders shared widgets">
+      <steps>
+        <step>Open an existing analysis in SpaarkeAi (sprk_spaarkeai) so the folded 3-pane mounts.</step>
+        <step>Toggle dark mode.</step>
+      </steps>
+      <expected>The 3-pane renders via the shared ThreePaneLayout; FindingsWidget/AnalysisEditorWidget/NdaReviewSummaryPanel render unchanged and respect dark mode (ADR-021).</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build the BFF and run /save + GET /{id} tests.</tool>
+    <tool name="npm">Build SpaarkeAi + shared libs (build:prod where applicable).</tool>
+    <tool name="terminal">Publish-size + CVE checks, /conflict-check.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs (/save + GET /{id} without chathistory)</output>
+    <output type="code">src/solutions/SpaarkeAi/ (folded 3-pane + work-type-parameterized hook)</output>
+    <output type="test">tests/ (/save + GET /{id} no-chathistory + work-type hook)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a saved analysis, when POST /{id}/save is called, then it persists without reading sprk_chathistory and succeeds.</criterion>
+    <criterion testable="true">Given an existing analysis, when GET /{id} is called, then it returns the anchor + outputs (transcript from Cosmos) with no sprk_chathistory read.</criterion>
+    <criterion testable="true">The conversation hooks are work-type-parameterized (sprk_worktype) — they function for NDA and at least one other work-type; no hardcoded NDA path remains in the generalized hook.</criterion>
+    <criterion testable="true">The AnalysisWorkspace 3-pane behavior renders inside SpaarkeAi via the shared ThreePaneLayout, and FindingsWidget/AnalysisEditorWidget/NdaReviewSummaryPanel still render unchanged (no contract changes).</criterion>
+    <criterion testable="true">Negative: no reference to the deleted AnalysisWorkspace tree or to a re-added sprk_chathistory read remains; BFF + client build green; publish-size reported; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec §13.5 / FR-22. Keep-with-changes (not retirement) for /save + GET /{id}. Depends on 062 having removed the
+    sprk_chathistory read. Shared widgets are contracts to preserve, not to refactor.
+
+    COMPLETED 2026-07-29. Full decision record: notes/task-064-chathistory-read-drop.md.
+
+    A (read drop): dropped sprk_chathistory read from the shared AnalysisDocumentLoader.GetOrReloadFromDataverseAsync
+    loader (feeds /save, GET, and /export). GET's ChatHistory field stays on the wire (back-compat) but is now always
+    empty — verified zero live client consumers of it; the actual Cosmos-backed transcript path clients use is the
+    separate GET /api/ai/chat/sessions/by-analysis/{id} (task 031). Escalation guard did not fire.
+
+    B (write cleanup): completed the 062 hand-off in full — removed IWorkingDocumentService.UpdateChatHistoryAsync +
+    impl, the ChatEndpoints.cs per-turn write + its now-unused workingDocumentService param, and the 3-file
+    sprk_chathistory column plumbing (DataverseServiceClientImpl.cs ColumnSet, DataverseWebApiService.cs $select,
+    Models.cs AnalysisEntity.ChatHistory property). Insights ObservationMirrorMapper.cs (different entity) untouched
+    per negative-check requirement.
+
+    C (NDA hooks -> work-type): CreateAnalysisWizardWidget.tsx was already work-type-parameterized (no NDA hardcoding
+    found). Found + generalized the actual hardcoded gate: ConversationPane.tsx's handleNdaClassified
+    (`docType !== "nda"`) -> table-driven DOCUMENT_REVIEW_CAPABILITIES registry in localActionChips.ts. A second
+    work-type is now a one-line registry addition (no Action exists yet for one, so none was added speculatively).
+    isNdaReviewResult (shape-based, not docType-based) needed no change. Cosmetic Nda-prefixed names left as-is
+    (deep rename, ~15 test files, no behavior change) — noted as deferred.
+
+    D (3-pane + widgets): verified, not rebuilt. ThreePaneLayout already consumed by ThreePaneShell.tsx;
+    FindingsWidget/AnalysisEditorWidget/NdaReviewSummaryPanel all confirmed registered + wired; no contract changes.
+
+    Verification: dotnet build 0 errors; dotnet test 9036 passed/8 pre-existing failures (confirmed via git-stash
+    baseline, unrelated to this task)/101 skipped; SpaarkeAi conversation Jest suite 48/433 passed (was 47/426, +7 new
+    registry tests); publish size 47.51 MB (matches baseline, no delta); no new HIGH CVE; /conflict-check clean
+    (Services/Ai sole-owner spaarke-ai-architecture-redesign-r2 has no active worktree, already merged).
+
+    Deferred (out of scope, noted for follow-up): AnalysisContextBuilder.BuildContinuationPrompt/
+    BuildContinuationPromptWithContext appear caller-less after 062's /continue removal — not in 062's hand-off list,
+    left untouched.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL: code-review + adr-check). /conflict-check before the BFF PR.</protocol>
+  </execution>
+</task>

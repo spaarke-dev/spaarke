@@ -396,7 +396,9 @@ public class AnalysisEntity
     public string? Name { get; set; }
     public Guid DocumentId { get; set; }
     public string? WorkingDocument { get; set; }
-    public string? ChatHistory { get; set; }
+    // task 064 (ADR-040 Path A, spec §13.5 / FR-22): ChatHistory (sprk_chathistory) property
+    // removed — the last reader (AnalysisDocumentLoader.GetOrReloadFromDataverseAsync) no longer
+    // consumes it; Dataverse is anchor + outputs, Cosmos is the transcript store-of-record.
     public int StatusCode { get; set; }
     public DateTime CreatedOn { get; set; }
     public DateTime ModifiedOn { get; set; }

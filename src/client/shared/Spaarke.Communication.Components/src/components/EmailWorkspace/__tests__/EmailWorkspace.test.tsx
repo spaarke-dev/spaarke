@@ -231,9 +231,7 @@ describe('EmailWorkspace', () => {
     // Loaded: the resolved archive id flows through to `EmailBodyView`, which calls `authenticatedFetch`
     // against the `eml-render` endpoint for THAT document id — proving the wiring (not a re-test of
     // EmailBodyView's own render-branch logic, already covered by its task-033 suite).
-    await waitFor(() =>
-      expect(authenticatedFetch).toHaveBeenCalledWith(`/documents/${EML_DOCUMENT_ID}/eml-render`)
-    );
+    await waitFor(() => expect(authenticatedFetch).toHaveBeenCalledWith(`/documents/${EML_DOCUMENT_ID}/eml-render`));
     // Server HTML lands in the sandboxed iframe's `srcdoc` (EmailBodyView, task 033 —
     // content is NOT queryable via RTL text matchers since it's inside a real iframe).
     const iframe = await screen.findByTestId('email-body-iframe');
