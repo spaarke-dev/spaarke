@@ -1,108 +1,114 @@
 /**
  * EmailConnectionsReview.tsx — the reading-pane ASSOCIATION RESOLVER (email-
- * communication-solution-r5, reading-pane MAIN-AREA redesign, section #6).
+ * communication-solution-r5, single-primary reading-pane redesign 2026-07-29).
  *
- * Redesign goal: answer ONE plain question with an obvious action. The section
- * that hosts this view is COLLAPSED by default; its header dot signals state, so
- * this body does NOT auto-expand anything. States (locked owner design):
- *   - CLEAR MATCH  — a single strong primary suggestion: "This email looks like
- *     it's about {Matter · X} — {rationale} · {97%}" → [✓ Confirm] · "Not this".
- *   - AMBIGUOUS    — 2+ strong conflicting candidates: "Which is this about?" →
- *     a ranked radio list (best pre-selected), each showing {label} · {real %} ·
- *     {plain-English rationale}. Enter confirms.
- *   - FILED        — green, SILENT: "✓ Filed to {X}" + Change / Remove only.
- *   - SUGGESTED    — a low/med-confidence single: "Possible match: {X} · {%} ·
- *     {why}" → Confirm · Not related.
- *   - UNMATCHED    — "Not filed yet." → Find a record · (Create new) · Dismiss.
- * Every % is REAL (from `sprk_associationprovenance`) and is ALWAYS paired with
- * its *why* — never a bare, unexplained percentage.
+ * Redesign goal (owner-locked): the reading pane makes exactly ONE primary
+ * association per email — the record that owns the denormalized
+ * `sprk_regardingrecord*` fields ("model A": the UI sets the single primary; the
+ * engine's multi-lookup auto-writes are unchanged). One section, three states,
+ * keyed to the section status dot:
+ *   - 🔴 REQUIRES REVIEW    — no engine auto-match. Top-3 candidate cards (always
+ *     3 slots; a slot is blank when its candidate is < 70%). Click a card to
+ *     select it → [✓ Confirm] appears directly BENEATH that card. Or "Link
+ *     another record" (all regarding targets via the shared `PolymorphicPicker`).
+ *   - 🟡 NEEDS CONFIRMATION — the engine auto-matched (100% / autoFiled) and wrote
+ *     the denorm primary; the top card is GREEN and pre-selected, but a human must
+ *     Confirm (or switch to another candidate — downgrade allowed).
+ *   - 🟢 CONFIRMED          — a human confirmed the primary. A "{Type}: {number}"
+ *     chip with a remove (×); removing returns to candidate selection.
  *
- * WRITE PATH (binding MUST): confirm / change / link-another all persist via the
- * task-020 ADDITIVE `applyRegardingSelection` (starts from an EMPTY payload,
- * never nulls a sibling typed lookup). "Remove" on a FILED row calls
- * `unlinkRegarding`, which nulls EXACTLY the one targeted lookup and leaves every
- * other regarding untouched (the additive model's inverse-of-add, never a bulk
- * clear). Dismissing a SUGGESTED (never-filed) row is an in-session hide — nothing
- * was written, so hiding needs no write. The connection derivation is the shared
- * `buildEmailConnections` (no client-side recompute of engine decisions; ADR-045).
- *
- * "Change" / "Link another" / "Find a record" reuse the shared `PolymorphicPicker`
- * (`@spaarke/ui-components`) — §11 reuse, no new picker UI. Fluent v9 tokens only
- * (ADR-021, dark-mode correct). No `as React.ComponentType` cast (NFR-05).
+ * WRITE PATH (binding MUST): confirm / switch / link-another persist via the
+ * task-020 ADDITIVE `applyRegardingSelection` (which writes the chosen typed
+ * lookup + all five denorm `sprk_regardingrecord*` fields), then
+ * `advanceAssociationStatus` marks the record Resolved (→ green). Remove calls
+ * `unlinkRegarding` (nulls exactly the one primary lookup). No text-search write
+ * path; the connection model is the shared `derivePrimaryReview` (no client-side
+ * recompute of engine decisions; ADR-045). Fluent v9 tokens only (ADR-021,
+ * dark-mode correct). No `as React.ComponentType` cast (NFR-05).
  */
 import * as React from 'react';
-import { Text, Button, MessageBar, MessageBarBody } from '@fluentui/react-components';
-import { Search20Regular, Link20Regular } from '@fluentui/react-icons';
+import { MessageBar, MessageBarBody } from '@fluentui/react-components';
+import { Search20Regular } from '@fluentui/react-icons';
 import { PolymorphicPicker } from '@spaarke/ui-components';
 import {
-  buildEmailConnections,
-  groupConnectionsByAction,
+  derivePrimaryReview,
   applyRegardingSelection,
-  unlinkRegarding,
-  type Connection,
-  type IRegardingSelection,
+  advanceAssociationStatus,
+  PRIMARY_CANDIDATE_SLOTS,
+  type PrimaryCandidate,
 } from '../../logic/connections';
 import type { EmailConnectionsReviewProps } from './EmailAssociationsAndTracking.types';
 import { useConnectionsReviewStyles } from './EmailConnectionsReview.styles';
-import { DEFAULT_LINK_CATALOG, fieldFor } from './EmailConnectionsReview.helpers';
-import { DecisionBlock, FiledRow, SuggestedMatch } from './EmailConnectionsReviewRows';
+import { DEFAULT_LINK_CATALOG } from './EmailConnectionsReview.helpers';
+import { CandidateCard, BlankCard } from './EmailConnectionsReviewRows';
+
+const candidateKey = (c: Pick<PrimaryCandidate, 'entity' | 'targetId'>): string =>
+  `${c.entity}:${c.targetId.replace(/[{}]/g, '').toLowerCase()}`;
 
 export function EmailConnectionsReview(props: EmailConnectionsReviewProps): React.ReactElement {
   const {
     communicationId,
     associationStatus,
     associationProvenanceJson,
+    regardingRecordName,
+    regardingRecordNumber,
     filedAssociations = [],
     writeContext,
     pickerWebApi = {},
     linkAnotherCatalog,
-    resolveDisplayName,
     readOnly = false,
     onAssociationsChanged,
-    onCreateNewRecord,
   } = props;
   const s = useConnectionsReviewStyles();
 
-  const [confirmedFields, setConfirmedFields] = React.useState<Set<string>>(new Set());
-  const [dismissed, setDismissed] = React.useState<Set<string>>(new Set());
-  const [dismissedUnmatched, setDismissedUnmatched] = React.useState(false);
+  const [selectedKey, setSelectedKey] = React.useState<string | undefined>(undefined);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [changingEntity, setChangingEntity] = React.useState<string | null>(null);
   const [linking, setLinking] = React.useState(false);
 
   // Session-local review state is per-selected-email — reset on selection change.
   React.useEffect(() => {
-    setConfirmedFields(new Set());
-    setDismissed(new Set());
-    setDismissedUnmatched(false);
+    setSelectedKey(undefined);
     setError(null);
-    setChangingEntity(null);
     setLinking(false);
   }, [communicationId]);
 
-  // SAME data path as the production PCF (no client recompute; ADR-045).
-  const connections = React.useMemo(
-    () => buildEmailConnections(associationProvenanceJson, associationStatus, filedAssociations),
-    [associationProvenanceJson, associationStatus, filedAssociations]
+  // SAME data path as the engine (no client recompute; ADR-045).
+  const model = React.useMemo(
+    () =>
+      derivePrimaryReview(associationProvenanceJson, associationStatus, filedAssociations, {
+        recordName: regardingRecordName,
+        recordNumber: regardingRecordNumber,
+      }),
+    [associationProvenanceJson, associationStatus, filedAssociations, regardingRecordName, regardingRecordNumber]
   );
 
-  const { needsDecision, filed, suggested } = React.useMemo(
-    () => groupConnectionsByAction(connections, [], confirmedFields, dismissed),
-    [connections, confirmedFields, dismissed]
-  );
+  const catalog = linkAnotherCatalog ?? DEFAULT_LINK_CATALOG;
 
-  const persist = React.useCallback(
-    async (field: string, selection: IRegardingSelection): Promise<void> => {
+  // Highlight the confirmed (🟢) or auto-matched (🟡) primary card green; a user
+  // pick highlights blue. The confirmed primary already owns the denorm fields, so
+  // it shows NO Confirm button (that primary's chip + Remove live in the section
+  // header — the reviewer switches by picking a different card here).
+  const greenKey = model.primary ? candidateKey(model.primary) : undefined;
+  const confirmedKey = model.state === 'confirmed' && model.primary ? candidateKey(model.primary) : undefined;
+  const activeSelectedKey = selectedKey ?? greenKey;
+
+  const confirmCandidate = React.useCallback(
+    async (c: PrimaryCandidate): Promise<void> => {
       setBusy(true);
       setError(null);
       try {
-        const res = await applyRegardingSelection(writeContext, selection);
+        const res = await applyRegardingSelection(writeContext, {
+          entityType: c.entity,
+          recordId: c.targetId,
+          recordName: c.targetName,
+        });
         if (!res.success) {
-          setError(res.error ?? 'Could not file this connection.');
+          setError(res.error ?? 'Could not file this association.');
           return;
         }
-        setConfirmedFields(prev => new Set(prev).add(field));
+        await advanceAssociationStatus(writeContext);
+        setSelectedKey(undefined);
         onAssociationsChanged?.();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unexpected error while filing.');
@@ -113,70 +119,13 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
     [writeContext, onAssociationsChanged]
   );
 
-  const handleConfirm = React.useCallback(
-    (conn: Connection, chosen?: { targetEntity: string; targetId: string; targetName?: string }): void => {
-      const selection: IRegardingSelection = chosen
-        ? { entityType: chosen.targetEntity, recordId: chosen.targetId, recordName: chosen.targetName ?? chosen.targetId }
-        : { entityType: conn.entity, recordId: conn.targetId, recordName: conn.targetName };
-      void persist(conn.field, selection);
-    },
-    [persist]
-  );
-
-  // "Remove" on a FILED row — removes ONLY this one association (unlinkRegarding
-  // nulls exactly the one typed lookup); every sibling regarding stays filed.
-  const handleRemoveFiled = React.useCallback(
-    (conn: Connection): void => {
-      void (async () => {
-        setBusy(true);
-        setError(null);
-        try {
-          const res = await unlinkRegarding(writeContext, conn.entity);
-          if (!res.success) {
-            setError(res.error ?? 'Could not remove this connection.');
-            return;
-          }
-          setConfirmedFields(prev => {
-            const next = new Set(prev);
-            next.delete(conn.field);
-            return next;
-          });
-          onAssociationsChanged?.();
-        } catch (err) {
-          setError(err instanceof Error ? err.message : 'Unexpected error while removing.');
-        } finally {
-          setBusy(false);
-        }
-      })();
-    },
-    [writeContext, onAssociationsChanged]
-  );
-
-  // "Not this" / "Not related" on a SUGGESTED row — in-session hide only (never
-  // filed, so hiding it needs no write — matches the production PCF's model).
-  const handleDismissSuggested = React.useCallback((key: string): void => {
-    setDismissed(prev => new Set(prev).add(key));
-  }, []);
-
-  const handleChangeSelected = React.useCallback(
-    (entityType: string, recordId: string, recordName: string): void => {
-      setChangingEntity(null);
-      void persist(fieldFor(entityType), { entityType, recordId, recordName });
-    },
-    [persist]
-  );
-
-  const handleLinkAnotherSelected = React.useCallback(
+  const onLinkSelected = React.useCallback(
     (entityType: string, recordId: string, recordName: string): void => {
       setLinking(false);
-      void persist(fieldFor(entityType), { entityType, recordId, recordName });
+      void confirmCandidate({ entity: entityType, targetId: recordId, targetName: recordName, confidence: 1 });
     },
-    [persist]
+    [confirmCandidate]
   );
-
-  const catalog = linkAnotherCatalog ?? DEFAULT_LINK_CATALOG;
-  const hasAnyRows = needsDecision.length > 0 || filed.length > 0 || suggested.length > 0;
-  const isUnmatched = !hasAnyRows && !dismissedUnmatched;
 
   return (
     <div className={s.root} data-testid="email-connections-review">
@@ -186,114 +135,56 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
         </MessageBar>
       )}
 
-      {/* AMBIGUOUS — "Which is this about?" */}
-      {needsDecision.map(conn => (
-        <DecisionBlock
-          key={conn.field}
-          conn={conn}
-          busy={busy}
-          readOnly={readOnly}
-          resolveDisplayName={resolveDisplayName}
-          onConfirm={handleConfirm}
-          s={s}
-        />
-      ))}
-
-      {/* SUGGESTED — clear match (high) or possible match (low/med) */}
-      {suggested.map(conn => (
-        <SuggestedMatch
-          key={conn.field}
-          conn={conn}
-          busy={busy}
-          readOnly={readOnly}
-          resolveDisplayName={resolveDisplayName}
-          onConfirm={handleConfirm}
-          onDismiss={handleDismissSuggested}
-          s={s}
-        />
-      ))}
-
-      {/* FILED — green, silent (Change / Remove) */}
-      {filed.length > 0 && (
-        <div className={s.block}>
-          <Text className={s.groupLabel}>Filed</Text>
-          {filed.map(conn => (
-            <FiledRow
-              key={conn.field}
-              conn={conn}
+      {/* Candidate cards + the "Link another record" tile share ONE grid, so the
+          link tile sits directly AFTER the last card (owner UAT). Always render the
+          fixed candidate-slot count; a slot is blank below 70%. */}
+      <div className={s.cards}>
+        {Array.from({ length: PRIMARY_CANDIDATE_SLOTS }, (_, i) => {
+          const c = model.candidates[i];
+          if (!c) return <BlankCard key={`blank-${i}`} s={s} />;
+          const k = candidateKey(c);
+          const isGreen = k === greenKey;
+          const isSelected = k === activeSelectedKey;
+          return (
+            <CandidateCard
+              key={k}
+              candidate={c}
+              selected={isSelected || isGreen}
+              tone={isGreen ? 'primary' : 'select'}
+              showConfirm={isSelected && k !== confirmedKey}
               busy={busy}
               readOnly={readOnly}
-              resolveDisplayName={resolveDisplayName}
-              isChanging={changingEntity === conn.entity}
-              onRequestChange={() => setChangingEntity(conn.entity)}
-              onCancelChange={() => setChangingEntity(null)}
-              onChangeSelected={handleChangeSelected}
-              onRemove={() => handleRemoveFiled(conn)}
-              pickerWebApi={pickerWebApi}
-              catalog={catalog}
+              onSelect={() => setSelectedKey(k)}
+              onConfirm={() => void confirmCandidate(c)}
               s={s}
             />
-          ))}
-        </div>
-      )}
+          );
+        })}
 
-      {/* UNMATCHED (interactive) — "Not filed yet." + Find a record · (Create new) · Dismiss */}
-      {isUnmatched && !readOnly && (
-        <div className={s.unmatched}>
-          <Text className={s.unmatchedText}>Not filed yet.</Text>
-          {linking ? (
-            <div className={s.linkRow}>
+        {/* Link another record — a tile matching the candidate cards. Clicking it
+            reveals the record-type dropdown + right-pane lookup IN PLACE (same grid
+            cell — no jump to a separate link); all regarding targets via the shared
+            picker (§11 reuse). */}
+        {!readOnly && (
+          <div className={s.cardCell}>
+            {linking ? (
               <PolymorphicPicker
-                title="Find a record"
+                title="Link another record"
                 catalog={catalog}
                 webApi={pickerWebApi}
-                onSelect={handleLinkAnotherSelected}
+                onSelect={onLinkSelected}
                 onError={m => setError(m)}
                 disabled={busy}
               />
-            </div>
-          ) : (
-            <div className={s.actionsRow}>
-              <Button size="small" appearance="primary" icon={<Search20Regular />} disabled={busy} onClick={() => setLinking(true)}>
-                Find a record
-              </Button>
-              {onCreateNewRecord && (
-                <Button size="small" appearance="secondary" disabled={busy} onClick={() => onCreateNewRecord()}>
-                  Create new
-                </Button>
-              )}
-              <Button size="small" appearance="transparent" className={s.linkBtn} disabled={busy} onClick={() => setDismissedUnmatched(true)}>
-                Dismiss
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* UNMATCHED (review-only) — nothing to review */}
-      {isUnmatched && readOnly && <Text className={s.empty}>No connections yet.</Text>}
-
-      {/* LINK ANOTHER — available once there IS at least one row to add alongside */}
-      {!readOnly &&
-        hasAnyRows &&
-        (linking ? (
-          <div className={s.linkRow}>
-            <PolymorphicPicker
-              title="Link another record"
-              catalog={catalog}
-              webApi={pickerWebApi}
-              onSelect={handleLinkAnotherSelected}
-              onError={m => setError(m)}
-              disabled={busy}
-            />
+            ) : (
+              <button type="button" className={s.linkCard} disabled={busy} onClick={() => setLinking(true)}>
+                <span className={s.linkCardLabel}>Link another record</span>
+                <Search20Regular className={s.linkCardIcon} aria-hidden="true" />
+              </button>
+            )}
           </div>
-        ) : (
-          <div className={s.linkRow}>
-            <Button size="small" appearance="subtle" icon={<Link20Regular />} disabled={busy} onClick={() => setLinking(true)}>
-              Link another record…
-            </Button>
-          </div>
-        ))}
+        )}
+      </div>
     </div>
   );
 }

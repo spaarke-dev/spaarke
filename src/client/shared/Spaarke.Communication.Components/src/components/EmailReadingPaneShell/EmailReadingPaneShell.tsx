@@ -34,8 +34,8 @@
  * the host `FluentProvider` in both light and dark mode.
  */
 import * as React from 'react';
-import { makeStyles, tokens, Text } from '@fluentui/react-components';
-import { Mail24Regular } from '@fluentui/react-icons';
+import { makeStyles, tokens, Text, Button } from '@fluentui/react-components';
+import { Mail24Regular, ArrowDown20Regular } from '@fluentui/react-icons';
 import { PanelSplitter, useTwoPanelLayout } from '@spaarke/ui-components';
 import { EmailCardList } from '../EmailCardList';
 import { EmailToolbar } from './EmailToolbar';
@@ -63,6 +63,8 @@ const useStyles = makeStyles({
     height: '100%',
   },
   readingPane: {
+    // `position: relative` anchors the circular scroll-down FAB (bottom-center).
+    position: 'relative',
     display: 'flex',
     flexDirection: 'column',
     minWidth: 0,
@@ -72,10 +74,29 @@ const useStyles = makeStyles({
   },
   readingPaneScroll: {
     flex: '1 1 auto',
+    minWidth: 0,
     minHeight: 0,
     overflowY: 'auto',
+    // Never scroll the reading pane horizontally at standard resolution — wide
+    // children (recipients, cards, body) wrap/ellipsis; anything else is clipped.
+    overflowX: 'hidden',
     display: 'flex',
     flexDirection: 'column',
+    // Hide the native vertical scrollbar — the circular ↓ FAB is the scroll
+    // affordance (owner UAT; mirrors the Compose editor). Wheel/trackpad/keyboard
+    // scrolling still work.
+    scrollbarWidth: 'none',
+    '::-webkit-scrollbar': { display: 'none' },
+  },
+  // Circular "more below" scroll cue — appears only when the reading pane has
+  // content below the fold; mirrors `ComposeEditor`'s scrollDownFab (§11).
+  scrollDownFab: {
+    position: 'absolute',
+    bottom: tokens.spacingVerticalL,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    zIndex: 2,
+    boxShadow: tokens.shadow16,
   },
   placeholder: {
     display: 'flex',
@@ -120,6 +141,49 @@ export const EmailReadingPaneShell: React.FC<EmailReadingPaneShellProps> = ({
     [onSelectedIdChange]
   );
 
+  // Circular scroll-down cue — visible only while the reading pane has content
+  // below the fold (an alternative to the native scrollbar, per owner UAT;
+  // mirrors ComposeEditor's FAB). Re-measured on scroll, on size changes
+  // (ResizeObserver), on DOM changes (MutationObserver — the .eml body / sections
+  // load async), and per selection.
+  const readingPaneScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const [showScrollDown, setShowScrollDown] = React.useState<boolean>(false);
+
+  React.useEffect(() => {
+    const el = readingPaneScrollRef.current;
+    if (!el) {
+      setShowScrollDown(false);
+      return;
+    }
+    const measure = (): void => {
+      const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+      setShowScrollDown(remaining > 8);
+    };
+    measure();
+    el.addEventListener('scroll', measure, { passive: true });
+    let ro: ResizeObserver | undefined;
+    let mo: MutationObserver | undefined;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(measure);
+      ro.observe(el);
+    }
+    if (typeof MutationObserver !== 'undefined') {
+      mo = new MutationObserver(measure);
+      mo.observe(el, { childList: true, subtree: true, characterData: true });
+    }
+    return () => {
+      el.removeEventListener('scroll', measure);
+      ro?.disconnect();
+      mo?.disconnect();
+    };
+  }, [selectedId]);
+
+  const scrollReadingPaneDown = React.useCallback((): void => {
+    const el = readingPaneScrollRef.current;
+    if (!el) return;
+    el.scrollBy({ top: Math.round(el.clientHeight * 0.8), behavior: 'smooth' });
+  }, []);
+
   // Reused two-panel layout hook (@spaarke/ui-components) — owns drag/keyboard
   // resize + localStorage persistence keyed by `storageKey`, so the splitter
   // width restores on next open without this shell re-implementing persistence.
@@ -154,7 +218,21 @@ export const EmailReadingPaneShell: React.FC<EmailReadingPaneShellProps> = ({
             {renderTop?.(selectedId)}
             {renderHeader?.(selectedId)}
             <EmailToolbar selectedId={selectedId} actions={actions} />
-            <div className={s.readingPaneScroll}>{renderBody?.(selectedId)}</div>
+            <div className={s.readingPaneScroll} ref={readingPaneScrollRef}>
+              {renderBody?.(selectedId)}
+            </div>
+            {showScrollDown && (
+              <Button
+                appearance="primary"
+                shape="circular"
+                size="large"
+                className={s.scrollDownFab}
+                icon={<ArrowDown20Regular />}
+                aria-label="Scroll down for more"
+                onClick={scrollReadingPaneDown}
+                data-testid="email-reading-pane-scroll-down"
+              />
+            )}
           </React.Fragment>
         ) : (
           <div className={s.placeholder} role="status">

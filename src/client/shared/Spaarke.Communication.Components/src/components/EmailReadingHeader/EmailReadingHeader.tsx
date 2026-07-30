@@ -30,7 +30,8 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     flexShrink: 0,
-    paddingBlock: tokens.spacingVerticalM,
+    // Shorter title bar (owner UAT) — tighter vertical rhythm above the toolbar.
+    paddingBlock: tokens.spacingVerticalXS,
     paddingInline: tokens.spacingHorizontalXL,
     // Light-gray title bar — a semantic token, not a hardcoded hex, so it
     // reads as a subtle gray in light mode and the correct elevated surface in

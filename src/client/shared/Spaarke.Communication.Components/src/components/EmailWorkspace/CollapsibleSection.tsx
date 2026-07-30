@@ -37,20 +37,32 @@ const useStyles = makeStyles({
     borderTopStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke2,
   },
-  header: {
+  // Header row hosts the toggle button + an optional interactive accessory
+  // (e.g. the confirmed-association chip) as SIBLINGS — the accessory must not
+  // nest inside the toggle <button> (invalid + swallows clicks).
+  headerRow: {
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     width: '100%',
+    paddingBlock: tokens.spacingVerticalM,
+    paddingInline: tokens.spacingHorizontalXL,
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    flex: '0 1 auto',
+    minWidth: 0,
     background: 'none',
     border: 'none',
     cursor: 'pointer',
     textAlign: 'left',
-    paddingBlock: tokens.spacingVerticalM,
-    paddingInline: tokens.spacingHorizontalXL,
+    padding: 0,
     color: tokens.colorNeutralForeground1,
-    ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
+    ':hover': { color: tokens.colorNeutralForeground1Hover },
   },
+  accessory: { display: 'flex', alignItems: 'center', minWidth: 0, gap: tokens.spacingHorizontalXS },
   chevron: {
     flexShrink: 0,
     color: tokens.colorNeutralForeground3,
@@ -88,6 +100,12 @@ export interface CollapsibleSectionProps {
   count?: number;
   /** Optional status dot + one-line label (Association section). Takes header-right slot. */
   status?: { tone: SectionStatusTone; label: string };
+  /**
+   * Optional interactive node rendered on the header row, BESIDE the toggle button
+   * (not nested in it). Used by the merged "Related to" section to surface the
+   * confirmed-association chip so it's visible while the section is collapsed.
+   */
+  headerAccessory?: React.ReactNode;
   /** Start expanded. Defaults to `false` (COLLAPSED by default — redesign requirement). */
   defaultOpen?: boolean;
   /**
@@ -106,6 +124,7 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   title,
   count,
   status,
+  headerAccessory,
   defaultOpen = false,
   keepMounted = false,
   id,
@@ -118,24 +137,27 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
 
   return (
     <div className={s.root} data-testid={`section-${id}`}>
-      <button
-        type="button"
-        className={s.header}
-        aria-expanded={open}
-        aria-controls={`section-body-${id}`}
-        onClick={() => setOpen(o => !o)}
-        data-testid={`section-toggle-${id}`}
-      >
-        <ChevronRight16Regular className={mergeClasses(s.chevron, open && s.chevronOpen)} aria-hidden="true" />
-        <Text className={s.title}>{title}</Text>
-        {typeof count === 'number' && <Text className={s.count}>({count})</Text>}
+      <div className={s.headerRow}>
+        <button
+          type="button"
+          className={s.header}
+          aria-expanded={open}
+          aria-controls={`section-body-${id}`}
+          onClick={() => setOpen(o => !o)}
+          data-testid={`section-toggle-${id}`}
+        >
+          <ChevronRight16Regular className={mergeClasses(s.chevron, open && s.chevronOpen)} aria-hidden="true" />
+          <Text className={s.title}>{title}</Text>
+          {typeof count === 'number' && <Text className={s.count}>({count})</Text>}
+        </button>
+        {headerAccessory && <div className={s.accessory}>{headerAccessory}</div>}
         {status && (
           <span className={s.statusWrap}>
             <span className={mergeClasses(s.dot, dotClass)} aria-hidden="true" />
             <Text className={s.statusLabel}>{status.label}</Text>
           </span>
         )}
-      </button>
+      </div>
       {keepMounted ? (
         <div
           id={`section-body-${id}`}

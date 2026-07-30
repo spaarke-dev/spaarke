@@ -17,7 +17,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as React from 'react';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 import { EmailConnectionsReview } from '../EmailConnectionsReview';
 import { EmailTrackingPanel } from '../EmailTrackingPanel';
@@ -78,75 +78,54 @@ function makeWriteContext(): IResolverWriteContext {
   };
 }
 
-/**
- * A provenance doc with all three review states represented:
- *  - sprk_matter: written:true, ThreadContinuity rung (the reply-inheritance
- *    case) — lands in "Filed automatically".
- *  - contact: soft match, not written — lands in "Suggested".
- *  - sprk_organization: TWO conflicting candidates — lands in "Needs your
- *    decision".
- */
-function buildProvenanceJson(): string {
+// `sprk_associationstatus` = Resolved (human-confirmed → green).
+const STATUS_RESOLVED = 100000000;
+const STATUS_PENDING = 100000001;
+
+/** Build a single provenance candidate carrying a RecordNameMatch (→ number + reason). */
+function cand(
+  field: string,
+  entity: string,
+  id: string,
+  name: string,
+  confidence: number,
+  opts: { written?: boolean; conflict?: boolean; number?: string } = {}
+): Record<string, unknown> {
+  return {
+    field,
+    targetEntity: entity,
+    targetId: id,
+    targetName: name,
+    reinforcedConfidence: confidence,
+    deterministicConfidence: confidence,
+    written: opts.written ?? false,
+    conflict: opts.conflict ?? false,
+    contributors: [
+      {
+        rung: 'RecordNameMatch',
+        confidence,
+        provenance: `record-name-match:${entity}:where=subject:matched=name:name="${name}":number="${opts.number ?? ''}":reason="name in subject"`,
+      },
+    ],
+  };
+}
+
+function provenance(candidates: Record<string, unknown>[], autoFiled = false): string {
   return JSON.stringify({
     version: 1,
     direction: 'inbound',
     decision: {
-      status: 'PartiallyResolved',
-      autoFiled: true,
+      status: '',
+      autoFiled,
       killSwitchEnabled: false,
       autoFileThreshold: 0.85,
-      topDeterministicConfidence: 0.9,
-      topConfidence: 0.95,
-      aiInvolved: true,
-      reason: 'thread continuity + AI org match',
+      topDeterministicConfidence: 0,
+      topConfidence: 0,
+      aiInvolved: false,
+      reason: '',
     },
-    rungsFired: ['ThreadContinuity', 'ParticipantCorrelation', 'SemanticMatch'],
-    candidates: [
-      {
-        field: 'sprk_regardingmatter',
-        targetEntity: 'sprk_matter',
-        targetId: 'mtr-1',
-        targetName: 'Acme v Beta',
-        reinforcedConfidence: 0.95,
-        deterministicConfidence: 0.9,
-        written: true,
-        conflict: false,
-        contributors: [{ rung: 'ThreadContinuity', confidence: 0.95, provenance: 'thread-continuity' }],
-      },
-      {
-        field: 'sprk_regardingcontact',
-        targetEntity: 'contact',
-        targetId: 'con-1',
-        targetName: 'Jane Doe',
-        reinforcedConfidence: 0.4,
-        deterministicConfidence: 0.3,
-        written: false,
-        conflict: false,
-        contributors: [{ rung: 'ParticipantCorrelation', confidence: 0.4, provenance: 'participant-correlation' }],
-      },
-      {
-        field: 'sprk_regardingorganization',
-        targetEntity: 'sprk_organization',
-        targetId: 'org-1',
-        targetName: 'Acme Corp',
-        reinforcedConfidence: 0.6,
-        deterministicConfidence: 0.5,
-        written: false,
-        conflict: true,
-        contributors: [{ rung: 'SemanticMatch', confidence: 0.6, provenance: 'semantic-match' }],
-      },
-      {
-        field: 'sprk_regardingorganization',
-        targetEntity: 'sprk_organization',
-        targetId: 'org-2',
-        targetName: 'Acme Corp International',
-        reinforcedConfidence: 0.55,
-        deterministicConfidence: 0.5,
-        written: false,
-        conflict: true,
-        contributors: [{ rung: 'SemanticMatch', confidence: 0.55, provenance: 'semantic-match' }],
-      },
-    ],
+    rungsFired: [],
+    candidates,
     signals: [],
   });
 }
@@ -154,15 +133,18 @@ function buildProvenanceJson(): string {
 function baseProps(overrides: Partial<EmailConnectionsReviewProps> = {}): EmailConnectionsReviewProps {
   return {
     communicationId: HOST_ID,
-    associationStatus: 100000001, // PendingReview
-    associationProvenanceJson: buildProvenanceJson(),
+    associationStatus: STATUS_PENDING,
+    associationProvenanceJson: provenance([
+      cand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Acme v Beta', 0.82, { number: 'MAT-1' }),
+      cand('sprk_regardingorganization', 'sprk_organization', 'org-1', 'Acme Corp', 0.75, { number: 'ORG-1' }),
+    ]),
     filedAssociations: [] as FiledAssociation[],
     writeContext: makeWriteContext(),
     ...overrides,
   };
 }
 
-describe('EmailConnectionsReview', () => {
+describe('EmailConnectionsReview (single-primary redesign 2026-07-29)', () => {
   const originalFetch = global.fetch;
 
   beforeEach(() => {
@@ -174,102 +156,88 @@ describe('EmailConnectionsReview', () => {
     global.fetch = originalFetch;
   });
 
-  it('shows an already-filed reply-inherited association as a silent FILED row (display only)', () => {
+  it('REQUIRES REVIEW: renders the ≥70% candidates as selectable cards; clicking one reveals Confirm beneath it', () => {
     renderWithProvider(<EmailConnectionsReview {...baseProps()} />);
 
-    // Filed group header + the filed matter, with Change/Remove (no Confirm).
-    expect(screen.getByText('Filed')).toBeInTheDocument();
-    const filed = screen.getByTestId('association-filed');
-    expect(within(filed).getByText(/Acme v Beta/)).toBeInTheDocument();
-    expect(within(filed).getByText(/Filed to/i)).toBeInTheDocument();
-    expect(within(filed).getByRole('button', { name: 'Change' })).toBeInTheDocument();
-    expect(within(filed).getByRole('button', { name: 'Remove' })).toBeInTheDocument();
+    // Both ≥70% candidates render as radio cards; nothing is pre-selected in the red state.
+    expect(screen.getByRole('radio', { name: /Acme v Beta/ })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Acme Corp/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument();
+
+    // Clicking a card selects it → Confirm appears.
+    fireEvent.click(screen.getByRole('radio', { name: /Acme v Beta/ }));
+    expect(screen.getByRole('button', { name: 'Confirm' })).toBeInTheDocument();
   });
 
-  it('renders an AMBIGUOUS conflict as "Which is this about?" ranked options — distinct from a low-confidence SUGGESTED match (FR-19)', () => {
-    renderWithProvider(<EmailConnectionsReview {...baseProps()} />);
-
-    // Ambiguous org conflict → a "Which is this about?" decision block with the
-    // two competing candidates, best pre-selected.
-    expect(screen.getByText('Which is this about?')).toBeInTheDocument();
-    const decision = screen.getByTestId('association-decision');
-    expect(within(decision).getByRole('radio', { name: 'Acme Corp' })).toBeInTheDocument();
-    expect(within(decision).getByRole('radio', { name: 'Acme Corp International' })).toBeInTheDocument();
-    // Best (highest-confidence) candidate is pre-selected.
-    expect(within(decision).getByRole('radio', { name: 'Acme Corp' })).toBeChecked();
-    // The % is paired with a "why" rationale (never a bare percentage).
-    expect(within(decision).getByText('60%')).toBeInTheDocument();
-
-    // Low-confidence contact → a "Possible match" suggested row (NOT a decision).
-    const suggested = screen.getByTestId('association-suggested');
-    expect(within(suggested).getByText(/Possible match/i)).toBeInTheDocument();
-    expect(within(suggested).getByText(/Jane Doe/)).toBeInTheDocument();
-    expect(within(suggested).getByText(/40%/)).toBeInTheDocument();
-  });
-
-  it('confirming a suggested match persists ADDITIVELY via applyRegardingSelection — the existing sibling regarding is preserved', async () => {
+  it('confirming a candidate persists ADDITIVELY via applyRegardingSelection (no sibling lookup nulled)', async () => {
     const props = baseProps();
     renderWithProvider(<EmailConnectionsReview {...props} />);
 
-    // Scope to the suggested row — the ambiguous decision block ALSO has a
-    // "Confirm" button, so an unscoped query is ambiguous.
-    const suggested = screen.getByTestId('association-suggested');
-    fireEvent.click(within(suggested).getByRole('button', { name: 'Confirm' }));
+    fireEvent.click(screen.getByRole('radio', { name: /Acme v Beta/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
 
     await waitFor(() => expect(props.writeContext.webApi.updateRecord).toHaveBeenCalled());
-
     const call = (props.writeContext.webApi.updateRecord as jest.Mock).mock.calls[0];
     expect(call[0]).toBe('sprk_communication');
     expect(call[1]).toBe(HOST_ID);
     const payload = call[2] as Record<string, unknown>;
-    // ADDITIVE: no sibling typed lookup is nulled by this write.
     const nulledBinds = Object.entries(payload).filter(([k, v]) => k.endsWith('@odata.bind') && v === null);
     expect(nulledBinds).toHaveLength(0);
-
-    // The pre-existing sibling (the filed Matter) is still rendered — untouched.
-    expect(screen.getByText(/Acme v Beta/)).toBeInTheDocument();
   });
 
-  it('removing a FILED association removes ONLY that one via unlinkRegarding — siblings (and other pending suggestions) are left intact', async () => {
-    const props = baseProps();
-    renderWithProvider(<EmailConnectionsReview {...props} />);
+  it('NEEDS CONFIRMATION: an auto-matched (autoFiled) top candidate is pre-selected with a Confirm', () => {
+    renderWithProvider(
+      <EmailConnectionsReview
+        {...baseProps({
+          associationProvenanceJson: provenance(
+            [cand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Acme v Beta', 0.95, { number: 'MAT-1' })],
+            true // autoFiled → needs-confirmation (yellow), pre-selected green card
+          ),
+        })}
+      />
+    );
 
-    // "Remove" on the FILED row (Acme v Beta / Matter). The suggested row uses
-    // "Not related" for its dismiss, so scope to the filed row for "Remove".
-    const filed = screen.getByTestId('association-filed');
-    fireEvent.click(within(filed).getByRole('button', { name: 'Remove' }));
+    expect(screen.getByRole('radio', { name: /Acme v Beta/ })).toBeInTheDocument();
+    // Pre-selected (no user click needed) → Confirm is already shown.
+    expect(screen.getByRole('button', { name: 'Confirm' })).toBeInTheDocument();
+  });
 
-    await waitFor(() => expect(props.writeContext.webApi.updateRecord).toHaveBeenCalled());
+  it('CONFIRMED: a Resolved + filed primary renders its card but NO Confirm (the chip + Remove live in the section header)', () => {
+    renderWithProvider(
+      <EmailConnectionsReview
+        {...baseProps({
+          associationStatus: STATUS_RESOLVED,
+          associationProvenanceJson: provenance([
+            cand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Acme v Beta', 0.95, { number: 'MAT-1', written: true }),
+          ]),
+          filedAssociations: [{ entityType: 'sprk_matter', recordId: 'mtr-1', recordName: 'Acme v Beta' }],
+        })}
+      />
+    );
 
-    const payload = (props.writeContext.webApi.updateRecord as jest.Mock).mock.calls[0][2] as Record<string, unknown>;
-    expect(payload).toEqual({ 'sprk_RegardingMatter@odata.bind': null });
-    const nulledBinds = Object.entries(payload).filter(([k, v]) => k.endsWith('@odata.bind') && v === null);
-    expect(nulledBinds).toHaveLength(1);
+    expect(screen.getByRole('radio', { name: /Acme v Beta/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument();
+  });
 
-    // The untouched suggested contact sibling is still present.
-    expect(screen.getByText(/Jane Doe/)).toBeInTheDocument();
+  it('offers a "Link another record" tile (interactive) and hides it in readOnly', () => {
+    const { rerender } = renderWithProvider(<EmailConnectionsReview {...baseProps()} />);
+    expect(screen.getByRole('button', { name: /Link another record/i })).toBeInTheDocument();
+
+    rerender(
+      <FluentProvider theme={webLightTheme}>
+        <EmailConnectionsReview {...baseProps({ readOnly: true })} />
+      </FluentProvider>
+    );
+    expect(screen.queryByRole('button', { name: /Link another record/i })).not.toBeInTheDocument();
   });
 
   it('renders correctly under a dark FluentProvider theme (ADR-021) with no console errors', () => {
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     renderWithProvider(<EmailConnectionsReview {...baseProps()} />, webDarkTheme);
 
-    expect(screen.getByText('Filed')).toBeInTheDocument();
+    expect(screen.getByTestId('email-connections-review')).toBeInTheDocument();
     expect(errorSpy).not.toHaveBeenCalled();
     errorSpy.mockRestore();
-  });
-
-  it('renders a read-only empty state when there is nothing to review', () => {
-    renderWithProvider(
-      <EmailConnectionsReview
-        {...baseProps({
-          associationProvenanceJson: null,
-          associationStatus: null,
-          readOnly: true,
-        })}
-      />
-    );
-    expect(screen.getByText('No connections yet.')).toBeInTheDocument();
   });
 });
 

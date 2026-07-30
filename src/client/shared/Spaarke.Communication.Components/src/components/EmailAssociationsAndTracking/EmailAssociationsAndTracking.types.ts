@@ -30,6 +30,8 @@ export interface EmailConnectionsReviewProps {
   associationProvenanceJson?: string | null;
   /** Denormalized regarding name — display fallback when there is no provenance/filed data at all. */
   regardingRecordName?: string | null;
+  /** Denormalized regarding record number (`sprk_regardingrecordnumber`) — used for the confirmed "{Type}: {number}" chip. */
+  regardingRecordNumber?: string | null;
   /** The record's actually-filed regarding lookups (incl. manual "Link another" ones the engine never suggested) — merged into engine-derived slots so the surface shows every association, not just suggestions. */
   filedAssociations?: FiledAssociation[];
   /** Write context (webApi + hostEntity + hostRecordId) for the additive write path. `hostRecordId` MUST match `communicationId`. */

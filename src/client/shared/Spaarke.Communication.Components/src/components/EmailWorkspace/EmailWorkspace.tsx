@@ -44,12 +44,11 @@ import { EmailReadingPaneShell } from '../EmailReadingPaneShell';
 import { EmailBodyView } from '../EmailBody';
 import { EmailReadingHeader, EmailReadingAttachments } from '../EmailReadingHeader';
 import { EmailRecipients } from '../EmailRecipients';
-import { EmailConnectionsReview } from '../EmailAssociationsAndTracking';
+import { EmailConnectionsReview, ConfirmedChip, useConnectionsReviewStyles } from '../EmailAssociationsAndTracking';
 import { useEmailComposeActions } from '../EmailComposeActions';
-import { summarizeEmailConnections } from '../../logic/connections';
+import { derivePrimaryReview, summarizePrimaryReview, unlinkRegarding } from '../../logic/connections';
 import { launchCreate, type CreateKind } from '../../logic/actions';
 import { CollapsibleSection } from './CollapsibleSection';
-import { EmailRelatedToPills } from './EmailRelatedToPills';
 import { COMMUNICATION_ENTITY, mapRowToEmailCardItem } from './EmailWorkspace.mapping';
 import { useEmailWorkspaceRecord } from './useEmailWorkspaceRecord';
 import type { EmailWorkspaceProps } from './EmailWorkspace.types';
@@ -69,11 +68,18 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     flexShrink: 0,
+    // Widget-style header: border + subtle elevation to match the other workspace
+    // widgets' title rows (owner UAT). NOTE: in the deployed app the widget host
+    // frames this further; this is the component-side approximation.
+    position: 'relative',
+    zIndex: 1,
     paddingInline: tokens.spacingHorizontalL,
     paddingBlock: tokens.spacingVerticalS,
+    backgroundColor: tokens.colorNeutralBackground1,
     borderBottomWidth: tokens.strokeWidthThin,
     borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
+    boxShadow: tokens.shadow2,
   },
   body: {
     display: 'flex',
@@ -197,15 +203,40 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
 
   const filedAssociations = record.recordState?.filedAssociations ?? [];
 
-  // Traffic-light status for the collapsed Association section header.
-  const associationSummary = React.useMemo(
+  // Single-primary review state (🔴 requires review · 🟡 needs confirmation ·
+  // 🟢 confirmed) — drives the merged "Related to" section's status dot AND the
+  // confirmed chip shown in that section's header (visible while collapsed).
+  const primaryModel = React.useMemo(
     () =>
-      summarizeEmailConnections(
+      derivePrimaryReview(
         record.recordState?.associationProvenanceJson ?? null,
         record.recordState?.associationStatus ?? null,
-        filedAssociations
+        filedAssociations,
+        {
+          recordName: record.recordState?.regardingRecordName,
+          recordNumber: record.recordState?.regardingRecordNumber,
+        }
       ),
     [record.recordState, filedAssociations]
+  );
+  const associationSummary = React.useMemo(() => summarizePrimaryReview(primaryModel), [primaryModel]);
+  const connStyles = useConnectionsReviewStyles();
+
+  // Remove the confirmed primary from the header chip (nulls exactly that one
+  // regarding lookup; every sibling association stays). `id` is the selected
+  // communication (host record) — resolved per-selection in `renderBody`.
+  const removePrimary = React.useCallback(
+    (entity: string, communicationId: string): void => {
+      void (async () => {
+        try {
+          await unlinkRegarding({ webApi, hostEntity: COMMUNICATION_ENTITY, hostRecordId: communicationId }, entity);
+          record.reload();
+        } catch (err) {
+          console.warn('[EmailWorkspace] remove association failed:', err);
+        }
+      })();
+    },
+    [webApi, record.reload]
   );
 
   return (
@@ -227,28 +258,6 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
           initialSelectedId={initialSelectedId}
           onSelectedIdChange={setSelectedId}
           actions={toolbarActions}
-          renderTop={id => (
-            // Association section at the VERY TOP — its status dot (🔴/🟡/🟢) is
-            // the first thing the user sees. COLLAPSED by default (dot signals
-            // state; do not auto-expand). Sits ABOVE the subject title bar.
-            <CollapsibleSection
-              id="association"
-              title="Association"
-              status={{ tone: associationSummary.tone, label: associationSummary.label }}
-            >
-              <EmailConnectionsReview
-                communicationId={id}
-                associationStatus={record.recordState?.associationStatus ?? null}
-                associationProvenanceJson={record.recordState?.associationProvenanceJson ?? null}
-                regardingRecordName={record.recordState?.regardingRecordName ?? null}
-                filedAssociations={filedAssociations}
-                writeContext={{ webApi, hostEntity: COMMUNICATION_ENTITY, hostRecordId: id }}
-                pickerWebApi={webApi}
-                linkAnotherCatalog={linkAnotherCatalog}
-                onAssociationsChanged={record.reload}
-              />
-            </CollapsibleSection>
-          )}
           renderHeader={() => <EmailReadingHeader subject={record.recordState?.subject ?? null} />}
           renderBody={id => (
             <div className={s.bodyRegion}>
@@ -271,8 +280,48 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
                 />
               </CollapsibleSection>
 
-              <CollapsibleSection id="related-to" title="Related to" count={filedAssociations.length}>
-                <EmailRelatedToPills associations={filedAssociations} />
+              {/* MERGED "Related to" — one section that BOTH shows the primary
+                  association state (dot: 🔴 requires review · 🟡 needs confirmation
+                  · 🟢 confirmed) AND resolves it. Replaces the old split of a
+                  top "Association" resolver + a separate read-only pills list. */}
+              <CollapsibleSection
+                id="related-to"
+                title="Related to"
+                status={{ tone: associationSummary.tone, label: associationSummary.label }}
+                headerAccessory={
+                  primaryModel.state === 'confirmed' && primaryModel.primary ? (
+                    <ConfirmedChip
+                      primary={primaryModel.primary}
+                      busy={false}
+                      readOnly={false}
+                      onOpen={
+                        primaryModel.primary.targetId && navigationService.openRecordModal
+                          ? () =>
+                              void navigationService.openRecordModal?.(
+                                primaryModel.primary!.entity,
+                                primaryModel.primary!.targetId
+                              )
+                          : undefined
+                      }
+                      onRemove={() => removePrimary(primaryModel.primary!.entity, id)}
+                      s={connStyles}
+                    />
+                  ) : undefined
+                }
+                defaultOpen
+              >
+                <EmailConnectionsReview
+                  communicationId={id}
+                  associationStatus={record.recordState?.associationStatus ?? null}
+                  associationProvenanceJson={record.recordState?.associationProvenanceJson ?? null}
+                  regardingRecordName={record.recordState?.regardingRecordName ?? null}
+                  regardingRecordNumber={record.recordState?.regardingRecordNumber ?? null}
+                  filedAssociations={filedAssociations}
+                  writeContext={{ webApi, hostEntity: COMMUNICATION_ENTITY, hostRecordId: id }}
+                  pickerWebApi={webApi}
+                  linkAnotherCatalog={linkAnotherCatalog}
+                  onAssociationsChanged={record.reload}
+                />
               </CollapsibleSection>
 
               <EmailBodyView

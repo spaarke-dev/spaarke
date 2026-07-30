@@ -191,17 +191,20 @@ describe('EmailWorkspace', () => {
     // contains a snippet of the same sentence.
     const readingPane = screen.getByTestId('email-reading-pane');
     await waitFor(() => expect(within(readingPane).getByText(/latest draft/i)).toBeInTheDocument());
-    // "Open full form" trigger is now in the toolbar (demoted icon).
-    expect(screen.getByRole('button', { name: 'Open full form' })).toBeInTheDocument();
-    // The three collapsible sections render (COLLAPSED by default) with their headers.
+    // "Open full form" was removed from the toolbar per owner UAT (2026-07-29).
+    expect(screen.queryByRole('button', { name: 'Open full form' })).not.toBeInTheDocument();
+    // The collapsible sections render with their headers. "Related to" is the
+    // merged association section (open by default) that BOTH shows the primary
+    // association state and resolves it — the old separate "Association" section
+    // is gone (single-primary redesign 2026-07-29).
     expect(screen.getByText('Attachments')).toBeInTheDocument();
     expect(screen.getByText('Related to')).toBeInTheDocument();
-    expect(screen.getByText('Association')).toBeInTheDocument();
-    // The Association resolver is collapsed by default; expanding it mounts the
-    // redesigned review (no engine provenance in this fixture → "Not filed yet.").
-    fireEvent.click(screen.getByTestId('section-toggle-association'));
+    expect(screen.queryByText('Association')).not.toBeInTheDocument();
+    // "Related to" is open by default, so the redesigned resolver is already
+    // mounted; with no engine provenance in this fixture it shows the candidate
+    // slots + the "Link another record" affordance.
     expect(await screen.findByTestId('email-connections-review')).toBeInTheDocument();
-    expect(screen.getByText('Not filed yet.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /link another record/i })).toBeInTheDocument();
   });
 
   it('given a selected card WITH a `.eml` archive, resolves the archive document id and renders the server-rendered body (loading→loaded transition)', async () => {

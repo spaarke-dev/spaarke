@@ -38,7 +38,6 @@ import {
   CheckmarkCircle20Regular,
   Receipt20Regular,
 } from '@fluentui/react-icons';
-import { OpenFullFormButton } from '../EmailComposeActions';
 import type { EmailToolbarActionHandlers } from './EmailReadingPaneShell.types';
 
 const useStyles = makeStyles({
@@ -47,6 +46,8 @@ const useStyles = makeStyles({
     width: '100%',
     minWidth: 0,
     flexShrink: 0,
+    // Slightly taller toolbar (owner UAT) — a bit more breathing room around the verbs.
+    paddingBlock: tokens.spacingVerticalXS,
     borderBottomWidth: tokens.strokeWidthThin,
     borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
@@ -61,7 +62,8 @@ const useStyles = makeStyles({
   // Pushes the divider + icon-only cluster to the toolbar's far right; the
   // labelled verbs keep their left placement (mirrors CommunicationActionsApp).
   dividerPush: { marginInlineStart: 'auto' },
-  rightGroup: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS },
+  // A little more breathing room between the right-side icon buttons (owner UAT).
+  rightGroup: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
 });
 
 export interface EmailToolbarProps {
@@ -161,15 +163,7 @@ export const EmailToolbar: React.FC<EmailToolbarProps> = ({ selectedId, actions 
               onClick={() => dispatch('Link Invoice', actions?.onLinkInvoice)}
             />
           </Tooltip>
-          {selectedId && (
-            <OpenFullFormButton
-              communicationId={selectedId}
-              onOpenFullForm={cid => {
-                if (actions?.onOpenFullForm) actions.onOpenFullForm(cid);
-                else warnPendingIntegration('Open full form');
-              }}
-            />
-          )}
+          {/* "Open full form" removed from the toolbar per owner UAT (2026-07-29). */}
         </div>
       </Toolbar>
     </div>

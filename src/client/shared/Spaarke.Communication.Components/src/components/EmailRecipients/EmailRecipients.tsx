@@ -35,18 +35,35 @@ const useStyles = makeStyles({
   row: {
     display: 'flex',
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalM,
   },
+  // Boxed field label — copied VERBATIM from the compose composer's `RecipientField`
+  // `labelBox` (owner UAT: "must match the Compose form"): same min-width, padding,
+  // border stroke, radius, background, foreground, and font size.
   label: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     flexShrink: 0,
-    width: '44px',
-    color: tokens.colorNeutralForeground3,
+    minWidth: '44px',
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke1}`,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase300,
   },
   value: {
     minWidth: 0,
     color: tokens.colorNeutralForeground1,
     overflowWrap: 'anywhere',
+    // Email addresses: Segoe UI 14px (owner UAT).
+    fontFamily: '"Segoe UI", system-ui, sans-serif',
+    fontSize: tokens.fontSizeBase300,
   },
 });
 
@@ -67,39 +84,23 @@ export const EmailRecipients: React.FC<EmailRecipientsProps> = ({ from, to, cc, 
   return (
     <div className={s.root} data-testid="email-recipients">
       <div className={s.row}>
-        <Text className={s.label} size={200}>
-          From
-        </Text>
-        <Text className={s.value} size={200}>
-          {from || ''}
-        </Text>
+        <Text className={s.label}>From</Text>
+        <Text className={s.value}>{from || ''}</Text>
       </div>
       <div className={s.row}>
-        <Text className={s.label} size={200}>
-          To
-        </Text>
-        <Text className={s.value} size={200}>
-          {to || ''}
-        </Text>
+        <Text className={s.label}>To</Text>
+        <Text className={s.value}>{to || ''}</Text>
       </div>
       {cc && (
         <div className={s.row}>
-          <Text className={s.label} size={200}>
-            Cc
-          </Text>
-          <Text className={s.value} size={200}>
-            {cc}
-          </Text>
+          <Text className={s.label}>Cc</Text>
+          <Text className={s.value}>{cc}</Text>
         </div>
       )}
       {bcc && (
         <div className={s.row}>
-          <Text className={s.label} size={200}>
-            Bcc
-          </Text>
-          <Text className={s.value} size={200}>
-            {bcc}
-          </Text>
+          <Text className={s.label}>Bcc</Text>
+          <Text className={s.value}>{bcc}</Text>
         </div>
       )}
     </div>

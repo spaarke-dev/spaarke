@@ -149,7 +149,8 @@ describe('EmailReadingPaneShell', () => {
       expect(screen.getByRole('button', { name: 'Create Event' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Create To Do' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Link Invoice' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Open full form' })).toBeInTheDocument();
+      // "Open full form" was removed from the toolbar per owner UAT (2026-07-29).
+      expect(screen.queryByRole('button', { name: 'Open full form' })).not.toBeInTheDocument();
     });
 
     it('dispatches each record-scoped action through the host-supplied actions core with the selected id', () => {
@@ -162,7 +163,6 @@ describe('EmailReadingPaneShell', () => {
         onCreateEvent: jest.fn(),
         onCreateTodo: jest.fn(),
         onLinkInvoice: jest.fn(),
-        onOpenFullForm: jest.fn(),
       };
       renderShell({ actions });
       fireEvent.click(screen.getByText('Email one'));
@@ -175,7 +175,6 @@ describe('EmailReadingPaneShell', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Create Event' }));
       fireEvent.click(screen.getByRole('button', { name: 'Create To Do' }));
       fireEvent.click(screen.getByRole('button', { name: 'Link Invoice' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Open full form' }));
 
       expect(actions.onReply).toHaveBeenCalledWith('e1');
       expect(actions.onReplyAll).toHaveBeenCalledWith('e1');
@@ -185,7 +184,6 @@ describe('EmailReadingPaneShell', () => {
       expect(actions.onCreateEvent).toHaveBeenCalledWith('e1');
       expect(actions.onCreateTodo).toHaveBeenCalledWith('e1');
       expect(actions.onLinkInvoice).toHaveBeenCalledWith('e1');
-      expect(actions.onOpenFullForm).toHaveBeenCalledWith('e1');
     });
 
     it('New is always enabled (not record-scoped); record-scoped buttons enable only once a card is selected', () => {

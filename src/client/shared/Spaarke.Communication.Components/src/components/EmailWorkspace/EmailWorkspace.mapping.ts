@@ -15,7 +15,12 @@
 import type { IDataService } from '@spaarke/ui-components';
 import { sanitizeEmailHtml } from '@spaarke/ui-components';
 import type { IAccessPermissionOption } from '@spaarke/ui-components';
-import { COMMUNICATION_REGARDING_FIELDS, type FiledAssociation } from '../../logic/connections';
+import {
+  COMMUNICATION_REGARDING_FIELDS,
+  derivePrimaryReview,
+  summarizePrimaryReview,
+  type FiledAssociation,
+} from '../../logic/connections';
 import type { EmailCardItem } from '../EmailCardList/EmailCardList.types';
 import { EMAIL_COMMUNICATION_TYPE } from '../EmailCardList/EmailCardList.types';
 
@@ -99,7 +104,30 @@ export function mapRowToEmailCardItem(row: Record<string, unknown>): EmailCardIt
     date: asNullableString(row['sprk_receiveddate']) ?? asNullableString(row['sprk_sentat']) ?? asString(row['createdon']),
     isUnread: false,
     communicationType,
+    reviewTone: deriveCardReviewTone(row),
   };
+}
+
+/**
+ * Derive the left-of-sender status dot tone (🔴/🟡/🟢) for a card from the row's
+ * association fields — using the SAME `derivePrimaryReview` the reading pane uses,
+ * so the card dot and the open email's section dot never disagree. Returns
+ * `undefined` when the row carries NO association data (a view whose FetchXML
+ * omits the association columns → no dot, rather than a misleading all-red list).
+ */
+function deriveCardReviewTone(row: Record<string, unknown>): 'red' | 'yellow' | 'green' | undefined {
+  const filed = readFiledAssociations(row);
+  const hasAssociationData =
+    row['sprk_associationstatus'] != null ||
+    (typeof row['sprk_associationprovenance'] === 'string' && row['sprk_associationprovenance'].length > 0) ||
+    filed.length > 0;
+  if (!hasAssociationData) return undefined;
+  return summarizePrimaryReview(
+    derivePrimaryReview(asNullableString(row['sprk_associationprovenance']), asNullableNumber(row['sprk_associationstatus']), filed, {
+      recordName: asNullableString(row['sprk_regardingrecordname']),
+      recordNumber: asNullableString(row['sprk_regardingrecordnumber']),
+    })
+  ).tone;
 }
 
 /** Strip tags from already-sanitized HTML and collapse whitespace into a short plain-text preview (never used with `dangerouslySetInnerHTML`). */
@@ -161,6 +189,7 @@ export interface EmailWorkspaceRecordState {
   receivedDate: string | null;
   sprk_body: string;
   regardingRecordName: string | null;
+  regardingRecordNumber: string | null;
   associationStatus: number | null;
   associationProvenanceJson: string | null;
   filedAssociations: FiledAssociation[];
@@ -181,6 +210,7 @@ export function toWorkspaceRecordState(raw: RawCommunicationRecord): EmailWorksp
     receivedDate: asNullableString(raw['sprk_receiveddate']),
     sprk_body: asString(raw['sprk_body']),
     regardingRecordName: asNullableString(raw['sprk_regardingrecordname']),
+    regardingRecordNumber: asNullableString(raw['sprk_regardingrecordnumber']),
     associationStatus: asNullableNumber(raw['sprk_associationstatus']),
     associationProvenanceJson: asNullableString(raw['sprk_associationprovenance']),
     filedAssociations: readFiledAssociations(raw),
