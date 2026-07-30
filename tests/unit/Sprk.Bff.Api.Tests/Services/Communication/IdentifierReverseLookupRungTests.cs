@@ -155,6 +155,53 @@ public class IdentifierReverseLookupRungTests
         decision.Status.Should().Be(AssociationStatusCodes.Ambiguous);
     }
 
+    // ── 3c. FR-12: a well-formed identifier the email REFERENCES but does not FILE ONTO is capped to 0.65 ──
+
+    [Fact]
+    public async Task Fr12_NewRecordFraming_ReferencedIdentifier_CappedSubThreshold_NotAutoFiledAlone()
+    {
+        // "new litigation matter related to MAT-123" — MAT-123 is referenced, not the record this email is
+        // about. It must NOT auto-file onto MAT-123 (misfile guard), so the normally-0.90 well-formed match is
+        // demoted to 0.65 (Suggested), while still being surfaced as a review candidate.
+        SetupRoster(FullRoster());
+        SetupNoRecordMatches();
+        var matterId = Guid.NewGuid();
+        _dv.Setup(d => d.QueryRecordsByNumberFieldAsync("sprk_matter", "sprk_matternumber", "MAT-123", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { Record("sprk_matter", matterId) });
+
+        var matches = await Rung().EvaluateAsync(
+            Envelope(subject: "New matter", body: "This is a new litigation matter related to MAT-123"),
+            new AssociationContext(), CancellationToken.None);
+
+        var match = matches.Should().ContainSingle().Subject;
+        match.Target!.Id.Should().Be(matterId, "the referenced record is still surfaced for review");
+        match.RegardingFieldName.Should().Be("sprk_regardingmatter");
+        match.Confidence.Should().Be(0.65);
+        match.Confidence.Should().BeLessThan(0.85, "an email presenting a NEW record must never auto-file onto the record it merely references");
+        match.Provenance.Should().Contain("new-record-referenced");
+    }
+
+    [Fact]
+    public async Task Fr12_FileOntoExistingRecord_NoNewRecordFraming_StillAutoFilesAt090()
+    {
+        // Control: the SAME identifier without new-record framing keeps its 0.90 auto-file confidence — FR-12
+        // intent only ever SUPPRESSES auto-file, it never widens or blocks a legitimate file-to-existing.
+        SetupRoster(FullRoster());
+        SetupNoRecordMatches();
+        var matterId = Guid.NewGuid();
+        _dv.Setup(d => d.QueryRecordsByNumberFieldAsync("sprk_matter", "sprk_matternumber", "MAT-123", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { Record("sprk_matter", matterId) });
+
+        var matches = await Rung().EvaluateAsync(
+            Envelope(subject: "Re: MAT-123", body: "Please file this correspondence onto MAT-123"),
+            new AssociationContext(), CancellationToken.None);
+
+        var match = matches.Should().ContainSingle().Subject;
+        match.Target!.Id.Should().Be(matterId);
+        match.Confidence.Should().Be(0.90, "no new-record framing ⇒ the explicit identifier auto-files normally");
+        match.Provenance.Should().NotContain("new-record-referenced");
+    }
+
     // ── 4. NEGATIVE: a dirty catalog row (null number field / contact anomaly) is read defensively ──
 
     [Fact]

@@ -89,6 +89,14 @@ public sealed class IdentifierReverseLookupRung : IAssociationRung
     private const double BareNumericConfidence = 0.65;
     /// <summary>Sub-threshold cap applied to every match of a token whose value spans multiple entity types.</summary>
     private const double MultiEntityCap = 0.65;
+    /// <summary>
+    /// FR-12 sub-threshold cap for a token the email <b>references but does not file onto</b> (e.g. "new
+    /// litigation matter related to LIT-123456"): capping a well-formed 0.90 identifier to 0.65 keeps the
+    /// referenced record as a WRITTEN Suggested candidate but stops it auto-filing alone (misfile guard —
+    /// demote-only, safe by construction). Like bare-numeric, it can still reinforce within a thread. Detected
+    /// deterministically by <see cref="NewRecordIntentDetector"/> (no LLM in the capture path; NFR-04).
+    /// </summary>
+    private const double ReferencedNotFiledCap = 0.65;
 
     /// <summary>
     /// Well-formed record-number token: a 2+ letter prefix, a <c>-</c> or <c>.</c> separator, then
@@ -177,13 +185,21 @@ public sealed class IdentifierReverseLookupRung : IAssociationRung
                 perToken.Add((token, matches));
         }
 
-        var result = BuildMatches(perToken);
+        // FR-12: does the envelope PRESENT a new record while REFERENCING an existing one
+        // ("new litigation matter related to LIT-123456")? If so, the referenced identifier(s) are demoted
+        // below the auto-file bar so the email lands Suggested (never silently filed onto a record it is not
+        // actually about). Deterministic + best-effort; the overwhelming common case returns null (no effect).
+        var newRecordIntent = NewRecordIntentDetector.Detect(message.Subject, message.BodyText);
+
+        var result = BuildMatches(perToken, newRecordIntent);
 
         var elapsed = Stopwatch.GetElapsedTime(startTs);
         _logger.LogInformation(
             "Rung 0 (identifier reverse-lookup) fired | Tokens: {TokenCount}, QueryCount: {QueryCount}, " +
-            "Matches: {MatchCount}, ElapsedMs: {ElapsedMs}",
-            tokens.Count, queryCount, result.Count, (long)elapsed.TotalMilliseconds);
+            "Matches: {MatchCount}, NewRecordIntent: {NewRecordIntent}, ElapsedMs: {ElapsedMs}",
+            tokens.Count, queryCount, result.Count,
+            newRecordIntent is null ? "none" : $"referenced=[{string.Join(",", newRecordIntent.ReferencedIdentifiers)}]",
+            (long)elapsed.TotalMilliseconds);
 
         return result;
     }
@@ -247,7 +263,8 @@ public sealed class IdentifierReverseLookupRung : IAssociationRung
     /// well-formed = 0.90, bare-numeric = 0.65, multi-entity token capped to 0.65.
     /// </summary>
     private static IReadOnlyList<RungMatch> BuildMatches(
-        IReadOnlyList<(TokenCandidate Token, List<Candidate> Matches)> perToken)
+        IReadOnlyList<(TokenCandidate Token, List<Candidate> Matches)> perToken,
+        NewRecordIntent? newRecordIntent)
     {
         var best = new Dictionary<(string Field, Guid Id), RungMatch>();
 
@@ -255,9 +272,14 @@ public sealed class IdentifierReverseLookupRung : IAssociationRung
         {
             var distinctFields = matches.Select(m => m.Entry.RegardingField).Distinct(StringComparer.OrdinalIgnoreCase).Count();
             var multiEntity = distinctFields > 1;
+            // FR-12: a token the email references-but-does-not-file-onto is capped sub-threshold so it never
+            // auto-files alone (the referenced record still surfaces as a Suggested candidate).
+            var referencedNotFiled = NewRecordIntentDetector.IsReferencedNotFiled(newRecordIntent, token.Value);
 
             var baseConfidence = token.IsWellFormed ? WellFormedConfidence : BareNumericConfidence;
             var confidence = multiEntity ? Math.Min(baseConfidence, MultiEntityCap) : baseConfidence;
+            if (referencedNotFiled)
+                confidence = Math.Min(confidence, ReferencedNotFiledCap);
 
             foreach (var candidate in matches)
             {
@@ -266,7 +288,8 @@ public sealed class IdentifierReverseLookupRung : IAssociationRung
                     $"number={candidate.Entry.NumberField}:" +
                     $"value=\"{RungProvenanceFormat.EscapeValue(token.Value)}\":" +
                     $"class={(token.IsWellFormed ? "well-formed" : "bare-numeric")}" +
-                    (multiEntity ? ":multi-entity" : string.Empty);
+                    (multiEntity ? ":multi-entity" : string.Empty) +
+                    (referencedNotFiled ? ":new-record-referenced" : string.Empty);
 
                 var match = new RungMatch
                 {

@@ -87,6 +87,32 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     private const string AttachmentActionActor = "email-attachment-action";
 
     /// <summary>
+    /// Task 042 (FR-12) — the <c>sprk_emailreviewlog.sprk_targetfield</c> sentinel PREFIX for a
+    /// "regarding-vs-related intent" proposal row (the email PRESENTS a new record while REFERENCING an
+    /// existing one → propose creating the new record). DISTINCT from the Job C / attachment-action prefixes so
+    /// it keeps its own open/closed lifecycle under <see cref="LoadOpenProposalFieldsAsync"/>'s per-field walk.
+    /// Suffixed with a stable hash of the trigger + referenced identifiers so re-enrichment is idempotent.
+    /// </summary>
+    private const string RegardingIntentSentinelFieldPrefix = "__regarding_intent__:";
+
+    /// <summary>
+    /// Task 042 (FR-12) — the provenance label written to <c>sprk_emailreviewlog.sprk_actor</c> for
+    /// regarding-intent rows. A plain provenance STRING, NOT a routed closed-catalog consumer type: FR-12 adds
+    /// no Action/Binding/eval family and no <see cref="ConsumerTypes"/> entry — intent detection is
+    /// deterministic (<see cref="NewRecordIntentDetector"/>) and the "create new record" is proposal-only
+    /// (there is no create-record write leg; human confirms in r5). §11 reuse.
+    /// </summary>
+    private const string RegardingIntentActor = "email-regarding-intent";
+
+    /// <summary>
+    /// Task 042 (FR-12) — marker written to <c>sprk_emailreviewlog.sprk_targetentity</c> for a regarding-intent
+    /// proposal whose <see cref="NewRecordIntent.ProposedEntityHint"/> is unpinned (generic "new filing"). A
+    /// non-entity sentinel so <see cref="LoadOpenProposalFieldsAsync"/>'s per-<c>targetentity</c> idempotency
+    /// walk still scopes it; never collides with a real entity logical name.
+    /// </summary>
+    private const string RegardingIntentUnpinnedTargetEntity = "__new_record__";
+
+    /// <summary>
     /// The 7 core record types whose <c>sprk_communication</c> regarding lookup Job B may propose updates to
     /// (task 020 / note 001 — matter, project, invoice, work assignment, budget, service request, report
     /// card). Reads the WRITE field from the code source of truth (<see cref="RegardingFieldMap"/>), never a
@@ -218,6 +244,15 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         // attachment + a machine-verified page locator, and feeds the SAME Job C create leg (no forked create).
         await RunStepAsync("email-attachment-action", communicationId,
             () => RunEmailAttachmentActionAsync(communicationId, message, triageResult, ct));
+
+        // Regarding-vs-related intent (task 042, FR-12): best-effort, non-fatal (NFR-04). Runs AFTER
+        // email-triage so it can annotate the already-persisted sprk_triagesummary. Note the SUPPRESSION half
+        // of FR-12 (don't auto-file onto a merely-referenced record) happens at CAPTURE in the identifier rung
+        // (NewRecordIntentDetector-driven confidence cap) — this enrichment step owns only the human-readable
+        // half: the triage-summary cross-reference note + the gated "create new record" proposal (proposal-only,
+        // human-confirmed; ADR-024 amended 2026-07-30 — one relationship, no related field).
+        await RunStepAsync("email-regarding-intent", communicationId,
+            () => RunEmailRegardingIntentAsync(communicationId, message, ct));
 
         await RunStepAsync("assessment-event", communicationId,
             () => RunAssessmentEmissionAsync(communicationId, direction, message, triageResult, ct));
@@ -1350,6 +1385,162 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         _logger.LogInformation(
             "Enrichment[email-create-task] created task {TaskId} and stored Applied row | CommunicationId: {CommunicationId}, Entity: {Entity}, Subject: {Subject}.",
             createdTaskId, communicationId, entityLogicalName, candidate.Subject);
+    }
+
+    // ── Task 042 (FR-12): regarding-vs-related intent ────────────────────────────
+    /// <summary>
+    /// Regarding-vs-related intent (FR-12) — the human-readable half. When the envelope PRESENTS a new record
+    /// while REFERENCING an existing one ("new litigation matter related to LIT-123456"), this step (a) notes
+    /// the cross-reference in <c>sprk_triagesummary</c> and (b) stores a gated "create new record"
+    /// <c>Proposed</c> row for human confirmation. The misfile-critical SUPPRESSION (the referenced record does
+    /// NOT auto-file) already happened at capture in <see cref="Rungs.IdentifierReverseLookupRung"/> via the
+    /// same <see cref="NewRecordIntentDetector"/> — this step writes nothing to the association and creates no
+    /// record (there is no create-record write leg; ADR-024 amended 2026-07-30: ONE relationship = regarding,
+    /// no related field). Reuses the append-only <c>sprk_emailreviewlog</c> Proposed-row + per-field
+    /// idempotency conventions — no new Action, facade, ConsumerType, or create mechanism (§11). Best-effort /
+    /// non-fatal (NFR-04): any failure logs + degrades, never throws up the enrichment/capture path.
+    /// </summary>
+    private async Task RunEmailRegardingIntentAsync(
+        Guid communicationId, NormalizedMessage message, CancellationToken ct)
+    {
+        try
+        {
+            var intent = NewRecordIntentDetector.Detect(message.Subject, message.BodyText);
+            if (intent is null)
+            {
+                // The overwhelming common case — the email is not presenting a new record. No-op.
+                return;
+            }
+
+            // Idempotency: scope the open-proposal walk by the proposed-entity marker (a real entity hint when
+            // pinned, else the __new_record__ sentinel), then skip if this exact intent already has an open row.
+            var targetEntityMarker = intent.ProposedEntityHint ?? RegardingIntentUnpinnedTargetEntity;
+            var sentinelField = BuildRegardingIntentSentinelField(intent);
+            var openSentinels = await LoadOpenProposalFieldsAsync(communicationId, targetEntityMarker, ct).ConfigureAwait(false);
+            if (openSentinels.Contains(sentinelField))
+            {
+                _logger.LogDebug(
+                    "Enrichment[email-regarding-intent] skipped: an open Proposed row already exists for this intent (append-only, idempotent) | CommunicationId: {CommunicationId}.",
+                    communicationId);
+                return;
+            }
+
+            await StoreRegardingIntentProposedRowAsync(communicationId, targetEntityMarker, sentinelField, intent, ct)
+                .ConfigureAwait(false);
+
+            // Note the cross-reference in the triage summary (best-effort; the reference is informational, not
+            // a structural link — ADR-024). A read failure or a summary that already carries the note is a
+            // no-op, so re-enrichment never duplicates it.
+            await AnnotateTriageSummaryAsync(communicationId, intent, ct).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Enrichment[email-regarding-intent] new-record intent proposed | CommunicationId: {CommunicationId}, ProposedType: {Type}, Referenced: [{Referenced}], Trigger: \"{Trigger}\".",
+                communicationId, intent.ProposedTypeLabel, string.Join(",", intent.ReferencedIdentifiers), intent.TriggerPhrase);
+        }
+        catch (Exception ex)
+        {
+            // NFR-04: intent classification MUST NOT fail capture/enrichment — degrade + log, never throw.
+            _logger.LogWarning(
+                ex,
+                "Enrichment[email-regarding-intent] failed (non-fatal) | CommunicationId: {CommunicationId}.",
+                communicationId);
+        }
+    }
+
+    /// <summary>
+    /// Stable idempotency sentinel for a regarding-intent proposal: a hash of the trigger phrase + the sorted
+    /// referenced identifiers, so re-enrichment of the same email produces the SAME sentinel (no duplicate
+    /// proposal) while two genuinely different new-record framings each get their own lifecycle.
+    /// </summary>
+    private static string BuildRegardingIntentSentinelField(NewRecordIntent intent)
+    {
+        var basis = intent.ProposedTypeLabel.Trim().ToLowerInvariant() + "|" +
+            string.Join(",", intent.ReferencedIdentifiers.Select(v => v.Trim().ToLowerInvariant()).OrderBy(v => v, StringComparer.Ordinal));
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(basis));
+        return RegardingIntentSentinelFieldPrefix + Convert.ToHexString(hash)[..8];
+    }
+
+    /// <summary>
+    /// Stores the gated "create new record" proposal as a PENDING <c>sprk_emailreviewlog</c> <c>Proposed</c>
+    /// row (the SAME append-only reuse as Job B/C, keyed by <paramref name="sentinelField"/>). NOTHING is
+    /// created here (NFR-06 / ADR-015 — there is no create-record write leg; the human confirms in r5); the row
+    /// is left OPEN as the reviewer's "create new / file-onto / dismiss" choice payload.
+    /// </summary>
+    private async Task StoreRegardingIntentProposedRowAsync(
+        Guid communicationId,
+        string targetEntityMarker,
+        string sentinelField,
+        NewRecordIntent intent,
+        CancellationToken ct)
+    {
+        var suggestion = new
+        {
+            kind = "regarding-intent",
+            intent = "new-record",
+            proposedType = intent.ProposedTypeLabel,
+            proposedEntity = intent.ProposedEntityHint, // null = unpinned (generic new record)
+            referencedIdentifiers = intent.ReferencedIdentifiers,
+            trigger = intent.TriggerPhrase,
+            // The reviewer's choices (r5 renders); r1 supplies the data (C-3). Nothing auto-finalizes.
+            options = new[] { "create-new-record", "file-onto-referenced", "dismiss" },
+            requireConfirm = true, // ADR-015: never auto-finalized
+        };
+        var suggestionJson = JsonSerializer.Serialize(suggestion);
+
+        var referenced = string.Join(", ", intent.ReferencedIdentifiers);
+        var name = $"New {intent.ProposedTypeLabel} proposed (references {referenced})";
+        var entity = new Entity("sprk_emailreviewlog")
+        {
+            ["sprk_name"] = Truncate(name, 850),
+            ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+            ["sprk_actortype"] = new OptionSetValue(ReviewActorTypeMachine),
+            ["sprk_action"] = new OptionSetValue(ReviewActionProposed),
+            ["sprk_actor"] = RegardingIntentActor,
+            ["sprk_targetentity"] = Truncate(targetEntityMarker, 100),
+            ["sprk_targetrecordid"] = string.Empty, // proposing a NEW record — no existing target id
+            ["sprk_targetfield"] = Truncate(sentinelField, 100),
+            ["sprk_sourceref"] = Truncate($"new-record-intent; references {referenced}; trigger \"{intent.TriggerPhrase}\"", 1000),
+            ["sprk_aisuggestion"] = suggestionJson,
+        };
+
+        await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Enrichment[email-regarding-intent] stored Proposed row | CommunicationId: {CommunicationId}, ProposedType: {Type}, Referenced: [{Referenced}].",
+            communicationId, intent.ProposedTypeLabel, referenced);
+    }
+
+    /// <summary>
+    /// Appends a human-readable cross-reference note to <c>sprk_triagesummary</c> (ADR-024: the reference is
+    /// noted, not persisted as a link). Best-effort: a read failure degrades to no write; an already-annotated
+    /// summary is left unchanged so re-enrichment never duplicates the note.
+    /// </summary>
+    private async Task AnnotateTriageSummaryAsync(Guid communicationId, NewRecordIntent intent, CancellationToken ct)
+    {
+        const string marker = "[Regarding intent]";
+
+        var record = await _genericEntityService
+            .RetrieveAsync("sprk_communication", communicationId, new[] { "sprk_triagesummary" }, ct)
+            .ConfigureAwait(false);
+        if (record is null)
+        {
+            return;
+        }
+
+        var current = record.GetAttributeValue<string>("sprk_triagesummary") ?? string.Empty;
+        if (current.Contains(marker, StringComparison.OrdinalIgnoreCase))
+        {
+            return; // already annotated — idempotent
+        }
+
+        var referenced = string.Join(", ", intent.ReferencedIdentifiers);
+        var note =
+            $"{marker} Appears to present a NEW {intent.ProposedTypeLabel} while referencing {referenced}. " +
+            $"The referenced record was NOT auto-filed; a \"create new record\" proposal is pending review.";
+        var updated = string.IsNullOrWhiteSpace(current) ? note : $"{current}\n\n{note}";
+
+        var fields = new Dictionary<string, object> { ["sprk_triagesummary"] = updated };
+        await _genericEntityService.UpdateAsync("sprk_communication", communicationId, fields, ct).ConfigureAwait(false);
     }
 
     // ── Task 041 (FR-13): attachment-grounded action extraction ──────────────────
