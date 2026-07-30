@@ -1,32 +1,31 @@
-# Current Task
+# Current Task State — ai-advanced-capabilities-analysis-hub-r1
 
-> Active-task tracker. **Full handoff: `notes/HANDOFF-2026-07-29.md`** (read it first on resume).
+> **Last Updated**: 2026-07-30 (by context-handoff)
+> **Recovery**: Read **`notes/HANDOFF-2026-07-30.md`** first — it has the full status + the detailed build plan.
 
-**Status**: CODE COMPLETE (24/28) + DEPLOYED to dev (BFF/code-page/ribbon-scripts/subgrids) — finishing the exposure layer.
-**Active task**: 071 client deploy — **top item: the Analysis "front door" (section registration + system layout)**.
-**Branch**: `work/ai-advanced-capabilities-analysis-hub-r1` · PR **#694** · synced to master.
+---
 
-## Resume in this order (detail in HANDOFF-2026-07-29.md §9)
+## Quick Recovery (READ THIS FIRST)
 
-1. **Front door (§4)** — no `analysisHub.registration.ts` + no `system-layouts.json` "Analysis" entry ⇒ hub not in
-   Manage Workspaces or the builder. Build the section registration + system layout + seed `sprk_workspacelayout` +
-   Dataverse views + gridconfig → rebuild + redeploy. Owner intent: system workspace named **"Analysis"** (cards→wizard,
-   grid→open). OPEN: grid-row = in-place (built) vs modal (owner to confirm).
-2. Ribbon buttons — fix the `AnalysisRecordLaunch` `worktype` seam → button = **"Create Analysis"** card selector →
-   redeploy ribbon scripts → `/ribbon-edit` import (show XML first).
-3. `sprk_analysis` "Analysis main form" still references the retired web resource (blocks the 4th WR delete) — strip it, delete, publish.
-4. Tech-debt sweep (form ref, empty `ChatHistory` field on GET, DF-04 dead `BuildContinuationPrompt*`, DF-01/02/03).
-5. agreements-r1 subDomain wiring (needs owner `sprk_subdomain` col) — see §7. 6. 072 e2e/UAT → 090 wrap + `/test-diet`.
+| Field | Value |
+|-------|-------|
+| **Status** | Front door + audit fixes SHIPPED (deployed to spaarkedev1, pushed PR #694). New feature designed, NOT built. |
+| **Next Action** | Build the **tabbed Quick Start** feature per `notes/HANDOFF-2026-07-30.md` §3 (decisions locked; architecture confirmed — `WorkspacePane` hosts the wizard modal). |
+| **Branch** | `work/ai-advanced-capabilities-analysis-hub-r1` · PR #694 · 0 ahead/behind origin · working tree clean |
 
-## Owner must create in Dataverse (HANDOFF §6)
+### The next build (tabbed Quick Start) — 6-step flow (HANDOFF-2026-07-30.md §3)
+1. Analysis widget → plain dataset grid (remove cards + task-031 reopen; row-click = OOB form Layout 1); `+ New` overridden → dispatch `open_quick_start{tab:'analysis', regarding}`.
+2. Quick Start = ONE Fluent `Dialog` + `TabList`: **Create** (7 GetStarted cards) + **Analysis** (3 cards). Grid `+ New` → Analysis tab; Assistant menu → Create tab.
+3. Agreement Review card → close Quick Start → open Create Analysis wizard AS A MODAL (`CreateRecordWizard embedded={false}`) hosted by `WorkspacePane`; on finish → new tab (as today).
+Files: PaneEventTypes (+2 intents) · AnalysisHubWidget · DataverseEntityViewWidget/DataGrid (onCreateNew) · NEW AnalysisCardsWidget · QuickStartModal · ConversationPane + WorkspacePane handlers.
 
-1. 4 saved queries on `sprk_analysis` (All / Agreement 100000000 / Research 100000001 / Patent 100000002).
-2. 1 `sprk_gridconfiguration` row → then replace placeholder GUID in `AnalysisHubWidget.tsx`.
-3. 1 `sprk_workspacelayout` seed for "Analysis" (I seed after registration).
-4. OPTIONAL `sprk_analysis.sprk_subdomain` (Choice) — only if doing agreements-r1 subDomain now.
+### Shipped this session (commits)
+`dc7a4fe8e` front door · `7317cb104` Dataverse seed · `552a091ee` P1 upload fix · `47c2058bf` P2 type hoist · `9231e7e8c` audit cleanup. Deployed + pushed.
 
-## Done this session
+### Deferred (owner-directed, HANDOFF §4)
+- DocumentUploadWizard (Summarize Files) live bug → LEAVE, investigate separately (AIPU2-104).
+- Tech-debt sweep: 4th WR delete (form ref), vestigial `ChatHistory` on GET, dead `BuildContinuationPrompt*`.
+- 072 e2e/UAT → 090 wrap-up + `/test-diet`. agreements-r1 subDomain thread (owner col).
 
-Worktree synced to master (merge clean) · **BFF deployed+verified** (fork/promote/by-analysis=401, continue/resume=404) ·
-**code page + ribbon scripts + subgrids deployed** · 3/4 retired web resources deleted (4th blocked by form ref) ·
-Phases 0–6 code ✅ pushed to PR #694 · agreements-r1 coordination assessed. No hard escalations all project.
+### Critical context
+No generic modal shell exists — standard = Fluent `Dialog` + `TabList`. `CreateRecordWizard embedded={false}` = modal. `POST /api/documents/upload` does NOT exist (use `EntityCreationService.uploadFilesToSpe`). ADR-012: widgets can't import solution → cross-pane via PaneEventBus intents.
