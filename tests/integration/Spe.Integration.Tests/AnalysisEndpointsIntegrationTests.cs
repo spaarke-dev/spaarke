@@ -651,10 +651,13 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
             // IPlaybookOrchestrationService.ExecuteAsync (post-task-041 migration; task 042
             // deleted the legacy direct-invocation path). The MockAnalysisOrchestrationService
             // registration below is retained because IAnalysisOrchestrationService is still
-            // consumed by other endpoints/handlers (ContinueAnalysis, ResumeAnalysis, GetAnalysis,
-            // ExportAnalysis, SaveWorkingDocument, ExecutePlaybook, plus the (since-deleted, task 044)
-            // analysis-query/working-document handlers). The scenario-driving mock for the migrated
-            // /api/ai/analysis/execute endpoint is MockPlaybookOrchestrationService below.
+            // consumed by other endpoints/handlers (GetAnalysis, ExportAnalysis, SaveWorkingDocument,
+            // ExecutePlaybook, plus the (since-deleted, task 044) analysis-query/working-document
+            // handlers). ContinueAnalysis/ResumeAnalysis were themselves retired
+            // (ai-advanced-capabilities-analysis-hub-r1 task 062, spec §13.5/FR-20, 2026-07-29) —
+            // superseded by the ChatEndpoints Redis→Cosmos model (task 020). The scenario-driving
+            // mock for the migrated /api/ai/analysis/execute endpoint is MockPlaybookOrchestrationService
+            // below.
             services.RemoveAll<IAnalysisOrchestrationService>();
             services.AddScoped<IAnalysisOrchestrationService>(sp =>
                 new MockAnalysisOrchestrationService(_scenario, _authorizedDocumentIds, _authorizationTracker));
@@ -827,16 +830,10 @@ internal class MockAnalysisOrchestrationService : IAnalysisOrchestrationService
     public Task<AnalysisDetailResult> GetAnalysisAsync(Guid analysisId, CancellationToken cancellationToken) =>
         throw new NotImplementedException();
 
-    public IAsyncEnumerable<AnalysisStreamChunk> ContinueAnalysisAsync(Guid analysisId, string message, HttpContext httpContext, CancellationToken cancellationToken) =>
-        throw new NotImplementedException();
-
     public Task<SavedDocumentResult> SaveWorkingDocumentAsync(Guid analysisId, AnalysisSaveRequest request, CancellationToken cancellationToken) =>
         throw new NotImplementedException();
 
     public Task<ExportResult> ExportAnalysisAsync(Guid analysisId, AnalysisExportRequest request, CancellationToken cancellationToken) =>
-        throw new NotImplementedException();
-
-    public Task<AnalysisResumeResult> ResumeAnalysisAsync(Guid analysisId, AnalysisResumeRequest request, HttpContext httpContext, CancellationToken cancellationToken) =>
         throw new NotImplementedException();
 
     public IAsyncEnumerable<AnalysisStreamChunk> ExecutePlaybookAsync(PlaybookExecuteRequest request, HttpContext httpContext, CancellationToken cancellationToken) =>

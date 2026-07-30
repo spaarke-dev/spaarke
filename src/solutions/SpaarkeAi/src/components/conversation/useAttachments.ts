@@ -47,6 +47,13 @@ export interface AttachmentsDeps {
   chatSessionId: string | null;
   /** Whether the host has an active workspace document context. */
   hasActiveWorkspaceDocument: boolean;
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1 task 024 (spec FR-08): true when the chat already
+   * has prior messages at the moment a file attaches — i.e. a "live" chat, not a brand-new empty
+   * one. Gates the new-session vs add-to-current-session prompt: a fresh/empty chat has nothing
+   * to preserve, so the file just attaches normally (no prompt).
+   */
+  hasPriorMessages: boolean;
   authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>;
   /** PaneEventBus dispatch (context channel `files_staged`). */
   dispatch: (channel: "context", event: ContextPaneEvent) => void;
@@ -63,6 +70,16 @@ export interface AttachmentsDeps {
    * upload (Wave 2). Optional — omitted by callers that don't track an active source document.
    */
   onSessionFileUploaded?: (info: { sessionFileId: string; fileName: string }) => void;
+}
+
+/**
+ * task 024 (spec FR-08): file(s) attached to a LIVE chat (prior messages already exist) that are
+ * awaiting an explicit new-session vs add-to-current-session decision. `filenames` covers the
+ * whole in-flight attach gesture — a second file dropped before the first is decided EXTENDS the
+ * same batch/dialog rather than opening a second prompt.
+ */
+export interface PendingFileSessionChoice {
+  filenames: string[];
 }
 
 export interface AttachmentsController {
@@ -87,6 +104,19 @@ export interface AttachmentsController {
   handleBeforeSendMessage: (messageText: string) => void;
   /** Session-created reset for all per-session refs + promotion state. */
   resetForSession: () => void;
+  /** task 024: non-null while file(s) attached to a live chat await a new-session/add-to-current choice. */
+  pendingFileSessionChoice: PendingFileSessionChoice | null;
+  /** "Add to current session" — resumes normal auto-promotion for the pending file(s) into THIS session. */
+  chooseAddToCurrentSession: () => void;
+  /**
+   * "New session" — queues the pending file(s) for carry-over into whatever session becomes
+   * current next. Does NOT itself start a new session (no new client-side session/fork logic per
+   * task constraint) — the caller (ConversationPane) switches sessions via its existing
+   * `handleNewSession` seam immediately after calling this.
+   */
+  prepareFilesForNewSession: () => void;
+  /** Dismiss without deciding — the file(s) stay attached but unpromoted (no silent default). */
+  dismissFileSessionChoice: () => void;
 }
 
 export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
@@ -94,6 +124,7 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
     bffBaseUrl,
     chatSessionId,
     hasActiveWorkspaceDocument,
+    hasPriorMessages,
     authenticatedFetch,
     dispatch,
     inject,
@@ -110,6 +141,7 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
     markEventFilePromotionFailed,
     queueDocumentUploadedEvent,
     noteOutboundMessage,
+    fireForPromotedFile,
   } = eventBatch;
 
   const [attachmentChips, setAttachmentChips] = React.useState<AttachmentChip[]>([]);
@@ -139,6 +171,33 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
   // Promotion concurrency + attempt bookkeeping (R7 12.3a + 2026-07-04 hardening).
   const pendingPromotionIdsRef = React.useRef<Set<string>>(new Set());
   const promotionAttemptCountRef = React.useRef<Map<string, number>>(new Map());
+
+  // ── task 024 (spec FR-08): new-session vs add-to-current prompt ──────────
+  //
+  // A chip whose id is in `excludedFromAutoPromoteChipIdsRef` is skipped by the auto-promote
+  // effect below until the user decides. It stays in the set forever once the decision is
+  // "new session" (that file is carried over separately, never promoted into THIS session); it
+  // is REMOVED from the set on "add to current" (the normal auto-promote effect then picks it up
+  // on its next run). `pendingFileSessionChoiceQueueRef` mirrors the pending batch into render
+  // state so ConversationPane can show the dialog.
+  const excludedFromAutoPromoteChipIdsRef = React.useRef<Set<string>>(new Set());
+  const [pendingChoiceQueue, setPendingChoiceQueue] = React.useState<
+    Array<{ id: string; filename: string }>
+  >([]);
+  // Ref mirror of `pendingChoiceQueue`, read (never mutated-with-side-effects) inside the choice
+  // resolvers below — keeps those resolvers free of side effects INSIDE a setState updater
+  // callback (React 18/19 StrictMode may double-invoke updater functions to surface impurity).
+  const pendingChoiceQueueRef = React.useRef<Array<{ id: string; filename: string }>>([]);
+
+  // Carry-over: file(s) queued by `prepareFilesForNewSession` for promotion into whichever
+  // session becomes current next. MUST survive `resetForSession()` (the session-created reset
+  // fires as PART OF the switch this queue is waiting for) — never added to that method's clear
+  // list. `newSessionCarryoverArmedRef` + `carryoverFromSessionIdRef` let the effect below detect
+  // the moment the switch actually completes (chatSessionId becomes non-null and different from
+  // the session that was current when "new session" was chosen).
+  const carryOverQueueRef = React.useRef<Array<{ filename: string; file: File }>>([]);
+  const newSessionCarryoverArmedRef = React.useRef<boolean>(false);
+  const carryoverFromSessionIdRef = React.useRef<string | null>(null);
 
   const uploadedFileCount = attachmentChips.length;
 
@@ -186,6 +245,22 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
       // Event-path gesture membership (count-complete batching, task 022b).
       noteChipsChanged(chips);
 
+      // task 024 (spec FR-08): a file attached to a LIVE chat (prior messages already exist)
+      // needs an explicit new-session vs add-to-current decision before it may auto-promote.
+      // Exclude it from the auto-promote effect below and add it to the pending-choice batch —
+      // a second file arriving before the first is decided EXTENDS the same batch/dialog rather
+      // than opening a second prompt (see PendingFileSessionChoice doc).
+      if (readyChipsThisTick.length > 0 && hasPriorMessages) {
+        const newlyPending: Array<{ id: string; filename: string }> = [];
+        for (const chip of readyChipsThisTick) {
+          excludedFromAutoPromoteChipIdsRef.current.add(chip.id);
+          newlyPending.push({ id: chip.id, filename: chip.filename });
+        }
+        const nextQueue = [...pendingChoiceQueueRef.current, ...newlyPending];
+        pendingChoiceQueueRef.current = nextQueue;
+        setPendingChoiceQueue(nextQueue);
+      }
+
       // Side effect 1: debounced inline confirmation message.
       if (readyChipsThisTick.length > 0) {
         for (const chip of readyChipsThisTick) {
@@ -218,7 +293,7 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
         dispatch("context", payload);
       }
     },
-    [dispatch, inject, noteChipsChanged]
+    [dispatch, inject, noteChipsChanged, hasPriorMessages]
   );
 
   /**
@@ -284,6 +359,11 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
       if (promotedChipIds.has(c.id)) return { id: c.id, name: c.filename, skip: "already-promoted" };
       if (pendingPromotionIdsRef.current.has(c.id)) return { id: c.id, name: c.filename, skip: "pending" };
       if (!heldFilesRef.current.has(c.filename)) return { id: c.id, name: c.filename, skip: "no-heldFile" };
+      // task 024: awaiting (or resolved to "new session", which carries the file over separately —
+      // see prepareFilesForNewSession) the live-chat new-session/add-to-current decision.
+      if (excludedFromAutoPromoteChipIdsRef.current.has(c.id)) {
+        return { id: c.id, name: c.filename, skip: "awaiting-session-choice" };
+      }
       return { id: c.id, name: c.filename, skip: null as string | null };
     });
     const eligible = skipReasons.filter((r) => r.skip === null);
@@ -429,7 +509,147 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
     queueDocumentUploadedEvent,
     markEventFilePromotionFailed,
     onSessionFileUploaded,
+    // task 024: `excludedFromAutoPromoteChipIdsRef` is a ref (mutating it alone doesn't re-run this
+    // effect) — `pendingChoiceQueue` is the state proxy for "a choice was just resolved," so a chip
+    // un-excluded by `chooseAddToCurrentSession` is re-evaluated for eligibility on the same tick.
+    pendingChoiceQueue,
   ]);
+
+  /**
+   * task 024 (spec FR-08) — promote a carried-over file (held from the PRIOR session, chosen via
+   * "new session") into the NEW session. No chip exists for this file in the new session's own
+   * strip (SprkChat remounted with zero attachments), so this mirrors `promoteOne` above minus
+   * the chip-id bookkeeping, and settles the Event-path gesture via `fireForPromotedFile` — the
+   * SAME synthetic-batch seam `spaarkeai-compose-r2`'s manual Browse ingest ceremony uses for a
+   * file promoted outside the attachment strip.
+   */
+  const promoteCarryOverFile = React.useCallback(
+    async (targetSessionId: string, filename: string, file: File): Promise<void> => {
+      const documentsUrl = `${bffBaseUrl.replace(/\/$/, "")}/api/ai/chat/sessions/${encodeURIComponent(targetSessionId)}/documents`;
+      for (let attemptNumber = 1; attemptNumber <= MAX_PROMOTE_ATTEMPTS; attemptNumber++) {
+        try {
+          const form = new FormData();
+          form.append("file", file, file.name);
+          const response = await authenticatedFetch(documentsUrl, { method: "POST", body: form });
+          if (!response.ok) {
+            console.error(
+              "[ConversationPane] carry-over /documents promote failed — attempt:%d status:%d filename:%s",
+              attemptNumber,
+              response.status,
+              filename
+            );
+            const shouldRetry =
+              attemptNumber < MAX_PROMOTE_ATTEMPTS && (response.status >= 500 || response.status === 0);
+            if (shouldRetry) {
+              await new Promise((resolve) => setTimeout(resolve, PROMOTE_RETRY_DELAY_MS));
+              continue;
+            }
+            inject(
+              makeLocalAssistantMessage(
+                `I started a new session but couldn't attach "${filename}" — you can try attaching it again here.`
+              )
+            );
+            return;
+          }
+          const uploadJson = (await response.json()) as { documentId?: string };
+          const documentId =
+            typeof uploadJson?.documentId === "string" && uploadJson.documentId.length > 0
+              ? uploadJson.documentId
+              : null;
+          inject(makeFileStatusMessage(`Started a new session with "${filename}".`, "File attached"));
+          if (documentId !== null) {
+            onSessionFileUploaded?.({ sessionFileId: documentId, fileName: filename });
+            fireForPromotedFile(documentId);
+          }
+          return;
+        } catch (err) {
+          const errName = err instanceof Error ? err.name : "unknown";
+          const errKind = err instanceof TypeError ? "network-or-cors" : errName;
+          console.error(
+            "[ConversationPane] carry-over /documents promote threw — attempt:%d filename:%s errKind:%s",
+            attemptNumber,
+            filename,
+            errKind
+          );
+          const shouldRetry = attemptNumber < MAX_PROMOTE_ATTEMPTS && errKind === "network-or-cors";
+          if (shouldRetry) {
+            await new Promise((resolve) => setTimeout(resolve, PROMOTE_RETRY_DELAY_MS));
+            continue;
+          }
+          inject(
+            makeLocalAssistantMessage(
+              `I started a new session but couldn't attach "${filename}" — you can try attaching it again here.`
+            )
+          );
+          return;
+        }
+      }
+    },
+    [authenticatedFetch, bffBaseUrl, inject, onSessionFileUploaded, fireForPromotedFile]
+  );
+
+  // Fires once the session switch a "new session" choice triggered actually completes —
+  // `chatSessionId` becomes non-null and differs from the session that was current when the
+  // choice was made. `carryOverQueueRef`/`newSessionCarryoverArmedRef`/`carryoverFromSessionIdRef`
+  // deliberately are NOT cleared by `resetForSession` (the session-created reset fires as PART OF
+  // this switch) — see their declarations above.
+  React.useEffect(() => {
+    if (!newSessionCarryoverArmedRef.current) return;
+    if (chatSessionId === null) return;
+    if (chatSessionId === carryoverFromSessionIdRef.current) return;
+
+    const queue = carryOverQueueRef.current;
+    carryOverQueueRef.current = [];
+    newSessionCarryoverArmedRef.current = false;
+    carryoverFromSessionIdRef.current = null;
+    const targetSessionId = chatSessionId;
+
+    void (async () => {
+      // Sequential (never parallel) — mirrors the G-P1 manifest-race hardening in the main
+      // auto-promote effect above.
+      for (const item of queue) {
+        await promoteCarryOverFile(targetSessionId, item.filename, item.file);
+      }
+    })();
+  }, [chatSessionId, promoteCarryOverFile]);
+
+  /** task 024: "Add to current session" — resumes normal auto-promotion for the pending batch. */
+  const chooseAddToCurrentSession = React.useCallback((): void => {
+    for (const { id } of pendingChoiceQueueRef.current) {
+      excludedFromAutoPromoteChipIdsRef.current.delete(id);
+    }
+    pendingChoiceQueueRef.current = [];
+    setPendingChoiceQueue([]);
+  }, []);
+
+  /**
+   * task 024: "New session" — queues the pending batch's held files for carry-over and arms the
+   * session-switch detector. Does NOT start a new session itself (ConversationPane's existing
+   * `handleNewSession` seam does that, immediately after calling this) — no new client-side
+   * session or fork logic is introduced here.
+   */
+  const prepareFilesForNewSession = React.useCallback((): void => {
+    const pending = pendingChoiceQueueRef.current;
+    for (const { filename } of pending) {
+      const file = heldFilesRef.current.get(filename);
+      if (file) carryOverQueueRef.current.push({ filename, file });
+    }
+    if (pending.length > 0) {
+      newSessionCarryoverArmedRef.current = true;
+      carryoverFromSessionIdRef.current = chatSessionId;
+    }
+    pendingChoiceQueueRef.current = [];
+    setPendingChoiceQueue([]);
+  }, [chatSessionId]);
+
+  /** task 024: dismiss without deciding — no silent default; the file(s) stay attached, unpromoted. */
+  const dismissFileSessionChoice = React.useCallback((): void => {
+    console.info(
+      "[ConversationPane] file-session prompt dismissed without a decision — pending file(s) stay attached but unpromoted"
+    );
+    pendingChoiceQueueRef.current = [];
+    setPendingChoiceQueue([]);
+  }, []);
 
   /**
    * SprkChat `onBeforeSendMessage` — synchronous BEFORE-send hook. Tracks the
@@ -471,7 +691,15 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
     [noteOutboundMessage, uploadedFileCount, hasActiveWorkspaceDocument, attachmentChips, inject]
   );
 
-  /** Session-created reset (R5 task 020 / 036 semantics preserved). */
+  /**
+   * Session-created reset (R5 task 020 / 036 semantics preserved).
+   *
+   * task 024: `excludedFromAutoPromoteChipIdsRef` + `pendingChoiceQueue` are session-scoped (the
+   * new session's chip ids will differ) and ARE cleared here. `carryOverQueueRef` /
+   * `newSessionCarryoverArmedRef` / `carryoverFromSessionIdRef` are DELIBERATELY NOT cleared —
+   * this reset fires as PART OF the very session-switch the carry-over effect is waiting to
+   * detect; clearing them here would silently drop the "new session" file(s).
+   */
   const resetForSession = React.useCallback((): void => {
     emittedSummarizeInterjectionKeysRef.current.clear();
     dispatchedReadyIdsRef.current.clear();
@@ -480,11 +708,20 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
     heldFilesRef.current.clear();
     setPromotedChipIds(new Set());
     setIsPromoting(false);
+    excludedFromAutoPromoteChipIdsRef.current.clear();
+    pendingChoiceQueueRef.current = [];
+    setPendingChoiceQueue([]);
     if (readyConfirmationTimerRef.current !== null) {
       clearTimeout(readyConfirmationTimerRef.current);
       readyConfirmationTimerRef.current = null;
     }
   }, []);
+
+  // task 024: derive the render-facing PendingFileSessionChoice from the internal queue.
+  const pendingFileSessionChoice = React.useMemo<PendingFileSessionChoice | null>(
+    () => (pendingChoiceQueue.length > 0 ? { filenames: pendingChoiceQueue.map((c) => c.filename) } : null),
+    [pendingChoiceQueue]
+  );
 
   // Stable controller identity (Step 9.5 review) — changes only when the
   // underlying state values change.
@@ -501,6 +738,10 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
       handleAttachmentReady,
       handleBeforeSendMessage,
       resetForSession,
+      pendingFileSessionChoice,
+      chooseAddToCurrentSession,
+      prepareFilesForNewSession,
+      dismissFileSessionChoice,
     }),
     [
       attachmentChips,
@@ -513,6 +754,10 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
       handleAttachmentReady,
       handleBeforeSendMessage,
       resetForSession,
+      pendingFileSessionChoice,
+      chooseAddToCurrentSession,
+      prepareFilesForNewSession,
+      dismissFileSessionChoice,
     ]
   );
 }

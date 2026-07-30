@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Analysis hub widget — 3 cards + DataGrid + view-by-type</title>
+    <phase>3 Hub</phase>
+    <gate>deps 011,012,020 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Net-new frontend/fluent-ui widget surface (.tsx) composing DataGrid framework + registry; user-facing home/launcher; FULL per §8 (frontend/fluent-ui/pcf-adjacent + NEW-surface).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reuse-heavy composition of shipped canonical components (DataGrid, ViewSelector, WorkspaceWidgetRegistry); fully specified, not architectural — sonnet default.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct file surface (new widget under Spaarke.AI.Widgets) — runs parallel with 040 (wizard) and 051 (Dataverse forms) per W4; no .claude/ writes.</parallel-reason>
+    <deps>011,012,020</deps>
+    <tags>frontend, spaarkeai, widget, fluent-ui, datagrid</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build the Analysis hub widget: a workspace widget rendering a top row of three "Create new" work-type cards
+    (Agreement Review LIVE and actionable; Legal Research + Patent Application rendered "coming soon"/disabled with a
+    visible affordance) above a DataGrid of existing sprk_analysis records with a view dropdown that filters by work
+    type. This is the home/launcher surface for the Analysis platform. Register it via registerWorkspaceWidget so the
+    host can mount it as a workspace tab.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent UI v9, the Spaarke DataGrid framework (`&lt;DataGrid configId=… />` +
+    sprk_gridconfiguration), and the WorkspaceWidgetRegistry mount model. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    A new workspace widget exists and is registered via registerWorkspaceWidget that renders three work-type cards
+    (1 actionable Agreement Review, 2 disabled coming-soon), a DataGrid of sprk_analysis via configId +
+    sprk_gridconfiguration, and a view dropdown filtering the grid by work type; ui-tests pass in light and dark mode.
+  </goal>
+
+  <context>
+    <background>
+      FR-10: the hub is the platform home/launcher. Three cards ship this project — Agreement Review is live; Legal
+      Research + Patent Application render "coming soon"/disabled (per spec Open-Question resolution, §345). Research
+      and Patent enablement is data/later, so the disabled state is CLIENT-ONLY affordance now — no server gating this
+      project. If a later project server-gates a card, apply the ADR-032 Null-Object kill-switch then. The grid uses
+      the DataGrid framework (not a bespoke table): `&lt;DataGrid configId=… />` reads a sprk_gridconfiguration record;
+      the view dropdown is the framework's own view mechanism (ViewSelector) narrowing rows by work type.
+    </background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/AnalysisHubWidget.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/ViewSelector.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DataverseEntityViewWidget.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateMatterWizardWidget.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">Client sprk_analysis TypeScript type — the row/record shape the grid + cards bind to.</dependency>
+      <dependency task="012" status="pending">sprk_worktype + regarding field-set — the work-type value the cards/view filter on.</dependency>
+      <dependency task="020" status="pending">Session↔Analysis binding — the FK a reopened row (task 031) rehydrates against; hub lists the same records.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">SCOPE: this widget's Fluent v9 components. Use Fluent UI v9 tokens (no hard-coded colors); the cards + grid MUST render correctly in both light and dark themes (verify via ui-tests dark-mode check).</constraint>
+    <constraint source="ADR-012">SCOPE: the DataGrid + ViewSelector. Consume the shared-lib DataGrid framework via `&lt;DataGrid configId=… />`; do NOT hand-roll a bespoke table or fork the component.</constraint>
+    <constraint source="ADR-032">SCOPE: the two coming-soon cards ONLY. Disabled state is client-only affordance this project (no server gating). Do NOT add feature-flag/DI plumbing; IF a later project server-gates a card, that project applies the Null-Object kill-switch — not here.</constraint>
+    <constraint source="project">SCOPE: work-type filtering. The view dropdown filters sprk_analysis rows by sprk_worktype using the DataGrid framework's own view mechanism (sprk_gridconfiguration views / ViewSelector) — do NOT filter with a bespoke client array outside the framework.</constraint>
+    <constraint source="project">SCOPE: card set. Exactly three cards ship — Agreement Review actionable, Legal Research + Patent Application disabled-with-affordance. Do NOT add or remove cards.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-v9.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="DataGrid framework" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx">
+        Render `&lt;DataGrid configId="…" />`; the config record supplies columns + views. Use ViewSelector for the view-by-type dropdown.
+      </pattern>
+      <pattern name="Workspace widget registration" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts">
+        Register the widget via registerWorkspaceWidget(...) mirroring the existing entries (widget type string, component, metadata).
+      </pattern>
+      <pattern name="Dashboard/widget mount model" location="src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts">
+        Widget mounts as a workspace tab through the registry; follow the two-wrapper model in SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare RIGOR LEVEL: FULL with reason (frontend/fluent-ui NEW-surface). Study BUILD-A-NEW-WORKSPACE-WIDGET.md + an existing workspace widget (DataverseEntityViewWidget / CreateMatterWizardWidget).</step>
+    <step order="1">Author AnalysisHubWidget.tsx: top row of three work-type cards using Fluent v9 tokens — Agreement Review actionable (onClick launches create/hub flow), Legal Research + Patent Application disabled with a visible "coming soon" affordance.</step>
+    <step order="2">Below the cards, render `&lt;DataGrid configId="…" />` bound to sprk_analysis (the config record is the sprk_gridconfiguration authored for the hub), listing existing analyses.</step>
+    <step order="3">Add the view-by-type dropdown (ViewSelector / framework views) that filters the grid rows by sprk_worktype.</step>
+    <step order="4">Register the widget in register-workspace-widgets.ts via registerWorkspaceWidget, mirroring an existing entry.</step>
+    <step order="5">Add ui-tests (render 3 cards; grid lists analyses; view filters; ADR-021 dark-mode) and run them.</step>
+    <step order="6">Update TASK-INDEX.md: set 030 status to ✅.</step>
+    <step order="7">Document any deviation in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If no suitable sprk_gridconfiguration exists for sprk_analysis (schema/config gap), STOP and escalate per CLAUDE.md §6 rather than hand-rolling a bespoke grid that bypasses the DataGrid framework.</trigger>
+    <trigger>If the "coming soon" cards appear to require server gating to be correct, STOP — that is an ADR-032 §6.5 decision, not a silent client hack.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbors are existing workspace widgets in src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/ (DataverseEntityViewWidget.tsx, CreateMatterWizardWidget.tsx) registered in WorkspaceWidgetRegistry.ts:192.</existing>
+    <extension>No — those are single-purpose widgets with a different intent. The hub is a net-new home/launcher intent composing the shipped DataGrid + cards; it reuses (does not fork) DataGrid, ViewSelector, and the registry, so the new surface is one thin composing widget, not a new framework.</extension>
+    <cost-of-doing-nothing>Without the hub widget there is no surface to create-an-analysis-by-type, find existing analyses, or reopen one (task 031) — FR-10/FR-11 have no host. The three-pane surface can only be entered from a record or chat, never from a platform home.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Three cards, one actionable">
+      <steps><step>Mount AnalysisHubWidget.</step></steps>
+      <expected>Exactly three work-type cards render; Agreement Review is enabled/clickable; Legal Research + Patent Application are disabled and show a visible "coming soon" affordance.</expected>
+    </test>
+    <test name="Grid lists analyses">
+      <steps><step>Mount with seeded sprk_analysis records.</step></steps>
+      <expected>The DataGrid renders the existing analyses via configId (framework grid, not a bespoke table).</expected>
+    </test>
+    <test name="View-by-type filters">
+      <steps><step>Select a work type in the view dropdown.</step></steps>
+      <expected>The grid rows narrow to analyses of that sprk_worktype; clearing/selecting "all" restores the full set.</expected>
+    </test>
+    <test name="ADR-021 dark-mode">
+      <steps><step>Render the widget under the dark Fluent theme.</step></steps>
+      <expected>Cards + grid + dropdown render with correct contrast using Fluent v9 tokens; no hard-coded colors, no unreadable/invisible elements.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/test the shared lib + widget (build:prod for production output).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/AnalysisHubWidget.tsx</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts (registration entry)</output>
+    <output type="test">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/__tests__/AnalysisHubWidget.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the hub widget mounts, when it renders, then exactly three work-type cards appear — Agreement Review actionable, Legal Research + Patent Application disabled-with-affordance.</criterion>
+    <criterion testable="true">Given seeded sprk_analysis records, when the hub renders, then the DataGrid lists them via `&lt;DataGrid configId=… />` (framework grid + sprk_gridconfiguration), not a bespoke table.</criterion>
+    <criterion testable="true">Given the hub grid, when a work type is chosen in the view dropdown, then the grid filters to that sprk_worktype and restores on clear.</criterion>
+    <criterion testable="true">The widget is registered via registerWorkspaceWidget and mountable as a workspace tab.</criterion>
+    <criterion testable="true">Negative: clicking a disabled coming-soon card performs no navigation/launch and surfaces no error.</criterion>
+    <criterion testable="true">ADR-021: the widget renders correctly in both light and dark themes (dark-mode ui-test passes).</criterion>
+    <criterion testable="true">All unit/ui tests pass; shared-lib build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-10 (§122-125) + Open-Question resolution (§345, three cards; Research/Patent coming-soon). Reuse-first per
+    CLAUDE.md §11 — compose DataGrid + ViewSelector + registry; do not fork. Card actionable-click wiring to the create
+    flow is provided by the wizard (task 040) and entry routing (task 050); this task ships the hub surface + cards.
+
+    COMPLETED (2026-07-29). Built `AnalysisHubWidget.tsx` composing (not forking): `ActionCard` for the 3 cards
+    (Agreement Review actionable + Fluent `Badge` "Coming soon" affordance on the 2 disabled cards) and the EXISTING
+    `DataverseEntityViewWidget` (which itself renders `&lt;DataGrid configId=… />`) for the Analysis grid — the
+    view-by-type dropdown is the DataGrid framework's own `ViewSelector`, populated by sibling saved queries once the
+    hub's `sprk_gridconfiguration` row is seeded (deployment note below). Agreement Review dispatches `widget_load`
+    opening `create-analysis-wizard` (task 040's `CreateAnalysisWizardWidget`) — deep service wiring
+    (dataService/authenticatedFetch/navigationService/searchUsers) is explicitly task 050's scope, not this task's
+    (documented deviation). Registered both `analysis-hub` and `create-analysis-wizard` in
+    `register-workspace-widgets.ts` (the latter was built by task 040 but deliberately left unregistered per the
+    040/030 handoff) and added both to the package barrel (`index.ts`).
+
+    Deviations: `notes/task-030-deviations.md`. Grid-config seed requirement (placeholder GUID
+    `00000000-0000-0000-0000-000000000000`, 4 sibling saved queries needed): `notes/hub-grid-config-deployment.md`
+    (handed to task 071 deploy).
+
+    Gates: code-review (clean; 1 test-coverage-gap Warning documented — grid data-rendering is mock-boundary tested,
+    matching precedent since no DataverseEntityViewWidget/DataGrid+Xrm test harness exists in this package yet) +
+    adr-check (0 violations — ADR-021/012/032/022 all compliant) — both PASS. Builds: shared-lib `tsc --noEmit` clean;
+    package jest 675/675 pass except 1 PRE-EXISTING unrelated failure (`communications-list` displayName drift from
+    commit `0bf1bb8ac`, not touched by this task); SpaarkeAi jest 701/701 pass; SpaarkeAi `tsc --noEmit` has
+    pre-existing unrelated errors (LegalWorkspace, missing `@hello-pangea/dnd`/`@spaarke/daily-briefing-components`
+    etc.) with zero hits for AnalysisHubWidget/CreateAnalysisWizardWidget/register-workspace-widgets.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL: code-review + adr-check).</protocol>
+  </execution>
+</task>

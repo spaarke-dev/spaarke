@@ -87,79 +87,6 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     // for the full deletion-scope inventory.
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<AnalysisStreamChunk> ContinueAnalysisAsync(
-        Guid analysisId,
-        string userMessage,
-        HttpContext httpContext,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("Continuing analysis {AnalysisId}", analysisId);
-
-        // Get analysis from Redis cache, or reload from Dataverse if cache miss
-        var cachedEntry = await _documentLoader.GetCachedAnalysisAsync(analysisId);
-        AnalysisInternalModel analysis;
-        if (cachedEntry == null)
-        {
-            _logger.LogInformation("Analysis {AnalysisId} not in cache, reloading from Dataverse", analysisId);
-            analysis = await _documentLoader.ReloadAnalysisFromDataverseAsync(analysisId, httpContext, cancellationToken);
-            await _documentLoader.CacheAnalysisAsync(analysisId, analysis);
-        }
-        else
-        {
-            // Rebuild full model from Dataverse using cache hint for document text
-            analysis = await _documentLoader.ReloadAnalysisFromDataverseAsync(analysisId, httpContext, cancellationToken);
-        }
-
-        // Build full prompt with document context via context builder service
-        var fullPrompt = _contextBuilder.BuildContinuationPromptWithContext(
-            analysis.SystemPrompt,
-            analysis.DocumentText,
-            analysis.ChatHistory,
-            userMessage,
-            analysis.WorkingDocument ?? string.Empty);
-
-        // Update chat history with user message
-        var chatHistory = analysis.ChatHistory.ToList();
-        chatHistory.Add(new ChatMessageModel("user", userMessage, DateTime.UtcNow));
-
-        // Stream AI completion
-        var outputBuilder = new StringBuilder();
-        var inputTokens = EstimateTokens(fullPrompt);
-
-        await foreach (var token in _openAiClient.StreamCompletionAsync(
-            fullPrompt,
-            cancellationToken: cancellationToken))
-        {
-            outputBuilder.Append(token);
-            yield return AnalysisStreamChunk.TextChunk(token);
-        }
-
-        // Save assistant response
-        var response = outputBuilder.ToString();
-        var outputTokens = EstimateTokens(response);
-        chatHistory.Add(new ChatMessageModel("assistant", response, DateTime.UtcNow));
-
-        // Update analysis in store (preserve DocumentText and SystemPrompt)
-        analysis = analysis with
-        {
-            WorkingDocument = response,
-            ChatHistory = chatHistory.ToArray(),
-            InputTokens = analysis.InputTokens + inputTokens,
-            OutputTokens = analysis.OutputTokens + outputTokens
-        };
-        await _documentLoader.CacheAnalysisAsync(analysisId, analysis);
-
-        await _resultPersistence.UpdateWorkingDocumentAsync(analysisId, response, cancellationToken);
-
-        var chatHistoryJson = JsonSerializer.Serialize(chatHistory);
-        await _resultPersistence.UpdateChatHistoryAsync(analysisId, chatHistoryJson, cancellationToken);
-
-        _logger.LogInformation("Analysis continuation completed for {AnalysisId}", analysisId);
-
-        yield return AnalysisStreamChunk.Completed(analysisId, new TokenUsage(inputTokens, outputTokens));
-    }
-
-    /// <inheritdoc />
     public async Task<SavedDocumentResult> SaveWorkingDocumentAsync(
         Guid analysisId,
         AnalysisSaveRequest request,
@@ -369,6 +296,10 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             Status = analysis.Status,
             WorkingDocument = analysis.WorkingDocument,
             FinalOutput = analysis.FinalOutput,
+            // task 064 (ADR-040 Path A): analysis.ChatHistory is always empty now — the loader no
+            // longer reads sprk_chathistory (Dataverse is anchor + outputs only; Cosmos is the
+            // transcript store-of-record, read via GET /api/ai/chat/sessions/by-analysis/{id}).
+            // The field stays on the wire contract for back-compat but no longer carries data.
             ChatHistory = analysis.ChatHistory
                 .Select(m => new ChatMessageInfo(m.Role, m.Content, m.Timestamp))
                 .ToArray(),
@@ -378,106 +309,6 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             StartedOn = analysis.StartedOn,
             CompletedOn = analysis.CompletedOn
         };
-    }
-
-    /// <inheritdoc />
-    public async Task<AnalysisResumeResult> ResumeAnalysisAsync(
-        Guid analysisId,
-        AnalysisResumeRequest request,
-        HttpContext httpContext,
-        CancellationToken cancellationToken)
-    {
-        _logger.LogInformation(
-            "Resuming analysis {AnalysisId} for document {DocumentId}, IncludeChatHistory={IncludeChatHistory}",
-            analysisId, request.DocumentId, request.IncludeChatHistory);
-
-        try
-        {
-            // Parse chat history if provided and requested
-            var chatHistory = Array.Empty<ChatMessageModel>();
-            var chatMessagesRestored = 0;
-
-            if (request.IncludeChatHistory && !string.IsNullOrWhiteSpace(request.ChatHistory))
-            {
-                chatHistory = _documentLoader.DeserializeChatHistory(request.ChatHistory, analysisId);
-                chatMessagesRestored = chatHistory.Length;
-            }
-
-            // Extract document text for context in chat continuations
-            string? documentText = null;
-            string? systemPrompt = null;
-
-            try
-            {
-                var document = await _documentLoader.GetDocumentAsync(
-                    request.DocumentId.ToString(), cancellationToken);
-
-                if (document != null)
-                {
-                    _logger.LogDebug("Extracting document text for resumed analysis {AnalysisId}", analysisId);
-                    documentText = await _documentLoader.ExtractDocumentTextAsync(document, httpContext, cancellationToken);
-
-                    // Build a default system prompt for continuations
-                    systemPrompt = AnalysisDocumentLoader.BuildDefaultSystemPrompt();
-
-                    _logger.LogInformation(
-                        "Extracted {CharCount} characters of document text for analysis {AnalysisId}",
-                        documentText?.Length ?? 0, analysisId);
-                }
-                else
-                {
-                    _logger.LogWarning("Document {DocumentId} not found in Dataverse", request.DocumentId);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "Failed to extract document text for resumed analysis {AnalysisId}. Continuing without document context.",
-                    analysisId);
-                // Continue without document text rather than failing the resume
-            }
-
-            // Create or update in-memory session with document context
-            var analysis = new AnalysisInternalModel
-            {
-                Id = analysisId,
-                DocumentId = request.DocumentId,
-                DocumentName = request.DocumentName ?? "Unknown",
-                ActionId = Guid.Empty, // Not needed for resumed session
-                Status = "InProgress",
-                DocumentText = documentText,
-                SystemPrompt = systemPrompt,
-                WorkingDocument = request.WorkingDocument,
-                ChatHistory = chatHistory,
-                StartedOn = DateTime.UtcNow
-            };
-
-            await _documentLoader.CacheAnalysisAsync(analysisId, analysis);
-
-            _logger.LogInformation(
-                "Analysis {AnalysisId} resumed successfully: {ChatMessages} messages, WorkingDoc={HasWorkingDoc}, HasDocText={HasDocText}",
-                analysisId, chatMessagesRestored, !string.IsNullOrWhiteSpace(request.WorkingDocument),
-                !string.IsNullOrWhiteSpace(documentText));
-
-            return new AnalysisResumeResult
-            {
-                AnalysisId = analysisId,
-                Success = true,
-                ChatMessagesRestored = chatMessagesRestored,
-                WorkingDocumentRestored = !string.IsNullOrWhiteSpace(request.WorkingDocument)
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to resume analysis {AnalysisId}", analysisId);
-
-            return new AnalysisResumeResult
-            {
-                AnalysisId = analysisId,
-                Success = false,
-                Error = ex.Message
-            };
-        }
     }
 
     // === Private Helper Methods ===
@@ -499,12 +330,6 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     private static string BuildFullPrompt(string systemPrompt, string userPrompt)
     {
         return $"{systemPrompt}\n\n---\n\n{userPrompt}";
-    }
-
-    private static int EstimateTokens(string text)
-    {
-        // Rough estimation: ~4 characters per token
-        return (int)Math.Ceiling(text.Length / 4.0);
     }
 
     /// <inheritdoc />

@@ -101,6 +101,7 @@ export function buildLaunchFromSeed(
         html: seed.draft.html,
         fileName: seed.draft.fileName ?? undefined,
       },
+      activeWorkType: seed.activeWorkType,
     };
   }
 
@@ -121,6 +122,7 @@ export function buildLaunchFromSeed(
         sessionFileId: seed.upload.sessionFileId,
         fileName: seed.upload.fileName ?? undefined,
       },
+      activeWorkType: seed.activeWorkType,
     };
   }
 
@@ -134,6 +136,7 @@ export function buildLaunchFromSeed(
         fileName: seed.fileName ?? undefined,
       },
       driveId: seed.speDriveId ?? "",
+      activeWorkType: seed.activeWorkType,
     };
   }
 
@@ -205,6 +208,9 @@ const ComposeDirectMount: React.FC<ComposeDirectMountProps> = ({ workspaceTabId,
     // tab-scopes its active-document registration and only the ACTIVE tab claims the session doc.
     workspaceTabId,
     isActiveTab,
+    // ai-advanced-capabilities-analysis-hub-r1 task 041 (FR-13): forward the launch's active
+    // work type so getToolsForSurface scopes the inline AI toolbar (e.g. Agreement Review).
+    activeWorkType: composeLaunch?.activeWorkType,
   });
 };
 

@@ -63,7 +63,7 @@ public class HandoffUrlBuilderTests
 
     #endregion
 
-    #region BuildAnalysisWorkspaceUrl Tests
+    #region BuildAnalysisWorkspaceUrl Tests (retirement task 060: repointed the legacy Analysis Workspace launcher deep-link to the sprk_spaarkeai openSpaarkeAi shape)
 
     [Fact]
     public void BuildAnalysisWorkspaceUrl_WithRequiredParams_ReturnsCorrectUrl()
@@ -73,16 +73,24 @@ public class HandoffUrlBuilderTests
 
         var url = _builder.BuildAnalysisWorkspaceUrl(analysisId, sourceFileId);
 
-        url.Should().Contain("webresourceName=sprk_AnalysisWorkspaceLauncher");
+        url.Should().Contain("webresourceName=sprk_spaarkeai");
         var data = ExtractDecodedData(url);
         data.Should().Contain("analysisId=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-        data.Should().Contain("sourceFileId=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        // Non-empty sourceFileId threads as entityLogicalName/entityId (the openSpaarkeAi
+        // "entity form" context channel) rather than a bespoke sourceFileId param, since
+        // the sprk_spaarkeai surface has no sourceFileId reader.
+        data.Should().Contain("entityLogicalName=sprk_document");
+        data.Should().Contain("entityId=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        data.Should().NotContain("sourceFileId");
         data.Should().NotContain("playbookId");
     }
 
     [Fact]
-    public void BuildAnalysisWorkspaceUrl_WithPlaybookId_IncludesPlaybookParam()
+    public void BuildAnalysisWorkspaceUrl_WithPlaybookId_DropsPlaybookParam()
     {
+        // playbookId is accepted for call-site compatibility (three existing callers pass it)
+        // but is NOT part of the openSpaarkeAi/SpaarkeAiLaunchParams contract, so it must not
+        // leak into the emitted URL — main.tsx has no reader for it.
         var analysisId = Guid.NewGuid();
         var sourceFileId = Guid.NewGuid();
         var playbookId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
@@ -90,7 +98,8 @@ public class HandoffUrlBuilderTests
         var url = _builder.BuildAnalysisWorkspaceUrl(analysisId, sourceFileId, playbookId);
 
         var data = ExtractDecodedData(url);
-        data.Should().Contain("playbookId=cccccccc-cccc-cccc-cccc-cccccccccccc");
+        data.Should().NotContain("playbookId");
+        data.Should().NotContain("cccccccc-cccc-cccc-cccc-cccccccccccc");
     }
 
     [Fact]
@@ -100,6 +109,36 @@ public class HandoffUrlBuilderTests
 
         var data = ExtractDecodedData(url);
         data.Should().NotContain("playbookId");
+    }
+
+    [Fact]
+    public void BuildAnalysisWorkspaceUrl_WithEmptySourceFileId_OmitsEntityContext()
+    {
+        // AgentErrorHandler passes Guid.Empty when no document is known (playbook-timeout
+        // path) — the degraded link must still carry analysisId and must not fabricate an
+        // entity context from an empty GUID.
+        var analysisId = Guid.NewGuid();
+
+        var url = _builder.BuildAnalysisWorkspaceUrl(analysisId, Guid.Empty);
+
+        var data = ExtractDecodedData(url);
+        data.Should().Contain($"analysisId={analysisId}");
+        data.Should().NotContain("entityLogicalName");
+        data.Should().NotContain("entityId");
+    }
+
+    [Fact]
+    public void BuildAnalysisWorkspaceUrl_AlwaysCarriesAnalysisId()
+    {
+        // Negative acceptance criterion: no caller silently drops analysisId context — every
+        // deep-link built for an existing analysis carries analysisId in the sprk_spaarkeai shape.
+        var analysisId = Guid.NewGuid();
+
+        var url = _builder.BuildAnalysisWorkspaceUrl(analysisId, Guid.NewGuid(), Guid.NewGuid());
+
+        url.Should().Contain("webresourceName=sprk_spaarkeai");
+        var data = ExtractDecodedData(url);
+        data.Should().Contain($"analysisId={analysisId}");
     }
 
     #endregion

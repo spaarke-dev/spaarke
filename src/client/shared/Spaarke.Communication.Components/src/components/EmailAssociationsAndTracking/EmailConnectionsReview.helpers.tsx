@@ -65,5 +65,7 @@ export const DEFAULT_LINK_CATALOG: RecordTypeCatalogEntry[] = TODO_REGARDING_CAT
 }));
 
 export function fieldFor(entityType: string): string {
-  return TODO_REGARDING_CATALOG.find(c => c.entityType === entityType)?.lookupAttribute ?? `sprk_regarding_${entityType}`;
+  return (
+    TODO_REGARDING_CATALOG.find(c => c.entityType === entityType)?.lookupAttribute ?? `sprk_regarding_${entityType}`
+  );
 }

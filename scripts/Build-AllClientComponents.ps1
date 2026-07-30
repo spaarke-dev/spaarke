@@ -23,7 +23,7 @@
 
 .PARAMETER Component
     Build only specific components by name. Accepts an array of component names.
-    Names match directory names (e.g., "LegalWorkspace", "AnalysisWorkspace", "PCF").
+    Names match directory names (e.g., "LegalWorkspace", "SemanticSearch", "PCF").
     Special names: "SharedLibs", "PCF", "ExternalSPA".
 
 .EXAMPLE
@@ -121,7 +121,6 @@ $ViteSolutions = @(
 
 # Webpack code pages (src/client/code-pages/)
 $WebpackCodePages = @(
-    "AnalysisWorkspace"
     "DocumentRelationshipViewer"
     "PlaybookBuilder"
     "SemanticSearch"

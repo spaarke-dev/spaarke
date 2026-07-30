@@ -29,7 +29,7 @@ import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, 
 import { WelcomeStartCards } from "./WelcomeStartCards";
 import { QuickStartModal } from "./QuickStartModal";
 import { MemoryDialog } from "./MemoryDialog";
-import { useAiSession, useDispatchPaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
+import { useAiSession, useDispatchPaneEvent, usePaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
 import type {
   IChatMessage,
@@ -54,6 +54,7 @@ import { CommandHelpPanel } from "./CommandHelpPanel";
 import { useInjectionQueue } from "./useInjectionQueue";
 import { useEventBatch } from "./useEventBatch";
 import { useAttachments } from "./useAttachments";
+import { FileAttachSessionPrompt } from "./FileAttachSessionPrompt";
 import { useConsumerChips } from "./useConsumerChips";
 // spaarke-notification-spine-r1 task 051 (FR-16): the proactive-suggestion renderer branch —
 // a SIBLING of the Click-path chips, subscribing to the Layer-C spine's `kind=suggestion`
@@ -91,7 +92,7 @@ import { formatComposeActionResultMarkdown, extractComposeEditExplanation } from
 import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage, buildComposeAttachedToAssistantMessage, makeFileStatusMessage } from "./summarizeRouting";
 import { routeReviseIntent } from "./composeReviseRouting";
 import { detectDraftDocumentIntent } from "./composeDraftRouting";
-import { LOCAL_CHIP, buildReviseInComposeChip, buildNdaReviewChip } from "./localActionChips";
+import { LOCAL_CHIP, buildReviseInComposeChip, buildNdaReviewChip, getDocumentReviewCapability } from "./localActionChips";
 import { buildChipPreference, recordChipUsage } from "./chipPreference";
 import {
   detectReviseThisDocumentIntent,
@@ -327,10 +328,18 @@ export function ConversationPane(): React.JSX.Element {
   // inert on a mounted-but-idle pane).
   const [draftCapabilityNeeded, setDraftCapabilityNeeded] = React.useState<boolean>(false);
   // task 022 (NDA review card): the SAME deferred capability-discovery seam resolves the
-  // `nda-review` bindingId — enabled the moment classification flags an NDA upload (below),
-  // well before the user reads the card and clicks it. Zero hardcoded GUID, zero new BFF read
-  // (reuses GET /api/ai/capabilities — the same closed-catalog projection revise/draft use).
+  // classified document type's review-capability bindingId — enabled the moment classification
+  // flags a reviewable upload (below), well before the user reads the card and clicks it. Zero
+  // hardcoded GUID, zero new BFF read (reuses GET /api/ai/capabilities — the same closed-catalog
+  // projection revise/draft use).
   const [ndaReviewCapabilityNeeded, setNdaReviewCapabilityNeeded] = React.useState<boolean>(false);
+  // task 064 (ai-advanced-capabilities-analysis-hub-r1, spec §13.5 / FR-22): the consumerType to
+  // resolve a bindingId for, set by `handleNdaClassified` from the matched
+  // `DocumentReviewCapability` (registry lookup by classified docType — generalizes the prior
+  // hardcoded "nda-review" consumerType so a different work-type's clause-review capability can
+  // be wired in later via a one-line registry addition, not a code fork). Declared here (before
+  // the `ndaReviewBindingId` memo below) so the memo can depend on it.
+  const [ndaReviewConsumerType, setNdaReviewConsumerType] = React.useState<string>("nda-review");
   const { capabilities: launchableCapabilities } = useCapabilityDiscovery({
     bffBaseUrl,
     authenticatedFetch,
@@ -362,12 +371,16 @@ export function ConversationPane(): React.JSX.Element {
     [launchableCapabilities]
   );
 
-  // task 022 — the `nda-review` Binding id, resolved from the SAME closed capability catalog
-  // (ADR-039: bindingId only from discovery, never invented/hardcoded — portable across
-  // environments exactly like reviseBindingId/draftBindingId/summarizeBindingId above).
+  // task 022 — the classified document type's review-capability Binding id, resolved from the
+  // SAME closed capability catalog (ADR-039: bindingId only from discovery, never
+  // invented/hardcoded — portable across environments exactly like
+  // reviseBindingId/draftBindingId/summarizeBindingId above). task 064: consumerType is now
+  // `ndaReviewConsumerType` (set from the matched `DocumentReviewCapability` by classified
+  // docType) rather than a hardcoded "nda-review" literal — defaults to "nda-review" so behavior
+  // for the NDA docType is unchanged.
   const ndaReviewBindingId = React.useMemo<string | null>(
-    () => launchableCapabilities.find((c) => c.consumerType === "nda-review")?.bindingId ?? null,
-    [launchableCapabilities]
+    () => launchableCapabilities.find((c) => c.consumerType === ndaReviewConsumerType)?.bindingId ?? null,
+    [launchableCapabilities, ndaReviewConsumerType]
   );
 
   // Wave 4 — the natural-language revise flow's client state:
@@ -413,9 +426,15 @@ export function ConversationPane(): React.JSX.Element {
   // (chat-classify / CLS-CHAT@v1) already-produced `docType` output — never a second
   // classification mechanism (ADR-039). Cleared on click-dispatch, dismiss, or a fresh
   // session (handleSessionCreated) — never left stale across sessions.
+  //
+  // task 064 (ai-advanced-capabilities-analysis-hub-r1, spec §13.5 / FR-22): widened with
+  // `cardLabel` so the Suggested-Next-Steps card text is driven by the matched
+  // `DocumentReviewCapability` (localActionChips.ts) rather than a hardcoded "Review an NDA"
+  // string — generalizes the docType gate to work-type without changing NDA's behavior.
   const [ndaReviewFile, setNdaReviewFile] = React.useState<{
     fileId: string;
     fileName: string;
+    cardLabel: string;
   } | null>(null);
   // ai-advanced-capabilities-nda-r1 follow-up (UAT 2026-07-26): render-free mirror of ndaReviewFile so
   // the stable-`[]`-deps `getAppendedLocalChips` callback (below) can read the current NDA state when
@@ -423,17 +442,24 @@ export function ConversationPane(): React.JSX.Element {
   // every clear site) and set synchronously in handleNdaClassified so it is already populated if the
   // classification and the chips frame land in the same tick (the pipeline order — promote → classify →
   // chips — normally sets it a frame earlier, but this makes the append race-free either way).
-  const ndaReviewFileRef = React.useRef<{ fileId: string; fileName: string } | null>(null);
+  const ndaReviewFileRef = React.useRef<{ fileId: string; fileName: string; cardLabel: string } | null>(null);
   ndaReviewFileRef.current = ndaReviewFile;
   const handleNdaClassified = React.useCallback((data: EventClassificationData): void => {
-    const docType = typeof data.docType === "string" ? data.docType.trim().toLowerCase() : "";
-    // Negative case (task 022 acceptance criterion 3): any docType other than "nda" — including
-    // an absent/unclassified result — leaves ndaReviewFile untouched, so no card renders.
-    if (docType !== "nda" || !data.fileId) return;
+    // task 064: the classified docType is resolved against the DOCUMENT_REVIEW_CAPABILITIES
+    // registry (localActionChips.ts) instead of a hardcoded `docType !== "nda"` comparison. The
+    // registry's only entry today is "nda" (unchanged behavior); a second work-type's
+    // clause-review capability is a one-line registry addition once its Action/Binding exists —
+    // no further code change here or in the discovery/dispatch below.
+    const capability = getDocumentReviewCapability(data.docType);
+    // Negative case (task 022 acceptance criterion 3): any docType with no registered review
+    // capability — including an absent/unclassified result — leaves ndaReviewFile untouched, so
+    // no card renders.
+    if (!capability || !data.fileId) return;
     // Kick off the deferred capability-discovery fetch NOW (well before the user reads the
     // card and clicks it) so ndaReviewBindingId is resolved by dispatch time.
     setNdaReviewCapabilityNeeded(true);
-    const file = { fileId: data.fileId, fileName: data.fileName ?? "the document" };
+    setNdaReviewConsumerType(capability.consumerType);
+    const file = { fileId: data.fileId, fileName: data.fileName ?? "the document", cardLabel: capability.cardLabel };
     ndaReviewFileRef.current = file; // same-tick guarantee for getAppendedLocalChips (see ref note above)
     setNdaReviewFile(file);
   }, []);
@@ -449,10 +475,20 @@ export function ConversationPane(): React.JSX.Element {
     onClassified: handleNdaClassified,
   });
 
+  // CHAT-4 (UAT 2026-07-19): track the live transcript length so the get-started cards render
+  // whenever the transcript is EMPTY — including a restored-but-empty session (where the old
+  // `chatSessionId === null` gate was false). Kept in sync via SprkChat's onMessagesChange.
+  //
+  // task 024 (spec FR-08): declared here (moved up from its original spot further below) so
+  // `hasPriorMessages` is available for the `useAttachments` call immediately below — a file
+  // attach mid-chat needs to know, AT ATTACH TIME, whether the chat already has messages.
+  const [chatMessageCount, setChatMessageCount] = React.useState(0);
+
   const attachments = useAttachments({
     bffBaseUrl,
     chatSessionId,
     hasActiveWorkspaceDocument: entityContext !== null,
+    hasPriorMessages: chatMessageCount > 0,
     authenticatedFetch,
     dispatch,
     inject: injection.inject,
@@ -504,6 +540,10 @@ export function ConversationPane(): React.JSX.Element {
   // (the playbook library is retired). Owned here so the `openLibraryModalRef` the chips
   // reach through (below) points at this modal instead of the library modal.
   const [quickStartOpen, setQuickStartOpen] = React.useState(false);
+  // ai-advanced-capabilities-analysis-hub-r1: which Quick Start tab opens. The
+  // Assistant menu / chips "More…" open 'create'; the Analysis grid `+ New`
+  // (via the `open_quick_start` intent below) opens 'analysis'.
+  const [quickStartTab, setQuickStartTab] = React.useState<"create" | "analysis">("create");
   // UAT 2026-07-21 (#8): "What the Assistant remembers about you" review/delete dialog (host-owned so
   // it has authenticatedFetch + bffBaseUrl), opened from the ⋮ Assistant Tools "Memory" entry.
   const [memoryOpen, setMemoryOpen] = React.useState(false);
@@ -544,7 +584,9 @@ export function ConversationPane(): React.JSX.Element {
     // notification card. Both read refs so this stays a stable `[]`-deps callback.
     getAppendedLocalChips: React.useCallback(
       () => [
-        ...(ndaReviewFileRef.current ? [buildNdaReviewChip()] : []),
+        // task 064: card label comes from the matched DocumentReviewCapability (defaults to
+        // "Review an NDA" for the NDA docType — unchanged behavior).
+        ...(ndaReviewFileRef.current ? [buildNdaReviewChip(ndaReviewFileRef.current.cardLabel)] : []),
         ...(promotedFileIdsByNameRef.current.size > 0 ? [buildReviseInComposeChip()] : []),
       ],
       []
@@ -1091,15 +1133,17 @@ export function ConversationPane(): React.JSX.Element {
   // wire shape the server's own chip transitions already use — EventRulesService.cs).
   const handleReviewNda = React.useCallback((): void => {
     if (!ndaReviewFile) return;
-    const { fileId, fileName } = ndaReviewFile;
+    const { fileId, fileName, cardLabel } = ndaReviewFile;
     mountFileInCompose(fileId, fileName);
     if (ndaReviewBindingId) {
       chips.dispatchBinding(ndaReviewBindingId, { slots: { fileIds: [fileId] } });
     } else {
       // Capability discovery hasn't resolved yet (or the catalog is unreachable) — the file still
       // opens in Compose above; tell the user the review itself didn't start (never a silent drop).
+      // task 064: message derives from the matched capability's cardLabel instead of a hardcoded
+      // "NDA review" string, so it reads correctly for any registered document-review type.
       injection.enqueue(
-        makeLocalAssistantMessage("Sorry — NDA review isn't available right now. Please try again.")
+        makeLocalAssistantMessage(`Sorry — "${cardLabel}" isn't available right now. Please try again.`)
       );
     }
     setNdaReviewFile(null);
@@ -1531,7 +1575,10 @@ export function ConversationPane(): React.JSX.Element {
   // specific candidate-confidence flow (mirrors useCommandRouting's
   // `openLibraryModal([])` call for the same reason).
   // P1-8: the SNS/post-upload "More…" card opens Quick Start (was the retired playbook library).
-  openLibraryModalRef.current = () => setQuickStartOpen(true);
+  openLibraryModalRef.current = () => {
+    setQuickStartTab("create");
+    setQuickStartOpen(true);
+  };
   const commands = useCommandRouting({
     bffBaseUrl,
     authenticatedFetch,
@@ -1772,6 +1819,9 @@ export function ConversationPane(): React.JSX.Element {
       clearExecutionTraceBuffer();
       // task 022: a fresh session has no pending "Review an NDA" card.
       setNdaReviewFile(null);
+      // task 064: reset the resolved consumerType to the default alongside the file — keeps the
+      // two pieces of state consistent even though only `ndaReviewFile` gates behavior.
+      setNdaReviewConsumerType("nda-review");
     },
     [setChatSessionId, clearRefinementPrompts, resetAttachments, resetChips, resetEventBatch]
   );
@@ -1806,6 +1856,26 @@ export function ConversationPane(): React.JSX.Element {
     },
     [setChatSessionId, startNewSession]
   );
+
+  // ai-advanced-capabilities-analysis-hub-r1 task 031 (FR-11): a DIFFERENT pane (the
+  // AnalysisHubWidget grid's row-open handler) asks this pane to adopt an EXISTING session —
+  // e.g. reopening an Analysis from the hub grid. Reuses the IDENTICAL mechanism the History
+  // menu already uses (`handleSelectHistorySession`): adopt the id + remount SprkChat, whose
+  // own `resumeSession()`/`loadHistory()` mount-effect restores the transcript (TTL-safe —
+  // `ChatSessionManager.GetSessionAsync` already falls back Redis→Cosmos→Dataverse per the
+  // task-025 hardening). No new restore mechanism; additive `conversation.session_switch`
+  // discriminant (ADR-030).
+  usePaneEvent("conversation", (event) => {
+    if (event.type === "session_switch" && event.sessionId) {
+      handleSelectHistorySession(event.sessionId);
+    } else if (event.type === "open_quick_start") {
+      // ai-advanced-capabilities-analysis-hub-r1: the Analysis grid `+ New`
+      // asks us to open the ONE Quick Start modal on a given tab. Default to
+      // 'create' if unspecified.
+      setQuickStartTab(event.quickStartTab ?? "create");
+      setQuickStartOpen(true);
+    }
+  });
 
   // ── OutcomeCard next-step chips (F-4, e2e-completion-audit 2026-07-10) ──────
   // A completed side-effect's OutcomeCard renders DECLARED next-step chips
@@ -1876,11 +1946,6 @@ export function ConversationPane(): React.JSX.Element {
   const [profileNudgeDismissed, setProfileNudgeDismissed] = React.useState(false);
   const showProfileNudge =
     myAssistant.available && myAssistant.needsProfile && !profileNudgeDismissed;
-
-  // CHAT-4 (UAT 2026-07-19): track the live transcript length so the get-started cards render
-  // whenever the transcript is EMPTY — including a restored-but-empty session (where the old
-  // `chatSessionId === null` gate was false). Kept in sync via SprkChat's onMessagesChange.
-  const [chatMessageCount, setChatMessageCount] = React.useState(0);
 
   // ── Auth loading guard (gate on isAuthenticated — never a token snapshot) ──
   // NOTE (Rules of Hooks): every React.use* call MUST appear ABOVE this early return — see the
@@ -1960,7 +2025,10 @@ export function ConversationPane(): React.JSX.Element {
               // file context + email handler + the R7-2 next-step injection, and — because opening it
               // never remounts SprkChat — the follow-up suggestion pills survive (the dual-modal path
               // was the one that lost them). AssistantToolMenu delegates to this prop when supplied.
-              onQuickStart={() => setQuickStartOpen(true)}
+              onQuickStart={() => {
+                setQuickStartTab("create");
+                setQuickStartOpen(true);
+              }}
               onMyAssistant={myAssistant.openDialog}
               highlightMyAssistant={myAssistant.needsProfile}
               // #8 (UAT 2026-07-21): the "Memory" entry opens the remembers-about-you review dialog.
@@ -2017,7 +2085,10 @@ export function ConversationPane(): React.JSX.Element {
             notification slot (it read as "hidden" above the fold) and INTO the Suggested-Next-Steps
             strip as an in-line card, alongside "Summarize this file / Revise document". See
             getAppendedLocalChips + LOCAL_CHIP.ndaReview → handleReviewNda. Rendered only when the
-            classifier flagged the upload as an NDA (host gates on ndaReviewFileRef). */}
+            classifier flagged the upload as a registered document-review type (host gates on
+            ndaReviewFileRef; task 064 generalized the docType→capability match to a small registry
+            in localActionChips.ts, DOCUMENT_REVIEW_CAPABILITIES — today only "nda" is registered,
+            so behavior is unchanged). */}
 
         {showWelcomePanel && <WelcomePanel />}
         {showWelcomeCards && (
@@ -2026,7 +2097,10 @@ export function ConversationPane(): React.JSX.Element {
             onCreateMatter={handleWelcomeCreateMatter}
             onCompose={handleWelcomeCompose}
             // R4-2 (UAT 2026-07-19): "More…" opens the Quick Start modal (same modal the ⋮ menu uses).
-            onMore={() => setQuickStartOpen(true)}
+            onMore={() => {
+              setQuickStartTab("create");
+              setQuickStartOpen(true);
+            }}
           />
         )}
 
@@ -2199,6 +2273,20 @@ export function ConversationPane(): React.JSX.Element {
       <QuickStartModal
         open={quickStartOpen}
         onClose={() => setQuickStartOpen(false)}
+        initialTab={quickStartTab}
+        // ai-advanced-capabilities-analysis-hub-r1: the Analysis tab's "Agreement Review"
+        // card. Close Quick Start, then ask WorkspacePane (which injects the wizard's
+        // Xrm services + resolves regarding from the host record) to host the Create
+        // Analysis wizard AS A MODAL. The wizard does not take a tab; on finish it opens
+        // its result tab as today.
+        onCreateAnalysis={(workTypeValue, workTypeLabel) => {
+          setQuickStartOpen(false);
+          dispatch("workspace", {
+            type: "open_create_analysis_wizard",
+            analysisWorkType: workTypeValue,
+            analysisWorkTypeLabel: workTypeLabel,
+          });
+        }}
         getFileContext={getQuickStartFileContext}
         // R5-9: Quick Start "Send Email" opens the shared Email Compose modal (blank), not the
         // playbook-library web resource. Close Quick Start first so the two modals don't stack.
@@ -2226,6 +2314,23 @@ export function ConversationPane(): React.JSX.Element {
             );
           }
         }}
+      />
+
+      {/* task 024 (spec FR-08): attaching a file to a LIVE chat (prior messages already exist)
+          prompts new-session vs add-to-current — never a silent default. "New session" pairs the
+          hook's file-carryover bookkeeping (prepareFilesForNewSession) with the EXISTING
+          "New session" seam (handleNewSession — clear + remount, task 021/022/023's archive
+          semantics: the prior session stays fully retrievable from History regardless, since
+          ListRecentSessionsAsync is not filtered by the Dataverse archived marker) so no new
+          client-side session/fork logic is introduced here. */}
+      <FileAttachSessionPrompt
+        pending={attachments.pendingFileSessionChoice}
+        onChooseNewSession={() => {
+          attachments.prepareFilesForNewSession();
+          handleNewSession();
+        }}
+        onChooseAddToCurrent={attachments.chooseAddToCurrentSession}
+        onDismiss={attachments.dismissFileSessionChoice}
       />
 
       {/* #8 (UAT 2026-07-21): "What the Assistant remembers about you" — review + forget over the

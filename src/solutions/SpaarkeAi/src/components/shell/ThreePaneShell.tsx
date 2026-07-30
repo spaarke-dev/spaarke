@@ -239,6 +239,67 @@ export interface ThreePaneShellProps {
   composeDocument?: ComposeDocumentRef | null;
   /** SPE container/drive id from URL — optional; resolved at runtime if absent. */
   composeDriveId?: string;
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1 task 041 (FR-13): the ACTIVE work type the launch
+   * is scoped to (e.g. `"agreement-analysis"` for an Agreement Review; Compose-only). Threaded
+   * into `ComposeLaunchContextValue.activeWorkType` so `ComposeWorkspace` → `ComposeEditor` scope
+   * the inline AI toolbar via `getToolsForSurface`. Omitted preserves the unscoped `'*'` default.
+   */
+  activeWorkType?: string;
+
+  // ---------------------------------------------------------------------------
+  // Analysis entry-matrix params (task 050 — spec §12 / FR-14).
+  //
+  // Published to WorkspacePane via AnalysisLaunchContext so it can place the
+  // launch in the correct host with pre-set context (2a/2b hub; 2c/2d existing).
+  // Omitting all of them preserves the default three-pane cold-load (BFF default
+  // layout) — every non-analysis launch is unaffected.
+  // ---------------------------------------------------------------------------
+
+  /** Analysis entry mode: 'new' opens the Analysis hub; 'existing' opens an analysis by id. */
+  analysisMode?: "new" | "existing";
+  /** `sprk_analysis` GUID to open (analysisMode='existing'). */
+  analysisId?: string;
+  /** `sprk_worktype` Choice value for a new analysis (analysisMode='new'). */
+  worktype?: string;
+}
+
+// ---------------------------------------------------------------------------
+// AnalysisLaunchContext (task 050 — spec §12 / FR-14)
+//
+// Publishes the analysis entry-matrix launch info to WorkspacePane (which is
+// rendered deep inside ThreePaneLayout with no props). Mirrors the established
+// ComposeLaunchContext / useComposeLaunch pattern — WorkspacePane consumes it
+// via useAnalysisLaunch() and falls through to the default cold-load when null.
+//
+// §11 justification — EXISTING: no context carries analysis-entry intent to
+// WorkspacePane today (ComposeLaunchContext is Compose-only; entityContext
+// carries the record but not the new-vs-existing/hub intent). EXTENSION: a new
+// context is required because WorkspacePane takes no props and the four-case
+// host mapping needs the mode. COST-OF-DOING-NOTHING: without it, an
+// `openSpaarkeAi(analysisId|worktype)` launch cannot open the hub or an existing
+// analysis — the entry matrix (2a/2b/2d) is unrealizable.
+// ---------------------------------------------------------------------------
+
+export interface AnalysisLaunchContextValue {
+  /** 'new' → open the Analysis hub; 'existing' → open an analysis by id. */
+  mode: "new" | "existing";
+  /** `sprk_analysis` GUID (mode='existing'). */
+  analysisId?: string;
+  /** `sprk_worktype` Choice value (mode='new'). */
+  worktype?: string;
+}
+
+export const AnalysisLaunchContext =
+  React.createContext<AnalysisLaunchContextValue | null>(null);
+AnalysisLaunchContext.displayName = "AnalysisLaunchContext";
+
+/**
+ * Consume the analysis entry-matrix launch info from inside WorkspacePane.
+ * Returns null when the app was not launched into an analysis entry mode.
+ */
+export function useAnalysisLaunch(): AnalysisLaunchContextValue | null {
+  return React.useContext(AnalysisLaunchContext);
 }
 
 // ---------------------------------------------------------------------------
@@ -628,7 +689,25 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
     composeMode,
     composeDocument = null,
     composeDriveId = "",
+    activeWorkType,
+    analysisMode,
+    analysisId,
+    worktype,
   } = props;
+
+  // task 050 (spec §12 / FR-14): assemble the analysis entry-matrix launch value
+  // so WorkspacePane can route to the correct host (hub for new; existing by id).
+  // Null unless the app was launched into an analysis entry mode — every
+  // non-analysis launch keeps the default cold-load.
+  const analysisLaunch = React.useMemo<AnalysisLaunchContextValue | null>(() => {
+    if (analysisMode === "existing" && analysisId) {
+      return { mode: "existing", analysisId };
+    }
+    if (analysisMode === "new") {
+      return { mode: "new", worktype };
+    }
+    return null;
+  }, [analysisMode, analysisId, worktype]);
 
   // spaarkeai-compose-r1 task 092: assemble the Compose launch context so
   // downstream panes can respond to modal-launch mode. `null` when the app is
@@ -656,9 +735,12 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
               // failed/absent association is non-fatal (surfaced via the gate's own `error` state).
               onCreateOnSaveAssociationComplete(newDocumentId);
             },
+            // task 041 (FR-13): forward the launch's active work type so getToolsForSurface
+            // scopes the Compose AI toolbar (e.g. Agreement Review).
+            activeWorkType,
           }
         : null,
-    [composeMode, composeDocument, composeDriveId, onCreateOnSaveAssociationComplete],
+    [composeMode, composeDocument, composeDriveId, activeWorkType, onCreateOnSaveAssociationComplete],
   );
 
   // Build the entity context for AiSessionProvider from URL params.
@@ -719,6 +801,7 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
       >
         <ShellStageManager>
           <SessionRestoreManager sessionId={sessionId}>
+           <AnalysisLaunchContext.Provider value={analysisLaunch}>
             <PaneCollapseContext.Provider value={paneCollapseCtx}>
               <div className={styles.shell}>
                 {/*
@@ -798,6 +881,7 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
                */}
               <CreateOnSaveAssociationGateDialog {...associationGateDialogProps} />
             </PaneCollapseContext.Provider>
+           </AnalysisLaunchContext.Provider>
           </SessionRestoreManager>
         </ShellStageManager>
       </AiSessionProvider>
