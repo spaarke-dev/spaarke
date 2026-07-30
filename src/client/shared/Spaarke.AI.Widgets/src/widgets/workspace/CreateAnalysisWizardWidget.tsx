@@ -116,7 +116,6 @@ import type {
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import type { WidgetState } from '../../types/shared';
 import { useDispatchPaneEvent } from '../../events/useDispatchPaneEvent';
-import { buildBffApiUrl } from '@spaarke/auth';
 
 // ---------------------------------------------------------------------------
 // Analysis-scoped regarding targets (ADR-024) — Matter / Project / Document
@@ -493,25 +492,41 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           documentId = context.selectedExistingRecord.recordId;
           documentName = context.selectedExistingRecord.recordName;
         } else if (context.uploadedFiles.length > 0) {
-          if (!authFetch || !bffBaseUrl) {
+          if (!authFetch || !bffBaseUrl || !webApiAdapter) {
             throw new Error('Document upload is not available right now. Please try again shortly.');
           }
-          const formData = new FormData();
-          for (const f of context.uploadedFiles) {
-            if (f.file) formData.append('files', f.file, f.name);
+          if (!context.speContainerId) {
+            throw new Error(
+              'No storage container is configured for your business unit — the document could not be uploaded.'
+            );
           }
-          formData.append('title', context.uploadedFiles[0]?.name ?? finishName);
 
-          const uploadResponse = await authFetch(buildBffApiUrl(bffBaseUrl, '/documents/upload'), {
-            method: 'POST',
-            body: formData,
-          });
-          if (!uploadResponse.ok) {
-            const text = await uploadResponse.text().catch(() => uploadResponse.statusText);
-            throw new Error(`Document upload failed (${uploadResponse.status}): ${text}`);
+          // Reuse the shared EntityCreationService — the SAME proven upload path every other
+          // Create*Wizard uses (Matter/Project/Event/Invoice/WorkAssignment). See
+          // docs/guides/WORKSPACE-ENTITY-CREATION-GUIDE.md §Step 4:
+          //   uploadFilesToSpe  → PUT /api/obo/containers/{id}/files/{path}  (real endpoint)
+          //   createDocumentRecords → durable sprk_document + Document Profile analysis (auto)
+          // This REPLACES a bespoke POST /api/documents/upload call that targeted a NON-EXISTENT
+          // BFF endpoint (§11 reuse violation caught in the 2026-07-29 duplicate-component audit).
+          const entityService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
+
+          const uploadResult = await entityService.uploadFilesToSpe(context.speContainerId, context.uploadedFiles);
+          if (uploadResult.uploadedFiles.length === 0) {
+            const firstErr = uploadResult.errors[0]?.error ?? 'unknown error';
+            throw new Error(`Document upload failed: ${firstErr}`);
           }
-          const uploadResult = (await uploadResponse.json()) as { documentIds?: string[] };
-          documentId = uploadResult.documentIds?.[0] ?? null;
+
+          // Create a STANDALONE sprk_document (empty navigationProperty → createDocumentRecords
+          // skips the parent @odata.bind). The Analysis is the SUBJECT-owner via its
+          // sprk_documentid lookup (ADR-007), not a parent of the document — so no child binding.
+          const docResult = await entityService.createDocumentRecords('', '', '', uploadResult.uploadedFiles, {
+            containerId: context.speContainerId,
+          });
+          documentId = docResult.createdDocumentIds[0] ?? null;
+          if (!documentId) {
+            const firstWarn = docResult.warnings[0] ?? 'the document record could not be created';
+            throw new Error(`Document upload succeeded but ${firstWarn}.`);
+          }
           documentName = context.uploadedFiles[0]?.name ?? finishName;
         }
 
