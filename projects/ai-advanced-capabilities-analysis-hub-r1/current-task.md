@@ -9,9 +9,16 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | Front door + audit fixes SHIPPED (deployed to spaarkedev1, pushed PR #694). New feature designed, NOT built. |
-| **Next Action** | Build the **tabbed Quick Start** feature per `notes/HANDOFF-2026-07-30.md` §3 (decisions locked; architecture confirmed — `WorkspacePane` hosts the wizard modal). |
-| **Branch** | `work/ai-advanced-capabilities-analysis-hub-r1` · PR #694 · 0 ahead/behind origin · working tree clean |
+| **Status** | **Tabbed Quick Start BUILT + deployed to spaarkedev1** (commit `980e6bc21`, NOT yet pushed). Front door + audit fixes already shipped on PR #694. |
+| **Next Action** | **UAT the tabbed Quick Start** on spaarkedev1 (hard-refresh Ctrl+Shift+R — aggressive web-resource cache). Then push PR #694 + 090 wrap-up + `/test-diet`. |
+| **Branch** | `work/ai-advanced-capabilities-analysis-hub-r1` · PR #694 · **1 commit ahead of origin** (980e6bc21, unpushed) · working tree clean |
+
+### UAT checklist (tabbed Quick Start — commit 980e6bc21)
+1. Open the Analysis workspace tab → it's now a **plain dataset grid** (no top cards). Row-click opens the OOB `sprk_analysis` form modal.
+2. Grid **`+ New`** → opens the **Quick Start** modal on the **Analysis** tab (3 cards; Agreement Review live, other 2 "coming soon").
+3. **Agreement Review** card → Quick Start closes → **Create Analysis wizard opens AS A MODAL**. On finish → result tab opens; Analysis grid tab stays.
+4. Assistant ⋮ menu / chips "More…" → Quick Start opens on the **Create** tab (7 GetStarted cards, unchanged). Tab switching works.
+5. Opened inside a Matter/Project record → wizard's regarding is pre-set to that record.
 
 ### The next build (tabbed Quick Start) — 6-step flow (HANDOFF-2026-07-30.md §3)
 1. Analysis widget → plain dataset grid (remove cards + task-031 reopen; row-click = OOB form Layout 1); `+ New` overridden → dispatch `open_quick_start{tab:'analysis', regarding}`.
