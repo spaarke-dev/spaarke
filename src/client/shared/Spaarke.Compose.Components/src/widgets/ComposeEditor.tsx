@@ -2728,6 +2728,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onThreadCreated={() => setPendingCommentRange(null)}
           onThreadsChanged={handleCommentThreadsChanged}
           initialThreads={initialCommentThreads}
+          // G9 (FR-08, task 031): the editor scroll container so the pane scroll-tracks the document
+          // (doc→pane) — the pane highlights + scrolls to the comment whose anchor is at the viewport top.
+          scrollContainerRef={editorScrollRef}
         />
         {/* UAT round-4: the FR-22 styles pane mount was REMOVED per user request (the "Show styles"
             toggle above it is gone too). Component + hook retained, unmounted. */}

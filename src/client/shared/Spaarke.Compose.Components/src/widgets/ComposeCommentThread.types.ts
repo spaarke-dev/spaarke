@@ -32,6 +32,9 @@ import { DocxTrackChangeKind, type DocxAnnotationInput } from './useComposeWordS
 import { resolveRunAnchor } from './stepOperationInterceptor';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type { ComposeAnchoredComment } from '../types/compose-operations';
+// task 031: the anchor-range primitive lives in a leaf module now (see the re-export note below).
+// Imported here for LOCAL use by composeSessionCommentThreadsToAnchoredComments.
+import { findCommentAnchorRange } from './commentAnchorRange';
 
 /** Author + timestamp stamp shared by a thread's root comment and every reply. */
 export interface ComposeCommentAuthorStamp {
@@ -158,43 +161,12 @@ export function composeSessionCommentThreadsToDocxAnnotations(
 // ai-advanced-capabilities-nda-r1 task 040 (comment-export wiring fix)
 // ---------------------------------------------------------------------------
 
-/** The `commentAnchor` mark name (mirrors `./marks/CommentAnchorMark.ts` and
- * `./hooks/useComposeCommentThreads.ts`'s `COMMENT_ANCHOR_MARK` — kept as its own local constant to
- * avoid a needless import of the mark module here). */
-const COMMENT_ANCHOR_MARK_NAME = 'commentAnchor';
-
-/**
- * Locate the CURRENT ProseMirror range of a `commentAnchor` mark by its `commentId` attribute,
- * spanning every text node carrying it (a mark can render as several adjacent text nodes when other
- * marks split them). Returns `null` when the mark is no longer present anywhere in `doc` — e.g. a
- * later edit deleted the anchored text. The caller treats a `null` result as "this thread's anchor no
- * longer exists," never guessing a replacement span (mirrors the op-log capture path's own
- * never-mis-map discipline in `stepOperationInterceptor.ts`).
- *
- * Exported (task 032, right-gutter comment layout): this is the SAME live-position-resolution
- * primitive {@link composeSessionCommentThreadsToAnchoredComments} already uses for save-time export —
- * `ComposeCommentGutter.tsx` reuses it verbatim to resolve each thread's CURRENT anchor span before
- * calling `editor.view.coordsAtPos(span.from)` for its Y placement, rather than trusting the thread's
- * stale, creation-time `anchorText` (ADR-049 "live position" constraint). No second implementation.
- */
-export function findCommentAnchorRange(doc: PMNode, commentId: string): { from: number; to: number } | null {
-  let from: number | null = null;
-  let to: number | null = null;
-  doc.descendants((node, pos) => {
-    if (!node.isText) return true;
-    const hasMark = node.marks.some(
-      m => m.type.name === COMMENT_ANCHOR_MARK_NAME && (m.attrs as { commentId?: string }).commentId === commentId
-    );
-    if (hasMark) {
-      const nodeFrom = pos;
-      const nodeTo = pos + node.nodeSize;
-      from = from === null ? nodeFrom : Math.min(from, nodeFrom);
-      to = to === null ? nodeTo : Math.max(to, nodeTo);
-    }
-    return true;
-  });
-  return from === null || to === null ? null : { from, to };
-}
+// task 031: `findCommentAnchorRange` + `COMMENT_ANCHOR_MARK_NAME` were EXTRACTED to the leaf module
+// `./commentAnchorRange` (so the G9 scroll-sync helpers can import the primitive without dragging this
+// file's persistence-vocabulary imports — `useComposeWordShuttle` → `@spaarke/auth`). Re-exported here
+// so every existing import site (`ComposeCommentGutter.tsx`, etc.) that imports it FROM this file is
+// unaffected. Single implementation.
+export { findCommentAnchorRange, COMMENT_ANCHOR_MARK_NAME } from './commentAnchorRange';
 
 /**
  * Maps threads to durable `(paraId, run-local range)`-anchored {@link ComposeAnchoredComment}s by

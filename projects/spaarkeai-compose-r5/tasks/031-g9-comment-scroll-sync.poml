@@ -4,7 +4,7 @@
     <title>G9 — Comment pane scroll-sync (position-link to in-document anchors)</title>
     <phase>3 Concurrency + UX</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Client-only UX change in Spaarke.Compose.Components; no persistence change, no BFF, no op-catalog change. New file creation / interaction wiring on an existing component surface.</rigor-reason>
     <model-tier>sonnet</model-tier>
