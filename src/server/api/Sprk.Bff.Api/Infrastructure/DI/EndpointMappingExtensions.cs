@@ -267,6 +267,11 @@ public static class EndpointMappingExtensions
         app.MapFinanceRollupEndpoints();
         app.MapCommunicationEndpoints();
 
+        // Email composer "insert template" render surface (email-communication-solution-r5). Thin,
+        // additive endpoint that reuses IEmailTemplateService for fetch + {!entity.field} merge; app-only
+        // Dataverse read (IGenericEntityService) + central TokenCredential — no new Dataverse client.
+        app.MapCommunicationTemplateEndpoints();
+
         // Notification spine Layer-C negotiate endpoint (spaarke-notification-spine-r1 task 020 /
         // FR-04). Mapped UNCONDITIONALLY — its handler resolves SignalRDeliveryService, which is
         // registered unconditionally (real or Null-Object) by AddNotificationsModule, so metadata
