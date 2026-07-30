@@ -447,6 +447,18 @@ export interface IEmailComposerProps {
   /** Optional className applied to the root layout container. */
   className?: string;
 
+  // — Dialog maximize/restore (owner UAT 2026-07-30, item 11) — additive/optional —
+  /**
+   * When supplied, the chromed header renders a maximize/restore button next to the
+   * close (X) affordance. The host (e.g. `SendEmailDialog`) owns the actual surface
+   * sizing — the engine only surfaces the toggle click. Omitted → no button (every
+   * existing caller is unaffected). Context-agnostic (ADR-012): the engine never sizes
+   * a host surface itself.
+   */
+  onToggleMaximize?: () => void;
+  /** Current maximize state — drives the button's icon + label. Only meaningful with {@link onToggleMaximize}. */
+  isMaximized?: boolean;
+
   /**
    * Optional override for the chromed (page/dialog mount) header title. When
    * supplied, it REPLACES the mode-derived word ('Reply'/'Forward'/'New

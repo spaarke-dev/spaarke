@@ -270,7 +270,8 @@ describe('ConversationView forward → SendEmailDialog forward mode (FR-08, ADR-
     const anchor = container.querySelector('[data-message-id="email1"]') as HTMLElement;
     await userEvent.click(within(anchor).getByRole('button', { name: /^Forward/ }));
 
-    const dialog = await screen.findByRole('dialog', {}, { timeout: 4000 });
+    // SendEmailDialog uses modalType="alert" (no light dismiss) → role="alertdialog".
+    const dialog = await screen.findByRole('alertdialog', {}, { timeout: 4000 });
 
     // Forward mode header (EmailComposer renders "Forward" for mode === 'forward').
     expect(within(dialog).getByRole('heading', { name: 'Forward' })).toBeInTheDocument();

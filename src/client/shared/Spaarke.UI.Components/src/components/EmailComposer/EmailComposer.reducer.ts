@@ -205,11 +205,15 @@ export function dedupSubjectPrefix(subject: string, prefix: 'Re:' | 'Fwd:'): str
 
 function wrapForwardedBody(source: ISourceCommunicationRecord): string {
   const sentAt = source.sentAt ? new Date(source.sentAt).toLocaleString() : '';
+  // Owner UAT 2026-07-30 (item 13): leave vertical room ABOVE the quoted thread so the
+  // author can type their message before the forwarded block. HTML → two empty paragraphs
+  // (the caret lands in the first); PlainText → two leading newlines.
+  const lead = source.bodyFormat === 'HTML' ? '<p></p><p></p>' : '\n\n';
   const header =
     source.bodyFormat === 'HTML'
       ? `<p>---------- Forwarded message ----------</p><p>From: ${escapeHtml(source.from)}<br/>Sent: ${escapeHtml(sentAt)}<br/>Subject: ${escapeHtml(source.subject)}</p><hr/>`
       : `---------- Forwarded message ----------\nFrom: ${source.from}\nSent: ${sentAt}\nSubject: ${source.subject}\n\n`;
-  return header + source.body;
+  return lead + header + source.body;
 }
 
 function escapeHtml(value: string): string {

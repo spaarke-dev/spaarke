@@ -15,7 +15,7 @@
  * No `@spaarke/auth` import (ADR-028) — `authenticatedFetch` is injected via props.
  */
 import * as React from 'react';
-import { Dialog, DialogSurface, DialogBody, makeStyles } from '@fluentui/react-components';
+import { Dialog, DialogSurface, DialogBody, makeStyles, mergeClasses } from '@fluentui/react-components';
 
 import { EmailComposer } from '../EmailComposer';
 import type {
@@ -60,6 +60,15 @@ const useDialogStyles = makeStyles({
     flexDirection: 'column',
     // Surface itself never scrolls — the body owns the scroll region below.
     overflow: 'hidden',
+  },
+  // Maximized (owner UAT 2026-07-30, item 11): fill the app container / mounted surface —
+  // NOT the physical screen. `100%` resolves against the Dialog's positioning context (the
+  // viewport/host surface the dialog is mounted in); the `maxWidth` cap is lifted so the
+  // surface can span the full width. Toggled back to the default rectangle on restore.
+  surfaceMaximized: {
+    maxWidth: '100%',
+    width: '100%',
+    height: '100%',
   },
   body: {
     display: 'flex',
@@ -182,6 +191,15 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
   const { open, onClose, mode, onSent, onError, regarding, associations, ...composerProps } = props;
   const dialogStyles = useDialogStyles();
 
+  // Maximize/restore (owner UAT 2026-07-30, item 11). The surface size is owned here (the
+  // engine owns the header where the toggle button lives), so the composer receives an
+  // `onToggleMaximize` callback + the current `isMaximized` flag and renders the button.
+  const [maximized, setMaximized] = React.useState(false);
+  // Always restore to the default rectangle whenever the dialog is (re)opened.
+  React.useEffect(() => {
+    if (!open) setMaximized(false);
+  }, [open]);
+
   // Fold `regarding` into the EXISTING association mechanism (ADR-024) — one
   // more `ICommunicationAssociation`, deduped against any explicit associations.
   // No second association path is introduced.
@@ -200,17 +218,24 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
   return (
     <Dialog
       open={open}
+      // modalType="alert" disables light-dismiss (backdrop click) AND Escape-to-close so an
+      // accidental click outside can't discard an in-progress draft (owner UAT 2026-07-30,
+      // item 12). The dialog now closes ONLY via the explicit X / Cancel affordances, which
+      // call onClose directly.
+      modalType="alert"
       onOpenChange={(_event, data) => {
         if (!data.open) onClose();
       }}
     >
-      <DialogSurface className={dialogStyles.surface}>
+      <DialogSurface className={mergeClasses(dialogStyles.surface, maximized && dialogStyles.surfaceMaximized)}>
         <DialogBody className={dialogStyles.body}>
           <EmailComposer
             {...composerProps}
             associations={mergedAssociations}
             mount="dialog"
             mode={mode ?? 'compose'}
+            isMaximized={maximized}
+            onToggleMaximize={() => setMaximized(m => !m)}
             onSent={result => {
               onSent?.(result.communicationId);
               onClose();

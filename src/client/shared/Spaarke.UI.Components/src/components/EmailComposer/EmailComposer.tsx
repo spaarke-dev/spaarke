@@ -33,11 +33,14 @@ import {
   Tooltip,
   ToolbarButton,
   Menu,
+  MenuButton,
   MenuTrigger,
   MenuPopover,
   MenuList,
   MenuItem,
+  MenuItemRadio,
   makeStyles,
+  shorthands,
   tokens,
   mergeClasses,
 } from '@fluentui/react-components';
@@ -48,7 +51,10 @@ import {
   Search20Regular,
   ChevronDown20Regular,
   ChevronUp20Regular,
+  ArrowMaximize20Regular,
+  ArrowMinimize20Regular,
 } from '@fluentui/react-icons';
+import type { CommunicationSendMode } from '../../services/communicationApi';
 
 import { sendCommunication, SendCommunicationError } from '../../services/communicationApi';
 import type { ICommunicationAssociation } from '../../services/communicationApi';
@@ -81,6 +87,15 @@ import { ComposerActionBar } from './subcomponents/ComposerActionBar';
 // picks this type and ATTACHES it, so it's intentionally excluded from the record-search
 // catalog (which inserts a body LINK for every other type). Owner UAT 2026-07-24.
 const DOCUMENT_LOGICAL_NAME = 'sprk_document';
+
+// "From:" sender option labels (owner UAT 2026-07-30, item 3). The engine has NO current-user
+// identity data source (context-agnostic, ADR-012), so the "user" option falls back to the
+// host-supplied `fromMailbox` address when present, else a generic "My mailbox" label — see the
+// report note on this gap. The Spaarke shared mailbox is a fixed, named destination.
+const SHARED_MAILBOX_LABEL = 'Spaarke shared mailbox';
+function userMailboxLabel(fromMailbox: string | undefined): string {
+  return fromMailbox && fromMailbox.trim() ? fromMailbox : 'My mailbox';
+}
 
 // ---------------------------------------------------------------------------
 // Attachment source defaults
@@ -148,17 +163,61 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
+  // Window controls (maximize + close) cluster on the LEFT, title beside them (owner UAT
+  // 2026-07-30, item 11 — "upper-left, next to the X close").
   header: {
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     gap: tokens.spacingHorizontalS,
   },
   headerActions: {
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalXXS,
+  },
+  // Dialog/page header title (owner UAT 2026-07-30, item 10): 18px. No token lands exactly on
+  // 18px (base ramp is 16/20/24), so an explicit px is used per ADR-021's "explicit px only
+  // when no token matches" carve-out; color/weight stay token-driven.
+  headerTitle: {
+    fontSize: '18px',
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
+  // "From:" row (owner UAT 2026-07-30, item 3): an Outlook-style sender line ABOVE To/Cc.
+  fromRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  // Label box — visually matches the To/Cc label boxes (RecipientField `labelBox`).
+  labelBox: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    minWidth: '44px',
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    ...shorthands.border(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase300,
+  },
+  // The sender value cell — a subtle menu button (choice) or plain text (fixed sender).
+  fromValue: {
+    flexGrow: 1,
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'center',
+  },
+  fromStaticText: {
+    color: tokens.colorNeutralForeground1,
+    fontSize: tokens.fontSizeBase300,
   },
   bccToggleRow: {
     display: 'flex',
@@ -285,6 +344,9 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     [props.attachmentSources, props.wizardContext]
   );
   const showSendModeRadio = props.sendMode === undefined;
+  // The top "From:" row offers the sender choice whenever the host hasn't fixed `sendMode`
+  // and the composer is editable (owner UAT 2026-07-30, item 3).
+  const showSenderChoice = showSendModeRadio && !state.readOnly;
 
   // Bcc is hidden by default (owner UAT mockup 2026-07-22 shows To/Cc only); a small
   // "Bcc" toggle reveals it, and it auto-reveals when the field already carries values.
@@ -662,6 +724,50 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         </MessageBar>
       )}
 
+      {/* From: — Outlook-style sender line ABOVE To/Cc (owner UAT 2026-07-30, item 3). Shows the
+          current sender; a dropdown switches between the user's mailbox and the Spaarke shared
+          mailbox. Wired to the engine's existing `sendMode` state (same store the bottom Send
+          selector reads). Hidden in read-only (view) mode — there is nothing to send. */}
+      {!state.readOnly && (
+        <div className={styles.fromRow} role="group" aria-label="From">
+          <span className={styles.labelBox} aria-hidden="true">
+            From
+          </span>
+          <div className={styles.fromValue}>
+            {showSenderChoice ? (
+              <Menu
+                positioning="below-start"
+                checkedValues={{ sendFrom: [state.sendMode] }}
+                onCheckedValueChange={(_e, data) => {
+                  const next = data.checkedItems[0] as CommunicationSendMode | undefined;
+                  if (next) dispatch({ type: 'SET_SEND_MODE', value: next });
+                }}
+              >
+                <MenuTrigger disableButtonEnhancement>
+                  <MenuButton appearance="subtle" size="small" aria-label="From mailbox">
+                    {state.sendMode === 'user' ? userMailboxLabel(state.fromMailbox) : SHARED_MAILBOX_LABEL}
+                  </MenuButton>
+                </MenuTrigger>
+                <MenuPopover>
+                  <MenuList>
+                    <MenuItemRadio name="sendFrom" value="user">
+                      {userMailboxLabel(state.fromMailbox)}
+                    </MenuItemRadio>
+                    <MenuItemRadio name="sendFrom" value="sharedMailbox">
+                      {SHARED_MAILBOX_LABEL}
+                    </MenuItemRadio>
+                  </MenuList>
+                </MenuPopover>
+              </Menu>
+            ) : (
+              <Text className={styles.fromStaticText}>
+                {state.sendMode === 'user' ? userMailboxLabel(state.fromMailbox) : SHARED_MAILBOX_LABEL}
+              </Text>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className={styles.section} role="region" aria-label="Recipients">
         <RecipientField
           label="To"
@@ -821,7 +927,32 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     >
       {isChromed && (
         <div className={styles.header}>
-          <Text as="h2" size={600} weight="semibold">
+          {/* Window controls cluster on the upper-LEFT: maximize/restore next to the X close
+              (owner UAT 2026-07-30, item 11). Maximize renders only when the host wires
+              `onToggleMaximize` (e.g. SendEmailDialog, which owns the surface sizing). */}
+          {(props.onToggleMaximize || props.onCancel) && (
+            <div className={styles.headerActions}>
+              {props.onToggleMaximize && (
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={props.isMaximized ? <ArrowMinimize20Regular /> : <ArrowMaximize20Regular />}
+                  aria-label={props.isMaximized ? 'Restore dialog size' : 'Maximize dialog'}
+                  onClick={() => props.onToggleMaximize?.()}
+                />
+              )}
+              {props.onCancel && (
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<Dismiss20Regular />}
+                  aria-label="Close dialog"
+                  onClick={() => props.onCancel?.()}
+                />
+              )}
+            </div>
+          )}
+          <Text as="h2" weight="semibold" className={styles.headerTitle}>
             {props.titleOverride ??
               (state.mode === 'view'
                 ? 'Email'
@@ -833,17 +964,6 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
                       ? 'Edit Draft'
                       : 'New Email')}
           </Text>
-          {props.onCancel && (
-            <div className={styles.headerActions}>
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<Dismiss20Regular />}
-                aria-label="Close dialog"
-                onClick={() => props.onCancel?.()}
-              />
-            </div>
-          )}
         </div>
       )}
 
