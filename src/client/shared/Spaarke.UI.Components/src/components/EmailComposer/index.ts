@@ -28,7 +28,11 @@ export type { ISendEmailPageProps } from './wrappers/SendEmailPage';
 // Xrm-backed compose-lookup handler factory (shared by the Email code page +
 // the SpaarkeAi `email` widget mounts — see file docblock). The engine stays
 // context-agnostic; hosts inject these callbacks.
-export { createXrmEmailComposeHandlers, EMAIL_RECORD_LOOKUP_CATALOG } from './createXrmEmailComposeHandlers';
+export {
+  createXrmEmailComposeHandlers,
+  resolveCurrentUserEmail,
+  EMAIL_RECORD_LOOKUP_CATALOG,
+} from './createXrmEmailComposeHandlers';
 export type { XrmEmailComposeHandlers } from './createXrmEmailComposeHandlers';
 
 // Sub-components (exported for advanced/direct composition + task 023 unit tests)

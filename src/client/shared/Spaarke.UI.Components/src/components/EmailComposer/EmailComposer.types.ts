@@ -413,7 +413,19 @@ export interface IEmailComposerProps {
   onAddRelationship?: () => Promise<IPickedRecord | null>;
 
   // — Send-side behavior —
+  /**
+   * FIXES the send mode + hides the From switcher (host-locked). Use when the caller
+   * mandates one mailbox. For a DEFAULT that the user can still change, use
+   * {@link defaultSendMode} instead.
+   */
   sendMode?: CommunicationSendMode;
+  /**
+   * Seeds the INITIAL send mode while leaving the From switcher interactive (owner UAT
+   * 2026-07-30, item 3). The email surface passes `'user'` so a reply/new defaults to
+   * sending from the signed-in user, switchable to the Spaarke shared mailbox. Ignored
+   * when {@link sendMode} is set (that path locks the mode). Default `'sharedMailbox'`.
+   */
+  defaultSendMode?: CommunicationSendMode;
   fromMailbox?: string;
   /** Archive sent `.eml` to SPE. Default `true`. */
   archiveToSpe?: boolean;

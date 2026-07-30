@@ -91,6 +91,12 @@ export interface EmailComposeActionsDeps {
    */
   onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
   /**
+   * The signed-in user's mailbox address (item 3). The email surface defaults the composer's
+   * From to send-as the current user; passing this shows the real address in the "From:" row
+   * instead of a generic "My mailbox". Host-resolved (Xrm). Optional — omitted → generic label.
+   */
+  fromMailbox?: string;
+  /**
    * Dataverse client URL (no trailing slash) used to build attachment
    * deep-links when carrying a parent email's attachments onto reply/forward.
    * Optional — absent → a relative document link is omitted (attachments still

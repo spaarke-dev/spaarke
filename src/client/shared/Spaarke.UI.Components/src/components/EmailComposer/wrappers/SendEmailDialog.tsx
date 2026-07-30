@@ -30,7 +30,11 @@ import type {
   IRecipient,
 } from '../EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
-import type { ICommunicationAssociation, SendCommunicationError } from '../../../services/communicationApi';
+import type {
+  ICommunicationAssociation,
+  SendCommunicationError,
+  CommunicationSendMode,
+} from '../../../services/communicationApi';
 import type { ILookupItem } from '../../../types/LookupTypes';
 
 /** Regarding record to auto-associate the sent email with (R3 task 020, FR-07). */
@@ -130,6 +134,16 @@ export interface ISendEmailDialogProps {
    * `...composerProps` spread; omitted → local picks stay display-only.
    */
   onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
+  /**
+   * Seeds the initial From/send mode while keeping the switcher interactive (item 3).
+   * The email surface passes `'user'`. Forwarded to the engine via `...composerProps`.
+   */
+  defaultSendMode?: CommunicationSendMode;
+  /**
+   * The signed-in user's mailbox address, shown as the "From: <user>" label when the
+   * user option is selected (item 3). Host-resolved (context-agnostic engine).
+   */
+  fromMailbox?: string;
   /**
    * Optional header-title override forwarded to the engine (e.g.
    * `Reply: <subject>`). Additive/optional; omitted → the engine's mode-derived

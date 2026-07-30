@@ -107,6 +107,11 @@ export interface EmailWorkspaceProps {
    */
   onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
   /**
+   * The signed-in user's mailbox address (item 3) — the compose "From:" row defaults to
+   * send-as the current user and shows this address. Mount-resolved (Xrm). Optional.
+   */
+  fromMailbox?: string;
+  /**
    * Dataverse client URL (no trailing slash) — used to build deep-links for the
    * parent email's carried-forward attachments. Optional.
    */

@@ -84,6 +84,26 @@ function deriveUploadedFileType(mimeType: string): UploadedFileType {
  * used to build record deep-link URLs for the picked records (best-effort;
  * absent → a relative link is omitted).
  */
+/**
+ * Resolve the signed-in user's mailbox address (item 3) for the compose "From:" row.
+ * Walks `Xrm.Utility.getGlobalContext().userSettings.userId` → `systemuser.internalemailaddress`.
+ * Returns `undefined` outside an MDA host or if the email is unset — callers then fall back
+ * to a generic label. Best-effort; never throws.
+ */
+export async function resolveCurrentUserEmail(): Promise<string | undefined> {
+  try {
+    const xrm = getXrm();
+    const userId: string | undefined = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userId;
+    if (!xrm?.WebApi || !userId) return undefined;
+    const clean = String(userId).replace(/[{}]/g, '');
+    const rec = await xrm.WebApi.retrieveRecord('systemuser', clean, '?$select=internalemailaddress');
+    const email = rec?.internalemailaddress;
+    return typeof email === 'string' && email.includes('@') ? email : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function createXrmEmailComposeHandlers(options?: {
   clientUrl?: string;
   /** Auth-aware fetch (ADR-028) — required to enable new-file upload (item 9b). */

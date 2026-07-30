@@ -161,7 +161,9 @@ export function initialState(props: IEmailComposerProps): EmailComposerState {
     body: props.initialBody ?? '',
     bodyFormat: props.initialBodyFormat ?? 'HTML',
     attachments: [...wizardAttachments(props), ...initialAttachmentsFor(props)],
-    sendMode: props.sendMode ?? 'sharedMailbox',
+    // `sendMode` (host-locked) wins; else `defaultSendMode` seeds an interactive default
+    // (item 3 — email surface passes 'user'); else the historical 'sharedMailbox' default.
+    sendMode: props.sendMode ?? props.defaultSendMode ?? 'sharedMailbox',
     fromMailbox: props.fromMailbox,
     archiveToSpe: props.archiveToSpe ?? true,
     associations: props.associations ?? [],

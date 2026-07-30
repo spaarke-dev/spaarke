@@ -42,6 +42,7 @@ import {
   createXrmDataService,
   createXrmNavigationService,
   createXrmEmailComposeHandlers,
+  resolveCurrentUserEmail,
   searchUsersAndContacts,
   getXrm,
 } from '@spaarke/ui-components';
@@ -87,6 +88,19 @@ export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
   );
   const dataverseUrl = React.useMemo(() => getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '', []);
 
+  // Signed-in user's mailbox address for the compose "From:" row (item 3). Resolved once
+  // via Xrm; the email surface defaults From to send-as this user (switchable to shared).
+  const [fromMailbox, setFromMailbox] = React.useState<string | undefined>();
+  React.useEffect(() => {
+    let cancelled = false;
+    void resolveCurrentUserEmail().then(email => {
+      if (!cancelled) setFromMailbox(email);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   if (!webApi) {
     // No Dataverse host available (e.g. a non-MDA dev shell). EmailWorkspace's
     // required host props cannot be resolved — fail closed rather than mount
@@ -109,6 +123,7 @@ export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
       onLookupRecord={composeHandlers.onLookupRecord}
       onAddRelationship={composeHandlers.onAddRelationship}
       onUploadLocalAttachment={composeHandlers.onUploadLocalAttachment}
+      fromMailbox={fromMailbox}
       dataverseUrl={dataverseUrl}
     />
   );

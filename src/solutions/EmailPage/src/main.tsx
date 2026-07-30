@@ -38,6 +38,7 @@ import {
   createXrmDataService,
   createXrmNavigationService,
   createXrmEmailComposeHandlers,
+  resolveCurrentUserEmail,
   searchUsersAndContacts,
   XrmDataverseClient,
   getXrm,
@@ -204,6 +205,19 @@ function Root() {
   );
   const dataverseUrl = React.useMemo(() => getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '', []);
 
+  // Signed-in user's mailbox for the compose "From:" row (item 3) — the email surface
+  // defaults From to send-as this user (switchable to the Spaarke shared mailbox).
+  const [fromMailbox, setFromMailbox] = React.useState<string | undefined>();
+  React.useEffect(() => {
+    let cancelled = false;
+    void resolveCurrentUserEmail().then(email => {
+      if (!cancelled) setFromMailbox(email);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const handleRetry = React.useCallback(() => setAttempt(n => n + 1), []);
 
   let body: React.ReactNode;
@@ -226,6 +240,7 @@ function Root() {
         onLookupRecord={composeHandlers.onLookupRecord}
         onAddRelationship={composeHandlers.onAddRelationship}
         onUploadLocalAttachment={composeHandlers.onUploadLocalAttachment}
+        fromMailbox={fromMailbox}
         dataverseUrl={dataverseUrl}
       />
     );
