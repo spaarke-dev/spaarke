@@ -108,12 +108,22 @@ public sealed class ComposeShadowPatchEngine
     /// <exception cref="ComposePatchException">The bytes are not a readable DOCX, the schema version is
     /// unsupported, a paraId/runIndex/offset does not resolve, an op targets an opaque atom or a
     /// pre-existing tracked change, or a structural op (task 031) was supplied.</exception>
+    /// <param name="trackChanges">G2 (FR-02, task 021 / R5-D2 Candidate A): when <c>true</c> (default) the
+    /// engine emits native tracked changes (<c>w:ins</c>/<c>w:del</c>/<c>w:pPrChange</c>/tracked para-marks) —
+    /// the shipped imported-doc path, unchanged. When <c>false</c> (the AUTHORED-origin save path, per the
+    /// durable <c>sprk_composeorigin</c> marker) the SAME resolve-by-<c>(paraId,runIndex,offset)</c> spine
+    /// applies edits as CLEAN OOXML: inserts are plain <c>w:r</c>, deletions physically remove the run/node,
+    /// block-attribute changes write the property with NO <c>w:pPrChange</c>. Nothing is re-derived — only
+    /// <c>document.xml</c> is re-serialized; every other package part + untouched paragraph subtree stays
+    /// byte-identical (I-4/NFR-01). The two byte-authors are NOT merged: this is a mode on the existing
+    /// delta-applier over retained bytes, not the from-scratch renderer.</param>
     public byte[] Apply(
         byte[] retainedBytes,
         ComposeOperationLog operationLog,
         IReadOnlyList<ComposeAnchoredComment>? comments = null,
         string? author = null,
-        DateTimeOffset? timestamp = null)
+        DateTimeOffset? timestamp = null,
+        bool trackChanges = true)
     {
         if (retainedBytes is null || retainedBytes.Length == 0)
         {
@@ -166,7 +176,7 @@ public sealed class ComposeShadowPatchEngine
             var body = mainPart.Document?.Body
                 ?? throw new ComposePatchException(ComposePatchErrorKind.MalformedDocument, "The .docx main document part has no body.");
 
-            var session = new PatchSession(mainPart, body, retainedBytes, author ?? DefaultAuthor, (timestamp ?? DateTimeOffset.UtcNow).UtcDateTime);
+            var session = new PatchSession(mainPart, body, retainedBytes, author ?? DefaultAuthor, (timestamp ?? DateTimeOffset.UtcNow).UtcDateTime, trackChanges);
             session.Execute(ops, anchoredComments);
 
             mainPart.Document!.Save();
@@ -186,6 +196,9 @@ public sealed class ComposeShadowPatchEngine
         private readonly byte[] _retainedBytes;
         private readonly string _author;
         private readonly DateTime _date;
+        // G2 (FR-02, task 021): false = clean-apply mode (authored-origin path) — plain runs, physical
+        // deletes, no w:pPrChange/tracked para-marks. Default true = the shipped tracked path (imported).
+        private readonly bool _trackChanges;
         private readonly Dictionary<string, Paragraph> _byParaId;
         private int _idCounter;
         private WordprocessingCommentsPart? _commentsPart;
@@ -201,13 +214,14 @@ public sealed class ComposeShadowPatchEngine
         // the model must be read from the (now-modified) editable part rather than the pristine retained bytes.
         private bool _numberingAuthored;
 
-        public PatchSession(MainDocumentPart mainPart, Body body, byte[] retainedBytes, string author, DateTime date)
+        public PatchSession(MainDocumentPart mainPart, Body body, byte[] retainedBytes, string author, DateTime date, bool trackChanges)
         {
             _mainPart = mainPart;
             _body = body;
             _retainedBytes = retainedBytes;
             _author = author;
             _date = date;
+            _trackChanges = trackChanges;
             _byParaId = BuildParaIdIndex(body);
             _idCounter = SeedRevisionId(mainPart, body);
         }
@@ -367,34 +381,51 @@ public sealed class ComposeShadowPatchEngine
             var para = Resolve(op.ParaId);
             var absOffset = ToAbsoluteOffset(para, op.ParaId, op.At);
 
-            // Split so a run boundary exists exactly at the insertion point, then anchor the <w:ins> there.
+            // Split so a run boundary exists exactly at the insertion point, then anchor the insertion there.
             SplitParagraphAtEditorOffset(para, absOffset, op.ParaId);
             var leftRun = LastRunEndingAt(para, absOffset);
 
-            var ins = NewInsertedRun();
-            ins.AppendChild(BuildRun(templateRunProperties: leftRun?.RunProperties, op.Text, op.Marks));
-            InsertInsAt(para, ins, leftRun);
+            // G2: tracked mode wraps the run in <w:ins>; clean mode inserts a bare <w:r> (no redline).
+            var element = BuildInsertElement(leftRun?.RunProperties, op.Text, op.Marks);
+            InsertInsAt(para, element, leftRun);
         }
 
-        /// <summary>Places <paramref name="ins"/> immediately after <paramref name="leftRun"/> (the run
-        /// ending at the insertion point). When <paramref name="leftRun"/> is null (offset 0) the tracked
-        /// insertion goes before the paragraph's first inline element, or is appended to an empty paragraph.</summary>
-        private static void InsertInsAt(Paragraph para, InsertedRun ins, Run? leftRun)
+        /// <summary>Builds the element an insert lands: a tracked <see cref="InsertedRun"/> wrapping the new run
+        /// (tracked mode) or a bare <see cref="Run"/> (G2 clean mode — no <c>w:ins</c>). Both carry identical run
+        /// content/properties; only the tracked-change wrapper differs.</summary>
+        private OpenXmlElement BuildInsertElement(RunProperties? templateRunProperties, string text, IReadOnlyList<ComposeMarkType> marks)
+        {
+            var run = BuildRun(templateRunProperties, text, marks);
+            if (!_trackChanges)
+            {
+                return run;
+            }
+
+            var ins = NewInsertedRun();
+            ins.AppendChild(run);
+            return ins;
+        }
+
+        /// <summary>Places <paramref name="newElement"/> immediately after <paramref name="leftRun"/> (the run
+        /// ending at the insertion point). When <paramref name="leftRun"/> is null (offset 0) the insertion
+        /// goes before the paragraph's first inline element, or is appended to an empty paragraph. The element
+        /// is a tracked <c>w:ins</c> (tracked mode) or a bare <c>w:r</c> (G2 clean mode).</summary>
+        private static void InsertInsAt(Paragraph para, OpenXmlElement newElement, Run? leftRun)
         {
             if (leftRun is not null)
             {
-                leftRun.InsertAfterSelf(ins);
+                leftRun.InsertAfterSelf(newElement);
                 return;
             }
 
             var firstInline = para.Elements().FirstOrDefault(IsInlineContainer);
             if (firstInline is not null)
             {
-                firstInline.InsertBeforeSelf(ins);
+                firstInline.InsertBeforeSelf(newElement);
             }
             else
             {
-                para.AppendChild(ins);
+                para.AppendChild(newElement);
             }
         }
 
@@ -416,12 +447,12 @@ public sealed class ComposeShadowPatchEngine
             var covered = IsolateRangeRuns(op.ParaId, op.Range);
             var first = covered.Count > 0 ? covered[0] : null;
 
-            // Insertion renders BEFORE the deletion (Word convention: <w:ins> new … <w:del> old).
+            // Insertion renders BEFORE the deletion (Word convention: <w:ins> new … <w:del> old). In G2 clean
+            // mode the insert is a bare <w:r> and the "deletion" below is a physical removal — no redline.
             var templateProps = first?.RunProperties;
             if (op.Text.Length > 0)
             {
-                var ins = NewInsertedRun();
-                ins.AppendChild(BuildRun(templateProps, op.Text, op.Marks));
+                var ins = BuildInsertElement(templateProps, op.Text, op.Marks);
                 if (first is not null)
                 {
                     first.InsertBeforeSelf(ins);
@@ -545,6 +576,22 @@ public sealed class ComposeShadowPatchEngine
                 throw StructuralRefused(op.ParaId, $"target '{op.TargetParaId}' carries a section break (w:sectPr); deleting its paragraph mark would drop section properties");
             }
 
+            // G2 clean mode: physically merge — move the source paragraph's inline content onto the target (in
+            // order, after the target's existing inline children), then remove the source node. The target's
+            // paragraph properties survive (its mark is the boundary that disappears). No tracked para-mark.
+            if (!_trackChanges)
+            {
+                foreach (var child in para.Elements().Where(IsInlineContainer).ToList())
+                {
+                    child.Remove();
+                    target.AppendChild(child);
+                }
+
+                para.Remove();
+                _byParaId.Remove(op.ParaId);
+                return;
+            }
+
             // The boundary between target and para is the TARGET's paragraph mark. Deleting it (tracked) is the
             // paragraph-mark deletion the prior art flags as the hardest OOXML edge (finding #6 / §5.6(b)).
             MarkParagraphMark(target, inserted: false);
@@ -598,6 +645,16 @@ public sealed class ComposeShadowPatchEngine
             if (HasSectionBreak(para))
             {
                 throw StructuralRefused(op.ParaId, "the paragraph carries a section break (w:sectPr); striking it would drop section properties");
+            }
+
+            // G2 clean mode: an authored doc's paragraph deletion is PHYSICAL — remove the whole node so it
+            // simply vanishes (no struck-through redline). The sectPr guard above already protects the one
+            // paragraph a physical remove would corrupt.
+            if (!_trackChanges)
+            {
+                para.Remove();
+                _byParaId.Remove(op.ParaId);
+                return;
             }
 
             // Snapshot the flatten once, then strike each settled physical run. Atoms / already-tracked runs are
@@ -668,6 +725,13 @@ public sealed class ComposeShadowPatchEngine
             if (newJc is { } jcValue)
             {
                 InsertJustificationInOrder(pPr, new Justification { Val = jcValue });
+            }
+
+            // G2 clean mode: the direct w:jc IS the change — an authored doc records no "changed from"
+            // formatting revision, so emit NO w:pPrChange.
+            if (!_trackChanges)
+            {
+                return;
             }
 
             var pPrChange = new ParagraphPropertiesChange { Id = NextId(), Author = _author, Date = _date };
@@ -1111,6 +1175,14 @@ public sealed class ComposeShadowPatchEngine
         private void RecordPPrChange(ParagraphProperties pPr, ParagraphPropertiesExtended previousProps)
         {
             pPr.RemoveAllChildren<ParagraphPropertiesChange>();
+
+            // G2 clean mode: the caller already applied the direct pPr mutation (w:pStyle / w:numPr); an
+            // authored doc records no "changed from" formatting revision, so emit NO w:pPrChange.
+            if (!_trackChanges)
+            {
+                return;
+            }
+
             var pPrChange = new ParagraphPropertiesChange { Id = NextId(), Author = _author, Date = _date };
             pPrChange.AppendChild(previousProps);
             pPr.AppendChild(pPrChange);
@@ -1132,6 +1204,20 @@ public sealed class ComposeShadowPatchEngine
 
         private void ApplyTableOperation(TableOperation op)
         {
+            // G2 clean mode (task 021): the table appliers below emit Word TRACKED table structure
+            // (w:trPr/w:ins, w:tcPr/w:cellIns, w:tblGridChange, w:tblPrChange, in-cell w:del/w:ins). A clean
+            // (authored-origin) apply has no clean equivalent yet, so REFUSE explicitly rather than emit
+            // tracked markup on an authored doc (decision note §2 sanctioned refusal; documented limitation —
+            // clean table structural editing is a follow-up). Text/mark/para-structural/block-attr authored
+            // edits ARE clean-supported; only table STRUCTURAL/content edits are out of clean scope for R5.
+            if (!_trackChanges)
+            {
+                throw TableRefused(op.ParaId, ComposePatchErrorKind.StructuralOperationRefused,
+                    "table edits are not yet supported on a clean (authored-origin) save — this is a bounded G2 " +
+                    "limitation (clean table structural apply is a follow-up); the edit is refused rather than " +
+                    "written as tracked-change markup on an authored document");
+            }
+
             var para = Resolve(op.ParaId); // O(1) paraId lookup — no text-search (I-7).
             var cell = para.Ancestors<TableCell>().FirstOrDefault()
                 ?? throw TableRefused(op.ParaId, ComposePatchErrorKind.TableNotFound,
@@ -1597,6 +1683,14 @@ public sealed class ComposeShadowPatchEngine
         /// </summary>
         private void MarkParagraphMark(Paragraph para, bool inserted)
         {
+            // G2 clean mode: a split/insert paragraph's node change is already applied physically; the tracked
+            // para-mark revision is what we SKIP so no redline appears. (Clean delete/merge do NOT reach here —
+            // they take their own physical-removal branch — so a skipped mark never leaves an undeleted node.)
+            if (!_trackChanges)
+            {
+                return;
+            }
+
             var pPr = para.ParagraphProperties ??= new ParagraphProperties();
             var markProps = pPr.ParagraphMarkRunProperties ??= new ParagraphMarkRunProperties();
 
@@ -1977,6 +2071,17 @@ public sealed class ComposeShadowPatchEngine
         /// </summary>
         private void ApplyRevisionReconciliation(string paraId, ComposeRevisionScope scope, string? revisionId, bool acceptNotReject)
         {
+            // G2 clean mode: accept/reject reconciles PRE-EXISTING imported tracked changes — a construct an
+            // authored (clean-origin) document does not contain by definition. It cannot legitimately appear on
+            // a clean save; refuse defensively rather than silently manipulate redlines that shouldn't exist.
+            if (!_trackChanges)
+            {
+                throw new ComposePatchException(
+                    ComposePatchErrorKind.StructuralOperationRefused,
+                    "accept/reject-revision is not valid on a clean (authored-origin) save — an authored document " +
+                    "carries no imported tracked changes to reconcile.");
+            }
+
             if (scope == ComposeRevisionScope.All)
             {
                 // accept-all / reject-all: reconcile EVERY revision in the document in deterministic order.
@@ -2160,6 +2265,15 @@ public sealed class ComposeShadowPatchEngine
 
         private void WrapRunAsDeleted(Run run)
         {
+            // G2 clean mode: an authored doc's own deletion is PHYSICAL — remove the run outright, no
+            // <w:del>/<w:delText> redline. (Resolution still happened by (paraId,runIndex,offset) upstream;
+            // clean mode changes only how the delete is represented, never how the target is found — I-7.)
+            if (!_trackChanges)
+            {
+                run.Remove();
+                return;
+            }
+
             // A run may carry text (w:t), deleted text (already inside a tracked change — guarded upstream
             // so it will be TrackChange.None here), or glyphs. Convert every w:t to w:delText (EDGE-4).
             var inner = new Run();

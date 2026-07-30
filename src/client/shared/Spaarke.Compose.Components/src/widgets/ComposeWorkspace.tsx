@@ -1115,21 +1115,23 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // speDriveItemId) — updating in place, no duplicate record. A LOADED/imported doc (docxBytes present)
         // keeps the op-log + baseline path below EXACTLY as-is → tracked changes (REQ-2 not regressed).
         //
-        // G1 (FR-01, task 020): route a REOPENED AUTHORED document (persisted sprk_composeorigin=authored)
-        // onto the SAME clean contentModel payload as a born-in-editor doc — NOT the op-log/tracked path.
-        // This is the wart G1 fixes: a doc the user AUTHORED, reopened cross-session, must not get spurious
-        // redlines on the user's own subsequent edits (REQ-1). Origin is resolved ONLY from the durable
-        // persisted marker (`state.origin`, set on loadSucceeded) — NEVER inferred from SPE-id presence
-        // (the fragile discriminator G1 replaces) or document content (I-7 / NFR-02). `null` origin (a
-        // legacy pre-existing row with no marker, OR a not-yet-promoted mount) is treated the SAME as
-        // 'imported' per the BINDING null-handling contract — so `=== 'authored'` is the ONLY branch that
-        // routes clean, and imported/null stay on the tracked op-log path unchanged (REQ-2 not regressed).
-        // NOTE: the clean contentModel payload is the ORIGIN PLUMBING for task 021 (G2) — task 021 wires the
-        // authored-origin → engine clean-apply mode. This task only guarantees an authored reopen lands on
-        // the clean payload (renderer), not the op log.
+        // G1/G2 (FR-01/FR-02, tasks 020/021 — Candidate A): a REOPENED AUTHORED doc (persisted
+        // sprk_composeorigin=authored, `state.docxBytes` present) now takes the SAME op-log path as an
+        // imported doc — it sends its retained baseline + operation log, and the SERVER applies the ops
+        // CLEAN (plain runs, physical deletes, no redlines) by reading the durable marker (engine
+        // trackChanges:false). This is the highest-fidelity path: only document.xml is re-serialized, every
+        // other package part + untouched subtree stays byte-identical — NOT a re-author-from-content-model
+        // (which drops headers/footers/styles on rich docs and violates ADR-049 I-1/I-2/I-4). The client no
+        // longer branches on origin here; the durable marker drives clean-vs-tracked server-side (NFR-02 —
+        // never inferred). See notes/g2-clean-apply-decision.md (operator resolution 2026-07-29).
+        //
+        // The ONLY contentModel case that remains on the replace route is an in-session BORN-IN-EDITOR
+        // re-save (`!state.docxBytes`): a blank/AI-draft doc holds NO retained baseline (its create-on-save
+        // returned the drive-ITEM id as VersionId, not a real SPE version), so the baseline-less op-log path
+        // 400s (task 039). It re-authors via contentModel, mirroring the create path — this is authored
+        // ORIGINATION through the renderer (the two-byte-author split), never authored EDITING through the op
+        // log; both stay clean.
         const bornInEditor = !state.docxBytes;
-        const isAuthoredOrigin = state.origin === 'authored';
-        const routeClean = bornInEditor || isAuthoredOrigin;
         requestBody = {
           // UAT 2026-07-19 P2: the drive the doc lives in (documentRef.driveId after a create-on-save),
           // falling back to the host default — so a born-in-editor doc's second save + baseline re-fetch
@@ -1137,20 +1139,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           driveId: saveDriveId,
           tenantId,
           sessionId: state.sessionId,
+          // G2: the server reads the durable sprk_composeorigin marker for THIS record to pick clean-vs-
+          // tracked apply — so documentRecordId MUST ride every reopened-doc save (already sent since G1).
           documentRecordId: state.documentRef.sprkDocumentId ?? null,
           displayName: state.documentRef.fileName ?? null,
           comments: anchoredComments,
           // C2: the baseline paraId map so the server can stamp minted ids before the engine resolves anchors
-          // (harmless on the clean branch — the server skips the stamp when ContentModel is present).
+          // (harmless on the contentModel branch — the server skips the stamp when ContentModel is present).
           paraIdMap,
-          ...(routeClean
-            ? // Born-in-editor OR reopened-authored (G1): re-author the whole document server-side from the
-              // content model — the CLEAN payload (renderer, no tracked changes). No baseline / op-log — an
-              // authored doc's edits are clean by construction, there is nothing to diff onto (REQ-1).
+          ...(bornInEditor
+            ? // In-session born-in-editor re-save: re-author from the content model (no retained baseline to
+              // delta onto — task 039). The renderer authors clean bytes; no op-log.
               { contentModel: editorRef.current.buildContentModel() }
             : {
-                // Loaded/imported dirty save (UNCHANGED — REQ-2). The load-time version id = the op-log's BASE
-                // VERSION; lets the server re-fetch the baseline even without the client bytes.
+                // Loaded/imported OR reopened-authored dirty save. The load-time version id = the op-log's BASE
+                // VERSION; lets the server re-fetch the baseline even without the client bytes. The server
+                // applies the op-log tracked (imported) or CLEAN (authored, per the durable marker) — REQ-1/REQ-2.
                 baselineVersionId: state.versionId ?? undefined,
                 // Same-session fast-path: still holding the retained original → send it (byte-identical).
                 content: state.docxBytes ? encodeRetained(state.docxBytes) : undefined,

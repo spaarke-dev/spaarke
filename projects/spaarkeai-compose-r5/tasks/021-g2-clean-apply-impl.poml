@@ -4,7 +4,7 @@
     <title>G2 — Clean (non-tracked) apply mode: implement the R5-D2 approach selected by the Phase-0 spike</title>
     <phase>2 Authored-doc lifecycle</phase>
     <gate>dep:003</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>High-blast-radius engine/save change on the byte-authoring path; a wrong branch silently produces tracked markup on authored docs or breaks byte preservation. Tags include bff-api/engine, modifies `.cs`, changes the apply contract. FULL per CLAUDE.md §8.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -460,32 +460,9 @@ public class ComposeService : IComposeService
         // value degrades to Origin=null — NEVER fails Load. The BINDING null-handling contract (see
         // ComposeOrigin remarks) is the CALLER's obligation: null MUST be treated as Imported, never
         // strict-equal to Authored.
-        ComposeOrigin? origin = null;
-        if (request.DocumentRecordId.HasValue)
-        {
-            try
-            {
-                var documentEntity = await _dataverse.RetrieveAsync(
-                        DocumentLogicalName,
-                        request.DocumentRecordId.Value,
-                        new[] { ComposeOriginAttribute },
-                        cancellationToken)
-                    .ConfigureAwait(false);
-
-                if (documentEntity is not null
-                    && documentEntity.Contains(ComposeOriginAttribute)
-                    && documentEntity[ComposeOriginAttribute] is OptionSetValue originOptionSet)
-                {
-                    origin = (ComposeOrigin)originOptionSet.Value;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "Compose load: sprk_composeorigin lookup failed for record={DocumentRecordId} — Origin will be null (callers must treat null as Imported per the BINDING null-handling contract)",
-                    request.DocumentRecordId);
-            }
-        }
+        ComposeOrigin? origin = request.DocumentRecordId.HasValue
+            ? await ReadPersistedOriginAsync(request.DocumentRecordId.Value, cancellationToken).ConfigureAwait(false)
+            : null;
 
         return new LoadComposeDocumentResult
         {
@@ -507,6 +484,43 @@ public class ComposeService : IComposeService
             ImportedComments = importedComments,
             Origin = origin,
         };
+    }
+
+    /// <summary>
+    /// G1/G2 (FR-01/FR-02, tasks 020/021): reads the durable <c>sprk_composeorigin</c> marker for an
+    /// existing <c>sprk_document</c>. Server-authoritative — the origin decision is the persisted marker,
+    /// never inferred from SPE-id presence or document content (NFR-02 / I-7). Best-effort: a read failure
+    /// OR a legacy row with no stored value returns <c>null</c> and NEVER throws — callers apply the BINDING
+    /// null-handling contract (treat <c>null</c> as <see cref="ComposeOrigin.Imported"/>, never strict-equal
+    /// to <see cref="ComposeOrigin.Authored"/>). Consumed by <see cref="LoadAsync"/> (returns it to the
+    /// client) and <see cref="SaveAsync"/> (selects the engine's clean-vs-tracked apply mode).
+    /// </summary>
+    private async Task<ComposeOrigin?> ReadPersistedOriginAsync(Guid documentRecordId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var documentEntity = await _dataverse.RetrieveAsync(
+                    DocumentLogicalName,
+                    documentRecordId,
+                    new[] { ComposeOriginAttribute },
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (documentEntity is not null
+                && documentEntity.Contains(ComposeOriginAttribute)
+                && documentEntity[ComposeOriginAttribute] is OptionSetValue originOptionSet)
+            {
+                return (ComposeOrigin)originOptionSet.Value;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose: sprk_composeorigin lookup failed for record={DocumentRecordId} — origin treated as null (callers apply the BINDING null-handling contract: null = Imported).",
+                documentRecordId);
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -675,6 +689,26 @@ public class ComposeService : IComposeService
         // document never mutates the stored value.
         var origin = request.ContentModel is not null ? ComposeOrigin.Authored : ComposeOrigin.Imported;
 
+        // G2 (FR-02, task 021 / R5-D2 Candidate A): the CLEAN-APPLY decision for the op-log/engine path.
+        // A reopened AUTHORED doc sends an op-log (ContentModel null) — the ContentModel discriminant above
+        // would mislabel it Imported, so the DURABLE sprk_composeorigin marker is authoritative here (read
+        // server-side, never inferred from SPE-id/content — NFR-02/I-7). When the marker says Authored, the
+        // engine applies edits CLEAN (plain runs, physical deletes, no w:pPrChange) so an authored doc's own
+        // cross-session edits carry NO redlines (REQ-1); Imported/legacy-null stay on the tracked default
+        // (REQ-2 not regressed). Best-effort: a marker read failure degrades to tracked (safe — worst case an
+        // authored doc shows redlines, never data loss). ContentModel-present saves take the renderer path
+        // (no engine Apply) and are already clean by construction.
+        var cleanApply = false;
+        if (request.ContentModel is null && request.DocumentRecordId is { } originRecordId)
+        {
+            var persistedOrigin = await ReadPersistedOriginAsync(originRecordId, cancellationToken).ConfigureAwait(false);
+            if (persistedOrigin == ComposeOrigin.Authored)
+            {
+                origin = ComposeOrigin.Authored;
+                cleanApply = true;
+            }
+        }
+
         // ────────────────────────────────────────────────────────────────────────────
         // FR-08 (task 050, design §5 "Save + concurrency"): version-stamp + assert-before-apply +
         // re-anchor-on-stale. Only meaningful for an EXISTING item (a transient create has no prior base
@@ -708,7 +742,7 @@ public class ComposeService : IComposeService
                 if (isStale)
                 {
                     var (patchedBytes, summary) = await ReanchorStaleSaveAsync(
-                            request, contentToPersist, httpContext, observedAt, cancellationToken)
+                            request, contentToPersist, httpContext, observedAt, trackChanges: !cleanApply, cancellationToken)
                         .ConfigureAwait(false);
 
                     contentToPersist = patchedBytes;
@@ -753,7 +787,8 @@ public class ComposeService : IComposeService
                 request.OperationLog ?? new ComposeOperationLog(),
                 request.Comments,
                 ResolveRevisionAuthor(httpContext),
-                observedAt);
+                observedAt,
+                trackChanges: !cleanApply);
         }
         // UAT round-3 (2026-07-27) — advisory comments on the CREATE-ON-SAVE / ContentModel path.
         // The block above only bakes comments when ContentModel is null (a loaded-doc delta save). But a
@@ -1181,6 +1216,7 @@ public class ComposeService : IComposeService
         byte[] originalBaseline,
         HttpContext httpContext,
         DateTimeOffset observedAt,
+        bool trackChanges,
         CancellationToken cancellationToken)
     {
         // Re-download the CURRENT (live) bytes — the base the op log must now be checked against. A
@@ -1327,7 +1363,8 @@ public class ComposeService : IComposeService
                     new ComposeOperationLog { SchemaVersion = request.OperationLog?.SchemaVersion ?? ComposeOperationSchema.Version, Operations = autoOps },
                     autoComments,
                     ResolveRevisionAuthor(httpContext),
-                    observedAt);
+                    observedAt,
+                    trackChanges: trackChanges);
         }
         catch (ComposePatchException ex)
         {

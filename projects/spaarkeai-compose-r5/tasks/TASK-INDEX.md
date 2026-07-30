@@ -27,7 +27,7 @@
 | 013 | G12 accept-all/reject-all batch | 1 Edit-path ops | ✅ | FULL | opus/high | 012 | ❌ shared engine |
 | 014 | G4 tables — full tracked structure (L long pole) | 1 Edit-path ops | ✅ | FULL | opus/xhigh | 004 | ❌ shared engine+catalog |
 | 020 | G1 origin routing (LoadAsync/SaveAsync + client) | 2 Lifecycle | ✅ | FULL | sonnet/high | 002 | ❌ shared service+workspace |
-| 021 | G2 clean-apply implementation | 2 Lifecycle | 🔲 | FULL | opus/xhigh | 003 | ❌ shared engine/service |
+| 021 | G2 clean-apply implementation | 2 Lifecycle | ✅ | FULL | opus/xhigh | 003 | ❌ shared engine/service |
 | 022 | G7 Save-Version / Save-New split-button | 2 Lifecycle | 🔲 | FULL | sonnet/high | 020 | ❌ shared service+workspace |
 | 030 | G8 external-change refresh + remount banner | 3 Concurrency/UX | 🔲 | FULL | sonnet/high | 020 | ❌ ComposeEditor overlap (031) |
 | 031 | G9 comment pane scroll-sync | 3 Concurrency/UX | 🔲 | STANDARD | sonnet/high | none | ❌ ComposeEditor overlap (030) |

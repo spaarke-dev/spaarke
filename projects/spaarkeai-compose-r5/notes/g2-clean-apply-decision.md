@@ -4,6 +4,8 @@
 > **Authored**: 2026-07-29 · **Rigor**: FULL · **Model**: opus @ xhigh
 > **Spec**: FR-02 (G2 clean, non-tracked apply for AUTHORED docs) · design R5-D2 · Owner Clarifications (R5-D2 = Phase-0 spike).
 > **Status**: ✅ DECIDED — **Candidate A (engine clean-apply BRANCH)**. No escalation (both criteria satisfiable; A satisfies all three).
+>
+> **⚠️ 2026-07-29 operator resolution (task 021 execution):** a routing conflict surfaced between task 020 (shipped: authored edits → `contentModel`/renderer, per spec FR-01 "not the op-log path") and this note's §4 (authored edits → `Apply(clean)` over retained bytes = Candidate A). Operator chose **Candidate A — highest fidelity**, and required **no regression to `spaarkeai-compose-fidelity-r4.5`** (now on master). Task 021 therefore ALSO re-routes the client's reopened-authored save from `contentModel` back to `operationLog` + a clean signal (bornInEditor/first-save origination still uses the renderer/contentModel — that split stands). Task 020's origin MARKER read/write is unchanged; only the client's clean-payload *shape* for reopened authored docs changes (contentModel → op-log+clean).
 
 ---
 
