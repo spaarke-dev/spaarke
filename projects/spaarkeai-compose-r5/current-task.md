@@ -3,11 +3,15 @@
 > **Last Updated**: 2026-07-30 (by context-handoff — ALL impl+hardening done; AT deploy gate; pre-compaction)
 > **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-compose-r5`. Working tree CLEAN, all pushed (tip `23b676a57`).
 >
-> **▶ NEXT ACTION (post-compaction):** ⏸ **AT THE DEPLOY GATE — awaiting operator.** ALL R5 implementation + hardening COMPLETE (**010–014, 020, 021, 022, 030, 031, 032, 033, 040, 041 ✅**). Branch fully GREEN end-to-end. Only two tasks remain, both operator-sequenced:
-> 1. **042 (deploy) — HOLDS for operator.** Technical deploy gate CLEARED (`notes/hardening-report.md`). Deploy is operator-coordinated (shared `sprk_spaarkeai` web resource + `spaarke-bff-dev`, last-deploy-wins). **Deploy the BFF + the `sprk_spaarkeai` client TOGETHER** (G5/G7 catalog changes are additive/no version bump — safe only if client+server ship together). When operator gives the go: `task-execute 042`.
-> 2. **090 (wrap-up) — depends on 042.** Runs AFTER deploy: `/test-diet` (reconcile R5 tests vs the 17-ban classifier), `/code-review` + `/adr-check` final sweep, close-out, then `/merge-to-master`.
+> **▶ NEXT ACTION (post-compaction):** 🔧 **PHASE 5 UAT REMEDIATION IN PROGRESS.** Task 042 deployed (operator); UAT surfaced 11 findings → 5 R5-owned (Phase 5 wave 050–054, see `notes/uat-remediation-r5.md`). Status:
+> - **050 ✅** UAT #1A redline routing + origin fix (SEV-1) — committed `e5c82afe6`. Compose suite 822/822, byte-diff green, publish 46.84 MB.
+> - **053 ✅** UAT #5 external-change on visibilitychange + Reload-from-source button — committed `1abd5785f`. Toolbar 46/46.
+> - **054 ✅** UAT #9 profile-button (gate already correct; added spinner feedback) — committed `bf3104e86`. Toolbar 47/47.
+> - **051 ⛔🔔 ESCALATED** UAT #1B persist computed numbering — feasibility investigation contradicts the premise; escalation trigger fired. **Awaiting owner decision** (options A/B/C in `notes/task-051-deviations.md`; recommend A = reduced scope, 050 already preserves numbering byte-identical).
+> - **052 🔲 REMAINING** UAT #10/#11 Word/WOPI unlock (SEV-1) — net-new SPE facade primitive + endpoint + client 423 branch + "Unlock & Save" button. Root cause + exact file:line in `notes/uat-remediation-r5.md`. **Platform caveat**: Graph has no universal WOPI unlock; discardCheckout releases a genuine checkout but a transient co-auth lock may still need to time out — build the affordance + honest UX. Ready to execute via `task-execute 052`.
 >
-> **Do NOT deploy autonomously.** Wait for the operator's explicit go on 042.
+> **After 052 + 051 decision**: re-verify (byte-diff + full BFF suite + publish ≤60) → **operator re-deploys BFF + `sprk_spaarkeai` client together** → re-UAT → then 090 wrap-up (/test-diet + review + merge-to-master).
+> **Out-of-scope UAT items (#2,3,4,7,8)** captured in `notes/uat-remediation-r5.md` (other projects; no issues filed per owner). **Do NOT deploy autonomously.**
 
 ---
 
