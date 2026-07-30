@@ -92,11 +92,9 @@ import { CalendarCheckmarkRegular, CheckmarkCircleFilled, MailRegular } from '@f
 import {
   ANALYSIS_REGARDING_TARGETS,
   AddTodoFollowOnStep,
-  AssociateToStep,
   CreateRecordWizard,
   EMPTY_TODO_FORM,
   EntityCreationService,
-  LookupField,
   SendEmailFollowOnStep,
   SprkAnalysisStatus,
   SprkAnalysisWorkType,
@@ -250,12 +248,6 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     marginBottom: tokens.spacingVerticalS,
   },
-  associateToWrap: {
-    padding: tokens.spacingHorizontalM,
-    borderRadius: tokens.borderRadiusMedium,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
 });
 
 // ---------------------------------------------------------------------------
@@ -263,6 +255,41 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 const EMPTY_SEARCH = () => Promise.resolve([] as ILookupItem[]);
+
+/**
+ * Read-only lookup control that opens the OOB right-side Dataverse lookup pane
+ * (via the caller's `onPick`, which calls `navigationService.openLookup`) rather
+ * than an inline typeahead. Shows the picked record's name + a Clear button once
+ * selected; a "Select…" button otherwise. Used for Assigned Attorney / Paralegal
+ * (both `contact` lookups) per UAT #6.
+ */
+interface ContactLookupControlProps {
+  value: ILookupItem | null;
+  onPick: () => void;
+  onClear: () => void;
+  disabled?: boolean;
+  placeholder?: string;
+}
+
+const ContactLookupControl: React.FC<ContactLookupControlProps> = ({ value, onPick, onClear, disabled, placeholder }) => {
+  if (value) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+        <Text size={300} weight="semibold">
+          {value.name}
+        </Text>
+        <Button appearance="subtle" size="small" onClick={onClear} disabled={disabled} aria-label="Clear selection">
+          Clear
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <Button appearance="secondary" onClick={onPick} disabled={disabled}>
+      {placeholder ?? 'Select…'}
+    </Button>
+  );
+};
 
 /** Adapt IDataService to the webApi shape CreateRecordWizard/PolymorphicResolverService expect. */
 function buildWebApiAdapter(dataService: IDataService) {
@@ -293,20 +320,26 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
   const styles = useStyles();
   const dispatch = useDispatchPaneEvent();
 
-  // ── Step 2 form state (name / description / access / associate-to) ──────
+  // ── Analysis Details form state (name / description / attorney / paralegal) ──
+  // UAT (2026-07-30): 'Access' (ownerid) removed; 'Associate To' moved to a
+  // dedicated FIRST step (config.associateToStep). Assigned Attorney / Paralegal
+  // are `contact` lookups opened via the OOB right-side lookup pane
+  // (navigationService.openLookup), NOT inline typeahead.
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [owner, setOwner] = useState<ILookupItem | null>(null);
-  const [association, setAssociation] = useState<AssociationResult | null>(data?.initialAssociation ?? null);
+  const [attorney, setAttorney] = useState<ILookupItem | null>(null);
+  const [paralegal, setParalegal] = useState<ILookupItem | null>(null);
+  // Transient OOB-lookup error (a failed pane open degrades to an inline notice).
+  const [lookupError, setLookupError] = useState<string | null>(null);
 
   const nameRef = useRef(name);
   nameRef.current = name;
   const descriptionRef = useRef(description);
   descriptionRef.current = description;
-  const ownerRef = useRef(owner);
-  ownerRef.current = owner;
-  const associationRef = useRef(association);
-  associationRef.current = association;
+  const attorneyRef = useRef(attorney);
+  attorneyRef.current = attorney;
+  const paralegalRef = useRef(paralegal);
+  paralegalRef.current = paralegal;
 
   // ── Next-steps state (Send Email / Create To Do) ────────────────────────
   const [emailTo, setEmailTo] = useState('');
@@ -352,6 +385,25 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
   const searchAssignees = data?.searchAssignees ?? data?.searchUsers ?? EMPTY_SEARCH;
 
   const handleSearchAssignees = useCallback((query: string) => searchAssignees(query), [searchAssignees]);
+
+  // Assigned Attorney / Paralegal — open the OOB right-side `contact` lookup pane
+  // (navigationService.openLookup, ADR: OOB modal over inline typeahead). Both
+  // columns (`sprk_assignedattorney1` / `sprk_assignedparalegal1`) target `contact`.
+  const handlePickContact = useCallback(
+    async (setter: (v: ILookupItem | null) => void): Promise<void> => {
+      if (!navigationService) return;
+      setLookupError(null);
+      try {
+        const results = await navigationService.openLookup({ entityType: 'contact', allowMultiSelect: false });
+        if (results && results.length > 0) {
+          setter({ id: results[0].id, name: results[0].name });
+        }
+      } catch (err) {
+        setLookupError(err instanceof Error ? err.message : 'Could not open the lookup. Please try again.');
+      }
+    },
+    [navigationService]
+  );
 
   // ── Next-steps card set: Send Email / Create To Do (spec FR-12) ─────────
   const followOnCards: FollowOnCardConfig[] = useMemo(
@@ -410,7 +462,25 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
       entityLabel: 'analysis',
       filesStepSubtitle: 'Upload the document to analyze, or select an existing one.',
 
-      // Step 1 extension (task 040): "select existing Document" alongside upload.
+      // Step 1 (UAT 2026-07-30): "Associate To" is now a dedicated FIRST step via
+      // CreateRecordWizard's built-in `associateToStep` (mirrors Create New Matter).
+      // Footer Cancel | Back | Skip | Next comes free from WizardShell; the step's
+      // Next is enabled once a record is selected, Skip bypasses it. `initialAssociation`
+      // (entry case 2b — opened in a Matter/Project) pre-fills the picker.
+      associateToStep: navigationService
+        ? {
+            entityTypes: ANALYSIS_REGARDING_ENTITY_TYPES as EntityTypeOption[],
+            navigationService,
+            initialAssociation: data?.initialAssociation,
+          }
+        : undefined,
+
+      // Step 2: Add file(s) — REQUIRED (UAT #4): the analysis IS a document review,
+      // so onFinish cannot proceed without a doc. Skip is hidden; Next gates on a
+      // file or an existing-Document pick.
+      requireFilesStep: true,
+
+      // Step 2 extension (task 040): "select existing Document" alongside upload.
       existingRecordPicker: navigationService
         ? {
             navigationService,
@@ -419,10 +489,9 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           }
         : undefined,
 
-      // Step 2: name + description + access + associate-to, all in ONE step
-      // (spec FR-12's 3-step framing — NOT CreateRecordWizard's built-in
-      // separate associateToStep, which would add a 4th step before the
-      // files step).
+      // Step 3: Analysis Details — name + description + Assigned Attorney / Paralegal.
+      // (UAT #5: the description sits on its own line below the title; UAT #6: 'Access'
+      // removed, two `contact` lookups added, opened via the OOB right-side pane.)
       infoStep: {
         id: 'analysis-details',
         label: 'Analysis Details',
@@ -433,10 +502,16 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
               <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
                 Analysis Details
               </Text>
-              <Text size={200} className={styles.stepSubtitle}>
-                Set the name, description, access, and the record this analysis is regarding.
+              <Text as="p" size={200} block className={styles.stepSubtitle}>
+                Set the name, description, and assignments for this analysis.
               </Text>
             </div>
+
+            {lookupError && (
+              <MessageBar intent="error">
+                <MessageBarBody>{lookupError}</MessageBarBody>
+              </MessageBar>
+            )}
 
             <Field label="Name" required>
               <Input
@@ -457,25 +532,25 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
               />
             </Field>
 
-            <LookupField
-              label="Access"
-              value={owner}
-              onChange={setOwner}
-              onSearch={searchUsers}
-              placeholder="Search for a person…"
-            />
+            <Field label="Assigned Attorney">
+              <ContactLookupControl
+                value={attorney}
+                onPick={() => handlePickContact(setAttorney)}
+                onClear={() => setAttorney(null)}
+                disabled={!navigationService}
+                placeholder="Select an attorney…"
+              />
+            </Field>
 
-            {navigationService && (
-              <div className={styles.associateToWrap}>
-                <AssociateToStep
-                  entityTypes={ANALYSIS_REGARDING_ENTITY_TYPES as EntityTypeOption[]}
-                  navigationService={navigationService}
-                  value={association}
-                  onChange={setAssociation}
-                  variant="compact"
-                />
-              </div>
-            )}
+            <Field label="Assigned Paralegal">
+              <ContactLookupControl
+                value={paralegal}
+                onPick={() => handlePickContact(setParalegal)}
+                onClear={() => setParalegal(null)}
+                disabled={!navigationService}
+                placeholder="Select a paralegal…"
+              />
+            </Field>
           </div>
         ),
       },
@@ -552,14 +627,38 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           'sprk_documentid@odata.bind': `/sprk_documents(${documentId})`,
         };
 
-        if (ownerRef.current?.id) {
-          payload['ownerid@odata.bind'] = `/systemusers(${ownerRef.current.id})`;
-        }
-
         const warnings: string[] = [];
 
+        // -- Assigned Attorney / Paralegal (both `contact` lookups, UAT #6) --------
+        // Bind via the discovered PascalCase nav-props (`sprk_AssignedAttorney1` /
+        // `sprk_AssignedParalegal1`) → `/contacts(id)`, the SAME pattern matterService
+        // uses. Discovery is best-effort; the hardcoded PascalCase fallback matches
+        // the schema names when discovery is unavailable (e.g. dev).
+        const attorneyPick = attorneyRef.current;
+        const paralegalPick = paralegalRef.current;
+        if (attorneyPick?.id || paralegalPick?.id) {
+          let assignNavProps: Awaited<ReturnType<typeof discoverNavProps>> = [];
+          try {
+            assignNavProps = await discoverNavProps('sprk_analysis');
+          } catch {
+            /* fall through to hardcoded nav-prop names below */
+          }
+          const navPropFor = (col: string, fallback: string): string =>
+            assignNavProps.find(e => e.columnName === col)?.navPropName ?? fallback;
+          if (attorneyPick?.id) {
+            payload[`${navPropFor('sprk_assignedattorney1', 'sprk_AssignedAttorney1')}@odata.bind`] =
+              `/contacts(${attorneyPick.id.replace(/[{}]/g, '')})`;
+          }
+          if (paralegalPick?.id) {
+            payload[`${navPropFor('sprk_assignedparalegal1', 'sprk_AssignedParalegal1')}@odata.bind`] =
+              `/contacts(${paralegalPick.id.replace(/[{}]/g, '')})`;
+          }
+        }
+
         // -- Associate-to: ADR-024 resolver fields + Field-Mapping inheritance --
-        const finishAssociation = associationRef.current;
+        // Association now comes from the dedicated "Associate To" first step
+        // (config.associateToStep → IFinishContext.association), not a local field.
+        const finishAssociation = context.association;
         if (finishAssociation) {
           const entitySet = REGARDING_ENTITY_SET_BY_TYPE[finishAssociation.entityType];
           const navPropHint = REGARDING_NAVPROP_HINT_BY_TYPE[finishAssociation.entityType];
@@ -714,12 +813,14 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
     workTypeLabel,
     name,
     description,
-    owner,
-    association,
-    searchUsers,
+    attorney,
+    paralegal,
+    lookupError,
+    handlePickContact,
     followOnCards,
     styles,
     dispatch,
+    data?.initialAssociation,
     data?.resolveSpeContainerId,
     data?.sessionId,
     handleClose,
@@ -742,6 +843,11 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         webApi={webApiAdapter!}
         config={config}
         embedded={false}
+        // UAT #2: match the Dataverse Create-wizard modal footprint (60% × 70%),
+        // instead of WizardShell's 95vw default which read as oversized next to
+        // "Create New Matter".
+        maxWidth="60vw"
+        height="70vh"
       />
     );
   }

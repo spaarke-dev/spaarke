@@ -322,6 +322,27 @@ export function WorkspacePane(): React.JSX.Element {
     [analysisWizardDataService],
   );
 
+  // SPE container resolver for the Analysis wizard's file upload (UAT #7 fix,
+  // 2026-07-30). The wizard's `onFinish` throws "No storage container is configured
+  // for your business unit" when `speContainerId` is empty — the root cause was that
+  // the modal host never supplied a `resolveSpeContainerId`. This is the SAME
+  // current-user → business-unit → `sprk_containerid` chain every shipped Create
+  // wizard uses (useWizardPageBootstrap.ts / the Create* code pages). Pure Dataverse
+  // Web API via the Xrm host global (no BFF/OBO); the GUID-strip on userId is required.
+  const resolveAnalysisSpeContainerId = React.useCallback(async (): Promise<string> => {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const xrm: any =
+      (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+    /* eslint-enable @typescript-eslint/no-explicit-any */
+    if (!xrm?.WebApi?.retrieveRecord) throw new Error("Xrm.WebApi not available");
+    const userId: string = xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "");
+    const user = await xrm.WebApi.retrieveRecord("systemuser", userId, "?$select=_businessunitid_value");
+    const buId = user["_businessunitid_value"] as string;
+    if (!buId) throw new Error("Could not resolve business unit");
+    const bu = await xrm.WebApi.retrieveRecord("businessunit", buId, "?$select=sprk_containerid");
+    return (bu["sprk_containerid"] as string) || "";
+  }, []);
+
   // ---------------------------------------------------------------------------
   // Create Analysis wizard MODAL host (ai-advanced-capabilities-analysis-hub-r1
   // tabbed Quick Start). The Quick Start "Agreement Review" card dispatches
@@ -1465,6 +1486,7 @@ export function WorkspacePane(): React.JSX.Element {
               navigationService: analysisWizardNavigationService,
               searchUsers: analysisWizardSearchUsers,
               searchAssignees: analysisWizardSearchUsers,
+              resolveSpeContainerId: resolveAnalysisSpeContainerId,
               authenticatedFetch,
               bffBaseUrl,
               ...(chatSessionId ? { sessionId: chatSessionId } : {}),
@@ -1840,6 +1862,7 @@ export function WorkspacePane(): React.JSX.Element {
               navigationService: analysisWizardNavigationService,
               searchUsers: analysisWizardSearchUsers,
               searchAssignees: analysisWizardSearchUsers,
+              resolveSpeContainerId: resolveAnalysisSpeContainerId,
               authenticatedFetch,
               bffBaseUrl,
               ...(chatSessionId ? { sessionId: chatSessionId } : {}),

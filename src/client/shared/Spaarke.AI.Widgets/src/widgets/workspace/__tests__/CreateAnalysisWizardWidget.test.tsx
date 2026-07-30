@@ -1,23 +1,27 @@
 /**
- * CreateAnalysisWizardWidget — unit tests (task 040)
+ * CreateAnalysisWizardWidget — unit tests
  *
- * Exercises the real `CreateRecordWizard` shell (not mocked — it is a small,
- * already-tested shared component) end-to-end through the 3-step flow the
- * task's ui-tests + acceptance criteria describe:
+ * Exercises the real `CreateRecordWizard` shell (not mocked — a small, already-tested
+ * shared component) end-to-end. As of the 2026-07-30 UAT rework the step sequence is
+ * FOUR steps (Associate To is now a dedicated first step, files are REQUIRED):
  *
- *   1. Three steps navigate (Add file(s) → Analysis Details → Next Steps).
- *   2. Finish creates a valid `sprk_analysis` (name, description, work-type,
- *      regarding, access, next-steps) and loads the file to a workspace tab
- *      (`widget_load` / `document-viewer` dispatch).
- *   3. Associate-to + next-steps are Field-Mapping-driven (`applyFieldMappings`
- *      is invoked with the expected source/target entities).
- *   4. Negative: finishing with no document blocks creation with a validation
- *      message (not an unhandled error).
- *   5. ADR-021: renders under both light and dark Fluent themes.
+ *   1. Associate To     (built-in `config.associateToStep`; skip-able)
+ *   2. Add file(s)       (REQUIRED — `config.requireFilesStep`; no Skip, Next gated on
+ *                         an uploaded file OR a picked existing Document)
+ *   3. Analysis Details  (name + description + Assigned Attorney/Paralegal contact lookups;
+ *                         'Access' removed)
+ *   4. Next Steps        (follow-on cards)
  *
- * `applyFieldMappings` is mocked at the module boundary (network/BFF call) —
- * everything else (CreateRecordWizard, AssociateToStep, LookupField,
- * WizardFollowOns) is the REAL shared-lib implementation.
+ * Covered:
+ *   1. The four steps render in order.
+ *   2. Add file(s) is REQUIRED — Next is disabled with no document (negative).
+ *   3. Finish creates a valid `sprk_analysis` and loads the file to a workspace tab.
+ *   4. Associate-to (step 1) is Field-Mapping-driven (`applyFieldMappings` parent→analysis).
+ *   5. Send Email next-step is Field-Mapping-driven (mapped subject/body win).
+ *   6. ADR-021: renders under both light and dark Fluent themes.
+ *
+ * `applyFieldMappings` is mocked at the module boundary (BFF call); everything else
+ * (CreateRecordWizard, AssociateToStep, WizardFollowOns) is the REAL shared-lib impl.
  */
 
 import '@testing-library/jest-dom';
@@ -25,11 +29,7 @@ import * as React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 
-// jsdom does not implement ResizeObserver; Fluent's MessageBar (rendered by
-// WizardShell's finish-error banner and the file step's validation banner)
-// uses it for reflow. This package's jest config has no global polyfill for
-// it (unlike Spaarke.UI.Components/jest.setup.js) — polyfill locally so the
-// error-banner path doesn't crash under jsdom.
+// jsdom does not implement ResizeObserver; Fluent's MessageBar uses it for reflow.
 class ResizeObserverStub {
   observe() {}
   unobserve() {}
@@ -102,6 +102,12 @@ function renderWidget(data: CreateAnalysisWizardData, theme: 'light' | 'dark' = 
   );
 }
 
+/** Step 1 "Associate To" is skip-able — bypass it via the footer Skip button. */
+function skipAssociateTo() {
+  fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
+}
+
+/** On the "Add file(s)" step, pick an existing Document (satisfies the required-file gate). */
 async function selectExistingDocument() {
   const button = await screen.findByTestId('select-existing-record-button');
   await act(async () => {
@@ -126,35 +132,32 @@ describe('CreateAnalysisWizardWidget', () => {
     (useDispatchPaneEvent as jest.Mock).mockReturnValue(jest.fn());
   });
 
-  it('renders the three-step flow: Add file(s) -> Analysis Details -> Next Steps', () => {
+  it('renders the four-step flow: Associate To -> Add file(s) -> Analysis Details -> Next Steps', () => {
     renderWidget(buildData());
 
+    // All four steps appear in the stepper sidebar.
+    expect(screen.getAllByText('Associate To').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Add file(s)').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Analysis Details').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Next Steps').length).toBeGreaterThan(0);
+  });
 
-    // Step 1 offers upload OR select existing.
+  it('requires a document: Add file(s) Next is disabled and offers no Skip until a doc is provided (negative)', () => {
+    renderWidget(buildData());
+
+    // Step 1: skip Associate To to reach the required Add file(s) step.
+    skipAssociateTo();
+
+    // Add file(s) is required — Next disabled, and there is no Skip button here.
+    const nextButton = screen.getByRole('button', { name: 'Next' });
+    expect(nextButton).toBeDisabled();
+    // The only remaining Skip on the page would be from a skippable step — none here.
+    expect(screen.queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument();
+    // The existing-document picker is available to satisfy the requirement.
     expect(screen.getByTestId('select-existing-record-button')).toBeInTheDocument();
   });
 
-  it('blocks Finish with a validation message when no document is provided (negative)', async () => {
-    renderWidget(buildData());
-
-    // Step 1: skip without a document.
-    clickPrimary('Next');
-    // Step 2: enter a name and advance.
-    fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'MSA Review' } });
-    clickPrimary('Next');
-    // Step 3: no follow-on actions selected -> Finish is the primary label.
-    await act(async () => {
-      clickPrimary('Finish');
-      await Promise.resolve();
-    });
-
-    expect(await screen.findByText(/attach a document or select an existing one/i)).toBeInTheDocument();
-  });
-
-  it('on finish, creates a valid sprk_analysis (name/description/work-type/regarding/access) and loads the file to a workspace tab', async () => {
+  it('on finish, creates a valid sprk_analysis (name/description/work-type) and loads the file to a workspace tab', async () => {
     const dispatchMock = jest.fn();
     (useDispatchPaneEvent as jest.Mock).mockReturnValue(dispatchMock);
 
@@ -171,16 +174,18 @@ describe('CreateAnalysisWizardWidget', () => {
 
     renderWidget(data);
 
-    // Step 1: select existing document.
+    // Step 1: skip Associate To.
+    skipAssociateTo();
+    // Step 2: select existing document.
     await selectExistingDocument();
     clickPrimary('Next');
 
-    // Step 2: name + description.
+    // Step 3: name + description.
     fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'MSA Review — Acme Corp' } });
     fireEvent.change(screen.getByLabelText('Analysis description'), { target: { value: 'Reviewing the MSA.' } });
     clickPrimary('Next');
 
-    // Step 3: finish with no follow-on actions.
+    // Step 4: finish with no follow-on actions.
     await act(async () => {
       clickPrimary('Finish');
       await Promise.resolve();
@@ -211,38 +216,41 @@ describe('CreateAnalysisWizardWidget', () => {
     );
   });
 
-  it('is Field-Mapping-driven for associate-to: applyFieldMappings runs parent -> sprk_analysis when a regarding record is picked', async () => {
+  it('is Field-Mapping-driven for associate-to: applyFieldMappings runs parent -> sprk_analysis when a regarding record is picked in step 1', async () => {
     const dataService = buildDataService();
-    // Two distinct navigationService.openLookup calls happen: one for the
-    // Step-1 existing-document picker, one for the Step-2 AssociateToStep.
+    // Two openLookup calls: first the step-1 AssociateToStep (matter), then the
+    // step-2 existing-document picker (document).
     const navigationService: INavigationService = {
       openRecord: jest.fn().mockResolvedValue(undefined),
       openDialog: jest.fn().mockResolvedValue({ confirmed: true }),
       closeDialog: jest.fn(),
       openLookup: jest
         .fn()
-        .mockResolvedValueOnce([{ id: 'existing-doc-id', name: 'MSA Draft', entityType: 'sprk_document' }])
-        .mockResolvedValueOnce([{ id: 'matter-id', name: 'Smith v. Jones', entityType: 'sprk_matter' }]),
+        .mockResolvedValueOnce([{ id: 'matter-id', name: 'Smith v. Jones', entityType: 'sprk_matter' }])
+        .mockResolvedValueOnce([{ id: 'existing-doc-id', name: 'MSA Draft', entityType: 'sprk_document' }]),
     };
     const data = buildData({ dataService, navigationService });
 
     renderWidget(data);
 
-    await selectExistingDocument();
-    clickPrimary('Next');
-
-    fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'MSA Review' } });
-
-    // Pick the regarding record via AssociateToStep's "Select Record" button.
+    // Step 1: pick the regarding record via AssociateToStep's "Select Record" button.
     const selectRecordButton = screen.getByTestId('associate-to-step-select-record-button');
     await act(async () => {
       fireEvent.click(selectRecordButton);
       await Promise.resolve();
     });
     await screen.findByText('Smith v. Jones');
-
     clickPrimary('Next');
 
+    // Step 2: select existing document.
+    await selectExistingDocument();
+    clickPrimary('Next');
+
+    // Step 3: name.
+    fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'MSA Review' } });
+    clickPrimary('Next');
+
+    // Step 4: finish.
     await act(async () => {
       clickPrimary('Finish');
       await Promise.resolve();
@@ -256,8 +264,6 @@ describe('CreateAnalysisWizardWidget', () => {
   });
 
   it('is Field-Mapping-driven for the Send Email next-step: applyFieldMappings runs sprk_analysis -> sprk_communication and mapped subject/body win over user input', async () => {
-    // Field Mapping profile supplies a subject/body — the mapped values MUST
-    // override the user-typed ones per the widget's onFinish contract.
     mockApplyFieldMappings.mockImplementation(
       async (args: { targetEntity: string; payload: Record<string, unknown> }) => {
         if (args.targetEntity === 'sprk_communication') {
@@ -278,13 +284,17 @@ describe('CreateAnalysisWizardWidget', () => {
 
     renderWidget(data);
 
+    // Step 1: skip Associate To.
+    skipAssociateTo();
+    // Step 2: existing document.
     await selectExistingDocument();
     clickPrimary('Next');
 
+    // Step 3: name.
     fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'MSA Review' } });
     clickPrimary('Next');
 
-    // Step 3: select the Send Email follow-on card, then advance into its step.
+    // Step 4: select the Send Email follow-on card, then advance into its step.
     fireEvent.click(screen.getByRole('checkbox', { name: /Send Notification Email/i }));
     clickPrimary('Next');
 
@@ -322,10 +332,10 @@ describe('CreateAnalysisWizardWidget', () => {
 
   it('ADR-021: renders correctly under both light and dark Fluent themes', () => {
     const { unmount } = renderWidget(buildData(), 'light');
-    expect(screen.getAllByText('Add file(s)').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Associate To').length).toBeGreaterThan(0);
     unmount();
 
     renderWidget(buildData(), 'dark');
-    expect(screen.getAllByText('Add file(s)').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Associate To').length).toBeGreaterThan(0);
   });
 });

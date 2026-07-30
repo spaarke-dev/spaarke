@@ -148,11 +148,15 @@ const useStyles = makeStyles({
   content: {
     display: 'flex',
     flexDirection: 'column',
-    minWidth: '480px',
-    maxWidth: '720px',
-    minHeight: '320px',
-    maxHeight: '70vh',
+    // FIXED size (ai-advanced-capabilities-analysis-hub-r1 UAT #1): the modal must
+    // NOT resize when switching tabs (Create has 7 cards, Analysis has 3). A fixed
+    // width + height keeps the dialog stable; each tab's card grid scrolls internally
+    // (the card widgets own `overflowY: auto`), so the shorter Analysis tab simply
+    // shows empty space below rather than shrinking the modal.
+    width: '640px',
+    height: '460px',
     padding: 0,
+    overflow: 'hidden',
   },
   title: {
     color: tokens.colorNeutralForeground1,
