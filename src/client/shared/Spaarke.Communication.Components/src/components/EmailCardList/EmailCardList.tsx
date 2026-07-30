@@ -30,8 +30,24 @@
  * dark mode.
  */
 import * as React from 'react';
-import { Skeleton, SkeletonItem, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { EMAIL_COMMUNICATION_TYPE, type EmailCardItem, type EmailCardListProps } from './EmailCardList.types';
+import {
+  SearchBox,
+  Skeleton,
+  SkeletonItem,
+  Text,
+  makeStyles,
+  mergeClasses,
+  tokens,
+  type InputOnChangeData,
+  type SearchBoxChangeEvent,
+} from '@fluentui/react-components';
+import {
+  EMAIL_COMMUNICATION_TYPE,
+  type EmailCardItem,
+  type EmailDateBucket,
+  type EmailDateBucketKey,
+  type EmailCardListProps,
+} from './EmailCardList.types';
 
 const DEFAULT_SKELETON_COUNT = 6;
 
@@ -44,16 +60,153 @@ function formatCardDate(date: string | Date): string {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(parsed);
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Ordered bucket definitions, newest → oldest. The render order (and the order
+ * `bucketEmailsByDate` returns non-empty buckets) is driven by this table.
+ */
+const BUCKET_ORDER: ReadonlyArray<{ key: EmailDateBucketKey; label: string }> = [
+  { key: 'today', label: 'Today' },
+  { key: 'yesterday', label: 'Yesterday' },
+  { key: 'thisWeek', label: 'This Week' },
+  { key: 'thisMonth', label: 'This Month' },
+  { key: 'older', label: 'Older' },
+];
+
+/** Local-calendar midnight (ms epoch) for the given date — bucketing is by calendar day, not by 24h offset. */
+function startOfDay(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+/**
+ * Classify one card's received date into a date bucket, relative to `now`.
+ * Boundaries (all by LOCAL calendar day):
+ *  - `today`     — same calendar day as `now` (defensively also catches any
+ *                  future-dated row so it never disappears below the fold).
+ *  - `yesterday` — the calendar day immediately before today.
+ *  - `thisWeek`  — within the last 7 calendar days (incl. today) but before
+ *                  yesterday, i.e. 2–6 days ago.
+ *  - `thisMonth` — older than `thisWeek` yet in the same calendar month + year
+ *                  as `now` (same or prior weeks this month).
+ *  - `older`     — everything else, plus any unparseable date (robustness).
+ */
+function classifyBucket(date: string | Date, now: Date): EmailDateBucketKey {
+  const parsed = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(parsed.getTime())) {
+    return 'older';
+  }
+  const todayStart = startOfDay(now);
+  const yesterdayStart = todayStart - DAY_MS;
+  const weekStart = todayStart - 6 * DAY_MS; // last 7 calendar days, inclusive of today
+  const dayStart = startOfDay(parsed);
+
+  if (dayStart >= todayStart) {
+    return 'today';
+  }
+  if (dayStart >= yesterdayStart) {
+    return 'yesterday';
+  }
+  if (dayStart >= weekStart) {
+    return 'thisWeek';
+  }
+  if (parsed.getFullYear() === now.getFullYear() && parsed.getMonth() === now.getMonth()) {
+    return 'thisMonth';
+  }
+  return 'older';
+}
+
+/**
+ * Pure, clock-injectable bucketing of email cards into Outlook-style date
+ * groups. Takes an explicit `now` so it is deterministic + unit-testable
+ * without mocking the clock (the component passes `new Date()`).
+ *
+ * Contract:
+ *  - Returns only NON-EMPTY buckets, in newest→oldest order (`BUCKET_ORDER`).
+ *  - Preserves the incoming order of `items` within each bucket (no re-sort).
+ */
+export function bucketEmailsByDate(items: ReadonlyArray<EmailCardItem>, now: Date): EmailDateBucket[] {
+  const grouped = new Map<EmailDateBucketKey, EmailCardItem[]>();
+  for (const item of items) {
+    const key = classifyBucket(item.date, now);
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.push(item);
+    } else {
+      grouped.set(key, [item]);
+    }
+  }
+  return BUCKET_ORDER.filter(b => grouped.has(b.key)).map(b => ({
+    key: b.key,
+    label: b.label,
+    items: grouped.get(b.key) as EmailCardItem[],
+  }));
+}
+
 const useStyles = makeStyles({
-  list: {
+  // Root wrapper: a non-scrolling toolbar pinned above a scrollable card list.
+  root: {
     display: 'flex',
     flexDirection: 'column',
     height: '100%',
     minHeight: 0,
     width: '100%',
     minWidth: 0,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  // Slim list toolbar. Currently holds only the search box; additional toolbar
+  // actions (sort / filter / refresh) are a future owner-specified addition.
+  toolbar: {
+    flexShrink: 0,
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    borderBottomWidth: tokens.strokeWidthThin,
+    borderBottomStyle: 'solid',
+    borderBottomColor: tokens.colorNeutralStroke2,
+  },
+  searchBox: {
+    flex: '1 1 auto',
+    minWidth: 0,
+  },
+  list: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    minHeight: 0,
+    width: '100%',
+    minWidth: 0,
     overflowY: 'auto',
     backgroundColor: tokens.colorNeutralBackground1,
+  },
+  // Sticky, unobtrusive date-bucket divider (Today / Yesterday / …). Muted
+  // foreground + a hairline separator, themed via semantic tokens (ADR-021).
+  divider: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderBottomWidth: tokens.strokeWidthThin,
+    borderBottomStyle: 'solid',
+    borderBottomColor: tokens.colorNeutralStroke2,
+  },
+  dividerLabel: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    textTransform: 'uppercase',
+    letterSpacing: tokens.spacingHorizontalXXS,
   },
   card: {
     display: 'flex',
@@ -165,6 +318,8 @@ export const EmailCardList: React.FC<EmailCardListProps> = ({
 }) => {
   const styles = useStyles();
   const [focusedId, setFocusedId] = React.useState<string | undefined>(undefined);
+  // Toolbar search state is intentionally internal (no parent wiring needed).
+  const [search, setSearch] = React.useState('');
 
   // FR-03 non-Email exclusion invariant: skip any row that is not Email, even
   // if the host passes an unfiltered array. Never trust the caller alone.
@@ -172,6 +327,28 @@ export const EmailCardList: React.FC<EmailCardListProps> = ({
     () => items.filter(item => item.communicationType === EMAIL_COMMUNICATION_TYPE),
     [items]
   );
+
+  // Client-side search: case-insensitive substring over sender + subject.
+  // Applied BEFORE bucketing so dividers reflect only matching results.
+  const filteredItems = React.useMemo<EmailCardItem[]>(() => {
+    const q = search.trim().toLowerCase();
+    if (q === '') {
+      return emailItems;
+    }
+    return emailItems.filter(item => item.from.toLowerCase().includes(q) || item.subject.toLowerCase().includes(q));
+  }, [emailItems, search]);
+
+  // Bucket the (filtered) cards into Outlook-style date groups. `now` comes from
+  // the wall clock in production; the pure helper takes it explicitly so it can
+  // be unit-tested deterministically. Empty buckets are omitted by the helper.
+  const buckets = React.useMemo<EmailDateBucket[]>(
+    () => bucketEmailsByDate(filteredItems, new Date()),
+    [filteredItems]
+  );
+
+  const handleSearchChange = React.useCallback((_e: SearchBoxChangeEvent, data: InputOnChangeData) => {
+    setSearch(data.value);
+  }, []);
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>, id: string) => {
@@ -205,6 +382,7 @@ export const EmailCardList: React.FC<EmailCardListProps> = ({
     );
   }
 
+  // No Email rows at all (before search) → the plain empty state, no toolbar.
   if (emailItems.length === 0) {
     return (
       <div className={styles.centeredState}>
@@ -213,75 +391,102 @@ export const EmailCardList: React.FC<EmailCardListProps> = ({
     );
   }
 
+  const renderCard = (item: EmailCardItem) => {
+    const isSelected = item.id === selectedId;
+    const isFocused = item.id === focusedId;
+    const unread = item.isUnread === true;
+    return (
+      <div
+        key={item.id}
+        role="listitem"
+        aria-selected={isSelected}
+        tabIndex={0}
+        className={mergeClasses(
+          styles.card,
+          isSelected ? styles.cardSelected : undefined,
+          isFocused ? styles.cardFocused : undefined
+        )}
+        onClick={() => onSelect(item.id)}
+        onKeyDown={e => handleKeyDown(e, item.id)}
+        onFocus={() => setFocusedId(item.id)}
+        onBlur={() => setFocusedId(prev => (prev === item.id ? undefined : prev))}
+      >
+        <div className={styles.cardHeaderRow}>
+          {item.reviewTone ? (
+            <span
+              className={mergeClasses(
+                styles.reviewDot,
+                item.reviewTone === 'green'
+                  ? styles.reviewDotGreen
+                  : item.reviewTone === 'yellow'
+                    ? styles.reviewDotYellow
+                    : styles.reviewDotRed
+              )}
+              role="img"
+              aria-label={
+                item.reviewTone === 'green'
+                  ? 'Confirmed'
+                  : item.reviewTone === 'yellow'
+                    ? 'Needs confirmation'
+                    : 'Requires review'
+              }
+              title={
+                item.reviewTone === 'green'
+                  ? 'Confirmed'
+                  : item.reviewTone === 'yellow'
+                    ? 'Needs confirmation'
+                    : 'Requires review'
+              }
+            />
+          ) : unread ? (
+            <span className={styles.unreadDot} role="img" aria-label="Unread" title="Unread" />
+          ) : null}
+          <Text className={styles.from} title={item.from}>
+            {item.from}
+          </Text>
+          <Text className={styles.date}>{formatCardDate(item.date)}</Text>
+        </div>
+        <Text className={mergeClasses(styles.subject, unread ? styles.subjectUnread : undefined)} title={item.subject}>
+          {item.subject}
+        </Text>
+        <Text className={styles.preview} title={item.preview}>
+          {item.preview}
+        </Text>
+      </div>
+    );
+  };
+
   return (
-    <div className={styles.list} role="list" aria-label="Emails">
-      {emailItems.map(item => {
-        const isSelected = item.id === selectedId;
-        const isFocused = item.id === focusedId;
-        const unread = item.isUnread === true;
-        return (
-          <div
-            key={item.id}
-            role="listitem"
-            aria-selected={isSelected}
-            tabIndex={0}
-            className={mergeClasses(
-              styles.card,
-              isSelected ? styles.cardSelected : undefined,
-              isFocused ? styles.cardFocused : undefined
-            )}
-            onClick={() => onSelect(item.id)}
-            onKeyDown={e => handleKeyDown(e, item.id)}
-            onFocus={() => setFocusedId(item.id)}
-            onBlur={() => setFocusedId(prev => (prev === item.id ? undefined : prev))}
-          >
-            <div className={styles.cardHeaderRow}>
-              {item.reviewTone ? (
-                <span
-                  className={mergeClasses(
-                    styles.reviewDot,
-                    item.reviewTone === 'green'
-                      ? styles.reviewDotGreen
-                      : item.reviewTone === 'yellow'
-                        ? styles.reviewDotYellow
-                        : styles.reviewDotRed
-                  )}
-                  role="img"
-                  aria-label={
-                    item.reviewTone === 'green'
-                      ? 'Confirmed'
-                      : item.reviewTone === 'yellow'
-                        ? 'Needs confirmation'
-                        : 'Requires review'
-                  }
-                  title={
-                    item.reviewTone === 'green'
-                      ? 'Confirmed'
-                      : item.reviewTone === 'yellow'
-                        ? 'Needs confirmation'
-                        : 'Requires review'
-                  }
-                />
-              ) : unread ? (
-                <span className={styles.unreadDot} role="img" aria-label="Unread" title="Unread" />
-              ) : null}
-              <Text className={styles.from} title={item.from}>
-                {item.from}
-              </Text>
-              <Text className={styles.date}>{formatCardDate(item.date)}</Text>
-            </div>
-            <Text
-              className={mergeClasses(styles.subject, unread ? styles.subjectUnread : undefined)}
-              title={item.subject}
-            >
-              {item.subject}
-            </Text>
-            <Text className={styles.preview} title={item.preview}>
-              {item.preview}
-            </Text>
-          </div>
-        );
-      })}
+    <div className={styles.root}>
+      {/*
+       * List toolbar. Search box is the only control for now; sort / filter /
+       * refresh actions are a future owner-specified addition and would sit here.
+       */}
+      <div className={styles.toolbar}>
+        <SearchBox
+          className={styles.searchBox}
+          value={search}
+          onChange={handleSearchChange}
+          placeholder="Search mail"
+          aria-label="Search mail"
+        />
+      </div>
+      {buckets.length === 0 ? (
+        <div className={styles.centeredState}>
+          <Text>No emails match your search</Text>
+        </div>
+      ) : (
+        <div className={styles.list} role="list" aria-label="Emails">
+          {buckets.map(bucket => (
+            <React.Fragment key={bucket.key}>
+              <div className={styles.divider} role="presentation">
+                <Text className={styles.dividerLabel}>{bucket.label}</Text>
+              </div>
+              {bucket.items.map(renderCard)}
+            </React.Fragment>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
