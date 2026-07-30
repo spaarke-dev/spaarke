@@ -22,7 +22,11 @@ import { PaneEventBus, PaneEventBusProvider } from '@spaarke/ai-widgets';
 const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): Promise<Response> => {
   const method = init?.method ?? 'GET';
   if (method === 'GET' && url.includes('/tabs')) {
-    return { ok: true, status: 200, json: async () => ({ tabs: [], activeTabId: null }) } as Partial<Response> as Response;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ tabs: [], activeTabId: null }),
+    } as Partial<Response> as Response;
   }
   if (method === 'PATCH' && url.includes('/tabs')) {
     return { ok: true, status: 204, json: async () => ({}) } as Partial<Response> as Response;
@@ -115,7 +119,7 @@ function renderPane(): { bus: PaneEventBus } {
       <PaneEventBusProvider bus={bus}>
         <WorkspacePane />
       </PaneEventBusProvider>
-    </FluentProvider>,
+    </FluentProvider>
   );
   return { bus };
 }
@@ -167,6 +171,26 @@ describe('WorkspacePane — FIX #10b email stub mount', () => {
 
     await waitFor(() => expect(screen.getByTestId('email-stub-widget')).toBeInTheDocument());
     expect(screen.getByTestId('email-stub-attachment')).toHaveTextContent('Report.docx');
+  });
+
+  it('the plain Email TAB (widgetType email, NO draft payload) resolves the REAL widget via the registry, NOT the stub (owner UAT #1)', async () => {
+    const { bus } = renderPane();
+
+    await act(async () => {
+      bus.dispatch('workspace', {
+        type: 'widget_load',
+        widgetType: 'email',
+        displayName: 'Email',
+        // No mode / bodyText / attachmentFileName — this is the tab-bar/pinned open,
+        // not the Compose draft hand-off.
+        widgetData: { layoutName: 'Email' },
+      });
+    });
+
+    // Falls through to the generic registry path → resolveWorkspaceWidget('email')
+    // (mocked to a stub-<type> marker). The "coming soon" EmailStubWidget must NOT mount.
+    await waitFor(() => expect(screen.getByTestId('stub-email')).toBeInTheDocument());
+    expect(screen.queryByTestId('email-stub-widget')).not.toBeInTheDocument();
   });
 
   it('the compose branch does NOT shadow email: an email load after a compose load still opens the stub', async () => {

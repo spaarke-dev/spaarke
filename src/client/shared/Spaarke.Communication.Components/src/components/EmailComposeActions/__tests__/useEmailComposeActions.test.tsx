@@ -274,7 +274,9 @@ describe('useEmailComposeActions — Dark Mode (ADR-021)', () => {
       </FluentProvider>
     );
 
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    // modalType="alert" (owner UAT #12 — no light-dismiss so a click-away can't discard a
+    // draft) renders role="alertdialog" rather than "dialog".
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
     expect(errorSpy).not.toHaveBeenCalled();
     errorSpy.mockRestore();
   });

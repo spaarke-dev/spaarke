@@ -96,6 +96,16 @@ export interface EmailReadingPaneShellProps {
   renderHeader?: EmailPaneSlotRenderer;
   /** Composed BODY-REGION slot — recipients block + collapsible Attachments / Related-to / Association sections + email body, in that order (the host composes them; the shell just renders the one returned node inside the scrollable region below the toolbar). Invoked with the selected id whenever a card is selected. */
   renderBody?: EmailPaneSlotRenderer;
+  /**
+   * Single-record ("hide list") mode. When `true`, the left `EmailCardList`
+   * pane AND the resizable `PanelSplitter` are omitted and the reading pane
+   * fills the full width — so the surface reads like a per-record "form" for the
+   * `initialSelectedId` record rather than the Outlook-style list+reading split.
+   * Additive + backward-compatible: default `false` preserves the exact two-pane
+   * layout for every existing caller. Intended to pair with `initialSelectedId`
+   * (with no list, selection can only come from that prop).
+   */
+  hideList?: boolean;
   /** localStorage key the splitter width persists under (default: a stable shell-scoped key). */
   storageKey?: string;
   /** Initial/reset reading-pane width in pixels (default 480). */

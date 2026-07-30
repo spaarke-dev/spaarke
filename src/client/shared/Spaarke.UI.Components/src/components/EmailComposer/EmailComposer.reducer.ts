@@ -161,7 +161,9 @@ export function initialState(props: IEmailComposerProps): EmailComposerState {
     body: props.initialBody ?? '',
     bodyFormat: props.initialBodyFormat ?? 'HTML',
     attachments: [...wizardAttachments(props), ...initialAttachmentsFor(props)],
-    sendMode: props.sendMode ?? 'sharedMailbox',
+    // `sendMode` (host-locked) wins; else `defaultSendMode` seeds an interactive default
+    // (item 3 — email surface passes 'user'); else the historical 'sharedMailbox' default.
+    sendMode: props.sendMode ?? props.defaultSendMode ?? 'sharedMailbox',
     fromMailbox: props.fromMailbox,
     archiveToSpe: props.archiveToSpe ?? true,
     associations: props.associations ?? [],
@@ -205,11 +207,15 @@ export function dedupSubjectPrefix(subject: string, prefix: 'Re:' | 'Fwd:'): str
 
 function wrapForwardedBody(source: ISourceCommunicationRecord): string {
   const sentAt = source.sentAt ? new Date(source.sentAt).toLocaleString() : '';
+  // Owner UAT 2026-07-30 (item 13): leave vertical room ABOVE the quoted thread so the
+  // author can type their message before the forwarded block. HTML → two empty paragraphs
+  // (the caret lands in the first); PlainText → two leading newlines.
+  const lead = source.bodyFormat === 'HTML' ? '<p></p><p></p>' : '\n\n';
   const header =
     source.bodyFormat === 'HTML'
       ? `<p>---------- Forwarded message ----------</p><p>From: ${escapeHtml(source.from)}<br/>Sent: ${escapeHtml(sentAt)}<br/>Subject: ${escapeHtml(source.subject)}</p><hr/>`
       : `---------- Forwarded message ----------\nFrom: ${source.from}\nSent: ${sentAt}\nSubject: ${source.subject}\n\n`;
-  return header + source.body;
+  return lead + header + source.body;
 }
 
 function escapeHtml(value: string): string {
@@ -466,6 +472,16 @@ export function validateState(state: EmailComposerState, options: IValidateOptio
   return { ok: errors.length === 0, errors };
 }
 
+/**
+ * Canonical dedup key for an association — `entityType:entityId`, lowercased,
+ * with `{}` braces stripped (Dataverse GUIDs are normally brace-less; this is a
+ * defensive superset of the historical ADD_ASSOCIATION dedup so a braced pick
+ * and its brace-less twin collapse to one). Used by `SET_PRIMARY_ASSOCIATION`.
+ */
+function associationKey(a: { entityType: string; entityId: string }): string {
+  return `${a.entityType}:${a.entityId.replace(/[{}]/g, '')}`.toLowerCase();
+}
+
 // ---------------------------------------------------------------------------
 // emailComposerReducer
 // ---------------------------------------------------------------------------
@@ -498,6 +514,19 @@ export function emailComposerReducer(state: EmailComposerState, action: EmailCom
       const key = `${action.association.entityType}:${action.association.entityId}`.toLowerCase();
       if (state.associations.some(a => `${a.entityType}:${a.entityId}`.toLowerCase() === key)) return state;
       return { ...state, associations: [...state.associations, action.association], isDirty: true };
+    }
+
+    case 'SET_PRIMARY_ASSOCIATION': {
+      // Owner UAT 2026-07-30 (item 8): single-primary "Related to" model. The picked record
+      // becomes index 0 — the PRIMARY regarding (the BFF's MapAssociationFields writes
+      // associations[0] onto sprk_regardingrecord* at send time; this is a CLIENT-ONLY ordering
+      // decision — no new send field). The OLD index-0 primary is REPLACED (dropped); any
+      // SECONDARY associations (index 1+) are preserved with the picked record deduped out.
+      // Key match mirrors the ADD_ASSOCIATION dedup (entityType:entityId, case-insensitive) with
+      // braces stripped defensively — GUIDs are normally brace-less, so this matches identically.
+      const key = associationKey(action.association);
+      const secondaries = state.associations.slice(1).filter(a => associationKey(a) !== key);
+      return { ...state, associations: [action.association, ...secondaries], isDirty: true };
     }
 
     case 'REMOVE_ASSOCIATION': {
