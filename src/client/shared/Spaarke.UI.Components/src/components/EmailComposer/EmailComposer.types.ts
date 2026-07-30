@@ -275,6 +275,7 @@ export type EmailComposerAction =
   | { type: 'TOGGLE_ATTACHMENT_SELECTED'; id: string }
   | { type: 'TOGGLE_ATTACHMENT_LINK'; id: string }
   | { type: 'ADD_ASSOCIATION'; association: ICommunicationAssociation }
+  | { type: 'SET_PRIMARY_ASSOCIATION'; association: ICommunicationAssociation }
   | { type: 'REMOVE_ASSOCIATION'; entityType: string; entityId: string }
   | { type: 'SET_VALIDATION_ERRORS'; result: IValidationResult }
   | { type: 'BEGIN_SEND' }

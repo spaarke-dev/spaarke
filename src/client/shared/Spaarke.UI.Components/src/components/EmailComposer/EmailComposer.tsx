@@ -25,6 +25,12 @@ import * as React from 'react';
 import { forwardRef, useImperativeHandle } from 'react';
 import {
   Button,
+  Dialog,
+  DialogSurface,
+  DialogTitle,
+  DialogBody,
+  DialogContent,
+  DialogActions,
   Input,
   Link,
   MessageBar,
@@ -129,6 +135,16 @@ function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/**
+ * Humanizes a Dataverse logical entity name for display (e.g. `sprk_matter` → `Matter`) — used
+ * as the replace-confirm's fallback when the current primary association has no `entityName`.
+ * Mirrors the same helper in `AssociationChips.tsx`.
+ */
+function humanizeEntityType(entityType: string): string {
+  const stripped = entityType.startsWith('sprk_') ? entityType.slice(5) : entityType;
+  return stripped.charAt(0).toUpperCase() + stripped.slice(1);
+}
+
 // ---------------------------------------------------------------------------
 // Styles — three mount variants (design §5.10). Layout density/chrome only;
 // all share the same Fluent semantic tokens (dark mode passes through the
@@ -223,18 +239,6 @@ const useStyles = makeStyles({
     display: 'flex',
     justifyContent: 'flex-end',
   },
-  // Collapsible section (Attachments, Related to) — a clickable header row (label + chevron)
-  // over the section body. Owner UAT 2026-07-24.
-  collapsibleHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: tokens.spacingHorizontalS,
-    cursor: 'pointer',
-    // +4px padding over the section header (owner UAT 2026-07-24).
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
-  },
   // Section label — standard Segoe UI 14px semibold, neutral foreground 1 (UI-DESIGN-STANDARDS
   // section-header spec; owner UAT 2026-07-24). Token-only so both themes resolve (ADR-021).
   sectionLabel: {
@@ -242,16 +246,32 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
-  // "Related to" body — chips + the link tile stacked (owner UAT 2026-07-30, item 10).
-  relatedBody: {
+  // "Related to" body — owner UAT 2026-07-30 (item 8): the label, chips, AND the "Link another
+  // record" affordance flow on ONE wrapping row (not stacked in a column), so the link reads as a
+  // sibling of the chips inline with the label.
+  relatedRow: {
     display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    gap: tokens.spacingVerticalS,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  // The label + chevron collapse toggle — a clickable cluster that sits at the head of the
+  // wrapping row.
+  relatedToggle: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    cursor: 'pointer',
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
   },
   // "Link another record" tile — the ONLY way to relate an email now that the connector
   // toolbar icon is gone (item 11). Non-bold label + leading search icon; bordered box that
-  // matches the reading-pane resolver's link tile. Token-only so both themes resolve (ADR-021).
+  // matches the reading-pane resolver's link tile. Font normalized to Segoe UI 12px
+  // (`fontSizeBase200`) with `fontFamily: 'inherit'` so it reads as a SIBLING of the chips —
+  // a native <button> otherwise falls back to the UA font (Arial) at a larger size (owner UAT
+  // 2026-07-30, item 8). Token-only so both themes resolve (ADR-021).
   linkTile: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -264,7 +284,8 @@ const useStyles = makeStyles({
     border: `${tokens.strokeWidthThin} dashed ${tokens.colorNeutralStroke1}`,
     backgroundColor: 'transparent',
     color: tokens.colorNeutralForeground2,
-    fontSize: tokens.fontSizeBase300,
+    fontFamily: 'inherit',
+    fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightRegular,
     cursor: 'pointer',
     ':hover': {
@@ -366,6 +387,10 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // Related-to section defaults expanded (shows what the email is associated to); Attachments
   // defaults collapsed (owner UAT 2026-07-24 — the latter is owned by AttachmentList).
   const [relatedCollapsed, setRelatedCollapsed] = React.useState(false);
+  // Single-primary "Related to" model (owner UAT 2026-07-30, item 8): a freshly-picked record is
+  // NOT appended silently — it is held here pending a "set as primary regarding?" confirmation.
+  // Non-null → the replace-confirm Dialog is open. Confirming promotes it to associations[0].
+  const [pendingPrimary, setPendingPrimary] = React.useState<ICommunicationAssociation | null>(null);
 
   // Record lookup (owner UAT round 5, RegardingResolver pattern): a document pick attaches
   // (Attach/Link per row); any other record type is inserted as a link in the message body
@@ -434,8 +459,12 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     [state.attachments.length]
   );
 
-  // Connector toolbar icon → add a relationship (owner UAT 2026-07-24, Option B). The host
-  // runs the OOB lookup + writes the association; we reflect the picked record in "Related to".
+  // "Link another record" → pick a record via the host polymorphic picker, then CONFIRM it as the
+  // primary regarding (owner UAT 2026-07-30, item 8). The pick is NOT appended silently: it is
+  // staged in `pendingPrimary`, which opens a "set as primary regarding?" replace-confirm Dialog.
+  // On confirm the record becomes associations[0] (the BFF maps associations[0] as the primary
+  // regarding at send time — CLIENT-ONLY ordering, no new send field). On cancel the pick is
+  // discarded (nothing added).
   const onAddRelationship = props.onAddRelationship;
   const handleAddRelationship = React.useCallback(() => {
     if (!onAddRelationship) return;
@@ -443,16 +472,22 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     void onAddRelationship()
       .then(picked => {
         if (!picked) return;
-        const association: ICommunicationAssociation = {
+        setPendingPrimary({
           entityType: picked.entityType,
           entityId: picked.id,
           entityName: picked.name,
           entityUrl: picked.url,
-        };
-        dispatch({ type: 'ADD_ASSOCIATION', association });
+        });
       })
       .catch(err => console.warn('[EmailComposer] add relationship failed:', err));
   }, [onAddRelationship]);
+
+  const confirmPrimary = React.useCallback(() => {
+    if (pendingPrimary) dispatch({ type: 'SET_PRIMARY_ASSOCIATION', association: pendingPrimary });
+    setPendingPrimary(null);
+  }, [pendingPrimary]);
+
+  const cancelPrimary = React.useCallback(() => setPendingPrimary(null), []);
 
   // ── Attach-on-compose: local-file → Document resolution (task 042 / FR-20) ──
   // A picked local file (already passed the CHAT-ATTACHMENT-POLICY 25 MB + MIME
@@ -848,46 +883,49 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         />
       </div>
 
-      {/* Related to — what this email is associated to (owner UAT 2026-07-24). Collapsible;
-          the connector toolbar icon adds a new relationship (Option B). */}
+      {/* Related to — what this email is associated to (owner UAT 2026-07-24). Single-primary
+          model (owner UAT 2026-07-30, item 8): the label, the chips (index 0 is the GREEN
+          PRIMARY regarding), and the "Link another record" affordance flow on ONE wrapping row.
+          "Link another record" opens a replace-confirm before promoting a pick to primary. */}
       {showAssociations && (
         <div className={styles.section} role="region" aria-label="Related to">
-          <div
-            className={styles.collapsibleHeader}
-            role="button"
-            tabIndex={0}
-            aria-expanded={!relatedCollapsed}
-            onClick={() => setRelatedCollapsed(c => !c)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                setRelatedCollapsed(c => !c);
-              }
-            }}
-          >
-            <Text className={styles.sectionLabel}>
-              Related to{state.associations.length > 0 ? ` (${state.associations.length})` : ''}
-            </Text>
-            {relatedCollapsed ? <ChevronDown20Regular /> : <ChevronUp20Regular />}
-          </div>
-          {!relatedCollapsed && (
-            <div className={styles.relatedBody}>
-              {state.associations.length > 0 && (
-                <AssociationChips
-                  associations={state.associations}
-                  onRemove={
-                    state.readOnly
-                      ? undefined
-                      : a =>
-                          dispatch({
-                            type: 'REMOVE_ASSOCIATION',
-                            entityType: a.entityType,
-                            entityId: a.entityId,
-                          })
-                  }
-                />
-              )}
-              {canLinkRecord ? (
+          <div className={styles.relatedRow}>
+            <div
+              className={styles.relatedToggle}
+              role="button"
+              tabIndex={0}
+              aria-expanded={!relatedCollapsed}
+              onClick={() => setRelatedCollapsed(c => !c)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setRelatedCollapsed(c => !c);
+                }
+              }}
+            >
+              <Text className={styles.sectionLabel}>
+                Related to{state.associations.length > 0 ? ` (${state.associations.length})` : ''}
+              </Text>
+              {relatedCollapsed ? <ChevronDown20Regular /> : <ChevronUp20Regular />}
+            </div>
+            {!relatedCollapsed && state.associations.length > 0 && (
+              <AssociationChips
+                associations={state.associations}
+                primaryIndex={0}
+                onRemove={
+                  state.readOnly
+                    ? undefined
+                    : a =>
+                        dispatch({
+                          type: 'REMOVE_ASSOCIATION',
+                          entityType: a.entityType,
+                          entityId: a.entityId,
+                        })
+                }
+              />
+            )}
+            {!relatedCollapsed &&
+              (canLinkRecord ? (
                 <button type="button" className={styles.linkTile} onClick={handleAddRelationship}>
                   <Search20Regular />
                   <span>{state.associations.length > 0 ? 'Link another record' : 'Link a record'}</span>
@@ -896,11 +934,43 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
                 <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
                   Not related to any record yet.
                 </Text>
-              ) : null}
-            </div>
-          )}
+              ) : null)}
+          </div>
         </div>
       )}
+
+      {/* Replace-confirm for the single-primary regarding (owner UAT 2026-07-30, item 8). Opens
+          when a record is picked via "Link another record". The second line renders ONLY when a
+          primary already exists (state.associations.length > 0) — the empty state has nothing to
+          replace. Confirm → promote to associations[0]; Cancel → discard the pick. */}
+      <Dialog
+        open={pendingPrimary !== null}
+        onOpenChange={(_e, data) => {
+          if (!data.open) cancelPrimary();
+        }}
+      >
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Set as primary regarding record</DialogTitle>
+            <DialogContent>
+              {state.associations.length > 0 && (
+                <Text>
+                  Will replace the currently selected record:{' '}
+                  {state.associations[0].entityName ?? humanizeEntityType(state.associations[0].entityType)}
+                </Text>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="primary" onClick={confirmPrimary}>
+                Set as primary
+              </Button>
+              <Button appearance="secondary" onClick={cancelPrimary}>
+                Cancel
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
 
       <BodyEditor
         ref={bodyEditorRef}

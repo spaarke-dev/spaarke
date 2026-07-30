@@ -472,6 +472,16 @@ export function validateState(state: EmailComposerState, options: IValidateOptio
   return { ok: errors.length === 0, errors };
 }
 
+/**
+ * Canonical dedup key for an association — `entityType:entityId`, lowercased,
+ * with `{}` braces stripped (Dataverse GUIDs are normally brace-less; this is a
+ * defensive superset of the historical ADD_ASSOCIATION dedup so a braced pick
+ * and its brace-less twin collapse to one). Used by `SET_PRIMARY_ASSOCIATION`.
+ */
+function associationKey(a: { entityType: string; entityId: string }): string {
+  return `${a.entityType}:${a.entityId.replace(/[{}]/g, '')}`.toLowerCase();
+}
+
 // ---------------------------------------------------------------------------
 // emailComposerReducer
 // ---------------------------------------------------------------------------
@@ -504,6 +514,19 @@ export function emailComposerReducer(state: EmailComposerState, action: EmailCom
       const key = `${action.association.entityType}:${action.association.entityId}`.toLowerCase();
       if (state.associations.some(a => `${a.entityType}:${a.entityId}`.toLowerCase() === key)) return state;
       return { ...state, associations: [...state.associations, action.association], isDirty: true };
+    }
+
+    case 'SET_PRIMARY_ASSOCIATION': {
+      // Owner UAT 2026-07-30 (item 8): single-primary "Related to" model. The picked record
+      // becomes index 0 — the PRIMARY regarding (the BFF's MapAssociationFields writes
+      // associations[0] onto sprk_regardingrecord* at send time; this is a CLIENT-ONLY ordering
+      // decision — no new send field). The OLD index-0 primary is REPLACED (dropped); any
+      // SECONDARY associations (index 1+) are preserved with the picked record deduped out.
+      // Key match mirrors the ADD_ASSOCIATION dedup (entityType:entityId, case-insensitive) with
+      // braces stripped defensively — GUIDs are normally brace-less, so this matches identically.
+      const key = associationKey(action.association);
+      const secondaries = state.associations.slice(1).filter(a => associationKey(a) !== key);
+      return { ...state, associations: [action.association, ...secondaries], isDirty: true };
     }
 
     case 'REMOVE_ASSOCIATION': {
