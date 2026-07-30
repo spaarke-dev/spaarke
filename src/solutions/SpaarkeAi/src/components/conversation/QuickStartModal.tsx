@@ -207,12 +207,14 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({
     setSelectedTab(data.value);
   }, []);
 
-  // Analysis tab: only "Agreement Review" is live. Selecting it closes Quick Start
-  // and hands the work type to the host, which dispatches `open_create_analysis_wizard`.
+  // Analysis tab: only "NDA Analysis" is live. Selecting it closes Quick Start and
+  // hands the work type to the host, which dispatches `open_create_analysis_wizard`.
+  // NDA Analysis uses the Agreement Review work-type value (100000000 — the only live
+  // one) but is a specific review path labelled for the user.
   const handleAnalysisCardClick = React.useCallback(
     (cardId: AnalysisCardId): void => {
-      if (cardId !== 'agreement-review') return; // coming-soon cards are disabled anyway
-      onCreateAnalysis?.(SprkAnalysisWorkType.AgreementAnalysis, 'Agreement Review');
+      if (cardId !== 'nda-analysis') return; // coming-soon cards are disabled anyway
+      onCreateAnalysis?.(SprkAnalysisWorkType.AgreementAnalysis, 'NDA Analysis');
       onClose();
     },
     [onCreateAnalysis, onClose],

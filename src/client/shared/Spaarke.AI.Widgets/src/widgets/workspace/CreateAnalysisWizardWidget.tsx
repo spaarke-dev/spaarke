@@ -603,10 +603,26 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         // -- Step 1: resolve the document (upload OR selected-existing) -----
         let documentId: string | null = null;
         let documentName = finishName;
+        // SPE pointer for opening the document in the editable Compose surface (Phase 1).
+        let speDriveItemId: string | undefined;
+        let speDriveId: string | undefined;
 
         if (context.selectedExistingRecord) {
           documentId = context.selectedExistingRecord.recordId;
           documentName = context.selectedExistingRecord.recordName;
+          // Resolve the SPE pointer from the picked sprk_document (mirrors DocumentComposeLaunch).
+          try {
+            const docRec = await dataService.retrieveRecord(
+              'sprk_document',
+              documentId,
+              '?$select=sprk_filename,sprk_graphitemid,sprk_graphdriveid'
+            );
+            speDriveItemId = docRec['sprk_graphitemid'] as string | undefined;
+            speDriveId = docRec['sprk_graphdriveid'] as string | undefined;
+            documentName = (docRec['sprk_filename'] as string | undefined) ?? documentName;
+          } catch {
+            /* pointer unavailable — the compose open falls back to the read-only viewer below */
+          }
         } else if (context.uploadedFiles.length > 0) {
           if (!authFetch || !bffBaseUrl || !webApiAdapter) {
             throw new Error('Document upload is not available right now. Please try again shortly.');
@@ -631,6 +647,10 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
             const firstErr = uploadResult.errors[0]?.error ?? 'unknown error';
             throw new Error(`Document upload failed: ${firstErr}`);
           }
+          // Capture the SPE pointer from the upload (id = drive-item, driveId = drive) so
+          // the document can open in the editable Compose surface (Phase 1).
+          speDriveItemId = uploadResult.uploadedFiles[0]?.id;
+          speDriveId = uploadResult.uploadedFiles[0]?.driveId;
 
           // Create a STANDALONE sprk_document (empty navigationProperty → createDocumentRecords
           // skips the parent @odata.bind). The Analysis is the SUBJECT-owner via its
@@ -800,31 +820,52 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
         }
 
-        // -- Load the file to a workspace tab (existing document-viewer widget) --
-        // Build the FULL DocumentViewerWidgetData shape (UAT round 4): the previous
-        // `{ documentId, title, sessionId }` payload was missing the required
-        // `filename` / `contentType` / `textContent` and a `fetchPreviewUrl`, so the
-        // viewer rendered "Unknown file / Preview not available". Reuse the shared
-        // resolver by treating the just-created document id as the analysis's
-        // `sprk_documentid` value (it IS the linked document).
-        const createdFilePreview = resolveAnalysisFilePreview(
-          { _sprk_documentid_value: documentId, sprk_name: documentName },
-          { bffBaseUrl: bffBaseUrl ?? '', authenticatedFetch: authFetch ?? (globalThis.fetch as typeof fetch) }
-        );
-        dispatch('workspace', {
-          type: 'widget_load',
-          widgetType: 'document-viewer',
-          widgetData: {
-            filename: documentName,
-            contentType: 'application/octet-stream',
-            textContent: '',
-            documentId,
-            ...(createdFilePreview.status === 'resolved'
-              ? { fetchPreviewUrl: createdFilePreview.fetchPreviewUrl }
-              : {}),
-          },
-          displayName: documentName,
-        });
+        // -- Open the document in the EDITABLE Compose/TipTap surface (Phase 1, UAT
+        // round 5) so the analysis surface IS the review surface, not a read-only
+        // preview. Requires BOTH the SPE drive-item id and drive id (ComposeEditor
+        // contract; mirrors DocumentComposeLaunch). Falls back to the read-only
+        // document-viewer when the SPE pointer is incomplete.
+        const analysisActiveWorkType =
+          workTypeValue === SprkAnalysisWorkType.AgreementAnalysis ? 'agreement-analysis' : undefined;
+
+        if (speDriveItemId && speDriveId) {
+          dispatch('workspace', {
+            type: 'widget_load',
+            widgetType: 'compose',
+            widgetData: {
+              compose: {
+                speDriveItemId,
+                speDriveId,
+                sprkDocumentId: documentId,
+                fileName: documentName,
+                ...(analysisActiveWorkType ? { activeWorkType: analysisActiveWorkType } : {}),
+              },
+            },
+            displayName: documentName,
+          });
+        } else {
+          // Incomplete SPE pointer → read-only preview fallback (correct shape so it
+          // doesn't render "Unknown file"). Reuse the shared resolver by treating the
+          // document id as the analysis's `sprk_documentid` value.
+          const createdFilePreview = resolveAnalysisFilePreview(
+            { _sprk_documentid_value: documentId, sprk_name: documentName },
+            { bffBaseUrl: bffBaseUrl ?? '', authenticatedFetch: authFetch ?? (globalThis.fetch as typeof fetch) }
+          );
+          dispatch('workspace', {
+            type: 'widget_load',
+            widgetType: 'document-viewer',
+            widgetData: {
+              filename: documentName,
+              contentType: 'application/octet-stream',
+              textContent: '',
+              documentId,
+              ...(createdFilePreview.status === 'resolved'
+                ? { fetchPreviewUrl: createdFilePreview.fetchPreviewUrl }
+                : {}),
+            },
+            displayName: documentName,
+          });
+        }
 
         setCompletedName(finishName);
 

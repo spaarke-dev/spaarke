@@ -1006,16 +1006,49 @@ export function WorkspacePane(): React.JSX.Element {
           // Network/parse failure — fall through to the document-only surface.
         }
 
-        // No bound session → open the analysis's linked document so the workspace
-        // shows THIS analysis (ADR-007 `sprk_documentid` → `sprk_document` hop).
+        // No bound session → open the analysis's linked document in the EDITABLE
+        // Compose/TipTap surface (Phase 1, UAT round 5): the analysis surface IS the
+        // review surface, not a read-only preview. Resolve the SPE pointer from the
+        // linked sprk_document (`sprk_graphitemid` = drive-item, `sprk_graphdriveid` =
+        // drive — BOTH required by ComposeEditor; mirrors DocumentComposeLaunch).
+        // Falls back to the read-only document-viewer if the pointer is incomplete.
         if (cancelled || sessionRestored) return;
         try {
           const rec = (await analysisWizardDataService.retrieveRecord(
             "sprk_analysis",
             analysisId,
-            "?$select=sprk_name,_sprk_documentid_value&$expand=sprk_documentid($select=sprk_documentname)",
+            "?$select=sprk_name,sprk_worktype,_sprk_documentid_value" +
+              "&$expand=sprk_documentid($select=sprk_filename,sprk_graphitemid,sprk_graphdriveid)",
           )) as Record<string, unknown>;
           if (cancelled) return;
+          const doc = (rec["sprk_documentid"] ?? {}) as Record<string, unknown>;
+          const speDriveItemId = doc["sprk_graphitemid"] as string | undefined;
+          const speDriveId = doc["sprk_graphdriveid"] as string | undefined;
+          const documentId = rec["_sprk_documentid_value"] as string | undefined;
+          const fileName =
+            (doc["sprk_filename"] as string | undefined) ?? (rec["sprk_name"] as string | undefined) ?? "Document";
+          // Agreement/NDA work-type (100000000) scopes the Compose AI toolbar tools.
+          const activeWorkType = rec["sprk_worktype"] === 100000000 ? "agreement-analysis" : undefined;
+
+          if (speDriveItemId && speDriveId) {
+            dispatch("workspace", {
+              type: "widget_load",
+              widgetType: "compose",
+              widgetData: {
+                compose: {
+                  speDriveItemId,
+                  speDriveId,
+                  ...(documentId ? { sprkDocumentId: documentId } : {}),
+                  fileName,
+                  ...(activeWorkType ? { activeWorkType } : {}),
+                },
+              },
+              displayName: fileName,
+            });
+            return;
+          }
+
+          // Incomplete SPE pointer → read-only preview fallback (ADR-007 hop).
           const preview = resolveAnalysisFilePreview(
             rec as Parameters<typeof resolveAnalysisFilePreview>[0],
             { bffBaseUrl, authenticatedFetch },
