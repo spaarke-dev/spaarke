@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>UAT — robust anchoring (paragraph-relative offset) + keep-edits recovery + Open-Document modal + anchor diagnostic</title>
+    <phase>5 UAT remediation</phase>
+    <gate>dep:050</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Write-path anchor-model change (fidelity-critical, D2-adjacent, owner-approved additive), plus client + server + modal. Mandatory code-review + adr-check + byte-diff at Step 9.5.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>050</deps>
+    <tags>bff-api, compose, frontend, pcf</tags>
+    <estimated-effort>L (3-5d)</estimated-effort>
+  </metadata>
+
+  <prompt>CONFIRMED via App Insights + the failing doc (Test WORD Document 4.docx, record 3cda9d8c-478c-f111-8077-7ced8ddc4a05): Compose save 422 = ComposePatchException "run-local offset 45 is out of range for runIndex 3 on paraId '421E7EDC' (run editor length 9)". Root cause: TipTap MERGES Word's fine-grained runs (that paragraph has 74 OOXML runs; "tincidunt"=run3=9 chars; the user-edited "Make changes to the document in Word for Web!"=run73=45 chars). The client maps a paragraph-relative char offset k → (runIndex,offset) using the EDITOR's merged run list (stepOperationInterceptor.ts:360-376), so editor-run3 ≠ OOXML-run3; the server resolves against OOXML's 74 runs → offset out of range. The (paraId,runIndex,offset) anchor is not stable across the TipTap↔OOXML boundary. OWNER-APPROVED FIX: additive paragraph-relative offset anchoring.</prompt>
+
+  <goal>Four deliverables:
+  1. **Prong 2 (the fix, owner-approved additive):** the op anchor carries the paragraph-relative character offset `k` (the client already computes it at stepOperationInterceptor.ts:360). The server, when `paraOffset` is present, resolves the real OOXML (run, run-local-offset) by walking the paragraph's runs to `k`; falls back to (runIndex,offset) when absent (backward-compatible). The exact failing scenario (edit at the end of run 73 in a 74-run paragraph) then saves correctly.
+  2. **Prong 1 (graceful degradation):** on an anchor-refusal batch, best-effort apply the resolvable ops and SURFACE the unresolvable ones instead of losing the whole batch (reuse the AUTO/REVIEW/ORPHAN re-anchor model); never silently apply a wrong edit.
+  3. **Open-Document modal:** a Compose toolbar button that opens the source Dataverse Document record in a MODAL rendered via the existing document-preview HTML mechanism.
+  4. **Diagnostic:** on any ComposePatchException, log the failing op (type, paraId, runIndex/offset/paraOffset) + the baseline paragraph's run breakdown (per-run lengths) so future 422s self-explain.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs (ComposeRunPoint :77-79 — add optional ParaOffset)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs (Resolve :376-383; point→run resolution + OffsetOutOfRange :2065 / RunIndexOutOfRange :2057)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (SaveAsync apply block :811; ReanchorStaleSaveAsync :1398-1579 for prong-1 model)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (MapPatchException :1947-1966)</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts (:360-376 pointToRunLocal — emit k; :385-394 resolveRunAnchor)</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts (client op mirror — add paraOffset)</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx + ComposeEditor.tsx + ComposeWorkspace.tsx (Open-Document button + modal)</file>
+      <file>tests/integration/seam/Compose/ (new seam test for the exact scenario + byte-diff)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Additive only — keep (runIndex,offset) as fallback; do NOT remove the existing anchor. Honor I-1..I-7: I-4 byte-surgical (server splits the target OOXML run at the resolved offset, untouched subtrees byte-identical); I-7 NO text-search — resolve strictly by paraId + numeric char offset, never by matching text.</constraint>
+    <constraint source="ADR-013/007">No AI internals / no Graph above SpeFileStore in Services/Compose.</constraint>
+    <constraint source="ADR-038">Seam DoD — a NEW through-the-wire (or engine-level) seam test reproducing the EXACT failing scenario (a 74-run paragraph like paraId 421E7EDC; an edit at the end of the last long run) that FAILS before the fix and PASSES after. NO banned mock/DI/ctor tests.</constraint>
+    <constraint source="project">NFR-01/03/04: byte-diff 24/24 MUST hold; no new runtime package; publish ≤60 MB. /conflict-check before the BFF PR.</constraint>
+    <constraint source="project">Open-Document modal MUST reuse the existing document-preview HTML mechanism (do not invent a new preview). ADR-021 dark mode.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">A NEW seam test: a 74-run paragraph, an insert/replace at the end of the last long run, resolves via paraOffset and persists the edit at the CORRECT position (asserted) — the pre-fix (runIndex,offset)-only path would 422.</criterion>
+    <criterion testable="true">Backward-compat: ops WITHOUT paraOffset still resolve via (runIndex,offset) exactly as before.</criterion>
+    <criterion testable="true">byte-diff 24/24 holds; I-4 (untouched subtrees byte-identical) + I-7 (no write-path text-search) preserved; no new package; publish ≤60 MB.</criterion>
+    <criterion testable="true">Prong 1: an anchor-refusal batch applies the resolvable ops and surfaces the unresolvable ones (never silently applies a wrong edit).</criterion>
+    <criterion testable="true">Open-Document toolbar button opens the source Document in a modal via the existing preview HTML; renders in dark mode.</criterion>
+    <criterion testable="true">Diagnostic: a ComposePatchException logs the op + the paragraph's per-run length breakdown.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
