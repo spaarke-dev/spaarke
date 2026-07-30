@@ -27,17 +27,17 @@
  * @see ADR-022 — React 19, functional components
  */
 
-import * as React from "react";
-import { makeStyles, tokens, Spinner } from "@fluentui/react-components";
-import { AppsListRegular } from "@fluentui/react-icons";
+import * as React from 'react';
+import { makeStyles, tokens, Spinner } from '@fluentui/react-components';
+import { AppsListRegular } from '@fluentui/react-icons';
 import {
   PaneHeader,
   createXrmDataService,
   createXrmNavigationService,
   searchUsersAndContacts,
   ANALYSIS_REGARDING_TARGETS,
-} from "@spaarke/ui-components";
-import type { AssociationResult } from "@spaarke/ui-components";
+} from '@spaarke/ui-components';
+import type { AssociationResult } from '@spaarke/ui-components';
 import {
   usePaneEvent,
   useDispatchPaneEvent,
@@ -45,13 +45,13 @@ import {
   getWorkspaceWidgetMetadata,
   useAiSession,
   CreateAnalysisWizardWidget,
-} from "@spaarke/ai-widgets";
+} from '@spaarke/ai-widgets';
 import type {
   WorkspacePaneEvent,
   ConversationPaneEvent,
   WorkspaceWidgetComponent,
   CreateAnalysisWizardData,
-} from "@spaarke/ai-widgets";
+} from '@spaarke/ai-widgets';
 // R6 Hotfix Wave B-G9c2 (2026-06-10): the previously-eager Summary tab
 // auto-install (R5 task 038) was removed. Each summarize invocation now
 // dispatches its own `workspace.widget_load` carrying the structured-
@@ -59,44 +59,41 @@ import type {
 // Those symbols are no longer needed at this site; capability dispatchers
 // (the shared dispatchConsumer helper via its `workspaceTarget` arg +
 // FilePreviewContextWidget.dispatchSummarizeOnly) own them now.
-import { buildBffApiUrl } from "@spaarke/auth";
-import { usePaneCollapseContext, useComposeLaunch, useAnalysisLaunch } from "../shell/ThreePaneShell";
+import { buildBffApiUrl } from '@spaarke/auth';
+import { usePaneCollapseContext, useComposeLaunch, useAnalysisLaunch } from '../shell/ThreePaneShell';
 // R3 ("Visible to assistant") — deep-import the cross-pane bridge hook (not the
 // `@spaarke/compose-components` barrel) so this workspace-pane module does NOT transitively pull the
 // TipTap editor widgets — mirrors ConversationPane's deep-import rationale. Resolves in Vite + jest.
-import { useComposeVisibility } from "@spaarke/compose-components/context/composeActionBridge";
-import { WorkspaceTabManager } from "./WorkspaceTabManager";
+import { useComposeVisibility } from '@spaarke/compose-components/context/composeActionBridge';
+import { WorkspaceTabManager } from './WorkspaceTabManager';
 import type {
   ActiveTabSnapshot,
   WorkspaceTabManagerState,
   WorkspaceTabPersistenceSnapshot,
-} from "./WorkspaceTabManager";
-import { WorkspaceTabManagerComponent } from "./WorkspaceTabManagerComponent";
-import { WorkspacePaneMenu } from "./WorkspacePaneMenu";
+} from './WorkspaceTabManager';
+import { WorkspaceTabManagerComponent } from './WorkspaceTabManagerComponent';
+import { WorkspacePaneMenu } from './WorkspacePaneMenu';
 // FIX #10b — STUB email widget rendered when the Compose "Email" affordance
 // (or the chat "email" chip) dispatches a `widget_load` with widgetType 'email'.
 // Statically imported so the email branch resolves the component synchronously
 // (no WorkspaceWidgetRegistry round-trip).
-import { EmailStubWidget } from "./EmailStubWidget";
+import { EmailStubWidget } from './EmailStubWidget';
 // spaarkeai-compose-r2 UNIFY — the DIRECT 'compose' widget's seed shape. Used to
 // build the ribbon composeMode=editor launch seed (stored-doc pointer) that the
 // workspace handler's 'compose' branch consumes.
-import type { ComposeWidgetSeed } from "./composeWidgetData";
+import type { ComposeWidgetSeed } from './composeWidgetData';
 import {
   logTelemetryError,
   TELEMETRY_TAB_RESTORE_LOAD_FAILURE,
   TELEMETRY_TAB_RESTORE_SAVE_FAILURE,
   TELEMETRY_UI_ACTION_ACK_FAILURE,
-} from "../../telemetry/errorTelemetry";
-import {
-  getPinnedWorkspaces,
-  prunePinnedToKnown,
-} from "../../services/pinnedWorkspaces";
+} from '../../telemetry/errorTelemetry';
+import { getPinnedWorkspaces, prunePinnedToKnown } from '../../services/pinnedWorkspaces';
 // Wave 2b (task 109): the cold-load default tab is now driven by
 // useWorkspaceLayouts().activeLayout (the BFF's discovered default — Daily
 // Briefing in dev) instead of a hard-coded Home tab. See the auto-install
 // effect below for the dispatch path.
-import { useWorkspaceLayouts } from "../../hooks/useWorkspaceLayouts";
+import { useWorkspaceLayouts } from '../../hooks/useWorkspaceLayouts';
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -104,11 +101,11 @@ import { useWorkspaceLayouts } from "../../hooks/useWorkspaceLayouts";
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    width: "100%",
-    overflow: "hidden",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    width: '100%',
+    overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground2,
   },
 
@@ -119,9 +116,9 @@ const useStyles = makeStyles({
   //    sees an empty pane and can pick from the Workspaces dropdown.
   firstPaintPlaceholder: {
     flex: 1,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 
@@ -146,7 +143,7 @@ const useStyles = makeStyles({
 // established for `chatSessionId`/`playbookId`). The BFF per-session
 // PATCH/GET remains the durable, cross-device store once a session exists;
 // this is an additive client-only fallback layer, not a replacement.
-const TAB_ANCHOR_KEY_PREFIX = "sprk_ai2_workspaceTabs";
+const TAB_ANCHOR_KEY_PREFIX = 'sprk_ai2_workspaceTabs';
 
 interface TabAnchorEntityContext {
   entityType?: string;
@@ -160,9 +157,7 @@ interface TabAnchorEntityContext {
  * on in that case, and the existing chatSessionId-gated BFF path is the only
  * persistence available.
  */
-export function tabAnchorKeyForContext(
-  entityContext: TabAnchorEntityContext | null | undefined,
-): string | null {
+export function tabAnchorKeyForContext(entityContext: TabAnchorEntityContext | null | undefined): string | null {
   if (!entityContext?.entityType || !entityContext?.entityId) return null;
   return `${TAB_ANCHOR_KEY_PREFIX}__${entityContext.entityType.toLowerCase()}:${entityContext.entityId.toLowerCase()}`;
 }
@@ -216,9 +211,9 @@ function writeLocalTabSnapshot(key: string, snapshot: WorkspaceTabPersistenceSna
  * Works for tabs restored from persistence, which never carried a stored key.
  */
 export function deriveComposeInstanceKey(widgetData: unknown): string | undefined {
-  if (widgetData === null || typeof widgetData !== "object") return undefined;
+  if (widgetData === null || typeof widgetData !== 'object') return undefined;
   const compose = (widgetData as { compose?: unknown }).compose;
-  if (compose === null || typeof compose !== "object") return undefined;
+  if (compose === null || typeof compose !== 'object') return undefined;
   const c = compose as {
     draft?: { ledgerRef?: string; fileName?: string; html?: string };
     upload?: { sessionFileId?: string; fileName?: string };
@@ -227,21 +222,21 @@ export function deriveComposeInstanceKey(widgetData: unknown): string | undefine
     fileName?: string;
   };
 
-  if (typeof c.draft?.ledgerRef === "string" && c.draft.ledgerRef.length > 0) {
+  if (typeof c.draft?.ledgerRef === 'string' && c.draft.ledgerRef.length > 0) {
     // `<bindingId>@t<turn>` → strip the per-turn suffix so re-drafts of the SAME binding reuse.
-    return `draft:${c.draft.ledgerRef.replace(/@t\d+$/i, "")}`;
+    return `draft:${c.draft.ledgerRef.replace(/@t\d+$/i, '')}`;
   }
-  if (typeof c.upload?.sessionFileId === "string" && c.upload.sessionFileId.length > 0) {
+  if (typeof c.upload?.sessionFileId === 'string' && c.upload.sessionFileId.length > 0) {
     return `upload:${c.upload.sessionFileId}`;
   }
-  if (typeof c.speDriveItemId === "string" && c.speDriveItemId.length > 0) {
+  if (typeof c.speDriveItemId === 'string' && c.speDriveItemId.length > 0) {
     return `stored:${c.speDriveItemId}`;
   }
-  if (typeof c.sprkDocumentId === "string" && c.sprkDocumentId.length > 0) {
+  if (typeof c.sprkDocumentId === 'string' && c.sprkDocumentId.length > 0) {
     return `stored:${c.sprkDocumentId}`;
   }
   const fn = c.upload?.fileName ?? c.draft?.fileName ?? c.fileName;
-  if (typeof fn === "string" && fn.length > 0) {
+  if (typeof fn === 'string' && fn.length > 0) {
     return `name:${fn}`;
   }
   // A compose object with no durable identity (Part-B inline html, or an empty seed) → no key.
@@ -283,8 +278,7 @@ export function WorkspacePane(): React.JSX.Element {
   // session and we can no-op cleanly when no session id is set yet.
   // ---------------------------------------------------------------------------
 
-  const { bffBaseUrl, authenticatedFetch, chatSessionId, isAuthenticated, entityContext } =
-    useAiSession();
+  const { bffBaseUrl, authenticatedFetch, chatSessionId, isAuthenticated, entityContext } = useAiSession();
 
   // ---------------------------------------------------------------------------
   // Analysis entry-matrix launch (task 050 — spec §12 / FR-14)
@@ -313,13 +307,10 @@ export function WorkspacePane(): React.JSX.Element {
   // "Connecting to workspace services…" gap task 030 deferred here.
   // ---------------------------------------------------------------------------
   const analysisWizardDataService = React.useMemo(() => createXrmDataService(), []);
-  const analysisWizardNavigationService = React.useMemo(
-    () => createXrmNavigationService(),
-    [],
-  );
+  const analysisWizardNavigationService = React.useMemo(() => createXrmNavigationService(), []);
   const analysisWizardSearchUsers = React.useCallback(
     (query: string) => searchUsersAndContacts(analysisWizardDataService, query),
-    [analysisWizardDataService],
+    [analysisWizardDataService]
   );
 
   // ---------------------------------------------------------------------------
@@ -346,7 +337,7 @@ export function WorkspacePane(): React.JSX.Element {
     const entityType = entityContext?.entityType;
     const recordId = entityContext?.entityId;
     if (!entityType || !recordId) return undefined;
-    const supported = ANALYSIS_REGARDING_TARGETS.some((t) => t.entityType === entityType);
+    const supported = ANALYSIS_REGARDING_TARGETS.some(t => t.entityType === entityType);
     if (!supported) return undefined;
     return { entityType, recordId, recordName: recordId };
   }, [entityContext?.entityType, entityContext?.entityId]);
@@ -357,7 +348,7 @@ export function WorkspacePane(): React.JSX.Element {
   const tabAnchorKey = React.useMemo(
     () => tabAnchorKeyForContext(entityContext),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [entityContext?.entityType, entityContext?.entityId],
+    [entityContext?.entityType, entityContext?.entityId]
   );
 
   // ---------------------------------------------------------------------------
@@ -368,16 +359,12 @@ export function WorkspacePane(): React.JSX.Element {
   // on every mutation. The actual `persistTabs` function below is rebuilt with
   // useCallback (it captures sessionId/bffBaseUrl) and assigned into the ref
   // on each render — so the manager always calls the latest persistTabs.
-  const persistTabsRef = React.useRef<
-    ((snapshot: WorkspaceTabPersistenceSnapshot) => void) | null
-  >(null);
+  const persistTabsRef = React.useRef<((snapshot: WorkspaceTabPersistenceSnapshot) => void) | null>(null);
 
   // Round 4 Fix 4: Forwarding ref for the active-tab-change signal. Same
   // pattern as persistTabsRef — keeps the manager construction stable while
   // letting the dispatch closure capture the latest `dispatch` reference.
-  const activeTabChangeRef = React.useRef<
-    ((snapshot: ActiveTabSnapshot) => void) | null
-  >(null);
+  const activeTabChangeRef = React.useRef<((snapshot: ActiveTabSnapshot) => void) | null>(null);
 
   // Stable manager reference — never recreated across re-renders.
   // The onPersistChange / onActiveTabChange callbacks are themselves stable;
@@ -385,19 +372,17 @@ export function WorkspacePane(): React.JSX.Element {
   // refresh cleanly without re-instantiating the manager).
   const managerRef = React.useRef<WorkspaceTabManager>(
     new WorkspaceTabManager({
-      onPersistChange: (snapshot) => {
+      onPersistChange: snapshot => {
         persistTabsRef.current?.(snapshot);
       },
-      onActiveTabChange: (snapshot) => {
+      onActiveTabChange: snapshot => {
         activeTabChangeRef.current?.(snapshot);
       },
-    }),
+    })
   );
 
   // React state mirrors the manager's snapshot; triggers re-renders.
-  const [tabState, setTabState] = React.useState<WorkspaceTabManagerState>(() =>
-    managerRef.current.getSnapshot()
-  );
+  const [tabState, setTabState] = React.useState<WorkspaceTabManagerState>(() => managerRef.current.getSnapshot());
 
   /** Sync React state with the current manager snapshot. */
   const syncState = React.useCallback((): void => {
@@ -414,8 +399,7 @@ export function WorkspacePane(): React.JSX.Element {
   // (in-memory state remains correct, restore on next mount may be stale).
   // ---------------------------------------------------------------------------
 
-  const pendingSnapshotRef =
-    React.useRef<WorkspaceTabPersistenceSnapshot | null>(null);
+  const pendingSnapshotRef = React.useRef<WorkspaceTabPersistenceSnapshot | null>(null);
   const persistTimerRef = React.useRef<number | null>(null);
 
   const persistTabs = React.useCallback(
@@ -441,15 +425,12 @@ export function WorkspacePane(): React.JSX.Element {
         if (!chatSessionId || !bffBaseUrl || !isAuthenticated) return;
 
         try {
-          const url = buildBffApiUrl(
-            bffBaseUrl,
-            `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs`,
-          );
+          const url = buildBffApiUrl(bffBaseUrl, `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs`);
           const response = await authenticatedFetch(url, {
-            method: "PATCH",
+            method: 'PATCH',
             headers: {
-              "Content-Type": "application/json",
-              Accept: "application/json",
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
             },
             body: JSON.stringify(snap),
           });
@@ -467,7 +448,7 @@ export function WorkspacePane(): React.JSX.Element {
         }
       }, 200);
     },
-    [chatSessionId, tabAnchorKey, bffBaseUrl, isAuthenticated, authenticatedFetch],
+    [chatSessionId, tabAnchorKey, bffBaseUrl, isAuthenticated, authenticatedFetch]
   );
 
   // Update the forwarding ref every render so the manager calls the latest
@@ -493,25 +474,22 @@ export function WorkspacePane(): React.JSX.Element {
     (frameId: string): void => {
       if (!chatSessionId || !bffBaseUrl || !isAuthenticated) return;
 
-      const ackUrl = buildBffApiUrl(
-        bffBaseUrl,
-        `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/ack`,
-      );
+      const ackUrl = buildBffApiUrl(bffBaseUrl, `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/ack`);
       void authenticatedFetch(ackUrl, {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
         },
         body: JSON.stringify({ frameId }),
-      }).catch((err) => {
+      }).catch(err => {
         logTelemetryError(TELEMETRY_UI_ACTION_ACK_FAILURE, {
           sessionId: chatSessionId,
           message: err instanceof Error ? err.message : String(err),
         });
       });
     },
-    [chatSessionId, bffBaseUrl, isAuthenticated, authenticatedFetch],
+    [chatSessionId, bffBaseUrl, isAuthenticated, authenticatedFetch]
   );
 
   // ---------------------------------------------------------------------------
@@ -553,15 +531,15 @@ export function WorkspacePane(): React.JSX.Element {
       // `tabs_clear` event when needed.
       if (!snapshot.tabId || !snapshot.widgetType) return;
 
-      dispatch("workspace", {
-        type: "active_widget_changed",
+      dispatch('workspace', {
+        type: 'active_widget_changed',
         widgetType: snapshot.widgetType,
         widgetData: snapshot.widgetData,
         tabId: snapshot.tabId,
         displayName: snapshot.displayName ?? snapshot.widgetType,
       });
     },
-    [dispatch],
+    [dispatch]
   );
 
   React.useEffect(() => {
@@ -622,33 +600,24 @@ export function WorkspacePane(): React.JSX.Element {
 
       if (chatSessionId) {
         try {
-          const url = buildBffApiUrl(
-            bffBaseUrl,
-            `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs`,
-          );
+          const url = buildBffApiUrl(bffBaseUrl, `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs`);
           const response = await authenticatedFetch(url, {
-            method: "GET",
-            headers: { Accept: "application/json" },
+            method: 'GET',
+            headers: { Accept: 'application/json' },
           });
           if (cancelled) return;
 
           if (response.ok) {
-            const snapshot =
-              (await response.json()) as WorkspaceTabPersistenceSnapshot;
+            const snapshot = (await response.json()) as WorkspaceTabPersistenceSnapshot;
             if (cancelled) return;
 
-            await managerRef.current.restoreFromPersistence(
-              snapshot,
-              resolveWorkspaceWidget,
-            );
+            await managerRef.current.restoreFromPersistence(snapshot, resolveWorkspaceWidget);
             if (cancelled) return;
 
             // restoreFromPersistence no-ops if a non-Home tab already exists (e.g.
             // the user opened a tab during the restore window) — treat that as a
             // successful server restore too, since a widget tab is present either way.
-            restoredFromServer = managerRef.current
-              .getSnapshot()
-              .tabs.some((t) => t.kind === "widget");
+            restoredFromServer = managerRef.current.getSnapshot().tabs.some(t => t.kind === 'widget');
           } else if (response.status !== 404) {
             throw new Error(`HTTP ${response.status}`);
           }
@@ -667,10 +636,7 @@ export function WorkspacePane(): React.JSX.Element {
       if (!cancelled && !restoredFromServer && tabAnchorKey) {
         const localSnapshot = readLocalTabSnapshot(tabAnchorKey);
         if (localSnapshot) {
-          await managerRef.current.restoreFromPersistence(
-            localSnapshot,
-            resolveWorkspaceWidget,
-          );
+          await managerRef.current.restoreFromPersistence(localSnapshot, resolveWorkspaceWidget);
         }
       }
 
@@ -680,8 +646,8 @@ export function WorkspacePane(): React.JSX.Element {
         // Notify ShellStageManager about the restored tab count so it can
         // advance to the appropriate stage (Stage 3 / Stage 4).
         const snap = managerRef.current.getSnapshot();
-        dispatch("workspace", {
-          type: "tab_count_change",
+        dispatch('workspace', {
+          type: 'tab_count_change',
           tabCount: snap.tabs.length,
         });
 
@@ -756,7 +722,7 @@ export function WorkspacePane(): React.JSX.Element {
   // transient/Browse doc survives). Non-compose default layouts (Daily
   // Briefing, dashboards, …) still flow through the 'workspace' LAYOUT door.
   const composeLaunch = useComposeLaunch();
-  const isComposeLaunch = composeLaunch?.composeMode === "editor";
+  const isComposeLaunch = composeLaunch?.composeMode === 'editor';
 
   // Build the DIRECT-widget seed from the launch context's stored document.
   // main.tsx parses the ribbon URL params (sprkDocumentId / speDriveItemId /
@@ -767,7 +733,7 @@ export function WorkspacePane(): React.JSX.Element {
   const composeLaunchSeed = React.useMemo<ComposeWidgetSeed>(() => {
     if (!isComposeLaunch) return {};
     const doc = composeLaunch?.document ?? null;
-    const driveId = composeLaunch?.driveId ?? "";
+    const driveId = composeLaunch?.driveId ?? '';
     const seed: ComposeWidgetSeed = {};
     if (doc?.speDriveItemId) seed.speDriveItemId = doc.speDriveItemId;
     if (doc?.sprkDocumentId) seed.sprkDocumentId = doc.sprkDocumentId;
@@ -812,20 +778,16 @@ export function WorkspacePane(): React.JSX.Element {
 
     // Skip if this layout is already open (e.g. NFR-09 tab restore brought
     // it back from the last session). Match by widgetData.layoutId.
-    const existingTab = manager
-      .getSnapshot()
-      .tabs.find((t) => {
-        if (t.widgetType !== "workspace") return false;
-        const data = t.widgetData as { layoutId?: string } | null;
-        return data?.layoutId === layoutForAutoInstall.id;
-      });
+    const existingTab = manager.getSnapshot().tabs.find(t => {
+      if (t.widgetType !== 'workspace') return false;
+      const data = t.widgetData as { layoutId?: string } | null;
+      return data?.layoutId === layoutForAutoInstall.id;
+    });
     if (existingTab) return;
 
     // Skip if the default is in the pinned list — the pin auto-open effect
     // below will open it; we don't want to double-dispatch.
-    const isPinned = getPinnedWorkspaces().some(
-      (p) => p.layoutId === layoutForAutoInstall.id,
-    );
+    const isPinned = getPinnedWorkspaces().some(p => p.layoutId === layoutForAutoInstall.id);
     if (isPinned) return;
 
     // Defer to a macrotask so usePaneEvent's subscription effect (declared
@@ -835,11 +797,11 @@ export function WorkspacePane(): React.JSX.Element {
     const timerId = window.setTimeout(() => {
       // eslint-disable-next-line no-console
       console.info(
-        `[WorkspacePane] Auto-installing default workspace: ${layoutForAutoInstall.name} (${layoutForAutoInstall.id})`,
+        `[WorkspacePane] Auto-installing default workspace: ${layoutForAutoInstall.name} (${layoutForAutoInstall.id})`
       );
-      dispatch("workspace", {
-        type: "widget_load",
-        widgetType: "workspace",
+      dispatch('workspace', {
+        type: 'widget_load',
+        widgetType: 'workspace',
         widgetData: {
           layoutId: layoutForAutoInstall.id,
           layoutName: layoutForAutoInstall.name,
@@ -883,12 +845,12 @@ export function WorkspacePane(): React.JSX.Element {
 
     const timerId = window.setTimeout(() => {
       // eslint-disable-next-line no-console
-      console.info("[WorkspacePane] Auto-installing compose (direct widget)");
-      dispatch("workspace", {
-        type: "widget_load",
-        widgetType: "compose",
+      console.info('[WorkspacePane] Auto-installing compose (direct widget)');
+      dispatch('workspace', {
+        type: 'widget_load',
+        widgetType: 'compose',
         widgetData: { compose: composeLaunchSeed },
-        displayName: "Compose",
+        displayName: 'Compose',
       });
     }, 0);
 
@@ -933,15 +895,15 @@ export function WorkspacePane(): React.JSX.Element {
     if (autoInstalledAnalysisRef.current) return; // run once per mount
     autoInstalledAnalysisRef.current = true;
 
-    if (analysisLaunch.mode === "new") {
+    if (analysisLaunch.mode === 'new') {
       const timerId = window.setTimeout(() => {
         // eslint-disable-next-line no-console
-        console.info("[WorkspacePane] Auto-installing Analysis hub (entry matrix 2a/2b)");
-        dispatch("workspace", {
-          type: "widget_load",
-          widgetType: "analysis-hub",
+        console.info('[WorkspacePane] Auto-installing Analysis hub (entry matrix 2a/2b)');
+        dispatch('workspace', {
+          type: 'widget_load',
+          widgetType: 'analysis-hub',
           widgetData: null,
-          displayName: "Analysis",
+          displayName: 'Analysis',
         });
       }, 0);
       return () => window.clearTimeout(timerId);
@@ -956,10 +918,10 @@ export function WorkspacePane(): React.JSX.Element {
         try {
           const lookupUrl = buildBffApiUrl(
             bffBaseUrl,
-            `/ai/chat/sessions/by-analysis/${encodeURIComponent(analysisId)}`,
+            `/ai/chat/sessions/by-analysis/${encodeURIComponent(analysisId)}`
           );
           const response = await authenticatedFetch(lookupUrl, {
-            headers: { Accept: "application/json" },
+            headers: { Accept: 'application/json' },
           });
           if (cancelled) return;
           // 404 (no session ever bound) / any non-OK → graceful no-op. The modal
@@ -968,8 +930,8 @@ export function WorkspacePane(): React.JSX.Element {
           if (!response.ok) return;
           const session = (await response.json()) as { sessionId?: string };
           if (cancelled || !session.sessionId) return;
-          dispatch("conversation", {
-            type: "session_switch",
+          dispatch('conversation', {
+            type: 'session_switch',
             sessionId: session.sessionId,
           });
         } catch {
@@ -1040,7 +1002,7 @@ export function WorkspacePane(): React.JSX.Element {
     // Workspaces drawer deleted the layout). Persists the cleaned list back
     // to localStorage in the same call. Returns the live (cleaned) list so we
     // do not dispatch widget_load for non-existent layouts.
-    const knownLayoutIds = new Set(layouts.map((l) => l.id));
+    const knownLayoutIds = new Set(layouts.map(l => l.id));
     const pinned = prunePinnedToKnown(knownLayoutIds);
     if (pinned.length === 0) return;
 
@@ -1048,19 +1010,17 @@ export function WorkspacePane(): React.JSX.Element {
     const openLayoutIds = new Set<string>(
       manager
         .getSnapshot()
-        .tabs.filter((t) => t.widgetType === "workspace")
-        .map((t) => {
+        .tabs.filter(t => t.widgetType === 'workspace')
+        .map(t => {
           const data = t.widgetData as { layoutId?: string } | null;
-          return data?.layoutId ?? "";
+          return data?.layoutId ?? '';
         })
-        .filter((id): id is string => id.length > 0),
+        .filter((id): id is string => id.length > 0)
     );
 
     // Filter to the pins that actually need opening so we can log + skip
     // cleanly if there's nothing to do.
-    const pinsToOpen = pinned.filter(
-      (pin) => !openLayoutIds.has(pin.layoutId),
-    );
+    const pinsToOpen = pinned.filter(pin => !openLayoutIds.has(pin.layoutId));
     if (pinsToOpen.length === 0) return;
 
     // Defer dispatch to a macrotask so usePaneEvent's subscription effect
@@ -1069,14 +1029,11 @@ export function WorkspacePane(): React.JSX.Element {
     // channel and are silently dropped — see block comment above.
     const timerId = window.setTimeout(() => {
       // eslint-disable-next-line no-console
-      console.info(
-        `[WorkspacePane] Auto-opening ${pinsToOpen.length} pinned workspace(s):`,
-        pinsToOpen,
-      );
+      console.info(`[WorkspacePane] Auto-opening ${pinsToOpen.length} pinned workspace(s):`, pinsToOpen);
       for (const pin of pinsToOpen) {
-        dispatch("workspace", {
-          type: "widget_load",
-          widgetType: "workspace",
+        dispatch('workspace', {
+          type: 'widget_load',
+          widgetType: 'workspace',
           widgetData: { layoutId: pin.layoutId, layoutName: pin.layoutName },
           displayName: pin.layoutName,
         });
@@ -1151,14 +1108,14 @@ export function WorkspacePane(): React.JSX.Element {
   // PaneEventBus subscription — 'workspace' channel
   // ---------------------------------------------------------------------------
 
-  usePaneEvent("workspace", (event: WorkspacePaneEvent): void => {
+  usePaneEvent('workspace', (event: WorkspacePaneEvent): void => {
     const manager = managerRef.current;
 
     // ai-advanced-capabilities-analysis-hub-r1 (tabbed Quick Start): open the
     // Create Analysis wizard AS A MODAL (not a tab). Just flip state; the modal
     // render below injects the Xrm services + regarding and, on finish, the wizard
     // opens its own result tab (document-viewer) exactly as before.
-    if (event.type === "open_create_analysis_wizard") {
+    if (event.type === 'open_create_analysis_wizard') {
       setCreateAnalysisModal({
         open: true,
         workTypeValue: event.analysisWorkType,
@@ -1173,7 +1130,7 @@ export function WorkspacePane(): React.JSX.Element {
     // frame, fire it NOW (the genuine "content is on screen" confirmation) — mirroring
     // the tab-open ack, only later + honest. No pending entry ⇒ no-op (a client-
     // originated open, or a render we never gated on).
-    if (event.type === "compose_content_rendered") {
+    if (event.type === 'compose_content_rendered') {
       const ledgerRef = event.ledgerRef;
       if (ledgerRef) {
         const frameId = pendingRenderAcksRef.current.get(ledgerRef);
@@ -1185,39 +1142,56 @@ export function WorkspacePane(): React.JSX.Element {
       return;
     }
 
-    if (event.type === "widget_load" && !event.tabId) {
+    if (event.type === 'widget_load' && !event.tabId) {
       // Guard: ignore our own re-dispatched widget_load confirmations (which carry tabId).
       // Only the server-initiated events (no tabId) should open a new tab.
-      const widgetType = event.widgetType ?? "unknown";
+      const widgetType = event.widgetType ?? 'unknown';
       const widgetData = event.widgetData ?? null;
 
-      // ── FIX #10b — STUB email tab ──────────────────────────────────────────
-      // The Compose "Email" affordance (ComposeAiToolbar → handleEmailAction) and
-      // the chat "email" chip dispatch widgetType 'email' (layoutName 'Email').
-      // Resolve EmailStubWidget SYNCHRONOUSLY (statically imported — no registry
-      // round-trip) and open a tab. Same addTab → confirm-dispatch pattern as the
-      // generic path below; auto-activates via addTab.
-      const emailData = widgetData as { layoutName?: string } | null;
-      if (widgetType === "email" || emailData?.layoutName === "Email") {
-        const emailDisplayName = event.displayName ?? "Email";
-        const emailTabId = manager.addTab("email", widgetData, emailDisplayName);
+      // ── FIX #10b — STUB email tab (compose DRAFT hand-off ONLY) ────────────
+      // The Compose "Email" affordance (ComposeAiToolbar → handleEmailAction)
+      // dispatches widgetType 'email' carrying a compose DRAFT payload
+      // (`mode: 'open'|'send'` + `bodyText`/`attachmentFileName`). That flow opens
+      // the lightweight EmailStubWidget preview (statically imported — synchronous).
+      //
+      // Owner UAT 2026-07-30 (item #1): the plain **Email tab** (tab bar / pinned)
+      // ALSO dispatches widgetType 'email' but WITHOUT a draft payload — it must
+      // load the REAL `EmailWorkspaceWidget`. Previously this intercept fired for
+      // ANY 'email' load and force-mounted the stub ("Email — coming soon"),
+      // shadowing the registry; a page refresh then restored the real widget via
+      // the registry, producing the "refresh fixes it" symptom. Gating the stub to
+      // the draft hand-off lets the plain tab fall through to the generic registry
+      // path below (→ resolveWorkspaceWidget('email') → EmailWorkspaceWidget).
+      const emailData = widgetData as {
+        layoutName?: string;
+        mode?: string;
+        bodyText?: string;
+        attachmentFileName?: string;
+      } | null;
+      const isComposeDraftHandoff = !!(
+        emailData &&
+        (emailData.mode || emailData.bodyText || emailData.attachmentFileName)
+      );
+      if ((widgetType === 'email' || emailData?.layoutName === 'Email') && isComposeDraftHandoff) {
+        const emailDisplayName = event.displayName ?? 'Email';
+        const emailTabId = manager.addTab('email', widgetData, emailDisplayName);
         // Cast to the registry's WorkspaceWidgetComponent (matches the 'compose'
         // registry path) — EmailStubWidget takes WorkspaceWidgetProps<EmailWidgetData>.
         manager.resolveTabComponent(
           emailTabId,
           EmailStubWidget as unknown as WorkspaceWidgetComponent,
-          emailDisplayName,
+          emailDisplayName
         );
         syncState();
         const emailSnapshot = manager.getSnapshot();
-        dispatch("workspace", {
-          type: "widget_load",
-          widgetType: "email",
+        dispatch('workspace', {
+          type: 'widget_load',
+          widgetType: 'email',
           tabId: emailTabId,
           ...(emailSnapshot.tabs.length > 0 ? { tabCount: emailSnapshot.tabs.length } : {}),
         });
-        dispatch("workspace", {
-          type: "tab_count_change",
+        dispatch('workspace', {
+          type: 'tab_count_change',
           tabCount: emailSnapshot.tabs.length,
         });
         // D-F3 truthfulness parity with the generic path — ack a server frame if present.
@@ -1234,8 +1208,7 @@ export function WorkspacePane(): React.JSX.Element {
       //   2. Registry metadata `displayName`.
       //   3. The raw widgetType string as last resort.
       const meta = getWorkspaceWidgetMetadata(widgetType);
-      const displayName =
-        event.displayName ?? meta?.displayName ?? widgetType;
+      const displayName = event.displayName ?? meta?.displayName ?? widgetType;
 
       // ── spaarkeai-compose-r2 UNIFY — "Compose" layout → Direct 'compose' ────
       // A "Compose" workspace-LAYOUT load — the WorkspacePaneMenu "Compose"
@@ -1248,11 +1221,9 @@ export function WorkspacePane(): React.JSX.Element {
       // LAYOUT door and flow through the generic addTab path below, unchanged.
       // The menu selection carries no document → empty Compose editor.
       const isComposeLayoutLoad =
-        widgetType === "workspace" &&
-        ((widgetData as { layoutName?: string } | null)?.layoutName ===
-          "Compose" ||
-          event.displayName === "Compose");
-      const effectiveWidgetType = isComposeLayoutLoad ? "compose" : widgetType;
+        widgetType === 'workspace' &&
+        ((widgetData as { layoutName?: string } | null)?.layoutName === 'Compose' || event.displayName === 'Compose');
+      const effectiveWidgetType = isComposeLayoutLoad ? 'compose' : widgetType;
 
       // ── Compose DIRECT widget — single-tab reuse (spaarkeai-compose-r2) ─────
       // Compose is a first-class DIRECT workspace widget (widgetType 'compose' →
@@ -1265,17 +1236,15 @@ export function WorkspacePane(): React.JSX.Element {
       // of stacking duplicates. Other layouts (Daily Briefing, Documents, …)
       // keep the 'workspace' LAYOUT door and flow through the generic addTab
       // path below, unchanged.
-      if (effectiveWidgetType === "compose") {
+      if (effectiveWidgetType === 'compose') {
         // FR-34 D-F3 (task 071): a CONTENT-bearing open carries a full-document
         // draft SEED (widgetData.compose.draft.ledgerRef — DEF-08 Part A). When
         // present, the ack is DEFERRED until ComposeWorkspace signals the draft
         // actually rendered (compose_content_rendered), keyed by this ledgerRef.
         // Absent for upload/stored/empty opens, which ack on tab-open as before.
-        const composeData = widgetData as
-          | { compose?: { draft?: { ledgerRef?: string } } }
-          | null;
+        const composeData = widgetData as { compose?: { draft?: { ledgerRef?: string } } } | null;
         const composeDraftLedgerRef =
-          composeData?.compose && typeof composeData.compose === "object"
+          composeData?.compose && typeof composeData.compose === 'object'
             ? composeData.compose.draft?.ledgerRef
             : undefined;
 
@@ -1285,16 +1254,14 @@ export function WorkspacePane(): React.JSX.Element {
         // draft) or an already-hoisted top-level value. When a re-seed carries none (e.g. an
         // add-to-DMS re-activation with only a `source` marker), the existing tab's filename is
         // preserved rather than clobbered with undefined.
-        const composeSeed = widgetData as
-          | {
-              filename?: string;
-              compose?: {
-                fileName?: string;
-                upload?: { fileName?: string };
-                draft?: { fileName?: string };
-              };
-            }
-          | null;
+        const composeSeed = widgetData as {
+          filename?: string;
+          compose?: {
+            fileName?: string;
+            upload?: { fileName?: string };
+            draft?: { fileName?: string };
+          };
+        } | null;
         const seedFilename =
           composeSeed?.compose?.upload?.fileName ??
           composeSeed?.compose?.draft?.fileName ??
@@ -1329,8 +1296,8 @@ export function WorkspacePane(): React.JSX.Element {
         const instanceKey = deriveComposeInstanceKey(widgetData);
         const hasComposeSeed =
           widgetData != null &&
-          typeof widgetData === "object" &&
-          typeof (widgetData as { compose?: unknown }).compose === "object" &&
+          typeof widgetData === 'object' &&
+          typeof (widgetData as { compose?: unknown }).compose === 'object' &&
           (widgetData as { compose?: unknown }).compose !== null;
         // UAT (tab independence): the seedless-reuse-active branch below must fire ONLY for the
         // KNOWN source-only re-activation flows (add-to-DMS / reporting-email / welcome-compose),
@@ -1341,22 +1308,21 @@ export function WorkspacePane(): React.JSX.Element {
         // keeping every analysis tab independent.
         const hasSourceReactivationMarker =
           widgetData != null &&
-          typeof widgetData === "object" &&
-          typeof (widgetData as { source?: unknown }).source === "string" &&
-          ((widgetData as { source?: string }).source ?? "").length > 0;
+          typeof widgetData === 'object' &&
+          typeof (widgetData as { source?: unknown }).source === 'string' &&
+          ((widgetData as { source?: string }).source ?? '').length > 0;
 
         const snapshot0 = manager.getSnapshot();
-        const composeTabs = snapshot0.tabs.filter((t) => t.widgetType === "compose");
+        const composeTabs = snapshot0.tabs.filter(t => t.widgetType === 'compose');
         let reuseTab: (typeof composeTabs)[number] | undefined;
         if (instanceKey) {
-          reuseTab = composeTabs.find((t) => composeTabInstanceKey(t) === instanceKey);
+          reuseTab = composeTabs.find(t => composeTabInstanceKey(t) === instanceKey);
         } else if (!hasComposeSeed && !isComposeLayoutLoad && hasSourceReactivationMarker) {
           // Source-only re-activation (explicit `widgetData.source`) — reuse the ACTIVE compose tab,
           // else the first open one. Never mints a duplicate (source-only opens carry no new
           // document + intentionally target the current doc). A blank menu "Compose" open
           // (isComposeLayoutLoad) and any UN-marked seedless open both fall through to a NEW tab.
-          reuseTab =
-            composeTabs.find((t) => t.id === snapshot0.activeTabId) ?? composeTabs[0];
+          reuseTab = composeTabs.find(t => t.id === snapshot0.activeTabId) ?? composeTabs[0];
         }
 
         if (reuseTab) {
@@ -1388,8 +1354,8 @@ export function WorkspacePane(): React.JSX.Element {
           syncState();
           ackComposeFrame();
           window.setTimeout(() => {
-            dispatch("workspace", {
-              type: "tab_change",
+            dispatch('workspace', {
+              type: 'tab_change',
               tabId: existingComposeTab.id,
               widgetType: existingComposeTab.widgetType,
               widgetData: reuseWidgetData,
@@ -1403,10 +1369,8 @@ export function WorkspacePane(): React.JSX.Element {
         // seed's filename to a top-level `filename` (R3 server-readable contract).
         // The tab's stable identity is re-derived from its seed on later reuse
         // decisions, so nothing extra is stamped onto widgetData.
-        const composeWidgetData = seedFilename
-          ? { ...(widgetData ?? {}), filename: seedFilename }
-          : widgetData;
-        const composeTabId = manager.addTab("compose", composeWidgetData, displayName);
+        const composeWidgetData = seedFilename ? { ...(widgetData ?? {}), filename: seedFilename } : widgetData;
+        const composeTabId = manager.addTab('compose', composeWidgetData, displayName);
         syncState();
         // UC-5 truthfulness (task 020 / FR-C1): a NEW compose tab's widget has
         // NOT resolved yet — only the empty shell exists. Acking here would
@@ -1418,12 +1382,12 @@ export function WorkspacePane(): React.JSX.Element {
         if (event.frameId && composeDraftLedgerRef) {
           pendingRenderAcksRef.current.set(composeDraftLedgerRef, event.frameId);
         }
-        resolveWorkspaceWidget("compose").then((Component) => {
-          const resolvedMeta = getWorkspaceWidgetMetadata("compose");
+        resolveWorkspaceWidget('compose').then(Component => {
+          const resolvedMeta = getWorkspaceWidgetMetadata('compose');
           manager.resolveTabComponent(
             composeTabId,
             Component,
-            event.displayName ? undefined : resolvedMeta?.displayName,
+            event.displayName ? undefined : resolvedMeta?.displayName
           );
           syncState();
           // UC-5 (task 020): the compose widget has now resolved + attached — a
@@ -1436,14 +1400,14 @@ export function WorkspacePane(): React.JSX.Element {
           }
           const snapshot = manager.getSnapshot();
           const currentTabCount = snapshot.tabs.length;
-          dispatch("workspace", {
-            type: "widget_load",
-            widgetType: "compose",
+          dispatch('workspace', {
+            type: 'widget_load',
+            widgetType: 'compose',
             tabId: composeTabId,
             ...(currentTabCount > 0 ? { tabCount: currentTabCount } : {}),
           });
-          dispatch("workspace", {
-            type: "tab_count_change",
+          dispatch('workspace', {
+            type: 'tab_count_change',
             tabCount: currentTabCount,
           });
         });
@@ -1458,7 +1422,7 @@ export function WorkspacePane(): React.JSX.Element {
       // + 2b initialAssociation) so pre-set context is preserved. Every other
       // widgetType flows through unchanged.
       const effectiveWidgetData =
-        widgetType === "create-analysis-wizard"
+        widgetType === 'create-analysis-wizard'
           ? {
               ...((widgetData as Record<string, unknown> | null) ?? {}),
               dataService: analysisWizardDataService,
@@ -1476,17 +1440,13 @@ export function WorkspacePane(): React.JSX.Element {
       syncState();
 
       // Lazy-resolve the widget component; update the tab once resolved.
-      resolveWorkspaceWidget(widgetType).then((Component) => {
+      resolveWorkspaceWidget(widgetType).then(Component => {
         const resolvedMeta = getWorkspaceWidgetMetadata(widgetType);
         // Round 4 Fix 4: preserve a per-instance displayName from the event
         // payload (e.g. "Corporate Workspace") over the registry's generic
         // label (e.g. "Workspace"). Pass `undefined` for displayName when the
         // event carried one so resolveTabComponent does not overwrite it.
-        manager.resolveTabComponent(
-          tabId,
-          Component,
-          event.displayName ? undefined : resolvedMeta?.displayName,
-        );
+        manager.resolveTabComponent(tabId, Component, event.displayName ? undefined : resolvedMeta?.displayName);
         syncState();
 
         // UC-5 truthfulness (task 020 / FR-C1) — MOVED here from tab-shell
@@ -1512,25 +1472,25 @@ export function WorkspacePane(): React.JSX.Element {
         // Dispatch widget_load WITH tabId so ShellStageManager reacts to it
         // (server-initiated events carry no tabId; this is the confirmation).
         // tabCount is included so ShellStageManager can also derive Stage 4.
-        dispatch("workspace", {
-          type: "widget_load",
+        dispatch('workspace', {
+          type: 'widget_load',
           widgetType,
           tabId,
           ...(currentTabCount > 0 ? { tabCount: currentTabCount } : {}),
         });
 
         // Dispatch tab_count_change so ShellStageManager can drive Stage 3↔4.
-        dispatch("workspace", {
-          type: "tab_count_change",
+        dispatch('workspace', {
+          type: 'tab_count_change',
           tabCount: currentTabCount,
         });
       });
-    } else if (event.type === "widget_update") {
+    } else if (event.type === 'widget_update') {
       if (event.tabId) {
         manager.updateTab(event.tabId, event.widgetData ?? null);
         syncState();
       }
-    } else if (event.type === "widget_action") {
+    } else if (event.type === 'widget_action') {
       // Forward widget_action events are handled by the widget itself via
       // the bus — WorkspacePane is a transparent router here.
       // No tab-manager state change needed.
@@ -1552,8 +1512,8 @@ export function WorkspacePane(): React.JSX.Element {
   // used by server-initiated widget_load events, ensuring identical tab lifecycle.
   // ---------------------------------------------------------------------------
 
-  usePaneEvent("conversation", (event: ConversationPaneEvent): void => {
-    if (event.type !== "playbook-selected") return;
+  usePaneEvent('conversation', (event: ConversationPaneEvent): void => {
+    if (event.type !== 'playbook-selected') return;
 
     const manager = managerRef.current;
     const defaultWidgets = event.defaultWidgets ?? [];
@@ -1567,10 +1527,10 @@ export function WorkspacePane(): React.JSX.Element {
     // (the editor holds an unsaved draft/document — losing it was the UC-4
     // regression). Preserve 'compose' work-product tabs across the clear.
     if (isExclusive && manager.getSnapshot().tabs.length > 0) {
-      manager.clearAllTabs({ preserveWidgetTypes: ["compose"] });
+      manager.clearAllTabs({ preserveWidgetTypes: ['compose'] });
       syncState();
       // Emit tabs_clear so subscribers (e.g. ContextPaneController) can reset.
-      dispatch("workspace", { type: "tabs_clear" });
+      dispatch('workspace', { type: 'tabs_clear' });
     }
 
     // Seed each default widget as a new tab.
@@ -1585,13 +1545,13 @@ export function WorkspacePane(): React.JSX.Element {
       syncState();
 
       // Lazy-resolve the widget component — same pattern as workspace channel.
-      resolveWorkspaceWidget(widgetType).then((Component) => {
+      resolveWorkspaceWidget(widgetType).then(Component => {
         const resolvedMeta = getWorkspaceWidgetMetadata(widgetType);
         manager.resolveTabComponent(tabId, Component, resolvedMeta?.displayName);
         syncState();
 
         // Dispatch widget_load (with tabId) so ShellStageManager can advance stage.
-        dispatch("workspace", { type: "widget_load", widgetType, tabId });
+        dispatch('workspace', { type: 'widget_load', widgetType, tabId });
       });
     }
   });
@@ -1610,8 +1570,8 @@ export function WorkspacePane(): React.JSX.Element {
       const activeTab = manager.getActiveTab();
 
       // Dispatch tab_change so ContextPaneController can adapt its view.
-      dispatch("workspace", {
-        type: "tab_change",
+      dispatch('workspace', {
+        type: 'tab_change',
         tabId,
         widgetType: activeTab?.widgetType,
         widgetData: activeTab?.widgetData,
@@ -1651,7 +1611,7 @@ export function WorkspacePane(): React.JSX.Element {
   // ---------------------------------------------------------------------------
   React.useEffect(() => {
     const activeTab = managerRef.current.getActiveTab();
-    composeVisibility?.(activeTab?.widgetType === "compose");
+    composeVisibility?.(activeTab?.widgetType === 'compose');
     // tabState.activeTabId drives every activation path (click, compose reuse,
     // close-restore, restore-from-persistence, auto-install); composeVisibility
     // re-runs the sync when the editor's handler registers/unregisters.
@@ -1668,8 +1628,8 @@ export function WorkspacePane(): React.JSX.Element {
 
       // Dispatch tab_count_change so ShellStageManager can revert Stage 4 → Stage 3
       // when the user closes tabs down to one, or Stage 3 → Stage 1 when all tabs close.
-      dispatch("workspace", {
-        type: "tab_count_change",
+      dispatch('workspace', {
+        type: 'tab_count_change',
         tabCount: currentTabCount,
       });
 
@@ -1677,8 +1637,8 @@ export function WorkspacePane(): React.JSX.Element {
       // ContextPaneController can adapt its view to the new active widget.
       if (newActiveId !== null) {
         const newActive = manager.getActiveTab();
-        dispatch("workspace", {
-          type: "tab_change",
+        dispatch('workspace', {
+          type: 'tab_change',
           tabId: newActiveId,
           widgetType: newActive?.widgetType,
           widgetData: newActive?.widgetData,
@@ -1704,17 +1664,14 @@ export function WorkspacePane(): React.JSX.Element {
   const handleTabDataChange = React.useCallback(
     (tabId: string, patch: unknown): void => {
       const manager = managerRef.current;
-      const current = manager.getSnapshot().tabs.find((t) => t.id === tabId);
+      const current = manager.getSnapshot().tabs.find(t => t.id === tabId);
       if (!current) return;
 
       const currentData =
-        current.widgetData !== null && typeof current.widgetData === "object"
+        current.widgetData !== null && typeof current.widgetData === 'object'
           ? (current.widgetData as Record<string, unknown>)
           : {};
-      const patchData =
-        patch !== null && typeof patch === "object"
-          ? (patch as Record<string, unknown>)
-          : {};
+      const patchData = patch !== null && typeof patch === 'object' ? (patch as Record<string, unknown>) : {};
 
       manager.updateTab(tabId, { ...currentData, ...patchData });
       syncState();
@@ -1756,9 +1713,9 @@ export function WorkspacePane(): React.JSX.Element {
   // dropdown menu doesn't bubble its click up to the header.
   const paneCollapse = usePaneCollapseContext();
   const handleHeaderCollapse = React.useCallback(() => {
-    paneCollapse?.toggle("workspace");
+    paneCollapse?.toggle('workspace');
   }, [paneCollapse]);
-  const isWorkspaceExpanded = !(paneCollapse?.isCollapsed("workspace") ?? false);
+  const isWorkspaceExpanded = !(paneCollapse?.isCollapsed('workspace') ?? false);
 
   // spaarkeai-compose-r1 task 100 (Phase 10 polish, FR-S7):
   //
@@ -1843,9 +1800,7 @@ export function WorkspacePane(): React.JSX.Element {
               authenticatedFetch,
               bffBaseUrl,
               ...(chatSessionId ? { sessionId: chatSessionId } : {}),
-              ...(analysisInitialAssociation
-                ? { initialAssociation: analysisInitialAssociation }
-                : {}),
+              ...(analysisInitialAssociation ? { initialAssociation: analysisInitialAssociation } : {}),
               onRequestClose: () => setCreateAnalysisModal({ open: false }),
             } as CreateAnalysisWizardData
           }
