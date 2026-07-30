@@ -1,10 +1,21 @@
 # BLOCKED-031 — Job B apply endpoint: no supported OBO/impersonated **write** path to Dataverse
 
+> ## ✅ RESOLVED 2026-07-29 — owner chose **Option 2** (Path A + additive impersonated-write extension)
+> The owner selected this doc's **recommended Option 2**: extend the shared write core with an optional
+> `Guid? impersonateSystemUserId` so the Job B apply PATCH runs AS the confirming user via `MSCRMCallerID`
+> (native Dataverse RLS + honest `modifiedby` = the confirming human — the "who accepted the change" the owner
+> wants). True OBO-token-to-Dataverse (Option 3) rejected as unnecessary; app-only (Option 1) rejected because
+> `modifiedby` would show the service principal. Go-live prerequisite acknowledged: BFF app user must hold
+> `prvActOnBehalfOfAnotherUser` (flagged for task 060 deploy). Decision record:
+> [`notes/031-write-identity-decision.md`](notes/031-write-identity-decision.md). **Implementation proceeding.**
+>
+> ---
+>
 > **Task**: 031 (P3, FULL rigor, opus/high, SECURITY-SENSITIVE — the only record-mutating task in r1)
-> **Status**: **ESCALATED** (POML `<escalation>` trigger fired; brief STEP 0 DECISION GATE → escalate branch)
-> **Date**: 2026-07-29
+> **Status**: ~~ESCALATED~~ → **RESOLVED (Option 2)** — escalation branch closed by owner decision.
+> **Date raised**: 2026-07-29 · **Date resolved**: 2026-07-29
 > **Raised by**: task-031 implementation agent, per root CLAUDE.md §6 / §6.5 and the task-031 brief.
-> **No code was written.** `CommunicationEndpoints.cs`, the seam, and the write core are untouched.
+> **No code was written at escalation time.** Implementation now proceeds under Option 2.
 
 ---
 

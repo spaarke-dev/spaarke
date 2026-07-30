@@ -42,7 +42,7 @@ r1 builds **no UI** — it *feeds* r5's shipped surfaces via a feed + apply cont
 | D-03 | Category taxonomy + priority weights — **Dataverse-tuneable**, starter set seeded (FR-16) |
 | D-05 | Triage-outcome term = **"review outcome"** (avoids ADR-040 "disposition" clash) |
 | D-06 | Obligation storage = **lean JSON** on `sprk_communication` |
-| D-07 | Mailbox coverage = **shared + M365 group** (FR-15; r1 owns; spike-first) |
+| D-07 | Mailbox coverage = **shared/central mailbox** (FR-15; already supported by shipped code — 051a). **M365 group mailbox DEFERRED** (owner 2026-07-29, §6.5 path A — forked capture pipeline + tenant-wide `Group.Read.All` not justified now; see `notes/050-mailbox-capture-spike.md`). |
 | D-08 | Priority scorer = **email-specific** (triage urgency + RI-confidence); do NOT reuse Workspace/Portfolio scoring |
 | D-10 | Surface placement = r5's (dual-use); **r1 feeds, builds no widget** |
 | D-11 | AI in P1 = **Triage Action + RAG grounding**; SprkChat-over-mail → P2 |
@@ -58,7 +58,7 @@ r1 builds **no UI** — it *feeds* r5's shipped surfaces via a feed + apply cont
 
 - **Code-directed Action + Binding only** — the **node-graph playbook engine is FROZEN** (Insights family only; ADR-039). MUST NOT land new capability on `PlaybookOrchestrationService` / `UpdateRecordNodeExecutor` / `IInvokePlaybookAi` (deleted). New capability = catalog data (`sprk_analysisaction` + `sprk_playbookconsumer`) + `coded`/`prompted` Action reached via `Services/Ai/PublicContracts/`.
 - **Auto-file C-1, rung 0+1 only** — narrow `AssociationStatusMapper`/`AutoFileGate`; rung 2 (participant) + rung 3 (structural) → `Suggested`. Bare-numeric identifiers never auto-file alone (need reinforcement); multi-entity → `Ambiguous`; AI-tier never auto-files.
-- **Job B is FULL** — propose → **human-confirm** → apply via `IActionSeam.UpdateRecordAsync` under the confirming user's **OBO** (ADR-028) → `sprk_emailreviewlog` audit row. Allow-listed fields only (`sprk_emailupdatefield`); every proposal cited + confidence; verify cited text exists (NFR-06); nothing deadline-bearing/privilege-adjacent auto-finalizes (ADR-015).
+- **Job B is FULL** — propose → **human-confirm** → apply via `IActionSeam.UpdateRecordAsync` under **Dataverse impersonation** (`MSCRMCallerID` = confirming user's `systemuserid`; owner Option 2, 2026-07-29 — no OBO token exchange needed since the apply is user-initiated; gives native `modifiedby` = the human + intersection privileges; see `notes/031-write-identity-decision.md`) → `sprk_emailreviewlog` audit row. Allow-listed fields only (`sprk_emailupdatefield`); every proposal cited + confidence; verify cited text exists (NFR-06); nothing deadline-bearing/privilege-adjacent auto-finalizes (ADR-015).
 - **IP docketing OUT** — removed entirely; do not add any docketing/deadline-cascade surface.
 - **Surfaces owned by completed r5** — r1 builds no UI; feeds r5 via feed + apply endpoints (C-3).
 - **AI facade discipline (NFR-03 / ADR-013)** — no `IOpenAiClient`/`IPlaybookService` injected into Communication code; reach AI only via `Services/Ai/PublicContracts/`.

@@ -60,7 +60,7 @@ public class ActionSeamTests
         _fieldMappingMock = new Mock<IFieldMappingDataverseService>();
         _fieldMappingMock
             .Setup(s => s.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
             .Returns(Task.CompletedTask);
 
         _scopeFactoryMock = new Mock<IServiceScopeFactory>(MockBehavior.Strict);
@@ -257,8 +257,8 @@ public class ActionSeamTests
         Dictionary<string, object?>? captured = null;
         _fieldMappingMock
             .Setup(s => s.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken>((_, _, fields, _) => captured = fields)
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((_, _, fields, _, _) => captured = fields)
             .Returns(Task.CompletedTask);
 
         var request = new UpdateRecordRequest
@@ -308,7 +308,7 @@ public class ActionSeamTests
         result.Error.Should().Contain("Contract");
         _fieldMappingMock.Verify(
             s => s.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()),
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
             Times.Never);
     }
 

@@ -1627,7 +1627,8 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         string entityLogicalName,
         Guid recordId,
         Dictionary<string, object?> fields,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Guid? impersonateSystemUserId = null)
     {
         if (fields.Count == 0)
         {
@@ -1644,23 +1645,43 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         var apiPath = $"{entitySetName}({recordId})";
         var body = System.Text.Json.JsonSerializer.Serialize(fields);
 
-        _logger.LogDebug("PATCH {ApiPath} with {FieldCount} fields", apiPath, fields.Count);
-
-        var response = await Task.Run(() =>
-            _serviceClient.ExecuteWebRequest(
-                HttpMethod.Patch,
-                apiPath,
-                body,
-                null,
-                "application/json"), ct);
-
-        if (!response.IsSuccessStatusCode)
+        // Job B apply (task 031): when a caller systemuserid is supplied, run the PATCH AS that user via a cloned
+        // ServiceClient with CallerId set (the SDK stamps MSCRMCallerID) — mirrors UserPrivilegeChecker's read-path
+        // impersonation. Null/empty = app-only (existing callers byte-unchanged). Fail-closed: if impersonation is
+        // requested but the clone cannot be established, the write throws rather than silently running app-only.
+        var impersonate = impersonateSystemUserId is { } imp && imp != Guid.Empty;
+        ServiceClient? impersonatedClient = impersonate ? _serviceClient.Clone() : null;
+        try
         {
-            var errorBody = await response.Content.ReadAsStringAsync(ct);
-            _logger.LogError(
-                "Failed to PATCH {Entity}({Id}): {StatusCode} {ErrorBody}",
-                entityLogicalName, recordId, response.StatusCode, errorBody);
-            response.EnsureSuccessStatusCode();
+            if (impersonatedClient is not null)
+                impersonatedClient.CallerId = impersonateSystemUserId!.Value;
+
+            var client = impersonatedClient ?? _serviceClient;
+
+            _logger.LogDebug(
+                "PATCH {ApiPath} with {FieldCount} fields{Impersonation}",
+                apiPath, fields.Count, impersonate ? $" (impersonating {impersonateSystemUserId})" : string.Empty);
+
+            var response = await Task.Run(() =>
+                client.ExecuteWebRequest(
+                    HttpMethod.Patch,
+                    apiPath,
+                    body,
+                    null,
+                    "application/json"), ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogError(
+                    "Failed to PATCH {Entity}({Id}): {StatusCode} {ErrorBody}",
+                    entityLogicalName, recordId, response.StatusCode, errorBody);
+                response.EnsureSuccessStatusCode();
+            }
+        }
+        finally
+        {
+            impersonatedClient?.Dispose();
         }
 
         _logger.LogInformation("Updated {Entity}({Id}) with {FieldCount} fields via Web API", entityLogicalName, recordId, fields.Count);

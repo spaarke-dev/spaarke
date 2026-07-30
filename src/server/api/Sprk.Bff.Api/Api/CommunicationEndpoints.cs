@@ -230,6 +230,23 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
+        // POST /api/communications/proposals/{reviewLogId}/apply — Job B APPLY (task 031 / FR-10). r5 renders the
+        // confirm card (from the queue-feed above) and POSTs the proposal's ReviewLogId here on Approve (C-2). The
+        // apply runs the record PATCH UNDER THE CONFIRMING USER'S impersonation (owner Option 2 — never app-only,
+        // caller resolved server-side from HttpContext.User, fail-closed 403), re-validates the sprk_emailupdatefield
+        // allow-list + citation AT APPLY time (never trust client gating), applies via the blessed
+        // IActionSeam.UpdateRecordAsync, and writes the append-only Applied sprk_emailreviewlog audit row. r1 builds
+        // no UI. Registered unconditionally (ADR-010/ADR-032).
+        group.MapPost("/proposals/{reviewLogId:guid}/apply", ApplyProposalAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("ApplyCommunicationProposal")
+            .WithDescription("Job B apply (FR-10): apply a confirmed pending field-update proposal to the associated record under the confirming user's MSCRMCallerID impersonation, then write the append-only Applied audit row. Caller resolved server-side (403 fail-closed); non-allow-listed field (403), unverifiable citation (422), or already-resolved proposal (409) are refused.")
+            .Produces<ApplyProposalResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
+            .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
+
         group.MapPost("/accounts/{id:guid}/verify", VerifyCommunicationAccountAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .WithName("VerifyCommunicationAccount")
@@ -784,6 +801,19 @@ public static class CommunicationEndpoints
         CancellationToken ct)
     {
         var result = await feedService.GetQueueFeedAsync(regarding, top, context.User, ct);
+        return TypedResults.Ok(result);
+    }
+
+    // Job B apply (task 031 / FR-10). The caller is resolved server-side inside the service (fail-closed 403); the
+    // record PATCH runs under that caller's MSCRMCallerID impersonation; failures surface as RFC 7807 ProblemDetails
+    // via SdapProblemException (403/404/409/422/500).
+    private static async Task<IResult> ApplyProposalAsync(
+        Guid reviewLogId,
+        ICommunicationProposalApplyService applyService,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var result = await applyService.ApplyAsync(reviewLogId, context.User, ct);
         return TypedResults.Ok(result);
     }
 

@@ -171,6 +171,15 @@ public sealed record UpdateRecordRequest
     public IReadOnlyList<ActionFieldMapping>? FieldMappings { get; init; }
     public IReadOnlyDictionary<string, string?>? LegacyFields { get; init; }
     public IReadOnlyList<ActionLookup>? Lookups { get; init; }
+
+    /// <summary>
+    /// OPTIONAL Dataverse <c>systemuserid</c> to run the PATCH AS, via <c>MSCRMCallerID</c> impersonation
+    /// (effective privileges = intersection of the BFF app user and this user; honest <c>modifiedby</c>).
+    /// Null/empty = app-only — the default for every playbook/node-executor and Phase 4/5 caller, so their write
+    /// is byte-unchanged. Supplied only by the Job B apply endpoint (task 031) with the confirming user's id, so
+    /// the human-approved field update is attributed to and gated by them at the Dataverse layer.
+    /// </summary>
+    public Guid? ImpersonateSystemUserId { get; init; }
 }
 
 /// <summary>Result of a <see cref="IActionSeam.UpdateRecordAsync"/> call. On a fail-loud coercion

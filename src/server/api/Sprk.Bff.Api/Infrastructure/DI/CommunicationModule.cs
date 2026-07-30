@@ -57,6 +57,9 @@ public static class CommunicationModule
         services.AddSingleton<CommunicationAccountService>();
         services.AddSingleton<ApprovedSenderValidator>();
         services.AddSingleton<CommunicationService>();
+        // ADR-010 testing-seam over CommunicationService.ReconstructEnvelopeAsync for the Job B apply path (task 031
+        // citation re-verify). Pass-through to the singleton CommunicationService → singleton.
+        services.AddSingleton<ICommunicationEnvelopeReader>(sp => sp.GetRequiredService<CommunicationService>());
         services.AddSingleton<EmlGenerationService>();
         services.AddSingleton<GraphMessageToEmlConverter>();
         services.AddSingleton<MailboxVerificationService>();
@@ -332,6 +335,15 @@ public static class CommunicationModule
         // Scoped ICallerSystemUserResolver). Registered UNCONDITIONALLY (ADR-010/ADR-032 — the endpoint maps
         // unconditionally); read-only, r1 supplies the feed only (C-3), r5 builds no surface here.
         services.AddScoped<CommunicationQueueFeedService>();
+
+        // Job B APPLY (email-communication-intelligence-r1 task 031 / FR-10). Applies a CONFIRMED pending proposal
+        // (task 030's open sprk_emailreviewlog Proposed row) to the associated record via the blessed
+        // IActionSeam.UpdateRecordAsync UNDER THE CONFIRMING USER'S MSCRMCallerID impersonation (owner Option 2,
+        // 2026-07-29 — native modifiedby = the human; go-live prereq: BFF app user holds prvActOnBehalfOfAnotherUser),
+        // re-validating the sprk_emailupdatefield allow-list + citation at apply time, and writing the append-only
+        // Applied audit row. SCOPED (consumes the Scoped ICallerSystemUserResolver, same as the queue feed).
+        // Registered UNCONDITIONALLY (ADR-010/ADR-032 — the apply endpoint maps unconditionally).
+        services.AddScoped<ICommunicationProposalApplyService, CommunicationProposalApplyService>();
 
         // Layer-C fan-out targeting (spaarke-notification-spine-r1 task 023 / FR-08 / NFR-07). Given a persisted
         // sprk_communication + its thread, returns the systemuserids eligible to receive a Layer-C ping (task 024's
