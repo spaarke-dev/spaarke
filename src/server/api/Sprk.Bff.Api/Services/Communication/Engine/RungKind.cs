@@ -44,6 +44,18 @@ public enum RungKind
     RecordNameMatch = 6,
 
     /// <summary>
+    /// Rung 3.7 — attachment→document association (email-communication-intelligence-r1 061 UAT / F1). Matches an
+    /// incoming email attachment to an EXISTING <c>sprk_document</c> (by file name today; by the AI-populated
+    /// <c>sprk_globalsearchextender</c> keyword/summary field as that project lands) and surfaces that document's
+    /// OWN matter/project/invoice links (<c>sprk_matter</c> / <c>sprk_relatedmatter</c> / …) as association
+    /// candidates — closing the gap where "the attached file is already filed to matter X" contributed nothing.
+    /// Indirect evidence (the DOCUMENT's matter, not the email's), so like <see cref="RecordNameMatch"/> it is
+    /// <b>surface-for-review, never auto-file</b>: NOT in the mapper's auto-file-eligible or deterministic-write
+    /// sets, and NOT an AI rung. Best-effort / non-fatal.
+    /// </summary>
+    DocumentAssociation = 8,
+
+    /// <summary>
     /// Rung 3.6 — deterministic CONTACT-NAME match (email-r4 UAT R2 B1, owner spec 2026-07-20). Extracts
     /// candidate PERSON-NAME phrases (a run of 2+ Title-Case tokens) from the envelope (subject + body +
     /// attachment text) and resolves each by EXACT full-name lookup against existing <c>contact</c> records

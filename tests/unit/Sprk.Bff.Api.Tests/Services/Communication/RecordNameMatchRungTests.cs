@@ -185,10 +185,10 @@ public class RecordNameMatchRungTests
     }
 
     [Fact]
-    public async Task Evaluate_WhenReferenceNumberAppears_EmitsMatchAtNumberConfidence()
+    public async Task Evaluate_WhenReferenceNumberAppearsInBody_EmitsMatchAtBodyNumberConfidence()
     {
         var matterId = Guid.NewGuid();
-        // Name won't appear in the email; the reference number will (separator-insensitive).
+        // Name won't appear in the email; the reference number will (separator-insensitive), in the BODY.
         SetupIndex(new RecordSearchResult
         {
             RecordId = matterId.ToString(),
@@ -204,9 +204,53 @@ public class RecordNameMatchRungTests
 
         var match = matches.Should().ContainSingle().Subject;
         match.Target!.Id.Should().Be(matterId);
-        match.Confidence.Should().Be(0.97);                     // NumberConfidence (most discriminating)
+        match.Confidence.Should().Be(0.90);                     // E1: BodyNumberConfidence (below a subject number)
         match.Provenance.Should().Contain("REAL-2026-123456.02");
         match.Provenance.Should().Contain("matched=number");
+        match.Provenance.Should().Contain("where=body");
+    }
+
+    [Fact]
+    public async Task Evaluate_E1_SubjectNumberOutranksBodyNumber()
+    {
+        // E1 (FR-12 UAT): the record cited by NUMBER in the SUBJECT (what the email is really about) must
+        // outrank a same-strength number merely mentioned in an older thread body. Before E1 both scored a flat
+        // 0.97 → a dead tie → Ambiguous with no ranking preference. Now the subject number (0.97) ranks above
+        // the body number (0.90). FR-12 still independently gates auto-file; this only changes candidate order.
+        var subjectMatterId = Guid.NewGuid();  // PAT-942665, cited in the subject
+        var bodyMatterId = Guid.NewGuid();     // REAL-2026-123456.02, cited only in a quoted body
+        SetupIndex(
+            new RecordSearchResult
+            {
+                RecordId = subjectMatterId.ToString(),
+                RecordType = RecordEntityType.Matter,
+                RecordName = "Patent Application 19183531",
+                ReferenceNumbers = new[] { "PAT-942665" },
+                ConfidenceScore = 0.5,
+            },
+            new RecordSearchResult
+            {
+                RecordId = bodyMatterId.ToString(),
+                RecordType = RecordEntityType.Matter,
+                RecordName = "Smith v Smith",
+                ReferenceNumbers = new[] { "REAL-2026-123456.02" },
+                ConfidenceScore = 0.5,
+            });
+
+        var envelope = new NormalizedMessage
+        {
+            Direction = CommunicationDirection.Incoming,
+            Subject = "Fw: PAT-942665 Patent Application",
+            BodyText = "This is a new application. Earlier thread referenced REAL-2026-123456.02.",
+        };
+
+        var matches = await Build().EvaluateAsync(envelope, new AssociationContext(), CancellationToken.None);
+
+        matches.Should().HaveCount(2);
+        matches[0].Target!.Id.Should().Be(subjectMatterId, "the subject-cited record ranks first");
+        matches[0].Confidence.Should().Be(0.97);   // subject number
+        matches[1].Target!.Id.Should().Be(bodyMatterId);
+        matches[1].Confidence.Should().Be(0.90);   // body number, ranked below
     }
 
     [Fact]
@@ -290,17 +334,19 @@ public class RecordNameMatchRungTests
         var match = matches.Should().ContainSingle().Subject;
         match.RegardingFieldName.Should().Be("sprk_regardingmatter");
         match.Target!.Id.Should().Be(matterId);
-        match.Confidence.Should().Be(0.97);                     // NumberConfidence (flat across locations)
+        match.Confidence.Should().Be(0.90);                     // E1: BodyNumberConfidence (a body number ranks below a subject number)
         match.Rung.Should().Be(RungKind.RecordNameMatch);       // Suggest-only — never auto-file-eligible
         match.Provenance.Should().Contain("where=body");
         match.Provenance.Should().Contain("REAL-2026-123456.02");
     }
 
     [Fact]
-    public async Task Evaluate_WhenSubjectRefAndDifferentBodyRef_EmitsBothMatterCandidates()
+    public async Task Evaluate_WhenSubjectRefAndDifferentBodyRef_EmitsBothMatterCandidates_SubjectRanksFirst()
     {
-        // The email-1 UAT scenario: matter #A in the subject, a DIFFERENT matter #B in the body. Both must
-        // surface as sprk_regardingmatter candidates each ≥ 0.85 so the mapper flags Ambiguous (user picks).
+        // The exact email-1 UAT scenario: matter #A cited in the SUBJECT (PAT-942665), a DIFFERENT matter #B in
+        // the BODY (REAL-2026-123456.02). Both must still surface each ≥ the 0.85 conflict floor (⇒ mapper
+        // Ambiguous, user picks). E1 (FR-12 UAT): instead of the old flat-0.97 dead tie, the SUBJECT-cited matter
+        // now outranks the body-cited one — the record the email is really about leads the review list.
         var patentId = Guid.NewGuid();
         var smithId = Guid.NewGuid();
         SetupSplitIndex(
@@ -315,8 +361,11 @@ public class RecordNameMatchRungTests
 
         matches.Should().HaveCount(2);
         matches.Should().OnlyContain(m => m.RegardingFieldName == "sprk_regardingmatter");
-        matches.Should().OnlyContain(m => m.Confidence == 0.97);            // both reference numbers ≥ threshold
-        matches.Select(m => m.Target!.Id).Should().BeEquivalentTo(new[] { patentId, smithId });
+        matches.Should().OnlyContain(m => m.Confidence >= 0.85); // both still ≥ the conflict floor ⇒ Ambiguous
+        matches[0].Target!.Id.Should().Be(patentId, "the subject-cited matter ranks first (E1)");
+        matches[0].Confidence.Should().Be(0.97);                 // subject number
+        matches[1].Target!.Id.Should().Be(smithId);
+        matches[1].Confidence.Should().Be(0.90);                 // body number, ranked below
         matches.Should().Contain(m => m.Provenance.Contains("where=subject") && m.Provenance.Contains("PAT-942665"));
         matches.Should().Contain(m => m.Provenance.Contains("where=body") && m.Provenance.Contains("REAL-2026-123456.02"));
     }

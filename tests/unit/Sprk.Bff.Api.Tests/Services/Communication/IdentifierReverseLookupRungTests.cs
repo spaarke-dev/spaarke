@@ -202,6 +202,54 @@ public class IdentifierReverseLookupRungTests
         match.Provenance.Should().NotContain("new-record-referenced");
     }
 
+    // ── 3d. P1 (FR-12 UAT): a bare-numeric segment of a well-formed identifier does NOT collide ──
+
+    [Fact]
+    public async Task P1_BareNumericSegmentOfWellFormedIdentifier_NotExtracted_NoCollision()
+    {
+        // Regression for the UAT misfile: "REAL-2026-123456.02" (a matter number) contains the digit-run
+        // "123456", which previously extracted as a standalone bare-numeric and collided with an UNRELATED
+        // invoice #123456 — becoming the record's primary Regarding. The inner digit-runs must NOT be
+        // extracted as independent tokens.
+        SetupRoster(FullRoster());
+        SetupNoRecordMatches();
+        var matterId = Guid.NewGuid();
+        _dv.Setup(d => d.QueryRecordsByNumberFieldAsync("sprk_matter", "sprk_matternumber", "REAL-2026-123456.02", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { Record("sprk_matter", matterId) });
+        // A trap: an invoice #123456 exists. If "123456" were still extracted, this would wrongly match.
+        var invoiceId = Guid.NewGuid();
+        _dv.Setup(d => d.QueryRecordsByNumberFieldAsync("sprk_invoice", "sprk_invoicenumber", "123456", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { Record("sprk_invoice", invoiceId) });
+
+        var matches = await Rung().EvaluateAsync(
+            Envelope(subject: "Fw: REAL-2026-123456.02 real estate", body: "Regarding REAL-2026-123456.02 please advise"),
+            new AssociationContext(), CancellationToken.None);
+
+        matches.Should().ContainSingle("only the well-formed matter identifier resolves — the inner digit-runs are not independent tokens");
+        matches[0].Target!.Id.Should().Be(matterId);
+        matches[0].RegardingFieldName.Should().Be("sprk_regardingmatter");
+        // The inner digit-runs "123456" and "2026" must never have been queried against any number field.
+        _dv.Verify(d => d.QueryRecordsByNumberFieldAsync(It.IsAny<string>(), It.IsAny<string>(), "123456", It.IsAny<CancellationToken>()), Times.Never,
+            "the '123456' segment of the matter number must not collide with an unrelated invoice");
+        _dv.Verify(d => d.QueryRecordsByNumberFieldAsync(It.IsAny<string>(), It.IsAny<string>(), "2026", It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task P1_StandaloneBareNumeric_StillExtracted_WhenNotInsideAWellFormedToken()
+    {
+        // Guard against over-suppression: a bare-numeric that is NOT a substring of any well-formed token is
+        // still a legitimate (sub-threshold) candidate.
+        SetupRoster(FullRoster());
+        SetupNoRecordMatches();
+        var matterId = Guid.NewGuid();
+        _dv.Setup(d => d.QueryRecordsByNumberFieldAsync("sprk_matter", "sprk_matternumber", "778899", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { Record("sprk_matter", matterId) });
+
+        var matches = await Rung().EvaluateAsync(Envelope(body: "please advise on 778899"), new AssociationContext(), CancellationToken.None);
+
+        matches.Should().ContainSingle().Which.Confidence.Should().Be(0.65, "a genuine standalone bare-numeric still matches at sub-threshold");
+    }
+
     // ── 4. NEGATIVE: a dirty catalog row (null number field / contact anomaly) is read defensively ──
 
     [Fact]
