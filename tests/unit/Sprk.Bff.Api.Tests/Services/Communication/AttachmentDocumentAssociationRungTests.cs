@@ -99,6 +99,38 @@ public class AttachmentDocumentAssociationRungTests
         matches[0].Target!.Id.Should().Be(matterId);
     }
 
+    // ── 2b. round-2 UAT: an attached invoice's INVOICE link is NOT surfaced (matter-only scope) ──
+
+    [Fact]
+    public async Task Evaluate_DocumentWithInvoiceLinkOnly_SurfacesNothing()
+    {
+        // 061 UAT round-2: "Invoice-10044725.pdf" is an invoice document linked to an invoice record. F1 must
+        // NOT follow the sprk_invoice link (that surfaced an unrelated invoice that then became the headline
+        // Regarding under the Ambiguous fall-through — "why is the logic favoring invoices?"). F1 is matter-only.
+        SetupDocuments(Document(Guid.NewGuid(), "Invoice-10044725.pdf",
+            ("sprk_invoice", "sprk_invoice", Guid.NewGuid())));
+
+        var matches = await Rung().EvaluateAsync(
+            MessageWithAttachment("Invoice-10044725.pdf"), new AssociationContext(), CancellationToken.None);
+
+        matches.Should().BeEmpty("F1 follows only matter links — an attached invoice's own invoice record is not what the email is about");
+    }
+
+    [Fact]
+    public async Task Evaluate_DocumentWithMatterAndInvoiceLinks_SurfacesOnlyTheMatter()
+    {
+        var matterId = Guid.NewGuid();
+        SetupDocuments(Document(Guid.NewGuid(), "PAT 109270W-1 - Letter.pdf",
+            ("sprk_matter", "sprk_matter", matterId),
+            ("sprk_invoice", "sprk_invoice", Guid.NewGuid())));
+
+        var matches = await Rung().EvaluateAsync(
+            MessageWithAttachment("PAT 109270W-1 - Letter.pdf"), new AssociationContext(), CancellationToken.None);
+
+        matches.Should().ContainSingle().Which.RegardingFieldName.Should().Be("sprk_regardingmatter");
+        matches[0].Target!.Id.Should().Be(matterId);
+    }
+
     // ── 3. cost gate: no attachments ⇒ no Dataverse query ──
 
     [Fact]

@@ -58,15 +58,20 @@ public sealed class AttachmentDocumentAssociationRung : IAssociationRung
     /// <c>sprk_document</c> record-link field → the target entity logical name. The communication regarding
     /// field is resolved from <see cref="RegardingFieldMap"/> (ADR-024 source of truth). "Related" links point
     /// at the same target entity as their primary counterpart (a related matter is still a matter).
+    /// <para>
+    /// <b>MATTER links only</b> (061 UAT round-2, 2026-07-30). F1's purpose is "surface the MATTER a document is
+    /// filed to" (the owner's examples were all matters). Following a document's INVOICE / project / work-
+    /// assignment links surfaced noise — an attached <c>Invoice-*.pdf</c> is an invoice document, so F1 followed
+    /// its <c>sprk_invoice</c> link and surfaced an unrelated invoice, which then became the headline Regarding
+    /// under the Ambiguous fall-through ("why is the logic favoring invoices?"). An attached invoice's own
+    /// invoice record is NOT what the email is about. Scoped to matter/related-matter; other link types can be
+    /// re-added deliberately if a concrete need appears.
+    /// </para>
     /// </summary>
     private static readonly IReadOnlyList<(string DocumentField, string TargetEntity)> DocumentLinkFields =
     [
         ("sprk_matter", "sprk_matter"),
         ("sprk_relatedmatter", "sprk_matter"),
-        ("sprk_project", "sprk_project"),
-        ("sprk_relatedproject", "sprk_project"),
-        ("sprk_invoice", "sprk_invoice"),
-        ("sprk_workassignment", "sprk_workassignment"),
     ];
 
     public AttachmentDocumentAssociationRung(

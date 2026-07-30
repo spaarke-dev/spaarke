@@ -294,7 +294,13 @@ public sealed class IncomingAssociationResolver
 
         // Populate polymorphic resolver fields whenever we asserted a regarding lookup (a Suggested
         // record surfaces the proposed target too, so the review UI needs the denormalized fields).
-        if (decision.RegardingWrites.Count > 0)
+        // P2b (061 UAT round-2, 2026-07-30): but NOT on Ambiguous. Ambiguous means the engine explicitly
+        // refused to pick among conflicting matters (they are not written); crowning whatever leftover
+        // non-conflicting record IS written (an incidental invoice, a fallback) as the denormalized "primary
+        // Regarding" headline is exactly the misfile the UAT flagged ("why is the logic favoring invoices?").
+        // The typed regarding lookups are still written for the review surface; the headline stays empty until
+        // the reviewer picks the primary.
+        if (decision.RegardingWrites.Count > 0 && decision.Status != AssociationStatusCodes.Ambiguous)
         {
             await PopulateResolverFieldsAsync(fields, ct);
         }

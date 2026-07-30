@@ -553,6 +553,70 @@ public class IncomingAssociationResolverTests
     }
 
     // =========================================================================
+    // P2b (061 UAT round-2): Ambiguous decision does NOT crown a denormalized headline
+    // =========================================================================
+
+    [Fact]
+    public async Task P2b_AmbiguousMattersWithLeftoverInvoice_DoesNotPopulateDenormalizedHeadline()
+    {
+        // The UAT misfile: two matters CONFLICT (Ambiguous → not written) while an incidental invoice is
+        // written non-conflicting. The denormalized "primary Regarding" headline (record type/id/name) must
+        // NOT be crowned with that leftover invoice — Ambiguous means "the reviewer decides", so no headline.
+        // The typed sprk_regardinginvoice lookup is still written for the review surface.
+        var matterA = Guid.NewGuid();
+        var matterB = Guid.NewGuid();
+        var invoiceId = Guid.NewGuid();
+        var conflictRung = new StubConflictingMattersPlusInvoiceRung(matterA, matterB, invoiceId);
+
+        _dataverseServiceMock
+            .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var resolver = new IncomingAssociationResolver(
+            new IAssociationRung[] { conflictRung },
+            _dataverseServiceMock.Object,
+            _dataverseServiceMock.Object,
+            AssociationTestSupport.Mapper(),
+            Mock.Of<ILogger<IncomingAssociationResolver>>());
+
+        var envelope = CreateEnvelope("Two matters and an invoice", "clerk@court.gov");
+
+        await resolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
+
+        _dataverseServiceMock.Verify(d => d.UpdateAsync(
+            "sprk_communication",
+            TestCommunicationId,
+            It.Is<Dictionary<string, object>>(fields =>
+                ((OptionSetValue)fields["sprk_associationstatus"]).Value == 100000004 && // Ambiguous
+                fields.ContainsKey("sprk_regardinginvoice") &&        // typed lookup still written
+                !fields.ContainsKey("sprk_regardingrecordtype") &&    // but NO denormalized headline
+                !fields.ContainsKey("sprk_regardingrecordid") &&
+                !fields.ContainsKey("sprk_regardingrecordname")),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>Emits two conflicting matters (same field, each ≥ threshold ⇒ Ambiguous) plus one
+    /// non-conflicting invoice — reproducing the UAT shape where a leftover record could be crowned.</summary>
+    private sealed class StubConflictingMattersPlusInvoiceRung : IAssociationRung
+    {
+        private readonly Guid _matterA, _matterB, _invoiceId;
+        public StubConflictingMattersPlusInvoiceRung(Guid matterA, Guid matterB, Guid invoiceId)
+        {
+            _matterA = matterA; _matterB = matterB; _invoiceId = invoiceId;
+        }
+        public RungKind Kind => RungKind.ExplicitReference;
+        public int Order => 0;
+        public Task<IReadOnlyList<RungMatch>> EvaluateAsync(
+            NormalizedMessage message, AssociationContext context, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<RungMatch>>(new[]
+            {
+                new RungMatch { RegardingFieldName = "sprk_regardingmatter", Target = new EntityReference("sprk_matter", _matterA), Confidence = 0.9, Provenance = "explicit:test:A", Rung = RungKind.ExplicitReference },
+                new RungMatch { RegardingFieldName = "sprk_regardingmatter", Target = new EntityReference("sprk_matter", _matterB), Confidence = 0.9, Provenance = "explicit:test:B", Rung = RungKind.ExplicitReference },
+                new RungMatch { RegardingFieldName = "sprk_regardinginvoice", Target = new EntityReference("sprk_invoice", _invoiceId), Confidence = 0.65, Provenance = "explicit:test:inv", Rung = RungKind.ExplicitReference },
+            });
+    }
+
+    // =========================================================================
     // Test Helpers
     // =========================================================================
 
