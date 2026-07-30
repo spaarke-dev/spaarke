@@ -54,6 +54,7 @@ import { CommentMultipleRegular } from '@fluentui/react-icons';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { INavigationService } from '../../types/serviceInterfaces';
 import {
+  deactivateThread,
   getThreadUnreadCount,
   listThreads,
   listThreadsByRegarding,
@@ -452,6 +453,30 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
     [allRows, client, onError]
   );
 
+  // — Delete/deactivate thread (round 7 item 7): soft-delete on the server, then
+  // drop the row locally + re-select a neighbor if the deleted thread was open. —
+  const handleDeleteThread = React.useCallback(
+    (threadId: string) => {
+      const wasSelected = threadId === selectedThreadId;
+      const remaining = allRows.filter(r => r.threadId !== threadId);
+
+      // Optimistic: remove the row immediately.
+      setAllRows(remaining);
+      if (wasSelected) {
+        const next = remaining[0]?.threadId;
+        setSelectedThreadId(next);
+        onThreadSelected?.(next);
+      }
+
+      deactivateThread(threadId, client).catch(err => {
+        // Rollback — restore the list (a reload token re-fetches the authoritative set) on ANY failure.
+        setReloadToken(t => t + 1);
+        if (err instanceof Error) onError?.(err);
+      });
+    },
+    [allRows, selectedThreadId, client, onThreadSelected, onError]
+  );
+
   const threadListRows: IThreadListRow[] = React.useMemo(() => {
     const mapped = visibleRows.map(r => ({
       threadId: r.threadId,
@@ -508,6 +533,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
               onCollapse={toggleCollapse}
               titleAccessory={threadsHeaderAccessory}
               onTogglePin={handleTogglePin}
+              onDeleteThread={handleDeleteThread}
             />
           </div>
           <PanelSplitter

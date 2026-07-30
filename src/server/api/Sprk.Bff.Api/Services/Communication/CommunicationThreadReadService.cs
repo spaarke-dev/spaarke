@@ -756,6 +756,20 @@ public sealed class CommunicationThreadReadService
         return rows.Count > 0;
     }
 
+    /// <summary>
+    /// Round-7 item 8 authorization gate: returns true only if the impersonated caller can SEE the single message
+    /// (<c>sprk_communication</c>). Mirrors <see cref="CanCallerSeeThreadAsync"/> — an impersonated top-1 existence
+    /// probe (MSCRMCallerID = caller). A message the caller cannot read returns zero rows → false → the delete
+    /// endpoint fails closed with a 403 (NFR-01: never deactivate a message the caller cannot see).
+    /// </summary>
+    public async Task<bool> CanCallerSeeMessageAsync(Guid communicationId, ClaimsPrincipal? caller, CancellationToken ct)
+    {
+        var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, ct);
+        var odata = $"$select={PkField}&$filter={PkField} eq {communicationId}&$top=1";
+        var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct);
+        return rows.Count > 0;
+    }
+
     // ── attachments (single bulk query per read) ────────────────────────────────────────────────────
 
     private async Task<IReadOnlyDictionary<Guid, IReadOnlyList<ThreadAttachmentRef>>> LoadAttachmentsAsync(
