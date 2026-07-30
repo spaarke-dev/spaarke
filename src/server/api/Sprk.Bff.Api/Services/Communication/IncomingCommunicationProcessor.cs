@@ -8,6 +8,7 @@ using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Communication.Engine;
@@ -623,6 +624,11 @@ public sealed class IncomingCommunicationProcessor
 
             var sb = new StringBuilder();
             var extractedCount = 0;
+            // Task 041 / FR-13: retain each attachment's extracted text + page structure (identity the flat
+            // `sb` concatenation discards) so the attachment-grounded action extractor can produce a
+            // machine-verified per-attachment/page locator. Built from the SAME extraction pass — no second
+            // extraction, no cost delta.
+            var perAttachment = new List<AttachmentExtractedText>();
 
             foreach (var attachment in fileAttachments)
             {
@@ -647,6 +653,12 @@ public sealed class IncomingCommunicationProcessor
                         if (sb.Length > 0) sb.Append('\n');
                         sb.Append(result.Text);
                         extractedCount++;
+
+                        perAttachment.Add(new AttachmentExtractedText(
+                            FileName: fileName,
+                            DocumentId: null, // the child sprk_document is created later in the pipeline
+                            FullText: result.Text!,
+                            Pages: result.Pages ?? Array.Empty<ExtractedPage>()));
                     }
                 }
                 catch (Exception ex)
@@ -667,7 +679,7 @@ public sealed class IncomingCommunicationProcessor
                 "Extracted attachment text for matching | GraphMessageId: {GraphMessageId}, Attachments: {Count}, Chars: {Chars}",
                 graphMessageId, extractedCount, text.Length);
 
-            return envelope with { AttachmentText = text };
+            return envelope with { AttachmentText = text, AttachmentTexts = perAttachment };
         }
         catch (Exception ex)
         {

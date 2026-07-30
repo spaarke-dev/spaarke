@@ -32,6 +32,19 @@ public record TextExtractionResult
     public EmailMetadata? EmailMetadata { get; init; }
 
     /// <summary>
+    /// Per-page extracted text, preserving the page structure Azure Document Intelligence returns.
+    /// Populated ONLY on the <see cref="TextExtractionMethod.DocumentIntelligence"/> path (PDFs / Office
+    /// docs); <c>null</c> for Native / Email / unsupported paths (single-blob sources have no page structure).
+    /// ADDITIVE (email-communication-intelligence-r1 task 041 / FR-13): existing callers read
+    /// <see cref="Text"/> and are byte-unchanged; this parallel representation lets the attachment-grounded
+    /// action extractor CODE-DERIVE a machine-verified page locator (locate the verbatim cited span in a
+    /// specific page's text) rather than trust a model-asserted page. The Redis extraction cache stores
+    /// <see cref="Text"/> only, so a cache HIT yields <c>null</c> Pages — the FR-13 attachment path uses the
+    /// direct (non-cached) <c>ExtractAsync</c> entry, so it always sees populated Pages on a live extraction.
+    /// </summary>
+    public IReadOnlyList<ExtractedPage>? Pages { get; init; }
+
+    /// <summary>
     /// Character count of extracted text. 0 if extraction failed.
     /// </summary>
     public int CharacterCount => Text?.Length ?? 0;
@@ -116,6 +129,14 @@ public record TextExtractionResult
     /// </summary>
     public bool IsVisionRequired => Method == TextExtractionMethod.VisionOcr && Success && Text == null;
 }
+
+/// <summary>
+/// One page of extracted document text, preserving the page boundary Azure Document Intelligence reports.
+/// ADDITIVE (task 041 / FR-13) — used only for code-derived machine-verified attachment-locator citation.
+/// </summary>
+/// <param name="PageNumber">1-based page number as reported by the extractor.</param>
+/// <param name="Text">Plain text of this page (line contents joined). May be empty for a blank page.</param>
+public sealed record ExtractedPage(int PageNumber, string Text);
 
 /// <summary>
 /// Methods for extracting text from documents.

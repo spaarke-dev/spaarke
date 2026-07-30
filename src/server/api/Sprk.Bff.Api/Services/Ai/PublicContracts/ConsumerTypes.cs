@@ -84,6 +84,47 @@ public static class ConsumerTypes
     public const string EmailAnalysis = "email-analysis";
 
     /// <summary>
+    /// <c>CommunicationEnrichmentService</c> (email-communication-intelligence-r1 task 023, FR-05) —
+    /// the FR-05 email-triage capability. A Linear AI Consumer (routed like <see cref="DocumentProfile"/>/
+    /// <see cref="MatterPreFill"/>: no <c>toolDescription</c>/<c>surfaces</c> — this Binding is invoked
+    /// directly from the Communication enrichment path via <see cref="ICommunicationTriageAi"/>, never
+    /// chat/loop-projected). Resolves to the catalog-authored <c>TRIAGE-EMAIL</c> Action
+    /// (<c>sprk_actioncode = "triage-email"</c>, task 022) which structures the ALREADY-PRODUCED
+    /// <c>AiClassificationRung</c> classification signal into <c>{category, summary, obligations[],
+    /// priority, reviewOutcome}</c> — no second full LLM pass.
+    /// </summary>
+    public const string EmailTriage = "email-triage";
+
+    /// <summary>
+    /// <c>CommunicationEnrichmentService</c> (email-communication-intelligence-r1 task 030, FR-09) —
+    /// the Job B "propose" capability. A Linear AI Consumer (routed like <see cref="EmailTriage"/>: no
+    /// <c>toolDescription</c>/<c>surfaces</c> — invoked directly off the Communication enrichment path via
+    /// <see cref="ICommunicationProposeAi"/>, never chat/loop-projected). Resolves to the catalog-authored
+    /// <c>PROPOSE-FIELD-UPDATES</c> Action (<c>sprk_actioncode = "propose-field-updates"</c>, task 030),
+    /// which extracts candidate NEW values for the operator-owned allow-list fields
+    /// (<c>sprk_emailupdatefield</c> enabled rows) — each with a verbatim citation + confidence — for the
+    /// record the email is associated to. Job B's OWN targeted field-value extraction (a single Action
+    /// call), NOT a second classification pass (the triage output is reused as grounding only).
+    /// </summary>
+    public const string EmailPropose = "email-propose";
+
+    /// <summary>
+    /// <c>CommunicationEnrichmentService</c> (email-communication-intelligence-r1 task 040, FR-14) —
+    /// the Job C "email implies work" capability. A Linear AI Consumer (routed like <see cref="EmailPropose"/>/
+    /// <see cref="EmailTriage"/>: no <c>toolDescription</c>/<c>surfaces</c> — invoked directly off the
+    /// Communication enrichment path via <see cref="ICommunicationCreateTaskAi"/>, never chat/loop-projected).
+    /// Resolves to the catalog-authored <c>CREATE-TASK-FROM-EMAIL</c> Action
+    /// (<c>sprk_actioncode = "create-task-from-email"</c>, task 040), which extracts candidate follow-up
+    /// tasks/events (subject/description/optional due date) — each with a verbatim citation + confidence —
+    /// grounded in the already-produced triage output. A non-deadline-bearing candidate is created
+    /// immediately via the shipped <c>IActionSeam.CreateTaskAsync</c> write core; a deadline-bearing
+    /// candidate is stored PENDING (<c>sprk_emailreviewlog</c> Proposed row) for human confirm (NFR-06 /
+    /// ADR-015) — never auto-finalized. Job C's OWN targeted extraction (a single Action call), NOT a
+    /// second classification pass (the triage output is reused as grounding only).
+    /// </summary>
+    public const string EmailCreateTask = "email-create-task";
+
+    /// <summary>
     /// <c>DailyBriefingCompositeService</c> — the Daily Briefing coded composite
     /// (FR-P3-04, spaarke-ai-architecture-redesign-r1 task 043; the platform's FIRST
     /// full <c>coded</c> Action). Two Binding rows: <c>default</c> (informational —
@@ -319,6 +360,9 @@ public static class ConsumerTypes
         ChatSummarize,
         ChatClassify,
         EmailAnalysis,
+        EmailTriage,
+        EmailPropose,
+        EmailCreateTask,
         DailyBriefingNarrate,
         DocumentProfile,
         ComposeSummarize,

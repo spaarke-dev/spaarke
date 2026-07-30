@@ -36,5 +36,29 @@ public interface ICommunicationDataverseService
     Task<Entity?> QueryOrganizationByDomainAsync(string domain, CancellationToken ct = default);
     Task<Entity?> QueryMatterByReferenceNumberAsync(string referenceNumber, CancellationToken ct = default);
     Task<Entity?> QueryRecordTypeRefAsync(string entityLogicalName, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reads the FULL <c>sprk_recordtype_ref</c> catalog (active rows), each carrying
+    /// <c>sprk_recordlogicalname</c>, <c>sprk_regardingfield</c>, and <c>sprk_regardingrecordnumberfield</c>.
+    /// The catalog is the per-tenant roster the identifier reverse-lookup rung (FR-01) reads to learn WHICH
+    /// number field to reverse-look-up per record type — so onboarding a tenant requires ONLY catalog config,
+    /// no code change. Read DEFENSIVELY by the caller (trim; skip rows with a null/blank number field). Returns
+    /// empty when the catalog is empty. Sibling to the single-row <see cref="QueryRecordTypeRefAsync"/> on this
+    /// ISP-segregated interface (same table, whole-roster read vs one row) — no new service.
+    /// </summary>
+    Task<IReadOnlyList<Entity>> QueryAllRecordTypeRefsAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Value-based reverse lookup (FR-01): resolves active records of <paramref name="entityLogicalName"/> whose
+    /// <paramref name="numberFieldLogicalName"/> EQUALS <paramref name="value"/> (exact equality). This is the
+    /// catalog-driven seam the identifier rung uses to match an email's identifier token against every record
+    /// type's number field by VALUE — no numbering scheme is decoded in code. Returns each match carrying its id
+    /// + the number field. Returns empty (never throws) when the entity/field name or value is null/blank, so a
+    /// dirty catalog row degrades to no-match (NFR-04). Returns 2+ entities when duplicate numbers exist
+    /// (legitimate — the caller surfaces the ambiguity, never guesses).
+    /// </summary>
+    Task<IReadOnlyList<Entity>> QueryRecordsByNumberFieldAsync(
+        string entityLogicalName, string numberFieldLogicalName, string value, CancellationToken ct = default);
+
     Task<Guid?> QuerySystemUserByAzureAdOidAsync(string azureAdObjectId, CancellationToken ct = default);
 }

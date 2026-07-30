@@ -34,6 +34,7 @@ public sealed class AutoFileGate
         var o = _options.CurrentValue;
         var enabled = o.Enabled;
         var threshold = o.Threshold;
+        var rung23 = o.Rung2And3AutoFileEnabled;
 
         if (!string.IsNullOrWhiteSpace(tenantKey) &&
             o.Tenants.TryGetValue(tenantKey, out var overrideEntry) &&
@@ -41,13 +42,19 @@ public sealed class AutoFileGate
         {
             if (overrideEntry.Enabled.HasValue) enabled = overrideEntry.Enabled.Value;
             if (overrideEntry.Threshold.HasValue) threshold = overrideEntry.Threshold.Value;
+            if (overrideEntry.Rung2And3AutoFileEnabled.HasValue) rung23 = overrideEntry.Rung2And3AutoFileEnabled.Value;
         }
 
-        return new AutoFileSettings(enabled, threshold);
+        return new AutoFileSettings(enabled, threshold, rung23);
     }
 }
 
 /// <summary>Effective auto-file policy for one decision.</summary>
 /// <param name="Enabled">Whether deterministic ≥ <paramref name="Threshold"/> matches auto-file.</param>
 /// <param name="Threshold">Confidence at or above which a deterministic match auto-files.</param>
-public readonly record struct AutoFileSettings(bool Enabled, double Threshold);
+/// <param name="Rung2And3AutoFileEnabled">
+/// C-1 narrowing kill-switch (ADR-045 path-A exception). <c>false</c> (default) = only rung 0
+/// (ExplicitReference) and rung 1 (ThreadContinuity) are auto-file-eligible. <c>true</c> = legacy
+/// pre-C-1 behavior — rungs 0–3 are all auto-file-eligible.
+/// </param>
+public readonly record struct AutoFileSettings(bool Enabled, double Threshold, bool Rung2And3AutoFileEnabled = false);

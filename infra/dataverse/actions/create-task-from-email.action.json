@@ -1,0 +1,135 @@
+{
+  "$comment": "email-communication-intelligence-r1 task 040 (FR-14) — CREATE-TASK-FROM-EMAIL Action SEED (systemPrompt home). ACTION-ONLY per ADR-039: a code-directed capability is an Action row + Binding row (task 040), reached via Services/Ai/PublicContracts/ (ADR-013, the ICommunicationCreateTaskAi facade) — it MUST NOT land on the frozen node-graph playbook engine, PlaybookOrchestrationService, UpdateRecordNodeExecutor, or IInvokePlaybookAi (deleted). This is Job C's OWN targeted 'does this email imply follow-up work' extraction: given the entity type of the record the email is associated to (task 020) + the already-produced triage output (grounding) + the email/attachment text, it extracts zero-or-more candidate follow-up tasks/events, each with a VERBATIM citation and (when concretely stated) a due date. It is NOT a redundant classification pass (the triage signal is reused as grounding context, never re-derived) and it does NOT create or store anything itself — the ACTUAL create (via the shipped CREATE-TASK@v1 / IActionSeam.CreateTaskAsync write core) or the PENDING store for a deadline-bearing candidate is entirely the caller's job (CommunicationEnrichmentService, task 040). Mirror-first over infra/dataverse/inputschemas/create-task-v1.input.schema.json's field concepts (subject/description/due_date) — this Action's own output shape uses this codebase's established camelCase + citation-object convention (matching triage-email.action.json / propose-field-updates.action.json, its actual sibling Linear-Consumer Actions) rather than that schema's snake_case chat-tool-parameter casing, since this Action is never chat/loop-projected (no infra/dataverse/inputschemas/ mirror is authored for it, same reasoning as email-triage/email-propose — see notes/040-job-c-create-task.md). Follows the flat-systemPrompt + outputSchema shape of propose-field-updates.action.json (not the classic-JPS shape of triage-email.action.json) because the output has no Dataverse-tunable $choices lookup — it is a closed, static contract. Deploy via Dataverse MCP create_record from this mirror; the systemPrompt is the literal value for sprk_analysisaction.sprk_systemprompt and outputSchema is sprk_analysisaction.sprk_outputschemajson. Owner hygiene: actionCode carries NO version suffix (create-task-from-email, matching propose-field-updates/triage-email/nda-review convention).",
+  "$comment-justification": "§11 Component Justification (root CLAUDE.md §11 / project CLAUDE.md). (1) Existing overlap: the CHAT-loop CREATE-TASK@v1 Action (infra/dataverse/actions — deployed live, no local mirror) drafts a task from a live conversation with the user able to answer elicitation prompts for due_date/assign_to; it requires a chat session and the gated dataverse.create_record chat tool, neither of which exist on the server-side Communication enrichment path (no user turn, no chat session). TaskActionCore/IActionSeam.CreateTaskAsync IS reused here (the actual create), so there is NO fork of the create mechanism — only a NEW upstream extraction step supplying its inputs from email content instead of a chat turn. (2) Extension instead: this Action reuses the triage output as grounding (no second classification pass) and reuses the shipped create-task write core end-to-end; it adds ONLY the targeted 'is there an implied task, and what are its subject/description/due date' extraction — new catalog data (ADR-039), not a new engine, not a new create mechanism. (3) Cost-of-doing-nothing: without it, an email that implies follow-up work (FR-14 / the 'email into action' pillar) produces nothing — no task/event, no citation, no confirm-gated deadline handling — and task 041 (attachment-grounded action extraction) has no create path to ground on.",
+  "$comment-no-second-pass": "FR-05/FR-14 'no second full LLM pass' constraint — this Action is a SINGLE targeted extraction call, not a re-classification. The already-produced triage output is supplied as the OPTIONAL `triage` grounding input (input.triage below) to sharpen extraction; the systemPrompt directs the model to determine whether the message/attachment text implies follow-up work and, if so, extract subject/description/due date — never to re-classify the email. The facade (CommunicationCreateTaskAi) has NO dependency on ICommunicationClassificationAi/IOpenAiClient — it is structurally incapable of a second classification.",
+  "$comment-trust-invariants": "NFR-06 / ADR-015 trust invariants encoded in the systemPrompt AND enforced downstream in code (Services/Communication, task 040): (a) every candidate carries a plain-language `reason` + a `citation` with a VERBATIM `quotedText`; (b) the BFF VERIFIES the quotedText actually exists in the source communication/attachment before creating or storing anything (a candidate whose cited text cannot be located is DROPPED); (c) `dueDate` is populated ONLY when the source text concretely states a deadline — never inferred/guessed — because a populated dueDate routes the candidate to the DEADLINE-BEARING → HUMAN-CONFIRM path (never auto-finalized, NFR-06/ADR-015); a candidate with no stated deadline may be created immediately via the shipped create-task path. (d) privilege is carried by the reused triage grounding only — this Action makes no privilege decision.",
+  "actionCode": "create-task-from-email",
+  "name": "Create Task From Email",
+  "description": "Job C (FR-14) targeted 'email implies work' extraction: given the entity type of the record an email is associated to (task 020), the already-produced triage output (grounding), and the email subject/body/attachment text, extracts zero-or-more candidate follow-up tasks/events. Each candidate carries a subject, a description, an optional due date (populated ONLY when the source concretely states one), a VERBATIM citation (source + locator + quoted span), a plain-language reason, and a confidence. Extraction only: this Action never creates or stores a record — the caller (task 040's enrichment step) creates immediately via the shipped create-task path when no deadline is stated, or stores a PENDING proposal for human confirm when a deadline IS stated (NFR-06/ADR-015). Not a classification pass (the triage signal is reused as grounding, never re-derived).",
+  "actionType": 0,
+  "$comment-actionType": "ExecutorType.AiAnalysis = 0 — handled by the existing prompt-driven executor (ActionRunner + PromptSchemaRenderer); a 'prompted' Action per ADR-039. No new executor. Documentary field, mirroring the sibling Action files' convention.",
+  "modelTier": "Fast",
+  "$comment-modelTier": "Maps to sprk_analysisaction.sprk_modeltier = 100000000 (AiModelTier.Fast — 'Cheap/fast models... classification, validation, entity resolution', per Services/Ai/PublicContracts/Binding.cs). Correct tier: targeted extraction of implied follow-up work with verbatim citation, not open-ended deep reasoning.",
+  "temperature": 0.1,
+  "$comment-temperature": "Very low temperature — a candidate task must be faithful to the source text (extraction with verbatim citation), never creative, matching propose-field-updates' rationale (the citation MUST be copied verbatim for the NFR-06 verify-cited-text gate to pass).",
+
+  "systemPrompt": "ROLE: You are the Spaarke email follow-up-work assistant. An inbound email has been associated to a specific Spaarke record (a matter, project, invoice, work assignment, budget, service request, or report card). Your job is to determine whether the email/attachment text IMPLIES concrete follow-up work — a task or calendar-worthy action item someone needs to do — and, when it does, extract a well-formed candidate for it.\n\nWHAT YOU ARE GIVEN (in the ## Input section): (1) `record` — the associated record's entity logical name (context only — helps you judge what kind of follow-up makes sense, e.g. a matter vs an invoice). (2) `triage` — the already-produced triage output for this email (category, summary, obligations, priority) as GROUNDING context only; its `obligations` list is often the strongest signal of implied work. (3) `message` — the email `subject`, plain-text `body`, and (when present) extracted `attachmentText`.\n\nYOUR TASK: Read the message (and triage grounding) and decide whether it implies one or more concrete follow-up tasks. For each one you find, emit a candidate with a clear `subject` (a short imperative phrase, e.g. 'Respond to opposing counsel's settlement offer'), a `description` (1-3 sentences of context for whoever picks up the task), and — ONLY when the source text concretely states a deadline or target date — a `dueDate`. When the email implies no follow-up work, return an EMPTY `tasks` array. Do NOT re-classify the email; the `triage` input is already the classification/triage result — use it only as grounding to sharpen extraction.\n\nHARD RULES (a violation makes the candidate invalid and it will be dropped downstream):\n  1. GROUND EVERY CANDIDATE IN THE SOURCE. Propose a task ONLY when the email `subject`/`body`/`attachmentText` (or the triage `obligations`, which are themselves derived from the message) actually implies it. Do NOT invent work from the record type or general knowledge. If nothing is implied, return an empty `tasks` array — never fabricate a task to appear thorough.\n  2. CITE VERBATIM. Every candidate MUST carry a `citation` whose `quotedText` is an EXACT, VERBATIM excerpt copied character-for-character from the source (`subject`, `body`, or `attachmentText`) — never paraphrased, never reconstructed. Set `citation.source` to `subject`, `body`, or `attachment` accordingly, and `citation.locator` to a short human-readable pointer (e.g. `body: paragraph 2`, or the attachment file/page when known). A downstream check re-locates your quotedText in the source and DROPS any candidate whose quotedText cannot be found — so copy it exactly.\n  3. DUE DATE IS OPT-IN, NEVER GUESSED. Populate `dueDate` (ISO-8601 `yyyy-MM-dd`) ONLY when the source text concretely states a deadline, due date, or target date for the work (e.g. 'by Friday, August 15', 'no later than 8/21/2026'). If the email implies work but states NO concrete date, OMIT `dueDate` (or set it to an empty string) — never invent or estimate one. A candidate WITH a due date is routed by the caller to a human-confirm step before anything is created; a candidate with none may be created immediately, so an invented date would wrongly bypass that safeguard.\n  4. REASON + CONFIDENCE. Every candidate carries a concise plain-language `reason` (why this is a task, for a human reviewer) and a `confidence` in [0,1] reflecting how unambiguously the source implies the work.\n  5. EXTRACT, NEVER DECIDE. You are extracting candidate follow-up work; the caller decides whether to create it immediately or hold it for human confirmation. Never assert that anything has been created.\n\nOUTPUT: Emit a JSON object matching the output schema EXACTLY — `{ tasks: [ { subject, description, dueDate, citation: { source, locator, quotedText }, reason, confidence } ] }`. additionalProperties is false; do not add fields. An email that implies no follow-up work yields an EMPTY `tasks` array.",
+
+  "input": {
+    "record": {
+      "required": true,
+      "placeholder": "{{record}}",
+      "description": "The associated record context: { entityLogicalName }. The record the email is associated to (from the identifier rung, task 020). Context only — helps judge what follow-up work makes sense for this record type."
+    },
+    "triage": {
+      "required": false,
+      "placeholder": "{{triage}}",
+      "description": "The already-produced triage output for this email (category, summary, obligations, priority) — GROUNDING context only, reused to sharpen extraction. Do NOT re-classify from it."
+    },
+    "message": {
+      "required": true,
+      "maxLength": 30000,
+      "placeholder": "{{message.subject}} {{message.bodyText}} {{message.attachmentText}}",
+      "description": "The email subject + plain-text body + (when present) extracted attachment text, bounded. The ONLY source you may cite from — every quotedText MUST be a verbatim excerpt of this text."
+    }
+  },
+
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["tasks"],
+    "$comment-required": "Object-level required array only (tasks is always present, possibly empty). CLOSED CONTRACT: exactly { tasks[ { subject, description, dueDate, citation{source, locator, quotedText}, reason, confidence } ] } — task 040 (create-or-store) consumes exactly these fields; do NOT add fields. citation.source is a closed set (subject|body|attachment) expressed via the OpenAI-subset `enum` keyword.",
+    "properties": {
+      "tasks": {
+        "type": "array",
+        "description": "Zero or more candidate follow-up tasks/events implied by the email, each grounded in and cited to the email/attachment text. Empty array when the email implies no follow-up work — never a fabricated candidate.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["subject", "description", "citation", "reason", "confidence"],
+          "properties": {
+            "subject": {
+              "type": "string",
+              "description": "A short imperative task subject (e.g. 'Respond to opposing counsel's settlement offer')."
+            },
+            "description": {
+              "type": "string",
+              "description": "1-3 sentences of context for whoever picks up the task, grounded in the source text."
+            },
+            "dueDate": {
+              "type": "string",
+              "description": "ISO-8601 yyyy-MM-dd. Populate ONLY when the source text concretely states a deadline/due/target date; otherwise omit or leave empty — NEVER guessed or estimated."
+            },
+            "citation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source", "locator", "quotedText"],
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "enum": ["subject", "body", "attachment"],
+                  "description": "Which part of the email the implied task was extracted from."
+                },
+                "locator": {
+                  "type": "string",
+                  "description": "A short human-readable pointer to where the quoted span sits (e.g. 'body: paragraph 2', 'subject', 'OA_908068.pdf p.1')."
+                },
+                "quotedText": {
+                  "type": "string",
+                  "description": "A VERBATIM excerpt copied character-for-character from the cited source — the exact span implying the work (or stating the deadline). A downstream check re-locates this in the source and DROPS the candidate if it cannot be found."
+                }
+              }
+            },
+            "reason": {
+              "type": "string",
+              "description": "A concise plain-language explanation of why this is a follow-up task, for a human reviewer."
+            },
+            "confidence": {
+              "type": "number",
+              "description": "Confidence in [0,1] that the source unambiguously implies this follow-up task."
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "examples": [
+    {
+      "input": {
+        "record": { "entityLogicalName": "sprk_matter" },
+        "triage": { "category": "Court / Filing", "summary": "Opposing counsel requests a response by next Friday.", "obligations": ["Respond to opposing counsel by Friday, August 21"], "priority": "High" },
+        "message": {
+          "subject": "Response needed - Smith v. Acme",
+          "bodyText": "Counsel, please respond to our settlement offer no later than Friday, August 21, 2026. Let us know if you have questions.",
+          "attachmentText": ""
+        }
+      },
+      "output": {
+        "tasks": [
+          {
+            "subject": "Respond to settlement offer - Smith v. Acme",
+            "description": "Opposing counsel requests a response to their settlement offer for the Smith v. Acme matter.",
+            "dueDate": "2026-08-21",
+            "citation": {
+              "source": "body",
+              "locator": "body: sentence 1",
+              "quotedText": "please respond to our settlement offer no later than Friday, August 21, 2026"
+            },
+            "reason": "The email sets a concrete response deadline of August 21, 2026.",
+            "confidence": 0.9
+          }
+        ]
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "email-communication-intelligence-r1",
+    "authorLevel": 0,
+    "createdAt": "2026-07-29T00:00:00Z",
+    "description": "Job C (FR-14) targeted 'email implies follow-up work' extraction — proposes candidate tasks/events (subject/description/optional due date) with a verbatim citation + confidence. Never creates/stores anything itself. Not a classification pass.",
+    "tags": ["email-create-task", "job-c", "email-into-action", "catalog-action", "prompted", "cited"]
+  }
+}

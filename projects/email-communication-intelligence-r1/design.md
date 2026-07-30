@@ -1,12 +1,163 @@
-# Spaarke Email Intelligence — Design Charter
+# Email Communication Intelligence R1 — Design Charter
 
-> **Status**: DRAFT v0.1 — 2026-07-10. Grounded pass over the concept charter; ready for operator review before `/design-to-spec`.
-> **Authors**: Claude Opus 4.8 drafting from live-code investigation + operator scope rulings (2026-07-10, verbatim in §1.1).
-> **Predecessor concept**: [`EMAIL-TRIAGE-MODULE-DESIGN.md`](EMAIL-TRIAGE-MODULE-DESIGN.md) (concept/market survey, DRAFT r1). That document is a **general review, not code-grounded** — its component names are *indicative only*. This design supersedes its factual claims with the as-built inventory in §3.
-> **Authoritative as-built context**:
-> - [`docs/architecture/communication-service-architecture.md`](../../docs/architecture/communication-service-architecture.md) (Current, 2026-04-05) — **the canonical email substrate**
-> - [`docs/architecture/email-to-document-architecture.md`](../../docs/architecture/email-to-document-architecture.md) (v1.2, marked **superseded** by the Communication Service)
-> - `src/server/api/Sprk.Bff.Api/Services/Communication/**` · `Services/Ai/Jobs/EmailAnalysisJobHandler.cs` · `x-financial-intelligence-module-r1/` (reuse precedent)
+> **Status**: DRAFT **rev 3** — 2026-07-28. Rev-3 reconciles the design against the **code-directed Action + Binding** substrate (the node-graph playbook engine is frozen), dissolves the stale `record`-disposition / redesign-r2 blockers, and grounds the G-1 deterministic-association mechanism in live `spaarkedev1` data + operator decisions. New authoritative material is **§0.7–§0.10**; they supersede the mechanism claims in D-2.5 / D-2.7 / T-5 / T-5b. **Read §0 first — it is the authoritative scope.**
+> **Prior**: rev 2 (2026-07-28) reconciled the v0.1 charter against what shipped since (r4 engine, r5 client design, notification-spine delivery). Sections §1–§13 are the v0.1 charter, preserved for strategic rationale but **superseded on all as-built and mechanism claims by §0**.
+> **Project**: `email-communication-intelligence-r1` (renamed 2026-07-28 from `spaarke-email-intelligence-module` to sort with the `email-communication-*` line). Epic [#431 EMAIL & MESSAGING](https://github.com/spaarke-dev/spaarke/issues/431).
+> **Authors**: v0.1 — Claude Opus 4.8 from live-code investigation + operator scope rulings (2026-07-10, verbatim in §1.1). rev 2 — code-grounded reconciliation (9-area as-built audit, 2026-07-28).
+> **Predecessor concept**: [`EMAIL-TRIAGE-MODULE-DESIGN.md`](EMAIL-TRIAGE-MODULE-DESIGN.md) (concept/market survey, DRAFT r1). That document is a **general review, not code-grounded** — its component names are *indicative only*.
+> **Authoritative as-built context (refreshed rev 2)**:
+> - Sibling projects: `email-communication-solution-r4` (matching engine — **shipped, on dev**), `email-communication-solution-r5` (Outlook-style Email Workspace UI — **designed, not built**), `spaarke-notification-spine-r1` (action/notification delivery spine — **shipped, partially inert**), `messaging-communication-app-r1/r2/r3` (Teams-style channel).
+> - [`docs/architecture/communication-service-architecture.md`](../../docs/architecture/communication-service-architecture.md) — the canonical email substrate.
+> - Key as-built files cited inline in §0.2.
+
+---
+
+## 0. Reconciliation & Narrowed Scope (rev 2 — 2026-07-28) — AUTHORITATIVE
+
+> This section supersedes the v0.1 as-built inventory (§3) and scope (§2, §5) wherever they conflict. It is written to be read standalone: an operator can review §0 alone and understand what r1 is, what it is not, and where its boundaries sit against the sibling projects. The strategic sections (§1.4 thesis, §2.0 pillars, §2.0b IP docketing wedge, §D-5.5 trust model) remain valid and are the "why."
+
+### 0.1 What shipped since v0.1 (the ground moved)
+
+The 2026-07-10 charter assumed the matching engine, the client surface, and the delivery spine were all to-be-built by this module. Three sibling projects have since claimed those layers. r1 must build **on** them, not re-scope them.
+
+| Layer | Owner project | Status (verified 2026-07-28) | What r1 does with it |
+|---|---|---|---|
+| **Matching / Association Engine** (email → matter/project/invoice/org/contact; deterministic rungs 0–5 + AI rung, provenance, auto-file) | `email-communication-solution-r4` | ✅ Shipped, deployed to dev | **Consume** — r1 adds zero matching logic |
+| **Rich AI classification substrate** (`CommunicationClassificationResult`: category, urgency, obligations[], suggestedActions[], privilegeFlagged, rationale) | r4 (task 031, FR-15) | ✅ Built — but **passive**: emitted as `provenance.signals` only; **consumed by nothing** | **Activate** — this is r1's single biggest harvest |
+| **Reading / compose / association-review UI** (Outlook-style two-pane, `.eml` render, reply/forward, interactive Connections review) | `email-communication-solution-r5` | 📝 Designed, not built | **Coordinate** — r1's triage/priority/summary is a *mode/overlay* in r5's surface, not a second app |
+| **Action + notification delivery spine** (durable outbox, SignalR, `CreateNotificationAsync`, `notification` disposition) | `spaarke-notification-spine-r1` | ✅ Spine shipped; RI path **inert** (see 0.2) | **Feed** — r1 supplies the real intelligence + confidence the spine delivers |
+| **Messaging (Teams-style) channel** | `messaging-communication-app-r1/2/3` | Active | **Out of scope** — email-only |
+
+### 0.2 Corrected as-built claims (v0.1 §3 is now wrong in these specifics)
+
+Code-grounded audit, 2026-07-28. These correct both the v0.1 charter and the earlier "r4 wired responsive intelligence" assumption:
+
+1. **The AI classification is rich but dark.** `Models/Ai/Communication/CommunicationClassificationResult.cs` produces category/urgency/obligations/suggestedActions/privilegeFlagged/rationale, but `Engine/Rungs/AiClassificationRung.cs` emits them as **metadata-only provenance signals** (Target=null, fixed 0.60 conf) that never prioritize, summarize-for-a-human, or trigger anything. **The substrate exists; the product on top of it does not.**
+2. **Responsive-Intelligence fan-out was RE-HOMED, not built.** r4's W5 tasks 050–054 (FR-18 `record`/`notification` dispositions, FR-19 enrichment→EventRules→Create*, FR-20 "Communication Triage" JPS action) are all **⏭️ RE-HOMED / MOOT** in r4's `TASK-INDEX.md` — `EventRulesService` is SSE/session-shaped and "semantically wrong" for email.
+3. **notification-spine landed only a thin slice, currently inert.** `CommunicationEnrichmentService` step 5 emits a `CommunicationAssessedSignal`, but its **`Confidence` is hardcoded to 0** ("the enrichment pipeline does not yet compute an RI-confidence score") → it **denies under any positive threshold**. It creates an **appnotification only** — no Event, no Task — and does not carry category/urgency/obligations.
+4. **`record` disposition still throws.** `DispositionRoutability.cs` marks `record` non-routable; `OutputRouter.cs` throws `NotSupportedException`. Job B (record currency) has **no write path from email**.
+5. **The "Communication Triage" JPS Action / summary-checklist (FR-20) was never authored.** The only email AI today is `AppOnlyAnalysisService.AnalyzeEmailAsync`, which runs a **document-profile** "Email Analysis" playbook and writes TL;DR/summary/keywords back onto the `.eml` Document — not a triage classification, and it does not fan out.
+6. **`UpdateRecordActionCore` / `DataverseUpdateRecordHandler` exist but touch no email flow** — used by daily-briefing/finance/compose only.
+7. **No triage queue, no prioritized inbox, no per-email audit entity (`sprk_emailreviewlog`), no Daily Briefing email channel (still 6 channels), no docketing/deadline-cascade code.** All confirmed absent.
+
+### 0.3 What r1 IS — the intelligence layer (narrowed scope)
+
+r1 is the **intelligence and record-currency layer** that sits on the shipped engine (r4), renders in the client (r5), and delivers through the spine (notification-spine). Its four jobs, in priority order:
+
+1. **Activate the classification substrate (Pillar 1 — UNDERSTAND).** Consume the already-produced category/urgency/obligations, compute a **real RI-confidence score** (fixes the hardcoded-0 gap), and surface **prioritization + 2-line summary + extracted obligations** to the user. This is mostly *wiring dark capability to a surface*, not new AI.
+2. **Record currency (Pillar 2 — UPDATE / Job B).** Author the email-triage playbook leg that **proposes allow-listed field updates on the matched record** (dates/amounts/parties/status), human-confirmed, cited to source email, audited. Requires completing the **`record` disposition** (coordinate with the `Services/Ai` owner). *This is the differentiator no sibling owns.*
+3. **Email-triggered action (Pillar 3 — ACT / Job C).** Feed a real assessment (with confidence + obligations) into the notification-spine so it can create **Event/Task**, not just an appnotification. The flagship vertical is **IP Auto-Docketing** (Office Action → dated deadline cascade), §2.0b — entirely greenfield.
+4. **Defensibility & surfacing.** The per-email **review-audit** record (machine + human review), and the **Daily Briefing triage channel** (7th).
+
+### 0.4 Explicit boundary / coordination map (§11 anti-overlap)
+
+| Capability | r1 owns? | Boundary rule |
+|---|---|---|
+| Matching / association / auto-file | ❌ r4 | Consume `sprk_associationprovenance` + status; add no rung |
+| Reading pane / compose / `.eml` render / Connections review UI | ❌ r5 | r1's triage-priority/summary renders **inside r5's surface** as a mode/overlay; if r5 slips, r1 may ship a minimal queue view but must not fork r5's components |
+| Notification/action **delivery** (outbox, SignalR, dispositions) | ❌ notification-spine | r1 **feeds** the spine (real confidence + assessment); does not build delivery |
+| `record` disposition **implementation** | ⚠️ shared | Owned by `Services/Ai` (redesign-r2 / notification-spine); r1 drives the requirement + the email-side proposal payload — coordinate, do not fork |
+| RI-confidence scoring | ✅ r1 | The hardcoded-0 gap is r1's to close |
+| Email-triage playbook (category-for-human, summary, obligations→actions, proposed record updates) | ✅ r1 | New JPS Action(s) on the existing AI platform |
+| Job B record-currency proposal + confirm flow | ✅ r1 | New |
+| IP docketing / deadline cascade | ✅ r1 | Greenfield; the flagship wedge |
+| Per-email review-audit entity + Daily Briefing triage channel | ✅ r1 | New |
+| Messaging/Teams/SMS | ❌ messaging-app | Email-only |
+
+### 0.5 Coordination hazards (all BFF hot-path)
+
+- **`Services/Ai/` is owned by `spaarke-ai-architecture-redesign-r2`** — consume `Services/Ai/PublicContracts/` seams; the `record`-disposition completion must go through that owner (same gate r4's W5 hit). Run `/conflict-check` before every BFF PR.
+- **`Services/Communication/` persist path** is edited by notification-spine (step-5 emit), messaging-app r1/2/3, and r4 — `parallel-safe: false` on that path. r1's RI-confidence work touches exactly this seam → coordinate merge order.
+- **`@spaarke/notifications` build break** from notification-spine must be resolved before any SpaarkeAi deploy from tip.
+
+### 0.6 Open questions for operator review (rev 2)
+
+> **Rev-3 resolutions (2026-07-28):** Q1 → **UI gated on r5** (operator); Phase-1 is backend-only but visible via the notification path (§0.10). Q2 → **DISSOLVED** — Job B needs no `record` disposition and redesign-r2 has no live owner (§0.7). Q3 → RI-confidence **derives from the classification rung + deterministic-rung agreement** (§0.10). Q4 → **Phase 1 = intelligence spine** (§0.10). Q5 (IP-docketing competitive validation, D-12) → **still open**, remains a Phase-2 gate.
+
+1. **Sequencing vs r5.** r1's Pillar-1 surface needs r5's client. Do we (a) gate r1's UI on r5, (b) run them together, or (c) let r1 ship a minimal standalone queue if r5 slips? *(Recommend b — shared contract, r1 provides the triage data behind r5's surface.)*
+2. **`record` disposition ownership.** Confirm with `spaarke-ai-architecture-redesign-r2` whether r1 or the AI-platform owner completes the `record` leg. Blocks Job B.
+3. **RI-confidence definition.** What computes the assessment confidence that notification-spine consumes — a field of the classification result, or a new scorer? *(Recommend: derive from the classification rung + deterministic-class agreement.)*
+4. **Scope of Phase 1.** Recommend Phase 1 = Pillar 1 (activate substrate + priority/summary surface) + the RI-confidence fix (unblocks notification-spine's Event/Task path). Defer Job B and IP docketing to Phase 2 — they are higher-value but need the `record` disposition and a docketing data model.
+5. **IP docketing as beachhead (D-12/D-13, still open).** Validate the competitive claim before committing the wedge as Phase-2 lead.
+
+---
+
+### 0.7 The intelligence & write substrate is CODE-DIRECTED (Action + Binding) — supersedes D-2.5 / D-2.7 / T-5 / T-5b mechanism
+
+**Investigation 2026-07-28 (four code-tracing passes + canonical docs).** The platform moved from the data-driven **node-graph playbook** engine to the **code-directed Action + Binding** model (ADR-039; `docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md`; operator decision 2026-06-30, *"config-table-with-rules IS an interpreter"*). The node-graph engine (`PlaybookOrchestrationService`, `UpdateRecordNodeExecutor`, et al.) is **FROZEN — Insights family only** (matter-health, predict-matter-cost, universal-ingest); ADR-039 MUST NOT land new capability on it. **Every mechanism the v0.1/rev-2 charter names on the node engine or a "JPS playbook graph" is superseded:**
+
+| Charter decision (mechanism) | Superseded by (code-directed) |
+|---|---|
+| D-2.5 "Email Triage **JPS playbook**" (node graph) | A `prompted` **Action + Binding** (`TRIAGE-EMAIL@v1`) — single structured LLM call via `ActionRunner`; triggered on the **Event path** (a communication event's `sprk_oneventbindings`) or from `CommunicationEnrichmentService`'s AI-analysis step via the `Services/Ai/PublicContracts/` facade (ADR-013 — never `IOpenAiClient` in Communication code) |
+| D-2.7 / T-5b Job B via `UpdateRecordNodeExecutor` | `IActionSeam.UpdateRecordAsync` → **`UpdateRecordActionCore`** (the *same shared core* the frozen node executor wraps, minus the template layer) → Dataverse PATCH under user OBO, behind the **existing single confirmation gate** (keyed on `sprk_sideeffectclass`, store-before-render, fail-closed) |
+| T-5 "re-point `AppOnlyAnalysisService`" | Triage is a **new Action + Binding on the enrichment/event path**, not a re-point of the document-profile analyzer (which stays as-is) |
+| Job C tasks / deadlines | The shipped **create-task pattern** (`CREATE-TASK@v1` → gated `dataverse.create_record` → `sprk_event`), cited to the source communication + analysis |
+
+**The "record disposition" blocker (rev-2 §0.6 Q2 / open D-2.7) is DISSOLVED.** The declarative `record` OutputRouter leg is dead (`DispositionRoutability` marks it non-routable; `OutputRouter` throws) and was explicitly deferred (former "E-21", never scheduled) — but Job B does **not** need it: the write cores (`UpdateRecordActionCore`, `TaskActionCore`, `NotificationActionCore`) are live and reached code-directed via `IActionSeam`. And `spaarke-ai-architecture-redesign-r2` (the claimed "owner" of `Services/Ai/`) is **complete, merged, deployed** — the `projects/INDEX.md:60` "sole owner" row is **stale**; there is no live owner to route through. r1 builds against the published `Services/Ai/PublicContracts/` seams with `/conflict-check`.
+
+**Correction to rev-2 §0.2 item 3:** the RI action chain is more built than rev-2 stated — when *authorized*, `CommunicationRiActionService` creates a **Task + durable outbox row + SignalR ping + appnotification** (not "appnotification only"). It is inert only because `CommunicationAssessedSignal.Confidence` is hardcoded to `0` (denies under the 0.8 default threshold), so today it creates **nothing**. Fixing the score is plumbing, not new infrastructure.
+
+**Coordination hazard (new):** ADR-041 (judgment/confirmation gate), ADR-043 (execution spine), ADR-047 (notification spine) are **Proposed / in-flight** — pin to their current shape and check the r2/successor charters before building against the gate or seams.
+
+### 0.8 G-1 deterministic association — the identifier rung (AUTHORITATIVE mechanism)
+
+Grounded in live `spaarkedev1` data + operator decisions, 2026-07-28.
+
+**Scope: 7 core identifier-bearing records** — matter, project, invoice, work assignment, budget, service request, report card — each with its number field: `sprk_matternumber`, `sprk_projectnumber`, `sprk_invoicenumber`, `sprk_workassignmentnumber`, `sprk_budgetnumber`, `sprk_servicerequestnumber`, `sprk_reportcardnumber`. Today the engine's rung 0 matches **matter only**; the other six are the declared-but-missing G-1 work (this is *extend the existing rung*, not a new engine).
+
+**Catalog-driven, not hardcoded.** The rung reads `sprk_recordtype_ref` (the ADR-024 catalog), which already carries per type: `sprk_recordlogicalname`, `sprk_regardingfield` (where to write the association), `sprk_regardingrecordnumberfield` (the number field to query), and `sprk_recordtypecode` (operator-populated: MTR / PRJT / INV / WRK / BDGT / SVCR / RPTC). The catalog **is** the per-org roster — onboarding a tenant needs no code change.
+
+**Value-based, org-agnostic matching — numbering schemes are deliberately NOT modeled.** Live data proves numbering varies by org *and* by sub-type: matters use practice-area prefixes (`CMRCL-`, `PAT-`, `LITG-`, `EMPL-` — none equals the `MTR` code), projects `PRJT.10001.01`, work assignments `NEW.10001US01`, invoices are inconsistent including bare digits (`123456`). So `sprk_recordtypecode` is a **taxonomy code, not an identifier prefix** and is **not** used as a matcher. The rung instead:
+1. extracts identifier-shaped candidate tokens from subject/body (a generic digits-plus-separators shape — never an org-specific format);
+2. exact-matches each candidate against the 7 core number fields (**values, not patterns**);
+3. a single match writes the typed regarding lookup, then **reinforces with the sender/participant rung via Noisy-OR** (§5.1) before auto-file.
+
+**Guardrails (binding):**
+- **Bare-numeric identifiers never auto-file on the identifier alone** — a value like invoice `123456` collides with phone numbers, amounts, ZIPs; it requires sender/participant reinforcement to reach auto-file confidence.
+- **Multiple-entity matches → `Ambiguous` → human review** (no write).
+- **AI-tier matches never auto-file** (existing invariant §5.3).
+
+**Report-card enablement:** operator has added `sprk_regardingreportcard` on `sprk_communication` and the `sprk_recordtype_ref` row (code RPTC, number field `sprk_reportcardnumber`). r1 adds the matching entry in `Services/Communication/Engine/RegardingFieldMap.cs` so the engine can write it.
+
+**Bonus signal:** the `PAT-` matter prefix deterministically flags **IP matters** — a free practice-area routing signal with no AI call (IP *docketing* itself is out of scope for this project — see §0.11).
+
+**Catalog data hygiene (prerequisite):** `sprk_recordtype_ref` has known typos in some `sprk_regardingfield` values (e.g. `sprk_regarrdingbudget`, `sprk_egardingproject`) and a `contact`-row logical-name anomaly; the rung must read defensively or these are cleaned up first.
+
+### 0.9 Two requirements the charter under-specifies (operator review 2026-07-28)
+
+**(a) "Regarding" vs "related-to" — intent-aware matching (net-new).** An email that quotes a record identifier is not always *about* that record. *"New filing based on PAT-908068"* means a **new** record *related to* PAT-908068, not filing onto it — a naive deterministic match would misfile. Required: (i) context-sensitive phrasing (*"new filing based on / re: / related to / parent:"*) **demotes** the identifier from *regarding* to *related*, suppressing auto-file; (ii) the triage Action classifies intent — `file-to-existing` vs `update-existing` vs **`new-record-related-to`** — and on the last proposes *creating* a record (gated `dataverse.create_record`), human-confirmed, with the referenced record linked as related. The ADR-024 regarding model expresses "regarding" only; representing "related-to" distinctly is new surface.
+
+**(b) Attachment-grounded action extraction (Job C).** The action an email implies often lives in the **attachment**, not the body (*"please see attached"* + a PDF). The Association Engine's `NormalizedMessage` envelope carries attachment **metadata only** (name / type / size), so rung-5 classification is body-only. Required: the triage / action-extraction Action **grounds on extracted attachment text** via the existing text-extraction → SPE-download → child-`sprk_document` path (already RAG-indexed), deterministically gated to likely action-triggers for cost. Attachment-derived actions are the **highest-difficulty AI** in the project and carry the heaviest eval-case obligation. *(This is general Job-C action extraction — not IP docketing, which is out of scope per §0.11.)*
+
+### 0.10 Phase 1 boundary + surfaces (operator decisions 2026-07-28)
+
+- **r5 is COMPLETE and owns the review/reading surfaces** (`email-communication-solution-r5` — reading pane, `.eml` render, associations/tracking view, email card list, dual-use Code Page + SpaarkeAi widget, all shipped). r1 is the **backend intelligence + record-write layer**; it *feeds* r5's surfaces via a shared data + confirm contract (`notes/email-intelligence-r1-coordination.md`). The earlier "UI gated on r5 (not built)" framing is **void** — the surfaces exist. r1's Phase-1 output renders in r5's shipped views.
+- **Phase 1 is also visible via the notification spine** (independent of any UI): fixing the RI-confidence-0 gap lights up `CommunicationRiActionService` → **Task + appnotification + SignalR ping** for high-signal email.
+- **Phase 1 scope =** RI-confidence scorer (email-specific — from triage urgency + deterministic-rung agreement) + `TRIAGE-EMAIL` Action/Binding (categorize / summarize / obligations / priority) + **RAG grounding** in the matter's own correspondence + the 7-entity identifier rung (§0.8, auto-file per C-1) + triage fields on `sprk_communication` + `sprk_emailreviewlog` audit + the report-card `RegardingFieldMap` entry + **Job B in FULL** (propose → confirm → apply via `IActionSeam.UpdateRecordAsync` → audit; confirm/apply on r5's shipped surface via a stored-proposal apply endpoint) + shared/group-mailbox capture coverage (D-07).
+- **Phase 2 (deferred):** SprkChat conversational review over the matter's mail (D-11c); Daily Briefing triage channel. *(IP Auto-Docketing is removed from this project — §0.11.)*
+
+### 0.11 Open decisions closed + scope locks (operator, 2026-07-28) — AUTHORITATIVE over §11
+
+All §11 open decisions (D-01…D-13) are resolved:
+
+| Ref | Decision | Resolution |
+|---|---|---|
+| D-01 | Triage unit | **`sprk_communication`** — no new entity |
+| D-02 / D-04 | Legacy OOB `email`-activity stack (Stack B) | **Moot — already retired by r4 (task 007).** Build only on `sprk_communication`/`.eml`; nothing to re-point or deprecate |
+| D-03 | Category taxonomy + priority weights | **Dataverse-tuneable**, starter set seeded |
+| D-05 | Triage-outcome term (avoid ADR-040 "disposition" collision) | **"review outcome"** |
+| D-06 | Obligation storage | **Lean JSON** on `sprk_communication`, shaped so it can be promoted to child records later (the child-record driver — per-deadline docketing — is removed with IP docketing) |
+| D-07 | Mailbox coverage | **Must support shared + M365 group mailboxes** — a capture-layer extension (communication-service domain); coordination item, not free |
+| D-08 | Email priority scorer | **Build email-specific** (triage urgency + RI-confidence). Do **NOT** reuse Workspace/Portfolio priority scoring (different signal — that ranks work items by due/status) |
+| D-09 | Client scope | Record-backed over `sprk_communication` (settled) |
+| D-10 | Surface placement | **Dual-use — Code Page AND SpaarkeAi widget; the build MUST mount in both** (Pattern D, following r5's shipped dual-deploy) |
+| D-11 | AI capabilities in P1 | **(a) Triage Action + (b) RAG grounding → P1.** (c) SprkChat-over-mail → P2 (revisit only if a small add) |
+| D-12 / D-13 | IP Auto-Docketing | **REMOVED from this project entirely** — §2.0b, G-9 docketing content, and D-12/D-13 are void |
+
+**Additional locks:**
+- **C-1 — auto-file policy:** auto-file only on **rung 0 (explicit caller-supplied / matter-number regex) + rung 1 (thread inheritance)**. Rung 2 (sender/participant) and rung 3 (structural) matches are **`Suggested`** (human-confirm), not auto-filed. Conservative per research (misfiling = the #1 trust-killer). More restrictive than the shipped "any deterministic ≥0.85" rule.
+- **Job B stays FULL** (propose → confirm → apply → audit) — explicitly **not** downscoped to propose-only. Confirm/apply lands on r5's shipped surfaces via a stored-proposal apply endpoint (coordination C-2).
+- **Phasing / complexity guardrail (build order):** (1) **lean spine** — identifier rung + `TRIAGE-EMAIL` + RAG grounding + RI-confidence + triage fields + `sprk_emailreviewlog` + notification path; (2) **Job B** propose→apply on r5 surfaces; (3) **regarding-vs-related intent** (§0.9a). Each stage validated before the next. The design *document* is elaborate (it did reconciliation work); the *Phase-1 build* is small and mostly harvest on shipped infrastructure — keep it that way.
 
 ---
 
@@ -84,6 +235,8 @@ The module delivers **three jobs**, all on the same substrate (matter-grounded, 
 
 ### 2.0b Flagship use case — IP Auto-Docketing (the wedge)
 
+> **⛔ REMOVED from this project (operator, 2026-07-28 — §0.11 / D-12 / D-13).** IP Auto-Docketing is **out of scope** for `email-communication-intelligence-r1`. The section below is retained for historical/strategic rationale only; no docketing entity, deadline-cascade engine, or IP-specific playbook is built here. General email-triggered actions (Job C) remain in scope; the IP *docketing* vertical does not.
+
 **Pillar 3's killer application, and the recommended beachhead.** In patent & trademark practice, a high volume of email carries **procedural instructions that trigger official actions with hard, malpractice-grade deadlines** — Office Actions ("response due in 3 months"), Notices of Allowance (issue-fee windows), foreign-associate instructions, annuity/renewal notices, priority deadlines. Calendaring these ("docketing") is mission-critical, high-volume, and — for *free-text email instructions* (as opposed to structured patent-office data feeds) — **still substantially manual**. A missed docket date can forfeit an IP right.
 
 Why this is the perfect Spaarke wedge — it exercises **all three pillars in one workflow**:
@@ -110,6 +263,8 @@ Competitive fit: IP docketing systems (Anaqua, Clarivate/CPA Global, Alt Legal, 
 ---
 
 ## 3. As-built foundation (grounded inventory — supersedes concept charter §4)
+
+> **⚠️ SUPERSEDED BY §0.2 (rev 2, 2026-07-28).** This inventory was accurate on 2026-07-10 but predates `email-communication-solution-r4` shipping the Association Engine + classification substrate, `r5` designing the client, and `notification-spine-r1` landing the delivery spine. Read §0.2 for the corrected as-built truth. The text below is retained for historical rationale only.
 
 **Two email stacks exist. This is the central architectural fact.**
 

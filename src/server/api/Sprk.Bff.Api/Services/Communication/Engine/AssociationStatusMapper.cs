@@ -10,7 +10,14 @@ namespace Sprk.Bff.Api.Services.Communication.Engine;
 /// result to a <c>sprk_associationstatus</c> plus an auto-file decision:
 ///
 /// <list type="bullet">
-///   <item>DETERMINISTIC (rungs 0–3) reinforced ≥ threshold, kill-switch on → <b>Resolved + auto-file</b>.</item>
+///   <item>
+///   C-1 narrowing (ADR-045 path-A exception, kill-switch-governed per ADR-018): rung 0 (ExplicitReference)
+///   + rung 1 (ThreadContinuity) reinforced ≥ threshold, kill-switch on → <b>Resolved + auto-file</b>.
+///   Rung 2 (ParticipantCorrelation) + rung 3 (StructuralDetector) still MATCH and contribute to full
+///   confidence, but do NOT clear the auto-file bar by default → <b>Suggested</b>, unless the tenant
+///   has <see cref="Configuration.AutoFileOptions.Rung2And3AutoFileEnabled"/> toggled on (legacy pre-C-1
+///   behavior).
+///   </item>
 ///   <item>Reinforced in [0.50, threshold), OR any AI rung (4–5) involved, OR kill-switch off → <b>Suggested</b>.</item>
 ///   <item>Reinforced &lt; 0.50, or no writable match → <b>Pending Review</b>.</item>
 ///   <item>Two+ distinct targets on the SAME field each ≥ threshold → <b>Ambiguous</b> (never guess).</item>
@@ -104,7 +111,7 @@ public sealed class AssociationStatusMapper
             .Where(m => m.Target is not null && m.RegardingFieldName is not null)
             .ToList();
 
-        var fieldWinners = BuildFieldWinners(writable);
+        var fieldWinners = BuildFieldWinners(writable, settings.Rung2And3AutoFileEnabled);
 
         // Conflict is "2+ distinct targets on the same field each ≥ the (tenant-resolved) threshold";
         // evaluate it now that the threshold is known.
@@ -210,7 +217,7 @@ public sealed class AssociationStatusMapper
 
     // ── Aggregation ──────────────────────────────────────────────────────────────
 
-    private static List<FieldWinner> BuildFieldWinners(IReadOnlyList<RungMatch> writable)
+    private static List<FieldWinner> BuildFieldWinners(IReadOnlyList<RungMatch> writable, bool includeRung23)
     {
         var winners = new List<FieldWinner>();
 
@@ -230,7 +237,15 @@ public sealed class AssociationStatusMapper
                     .ToList();
 
                 var fullConf = NoisyOr(perKindMax.Select(m => m.Confidence));
-                var detConf = NoisyOr(perKindMax.Where(m => IsAutoFileEligible(m.Rung)).Select(m => m.Confidence));
+                // Auto-file STATUS confidence: C-1-narrowed set (rung 0+1, or 0–3 when the kill-switch
+                // toggles rung 2/3 back on). Drives topDetSubstantive → the Resolved/auto-file decision.
+                var detConf = NoisyOr(perKindMax.Where(m => IsAutoFileEligible(m.Rung, includeRung23)).Select(m => m.Confidence));
+                // Deterministic WRITE confidence: the PRE-C-1 deterministic set (all rungs 0–3, never AI,
+                // never RecordNameMatch/ContactNameMatch). Independent of the auto-file narrowing so that when
+                // an email DOES auto-file, ALL its deterministic (rung 0–3) associations are still written to
+                // Dataverse exactly as the shipped design specifies ("fallback matches are still WRITTEN...
+                // they just don't clear the auto-file bar"). Consumed only by the Resolved-branch write gate.
+                var writeConf = NoisyOr(perKindMax.Where(m => IsDeterministicWriteEligible(m.Rung)).Select(m => m.Confidence));
                 // "AI involved" is TRUE only when a genuine AI rung contributed. RecordNameMatch is a
                 // deterministic exact-match rung that is (intentionally) not auto-file-eligible — it must NOT
                 // be mislabeled as AI in the provenance/reason.
@@ -240,6 +255,7 @@ public sealed class AssociationStatusMapper
                     Target: contributors[0].Target!,
                     FullConfidence: fullConf,
                     DeterministicConfidence: detConf,
+                    WriteConfidence: writeConf,
                     AiInvolved: aiInvolved,
                     Contributors: perKindMax));
             }
@@ -263,7 +279,10 @@ public sealed class AssociationStatusMapper
         {
             if (fw.Conflict) continue; // never assert a conflicting field
             var winner = fw.Winner;
-            var conf = useDeterministic ? winner.DeterministicConfidence : winner.FullConfidence;
+            // Resolved branch (useDeterministic) writes the PRE-C-1 deterministic set (rung 0–3 via
+            // WriteConfidence) so no fallback/structural association is dropped when an email auto-files;
+            // Suggested branch writes on FullConfidence (may include AI-derived fields).
+            var conf = useDeterministic ? winner.WriteConfidence : winner.FullConfidence;
             if (conf >= WriteFloor)
             {
                 writes[fw.Field] = winner.Target;
@@ -359,12 +378,33 @@ public sealed class AssociationStatusMapper
 
     /// <summary>
     /// Rungs whose confidence is AUTO-FILE-ELIGIBLE (a match here can push a substantive target to Resolved).
-    /// The 4 hard-deterministic rungs. Deliberately EXCLUDES <see cref="RungKind.RecordNameMatch"/>: per owner
-    /// spec (2026-07-17) a name match is surfaced for review (the user picks the primary among matches), never
-    /// auto-filed — so it contributes to full confidence + is written as a Suggested candidate, but does not
-    /// clear the auto-file bar on its own.
+    /// C-1 narrowing (ADR-045 path-A exception, email-communication-intelligence-r1): by default (
+    /// <paramref name="includeRung23"/> = <c>false</c>) only rung 0 (<see cref="RungKind.ExplicitReference"/>)
+    /// and rung 1 (<see cref="RungKind.ThreadContinuity"/>) are eligible — misfiling is the #1 trust-killer,
+    /// so participant/sender-only (rung 2) and structural (rung 3) matches still contribute to full
+    /// confidence and are written as Suggested candidates, but do not clear the auto-file bar alone.
+    /// <paramref name="includeRung23"/> = <c>true</c> restores the legacy pre-C-1 behavior (rungs 0–3 all
+    /// eligible) — kill-switch-governed per ADR-018 via <see cref="Configuration.AutoFileOptions.Rung2And3AutoFileEnabled"/>,
+    /// togglable without a redeploy. Deliberately EXCLUDES <see cref="RungKind.RecordNameMatch"/> regardless
+    /// of the flag: per owner spec (2026-07-17) a name match is surfaced for review (the user picks the
+    /// primary among matches), never auto-filed.
     /// </summary>
-    private static bool IsAutoFileEligible(RungKind kind) =>
+    private static bool IsAutoFileEligible(RungKind kind, bool includeRung23) =>
+        kind is RungKind.ExplicitReference or RungKind.ThreadContinuity
+             || (includeRung23 && kind is RungKind.ParticipantCorrelation or RungKind.StructuralDetector);
+
+    /// <summary>
+    /// Rungs whose confidence is DETERMINISTIC-WRITE-ELIGIBLE — the PRE-C-1 deterministic set (all four
+    /// hard-deterministic rungs 0–3). This is the WRITE set for the Resolved branch and is INDEPENDENT of
+    /// the C-1 auto-file narrowing (<see cref="IsAutoFileEligible"/>): the narrowing changes only WHICH rungs
+    /// can push a communication to auto-file STATUS, not which deterministic associations are persisted once
+    /// it does. When an email auto-files, all rung 0–3 associations (incl. participant/structural fallbacks)
+    /// are still written — the shipped design keeps fallback matches WRITTEN even though they don't clear the
+    /// auto-file bar; r5's review surface displays these denormalized associations. Excludes
+    /// <see cref="RungKind.RecordNameMatch"/> / <see cref="RungKind.ContactNameMatch"/> and AI rungs exactly
+    /// as the deterministic write set always has.
+    /// </summary>
+    private static bool IsDeterministicWriteEligible(RungKind kind) =>
         kind is RungKind.ExplicitReference or RungKind.ThreadContinuity
              or RungKind.ParticipantCorrelation or RungKind.StructuralDetector;
 
@@ -378,6 +418,7 @@ public sealed class AssociationStatusMapper
         EntityReference Target,
         double FullConfidence,
         double DeterministicConfidence,
+        double WriteConfidence,
         bool AiInvolved,
         IReadOnlyList<RungMatch> Contributors);
 

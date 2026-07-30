@@ -1,235 +1,159 @@
 /**
- * Row-level sub-components for the ASSOCIATIONS review view (task 035). Split
- * out of `EmailConnectionsReview.tsx` at code-review time (Step 9.5) purely
- * to keep the main component file under this repo's review-metric line
- * thresholds — no behavior change. Each component is presentational; all
- * writes are orchestrated by the parent `EmailConnectionsReview` (it owns the
- * `applyRegardingSelection` / `unlinkRegarding` calls) and handed down as
- * callback props.
+ * Row-level sub-components for the reading-pane ASSOCIATION RESOLVER (email-
+ * communication-solution-r5, single-primary reading-pane redesign 2026-07-29).
+ * The resolver makes ONE primary association across three states; these are the
+ * shared building blocks:
+ *
+ *   - `CandidateCard` — a 2-line candidate card: line 1 `{REC#} : {name}` + a
+ *     right-aligned match-% tag; line 2 the plain-English match reason. Clicking
+ *     the card selects it (radio semantics); the parent renders the `Confirm`
+ *     button directly BENEATH the selected card via the `showConfirm` slot. The
+ *     auto-matched primary (needs-confirmation) renders green (`tone="primary"`).
+ *   - `BlankCard`     — an empty slot for a candidate below the 70% floor.
+ *   - `ConfirmedChip` — the confirmed primary as a "{Type}: {number}" chip with a
+ *     remove (×) that returns the reviewer to candidate selection.
+ *
+ * Every % is REAL (from `sprk_associationprovenance` confidence) and is always
+ * paired with its *why*. All writes are orchestrated by the parent
+ * `EmailConnectionsReview` (it owns `applyRegardingSelection` / `unlinkRegarding`)
+ * and handed down as callbacks. Fluent v9 tokens only (ADR-021, dark-mode
+ * correct). No `as React.ComponentType` cast (NFR-05).
  */
 import * as React from 'react';
-import { mergeClasses, Text, Button, Badge, Tooltip, Radio, RadioGroup } from '@fluentui/react-components';
-import { Dismiss16Regular, Checkmark16Regular, ArrowSwap16Regular } from '@fluentui/react-icons';
-import { PolymorphicPicker, type RecordTypeCatalogEntry, type IPolymorphicPickerWebApi } from '@spaarke/ui-components';
-import { groupCandidatesByName, entityLabel, type Connection, type CandidateGroup } from '../../logic/connections';
-import { entityIcon } from './EmailConnectionsReview.helpers';
+import { mergeClasses, Text, Button, Tooltip } from '@fluentui/react-components';
+import { Checkmark16Filled, Dismiss12Regular } from '@fluentui/react-icons';
+import { entityLabel, type PrimaryCandidate } from '../../logic/connections';
 import type { ConnectionsReviewStyles } from './EmailConnectionsReview.styles';
 
-// ── "Needs your decision" — one ambiguous conflict as selectable options ──
-export function DecisionBlock({
-  conn,
+function pct(confidence: number): string {
+  return `${Math.round(confidence * 100)}%`;
+}
+
+// ── One 2-line candidate card (click to select; Confirm shows under the selection) ──
+export function CandidateCard({
+  candidate,
+  selected,
+  tone,
+  showConfirm,
   busy,
   readOnly,
-  resolveDisplayName,
+  onSelect,
   onConfirm,
   s,
 }: {
-  conn: Connection;
+  candidate: PrimaryCandidate;
+  selected: boolean;
+  /** `'primary'` → green auto-matched card; `'select'` → brand-blue when picked. */
+  tone: 'select' | 'primary';
+  showConfirm: boolean;
   busy: boolean;
   readOnly: boolean;
-  resolveDisplayName?: (entity: string, id: string) => string | undefined;
-  onConfirm: (conn: Connection, chosen: { targetEntity: string; targetId: string; targetName?: string }) => void;
+  onSelect: () => void;
+  onConfirm: () => void;
   s: ConnectionsReviewStyles;
 }): React.ReactElement {
-  const groups: CandidateGroup[] = React.useMemo(
-    () => groupCandidatesByName(conn.alternatives ?? []),
-    [conn.alternatives]
-  );
-  const [selected, setSelected] = React.useState<string | null>(null);
-  const nameOf = (g: CandidateGroup) =>
-    resolveDisplayName?.(g.candidates[0].targetEntity, g.candidates[0].targetId) ?? g.targetName;
-
+  const selectedClass = tone === 'primary' ? s.cardPrimary : s.cardSelected;
   return (
-    <div>
-      <Text className={s.secHint}>
-        {groups.length} possible matches for {conn.slotLabel.toLowerCase()} — pick the one this email is really about.
-      </Text>
-      <RadioGroup value={selected ?? ''} onChange={(_, d) => setSelected(d.value)}>
-        <div className={s.options}>
-          {groups.map((g, i) => (
-            <div
-              key={i}
-              className={mergeClasses(s.opt, selected === String(i) && s.optSel)}
-              onClick={() => !readOnly && setSelected(String(i))}
-              role="presentation"
-            >
-              <Radio value={String(i)} disabled={readOnly} aria-label={nameOf(g)} />
-              <div className={s.optRec}>
-                <Text className={s.optName}>
-                  {nameOf(g)}
-                  {g.recordNumber ? <span className={s.recNum}> · {g.recordNumber}</span> : null}
-                  {g.candidates.length > 1 ? <span className={s.typeTag}> · {g.candidates.length} records</span> : null}
-                </Text>
-              </div>
-              <Text className={s.confLbl}>{Math.round(g.confidence * 100)}%</Text>
-            </div>
-          ))}
+    <div className={s.cardCell}>
+      <div
+        role="radio"
+        aria-checked={selected}
+        aria-label={`${candidate.recordNumber ? candidate.recordNumber + ' ' : ''}${candidate.targetName}`}
+        tabIndex={readOnly ? -1 : 0}
+        className={mergeClasses(s.card, selected && selectedClass)}
+        onClick={() => !readOnly && onSelect()}
+        onKeyDown={e => {
+          if (readOnly) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onSelect();
+          }
+        }}
+      >
+        <div className={s.cardHeadRow}>
+          <Text className={s.cardIdentity}>
+            {candidate.recordNumber ? (
+              <>
+                <span className={s.recNum}>{candidate.recordNumber}</span>
+                <span className={s.cardName}> : {candidate.targetName}</span>
+              </>
+            ) : (
+              <span className={s.recNum}>{candidate.targetName}</span>
+            )}
+          </Text>
+          <span className={s.pctTag}>{pct(candidate.confidence)}</span>
         </div>
-      </RadioGroup>
-      {!readOnly && (
-        <Button
-          appearance="primary"
-          disabled={selected === null || busy}
-          onClick={() => {
-            if (selected === null) return;
-            const top = groups[Number(selected)].candidates[0];
-            onConfirm(conn, { targetEntity: top.targetEntity, targetId: top.targetId, targetName: top.targetName });
-          }}
-        >
-          Confirm
-        </Button>
-      )}
-    </div>
-  );
-}
-
-// ── "Filed automatically" — a done row with Change (re-file via picker) / Dismiss (unlink) ──
-export function FiledRow({
-  conn,
-  first,
-  busy,
-  readOnly,
-  resolveDisplayName,
-  isChanging,
-  onRequestChange,
-  onCancelChange,
-  onChangeSelected,
-  onDismiss,
-  pickerWebApi,
-  catalog,
-  s,
-}: {
-  conn: Connection;
-  first: boolean;
-  busy: boolean;
-  readOnly: boolean;
-  resolveDisplayName?: (entity: string, id: string) => string | undefined;
-  isChanging: boolean;
-  onRequestChange: () => void;
-  onCancelChange: () => void;
-  onChangeSelected: (entityType: string, recordId: string, recordName: string) => void;
-  onDismiss: () => void;
-  pickerWebApi: IPolymorphicPickerWebApi;
-  catalog: readonly RecordTypeCatalogEntry[];
-  s: ConnectionsReviewStyles;
-}): React.ReactElement {
-  const name = resolveDisplayName?.(conn.entity, conn.targetId) ?? conn.targetName;
-  const scopedCatalog = React.useMemo(() => catalog.filter(c => c.logicalName === conn.entity), [catalog, conn.entity]);
-
-  return (
-    <div className={mergeClasses(s.row, !first && s.rowBorder)}>
-      <span className={s.ico}>{entityIcon(conn.entity)}</span>
-      <div className={s.rec}>
-        <Text className={s.recName}>
-          {name}
-          {conn.recordNumber ? <span className={s.recNum}>· {conn.recordNumber}</span> : null}
-          <span className={s.typeTag}>{entityLabel(conn.entity)}</span>
-        </Text>
+        {candidate.matchReason ? <Text className={s.cardReason}>{candidate.matchReason}</Text> : null}
       </div>
-      <Badge appearance="tint" color="success">
-        Linked
-      </Badge>
-      {readOnly ? (
-        <span />
-      ) : isChanging ? (
-        <div className={s.rowActs}>
-          <PolymorphicPicker
-            title="Change"
-            catalog={scopedCatalog}
-            webApi={pickerWebApi}
-            onSelect={onChangeSelected}
-            disabled={busy}
-          />
-          <Button size="small" appearance="subtle" onClick={onCancelChange}>
-            Cancel
+      {showConfirm && !readOnly ? (
+        <div className={s.confirmSlot}>
+          <Button appearance="primary" size="small" icon={<Checkmark16Filled />} disabled={busy} onClick={onConfirm}>
+            Confirm
           </Button>
         </div>
-      ) : (
-        <div className={s.rowActs}>
-          <Tooltip content="Change" relationship="label">
-            <Button
-              size="small"
-              appearance="subtle"
-              icon={<ArrowSwap16Regular />}
-              aria-label="Change"
-              disabled={busy}
-              onClick={onRequestChange}
-            />
-          </Tooltip>
-          <Tooltip content="Dismiss" relationship="label">
-            <Button
-              size="small"
-              appearance="subtle"
-              icon={<Dismiss16Regular />}
-              aria-label="Dismiss"
-              disabled={busy}
-              onClick={onDismiss}
-            />
-          </Tooltip>
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }
 
-// ── "Suggested" — a soft match to Confirm or Dismiss (client-side hide, no write) ──
-export function SuggestedRow({
-  conn,
-  first,
+// ── Blank slot — a candidate below the 70% floor (legitimately no match here) ──
+export function BlankCard({ s }: { s: ConnectionsReviewStyles }): React.ReactElement {
+  return (
+    <div className={s.cardCell}>
+      <div className={s.cardBlank} aria-hidden="true">
+        No confident match
+      </div>
+    </div>
+  );
+}
+
+// ── Confirmed primary — "{Type}: {number}" chip, clickable to open the record,
+//    with a remove (×). Rendered in the merged "Related to" SECTION HEADER so the
+//    confirmed association is visible while the section is collapsed. ──
+export function ConfirmedChip({
+  primary,
   busy,
   readOnly,
-  resolveDisplayName,
-  onConfirm,
-  onDismiss,
+  onOpen,
+  onRemove,
   s,
 }: {
-  conn: Connection;
-  first: boolean;
+  primary: PrimaryCandidate;
   busy: boolean;
   readOnly: boolean;
-  resolveDisplayName?: (entity: string, id: string) => string | undefined;
-  onConfirm: (conn: Connection) => void;
-  onDismiss: (key: string) => void;
+  /** Open the associated record (omit → the value renders as plain text). */
+  onOpen?: () => void;
+  onRemove: () => void;
   s: ConnectionsReviewStyles;
 }): React.ReactElement {
-  const name = resolveDisplayName?.(conn.entity, conn.targetId) ?? conn.targetName;
+  const type = primary.entity ? entityLabel(primary.entity) : 'Record';
+  const value = primary.recordNumber ?? primary.targetName;
+  const title = `${type} · ${primary.targetName}${primary.recordNumber ? ' · ' + primary.recordNumber : ''}`;
   return (
-    <div className={mergeClasses(s.row, !first && s.rowBorder)}>
-      <span className={s.ico}>{entityIcon(conn.entity)}</span>
-      <div className={s.rec}>
-        <Text className={s.recName}>
-          {name}
-          {conn.recordNumber ? <span className={s.recNum}>· {conn.recordNumber}</span> : null}
-          <span className={s.typeTag}>{entityLabel(conn.entity)}</span>
-        </Text>
-      </div>
-      <span />
-      <div className={s.rowActs}>
-        {!readOnly && (
-          <>
-            <Tooltip content="Confirm" relationship="label">
-              <Button
-                size="small"
-                appearance="subtle"
-                icon={<Checkmark16Regular />}
-                aria-label="Confirm"
-                disabled={busy}
-                onClick={() => onConfirm(conn)}
-              />
-            </Tooltip>
-            <Tooltip content="Dismiss" relationship="label">
-              <Button
-                size="small"
-                appearance="subtle"
-                icon={<Dismiss16Regular />}
-                aria-label="Dismiss"
-                disabled={busy}
-                onClick={() => onDismiss(conn.field)}
-              />
-            </Tooltip>
-          </>
+    <div className={s.chipRow} data-testid="association-confirmed">
+      <span className={s.chip} title={title}>
+        <Text className={s.chipType}>{type}:</Text>
+        {onOpen ? (
+          <button type="button" className={s.chipLink} onClick={onOpen} title={`Open ${title}`}>
+            {value}
+          </button>
+        ) : (
+          <Text className={s.chipValue}>{value}</Text>
         )}
-      </div>
+        {!readOnly ? (
+          <Tooltip content="Remove" relationship="label">
+            <Button
+              className={s.chipRemove}
+              appearance="transparent"
+              size="small"
+              icon={<Dismiss12Regular />}
+              aria-label="Remove"
+              disabled={busy}
+              onClick={onRemove}
+            />
+          </Tooltip>
+        ) : null}
+      </span>
     </div>
   );
 }

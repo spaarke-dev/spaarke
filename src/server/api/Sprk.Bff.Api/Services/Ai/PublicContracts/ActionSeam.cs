@@ -124,7 +124,8 @@ public sealed class ActionSeam : IActionSeam
                     request.RecordId,
                     renderedMappings,
                     request.LegacyFields,
-                    renderedLookups),
+                    renderedLookups,
+                    request.ImpersonateSystemUserId),
                 cancellationToken);
 
             return new UpdateRecordResult(true, fieldsUpdated.ToArray(), null);

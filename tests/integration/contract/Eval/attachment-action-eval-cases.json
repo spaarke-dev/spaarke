@@ -1,0 +1,60 @@
+{
+  "$comment": "email-communication-intelligence-r1 task 041 (FR-13 / NFR-07 blocking merge gate) — the attachment-grounded action-extraction eval family, joined to the SAME Category=GoldenUtteranceEval merge gate via AttachmentActionEvalTests.cs (identical net-new-family pattern as the create-task-from-email / triage-email / email-propose families in this directory — no shared golden-utterances.json edit, no CI-YAML change; the trait IS the registration). No new ConsumerType is introduced — FR-13 REUSES the create-task-from-email Action + the ICommunicationCreateTaskAi facade + the IActionSeam.CreateTaskAsync create leg (the P2LoopInjection ConsumerTypes.All full-catalog forcing function is already satisfied by task 040's GU-140). What this family proves MECHANICALLY (no live model): (1) attachment-only-locator — an action present ONLY in an attachment is machine-verified to the attachment + a CODE-DERIVED page via the REAL AttachmentActionGate.VerifyAgainstAttachment (this is the NFR-07 heart: an action stated only in an attachment, cited to that attachment); (2) cost-gate — the deterministic NFR-08 pre-filter flags action-bearing attachments and skips inert ones via the REAL AttachmentActionGate.IsLikelyActionTrigger; (3) reuse-not-fork — no new Action / facade / ConsumerType / create mechanism (grep-verifiable); (4) deadline-confirm — a deadline-bearing attachment candidate reuses the DueDate.HasValue -> human-confirm branch (NFR-06/ADR-015). All cases are channel:'event' (invoked off the Communication enrichment path, no chat/loop projection).",
+  "schemaVersion": "attachment-action-eval@v1",
+  "cases": [
+    {
+      "caseId": "ATTACHACTION-001",
+      "family": "attachment-only-locator",
+      "ucId": "UC-F-1",
+      "channel": "event",
+      "utterance": "[email-attachment-action] an action stated ONLY in an attachment (not the subject/body) is machine-verified to the attachment and cited to a code-derived page",
+      "notes": "The NFR-07 heart: AttachmentActionGate.VerifyAgainstAttachment locates the verbatim cited span in a specific attachment page and returns (present:true, page:N) — the page is DERIVED by locating the span, never asserted by the model. A span present only in the email body (not the attachment) returns present:false (attachment-scoped, strictly stronger than the shipped merged-blob check). Proven against the REAL gate.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-create-task",
+        "actionCode": "create-task-from-email",
+        "attachmentScopedLocatorVerified": true
+      }
+    },
+    {
+      "caseId": "ATTACHACTION-002",
+      "family": "cost-gate",
+      "ucId": "UC-F-1",
+      "channel": "event",
+      "utterance": "[email-attachment-action] NFR-08 — only attachments whose text carries an action-trigger signal are sent for an LLM extraction pass; inert attachments are skipped",
+      "notes": "AttachmentActionGate.IsLikelyActionTrigger returns true for action-bearing text ('please countersign', 'file no later than') and false for an inert reference attachment (an org chart, a revenue summary) — the deterministic cost gate that bounds LLM spend. Proven against the REAL gate.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-create-task",
+        "costGateSkipsInertAttachments": true
+      }
+    },
+    {
+      "caseId": "ATTACHACTION-003",
+      "family": "reuse-not-fork",
+      "ucId": "UC-F-1",
+      "channel": "event",
+      "utterance": "[email-attachment-action] FR-13 reuses the create-task-from-email Action + ICommunicationCreateTaskAi facade + IActionSeam.CreateTaskAsync create leg — no new Action, facade, ConsumerType, or create mechanism",
+      "notes": "Grep-verifiable structural proof: CommunicationEnrichmentService's attachment step calls _createTaskAi.ExtractAsync and _actionSeam.CreateTaskAsync (the SAME reused primitives as Job C); there is NO new infra/dataverse/actions/*attachment*.json Action file; ConsumerTypes.cs adds NO attachment-action routed constant (the reused routing consumer is EmailCreateTask). §11 reuse-maximal.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-create-task",
+        "actionCode": "create-task-from-email",
+        "reusesShippedCreatePath": true
+      }
+    },
+    {
+      "caseId": "ATTACHACTION-004",
+      "family": "deadline-confirm",
+      "ucId": "UC-F-1",
+      "channel": "event",
+      "utterance": "[email-attachment-action] NFR-06/ADR-015 — a deadline-bearing attachment candidate is stored PENDING for human confirm, never auto-finalized",
+      "notes": "Structural proof: the attachment step reuses the SAME candidate.DueDate.HasValue branch — a non-null DueDate skips IActionSeam.CreateTaskAsync and leaves the sprk_emailreviewlog Proposed row OPEN. Proven at the seam level (EmailAttachmentActionSeamTests) against the REAL enrichment orchestration.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-create-task",
+        "deadlineBearingNeverAutoFinalizes": true
+      }
+    }
+  ]
+}

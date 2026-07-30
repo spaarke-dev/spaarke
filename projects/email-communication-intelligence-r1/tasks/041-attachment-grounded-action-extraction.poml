@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>Attachment-grounded action extraction — ground the Action on extracted attachment text (text-extraction → SPE → child-`sprk_document`), deterministically gated to action-triggers, cited to attachment + locator</title>
+    <phase>P4 — Job C + intent</phase>
+    <gate>after:040</gate>
+    <status>not-started</status>
+    <tags>bff-api, catalog</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Highest-difficulty AI in r1 (spec / plan §8) — extracting an action stated only in an attachment and citing it to the exact attachment locator. Heaviest eval-case obligation (NFR-07). Grounds a create on the Job C path (040), so the deadline→confirm + citation-verification obligations carry through. Deterministically gated to likely action-triggers for cost. BFF-touching: publish-size + CVE + Placement Justification; code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The hardest extraction problem in the project — action buried in attachment PDF text, cited precisely to attachment + locator, with a deterministic cost gate; reasoning quality on extraction accuracy + citation fidelity is decisive.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Grounds on 040's create-task path + shares `Services/Communication/` + `Services/Ai/PublicContracts/`; serialize after 040. `/conflict-check` before the PR.</parallel-reason>
+    <dependencies>040</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement **attachment-grounded action extraction** (FR-13): the triage/action Action grounds on **extracted attachment text** (via the existing text-extraction → SPE → child-`sprk_document` pipeline) and extracts an action stated **only in an attachment**, **deterministically gated to likely action-triggers** (for cost), and **cited to the attachment + locator**. The extracted action feeds the Job C create path (040).
+
+    Reach AI **only** through `Services/Ai/PublicContracts/` (ADR-013 facade) as a **code-directed Action + Binding** (ADR-039). MUST NOT land capability on the frozen node-graph engine. Reuse the existing attachment text-extraction pipeline (SPE → child-`sprk_document`) — do NOT build a new extractor. Reuse the Job C create path (040) for the resulting task/event — do NOT fork a second create mechanism.
+
+    **Cost gate (NFR-08-style discipline):** run the LLM extraction ONLY on attachments that a **deterministic pre-filter** flags as likely action-triggers (do not extract from every attachment). **Citation fidelity (NFR-06):** the extracted action MUST be cited to the attachment + a precise locator, and the cited text MUST be verified to exist in the extracted attachment text before proposing/creating; deadline-bearing entries require confirm (ADR-015). **NFR-04:** best-effort / non-fatal on the enrichment path.
+
+    This is the **highest-difficulty AI** in r1 — the **heaviest golden-utterance eval-case obligation** (NFR-07): the eval must demonstrate extraction of an action present ONLY in an attachment, cited to the attachment.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication + Ai domains, authoritative on the attachment text-extraction pipeline (text-extraction → SPE → child-`sprk_document`), the `Services/Ai/PublicContracts/` facade (ADR-013), Action + Binding authoring (ADR-039), the Job C create path (040), NFR-06 citation verification, NFR-07 eval obligation, and cost-gating discipline.
+  </role>
+
+  <goal>
+    Given an email with an attachment whose text (extracted via the existing SPE → child-`sprk_document` pipeline) states an action not present in the body, a deterministic pre-filter flags it as a likely action-trigger, the Action extracts the action cited to the attachment + locator (verified to exist), and it feeds the Job C create path (040) with deadline-bearing entries gated to confirm. Extraction runs only on flagged attachments (cost). A golden-utterance eval case demonstrates the attachment-only extraction + citation. Best-effort on the enrichment path. Build clean; unit + seam tests + the eval case pass; publish-size + CVE + Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      Some obligations/actions live only in an attachment (a PDF "please execute by Aug 15"), not the email body. FR-13 extracts those. The attachment text is already available via the existing pipeline (text-extraction → SPE → child-`sprk_document`) — this task grounds the Action on that extracted text, it does NOT build a new extractor. The resulting action feeds the Job C create path (040), so 040's citation + deadline→confirm obligations carry through, now cited to the attachment + locator.
+
+      This is the hardest AI problem in r1 (plan §8): the action is buried in document text and the citation must point precisely at the attachment span. To control cost, a deterministic pre-filter gates which attachments get an LLM extraction pass (do not extract from all). NFR-07: the eval-case obligation is heaviest here — the golden utterance must have the action ONLY in the attachment.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionSeam.cs (REUSE — facade seam; extraction Action + the create it feeds go through here)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ActionCore/TaskActionCore.cs (REUSE via 040 — the create path the extracted action feeds)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs (REFERENCE — enrichment path; extraction fires best-effort + cost-gated, NFR-04)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/AiClassificationRung.cs (REFERENCE — the triage signal / action-trigger context)</file>
+      <file>infra/dataverse/inputschemas/create-task-v1.input.schema.json (REUSE via 040 — the create the extracted action targets)</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md (Action + Binding authoring; RAG/attachment grounding)</file>
+      <file>projects/email-communication-intelligence-r1/tasks/040-job-c-email-triggered-work-create-task.poml (the create path this grounds on)</file>
+    </relevant-files>
+    <dependencies>040 (the Job C create path the extracted action feeds).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-13">Scope: ground the triage/action Action on extracted attachment text (existing text-extraction → SPE → child-`sprk_document`), deterministically gated to likely action-triggers; an action stated only in an attachment is extracted and cited to the attachment + locator.</constraint>
+    <constraint source="ADR-039">Scope: code-directed Action + Binding via catalog data; MUST NOT land capability on the frozen node-graph engine; reuse the existing attachment extraction pipeline (no new extractor) + the Job C create path (no forked create).</constraint>
+    <constraint source="ADR-013 / NFR-03">Scope: reach AI ONLY via `Services/Ai/PublicContracts/`; MUST NOT inject `IOpenAiClient`/`IPlaybookService` into Communication code.</constraint>
+    <constraint source="NFR-06 / ADR-015">Scope: the extracted action is cited to the attachment + a precise locator; the system verifies the cited text exists in the extracted attachment text before proposing/creating; deadline-bearing entries require confirm; nothing deadline-bearing auto-finalizes.</constraint>
+    <constraint source="NFR-08 / cost">Scope: run the LLM extraction ONLY on attachments a deterministic pre-filter flags as likely action-triggers; do NOT extract from every attachment; report the gating behavior.</constraint>
+    <constraint source="NFR-04 / ADR-045">Scope: extraction is best-effort / non-fatal — it MUST NOT fail the capture or send / enrichment path.</constraint>
+    <constraint source="NFR-07 / ADR-039">Scope: heaviest eval obligation — a golden-utterance eval case MUST demonstrate extraction of an action present ONLY in an attachment, cited to the attachment (blocking merge gate).</constraint>
+    <constraint source="project §10">Scope: BFF Hygiene — load `.claude/constraints/bff-extensions.md`; state Placement Justification (grounds on existing extraction + Job C path via PublicContracts; catalog data, no new service); publish-size delta vs ~49.63 MB (expected ≈0); no new HIGH CVE; update tests + seam tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionSeam.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ActionCore/TaskActionCore.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs</file>
+      <file>infra/dataverse/inputschemas/create-task-v1.input.schema.json</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-015-ai-data-governance.md</file>
+      <file>docs/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Ground on extracted attachment text" location="child-sprk_document (SPE text-extraction)">
+        Read the already-extracted attachment text (text-extraction → SPE → child-`sprk_document`); ground the extraction Action on it; do NOT build a new extractor.
+      </pattern>
+      <pattern name="Deterministic cost gate" location="Services/Communication/CommunicationEnrichmentService.cs">
+        A deterministic pre-filter flags likely action-trigger attachments; run the LLM extraction only on flagged attachments; the rest are skipped (cost).
+      </pattern>
+      <pattern name="Attachment-locator citation" location="Services/Ai/PublicContracts/">
+        Cite the extracted action to the attachment + a precise locator; verify the cited span exists in the extracted text before feeding the create path (NFR-06).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `.claude/constraints/bff-extensions.md`, `docs/guides/ai-guide-consumer-wiring.md` (attachment/RAG grounding), ADR-039, ADR-013, ADR-015, and 040's create-path decisions.</step>
+    <step order="2">Read the attachment extraction pipeline (text-extraction → SPE → child-`sprk_document`), `IActionSeam.cs`, and the enrichment path — identify where extracted attachment text is available + where the trigger fires best-effort.</step>
+    <step order="3">Implement the deterministic action-trigger pre-filter (which attachments get an LLM extraction pass) — cost gate; report the gating behavior.</step>
+    <step order="4">Author the extraction Action + Binding (catalog data) grounded on the extracted attachment text that produces an action + a citation to the attachment + a precise locator; verify the cited span exists in the extracted text before proceeding (NFR-06).</step>
+    <step order="5">Feed the extracted action into the Job C create path (040): create the task/event cited to the attachment; deadline-bearing entries require confirm (ADR-015). Reuse 040's create path — no forked create.</step>
+    <step order="6">Wire best-effort onto the enrichment path (NFR-04) — log + degrade on failure, never throw up capture/send.</step>
+    <step order="7">Add the golden-utterance eval case (NFR-07, heaviest): an action present ONLY in an attachment is extracted + cited to the attachment. Write unit + seam tests: (a) attachment-only action extracted + cited to attachment + locator; (b) NEGATIVE — an attachment NOT flagged by the pre-filter is not LLM-extracted (cost gate); (c) NEGATIVE — an extracted action whose cited text is not in the attachment is not created (citation verification); (d) deadline-bearing → confirm; (e) extraction failure does not fail the enrichment path (NFR-04). ADR-038 boundary mocks only.</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + targeted `dotnet test`; publish-size (report absolute + delta vs ~49.63 MB) + CVE scan.</step>
+    <step order="9.5">FULL-rigor gates: `code-review` (focus reuse-of-extractor + Job C create, cost gate, citation fidelity, facade discipline, non-fatal); `adr-check` against ADR-039 / ADR-013 / ADR-015 + spec FR-13 / NFR-04 / NFR-06 / NFR-07. Address Critical findings; cite Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (shared `Services/Communication/`; coordinate with 040 on the create path).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (041 ✅) + `current-task.md`; record decisions (pre-filter design, attachment-text grounding point, locator-citation approach, eval case).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the existing attachment text-extraction pipeline does not expose extracted text at the granularity needed to produce a precise attachment locator (so citation fidelity cannot be met without a new extractor), STOP and surface per root §6 / §6.5 rather than building a parallel extraction pipeline.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The text-extraction → SPE → child-`sprk_document` pipeline already extracts attachment text; the Job C create path (040) already creates cited tasks/events; the classification/triage signal (022) provides action-trigger context.</existing>
+    <extension>Yes — this is a new Action + Binding (catalog data) + a deterministic pre-filter, grounding on the existing extracted text + feeding the existing create path; no new extractor, no new create mechanism, no new service.</extension>
+    <cost-of-doing-nothing>Without attachment-grounded extraction, an action stated only in an attachment (a PDF deadline) is invisible to triage — the obligation is missed (FR-13 / Success Criterion 7 fails), the highest-value email-intelligence differentiator.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="read">Inspect the extraction pipeline, facade seam, Job C create path, enrichment path, wiring guide</tool>
+    <tool name="grep">Confirm reuse of the extractor + Job C create (no new extractor / forked create); confirm facade discipline</tool>
+    <tool name="edit">Implement the pre-filter + extraction Action/Binding + create wiring</tool>
+    <tool name="bash">Build, unit/seam tests, eval-case render, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ + Services/Ai/PublicContracts/ (UPDATED — deterministic action-trigger pre-filter + attachment-grounded extraction Action feeding the Job C create path, cited to attachment + locator, best-effort)</output>
+    <output type="config">infra/dataverse/ (extraction Action + Binding rows; heaviest golden-utterance eval case — attachment-only action)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ + tests/integration/seam/ — attachment-only-extracted-cited + cost-gate-skips-unflagged + citation-verified + deadline→confirm + non-fatal</output>
+    <output type="docs">PR description with §11 Component Justification + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An action stated ONLY in an attachment PDF is extracted and cited to the attachment + a precise locator, and feeds the Job C create path (040).</criterion>
+    <criterion testable="true">The LLM extraction runs ONLY on attachments a deterministic pre-filter flags as likely action-triggers; unflagged attachments are not extracted (cost gate, verifiable).</criterion>
+    <criterion testable="true">NEGATIVE: an extracted action whose cited text is not present in the extracted attachment text is not created (citation verification, NFR-06); deadline-bearing entries require confirm.</criterion>
+    <criterion testable="true">Reuses the existing extraction pipeline + the Job C create path — no new extractor, no forked create (grep-verifiable); AI reached only via `Services/Ai/PublicContracts/`; no frozen-engine landing.</criterion>
+    <criterion testable="true">Extraction is best-effort: a failure does NOT fail the capture or send / enrichment path (NFR-04).</criterion>
+    <criterion testable="true">The heaviest golden-utterance eval case (action ONLY in an attachment, cited to the attachment) exists and passes (NFR-07).</criterion>
+    <criterion testable="true">`dotnet build` clean; tests pass; publish-size delta ≈0 vs ~49.63 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Highest-difficulty AI in r1 (plan §8) with the heaviest eval obligation. Grounds on the existing extraction pipeline + the Job C create path (040) — reuse, do not rebuild. The deterministic cost gate + attachment-locator citation fidelity are the two decisive properties. Run `/conflict-check` before the PR (shared `Services/Communication/`).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files. Apply FULL rigor — Step 9.5 gates REQUIRED. Per §10 + §11: publish-size delta (baseline ~49.63 MB) + CVE + Placement + Component Justification in the PR. `/conflict-check` before the PR. Model tier `opus` @ effort `high`.</protocol>
+  </execution>
+</task>

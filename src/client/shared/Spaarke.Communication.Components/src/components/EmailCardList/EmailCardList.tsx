@@ -88,13 +88,11 @@ const useStyles = makeStyles({
     flex: '1 1 auto',
     minWidth: 0,
     color: tokens.colorNeutralForeground1,
-    fontWeight: tokens.fontWeightRegular,
+    // Sender address is always bold (owner UAT) — the primary identifier per card.
+    fontWeight: tokens.fontWeightSemibold,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-  },
-  fromUnread: {
-    fontWeight: tokens.fontWeightSemibold,
   },
   date: {
     flexShrink: 0,
@@ -102,7 +100,8 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
   },
   subject: {
-    color: tokens.colorNeutralForeground1,
+    // Subject in the brand (blue) color (owner UAT) so it reads as the actionable line.
+    color: tokens.colorBrandForeground1,
     fontWeight: tokens.fontWeightRegular,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -111,6 +110,12 @@ const useStyles = makeStyles({
   subjectUnread: {
     fontWeight: tokens.fontWeightSemibold,
   },
+  // Association review status dot, left of the sender (🔴 requires review ·
+  // 🟡 needs confirmation · 🟢 confirmed). Semantic tokens → dark-mode correct.
+  reviewDot: { flexShrink: 0, width: '8px', height: '8px', borderRadius: tokens.borderRadiusCircular },
+  reviewDotRed: { backgroundColor: tokens.colorPaletteRedForeground1 },
+  reviewDotYellow: { backgroundColor: tokens.colorPaletteMarigoldForeground1 },
+  reviewDotGreen: { backgroundColor: tokens.colorPaletteGreenForeground1 },
   preview: {
     color: tokens.colorNeutralForeground3,
     overflow: 'hidden',
@@ -231,8 +236,36 @@ export const EmailCardList: React.FC<EmailCardListProps> = ({
             onBlur={() => setFocusedId(prev => (prev === item.id ? undefined : prev))}
           >
             <div className={styles.cardHeaderRow}>
-              {unread && <span className={styles.unreadDot} role="img" aria-label="Unread" title="Unread" />}
-              <Text className={mergeClasses(styles.from, unread ? styles.fromUnread : undefined)} title={item.from}>
+              {item.reviewTone ? (
+                <span
+                  className={mergeClasses(
+                    styles.reviewDot,
+                    item.reviewTone === 'green'
+                      ? styles.reviewDotGreen
+                      : item.reviewTone === 'yellow'
+                        ? styles.reviewDotYellow
+                        : styles.reviewDotRed
+                  )}
+                  role="img"
+                  aria-label={
+                    item.reviewTone === 'green'
+                      ? 'Confirmed'
+                      : item.reviewTone === 'yellow'
+                        ? 'Needs confirmation'
+                        : 'Requires review'
+                  }
+                  title={
+                    item.reviewTone === 'green'
+                      ? 'Confirmed'
+                      : item.reviewTone === 'yellow'
+                        ? 'Needs confirmation'
+                        : 'Requires review'
+                  }
+                />
+              ) : unread ? (
+                <span className={styles.unreadDot} role="img" aria-label="Unread" title="Unread" />
+              ) : null}
+              <Text className={styles.from} title={item.from}>
                 {item.from}
               </Text>
               <Text className={styles.date}>{formatCardDate(item.date)}</Text>

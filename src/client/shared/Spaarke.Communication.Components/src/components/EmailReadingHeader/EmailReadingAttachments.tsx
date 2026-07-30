@@ -80,6 +80,7 @@ export const EmailReadingAttachments: React.FC<IEmailReadingAttachmentsProps> = 
   dataService,
   navigation,
   apiBaseUrl,
+  onCountChange,
 }) => {
   const s = useStyles();
 
@@ -105,11 +106,15 @@ export const EmailReadingAttachments: React.FC<IEmailReadingAttachmentsProps> = 
     void service
       .getFileAttachments(selectedId)
       .then(rows => {
-        if (!cancelled) setItems(rows);
+        if (cancelled) return;
+        setItems(rows);
+        onCountChange?.(rows.length);
       })
       .catch(err => {
         console.error('[EmailReadingAttachments] attachment load failed:', err);
-        if (!cancelled) setLoadError('Could not load attachments for this email.');
+        if (cancelled) return;
+        setLoadError('Could not load attachments for this email.');
+        onCountChange?.(0);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -117,6 +122,7 @@ export const EmailReadingAttachments: React.FC<IEmailReadingAttachmentsProps> = 
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onCountChange is a stable host callback; re-fetch keyed only on service/selection.
   }, [service, selectedId]);
 
   // ── Preview modal (mirrors CommunicationAttachmentsApp.tsx) ────────────────

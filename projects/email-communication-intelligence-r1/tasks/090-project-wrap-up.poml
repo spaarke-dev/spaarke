@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>Project wrap-up — README/status → Complete + 9 Success Criteria annotated, `/test-diet` gate, lessons-learned, TASK-INDEX reconciliation</title>
+    <phase>Wrap</phase>
+    <gate>done</gate>
+    <status>not-started</status>
+    <tags>wrapup</tags>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Project-close orchestration from the MAIN SESSION: status flip + 9 Success Criteria annotation, lessons-learned, the mandatory `/test-diet` reconciliation gate (root §7), and TASK-INDEX reconciliation. Writes project-close state + invokes the test-diet gate; no product code change. MINIMAL rigor with the explicit test-diet gate.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Documentation + gate orchestration against a known close-out sequence; no design judgment.</model-tier-reason>
+    <effort>low</effort>
+    <parallel-group>P6</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Main-session-only: runs the `/test-diet` gate + updates project-close state after ALL work tasks complete; cannot be delegated to a subagent (root §3 write boundary — touches project-close state + gates).</parallel-reason>
+    <dependencies>061</dependencies>
+  </metadata>
+
+  <prompt>
+    Close out `email-communication-intelligence-r1` from the MAIN SESSION only:
+
+    1. **README/status → Complete + graduation** — flip the project status to Complete; summarize what shipped (Phase 1–5: the 7-entity identifier rung + C-1 auto-file narrowing + report-card enablement; the `TRIAGE-EMAIL` Action + Binding + RAG + RI-confidence scorer + triage fields + `sprk_emailreviewlog`; Job B propose → apply(OBO) → audit + queue-feed; Job C create-task + attachment-grounded extraction + regarding-vs-related intent; the FR-15 shared/group mailbox capture spike + implementation) and **annotate each of the 9 spec Success Criteria** as met (or documented as owner-handoff / env-blocked / deferred per the 061 UAT report).
+
+    2. **`/test-diet` gate (MANDATORY, root §7)** — invoke `/test-diet` to reconcile every test added/modified during r1 (esp. the seam tests + eval cases + Job B negative/authorization tests + the FR-15 capture characterization guard) against the ADR-038 build-vs-maintain classifier: MAINTAIN-class tests stay at KEEP paths; SCAFFOLDING-class tests are emitted for deletion (`git rm`); AMBIGUOUS require reviewer judgment. The skill is read-only — it emits commands for the reviewer. Output: `notes/test-diet-report.md`. The wrap-up PR MUST cite this report.
+
+    3. **Lessons-learned** — author `notes/lessons-learned.md` capturing: the shared `Services/Communication/` + `Services/Ai/PublicContracts/` edit discipline (`/conflict-check` per PR; ADR-041/043/047 in-flight pinning); the code-directed Action + Binding approach (frozen node engine avoided); the Job B trust chain (allow-list + cite + verify-cited-text + OBO + audit); the ADR-024 path-A "related-to" relationship model; the C-1 auto-file narrowing (ADR-045 path-A); the RI-confidence hardcoded-0 fix; the FR-15 spike outcome (+ whether its escalation fired) + operator permission-grant handoff; publish-size trajectory vs ~49.63 MB; and any deferred items.
+
+    4. **Final TASK-INDEX reconciliation** — confirm every task (001–061) is ✅ (or explicitly documented as deferred / owner-handoff, e.g. operator schema creation or env-blocked UAT criteria); set `current-task.md` to "none — project complete".
+
+    Then confirm the project is complete and ready for `merge-to-master`.
+  </prompt>
+
+  <role>
+    Spaarke project lead running the main-session project-close protocol. Authoritative on the wrap-up sequence, the `/test-diet` gate (root §7), and TASK-INDEX reconciliation. Does NOT delegate to subagents (root §3 write boundary).
+  </role>
+
+  <goal>
+    Project status is Complete with the 9 Success Criteria annotated (per the 061 UAT report); `notes/lessons-learned.md` and `notes/test-diet-report.md` exist; the `/test-diet` gate has run and its report is cited; TASK-INDEX is fully reconciled; `current-task.md` is "none — project complete". The project is ready to merge to master.
+  </goal>
+
+  <context>
+    <background>
+      This is the project-close task. Per root §7, a `090-wrapup-*` task invokes `/test-diet` BEFORE marking the project complete — reconciling r1's test additions against the ADR-038 KEEP-path categories (the seam tests + eval cases + Job B negative/authorization tests + the FR-15 capture characterization guard are the bulk). r1 was substantial: an association rung + auto-file narrowing, a triage Action + RI-confidence scorer, the FULL Job B record-currency chain (propose → OBO apply → audit + queue-feed), Job C + attachment extraction + intent, and the FR-15 capture track. r1 built no UI — surfaces are r5's, so any surface verification is an r5/operator handoff.
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-intelligence-r1/README.md (status → Complete + 9 Success Criteria annotated)</file>
+      <file>projects/email-communication-intelligence-r1/notes/lessons-learned.md (NEW)</file>
+      <file>projects/email-communication-intelligence-r1/notes/test-diet-report.md (NEW — from /test-diet)</file>
+      <file>projects/email-communication-intelligence-r1/notes/uat-report.md (the 061 UAT results to annotate the criteria from)</file>
+      <file>projects/email-communication-intelligence-r1/tasks/TASK-INDEX.md</file>
+      <file>projects/email-communication-intelligence-r1/current-task.md</file>
+    </relevant-files>
+    <dependencies>061 (UAT complete — its report annotates the Success Criteria).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="root §7">A `090-wrapup-*` task MUST invoke `/test-diet` BEFORE marking the project complete; the wrap-up PR MUST cite `notes/test-diet-report.md` (or document the skip rationale). Skipping is a HARD WARNING.</constraint>
+    <constraint source="root §3">Main-session only — this task writes project-close state + runs the gate; do NOT delegate to a subagent.</constraint>
+    <constraint source="ADR-038">`/test-diet` classifies per the build-vs-maintain criteria; the skill is read-only (emits `git rm`/`git mv` for the reviewer; no auto-execute).</constraint>
+    <constraint source="project">Annotate the 9 Success Criteria from the 061 UAT report (met / owner-handoff / env-blocked / deferred); record the FR-15 spike outcome + operator permission-grant handoff + any deferred items in lessons-learned.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>projects/email-communication-intelligence-r1/tasks/TASK-INDEX.md</file>
+      <file>projects/email-communication-intelligence-r1/notes/uat-report.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1" name="Verify all tasks complete">Read `TASK-INDEX.md`; confirm every task (001–061) is ✅ (or explicitly documented as deferred / owner-handoff). If any remain 🔲/🔄 unexpectedly, STOP and report.</step>
+    <step order="2" name="Status → Complete + graduation">Update the project status to Complete; summarize the Phase 1–5 shipped scope + annotate the 9 spec Success Criteria as met / owner-handoff / env-blocked / deferred (from the 061 UAT report).</step>
+    <step order="3" name="/test-diet gate">Invoke `/test-diet`; produce `notes/test-diet-report.md` (MAINTAIN keep / SCAFFOLDING `git rm` / AMBIGUOUS reviewer-judgment). Do NOT auto-execute the emitted commands.</step>
+    <step order="4" name="Lessons-learned">Author `notes/lessons-learned.md` (shared-path edit discipline + conflict-check; code-directed Action + Binding; Job B trust chain; ADR-024 path-A related-to model; C-1 auto-file narrowing; RI-confidence hardcoded-0 fix; FR-15 spike outcome + escalation-fired + operator permission-grant handoff; publish-size trajectory vs ~49.63 MB; deferred items).</step>
+    <step order="5" name="Reconcile + reset">Mark task 090 ✅ in `TASK-INDEX.md`; confirm full reconciliation; set `current-task.md` to "none — project complete".</step>
+    <step order="6" name="Ready to merge">Confirm the project is complete and ready for `merge-to-master`; the wrap-up PR cites `notes/test-diet-report.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Verify task completion + gather close artifacts (UAT report, TASK-INDEX)</tool>
+    <tool name="edit">Status + graduation annotation; lessons-learned; TASK-INDEX; current-task</tool>
+    <tool name="test-diet">MANDATORY project-close test reconciliation gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-communication-intelligence-r1/README.md (UPDATED — status Complete + 9 Success Criteria annotated)</output>
+    <output type="docs">projects/email-communication-intelligence-r1/notes/lessons-learned.md (NEW)</output>
+    <output type="docs">projects/email-communication-intelligence-r1/notes/test-diet-report.md (NEW — from /test-diet)</output>
+    <output type="docs">projects/email-communication-intelligence-r1/tasks/TASK-INDEX.md + current-task.md (UPDATED — fully reconciled)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every task (001–061) is ✅ (or explicitly documented as deferred / owner-handoff) in `TASK-INDEX.md` before wrap-up completes.</criterion>
+    <criterion testable="true">Project status is Complete with a Phase 1–5 shipped-scope summary + the 9 Success Criteria annotated (from the 061 UAT report).</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` exists (incl. the Job B trust chain + the FR-15 spike outcome / operator permission-grant handoff).</criterion>
+    <criterion testable="true">`/test-diet` has run; `notes/test-diet-report.md` exists and is cited in the wrap-up PR; no emitted `git rm` auto-executed.</criterion>
+    <criterion testable="true">`current-task.md` is set to "none — project complete"; the project is ready for `merge-to-master`.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Main-session only (root §3). The `/test-diet` gate is mandatory per root §7 — skipping is a HARD WARNING that must be justified in the PR. Operator-created schema (`sprk_emailupdatefield`, `sprk_regardingreportcard`, RPTC row) + FR-15 permission grants + any env-blocked UAT criteria are documented as tracked owner-handoffs, not incomplete tasks. After this task, run `merge-to-master`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Main-session only. Apply MINIMAL rigor + the mandatory `/test-diet` gate (root §7) at Step 3. Do NOT delegate to a subagent. Cite `notes/test-diet-report.md` in the wrap-up PR. Model tier `sonnet` @ effort `low`.</protocol>
+  </execution>
+</task>

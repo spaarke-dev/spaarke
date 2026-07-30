@@ -306,6 +306,35 @@ public class AssociationMappingTests
 
     #endregion
 
+    #region Entity Type: sprk_reportcard
+
+    [Fact]
+    public async Task SendAsync_WithReportCardAssociation_SetsRegardingReportCardLookup()
+    {
+        // Arrange - report card is the 7th core record type (task 010 / FR-02);
+        // sprk_reportcard maps to the sprk_regardingreportcard lookup (verified live in task 001).
+        var reportCardId = Guid.NewGuid();
+        var service = CreateService();
+        var request = CreateRequestWithAssociations(new CommunicationAssociation
+        {
+            EntityType = "sprk_reportcard",
+            EntityId = reportCardId,
+            EntityName = "Q3 Report Card"
+        });
+
+        // Act
+        await service.SendAsync(request);
+
+        // Assert
+        _capturedEntity.Should().NotBeNull();
+        var entityRef = _capturedEntity!["sprk_regardingreportcard"] as EntityReference;
+        entityRef.Should().NotBeNull("sprk_reportcard maps to sprk_regardingreportcard lookup");
+        entityRef!.LogicalName.Should().Be("sprk_reportcard");
+        entityRef.Id.Should().Be(reportCardId);
+    }
+
+    #endregion
+
     #region Entity Type: sprk_invoice
 
     [Fact]
@@ -371,6 +400,7 @@ public class AssociationMappingTests
     [InlineData("sprk_project", "sprk_regardingproject")]
     [InlineData("sprk_analysis", "sprk_regardinganalysis")]
     [InlineData("sprk_budget", "sprk_regardingbudget")]
+    [InlineData("sprk_reportcard", "sprk_regardingreportcard")]
     [InlineData("sprk_invoice", "sprk_regardinginvoice")]
     [InlineData("sprk_workassignment", "sprk_regardingworkassignment")]
     public async Task SendAsync_WithEntityType_SetsCorrectLookupField(string entityType, string expectedLookupField)

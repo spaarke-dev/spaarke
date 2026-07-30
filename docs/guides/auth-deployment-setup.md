@@ -655,6 +655,8 @@ Test-ApplicationAccessPolicy `
 
 No App Service restart required.
 
+**Shared mailboxes (FR-15, `email-communication-intelligence-r1`)**: a shared mailbox is a Graph `User` object (sign-in disabled), so this exact procedure onboards it — no code change, no separate mechanism. Steps: (1) create/confirm the receive-enabled `sprk_communicationaccount` row for the shared mailbox's SMTP with `AccountType = SharedAccount` (already the default for that field); (2) run the `Add-DistributionGroupMember` command above with the shared mailbox's SMTP as `-Member`; (3) confirm `Test-ApplicationAccessPolicy` returns `Granted` for both the BFF app-reg and MI principals against that SMTP. `GraphSubscriptionManager` enumerates all receive-enabled accounts regardless of `AccountType` and subscribes to `users/{smtp}/mailFolders/{folder}/messages` unchanged, so no additional Graph app permission or code path is needed beyond what §5/§7 already grant.
+
 ### Common failure modes
 
 | Symptom | Cause | Fix |

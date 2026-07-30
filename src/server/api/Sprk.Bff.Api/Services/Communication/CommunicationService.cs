@@ -26,7 +26,7 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// so this orchestrator is free of provider (Microsoft.Graph) types — a future channel is added by
 /// registering a new sender/archiver, with no change here (NFR-04).
 /// </summary>
-public sealed class CommunicationService
+public sealed class CommunicationService : ICommunicationEnvelopeReader
 {
     private readonly CommunicationChannelDispatcher _channelDispatcher;
     private readonly ApprovedSenderValidator _senderValidator;
@@ -1814,6 +1814,7 @@ public sealed class CommunicationService
         ["sprk_project"] = ("sprk_regardingproject", "sprk_projects"),
         ["sprk_analysis"] = ("sprk_regardinganalysis", "sprk_analysises"),
         ["sprk_budget"] = ("sprk_regardingbudget", "sprk_budgets"),
+        ["sprk_reportcard"] = ("sprk_regardingreportcard", "sprk_reportcards"),
         ["sprk_invoice"] = ("sprk_regardinginvoice", "sprk_invoices"),
         ["sprk_workassignment"] = ("sprk_regardingworkassignment", "sprk_workassignments"),
         ["sprk_servicerequest"] = ("sprk_regardingservicerequest", "sprk_servicerequests"),

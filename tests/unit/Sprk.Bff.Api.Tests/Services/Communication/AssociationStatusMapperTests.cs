@@ -71,6 +71,12 @@ public class AssociationStatusMapperTests
     {
         // A substantive matter match ≥ threshold auto-files Resolved; the co-occurring contact fallback is
         // written too. (The contact no longer suppresses — nor is required for — the substantive auto-file.)
+        //
+        // C-1 DECOUPLING (021): the contact fallback here is identified via rung 2 (ParticipantCorrelation),
+        // which is no longer auto-file-eligible for the STATUS decision — but it IS still in the deterministic
+        // WRITE set (rung 0–3), so it is persisted alongside the auto-filed matter exactly as the shipped
+        // design specifies ("fallback matches are still WRITTEN"). r5's review surface displays it. This
+        // proves the C-1 narrowing changed only the auto-file STATUS, not the Resolved-branch write set.
         var matterId = Guid.NewGuid();
         var contactId = Guid.NewGuid();
         var mapper = AssociationTestSupport.Mapper(enabled: true, threshold: 0.85);
@@ -254,14 +260,17 @@ public class AssociationStatusMapperTests
     [Fact]
     public void Decide_TwoIndependentDeterministicRungsAgree_ReinforceOverThreshold_AutoFiles()
     {
-        // Neither 0.70 nor 0.65 alone reaches 0.85; noisy-OR = 1-(0.30)(0.35) = 0.895 ⇒ auto-file.
+        // C-1 (only rung 0 + rung 1 are auto-file-eligible): a rung-0 bare-numeric-band match (0.65,
+        // ExplicitReference) reinforcing with a rung-1 thread-inheritance match (0.70, ThreadContinuity) on
+        // the SAME field noisy-ORs to 1-(0.30)(0.35) = 0.895 ⇒ auto-file. Both contributing rungs are
+        // auto-file-eligible post-narrowing, so reinforcement across them still auto-files.
         var matterId = Guid.NewGuid();
         var mapper = AssociationTestSupport.Mapper(threshold: 0.85);
 
         var decision = mapper.Decide(
             new[]
             {
-                Match(MatterField, matterId, 0.70, RungKind.ParticipantCorrelation),
+                Match(MatterField, matterId, 0.70, RungKind.ThreadContinuity),
                 Match(MatterField, matterId, 0.65, RungKind.ExplicitReference),
             },
             CommunicationDirection.Incoming, tenantKey: null);
@@ -271,19 +280,111 @@ public class AssociationStatusMapperTests
         decision.Provenance.Decision.TopDeterministicConfidence.Should().BeApproximately(0.895, 0.01);
     }
 
+    // ── C-1 auto-file narrowing (rung 0 + rung 1 only; rung 2/3 → Suggested) ─────
+
+    [Fact]
+    public void Decide_Rung1ThreadContinuitySubstantiveMatch_AtOrAboveThreshold_AutoFiles()
+    {
+        // Rung 1 (thread inheritance) is one of the two C-1 auto-file-eligible rungs.
+        var matterId = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[] { Match(MatterField, matterId, 0.92, RungKind.ThreadContinuity) },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Resolved);
+        decision.AutoFiled.Should().BeTrue();
+        decision.RegardingWrites[MatterField].Id.Should().Be(matterId);
+    }
+
+    [Fact]
+    public void Decide_ParticipantCorrelationSubstantiveMatch_AtOrAboveThreshold_LandsSuggested_NotResolved()
+    {
+        // C-1 narrowing: a sender/participant-only match (rung 2), even at high confidence on a SUBSTANTIVE
+        // field (a membership-derived matter, not a fallback contact/org/account), is no longer
+        // auto-file-eligible by default — it still MATCHES but resolves to Suggested for human confirmation.
+        var matterId = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[] { Match(MatterField, matterId, 0.90, RungKind.ParticipantCorrelation) },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Suggested);
+        decision.AutoFiled.Should().BeFalse();
+        decision.RegardingWrites.Should().ContainKey(MatterField); // still written for review
+        decision.RegardingWrites[MatterField].Id.Should().Be(matterId);
+    }
+
+    [Fact]
+    public void Decide_StructuralDetectorSubstantiveMatch_AtOrAboveThreshold_LandsSuggested_NotResolved()
+    {
+        // C-1 narrowing: a structural-detector match (rung 3), even at high confidence on a substantive
+        // field, no longer auto-file-eligible by default — MATCHES but resolves to Suggested.
+        var matterId = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[] { Match(MatterField, matterId, 0.90, RungKind.StructuralDetector) },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Suggested);
+        decision.AutoFiled.Should().BeFalse();
+        decision.RegardingWrites.Should().ContainKey(MatterField); // still written for review
+        decision.RegardingWrites[MatterField].Id.Should().Be(matterId);
+    }
+
+    [Fact]
+    public void Decide_BareNumericExplicitReferenceWithoutReinforcement_LandsSuggested()
+    {
+        // Task 020's IdentifierReverseLookupRung emits bare-numeric matches at 0.65 confidence (below the
+        // 0.85 threshold) — a rung-0-class match with no same-field reinforcement is not strong enough alone
+        // to auto-file; it lands Suggested via the ordinary threshold mechanism (no separate flag needed).
+        var matterId = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[] { Match(MatterField, matterId, 0.65, RungKind.ExplicitReference) },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Suggested);
+        decision.AutoFiled.Should().BeFalse();
+        decision.RegardingWrites.Should().ContainKey(MatterField);
+    }
+
+    [Fact]
+    public void Decide_KillSwitchRung2And3AutoFileEnabledLegacyMode_ParticipantCorrelationAutoFiles()
+    {
+        // The C-1 narrowing is kill-switch-governed (ADR-018): toggling Rung2And3AutoFileEnabled = true
+        // restores the legacy pre-C-1 behavior, proving the narrowing is revertible without a redeploy.
+        var matterId = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(threshold: 0.85, rung2And3AutoFileEnabled: true);
+
+        var decision = mapper.Decide(
+            new[] { Match(MatterField, matterId, 0.90, RungKind.ParticipantCorrelation) },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Resolved);
+        decision.AutoFiled.Should().BeTrue();
+        decision.RegardingWrites[MatterField].Id.Should().Be(matterId);
+    }
+
     [Fact]
     public void Decide_SameRungKindTwice_DoesNotReinforce_TakesMaxOnly()
     {
         // Two matches from the SAME rung kind on the same target must NOT noisy-OR (that would let a rung
-        // inflate its own confidence). Max = 0.70 (< threshold) ⇒ Suggested, not Resolved.
+        // inflate its own confidence). Max = 0.70 (< threshold) ⇒ Suggested, not Resolved. Uses rung 1
+        // (ThreadContinuity, C-1 auto-file-eligible) so the deterministic confidence is non-zero and the
+        // max-not-noisy-OR assertion remains meaningful post-C-1-narrowing.
         var matterId = Guid.NewGuid();
         var mapper = AssociationTestSupport.Mapper(threshold: 0.85);
 
         var decision = mapper.Decide(
             new[]
             {
-                Match(MatterField, matterId, 0.70, RungKind.ParticipantCorrelation),
-                Match(MatterField, matterId, 0.70, RungKind.ParticipantCorrelation),
+                Match(MatterField, matterId, 0.70, RungKind.ThreadContinuity),
+                Match(MatterField, matterId, 0.70, RungKind.ThreadContinuity),
             },
             CommunicationDirection.Incoming, tenantKey: null);
 
@@ -359,6 +460,9 @@ public class AssociationStatusMapperTests
     [Fact]
     public void Decide_ComplementaryFields_WritesBothWhenResolved()
     {
+        // A rung-1 matter auto-files (Resolved) and its co-occurring rung-2 (ParticipantCorrelation) contact
+        // field is written alongside it — proving the deterministic WRITE set is the full rung 0–3 set,
+        // decoupled from the C-1 auto-file-STATUS narrowing (rung 0+1).
         var matterId = Guid.NewGuid();
         var personId = Guid.NewGuid();
         var mapper = AssociationTestSupport.Mapper(threshold: 0.85);
