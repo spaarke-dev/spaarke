@@ -82,7 +82,7 @@ import { Badge, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-c
 import { DocumentAddRegular, DocumentMultipleRegular, DocumentSearchRegular } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 
-import { ActionCard } from '@spaarke/ui-components';
+import { ActionCard, SprkAnalysisWorkType, ANALYSIS_REGARDING_TARGETS } from '@spaarke/ui-components';
 import type { ActionCardProps, AssociationResult } from '@spaarke/ui-components';
 import { buildBffApiUrl } from '@spaarke/auth';
 
@@ -94,25 +94,18 @@ import type { CreateAnalysisWizardData } from './CreateAnalysisWizardWidget';
 import type { DocumentViewerWidgetData } from './DocumentViewerWidget';
 
 // ---------------------------------------------------------------------------
-// sprk_worktype — raw Choice value, restated locally (ADR-012; see file header)
+// Regarding pre-set gating (ADR-024) — derived from the canonical shared catalog
 // ---------------------------------------------------------------------------
 
 /**
- * `sprk_worktype` — SprkAnalysisWorkType.AgreementAnalysis (task 011,
- * `src/solutions/SpaarkeAi/src/types/sprkAnalysis.ts`). Restated as a local raw
- * constant — this shared-lib widget cannot import the SpaarkeAi-solution-owned enum
- * (ADR-012: dependency direction is solution → shared lib, never the reverse). Mirrors
- * `CreateAnalysisWizardWidget`'s identical `DEFAULT_WORK_TYPE_VALUE` restatement.
+ * Regarding entity types the hub can pre-set on the wizard (entry case 2b, when
+ * opened in a Matter/Project/Document record context). Derived from the
+ * single-source `ANALYSIS_REGARDING_TARGETS` (`@spaarke/ui-components`, hoisted
+ * 2026-07-29 P2) — no local restatement. Any other host entity opens the hub unforced.
  */
-const WORK_TYPE_AGREEMENT_REVIEW = 100000000;
-
-/**
- * Regarding entity types the Analysis wizard can pre-set (mirrors the wizard's
- * own `ANALYSIS_REGARDING_ENTITY_TYPES` — Matter / Project / Document; ADR-024).
- * The hub only pre-sets regarding=parent (entry case 2b) when the launch's record
- * context is one of these; any other host entity opens the hub unforced.
- */
-const SUPPORTED_REGARDING_ENTITY_TYPES: ReadonlySet<string> = new Set(['sprk_matter', 'sprk_project', 'sprk_document']);
+const SUPPORTED_REGARDING_ENTITY_TYPES: ReadonlySet<string> = new Set(
+  ANALYSIS_REGARDING_TARGETS.map(t => t.entityType)
+);
 
 // ---------------------------------------------------------------------------
 // Grid configuration — sprk_gridconfiguration for the hub's Analysis grid
@@ -188,8 +181,9 @@ interface AnalysisSessionLookupResponse {
  * Restated locally rather than imported from
  * `src/solutions/SpaarkeAi/src/services/analysisFileResolution.ts` — that module is
  * SpaarkeAi-solution-owned and this shared-lib widget cannot import it (ADR-012:
- * dependency direction is solution → shared lib, never the reverse — see the identical
- * `WORK_TYPE_AGREEMENT_REVIEW` restatement above for the established precedent). Returns
+ * dependency direction is solution → shared lib, never the reverse; the shared analysis
+ * ENUMS/catalog are imported from `@spaarke/ui-components`, but this read-side field-hop
+ * helper stays local as it reads raw grid-row OData keys). Returns
  * `null` when the Analysis has no linked document — callers MUST treat that as "no file",
  * never fabricate a pointer.
  */
@@ -378,7 +372,7 @@ export const AnalysisHubWidget: React.FC<WorkspaceWidgetProps<AnalysisHubWidgetD
       type: 'widget_load',
       widgetType: 'create-analysis-wizard',
       widgetData: {
-        workTypeValue: WORK_TYPE_AGREEMENT_REVIEW,
+        workTypeValue: SprkAnalysisWorkType.AgreementAnalysis,
         workTypeLabel: 'Agreement Review',
         // 2b regarding pre-set (undefined in 2a → no forced regarding). The deep
         // Dataverse services (dataService/navigationService/searchUsers/

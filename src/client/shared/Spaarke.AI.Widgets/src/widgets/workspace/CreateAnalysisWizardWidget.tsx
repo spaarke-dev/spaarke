@@ -17,9 +17,11 @@
  *     steps card set" pattern already shipped in this shared lib).
  *
  * On Finish:
- *   1. Resolves the Step-1 document (upload via the existing BFF
- *      `/documents/upload` endpoint — same call DocumentUploadWizardWidget
- *      uses — OR the Step-1 existing-record pick).
+ *   1. Resolves the Step-1 document — either the shared `EntityCreationService`
+ *      upload path (`uploadFilesToSpe` → `PUT /api/obo/containers/{id}/files/{path}`
+ *      → `createDocumentRecords` → durable `sprk_document` + Document Profile), the
+ *      SAME proven path every Create*Wizard uses (WORKSPACE-ENTITY-CREATION-GUIDE.md),
+ *      OR the Step-1 existing-record pick.
  *   2. Creates the `sprk_analysis` record: name / description / work-type /
  *      access (owner) / the ADR-024 regarding resolver fields (via
  *      `applyResolverFields`) / `sprk_documentid` (ADR-007 hop — NEVER an SPE
@@ -88,6 +90,7 @@ import { CalendarCheckmarkRegular, CheckmarkCircleFilled, MailRegular } from '@f
 // built in CI); deep subpaths do not resolve under that mapping. The barrel
 // re-exports every symbol used below (components/index.ts).
 import {
+  ANALYSIS_REGARDING_TARGETS,
   AddTodoFollowOnStep,
   AssociateToStep,
   CreateRecordWizard,
@@ -95,6 +98,8 @@ import {
   EntityCreationService,
   LookupField,
   SendEmailFollowOnStep,
+  SprkAnalysisStatus,
+  SprkAnalysisWorkType,
   applyFieldMappings,
   applyResolverFields,
   createTodoRegardingChild,
@@ -120,44 +125,23 @@ import { useDispatchPaneEvent } from '../../events/useDispatchPaneEvent';
 // ---------------------------------------------------------------------------
 // Analysis-scoped regarding targets (ADR-024) — Matter / Project / Document
 // ---------------------------------------------------------------------------
-// Mirrors the three-field scope enumerated by
-// `src/solutions/SpaarkeAi/src/services/analysisRegardingResolver.ts`
-// (ANALYSIS_REGARDING_FIELDS: sprk_regardingmatter / sprk_regardingproject /
-// sprk_regardingdocument). This widget does not import that solution-owned
-// module (shared-lib code MUST NOT depend on a specific solution — ADR-012),
-// so the same three-entry catalog is restated here.
+// DERIVED from the canonical single-source `ANALYSIS_REGARDING_TARGETS`
+// (`@spaarke/ui-components`, hoisted 2026-07-29 P2). No local catalog restatement —
+// the shape adapters below just project the shared catalog into the two lookup
+// maps + the AssociateToStep option array this wizard consumes.
 
-const ANALYSIS_REGARDING_ENTITY_TYPES: readonly EntityTypeOption[] = [
-  { label: 'Matter', entityType: 'sprk_matter' },
-  { label: 'Project', entityType: 'sprk_project' },
-  { label: 'Document', entityType: 'sprk_document' },
-];
+const ANALYSIS_REGARDING_ENTITY_TYPES: readonly EntityTypeOption[] = ANALYSIS_REGARDING_TARGETS.map(t => ({
+  label: t.label,
+  entityType: t.entityType,
+}));
 
-const REGARDING_ENTITY_SET_BY_TYPE: Record<string, string> = {
-  sprk_matter: 'sprk_matters',
-  sprk_project: 'sprk_projects',
-  sprk_document: 'sprk_documents',
-};
+const REGARDING_ENTITY_SET_BY_TYPE: Record<string, string> = Object.fromEntries(
+  ANALYSIS_REGARDING_TARGETS.map(t => [t.entityType, t.entitySet])
+);
 
-const REGARDING_NAVPROP_HINT_BY_TYPE: Record<string, string> = {
-  sprk_matter: 'matter',
-  sprk_project: 'project',
-  sprk_document: 'document',
-};
-
-/**
- * `sprk_worktype` default — SprkAnalysisWorkType.AgreementAnalysis (task 011,
- * `src/solutions/SpaarkeAi/src/types/sprkAnalysis.ts`). Restated as a local
- * constant (not imported — see the `CreateAnalysisWizardData` doc comment on
- * `workTypeValue` for why) so the magic number reads with intent.
- */
-const DEFAULT_WORK_TYPE_VALUE = 100000000;
-
-/**
- * `sprk_analysisstatus` — SprkAnalysisStatus.InProgress (task 011). Restated
- * locally for the same reason as {@link DEFAULT_WORK_TYPE_VALUE}.
- */
-const ANALYSIS_STATUS_IN_PROGRESS = 1;
+const REGARDING_NAVPROP_HINT_BY_TYPE: Record<string, string> = Object.fromEntries(
+  ANALYSIS_REGARDING_TARGETS.map(t => [t.entityType, t.navPropHint])
+);
 
 // ---------------------------------------------------------------------------
 // Data payload shape
@@ -338,7 +322,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
   const authFetch = data?.authenticatedFetch;
   const bffBaseUrl = data?.bffBaseUrl;
   const navigationService = data?.navigationService;
-  const workTypeValue = data?.workTypeValue ?? DEFAULT_WORK_TYPE_VALUE; // Agreement Review
+  const workTypeValue = data?.workTypeValue ?? SprkAnalysisWorkType.AgreementAnalysis; // Agreement Review
   const workTypeLabel = data?.workTypeLabel ?? 'Agreement Review';
 
   const webApiAdapter = useMemo(() => (dataService ? buildWebApiAdapter(dataService) : null), [dataService]);
@@ -542,7 +526,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           // "Run the analysis" (scoped per this widget's header doc comment):
           // mark InProgress — the session/AI-execution binding is owned by
           // other tasks in this project (020–025).
-          sprk_analysisstatus: ANALYSIS_STATUS_IN_PROGRESS,
+          sprk_analysisstatus: SprkAnalysisStatus.InProgress,
           'sprk_documentid@odata.bind': `/sprk_documents(${documentId})`,
         };
 
