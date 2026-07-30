@@ -127,4 +127,63 @@ public sealed class ComposeShadowPatchEngineByteDiffSeamTests
             .Select(p => p.OuterXml)
             .ToList();
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // UAT #1B (task 051, recommendation A) — explicit guard that an interior edit PRESERVES numbering.xml
+    // byte-identical, so a doc whose numbering Word renders correctly keeps rendering correctly after a
+    // Compose save. The all-"1." symptom the operator saw was the PRE-050 renderer misroute re-authoring
+    // numbering from a lossy content model (task 050 fixed the routing); the byte-surgical engine never
+    // touches numbering.xml on a plain edit. The general InteriorInsert test above already proves this for
+    // every corpus doc via AllUntouchedPartsByteIdentical (which includes numbering.xml); this names the
+    // guarantee explicitly against the interrupted-numbering fixture so a future regression is unmistakable.
+    // Native "author computed numbering into OOXML for docs Word itself renders wrong" is deferred to R6 (see
+    // notes/task-051-deviations.md) — no such case exists in the corpus (nda-interrupted-clauses renders 1→6
+    // correctly in Word per the corpus manifest).
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    [Fact]
+    public void InteriorEdit_OnInterruptedNumberingDoc_LeavesNumberingXmlByteIdentical_UAT1B()
+    {
+        var path = ComposeCorpusFixtureLocator.EnumerateDocumentPaths()
+            .FirstOrDefault(p => string.Equals(Path.GetFileName(p), "nda-interrupted-clauses.docx", StringComparison.OrdinalIgnoreCase));
+        if (path is null)
+        {
+            return; // fixture not present in this checkout (LFS) — the general corpus test still covers it.
+        }
+
+        var original = ComposeCorpusFixtureLocator.LoadVerifiedBytes(path);
+        var (targetParaId, _) = ReadParagraphSnapshot(original);
+        targetParaId.Should().NotBeNull("the interrupted-numbering fixture must have an addressable paragraph to edit");
+
+        var beforeNumbering = ReadNumberingPartBytes(original);
+        beforeNumbering.Should().NotBeNull("the fixture must carry a numbering.xml part (it uses list numbering)");
+
+        var log = new ComposeOperationLog
+        {
+            Operations = new ComposeOperation[]
+            {
+                new InsertTextOperation { ParaId = targetParaId!, At = new ComposeRunPoint(0, 0), Text = "[UAT-1B]" },
+            },
+        };
+
+        var patched = _engine.Apply(original, log, author: "Seam", timestamp: When);
+
+        var afterNumbering = ReadNumberingPartBytes(patched);
+        afterNumbering.Should().Equal(beforeNumbering,
+            "an interior text edit must leave numbering.xml byte-identical — the save preserves the source doc's Word-correct numbering (UAT #1B); numbering is only ever authored for explicit setBlockAttr List ops, never a plain insert");
+    }
+
+    /// <summary>Returns the NumberingDefinitionsPart raw bytes (null if the package has no numbering part).</summary>
+    private static byte[]? ReadNumberingPartBytes(byte[] docxBytes)
+    {
+        using var doc = WordprocessingDocument.Open(new MemoryStream(docxBytes, writable: false), isEditable: false);
+        var numberingPart = doc.MainDocumentPart?.NumberingDefinitionsPart;
+        if (numberingPart is null)
+        {
+            return null;
+        }
+        using var stream = numberingPart.GetStream();
+        using var ms = new MemoryStream();
+        stream.CopyTo(ms);
+        return ms.ToArray();
+    }
 }

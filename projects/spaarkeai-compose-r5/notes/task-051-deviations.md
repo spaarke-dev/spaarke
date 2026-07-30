@@ -1,7 +1,16 @@
-# Task 051 — UAT #1B persist computed numbering to OOXML — ESCALATION (§6.5)
+# Task 051 — UAT #1B persist computed numbering to OOXML — RESOLVED (option A)
 
-> **Status**: 🔔 ESCALATED — the POML escalation trigger fired. Awaiting owner decision.
+> **Status**: ✅ RESOLVED — owner chose **option A** (2026-07-30): reduced scope + defer native authoring to R6.
 > **Date**: 2026-07-30 · Rigor FULL · opus/xhigh.
+
+## Resolution (option A, implemented)
+- **(ii) explicit #1B guard added** — `ComposeShadowPatchEngineByteDiffSeamTests.InteriorEdit_OnInterruptedNumberingDoc_LeavesNumberingXmlByteIdentical_UAT1B`: loads `nda-interrupted-clauses.docx`, applies an interior insert via the real engine, asserts `numbering.xml` is **byte-identical** before/after. Proves 050's byte-surgical save preserves the source doc's Word-correct numbering. (The general InteriorInsert corpus test already covered this via `AllUntouchedPartsByteIdentical`; this names it explicitly for #1B.) Byte-diff seam suite 17/17.
+- **(i) fresh-doc re-UAT** — operator action on re-deploy (a fresh upload edited via the post-050 tracked path preserves numbering; mis-stamped docs from the buggy build are excluded per task-050's known limitation).
+- **(iii) native-divergent authoring DEFERRED to R6** — gated on an owner-supplied fixture that **Word itself** renders wrong (none exists in the corpus; the R4.5 engine faithfully mirrors Word, so there is no divergence to author around without forking the numbering algorithm — R5-D4 tension + byte-diff/read-engine risk). Design to prototype then: per-paragraph `numPr` + synthesized `num`/`startOverride`, scoped to divergent paragraphs only.
+
+---
+
+## Original escalation record (why A was the right call)
 
 ## Why this escalates
 The owner scoped 051 IN ("investigate authoring computed numbering back into numbering.xml now"). A read-only feasibility investigation found the **premise is largely empty** and a safe implementation is **not feasible as specified** — the POML's own escalation trigger ("if authoring cannot be scoped to divergent paragraphs without regressing I-4/byte-diff or touching the R4.5 read engine, STOP and escalate") fires. Silent scope-reduction is forbidden (CLAUDE.md §6.5), so this surfaces for a decision.

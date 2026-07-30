@@ -37,7 +37,7 @@
 | 041 | No-regression + publish-size hardening gate | 4 Hardening | ✅ | STANDARD | sonnet/high | 010,011,012,013,014,020,021,022,030,031,032,033,040 | ❌ aggregates all |
 | 042 | Deploy (master-with-R4.5) + operator UAT | 4 Hardening | ✅ | FULL | sonnet/high | 041 | ❌ deploy |
 | 050 | UAT #1A redline routing + origin fix (SEV-1) | 5 UAT remediation | ✅ | FULL | opus/xhigh | 042 | ❌ shared ComposeService |
-| 051 | UAT #1B persist computed numbering to OOXML | 5 UAT remediation | ⛔🔔 | FULL | opus/xhigh | 050 | ❌ shared engine/projection |
+| 051 | UAT #1B numbering — option A (byte-identity guard; native authoring → R6) | 5 UAT remediation | ✅ | FULL | opus/xhigh | 050 | ❌ shared engine/projection |
 | 052 | UAT #10/#11 Word/WOPI lock — honest UX + Retry/Reload | 5 UAT remediation | ✅ | FULL | opus/high | 042 | ❌ shared endpoints+workspace |
 | 053 | UAT #5 external-change visibilitychange + reload button | 5 UAT remediation | ✅ | FULL | sonnet/high | 042 | ❌ shared workspace/toolbar |
 | 054 | UAT #9 refresh-profile button gate relax | 5 UAT remediation | ✅ | STANDARD | sonnet/high | 042 | ❌ shared workspace/toolbar |
