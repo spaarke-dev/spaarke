@@ -4,7 +4,7 @@
     <title>G11 — Track-changes-off keeps imported/AI redlines visible (view-only)</title>
     <phase>3 Concurrency + UX</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Client-only view-only decoration change in Spaarke.Compose.Components; no persistence change, no BFF, no op-catalog change. Modifies an existing extension + toolbar toggle on an existing component surface.</rigor-reason>
     <model-tier>sonnet</model-tier>

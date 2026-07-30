@@ -31,7 +31,7 @@
 | 022 | G7 Save-Version / Save-New split-button | 2 Lifecycle | ✅ | FULL | sonnet/high | 020 | ❌ shared service+workspace |
 | 030 | G8 external-change refresh + remount banner | 3 Concurrency/UX | ✅ | FULL | sonnet/high | 020 | ❌ ComposeEditor overlap (031) |
 | 031 | G9 comment pane scroll-sync | 3 Concurrency/UX | ✅ | STANDARD | sonnet/high | none | ❌ ComposeEditor overlap (030) |
-| 032 | G11 track-changes-off keeps redlines visible | 3 Concurrency/UX | 🔲 | STANDARD | sonnet/high | none | ❌ shared TrackChangesExtension+toolbar |
+| 032 | G11 track-changes-off keeps redlines visible | 3 Concurrency/UX | ✅ | STANDARD | sonnet/high | none | ❌ shared TrackChangesExtension+toolbar |
 | 033 | G5 hyperlinks (authored render + edit op, both paths) | 3 Concurrency/UX | 🔲 | FULL | opus/high | 004 | ❌ shared renderer+catalog+engine |
 | 040 | G10 profile re-run (reload + manual button) | 4 Hardening | 🔲 | FULL | sonnet/high | 020 | ❌ shared service |
 | 041 | No-regression + publish-size hardening gate | 4 Hardening | 🔲 | STANDARD | sonnet/high | 010,011,012,013,014,020,021,022,030,031,032,033,040 | ❌ aggregates all |
