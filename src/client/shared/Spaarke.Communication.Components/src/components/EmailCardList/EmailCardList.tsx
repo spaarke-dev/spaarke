@@ -190,8 +190,14 @@ export const EmailCardList: React.FC<EmailCardListProps> = ({
           <div key={`email-skeleton-${index}`} className={styles.skeletonCard}>
             <Skeleton aria-label="Loading email">
               <SkeletonItem shape="rectangle" style={{ width: '40%', height: '12px' }} />
-              <SkeletonItem shape="rectangle" style={{ width: '70%', height: '12px', marginTop: tokens.spacingVerticalXS }} />
-              <SkeletonItem shape="rectangle" style={{ width: '90%', height: '10px', marginTop: tokens.spacingVerticalXS }} />
+              <SkeletonItem
+                shape="rectangle"
+                style={{ width: '70%', height: '12px', marginTop: tokens.spacingVerticalXS }}
+              />
+              <SkeletonItem
+                shape="rectangle"
+                style={{ width: '90%', height: '10px', marginTop: tokens.spacingVerticalXS }}
+              />
             </Skeleton>
           </div>
         ))}
@@ -264,7 +270,10 @@ export const EmailCardList: React.FC<EmailCardListProps> = ({
               </Text>
               <Text className={styles.date}>{formatCardDate(item.date)}</Text>
             </div>
-            <Text className={mergeClasses(styles.subject, unread ? styles.subjectUnread : undefined)} title={item.subject}>
+            <Text
+              className={mergeClasses(styles.subject, unread ? styles.subjectUnread : undefined)}
+              title={item.subject}
+            >
               {item.subject}
             </Text>
             <Text className={styles.preview} title={item.preview}>

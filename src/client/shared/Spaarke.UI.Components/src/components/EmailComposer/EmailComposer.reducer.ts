@@ -506,9 +506,7 @@ export function emailComposerReducer(state: EmailComposerState, action: EmailCom
       const key = `${action.entityType}:${action.entityId}`.toLowerCase();
       return {
         ...state,
-        associations: state.associations.filter(
-          a => `${a.entityType}:${a.entityId}`.toLowerCase() !== key
-        ),
+        associations: state.associations.filter(a => `${a.entityType}:${a.entityId}`.toLowerCase() !== key),
         isDirty: true,
       };
     }

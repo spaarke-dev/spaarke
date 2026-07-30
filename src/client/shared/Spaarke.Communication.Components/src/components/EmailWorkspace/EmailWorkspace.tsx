@@ -148,7 +148,11 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
   );
 
   // Compose/reply/forward/new + "Open full form" — the ONE canonical composer.
-  const { actions: composeActions, composerDialog, openFullForm } = useEmailComposeActions({
+  const {
+    actions: composeActions,
+    composerDialog,
+    openFullForm,
+  } = useEmailComposeActions({
     authenticatedFetch,
     bffBaseUrl,
     dataService,

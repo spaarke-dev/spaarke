@@ -28,15 +28,7 @@
  * (ADR-022 / NFR-05): `React.FC` + standard hooks, no `as React.ComponentType`.
  */
 import * as React from 'react';
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Button,
-  Skeleton,
-  SkeletonItem,
-  Tooltip,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Text, Button, Skeleton, SkeletonItem, Tooltip } from '@fluentui/react-components';
 import { ErrorCircle24Regular, ArrowClockwise16Regular, Info16Regular } from '@fluentui/react-icons';
 import { sanitizeEmailHtml } from '@spaarke/ui-components';
 import { authenticatedFetch as defaultAuthenticatedFetch } from '@spaarke/auth';
@@ -146,11 +138,7 @@ const useStyles = makeStyles({
 });
 
 /** Internal render phase — one of loading / eml / fallback / record-error. */
-type Phase =
-  | { kind: 'loading' }
-  | { kind: 'eml'; html: string }
-  | { kind: 'fallback' }
-  | { kind: 'record-error' };
+type Phase = { kind: 'loading' } | { kind: 'eml'; html: string } | { kind: 'fallback' } | { kind: 'record-error' };
 
 /**
  * Build the relative `eml-render` path. `authenticatedFetch` prefixes `/api`
@@ -232,11 +220,7 @@ export const EmailBodyView: React.FC<EmailBodyViewProps> = ({
           <ErrorCircle24Regular className={s.errorIcon} aria-hidden="true" />
           <Text>This email couldn&apos;t be loaded.</Text>
           {onRetryRecord ? (
-            <Button
-              appearance="secondary"
-              icon={<ArrowClockwise16Regular />}
-              onClick={onRetryRecord}
-            >
+            <Button appearance="secondary" icon={<ArrowClockwise16Regular />} onClick={onRetryRecord}>
               Retry
             </Button>
           ) : null}
@@ -248,12 +232,7 @@ export const EmailBodyView: React.FC<EmailBodyViewProps> = ({
   if (phase.kind === 'loading') {
     return (
       <div className={s.root}>
-        <Skeleton
-          className={s.skeleton}
-          aria-label="Loading email"
-          role="status"
-          data-testid="email-body-loading"
-        >
+        <Skeleton className={s.skeleton} aria-label="Loading email" role="status" data-testid="email-body-loading">
           <SkeletonItem className={s.skeletonLine} style={{ width: '90%' }} />
           <SkeletonItem className={s.skeletonLine} style={{ width: '75%' }} />
           <SkeletonItem className={s.skeletonLine} style={{ width: '82%' }} />

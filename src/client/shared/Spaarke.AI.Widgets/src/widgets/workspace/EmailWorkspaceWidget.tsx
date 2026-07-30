@@ -85,10 +85,7 @@ export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
     () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: bffBaseUrl ?? undefined }),
     [authenticatedFetch, bffBaseUrl]
   );
-  const dataverseUrl = React.useMemo(
-    () => getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '',
-    []
-  );
+  const dataverseUrl = React.useMemo(() => getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '', []);
 
   if (!webApi) {
     // No Dataverse host available (e.g. a non-MDA dev shell). EmailWorkspace's
