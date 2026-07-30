@@ -92,6 +92,8 @@ export type {
   IAttachmentItem,
   IRecordLookupTarget,
   IPickedRecord,
+  IEmailTemplateSummary,
+  IEmailTemplateRenderResult,
   IWizardContext,
   IRecipient,
   ValidationErrorCode,

@@ -28,6 +28,8 @@ import type {
   IRecordLookupTarget,
   IPickedRecord,
   IRecipient,
+  IEmailTemplateSummary,
+  IEmailTemplateRenderResult,
 } from '@spaarke/ui-components';
 import type { IResolverWriteContext } from '../../logic/connections';
 
@@ -106,6 +108,18 @@ export interface EmailWorkspaceProps {
    * display-only.
    */
   onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
+  /**
+   * Compose template picker (Wave E) — `onListEmailTemplates` lists OOB `template` records,
+   * `onRenderEmailTemplate` renders the chosen one (merging field codes from the primary
+   * regarding). Forwarded to the composer via `useEmailComposeActions`. Mount-supplied Xrm/BFF
+   * handlers; omit either → the toolbar template button is hidden.
+   */
+  onListEmailTemplates?: () => Promise<IEmailTemplateSummary[]>;
+  onRenderEmailTemplate?: (args: {
+    templateId: string;
+    regardingEntityType?: string;
+    regardingRecordId?: string;
+  }) => Promise<IEmailTemplateRenderResult>;
   /**
    * The signed-in user's mailbox address (item 3) — the compose "From:" row defaults to
    * send-as the current user and shows this address. Mount-resolved (Xrm). Optional.

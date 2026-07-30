@@ -24,6 +24,8 @@ import type {
   IRecordLookupTarget,
   IPickedRecord,
   IRecipient,
+  IEmailTemplateSummary,
+  IEmailTemplateRenderResult,
 } from '@spaarke/ui-components';
 import type { EmailToolbarActionHandlers } from '../EmailReadingPaneShell';
 import type { ComposerFields } from '../../logic/actions';
@@ -90,6 +92,19 @@ export interface EmailComposeActionsDeps {
    * omitted → local picks stay display-only.
    */
   onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
+  /**
+   * Compose template picker (Wave E). `onListEmailTemplates` lists selectable OOB `template`
+   * records; `onRenderEmailTemplate` renders the chosen one (merging field codes from the
+   * primary regarding). Forwarded verbatim to the composer for ALL modes. Optional
+   * (host-supplied Xrm/BFF handlers via `createXrmEmailComposeHandlers`); omit either → the
+   * toolbar template button is hidden.
+   */
+  onListEmailTemplates?: () => Promise<IEmailTemplateSummary[]>;
+  onRenderEmailTemplate?: (args: {
+    templateId: string;
+    regardingEntityType?: string;
+    regardingRecordId?: string;
+  }) => Promise<IEmailTemplateRenderResult>;
   /**
    * The signed-in user's mailbox address (item 3). The email surface defaults the composer's
    * From to send-as the current user; passing this shows the real address in the "From:" row

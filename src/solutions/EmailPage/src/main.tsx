@@ -333,6 +333,8 @@ function Root() {
         onLookupRecord={composeHandlers.onLookupRecord}
         onAddRelationship={composeHandlers.onAddRelationship}
         onUploadLocalAttachment={composeHandlers.onUploadLocalAttachment}
+        onListEmailTemplates={composeHandlers.onListEmailTemplates}
+        onRenderEmailTemplate={composeHandlers.onRenderEmailTemplate}
         fromMailbox={fromMailbox}
         dataverseUrl={dataverseUrl}
         initialSelectedId={launch.initialSelectedId}

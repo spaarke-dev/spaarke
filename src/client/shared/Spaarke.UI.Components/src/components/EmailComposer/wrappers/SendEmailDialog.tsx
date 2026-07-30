@@ -28,6 +28,8 @@ import type {
   IRecordLookupTarget,
   IPickedRecord,
   IRecipient,
+  IEmailTemplateSummary,
+  IEmailTemplateRenderResult,
 } from '../EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import type {
@@ -128,6 +130,18 @@ export interface ISendEmailDialogProps {
    * not shown.
    */
   onAddRelationship?: () => Promise<IPickedRecord | null>;
+  /**
+   * Compose template picker (Wave E). `onListEmailTemplates` lists selectable OOB
+   * `template` records; `onRenderEmailTemplate` renders the chosen one (merging field
+   * codes from the primary regarding). Both forwarded to the engine via `...composerProps`;
+   * omit either → the toolbar template button is hidden.
+   */
+  onListEmailTemplates?: () => Promise<IEmailTemplateSummary[]>;
+  onRenderEmailTemplate?: (args: {
+    templateId: string;
+    regardingEntityType?: string;
+    regardingRecordId?: string;
+  }) => Promise<IEmailTemplateRenderResult>;
   /**
    * Resolve a locally-picked file to a governed `sprk_document` (item 9b) so it
    * flows into the send payload. Forwarded verbatim to the engine via the

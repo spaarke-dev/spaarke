@@ -20,7 +20,13 @@
 import { getXrm } from '../../services/xrmGlobal';
 import { EntityCreationService, type AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
-import type { IRecordLookupTarget, IPickedRecord, IRecipient } from './EmailComposer.types';
+import type {
+  IRecordLookupTarget,
+  IPickedRecord,
+  IRecipient,
+  IEmailTemplateSummary,
+  IEmailTemplateRenderResult,
+} from './EmailComposer.types';
 
 /**
  * Record-lookup targets offered by the composer's "insert a link to a record" /
@@ -69,6 +75,22 @@ export interface XrmEmailComposeHandlers {
    * container per deployment, resolved from the current user's owning BU).
    */
   onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
+  /**
+   * List OOB Dataverse `template` records for the compose template picker (Wave E). Xrm-only —
+   * always present. The composer's template button also needs {@link onRenderEmailTemplate}
+   * (auth + BFF), so the button stays hidden when render is unavailable (e.g. the harness).
+   */
+  onListEmailTemplates: () => Promise<IEmailTemplateSummary[]>;
+  /**
+   * Render a chosen template via the BFF (`POST /api/communications/template/render`), merging
+   * `{!entity.field}` codes from the primary regarding. Only present when `authenticatedFetch` +
+   * `bffBaseUrl` are supplied — omitted otherwise (composer hides the template button).
+   */
+  onRenderEmailTemplate?: (args: {
+    templateId: string;
+    regardingEntityType?: string;
+    regardingRecordId?: string;
+  }) => Promise<IEmailTemplateRenderResult>;
 }
 
 /** Best-effort SPE upload never reads this — map for display parity only, default 'pdf'. */
@@ -242,11 +264,57 @@ export function createXrmEmailComposeHandlers(options?: {
         }
       : undefined;
 
+  // Template picker (Wave E): LIST the OOB `template` records via Xrm.WebApi (host-only, no auth),
+  // and RENDER a chosen one via the BFF so `{!entity.field}` codes merge from the primary regarding.
+  const onListEmailTemplates = async (): Promise<IEmailTemplateSummary[]> => {
+    const xrm = getXrm();
+    if (!xrm?.WebApi) return [];
+    try {
+      const res = await xrm.WebApi.retrieveMultipleRecords('template', '?$select=templateid,title&$orderby=title asc');
+      return (res?.entities ?? [])
+        .map((e: Record<string, unknown>) => ({
+          id: String(e.templateid ?? ''),
+          name: (e.title as string) || '(untitled)',
+        }))
+        .filter((t: IEmailTemplateSummary) => t.id.length > 0);
+    } catch (err) {
+      console.warn('[EmailCompose] template list failed:', err);
+      return [];
+    }
+  };
+
+  const onRenderEmailTemplate =
+    authenticatedFetch && bffBaseUrl
+      ? async (args: {
+          templateId: string;
+          regardingEntityType?: string;
+          regardingRecordId?: string;
+        }): Promise<IEmailTemplateRenderResult> => {
+          const base = bffBaseUrl.replace(/\/+$/, '');
+          const resp = await authenticatedFetch(`${base}/api/communications/template/render`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              templateId: args.templateId,
+              regardingEntityType: args.regardingEntityType,
+              regardingRecordId: args.regardingRecordId,
+            }),
+          });
+          if (!resp.ok) {
+            throw new Error(`Template render failed (${resp.status})`);
+          }
+          const data = (await resp.json()) as Partial<IEmailTemplateRenderResult>;
+          return { subject: data.subject ?? '', body: data.body ?? '', isHtml: !!data.isHtml };
+        }
+      : undefined;
+
   return {
     recordLookupCatalog: EMAIL_RECORD_LOOKUP_CATALOG,
     onLookupRecipients,
     onLookupRecord,
     onAddRelationship,
     onUploadLocalAttachment,
+    onListEmailTemplates,
+    onRenderEmailTemplate,
   };
 }

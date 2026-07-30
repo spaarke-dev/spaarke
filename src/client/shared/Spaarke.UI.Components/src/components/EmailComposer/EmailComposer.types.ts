@@ -132,6 +132,29 @@ export interface IPickedRecord {
   sizeBytes?: number;
 }
 
+/**
+ * A selectable email template (Wave E, owner UAT 2026-07-30). Minimal shape the compose
+ * template picker needs to LIST OOB Dataverse `template` records — the host resolves these
+ * via `Xrm.WebApi` (see `createXrmEmailComposeHandlers.onListEmailTemplates`).
+ */
+export interface IEmailTemplateSummary {
+  /** Dataverse `template` row id (`templateid`). */
+  id: string;
+  /** Display title (`title`). */
+  name: string;
+}
+
+/**
+ * The RENDERED template (Wave E). Returned by the host's render callback, which calls the
+ * BFF `POST /api/communications/template/render` so `{!entity.field}` field codes merge from
+ * the confirmed PRIMARY regarding record. `isHtml` drives the composer body format.
+ */
+export interface IEmailTemplateRenderResult {
+  subject: string;
+  body: string;
+  isHtml: boolean;
+}
+
 /** Files a hosting wizard has already uploaded, offered as a pre-checked attachment source. */
 export interface IWizardContext {
   uploadedFiles: {
@@ -412,6 +435,25 @@ export interface IEmailComposerProps {
    * "Related to" section. Context-agnostic (ADR-012): the host owns the Xrm bridge + write.
    */
   onAddRelationship?: () => Promise<IPickedRecord | null>;
+
+  // — Template picker (Wave E, owner UAT 2026-07-30) — additive/optional —
+  /**
+   * Lists selectable email templates (OOB Dataverse `template` records). Host-resolved via
+   * `Xrm.WebApi`. The toolbar template button renders ONLY when BOTH this and
+   * {@link onRenderEmailTemplate} are supplied AND the composer is editable; omit either → hidden.
+   */
+  onListEmailTemplates?: () => Promise<IEmailTemplateSummary[]>;
+  /**
+   * Renders a chosen template — the host calls the BFF `POST /api/communications/template/render`,
+   * passing the confirmed PRIMARY regarding (`associations[0]`) so `{!entity.field}` codes merge
+   * from that record — and returns the subject/body to fill. Context-agnostic (ADR-012): the host
+   * owns auth + the BFF URL.
+   */
+  onRenderEmailTemplate?: (args: {
+    templateId: string;
+    regardingEntityType?: string;
+    regardingRecordId?: string;
+  }) => Promise<IEmailTemplateRenderResult>;
 
   // — Send-side behavior —
   /**

@@ -59,6 +59,7 @@ import {
   ChevronUp20Regular,
   ArrowMaximize20Regular,
   ArrowMinimize20Regular,
+  DocumentText20Regular,
 } from '@fluentui/react-icons';
 import type { CommunicationSendMode } from '../../services/communicationApi';
 
@@ -79,6 +80,7 @@ import type {
   IEmailComposerProps,
   IComposerAttachmentSource,
   IPickedRecord,
+  IEmailTemplateSummary,
   IValidationResult,
 } from './EmailComposer.types';
 import type { RichTextEditorRef } from '../RichTextEditor';
@@ -101,6 +103,18 @@ const DOCUMENT_LOGICAL_NAME = 'sprk_document';
 const SHARED_MAILBOX_LABEL = 'Spaarke shared mailbox';
 function userMailboxLabel(fromMailbox: string | undefined): string {
   return fromMailbox && fromMailbox.trim() ? fromMailbox : 'My mailbox';
+}
+
+// Whether the compose body has any real content (Wave E template picker) — HTML tags,
+// &nbsp;, and whitespace don't count, so an "empty" editor (which serializes to <p><br></p>)
+// reads as empty and a template applies without an overwrite prompt.
+function isComposeBodyEmpty(body: string): boolean {
+  return (
+    (body || '')
+      .replace(/<[^>]*>/g, '')
+      .replace(/&nbsp;/g, '')
+      .trim().length === 0
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -392,6 +406,13 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // Non-null → the replace-confirm Dialog is open. Confirming promotes it to associations[0].
   const [pendingPrimary, setPendingPrimary] = React.useState<ICommunicationAssociation | null>(null);
 
+  // Compose template picker (Wave E, owner UAT 2026-07-30). Templates load lazily when the
+  // menu opens; picking one whose apply would overwrite existing subject/body prompts a confirm.
+  const [templates, setTemplates] = React.useState<IEmailTemplateSummary[] | null>(null);
+  const [templatesLoading, setTemplatesLoading] = React.useState(false);
+  const [templateError, setTemplateError] = React.useState<string | null>(null);
+  const [pendingTemplateId, setPendingTemplateId] = React.useState<string | null>(null);
+
   // Record lookup (owner UAT round 5, RegardingResolver pattern): a document pick attaches
   // (Attach/Link per row); any other record type is inserted as a link in the message body
   // AT THE CURSOR (owner UAT 2026-07-24 — HTML mode via the editor's insertAtCursor; plain
@@ -578,8 +599,65 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     [props.onLookupRecord, handleRecordPicked]
   );
 
+  // ── Template picker (Wave E) ───────────────────────────────────────────────
+  // The toolbar template button renders only when the host supplies BOTH the list + render
+  // callbacks and the composer is editable. Applying a template REPLACES subject + body
+  // (mirrors Outlook "Apply template"); the field codes are merged server-side against the
+  // confirmed primary regarding (`associations[0]`).
+  const showTemplatePicker = !state.readOnly && !!props.onListEmailTemplates && !!props.onRenderEmailTemplate;
+
+  const loadTemplates = React.useCallback(() => {
+    const list = props.onListEmailTemplates;
+    if (!list) return;
+    setTemplatesLoading(true);
+    setTemplateError(null);
+    void list()
+      .then(items => setTemplates(items ?? []))
+      .catch(() => setTemplateError('Could not load templates.'))
+      .finally(() => setTemplatesLoading(false));
+  }, [props.onListEmailTemplates]);
+
+  const applyTemplate = React.useCallback(
+    (templateId: string) => {
+      const render = props.onRenderEmailTemplate;
+      if (!render) return;
+      const primary = stateRef.current.associations[0];
+      void render({
+        templateId,
+        regardingEntityType: primary?.entityType,
+        regardingRecordId: primary?.entityId,
+      })
+        .then(result => {
+          if (!result) return;
+          dispatch({ type: 'SET_BODY_FORMAT', value: result.isHtml ? 'HTML' : 'PlainText' });
+          dispatch({ type: 'SET_FIELD', field: 'subject', value: result.subject ?? '' });
+          dispatch({ type: 'SET_FIELD', field: 'body', value: result.body ?? '' });
+        })
+        .catch(() => setTemplateError('Could not apply the template.'));
+    },
+    [props.onRenderEmailTemplate]
+  );
+
+  const handleTemplatePick = React.useCallback(
+    (templateId: string) => {
+      const hasContent = stateRef.current.subject.trim().length > 0 || !isComposeBodyEmpty(stateRef.current.body);
+      if (hasContent) {
+        setPendingTemplateId(templateId);
+      } else {
+        applyTemplate(templateId);
+      }
+    },
+    [applyTemplate]
+  );
+
+  const confirmTemplate = React.useCallback(() => {
+    if (pendingTemplateId) applyTemplate(pendingTemplateId);
+    setPendingTemplateId(null);
+  }, [pendingTemplateId, applyTemplate]);
+  const cancelTemplate = React.useCallback(() => setPendingTemplateId(null), []);
+
   const toolbarSlot =
-    canAddLocal || canLinkDocument || showRecordSearch ? (
+    canAddLocal || canLinkDocument || showRecordSearch || showTemplatePicker ? (
       <div className={styles.toolbarSlot}>
         {(canAddLocal || canLinkDocument) && (
           <Menu positioning="below-end">
@@ -613,6 +691,38 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
                     {t.displayName}
                   </MenuItem>
                 ))}
+              </MenuList>
+            </MenuPopover>
+          </Menu>
+        )}
+        {showTemplatePicker && (
+          // Apply an email template (Wave E). Grouped with the paperclip/search in the same
+          // toolbar section. Templates load on menu open; picking one fills subject + body.
+          <Menu
+            positioning="below-end"
+            onOpenChange={(_e, data) => {
+              if (data.open) loadTemplates();
+            }}
+          >
+            <MenuTrigger disableButtonEnhancement>
+              <Tooltip content="Apply an email template" relationship="label">
+                <ToolbarButton icon={<DocumentText20Regular />} aria-label="Apply template" />
+              </Tooltip>
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                {templatesLoading && <MenuItem disabled>Loading…</MenuItem>}
+                {!templatesLoading && templateError && <MenuItem disabled>{templateError}</MenuItem>}
+                {!templatesLoading && !templateError && (templates?.length ?? 0) === 0 && (
+                  <MenuItem disabled>No templates available</MenuItem>
+                )}
+                {!templatesLoading &&
+                  !templateError &&
+                  templates?.map(t => (
+                    <MenuItem key={t.id} onClick={() => handleTemplatePick(t.id)}>
+                      {t.name}
+                    </MenuItem>
+                  ))}
               </MenuList>
             </MenuPopover>
           </Menu>
@@ -965,6 +1075,34 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
                 Set as primary
               </Button>
               <Button appearance="secondary" onClick={cancelPrimary}>
+                Cancel
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
+      {/* Template overwrite confirm (Wave E) — only shown when applying would replace
+          existing subject/body. modalType="alert" disables light-dismiss so a stray click
+          can't discard the in-progress draft. */}
+      <Dialog
+        open={pendingTemplateId !== null}
+        modalType="alert"
+        onOpenChange={(_e, data) => {
+          if (!data.open) cancelTemplate();
+        }}
+      >
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Apply template?</DialogTitle>
+            <DialogContent>
+              <Text>This will replace the current subject and message body.</Text>
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="primary" onClick={confirmTemplate}>
+                Apply
+              </Button>
+              <Button appearance="secondary" onClick={cancelTemplate}>
                 Cancel
               </Button>
             </DialogActions>

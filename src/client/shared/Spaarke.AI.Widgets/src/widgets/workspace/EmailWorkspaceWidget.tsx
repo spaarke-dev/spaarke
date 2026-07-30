@@ -123,6 +123,8 @@ export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
       onLookupRecord={composeHandlers.onLookupRecord}
       onAddRelationship={composeHandlers.onAddRelationship}
       onUploadLocalAttachment={composeHandlers.onUploadLocalAttachment}
+      onListEmailTemplates={composeHandlers.onListEmailTemplates}
+      onRenderEmailTemplate={composeHandlers.onRenderEmailTemplate}
       fromMailbox={fromMailbox}
       dataverseUrl={dataverseUrl}
     />
