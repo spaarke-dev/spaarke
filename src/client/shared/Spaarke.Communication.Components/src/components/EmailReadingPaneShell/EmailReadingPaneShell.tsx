@@ -134,6 +134,7 @@ const EmailReadingPaneShellInner: React.FC<EmailReadingPaneShellProps> = ({
   renderTop,
   renderHeader,
   renderBody,
+  hideList = false,
   storageKey = DEFAULT_STORAGE_KEY,
   defaultReadingPaneWidth = DEFAULT_READING_PANE_WIDTH_PX,
   minListWidth = DEFAULT_MIN_LIST_WIDTH_PX,
@@ -211,19 +212,27 @@ const EmailReadingPaneShellInner: React.FC<EmailReadingPaneShellProps> = ({
       ref={containerRef as React.RefObject<HTMLDivElement>}
       data-testid="email-reading-pane-shell"
     >
-      <div className={s.listPane} style={{ width: primaryWidth }} data-testid="email-list-pane">
-        <EmailCardList items={items} isLoading={isLoading} selectedId={selectedId} onSelect={handleSelect} />
-      </div>
+      {!hideList && (
+        <>
+          <div className={s.listPane} style={{ width: primaryWidth }} data-testid="email-list-pane">
+            <EmailCardList items={items} isLoading={isLoading} selectedId={selectedId} onSelect={handleSelect} />
+          </div>
 
-      <PanelSplitter
-        onMouseDown={splitterHandlers.onMouseDown}
-        onKeyDown={splitterHandlers.onKeyDown}
-        onDoubleClick={splitterHandlers.onDoubleClick}
-        isDragging={isDragging}
-        currentRatio={currentRatio}
-      />
+          <PanelSplitter
+            onMouseDown={splitterHandlers.onMouseDown}
+            onKeyDown={splitterHandlers.onKeyDown}
+            onDoubleClick={splitterHandlers.onDoubleClick}
+            isDragging={isDragging}
+            currentRatio={currentRatio}
+          />
+        </>
+      )}
 
-      <div className={s.readingPane} style={{ width: detailWidth }} data-testid="email-reading-pane">
+      <div
+        className={s.readingPane}
+        style={{ width: hideList ? '100%' : detailWidth }}
+        data-testid="email-reading-pane"
+      >
         {selectedId ? (
           <React.Fragment key={selectedId}>
             {renderTop?.(selectedId)}

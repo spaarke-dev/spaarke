@@ -120,4 +120,14 @@ export interface EmailWorkspaceProps {
   linkAnotherCatalog?: readonly RecordTypeCatalogEntry[];
   /** Optional id to select on first mount (forwarded to `EmailReadingPaneShell`). */
   initialSelectedId?: string;
+  /**
+   * Single-record ("hide list") mode. When `true` AND an `initialSelectedId` is
+   * set, the left list pane is hidden and only the reading pane for that record
+   * renders — so the surface reads like a per-record "form" (Pattern B
+   * `single`/`view=record` launch) rather than the list+reading workspace.
+   * Additive + optional: default (falsy) preserves the exact list+reading layout,
+   * so the SpaarkeAi widget mount and the standalone code-page list mode are
+   * unaffected. Forwarded to `EmailReadingPaneShell`'s `hideList`.
+   */
+  hideList?: boolean;
 }

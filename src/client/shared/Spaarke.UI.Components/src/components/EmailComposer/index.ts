@@ -35,6 +35,13 @@ export {
 } from './createXrmEmailComposeHandlers';
 export type { XrmEmailComposeHandlers } from './createXrmEmailComposeHandlers';
 
+// Pattern B launcher — opens the standalone Email code page (`sprk_emailpage`)
+// as a centered modal dialog for a specific `sprk_communication` record.
+// Callers (e.g. a Messages "open email" icon) invoke this instead of
+// `Xrm.Navigation.openForm`.
+export { openEmailRecord, EMAIL_PAGE_WEBRESOURCE_NAME } from './openEmailRecord';
+export type { OpenEmailRecordOptions } from './openEmailRecord';
+
 // Sub-components (exported for advanced/direct composition + task 023 unit tests)
 export { RecipientField } from './subcomponents/RecipientField';
 export type { IRecipientFieldProps } from './subcomponents/RecipientField';

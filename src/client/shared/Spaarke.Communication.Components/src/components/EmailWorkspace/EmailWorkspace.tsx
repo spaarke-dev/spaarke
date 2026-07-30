@@ -129,8 +129,14 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
   dataverseUrl,
   linkAnotherCatalog,
   initialSelectedId,
+  hideList,
 }) => {
   const s = useStyles();
+
+  // Single-record ("form") mode: only hide the list when a record is actually
+  // pre-selected (otherwise a hidden list with no selection would be a dead-end
+  // "Select an email" placeholder). Default falsy → unchanged list+reading path.
+  const hideListPane = Boolean(hideList) && Boolean(initialSelectedId);
 
   // Left pane: saved-view discovery + the raw rows the view's FetchXML selects.
   const { views, selectedViewId, setSelectedViewId, rows, isLoading, error } =
@@ -279,6 +285,7 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
           items={cardItems}
           isLoading={isLoading}
           initialSelectedId={initialSelectedId}
+          hideList={hideListPane}
           onSelectedIdChange={setSelectedId}
           actions={toolbarActions}
           renderHeader={() => <EmailReadingHeader subject={record.recordState?.subject ?? null} />}
