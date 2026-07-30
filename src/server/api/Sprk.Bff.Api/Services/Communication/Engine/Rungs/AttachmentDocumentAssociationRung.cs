@@ -59,19 +59,23 @@ public sealed class AttachmentDocumentAssociationRung : IAssociationRung
     /// field is resolved from <see cref="RegardingFieldMap"/> (ADR-024 source of truth). "Related" links point
     /// at the same target entity as their primary counterpart (a related matter is still a matter).
     /// <para>
-    /// <b>MATTER links only</b> (061 UAT round-2, 2026-07-30). F1's purpose is "surface the MATTER a document is
-    /// filed to" (the owner's examples were all matters). Following a document's INVOICE / project / work-
-    /// assignment links surfaced noise — an attached <c>Invoice-*.pdf</c> is an invoice document, so F1 followed
-    /// its <c>sprk_invoice</c> link and surfaced an unrelated invoice, which then became the headline Regarding
-    /// under the Ambiguous fall-through ("why is the logic favoring invoices?"). An attached invoice's own
-    /// invoice record is NOT what the email is about. Scoped to matter/related-matter; other link types can be
-    /// re-added deliberately if a concrete need appears.
+    /// <b>Type-agnostic by design</b> (061 UAT round-2, 2026-07-30). F1 follows EVERY record link a document
+    /// carries — matter, project, invoice, work-assignment — never a hard-coded single type. Relevance is not
+    /// decided by hard-coding paths; it is decided by the smart layer: F1 emits at a suggest-band confidence and
+    /// its <see cref="RungKind.DocumentAssociation"/> matches are <b>surface-only</b> (candidates the reviewer
+    /// confirms/dismisses, NEVER written as "filed" — see <see cref="AssociationStatusMapper"/>), and the
+    /// Ambiguous headline guard (P2b) stops any candidate being crowned. So an attached invoice's invoice
+    /// surfaces as a dismissible SUGGESTION, not a filed association — without hard-coding invoices out.
     /// </para>
     /// </summary>
     private static readonly IReadOnlyList<(string DocumentField, string TargetEntity)> DocumentLinkFields =
     [
         ("sprk_matter", "sprk_matter"),
         ("sprk_relatedmatter", "sprk_matter"),
+        ("sprk_project", "sprk_project"),
+        ("sprk_relatedproject", "sprk_project"),
+        ("sprk_invoice", "sprk_invoice"),
+        ("sprk_workassignment", "sprk_workassignment"),
     ];
 
     public AttachmentDocumentAssociationRung(
