@@ -26,6 +26,9 @@ import type {
   IRecipient,
   IEmailTemplateSummary,
   IEmailTemplateRenderResult,
+  IEmailAiDraftAction,
+  IEmailAiDraftRequest,
+  IEmailAiDraftResult,
 } from '@spaarke/ui-components';
 import type { EmailToolbarActionHandlers } from '../EmailReadingPaneShell';
 import type { ComposerFields } from '../../logic/actions';
@@ -105,6 +108,13 @@ export interface EmailComposeActionsDeps {
     regardingEntityType?: string;
     regardingRecordId?: string;
   }) => Promise<IEmailTemplateRenderResult>;
+  /**
+   * AI "sparkle" draft (Wave E). `onDraftWithAi` generates/refines the body via the BFF; optional
+   * `aiDraftActions` overrides the preset quick-actions. Forwarded to the composer for ALL modes.
+   * Optional (host-supplied Xrm/BFF handler); omit `onDraftWithAi` → the sparkle button is hidden.
+   */
+  onDraftWithAi?: (req: IEmailAiDraftRequest) => Promise<IEmailAiDraftResult>;
+  aiDraftActions?: IEmailAiDraftAction[];
   /**
    * The signed-in user's mailbox address (item 3). The email surface defaults the composer's
    * From to send-as the current user; passing this shows the real address in the "From:" row

@@ -26,6 +26,8 @@ import type {
   IRecipient,
   IEmailTemplateSummary,
   IEmailTemplateRenderResult,
+  IEmailAiDraftRequest,
+  IEmailAiDraftResult,
 } from './EmailComposer.types';
 
 /**
@@ -91,6 +93,12 @@ export interface XrmEmailComposeHandlers {
     regardingEntityType?: string;
     regardingRecordId?: string;
   }) => Promise<IEmailTemplateRenderResult>;
+  /**
+   * Generate/refine the message body via AI (Wave E). Calls the BFF
+   * `POST /api/communications/draft`. Only present when `authenticatedFetch` + `bffBaseUrl` are
+   * supplied — omitted otherwise (composer hides the sparkle button).
+   */
+  onDraftWithAi?: (req: IEmailAiDraftRequest) => Promise<IEmailAiDraftResult>;
 }
 
 /** Best-effort SPE upload never reads this — map for display parity only, default 'pdf'. */
@@ -308,6 +316,31 @@ export function createXrmEmailComposeHandlers(options?: {
         }
       : undefined;
 
+  // AI "sparkle" draft (Wave E): POST the intent + current body/subject to the BFF, which owns the
+  // prompt text (admin-editable growth path) and calls Azure OpenAI. Only wired with auth + BFF URL.
+  const onDraftWithAi =
+    authenticatedFetch && bffBaseUrl
+      ? async (req: IEmailAiDraftRequest): Promise<IEmailAiDraftResult> => {
+          const base = bffBaseUrl.replace(/\/+$/, '');
+          const resp = await authenticatedFetch(`${base}/api/communications/draft`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              intent: req.intent,
+              userInstruction: req.userInstruction,
+              currentBody: req.currentBody,
+              isHtml: req.isHtml,
+              subject: req.subject,
+            }),
+          });
+          if (!resp.ok) {
+            throw new Error(`AI draft failed (${resp.status})`);
+          }
+          const data = (await resp.json()) as Partial<IEmailAiDraftResult>;
+          return { text: data.text ?? '', isHtml: data.isHtml };
+        }
+      : undefined;
+
   return {
     recordLookupCatalog: EMAIL_RECORD_LOOKUP_CATALOG,
     onLookupRecipients,
@@ -316,5 +349,6 @@ export function createXrmEmailComposeHandlers(options?: {
     onUploadLocalAttachment,
     onListEmailTemplates,
     onRenderEmailTemplate,
+    onDraftWithAi,
   };
 }

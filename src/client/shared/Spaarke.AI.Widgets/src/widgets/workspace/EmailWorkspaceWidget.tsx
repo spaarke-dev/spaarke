@@ -125,6 +125,7 @@ export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
       onUploadLocalAttachment={composeHandlers.onUploadLocalAttachment}
       onListEmailTemplates={composeHandlers.onListEmailTemplates}
       onRenderEmailTemplate={composeHandlers.onRenderEmailTemplate}
+      onDraftWithAi={composeHandlers.onDraftWithAi}
       fromMailbox={fromMailbox}
       dataverseUrl={dataverseUrl}
     />

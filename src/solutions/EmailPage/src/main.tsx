@@ -335,6 +335,7 @@ function Root() {
         onUploadLocalAttachment={composeHandlers.onUploadLocalAttachment}
         onListEmailTemplates={composeHandlers.onListEmailTemplates}
         onRenderEmailTemplate={composeHandlers.onRenderEmailTemplate}
+        onDraftWithAi={composeHandlers.onDraftWithAi}
         fromMailbox={fromMailbox}
         dataverseUrl={dataverseUrl}
         initialSelectedId={launch.initialSelectedId}

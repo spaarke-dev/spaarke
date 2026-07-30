@@ -155,6 +155,42 @@ export interface IEmailTemplateRenderResult {
   isHtml: boolean;
 }
 
+/**
+ * One AI-draft quick action offered by the compose "sparkle" menu (Wave E). `intent` is a stable
+ * key the host maps to a server-side prompt (admin-editable — the label is UI-only). The engine
+ * ships a default set; a host may override via {@link IEmailComposerProps.aiDraftActions}.
+ */
+export interface IEmailAiDraftAction {
+  /** Stable intent key sent to the host (e.g. 'reply', 'concise', 'formal'). */
+  intent: string;
+  /** Menu label shown to the user. */
+  label: string;
+}
+
+/**
+ * Request the composer hands to the host's AI-draft callback (Wave E). The host builds the actual
+ * prompt server-side from `intent` (+ `userInstruction` for the free-text "Enter prompt" action)
+ * and the supplied body/subject context, calls the BFF, and returns the drafted text.
+ */
+export interface IEmailAiDraftRequest {
+  /** The picked action's {@link IEmailAiDraftAction.intent}, or `'custom'` for the free-text prompt. */
+  intent: string;
+  /** Free-text instruction for the `'custom'` intent (the "Enter prompt" action). */
+  userInstruction?: string;
+  /** Current message body (HTML or plain per {@link isHtml}) — the text to refine or reply to. */
+  currentBody: string;
+  /** Whether {@link currentBody} is HTML (drives how the host frames the prompt + reads the result). */
+  isHtml: boolean;
+  /** Current subject, for context. */
+  subject?: string;
+}
+
+/** The AI-drafted body (Wave E). `isHtml` drives the composer body format; defaults to the request's when omitted. */
+export interface IEmailAiDraftResult {
+  text: string;
+  isHtml?: boolean;
+}
+
 /** Files a hosting wizard has already uploaded, offered as a pre-checked attachment source. */
 export interface IWizardContext {
   uploadedFiles: {
@@ -454,6 +490,21 @@ export interface IEmailComposerProps {
     regardingEntityType?: string;
     regardingRecordId?: string;
   }) => Promise<IEmailTemplateRenderResult>;
+
+  // — AI draft "sparkle" (Wave E, owner UAT 2026-07-30) — additive/optional —
+  /**
+   * Generates/refines the message body via AI. The toolbar sparkle button renders ONLY when this
+   * is supplied AND the composer is editable; omit → hidden. The host owns the BFF call + prompt
+   * text (the intents are stable keys, the prompts are server-side/admin-editable). Context-agnostic
+   * (ADR-012): the engine passes the current body/subject and applies the returned text.
+   */
+  onDraftWithAi?: (req: IEmailAiDraftRequest) => Promise<IEmailAiDraftResult>;
+  /**
+   * Overrides the default sparkle quick-actions (Draft a reply / Summarize the thread / Make it
+   * concise / Formal tone / Friendly tone / Fix grammar & tone). The free-text "Enter prompt" action
+   * is always appended. Optional — omit to use the defaults.
+   */
+  aiDraftActions?: IEmailAiDraftAction[];
 
   // — Send-side behavior —
   /**

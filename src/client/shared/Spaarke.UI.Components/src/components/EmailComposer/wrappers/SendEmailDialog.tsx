@@ -30,6 +30,9 @@ import type {
   IRecipient,
   IEmailTemplateSummary,
   IEmailTemplateRenderResult,
+  IEmailAiDraftAction,
+  IEmailAiDraftRequest,
+  IEmailAiDraftResult,
 } from '../EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import type {
@@ -142,6 +145,13 @@ export interface ISendEmailDialogProps {
     regardingEntityType?: string;
     regardingRecordId?: string;
   }) => Promise<IEmailTemplateRenderResult>;
+  /**
+   * AI "sparkle" draft (Wave E). `onDraftWithAi` generates/refines the body via the BFF; optional
+   * `aiDraftActions` overrides the preset quick-actions. Both forwarded to the engine via
+   * `...composerProps`; omit `onDraftWithAi` → the sparkle button is hidden.
+   */
+  onDraftWithAi?: (req: IEmailAiDraftRequest) => Promise<IEmailAiDraftResult>;
+  aiDraftActions?: IEmailAiDraftAction[];
   /**
    * Resolve a locally-picked file to a governed `sprk_document` (item 9b) so it
    * flows into the send payload. Forwarded verbatim to the engine via the

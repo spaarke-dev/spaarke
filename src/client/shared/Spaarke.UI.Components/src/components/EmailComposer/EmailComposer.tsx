@@ -32,6 +32,8 @@ import {
   DialogContent,
   DialogActions,
   Input,
+  Textarea,
+  Spinner,
   Link,
   MessageBar,
   MessageBarBody,
@@ -60,6 +62,7 @@ import {
   ArrowMaximize20Regular,
   ArrowMinimize20Regular,
   DocumentText20Regular,
+  Sparkle20Regular,
 } from '@fluentui/react-icons';
 import type { CommunicationSendMode } from '../../services/communicationApi';
 
@@ -81,6 +84,7 @@ import type {
   IComposerAttachmentSource,
   IPickedRecord,
   IEmailTemplateSummary,
+  IEmailAiDraftAction,
   IValidationResult,
 } from './EmailComposer.types';
 import type { RichTextEditorRef } from '../RichTextEditor';
@@ -116,6 +120,18 @@ function isComposeBodyEmpty(body: string): boolean {
       .trim().length === 0
   );
 }
+
+// Default AI "sparkle" quick-actions (Wave E). Intent keys are stable + map to a server-side prompt
+// (the label is UI-only). A host may override via `props.aiDraftActions`; the free-text "Enter prompt"
+// action is always appended by the composer.
+const DEFAULT_AI_DRAFT_ACTIONS: IEmailAiDraftAction[] = [
+  { intent: 'reply', label: 'Draft a reply' },
+  { intent: 'summarize', label: 'Summarize the thread' },
+  { intent: 'concise', label: 'Make it concise' },
+  { intent: 'formal', label: 'Formal tone' },
+  { intent: 'friendly', label: 'Friendly tone' },
+  { intent: 'grammar', label: 'Fix grammar & tone' },
+];
 
 // ---------------------------------------------------------------------------
 // Attachment source defaults
@@ -413,6 +429,13 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   const [templateError, setTemplateError] = React.useState<string | null>(null);
   const [pendingTemplateId, setPendingTemplateId] = React.useState<string | null>(null);
 
+  // AI "sparkle" draft (Wave E). `aiDrafting` disables the sparkle while a completion is in flight;
+  // the "Enter prompt" free-text action opens `aiPromptOpen` with `aiPromptText`.
+  const [aiDrafting, setAiDrafting] = React.useState(false);
+  const [aiError, setAiError] = React.useState<string | null>(null);
+  const [aiPromptOpen, setAiPromptOpen] = React.useState(false);
+  const [aiPromptText, setAiPromptText] = React.useState('');
+
   // Record lookup (owner UAT round 5, RegardingResolver pattern): a document pick attaches
   // (Attach/Link per row); any other record type is inserted as a link in the message body
   // AT THE CURSOR (owner UAT 2026-07-24 — HTML mode via the editor's insertAtCursor; plain
@@ -656,8 +679,52 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   }, [pendingTemplateId, applyTemplate]);
   const cancelTemplate = React.useCallback(() => setPendingTemplateId(null), []);
 
+  // ── AI "sparkle" draft (Wave E) ────────────────────────────────────────────
+  // Rendered only when the host wires `onDraftWithAi` and the composer is editable. The engine passes
+  // the CURRENT body/subject; the host builds the prompt + calls the BFF; the returned text REPLACES the
+  // body (the user explicitly invoked a draft). A short in-flight guard prevents double-submits.
+  const showSparkle = !state.readOnly && !!props.onDraftWithAi;
+  const aiDraftActions = props.aiDraftActions ?? DEFAULT_AI_DRAFT_ACTIONS;
+
+  const runAiDraft = React.useCallback(
+    (intent: string, userInstruction?: string) => {
+      const draft = props.onDraftWithAi;
+      if (!draft) return;
+      setAiDrafting(true);
+      setAiError(null);
+      const isHtml = stateRef.current.bodyFormat === 'HTML';
+      void draft({
+        intent,
+        userInstruction,
+        currentBody: stateRef.current.body,
+        isHtml,
+        subject: stateRef.current.subject,
+      })
+        .then(result => {
+          if (!result || !result.text) {
+            setAiError('No draft was produced. Please try again.');
+            return;
+          }
+          const resultIsHtml = result.isHtml ?? isHtml;
+          dispatch({ type: 'SET_BODY_FORMAT', value: resultIsHtml ? 'HTML' : 'PlainText' });
+          dispatch({ type: 'SET_FIELD', field: 'body', value: result.text });
+        })
+        .catch(() => setAiError('AI drafting is unavailable right now.'))
+        .finally(() => setAiDrafting(false));
+    },
+    [props.onDraftWithAi]
+  );
+
+  const submitAiPrompt = React.useCallback(() => {
+    const instruction = aiPromptText.trim();
+    if (!instruction) return;
+    setAiPromptOpen(false);
+    setAiPromptText('');
+    runAiDraft('custom', instruction);
+  }, [aiPromptText, runAiDraft]);
+
   const toolbarSlot =
-    canAddLocal || canLinkDocument || showRecordSearch || showTemplatePicker ? (
+    canAddLocal || canLinkDocument || showRecordSearch || showTemplatePicker || showSparkle ? (
       <div className={styles.toolbarSlot}>
         {(canAddLocal || canLinkDocument) && (
           <Menu positioning="below-end">
@@ -723,6 +790,31 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
                       {t.name}
                     </MenuItem>
                   ))}
+              </MenuList>
+            </MenuPopover>
+          </Menu>
+        )}
+        {showSparkle && (
+          // AI draft "sparkle" (Wave E): preset quick-actions + a free-text "Enter prompt" action.
+          // Disabled + spinner while a completion is in flight.
+          <Menu positioning="below-end">
+            <MenuTrigger disableButtonEnhancement>
+              <Tooltip content="Draft or refine with AI" relationship="label">
+                <ToolbarButton
+                  icon={aiDrafting ? <Spinner size="tiny" /> : <Sparkle20Regular />}
+                  aria-label="Draft with AI"
+                  disabled={aiDrafting}
+                />
+              </Tooltip>
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                {aiDraftActions.map(a => (
+                  <MenuItem key={a.intent} onClick={() => runAiDraft(a.intent)}>
+                    {a.label}
+                  </MenuItem>
+                ))}
+                <MenuItem onClick={() => setAiPromptOpen(true)}>Enter prompt…</MenuItem>
               </MenuList>
             </MenuPopover>
           </Menu>
@@ -1109,6 +1201,45 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           </DialogBody>
         </DialogSurface>
       </Dialog>
+
+      {/* AI "Enter prompt" free-text dialog (Wave E). Submitting runs the 'custom' intent. */}
+      <Dialog
+        open={aiPromptOpen}
+        modalType="alert"
+        onOpenChange={(_e, data) => {
+          if (!data.open) setAiPromptOpen(false);
+        }}
+      >
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Draft with AI</DialogTitle>
+            <DialogContent>
+              <Textarea
+                value={aiPromptText}
+                onChange={(_e, data) => setAiPromptText(data.value)}
+                placeholder="e.g. Draft a polite reply asking for the signed contract by Friday."
+                aria-label="AI prompt"
+                resize="vertical"
+                style={{ width: '100%' }}
+              />
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="primary" onClick={submitAiPrompt} disabled={!aiPromptText.trim()}>
+                Generate
+              </Button>
+              <Button appearance="secondary" onClick={() => setAiPromptOpen(false)}>
+                Cancel
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
+      {aiError && (
+        <MessageBar intent="warning">
+          <MessageBarBody>{aiError}</MessageBarBody>
+        </MessageBar>
+      )}
 
       <BodyEditor
         ref={bodyEditorRef}

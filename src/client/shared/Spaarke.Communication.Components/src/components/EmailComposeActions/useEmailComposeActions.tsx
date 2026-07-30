@@ -73,6 +73,8 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
     onUploadLocalAttachment,
     onListEmailTemplates,
     onRenderEmailTemplate,
+    onDraftWithAi,
+    aiDraftActions,
     fromMailbox,
     dataverseUrl,
     associations,
@@ -204,6 +206,8 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
       onUploadLocalAttachment={onUploadLocalAttachment}
       onListEmailTemplates={onListEmailTemplates}
       onRenderEmailTemplate={onRenderEmailTemplate}
+      onDraftWithAi={onDraftWithAi}
+      aiDraftActions={aiDraftActions}
       defaultSendMode="user"
       fromMailbox={fromMailbox}
       associations={isRecordScoped ? associations : undefined}

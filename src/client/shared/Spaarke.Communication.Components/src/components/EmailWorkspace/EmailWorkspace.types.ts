@@ -30,6 +30,9 @@ import type {
   IRecipient,
   IEmailTemplateSummary,
   IEmailTemplateRenderResult,
+  IEmailAiDraftAction,
+  IEmailAiDraftRequest,
+  IEmailAiDraftResult,
 } from '@spaarke/ui-components';
 import type { IResolverWriteContext } from '../../logic/connections';
 
@@ -120,6 +123,13 @@ export interface EmailWorkspaceProps {
     regardingEntityType?: string;
     regardingRecordId?: string;
   }) => Promise<IEmailTemplateRenderResult>;
+  /**
+   * AI "sparkle" draft (Wave E). `onDraftWithAi` generates/refines the compose body via the BFF;
+   * optional `aiDraftActions` overrides the preset quick-actions. Mount-supplied Xrm/BFF handler;
+   * omit `onDraftWithAi` → the sparkle button is hidden.
+   */
+  onDraftWithAi?: (req: IEmailAiDraftRequest) => Promise<IEmailAiDraftResult>;
+  aiDraftActions?: IEmailAiDraftAction[];
   /**
    * The signed-in user's mailbox address (item 3) — the compose "From:" row defaults to
    * send-as the current user and shows this address. Mount-resolved (Xrm). Optional.
