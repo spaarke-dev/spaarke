@@ -180,9 +180,7 @@ export const AnalysisCardsWidget: React.FC<AnalysisCardsWidgetProps> = ({ onCard
             icon={card.icon as ActionCardProps['icon']}
             label={card.label}
             ariaLabel={
-              card.comingSoon
-                ? `${card.label} — coming soon, not yet available`
-                : `${card.label} — ${card.description}`
+              card.comingSoon ? `${card.label} — coming soon, not yet available` : `${card.label} — ${card.description}`
             }
             onClick={cardHandlers[card.id]}
             disabled={card.comingSoon}
