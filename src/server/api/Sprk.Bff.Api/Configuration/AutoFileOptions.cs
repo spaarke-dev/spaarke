@@ -12,15 +12,21 @@ namespace Sprk.Bff.Api.Configuration;
 /// <remarks>
 /// <para>
 /// <b>ADR Tension Path A (owner override of design DEC-4):</b> auto-file is ON at launch for
-/// DETERMINISTIC (rungs 0–3) matches at or above <see cref="Threshold"/>. AI rungs (4–5) NEVER auto-file
-/// regardless of this flag. The kill-switch is the per-tenant escape hatch; misfile = re-file (audited),
+/// DETERMINISTIC matches at or above <see cref="Threshold"/>. Per the C-1 narrowing
+/// (<c>email-communication-intelligence-r1</c>, ADR-045 path-A exception), only rungs 0 (ExplicitReference)
+/// and 1 (ThreadContinuity) auto-file by default — rungs 2 (ParticipantCorrelation) and 3
+/// (StructuralDetector) still MATCH but resolve to <c>Suggested</c> unless
+/// <see cref="Rung2And3AutoFileEnabled"/> is toggled on (legacy pre-C-1 behavior, kill-switch-governed
+/// per ADR-018 so the narrowing is revertible without a redeploy). AI rungs (4–5) NEVER auto-file
+/// regardless of either flag. The kill-switch is the per-tenant escape hatch; misfile = re-file (audited),
 /// never delete (R-1).
 /// </para>
 /// <para>
 /// <b>Per-tenant:</b> a deployment that fronts multiple tenants can override the global default per
 /// tenant via <see cref="Tenants"/> (keyed by an opaque tenant key the caller supplies). When no tenant
-/// key is supplied, or no override exists for it, the global <see cref="Enabled"/>/<see cref="Threshold"/>
-/// apply. Most single-org deployments never populate <see cref="Tenants"/> and simply flip the global flag.
+/// key is supplied, or no override exists for it, the global <see cref="Enabled"/>/<see cref="Threshold"/>/
+/// <see cref="Rung2And3AutoFileEnabled"/> apply. Most single-org deployments never populate
+/// <see cref="Tenants"/> and simply flip the global flag.
 /// </para>
 /// </remarks>
 public class AutoFileOptions
@@ -42,8 +48,18 @@ public class AutoFileOptions
     public double Threshold { get; set; } = 0.85;
 
     /// <summary>
+    /// C-1 auto-file narrowing kill-switch (ADR-045 path-A exception; ADR-018 governance).
+    /// <c>false</c> (default) = C-1 narrowed behavior — only rung 0 (ExplicitReference) and rung 1
+    /// (ThreadContinuity) are auto-file-eligible; rung 2 (ParticipantCorrelation) and rung 3
+    /// (StructuralDetector) still match but resolve to <c>Suggested</c>. <c>true</c> = legacy pre-C-1
+    /// behavior — rungs 0–3 are all auto-file-eligible. Togglable without a redeploy (ADR-018).
+    /// </summary>
+    public bool Rung2And3AutoFileEnabled { get; set; } = false;
+
+    /// <summary>
     /// Optional per-tenant overrides, keyed by an opaque tenant key. A present override replaces the
-    /// global <see cref="Enabled"/> and/or <see cref="Threshold"/> for that tenant only.
+    /// global <see cref="Enabled"/>, <see cref="Threshold"/>, and/or <see cref="Rung2And3AutoFileEnabled"/>
+    /// for that tenant only.
     /// </summary>
     public Dictionary<string, AutoFileTenantOverride> Tenants { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
@@ -61,4 +77,10 @@ public class AutoFileTenantOverride
     /// <summary>Per-tenant threshold override; null = inherit global <see cref="AutoFileOptions.Threshold"/>.</summary>
     [Range(0.0, 1.0, ErrorMessage = "Communication:AutoFile:Tenants:*:Threshold must be in [0.0, 1.0].")]
     public double? Threshold { get; set; }
+
+    /// <summary>
+    /// Per-tenant C-1 narrowing override; null = inherit global
+    /// <see cref="AutoFileOptions.Rung2And3AutoFileEnabled"/>.
+    /// </summary>
+    public bool? Rung2And3AutoFileEnabled { get; set; }
 }

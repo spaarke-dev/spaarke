@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>Regarding-vs-related intent — classify `file-to-existing | update-existing | new-record-related-to`; demote the identifier on "new filing based on X" (suppress auto-file); propose gated `dataverse.create_record` linking the referenced record as related</title>
+    <phase>P4 — Job C + intent</phase>
+    <gate>after:020,022</gate>
+    <status>not-started</status>
+    <tags>bff-api, catalog, communication</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Intent classification that GATES auto-file behavior on the association path — a misclassification silently misfiles email onto the wrong record (misfiling = #1 trust-killer). Introduces the "related-to" relationship distinctly from "regarding" (ADR-024 path-A exception) WITHOUT a second regarding mechanism. Touches the shared association/auto-file path + the gated create path. BFF-touching: publish-size + CVE + Placement Justification; code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The intent boundary (regarding vs related; "new filing based on X" demotes rather than files) is subtle and safety-critical — the exact reasoning that, done sloppily, misfiles email; and representing "related-to" without a second regarding mechanism (ADR-024 path-A) needs careful judgment.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>P4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the shared association / auto-file path + `Services/Ai/PublicContracts/` + the gated create path; serialize among shared `Services/Communication/` writers. `/conflict-check` before the PR.</parallel-reason>
+    <dependencies>020, 022</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement **regarding-vs-related intent** (FR-12): classify each email's intent as `file-to-existing | update-existing | new-record-related-to`. When phrasing like **"new filing based on X"** appears, **demote** the identifier X from *regarding* to *related* and **suppress auto-file** onto X. On `new-record-related-to`, propose creating a NEW record (gated `dataverse.create_record`) that **links the referenced record X as related** — NOT filed onto X.
+
+    Represent the "related-to" relationship **distinctly from "regarding"** WITHOUT introducing a second regarding mechanism — this is an **ADR-024 path-A exception** (document the relationship model). Reuse the one regarding mechanism (resolver-only write) for actual regarding; represent "related-to" as a separate, documented relationship.
+
+    Reach AI **only** through `Services/Ai/PublicContracts/` (ADR-013 facade) as a **code-directed Action + Binding** (ADR-039). MUST NOT land capability on the frozen node-graph engine. Reuse the gated `dataverse.create_record` tool for the create (as Job C does) — do NOT fork a second create mechanism. The create is **proposed** (offered as create-new / file-onto / link-related), gated + human-confirmed; nothing auto-finalizes on the `new-record-related-to` branch (NFR-06 / ADR-015). **NFR-04:** best-effort / non-fatal.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication + Ai domains, authoritative on the association / auto-file path (020/021), ADR-024 (one regarding mechanism; resolver-only write; the path-A exception for representing "related-to" distinctly), ADR-039 (code-directed Action + Binding), ADR-013 (PublicContracts facade), the gated `dataverse.create_record` tool, and NFR-06 / ADR-015 (proposed + confirmed, nothing auto-finalizes on the create branch).
+  </role>
+
+  <goal>
+    An email's intent is classified `file-to-existing | update-existing | new-record-related-to`. "New filing based on X" demotes X from regarding to related and suppresses auto-file onto X; the system offers create-new / file-onto / link-related rather than silently filing onto X. On `new-record-related-to`, a gated `dataverse.create_record` is proposed that links X as related (via a documented "related-to" relationship distinct from "regarding", no second regarding mechanism — ADR-024 path-A). AI reached only via `PublicContracts`; the create reuses the gated create tool; nothing auto-finalizes on the create branch. Best-effort on the enrichment path. Build clean; unit + seam tests + a golden-utterance eval case pass; publish-size + CVE + Placement Justification reported; the relationship model documented.
+  </goal>
+
+  <context>
+    <background>
+      The single biggest misfiling risk: an email that references record X but is actually about a NEW related matter ("new filing based on PAT-908068") must NOT auto-file onto X. FR-12 detects that intent and demotes the identifier from regarding to related, then offers create-new / file-onto / link-related. This is the intent layer above the deterministic identifier rung (020) + the C-1 auto-file narrowing (021) — it can SUPPRESS an auto-file the rung would otherwise do.
+
+      ADR-024 owns the one polymorphic regarding mechanism (resolver-only write). "Related-to" is a genuinely different relationship — but building a SECOND regarding mechanism is forbidden. The resolution (spec §6.5 / ADR Tensions) is path-A: represent "related-to" distinctly (a documented relationship) while leaving "regarding" to the one resolver mechanism. Document the relationship model.
+
+      The create on the `new-record-related-to` branch reuses the gated `dataverse.create_record` tool (as Job C / 040 does) — proposed + confirmed, never auto-finalized (NFR-06 / ADR-015).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AutoFileGate.cs (REFERENCE — the auto-file gate this intent can SUPPRESS on "new filing based on X")</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs (REFERENCE — association status; demoted identifier → related, not regarding auto-file)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/AiClassificationRung.cs (REFERENCE — the classification substrate; intent reuses the signal, no 2nd full LLM pass)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionSeam.cs (REUSE — facade seam; intent Action + the gated create go through here)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs (REFERENCE — the one regarding mechanism; "related-to" is represented distinctly, NOT via a second map)</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md (one regarding mechanism; resolver-only write; path-A exception for "related-to")</file>
+      <file>infra/dataverse/inputschemas/create-task-v1.input.schema.json (REFERENCE — the gated-create pattern shape reused for the related-record create)</file>
+      <file>projects/email-communication-intelligence-r1/tasks/040-job-c-email-triggered-work-create-task.poml (the gated-create precedent to mirror)</file>
+    </relevant-files>
+    <dependencies>020 (the identifier association this intent can demote), 022 (the classification signal reused for intent).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-12">Scope: classify intent `file-to-existing | update-existing | new-record-related-to`; "new filing based on X" DEMOTES the identifier from regarding to related + SUPPRESSES auto-file onto X; on `new-record-related-to`, propose a gated `dataverse.create_record` linking X as related. Offer create-new / file-onto / link-related — never silently file onto X.</constraint>
+    <constraint source="ADR-024 (path-A exception)">Scope: represent "related-to" DISTINCTLY from "regarding" WITHOUT a second regarding mechanism; reuse the one resolver-only regarding mechanism for actual regarding; document the "related-to" relationship model. This is a documented path-A exception (spec §6.5).</constraint>
+    <constraint source="ADR-039">Scope: code-directed Action + Binding via catalog data; MUST NOT land capability on the frozen node-graph engine; reuse the gated `dataverse.create_record` tool (no forked create).</constraint>
+    <constraint source="ADR-013 / NFR-03">Scope: reach AI ONLY via `Services/Ai/PublicContracts/`; MUST NOT inject `IOpenAiClient`/`IPlaybookService` into Communication code.</constraint>
+    <constraint source="NFR-06 / ADR-015">Scope: the create on `new-record-related-to` is proposed + human-confirmed (gated); nothing auto-finalizes on this branch; privilege flagged never decided.</constraint>
+    <constraint source="C-1 / FR-03">Scope: this intent interacts with the C-1 auto-file narrowing (021) — it can only SUPPRESS an auto-file, never widen it; a demoted identifier does not auto-file.</constraint>
+    <constraint source="NFR-04 / ADR-045">Scope: intent classification is best-effort / non-fatal — it MUST NOT fail the capture or send / enrichment path.</constraint>
+    <constraint source="project §10">Scope: BFF Hygiene — load `.claude/constraints/bff-extensions.md`; state Placement Justification (extends the association/auto-file path + reuses the gated create via PublicContracts; catalog data, no new service, no second regarding mechanism); publish-size delta vs ~49.63 MB (expected ≈0); no new HIGH CVE; update tests + seam tests.</constraint>
+    <constraint source="NFR-07 / ADR-039">Scope: the intent Action/Binding adds a golden-utterance eval case (blocking merge gate) — incl. the "new filing based on X" demotion case.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AutoFileGate.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionSeam.cs</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-015-ai-data-governance.md</file>
+      <file>docs/adr/ADR-045-communication-architecture.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Intent demotes auto-file" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AutoFileGate.cs">
+        On "new filing based on X" intent, suppress the auto-file the rung would otherwise do; surface create-new / file-onto / link-related as options instead of silently filing onto X.
+      </pattern>
+      <pattern name="Related-to without a second regarding" location=".claude/adr/ADR-024-polymorphic-resolver-pattern.md">
+        Represent "related-to" as a documented distinct relationship; DO NOT add a second regarding map/mechanism (ADR-024 path-A exception); the one resolver mechanism still owns "regarding".
+      </pattern>
+      <pattern name="Reuse gated create" location="infra/dataverse/inputschemas/create-task-v1.input.schema.json">
+        The related-record create reuses the gated `dataverse.create_record` pattern (as 040 does), proposed + confirmed; no forked create mechanism.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `.claude/constraints/bff-extensions.md`, ADR-024 (one regarding mechanism + the path-A exception rationale), ADR-039, ADR-013, ADR-015, the spec §6.5 ADR Tensions (ADR-024 path-A), and 040's gated-create decisions.</step>
+    <step order="2">Read `AutoFileGate.cs`, `AssociationStatusMapper.cs`, `RegardingFieldMap.cs`, and `AiClassificationRung.cs` — identify where auto-file happens (so intent can suppress it), how the one regarding mechanism writes, and where the classification signal is available.</step>
+    <step order="3">Author the intent Action + Binding (catalog data) reusing the classification signal (022) that classifies `file-to-existing | update-existing | new-record-related-to`; grep to confirm there is no existing intent layer (§11 evidence).</step>
+    <step order="4">Wire the demotion: on `new-record-related-to` ("new filing based on X"), demote X from regarding to related + SUPPRESS the auto-file onto X (via `AutoFileGate` / `AssociationStatusMapper`); surface create-new / file-onto / link-related as options — never silently file onto X.</step>
+    <step order="5">Design + document the "related-to" relationship distinctly from "regarding" (ADR-024 path-A) — NO second regarding mechanism; the one resolver mechanism still owns "regarding". Document the relationship model in the PR / a design note.</step>
+    <step order="6">On `new-record-related-to`, propose a gated `dataverse.create_record` (reuse the gated-create pattern from 040) that links X as related; proposed + human-confirmed, nothing auto-finalizes (NFR-06 / ADR-015). Wire best-effort onto the enrichment path (NFR-04).</step>
+    <step order="7">Add the golden-utterance eval case (NFR-07) incl. the "new filing based on X" demotion. Write unit + seam tests: (a) "new filing based on PAT-908068" does NOT auto-file onto PAT-908068; it offers create-new / file-onto / link-related; (b) `file-to-existing` still auto-files per C-1 (intent only suppresses, never widens); (c) the create links X as related via the documented relationship — NO second regarding mechanism (grep-verifiable); (d) the create is proposed + confirmed, never auto-finalized; (e) intent failure does not fail the enrichment path (NFR-04). ADR-038 boundary mocks only.</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + targeted `dotnet test`; publish-size (report absolute + delta vs ~49.63 MB) + CVE scan.</step>
+    <step order="9.5">FULL-rigor gates: `code-review` (focus no-misfile on demotion, no second regarding mechanism, reuse gated create, facade discipline, non-fatal); `adr-check` against ADR-024 (path-A) / ADR-039 / ADR-013 / ADR-015 + spec FR-12 / C-1 / NFR-04 / NFR-06 / NFR-07. Address Critical findings; cite the path-A exception + Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (shared `Services/Communication/` association path).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (042 ✅) + `current-task.md`; record decisions (intent taxonomy, demotion wiring point, the documented related-to relationship model, gated-create reuse).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If representing "related-to" distinctly cannot be done without either (a) a second regarding mechanism (ADR-024 violation) or (b) an ambiguous intent boundary where "new filing based on X" cannot be reliably separated from "file onto X" — STOP and surface per root §6 / §6.5 (this is the ADR-024 path-A exception; confirm the resolution or escalate). Do NOT add a second regarding mechanism and do NOT ship an intent classifier that silently misfiles on the ambiguous boundary.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The identifier rung (020) + C-1 auto-file gate (021) associate + auto-file; the one ADR-024 regarding mechanism writes regarding; the gated `dataverse.create_record` (040) creates records. There is no intent layer that distinguishes "about X" from "new thing related to X".</existing>
+    <extension>Yes — a new intent Action + Binding (catalog data) that reuses the classification signal + the auto-file gate + the gated create; "related-to" is represented as a documented distinct relationship (ADR-024 path-A), NOT a second regarding mechanism; no new service.</extension>
+    <cost-of-doing-nothing>Without intent, "new filing based on PAT-908068" silently auto-files onto PAT-908068 (misfiling = #1 trust-killer) and there is no way to link a genuinely new related record — FR-12 / Success Criterion 3 fails.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="read">Inspect the auto-file gate, status mapper, regarding map, classification substrate, facade, ADR-024</tool>
+    <tool name="grep">Confirm no existing intent layer (§11); confirm NO second regarding mechanism introduced; confirm gated-create reuse</tool>
+    <tool name="edit">Author the intent Action/Binding + demotion wiring + related-to relationship + gated-create proposal</tool>
+    <tool name="bash">Build, unit/seam tests, eval-case render, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ + Services/Ai/PublicContracts/ (UPDATED — intent classification + auto-file demotion + documented related-to relationship + gated-create proposal, best-effort)</output>
+    <output type="config">infra/dataverse/ (intent Action + Binding rows + golden-utterance eval case incl. "new filing based on X" demotion)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ + tests/integration/seam/ — new-filing-not-auto-filed + file-to-existing-still-auto-files + related-link-no-second-regarding + proposed-not-auto-finalized + non-fatal</output>
+    <output type="docs">PR description with the ADR-024 path-A exception (documented related-to relationship model) + §11 Component Justification + Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"New filing based on PAT-908068" does NOT auto-file onto PAT-908068; the system offers create-new / file-onto / link-related (the identifier is demoted from regarding to related, auto-file suppressed).</criterion>
+    <criterion testable="true">`file-to-existing` intent still auto-files per C-1 (021) — the intent layer only SUPPRESSES auto-file, never widens it.</criterion>
+    <criterion testable="true">On `new-record-related-to`, a gated `dataverse.create_record` is proposed that links the referenced record as related via a documented "related-to" relationship — NO second regarding mechanism is introduced (ADR-024 path-A; grep-verifiable).</criterion>
+    <criterion testable="true">The related-record create is proposed + human-confirmed; nothing auto-finalizes on the `new-record-related-to` branch (NFR-06 / ADR-015).</criterion>
+    <criterion testable="true">AI reached only via `Services/Ai/PublicContracts/`; the create reuses the gated `dataverse.create_record` (no forked create); no capability landed on the frozen node engine.</criterion>
+    <criterion testable="true">Intent classification is best-effort: a failure does NOT fail the capture or send / enrichment path (NFR-04).</criterion>
+    <criterion testable="true">A golden-utterance eval case (incl. the "new filing based on X" demotion) exists and passes (NFR-07); `dotnet build` clean; tests pass; publish-size delta ≈0 vs ~49.63 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The safety-critical property is: never silently misfile on "new filing based on X". "Related-to" is represented distinctly from "regarding" without a second regarding mechanism (ADR-024 path-A exception — document it in the PR). Reuse the gated create (040) — do not fork. Run `/conflict-check` before the PR (shared `Services/Communication/` association path).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files. Apply FULL rigor — Step 9.5 gates REQUIRED (safety-critical intent boundary + ADR-024 path-A). Per §10 + §11: publish-size delta (baseline ~49.63 MB) + CVE + Placement + Component Justification + the documented path-A exception in the PR. `/conflict-check` before the PR. Model tier `opus` @ effort `xhigh`.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Repoint client launch points + remove dead custom-page path</title>
+    <phase>6 Retirement</phase>
+    <gate>blocked — 052, 060 (server repoint first)</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Frontend edits to web-resource JS + a code-page navigateTo; repoints known launch strings to openSpaarkeAi and removes a dead branch — bounded, no new surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical repoint of client launch call-sites with a named reference (openSpaarkeAi); the dead custom-page branch is clearly delimited.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Ordered retirement (§13.5): client launches must be repointed after the server deep-links (060) and before the web-resource/tree deletion (063).</parallel-reason>
+    <deps>052,060</deps>
+    <tags>frontend, retirement</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Repoint the client-side launch points that open the retiring sprk_analysisworkspace surface so they call openSpaarkeAi
+    (`sprk_spaarkeai`) instead, and remove the dead custom-page path that targets sprk_analysisworkspace_8bc0b. Covers the
+    sprk_analysis form OnLoad/ribbon command, the AnalysisWorkspace launcher shim, and the PlaybookLibrary navigateTo.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse web-resource JS launch commands, code-page navigateTo, and the
+    openSpaarkeAi client deep-link. Follow ADRs strictly — record-driven opens stay in code via openSpaarkeAi, not
+    surfaceLaunchRegistry.
+  </role>
+
+  <goal>
+    The sprk_analysis form OnLoad/ribbon launcher and the PlaybookLibrary navigateTo open the sprk_spaarkeai surface via
+    openSpaarkeAi; the dead custom-page path (sprk_analysisworkspace_8bc0b) in sprk_analysis_commands.js is removed; a Grep
+    for the retiring names across client JS/TS returns zero (outside files deleted by 063); client builds green.
+  </goal>
+
+  <context>
+    <background>
+      Per spec §13.5 / FR-19, client launch points still open the retiring code page. Three exist:
+      sprk_analysis_commands.js (Spaarke_OpenAnalysisWorkspace at lines ~145-169, ~213-235, and a dead custom-page branch
+      near 549 targeting sprk_analysisworkspace_8bc0b); the AnalysisWorkspace launcher shim
+      sprk_AnalysisWorkspaceLauncher.js; and PlaybookLibrary main.tsx (~234-245) which navigateTo webresourceName
+      sprk_AnalysisWorkspace. Task 060 already repointed the server deep-links; this repoints the client. openSpaarkeAi is
+      the target (extended in 052). The AnalysisWorkspace launcher tree itself is deleted in 063 — here we only repoint the
+      launch callers that survive (form/ribbon + PlaybookLibrary) and strip the dead branch.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/webresources/js/sprk_analysis_commands.js</file>
+      <file role="modify">src/solutions/PlaybookLibrary/src/main.tsx</file>
+      <file role="modify">src/client/code-pages/AnalysisWorkspace/launcher/sprk_AnalysisWorkspaceLauncher.js</file>
+      <file role="canonical-reference">src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="052" status="pending">openSpaarkeAi extended with analysisId/worktype/regarding — the client repoint target.</dependency>
+      <dependency task="060" status="pending">Server-side deep-links already repointed; keeps client + server on the same sprk_spaarkeai shape.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">SCOPE: repointed client launches call openSpaarkeAi (sprk_spaarkeai deep-link in code); record-driven opens MUST NOT route through surfaceLaunchRegistry.</constraint>
+    <constraint source="project">SCOPE: only the surviving launch callers (sprk_analysis form/ribbon command, PlaybookLibrary navigateTo) are repointed; the dead custom-page branch (sprk_analysisworkspace_8bc0b) is removed. Do NOT delete the AnalysisWorkspace source tree here (that is task 063) — only edit the launcher shim if it still gates a surviving caller.</constraint>
+    <constraint source="project">SCOPE: ordered §13.5 — this repoint MUST be complete before the web-resource/tree deletion in 063; no deletion of web resources in this task.</constraint>
+    <constraint source="ADR-021">SCOPE: any UI touched (ribbon/launch) preserves Fluent v9 conventions and dark-mode behavior of the opened SpaarkeAi surface; this task changes the launch target, not the surface chrome.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="openSpaarkeAi client deep-link" location="src/solutions/SpaarkeAi/src/utils/launch-resolver.ts">
+        Mirror openSpaarkeAi/openSpaarkeAiCompose (~198,268) for the exact sprk_spaarkeai navigate shape the client launchers must call (analysisId/worktype/regarding).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare STANDARD rigor + reason; confirm 052 + 060 merged.</step>
+    <step order="1">Read launch-resolver.ts openSpaarkeAi to capture the client-side sprk_spaarkeai navigate shape.</step>
+    <step order="2">In sprk_analysis_commands.js, repoint Spaarke_OpenAnalysisWorkspace (lines ~145-169, ~213-235) to call openSpaarkeAi (sprk_spaarkeai) with analysisId/regarding context.</step>
+    <step order="3">Remove the dead custom-page path near line ~549 that targets sprk_analysisworkspace_8bc0b (unreferenced/dead branch).</step>
+    <step order="4">Repoint PlaybookLibrary main.tsx (~234-245): change navigateTo webresourceName sprk_AnalysisWorkspace to openSpaarkeAi (sprk_spaarkeai).</step>
+    <step order="5">Inspect sprk_AnalysisWorkspaceLauncher.js — if it only bootstraps the retiring code page (deleted in 063) and no surviving caller depends on it, leave it for 063's deletion; do NOT repoint it to keep the dead page alive.</step>
+    <step order="6">Build the affected client bundles (PlaybookLibrary; SpaarkeAi if touched); Grep client JS/TS for sprk_analysisworkspace / sprk_AnalysisWorkspace / sprk_analysisworkspace_8bc0b and confirm the only remaining hits are inside the AnalysisWorkspace tree that 063 deletes.</step>
+    <step order="7">Update TASK-INDEX.md: set task 061 status to ✅.</step>
+    <step order="8">Document any deviation in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a client launcher relies on custom-page behavior (sprk_analysisworkspace) that openSpaarkeAi's sprk_spaarkeai surface does not yet provide, STOP and escalate per CLAUDE.md §6 rather than keeping the custom page alive as a workaround.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build PlaybookLibrary / SpaarkeAi client bundles (build:prod where applicable).</tool>
+    <tool name="terminal">Run Grep verification across client JS/TS.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/webresources/js/sprk_analysis_commands.js</output>
+    <output type="code">src/solutions/PlaybookLibrary/src/main.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the sprk_analysis form ribbon/OnLoad launcher fires, when it opens the analysis surface, then it navigates to sprk_spaarkeai via openSpaarkeAi carrying analysisId/regarding (not sprk_analysisworkspace).</criterion>
+    <criterion testable="true">Given the PlaybookLibrary launch, when invoked, then it opens sprk_spaarkeai via openSpaarkeAi (not navigateTo webresourceName sprk_AnalysisWorkspace).</criterion>
+    <criterion testable="true">The dead custom-page path (sprk_analysisworkspace_8bc0b) is removed from sprk_analysis_commands.js.</criterion>
+    <criterion testable="true">Grep-clean: sprk_analysisworkspace / sprk_AnalysisWorkspace / sprk_analysisworkspace_8bc0b return zero matches across surviving client JS/TS (remaining hits, if any, live only inside src/client/code-pages/AnalysisWorkspace/ which task 063 deletes).</criterion>
+    <criterion testable="true">Client bundles build green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec §13.5 / FR-19. Ordered: repoint client after server (060), before delete (063). The launcher shim
+    sprk_AnalysisWorkspaceLauncher.js is deleted with the tree in 063 unless a surviving caller needs it — do not resurrect
+    the custom page.
+
+    COMPLETION (2026-07-29): Repointed both surviving launch callers.
+    - sprk_analysis_commands.js: Spaarke_OpenAnalysisWorkspace (~L145) now navigates to webresource
+      "sprk_spaarkeai" (openSpaarkeAi param shape hand-duplicated inline — the file is a plain
+      non-module web resource and cannot import launch-resolver.ts) with analysisId (existing-analysis
+      channel) plus entityLogicalName="sprk_document"/entityId/regarding when a documentId is present.
+      The dead custom-page branch (pageType: "custom", the retiring sprk_analysisworkspace_8bc0b name)
+      was removed entirely, not just repointed. Version bumped 1.0.0 -> 1.1.0; stale deployment-notes
+      comment updated.
+    - PlaybookLibrary/src/main.tsx: handleComplete's cross-frame navigateTo repointed from the retiring
+      webresourceName to "sprk_spaarkeai", param payload rebuilt via URLSearchParams to match the
+      analysisId/entityId/entityLogicalName/regarding shape (was analysisId/documentId ad hoc).
+    - Deliberately left untouched (task 063 scope): src/client/code-pages/AnalysisWorkspace/** including
+      sprk_AnalysisWorkspaceLauncher.js — still references the retiring names; that whole tree is deleted,
+      not repointed.
+    - Grep verification: `sprk_analysisworkspace|sprk_AnalysisWorkspace` (case-insensitive) returns zero
+      matches in both modified files and in src/solutions/** overall; the only remaining src/client hits
+      are the three files under code-pages/AnalysisWorkspace/ (index.tsx, launcher script,
+      build-webresource.ps1) — in scope for 063, not this task.
+    - Build/test: PlaybookLibrary `vite build` succeeds (3721 modules, dist/index.html emitted, cleaned up
+      after verification). `tsc --noEmit` reports 4 pre-existing TS2307 module-resolution errors on
+      unrelated import lines (45-48, @spaarke/ui-components subpath exports) — confirmed identical via
+      `git stash` against unmodified HEAD, not introduced by this task. sprk_analysis_commands.js passed
+      `node --check` syntax validation. package-lock.json churn from the local `npm install` (adding a
+      pre-existing @spaarke/auth file: dependency entry) was reverted to keep the diff scoped to the two
+      intended source files.
+    - Quality gates: STANDARD rigor per POML — code-review/adr-check (Step 9.5) skipped by default, not run.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute (STANDARD — Step 9.5 gates skipped by default).</protocol>
+  </execution>
+</task>

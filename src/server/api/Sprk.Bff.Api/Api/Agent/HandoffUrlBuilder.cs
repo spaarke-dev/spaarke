@@ -6,7 +6,7 @@ namespace Sprk.Bff.Api.Api.Agent;
 
 /// <summary>
 /// Generates deep-link URLs for handoff from M365 Copilot to
-/// Analysis Workspace and wizard Code Pages.
+/// the SpaarkeAi three-pane Analysis surface and wizard Code Pages.
 /// </summary>
 public sealed class HandoffUrlBuilder
 {
@@ -18,9 +18,30 @@ public sealed class HandoffUrlBuilder
     }
 
     /// <summary>
-    /// Generates a deep-link to the Analysis Workspace with full context.
-    /// Opens via Xrm.Navigation.navigateTo targeting the AnalysisWorkspaceLauncher web resource.
+    /// Generates a deep-link to the SpaarkeAi three-pane Analysis surface (`sprk_spaarkeai`)
+    /// for an existing analysis record, mirroring the `openSpaarkeAi` deep-link shape
+    /// (<c>launch-resolver.ts</c>'s <c>SpaarkeAiLaunchParams</c> — ai-advanced-capabilities-
+    /// analysis-hub-r1 task 052, spec §13.3 / FR-16). Opens the same surface
+    /// <c>Xrm.Navigation.navigateTo({webresourceName:'sprk_spaarkeai', ...})</c> would produce
+    /// client-side.
     /// </summary>
+    /// <remarks>
+    /// Retirement task 060 (spec §13.5 / FR-18) repoints this method from the now-retired
+    /// legacy Analysis Workspace launcher web resource (would 404 once the legacy code page
+    /// is deleted in task 063) to the go-forward SpaarkeAi surface. The method name and
+    /// 3-argument signature are kept stable to avoid
+    /// call-site churn across <c>PlaybookStatusEndpoints</c>, <c>PlaybookInvocationService</c>,
+    /// and <c>AgentErrorHandler</c> — only the emitted URL shape changes.
+    ///
+    /// Deliberately NOT carried into the new shape: <paramref name="playbookId"/> is accepted
+    /// for call-site source compatibility but is DROPPED from the emitted URL — it has no
+    /// place in the <c>openSpaarkeAi</c> contract (<c>SpaarkeAiLaunchParams</c> has no
+    /// playbookId field) and no consumer in <c>main.tsx</c>. When <paramref name="sourceFileId"/>
+    /// is non-empty it is threaded as <c>entityLogicalName=sprk_document</c> +
+    /// <c>entityId</c> so the opened session also carries document context — this mirrors the
+    /// "Entity form command bar" launch context already supported by
+    /// <c>SpaarkeAiLaunchParams</c>, so no new param is invented.
+    /// </remarks>
     public string BuildAnalysisWorkspaceUrl(
         Guid analysisId,
         Guid sourceFileId,
@@ -28,14 +49,16 @@ public sealed class HandoffUrlBuilder
     {
         var parameters = new Dictionary<string, string>
         {
-            ["analysisId"] = analysisId.ToString(),
-            ["sourceFileId"] = sourceFileId.ToString()
+            ["analysisId"] = analysisId.ToString()
         };
 
-        if (playbookId.HasValue)
-            parameters["playbookId"] = playbookId.Value.ToString();
+        if (sourceFileId != Guid.Empty)
+        {
+            parameters["entityLogicalName"] = "sprk_document";
+            parameters["entityId"] = sourceFileId.ToString();
+        }
 
-        return BuildWebResourceUrl("sprk_AnalysisWorkspaceLauncher", parameters);
+        return BuildWebResourceUrl("sprk_spaarkeai", parameters);
     }
 
     /// <summary>

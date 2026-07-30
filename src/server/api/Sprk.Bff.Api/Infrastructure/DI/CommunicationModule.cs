@@ -57,8 +57,16 @@ public static class CommunicationModule
         services.AddSingleton<CommunicationAccountService>();
         services.AddSingleton<ApprovedSenderValidator>();
         services.AddSingleton<CommunicationService>();
+        // ADR-010 testing-seam over CommunicationService.ReconstructEnvelopeAsync for the Job B apply path (task 031
+        // citation re-verify). Pass-through to the singleton CommunicationService → singleton.
+        services.AddSingleton<ICommunicationEnvelopeReader>(sp => sp.GetRequiredService<CommunicationService>());
         services.AddSingleton<EmlGenerationService>();
         services.AddSingleton<GraphMessageToEmlConverter>();
+        // HTML-preserving REVERSE of GraphMessageToEmlConverter (email-communication-solution-r5 task 010 /
+        // FR-07 / NFR-03). Pure transformation (no I/O) → singleton, mirroring the converter above; its
+        // HtmlSanitizer is configured once in the ctor and only Sanitize() is called after (thread-safe).
+        // Consumed by the GET /api/documents/{id}/eml-render endpoint (FileAccessEndpoints).
+        services.AddSingleton<EmlToHtmlRenderer>();
         services.AddSingleton<MailboxVerificationService>();
 
         // Channel seams (ADR-045 rule 4 / NFR-04). Email is the ONLY R4 implementation of each seam.
@@ -152,6 +160,13 @@ public static class CommunicationModule
         // and the engine evaluates them by ascending Order — so registration order is cosmetic.
         services.AddSingleton<GraphMessageNormalizer>();
         services.AddSingleton<IAssociationRung, ExplicitReferenceRung>();      // rung 0 — explicit reference
+        // rung 0 — identifier reverse-lookup (FR-01). SAME Kind/Order as ExplicitReferenceRung: a well-formed
+        // explicit identifier IS a rung-0 explicit reference. Extends matter-only identifier matching to all 7
+        // core types by VALUE-based reverse lookup against Dataverse, catalog-driven off sprk_recordtype_ref
+        // (no numbering scheme in code; onboarding a tenant needs only catalog config). Bare-numeric tokens
+        // emit sub-threshold (never auto-file alone); multi-entity tokens are capped (never a guessed auto-file).
+        // Registered unconditionally (mirrors the other deterministic rungs; ADR-010).
+        services.AddSingleton<IAssociationRung, IdentifierReverseLookupRung>(); // rung 0 — identifier reverse-lookup
         services.AddSingleton<IAssociationRung, ThreadContinuityRung>();       // rung 1 — thread continuity
         services.AddSingleton<IAssociationRung, ParticipantCorrelationRung>(); // rung 2 — participant correlation
         // rung 3 — structural detectors (NFR-04: adding a detector is a new IStructuralDetector
@@ -317,6 +332,23 @@ public static class CommunicationModule
         services.TryAddScoped<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver,
                               Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolver>();
         services.AddScoped<CommunicationThreadReadService>();
+
+        // FR-17 ranked-exceptions queue-feed (email-communication-intelligence-r1 task 032). SAME impersonated
+        // read + shared ICommunicationAccessFilter as CommunicationThreadReadService above (no new access
+        // mechanism) — composed with task 030's sprk_emailreviewlog Proposed-row store via the existing
+        // IGenericEntityService seam. SCOPED for the same reason as CommunicationThreadReadService (consumes the
+        // Scoped ICallerSystemUserResolver). Registered UNCONDITIONALLY (ADR-010/ADR-032 — the endpoint maps
+        // unconditionally); read-only, r1 supplies the feed only (C-3), r5 builds no surface here.
+        services.AddScoped<CommunicationQueueFeedService>();
+
+        // Job B APPLY (email-communication-intelligence-r1 task 031 / FR-10). Applies a CONFIRMED pending proposal
+        // (task 030's open sprk_emailreviewlog Proposed row) to the associated record via the blessed
+        // IActionSeam.UpdateRecordAsync UNDER THE CONFIRMING USER'S MSCRMCallerID impersonation (owner Option 2,
+        // 2026-07-29 — native modifiedby = the human; go-live prereq: BFF app user holds prvActOnBehalfOfAnotherUser),
+        // re-validating the sprk_emailupdatefield allow-list + citation at apply time, and writing the append-only
+        // Applied audit row. SCOPED (consumes the Scoped ICallerSystemUserResolver, same as the queue feed).
+        // Registered UNCONDITIONALLY (ADR-010/ADR-032 — the apply endpoint maps unconditionally).
+        services.AddScoped<ICommunicationProposalApplyService, CommunicationProposalApplyService>();
 
         // Layer-C fan-out targeting (spaarke-notification-spine-r1 task 023 / FR-08 / NFR-07). Given a persisted
         // sprk_communication + its thread, returns the systemuserids eligible to receive a Layer-C ping (task 024's

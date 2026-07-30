@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Schema preflight — verify owner-created columns present</title>
+    <phase>1 Data spine</phase>
+    <gate>done</gate>
+    <status>completed</status>
+    <completion>Executed inline in the orchestration session (2026-07-28) via Dataverse MCP `describe`. All 6 contract elements verified PRESENT: sprk_analysis.{sprk_worktype (Choice 100000000/1/2), sprk_regardingmatter→sprk_matter, sprk_regardingproject→sprk_project, sprk_regardingdocument→sprk_document, sprk_description}, sprk_aichatsummary.sprk_analysis→sprk_analysis. Bonus: full ADR-024 resolver field-set (sprk_regardingrecordtype/id/name + budget/communication/invoice lookups) already present; sprk_isarchived present on sprk_aichatsummary (relevant to task 022). Evidence: notes/schema-prerequisites.md "VERIFIED PRESENT" section. Gate result: PASS — Phase 1/2 data+session code unblocked.</completion>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Read-only verification of Dataverse schema existence; no code authored; the value is the gate decision, not implementation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical existence check against a fixed schema contract — lowest judgment; low effort.</model-tier-reason>
+    <effort>low</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>HUMAN GATE (W1). All Phase-1/Phase-2 data + session code (011, 012, 013, 020…) assumes these columns exist; verification must complete and pass before any consumer runs.</parallel-reason>
+    <deps>001</deps>
+    <tags>dataverse, preflight</tags>
+    <estimated-effort>0.5-1 hour</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Verify that every owner-created Dataverse column this project consumes actually exists in the target environment,
+    with the expected type/target, BEFORE any data-spine or session-binding code task runs. This is a HUMAN GATE: if
+    any column is missing, BLOCK the dependent tasks and produce a clear owner-action list — do NOT create the schema
+    yourself (the owner owns schema per spec Prerequisites).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Familiar with Dataverse metadata inspection (Web API `EntityDefinitions` / MCP
+    `describe`) and the project's exact owner-created schema contract from spec.md Prerequisites.
+  </role>
+
+  <goal>
+    A recorded verification (in `projects/ai-advanced-capabilities-analysis-hub-r1/notes/schema-preflight.md`) confirming
+    presence + type/target of all six owner-created schema elements; if any is absent, the note lists the exact
+    owner-action items and the dependent tasks are marked blocked.
+  </goal>
+
+  <context>
+    <background>
+      Per spec Prerequisites (HUMAN GATE) + PLAN Phase 1.0, all net-new Dataverse schema is created by the owner; this
+      project consumes it. The pipeline requires an explicit preflight so code tasks (011 type, 012 regarding, 013 file
+      hop, 020 session FK) can assume the columns exist. `sprk_description` and `sprk_project` are confirmed created;
+      the remaining owner columns must be verified before Phase 1+2 code runs.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/ai-advanced-capabilities-analysis-hub-r1/spec.md</file>
+      <file role="new">projects/ai-advanced-capabilities-analysis-hub-r1/notes/schema-preflight.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Green e2e baseline established (Phase 0 gate cleared).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE = verification ONLY. Do NOT create, alter, or migrate any Dataverse column — the owner owns schema. A missing column is a BLOCK + notify, never a create-it action (see escalation).</constraint>
+    <constraint source="project">SCOPE = the exact spec Prerequisites contract: `sprk_analysis.sprk_worktype` (Choice: agreement-analysis / legal-research / patent-application), `sprk_analysis.sprk_regardingmatter` (Lookup → sprk_matter), `sprk_analysis.sprk_regardingproject` (Lookup → sprk_project), `sprk_analysis.sprk_regardingdocument` (Lookup → sprk_document), `sprk_analysis.sprk_description` (multiline text), `sprk_aichatsummary.sprk_analysis` (Lookup FK → sprk_analysis). Verify logical name AND type/target for each.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse schema verification</topic>
+    <files>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>docs/data-model/</file>
+    </files>
+    <patterns>
+      <pattern name="metadata describe" location=".claude/skills/dataverse-mcp-usage/SKILL.md">
+        Use the Dataverse MCP `describe` / Web API `EntityDefinitions` read path to confirm attribute existence + type/target without mutating schema.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare MINIMAL rigor + reason. Load the spec Prerequisites schema contract.</step>
+    <step order="1">For each of the 6 elements, query Dataverse metadata and record: present Y/N, logical name match, type, and lookup target (where applicable).</step>
+    <step order="2">Cross-check the `sprk_worktype` Choice option values (agreement-analysis / legal-research / patent-application) resolve to real option-set members.</step>
+    <step order="3">Write the results to notes/schema-preflight.md. If ALL present → mark the gate PASS. If ANY missing/mismatched → mark BLOCKED and produce an owner-action list (table + logical name + expected type/target).</step>
+    <step order="4">If blocked, set the dependent tasks (011, 012, 013, 020) to ⛔ blocked in TASK-INDEX.md and notify the owner (🔔 Human Input Required). If pass, update TASK-INDEX.md: set task 010 status to ✅.</step>
+    <step order="5">Document the outcome in `projects/ai-advanced-capabilities-analysis-hub-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any required column is absent or its type/target does not match the spec contract, STOP — do NOT create or modify the schema (owner owns it). Emit 🔔 Human Input Required with the exact owner-action list and block dependent tasks per CLAUDE.md §6.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dataverse-mcp">Read Dataverse metadata (describe / EntityDefinitions) — read-only.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/ai-advanced-capabilities-analysis-hub-r1/notes/schema-preflight.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the target environment, when the preflight runs, then all 6 owner-created elements are confirmed present with matching logical name + type/target, and the gate is recorded PASS in notes/schema-preflight.md.</criterion>
+    <criterion testable="true">`sprk_worktype` is a Choice column and its three option values (agreement-analysis, legal-research, patent-application) are confirmed present.</criterion>
+    <criterion testable="true">Negative: if a column is absent or mismatched, the task blocks with a clear owner-action list (element, logical name, expected type/target) and dependent tasks 011/012/013/020 are marked ⛔ blocked — the schema is NOT created by this task.</criterion>
+    <criterion testable="true">Negative: no Dataverse schema mutation is performed (verify by confirming only read/describe calls were issued).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec Prerequisites (HUMAN GATE) + PLAN Phase 1.0. `sprk_description` (multiline) + `sprk_project` logical name already
+    confirmed by owner 2026-07-28; `sprk_documentid` is KEPT as the SPE subject-pointer and is a separate role from
+    `sprk_regardingdocument` (do not conflate).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute (MINIMAL rigor; Step 9.5 gates skipped).</protocol>
+  </execution>
+</task>

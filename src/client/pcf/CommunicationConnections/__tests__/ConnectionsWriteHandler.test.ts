@@ -35,7 +35,7 @@ import {
   unlinkRegarding,
   _resetNavPropCacheForTests,
   type IResolverWriteContext,
-} from '../CommunicationConnections/handlers/ConnectionsWriteHandler';
+} from '@spaarke/communication-components/logic/connections';
 
 const NAV_PROPS_RESPONSE = {
   ok: true,

@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>End-to-end UI tests (entry matrix, hub, wizard, fork, reopen, retirement grep-clean)</title>
+    <phase>7 Deploy</phase>
+    <gate>071 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Final experiential gate; e2e-test tag; verifies the 9 spec Success Criteria across the deployed three-pane + record-form surfaces incl. ADR-021 dark mode + session-durability behavior.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>UI test execution via the ui-test skill (Chrome) against deployed surfaces; no code authoring — but high effort for the breadth of paths.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Runs against the fully-deployed environment; after both deploy tasks (070/071), before wrap-up (090).</parallel-reason>
+    <deps>071</deps>
+    <tags>e2e-test, frontend, ui-test</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Run the browser UI tests end-to-end against the deployed environment covering every project acceptance path: the
+    entry matrix 2a–2d, the hub (3 cards + grid + view-by-type), the wizard → create sprk_analysis → run, fork-on-analysis
+    (new bound session + prior archived + warning), reopen (restore session/review/files), TTL-expiry reopen via Cosmos,
+    and the retirement grep-clean (no analysisworkspace refs, no 404 deep-links). Include the ADR-021 dark-mode check on
+    every new surface. The pass condition is the 9 spec Success Criteria verified.
+  </prompt>
+
+  <role>
+    SPAARKE QA engineer using the ui-test skill (Chrome integration). Expert in the SpaarkeAi three-pane, the Analysis
+    hub widget, the per-type wizard, and the Matter/Project record-form entry paths.
+  </role>
+
+  <goal>
+    All 9 spec Success Criteria are verified against the deployed build: the 12 e2e baseline pass, hub create-flow,
+    durable reopen, fork-with-warning, TTL-expiry-via-Cosmos, record subgrid + 2b/2d modal opens, retirement clean,
+    BFF size/CVE gate (from 070), and record-driven opens via openSpaarkeAi — with dark-mode + console-error checks
+    on every new surface.
+  </goal>
+
+  <context>
+    <background>
+      The frontend tasks (011/012/013/030/031/040/041/050/051/052) each ship &lt;ui-tests&gt;; this task runs them
+      together end-to-end on the deployed build to catch integration + theming + session-durability regressions. The
+      entry matrix has four paths (2a new-in-workspace, 2b new-in-record → wizard → modal, 2c existing-in-workspace,
+      2d existing-in-record → modal). Fork-on-analysis mid-chat must produce a new bound Analysis+session, archive the
+      prior to history, and warn. TTL-expiry reopen must restore history from the durable Cosmos transcript (no empty
+      session). Retirement leaves nothing dangling (grep for `analysisworkspace`, no 404 deep-links).
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/ai-advanced-capabilities-analysis-hub-r1/spec.md</file>
+      <file role="canonical-reference">projects/ai-advanced-capabilities-analysis-hub-r1/tasks/030-analysis-hub-widget.poml</file>
+      <file role="canonical-reference">projects/ai-advanced-capabilities-analysis-hub-r1/tasks/040-per-type-creation-wizard.poml</file>
+      <file role="canonical-reference">projects/ai-advanced-capabilities-analysis-hub-r1/tasks/050-entry-matrix-host-routing.poml</file>
+      <file role="new">projects/ai-advanced-capabilities-analysis-hub-r1/notes/e2e-ui-test-results.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="071" status="pending">Client + ribbon + form customizations deployed (and BFF via 070) — the environment under test.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">SCOPE: every new surface (hub widget, wizard, modal host, subgrid). Passes the dark-mode check — semantic Fluent v9 tokens, no white/black hardcodes; toggle dark mode and verify adaptation.</constraint>
+    <constraint source="NFR-04">SCOPE: session/transcript durability. Verify no data loss across pane close, refresh, and reopen; TTL-expiry reopen restores prior history from the durable Cosmos transcript (not an empty session).</constraint>
+    <constraint source="NFR-07">SCOPE: retirement verification. Grep C#/JS/solution for `analysisworkspace` (all 4 casings) — zero dangling references, zero 404 deep-links.</constraint>
+    <constraint source="ADR-039">SCOPE: record-driven opens. Verify record ribbon/subgrid opens route through `openSpaarkeAi`, not `surfaceLaunchRegistry`.</constraint>
+    <constraint source="project">SCOPE: every new client surface. Passes a console-error check (no uncaught console errors during the flow).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ui-testing</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="ui-test skill" location=".claude/skills/ui-test/SKILL.md">
+        Chrome-integration browser testing; run the per-task &lt;ui-tests&gt; together end-to-end; capture dark-mode + console checks.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; load the ui-test skill + spec.md Success Criteria; confirm 071 is ✅ (environment deployed).</step>
+    <step order="1">Verify the 12 pre-existing e2e suites pass on the deployed build (Success Criterion #1, green baseline).</step>
+    <step order="2">Entry matrix 2a–2d: exercise new-in-workspace, new-in-record → wizard → modal (regarding pre-set), existing-in-workspace, existing-in-record → modal; assert each opens the correct host with correct pre-set context (#2, #6).</step>
+    <step order="3">Hub widget: assert 3 cards render (Agreement live; Research/Patent coming-soon disabled), the grid lists sprk_analysis, and view-by-type filters correctly.</step>
+    <step order="4">Wizard: card → 3-step wizard → finish creates a valid sprk_analysis (name/description/work-type/regarding/access/next-steps) and runs the analysis (#2).</step>
+    <step order="5">Fork-on-analysis: launch an analysis mid-chat; assert a new bound Analysis+session, the prior session archived to history (switchable back), and the warning shown (#4).</step>
+    <step order="6">Reopen: from the hub grid, reopen an analysis; assert session history + findings/review state + files restore (#3).</step>
+    <step order="7">TTL-expiry: expire a session, reopen; assert prior history restores from Cosmos (no empty-session data loss) (#5).</step>
+    <step order="8">Retirement grep-clean: grep C#/JS/solution for `analysisworkspace`; assert no dangling refs / no 404 deep-links (#7); confirm record opens go via openSpaarkeAi (#9).</step>
+    <step order="9">Dark-mode + console-error checks on every new surface (hub, wizard, modal host, subgrid).</step>
+    <step order="10">Record pass/fail per Success Criterion in notes/e2e-ui-test-results.md; file regressions as notes/ issues; update TASK-INDEX.md: mark 072 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of the 9 spec Success Criteria fails on the deployed build (e.g. TTL-expiry reopen creates an empty session, fork does not archive/warn, or a dangling analysisworkspace ref survives), STOP and file it as a blocking regression — do NOT mark 072 ✅ with an unresolved criterion.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Run the ui-test skill (Chrome) + the retirement grep.</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-advanced-capabilities-analysis-hub-r1/notes/e2e-ui-test-results.md (pass/fail per Success Criterion + dark-mode/console results)</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Entry matrix + hub + wizard + fork + reopen (end-to-end)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=webresource&amp;webresourceName=sprk_SpaarkeAi</url>
+      <steps>
+        <step>Open the Analysis hub; verify 3 cards (Agreement live; Research/Patent coming-soon disabled) + grid + view-by-type filter</step>
+        <step>Click the Agreement card; complete the 3-step wizard; verify a sprk_analysis is created and the analysis runs</step>
+        <step>Mid-chat, launch an analysis; verify a new bound Analysis+session, prior archived to history, and the warning</step>
+        <step>Reopen the analysis from the grid; verify session history + review state + files restore</step>
+        <step>Expire the session (TTL) and reopen; verify prior history restores from Cosmos (no empty session)</step>
+        <step>From a Matter form, use the ribbon launcher + Analysis subgrid; verify 2b (new → wizard → modal, regarding pre-set) and 2d (existing → modal) open correctly</step>
+        <step>Toggle dark mode across hub/wizard/modal/subgrid; verify semantic-token adaptation and check the console</step>
+      </steps>
+      <expected>All 4 entry paths open the correct host with correct pre-set context; hub/wizard/fork/reopen/TTL-reopen behave per spec; every new surface is ADR-021 dark-mode compliant with no console errors.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">SC#1: the 12 pre-existing e2e suites pass on the deployed build.</criterion>
+    <criterion testable="true">SC#2: a user can create an Agreement Review from the hub (card → wizard → running analysis).</criterion>
+    <criterion testable="true">SC#3: an analysis is a durable sprk_analysis, findable + reopenable from the hub grid with session/review/files restored.</criterion>
+    <criterion testable="true">SC#4: launching an analysis forks a new bound session + archives the prior, with warning shown.</criterion>
+    <criterion testable="true">SC#5: sessions survive TTL expiry via Cosmos (reopen restores history, no empty-session data loss).</criterion>
+    <criterion testable="true">SC#6: a Matter/Project record shows an Analysis subgrid; 2b opens wizard → modal (regarding pre-set) and 2d opens the modal.</criterion>
+    <criterion testable="true">SC#7: sprk_analysisworkspace is fully retired — grep finds no 404 deep-links / no dangling web-resource refs.</criterion>
+    <criterion testable="true">SC#8: BFF publish-size ≤60 MB + no new HIGH CVE (carried from 070's record).</criterion>
+    <criterion testable="true">SC#9: record-driven opens route via openSpaarkeAi, not surfaceLaunchRegistry (verified in-flow + by grep).</criterion>
+    <criterion testable="true">Every new surface passes the ADR-021 dark-mode check and has no console errors.</criterion>
+    <criterion testable="true">Negative: any failing Success Criterion is filed as a blocking regression and 072 is NOT marked ✅ until resolved.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Final experiential gate before wrap-up. The 9 Success Criteria are the closed pass set (spec §Success Criteria).
+    SC#8 evidence is produced by task 070; this task confirms the record is present, it does not re-run the deploy.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute; run the ui-test skill (Step 9.7); verify all 9 Success Criteria.</protocol>
+  </execution>
+</task>

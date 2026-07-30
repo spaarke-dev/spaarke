@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>Job C — email-triggered tasks/events via the shipped create-task pattern (`CREATE-TASK@v1` → gated `dataverse.create_record` → `sprk_event`), cited</title>
+    <phase>P4 — Job C + intent</phase>
+    <gate>after:020,022</gate>
+    <status>completed</status>
+    <tags>bff-api, catalog</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Creates records (tasks/events) from email content on the AI-directed create path; deadline-bearing entries require human confirm (NFR-06 / ADR-015); citation to the source communication is load-bearing. Reuses the shipped `CREATE-TASK@v1` pattern — MUST NOT fork a second create mechanism. BFF-touching (catalog data + Ai via PublicContracts): publish-size + CVE + Placement Justification; code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reuses a fully shipped, well-specified pattern (`CREATE-TASK@v1` → gated `dataverse.create_record`); the work is wiring the email trigger + citation + confirm gate onto an existing capability, not novel design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares the Job C create path + `Services/Communication/` + `Services/Ai/PublicContracts/` seams with 041 (which grounds on this path); serialize. `/conflict-check` before the PR.</parallel-reason>
+    <dependencies>020, 022</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement **Job C** (FR-14): email content triggers tasks/events via the **shipped create-task pattern** — `CREATE-TASK@v1` → gated `dataverse.create_record` → `sprk_event` — on the record the email is associated to (020), **cited to the source communication**. Reuse the shipped capability end-to-end; do NOT fork a second task-creation mechanism.
+
+    Reach AI + the create tool **only** through `Services/Ai/PublicContracts/` (ADR-013 facade) as a **code-directed Action + Binding** (ADR-039). MUST NOT land capability on the frozen node-graph playbook engine. The create is a **gated** `dataverse.create_record` — deadline-bearing entries (anything with a due/deadline date) require **human confirm** (NFR-06 / ADR-015); nothing deadline-bearing auto-finalizes.
+
+    Ground the trigger in the triage signal already produced on the enrichment path (022) — do not run a second full LLM pass. Every created task/event carries a citation to the source communication (email + locator) and lands on the correct associated record. **NFR-04:** Job C is best-effort / non-fatal — it MUST NOT fail the capture or send path.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication + Ai domains, authoritative on the shipped `create-task` capability (`CREATE-TASK@v1`), the gated `dataverse.create_record` tool, the `Services/Ai/PublicContracts/` facade (ADR-013), Action + Binding authoring (ADR-039), the `TaskActionCore` write core, and NFR-06 / ADR-015 (deadline-bearing → confirm). Fluent in `docs/guides/ai-guide-consumer-wiring.md`.
+  </role>
+
+  <goal>
+    Given an email associated to a record (020) with a triage signal (022) implying a task/event, Job C creates the task/event on the right record via `CREATE-TASK@v1` → gated `dataverse.create_record` → `sprk_event`, cited to the source communication. A deadline-bearing entry requires human confirm before finalizing. The capability reuses the shipped create-task pattern (no fork), reaches AI only via `PublicContracts`, and is best-effort on the enrichment path. Build clean; unit + seam tests + a golden-utterance eval case pass; publish-size + CVE + Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      r1 turns email into action. Job C is the "email implies work" path: it reuses the shipped create-task capability rather than building a new one. The reference Binding + input schema exist (`infra/dataverse/sprk_playbookconsumer-rows.json` + `infra/dataverse/inputschemas/create-task-v1.input.schema.json`); `TaskActionCore` is the write core; the create tool is gated `dataverse.create_record`. This task authors the email→create-task Action + Binding (catalog data) + wires the trigger onto the enrichment path.
+
+      NFR-06 / ADR-015: deadline-bearing entries require confirm — a task with a due date is not auto-finalized. The citation to the source communication is what makes the created item defensible (why does this task exist? — because of email X). 041 grounds attachment-derived action extraction on this same create path.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ActionCore/TaskActionCore.cs (REUSE — the create-task write core `CREATE-TASK@v1` fronts)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionSeam.cs (REUSE — the facade seam to the create path)</file>
+      <file>infra/dataverse/inputschemas/create-task-v1.input.schema.json (REUSE/MIRROR — the CREATE-TASK@v1 input schema; author the email→create Binding mirror-first)</file>
+      <file>infra/dataverse/sprk_playbookconsumer-rows.json (REFERENCE — Binding row shape for the create-task consumer)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs (REFERENCE — enrichment path where the trigger fires best-effort, NFR-04)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/AiClassificationRung.cs (REFERENCE — the triage signal to reuse; no 2nd full LLM pass)</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md (Action + Binding authoring; the create-task worked example)</file>
+    </relevant-files>
+    <dependencies>020 (the association that supplies the target record), 022 (the triage signal that implies the task).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-14">Scope: email content triggers tasks/events via the shipped create-task pattern (`CREATE-TASK@v1` → gated `dataverse.create_record` → `sprk_event`), cited to the source communication, on the correct associated record; deadline-bearing entries require confirm.</constraint>
+    <constraint source="ADR-039">Scope: code-directed Action + Binding via catalog data reusing the shipped create-task capability; MUST NOT land capability on the frozen node-graph engine; MUST NOT fork a second task-creation mechanism.</constraint>
+    <constraint source="ADR-013 / NFR-03">Scope: reach AI + the create tool ONLY via `Services/Ai/PublicContracts/`; MUST NOT inject `IOpenAiClient`/`IPlaybookService` into Communication code.</constraint>
+    <constraint source="NFR-06 / ADR-015">Scope: deadline-bearing entries (with a due/deadline date) require human confirm; nothing deadline-bearing auto-finalizes; each created item carries a citation to the source communication.</constraint>
+    <constraint source="NFR-04 / ADR-045">Scope: Job C is best-effort / non-fatal — it MUST NOT fail the capture or send path.</constraint>
+    <constraint source="project §10">Scope: BFF Hygiene — load `.claude/constraints/bff-extensions.md`; state Placement Justification (reuses the shipped create-task capability + PublicContracts facade; catalog data, no new service); publish-size delta vs ~49.63 MB (expected ≈0); no new HIGH CVE; update tests in `tests/unit/Sprk.Bff.Api.Tests/` + seam tests.</constraint>
+    <constraint source="NFR-07 / ADR-039">Scope: the Job C Action/Binding adds a golden-utterance eval case (blocking merge gate).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ActionCore/TaskActionCore.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionSeam.cs</file>
+      <file>infra/dataverse/inputschemas/create-task-v1.input.schema.json</file>
+      <file>infra/dataverse/sprk_playbookconsumer-rows.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-015-ai-data-governance.md</file>
+      <file>docs/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Reuse CREATE-TASK@v1" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ActionCore/TaskActionCore.cs">
+        Author the email→create Binding mirror-first over `create-task-v1.input.schema.json`; route through the shipped create-task capability + gated `dataverse.create_record`; do not fork.
+      </pattern>
+      <pattern name="Deadline-bearing → confirm" location="Services/Ai/PublicContracts/">
+        A created entry with a due/deadline date requires human confirm before finalizing; auto-finalize only non-deadline-bearing entries.
+      </pattern>
+      <pattern name="Cite the source" location="Services/Communication/CommunicationEnrichmentService.cs">
+        Every created task/event carries a citation to the source communication (email + locator); the trigger fires best-effort on the enrichment path (NFR-04).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `.claude/constraints/bff-extensions.md`, `docs/guides/ai-guide-consumer-wiring.md` (create-task worked example), ADR-039, ADR-013, ADR-015 (deadline-bearing → confirm).</step>
+    <step order="2">Read `TaskActionCore.cs`, `create-task-v1.input.schema.json`, `sprk_playbookconsumer-rows.json`, and the enrichment path — identify the shipped create path, the input-schema shape to mirror, and where the trigger fires on enrichment.</step>
+    <step order="3">Author the email→create-task Action + Binding (catalog data, mirror-first over the create-task input schema) that, given the associated record + reused triage signal (022), proposes/creates a task/event on the right record via `CREATE-TASK@v1` → gated `dataverse.create_record` → `sprk_event`, cited.</step>
+    <step order="4">Wire the deadline-bearing confirm gate: an entry with a due/deadline date requires human confirm; non-deadline-bearing entries may auto-finalize per the shipped gate. Attach the source-communication citation.</step>
+    <step order="5">Wire the trigger onto the enrichment path best-effort (NFR-04) — log + degrade on failure, never throw up capture/send.</step>
+    <step order="6">Add the golden-utterance eval case (NFR-07). Write unit + seam tests: (a) an email implying a task creates one on the right record, cited to the source; (b) a deadline-bearing entry requires confirm (does not auto-finalize); (c) the create reuses `CREATE-TASK@v1` / gated `dataverse.create_record` (no forked mechanism, grep-verifiable); (d) a Job C failure does not fail the enrichment path (NFR-04). ADR-038 boundary mocks only.</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` + targeted `dotnet test`; publish-size (report absolute + delta vs ~49.63 MB) + CVE scan.</step>
+    <step order="9.5">FULL-rigor gates: `code-review` (focus reuse-not-fork, deadline→confirm, citation, facade discipline, non-fatal); `adr-check` against ADR-039 / ADR-013 / ADR-015 + spec FR-14 / NFR-04 / NFR-06 / NFR-07. Address Critical findings; cite Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (shared `Services/Communication/` + create path; coordinate with 041 which grounds on this path).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (040 ✅) + `current-task.md`; record decisions (create-task Binding shape, confirm-gate wiring, citation approach) for 041.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the shipped `CREATE-TASK@v1` input schema / create path cannot express the email-triggered task/event without a schema change or a second create mechanism, STOP and surface per root §6 / §6.5 rather than forking a parallel task-creation path.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The shipped `create-task` capability (`CREATE-TASK@v1` → gated `dataverse.create_record` → `sprk_event`) already creates tasks/events; `TaskActionCore` is the write core.</existing>
+    <extension>Yes — this is a new Action + Binding (catalog data) mirror-first over the shipped create-task input schema, reusing the shipped create path end-to-end; no new create mechanism, no new service.</extension>
+    <cost-of-doing-nothing>Without Job C, an email that implies work (a task/event) results in nothing — the "email into action" pillar (FR-14 / Success Criterion 7 grounding) does not ship, and 041's attachment-derived action extraction has no create path to ground on.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="read">Inspect the create-task core, input schema, Binding rows, enrichment path, wiring guide</tool>
+    <tool name="grep">Confirm reuse of `CREATE-TASK@v1` (no forked create mechanism); confirm no facade violation</tool>
+    <tool name="edit">Author the email→create Action/Binding + confirm gate + enrichment-path wiring</tool>
+    <tool name="bash">Build, unit/seam tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ + Services/Ai/PublicContracts/ (UPDATED — Job C trigger onto the shipped create-task path, cited, confirm-gated, best-effort)</output>
+    <output type="config">infra/dataverse/ (email→create-task Action + Binding rows + input schema mirror; golden-utterance eval case)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ + tests/integration/seam/ — create-on-right-record-cited + deadline→confirm + reuse-not-fork + non-fatal</output>
+    <output type="docs">PR description with §11 Component Justification + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An email implying a task creates one on the correct associated record via `CREATE-TASK@v1` → gated `dataverse.create_record` → `sprk_event`, cited to the source communication.</criterion>
+    <criterion testable="true">A deadline-bearing entry requires human confirm and does NOT auto-finalize (NFR-06 / ADR-015).</criterion>
+    <criterion testable="true">The create reuses the shipped create-task capability — no second task-creation mechanism is introduced (grep-verifiable); AI + create tool reached only via `Services/Ai/PublicContracts/`; no capability landed on the frozen node engine.</criterion>
+    <criterion testable="true">Job C is best-effort: a Job C failure does NOT fail the capture or send / enrichment path (NFR-04).</criterion>
+    <criterion testable="true">A golden-utterance eval case exists for the Job C Action/Binding (NFR-07).</criterion>
+    <criterion testable="true">`dotnet build` clean; tests pass; publish-size delta ≈0 vs ~49.63 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Blocks 041 (attachment-grounded action extraction grounds on this create path). Reuse the shipped create-task capability — do NOT fork. Deadline-bearing → confirm is non-negotiable (NFR-06 / ADR-015). Run `/conflict-check` before the PR (shared `Services/Communication/`).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files. Apply FULL rigor — Step 9.5 gates REQUIRED. Per §10 + §11: publish-size delta (baseline ~49.63 MB) + CVE + Placement + Component Justification in the PR. `/conflict-check` before the PR. Model tier `sonnet` @ effort `high`.</protocol>
+  </execution>
+</task>

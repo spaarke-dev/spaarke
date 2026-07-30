@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="email-communication-solution-r5">
+  <metadata>
+    <title>FR-11/FR-12: reading-pane envelope header (CommunicationHeader reuse) + attachments view (AttachmentList) with preview</title>
+    <phase>3 Layer-2 React 19 views + reading-pane shell</phase>
+    <gate>after:021,032</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Composition of already-reviewed reused components (CommunicationHeader, promoted AttachmentList, RichFilePreviewDialog) into the reading-pane shell; no new business logic, no security boundary, no BFF touch. STANDARD (Step 9.5 gate skipped), but ui-tests + dark-mode check apply per the frontend/fluent-ui tags.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Straightforward reuse/wiring of existing components with a clear reference impl; no cross-surface correctness or security reasoning required.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct reading-pane sub-view (header + attachments); shares only the shell mount contract with 033/035/036. Separate view files.</parallel-reason>
+    <deps>021,032</deps>
+    <tags>frontend, fluent-ui, react</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the reading-pane HEADER + ATTACHMENTS sub-view (React 19 Layer-2). The header REUSES `CommunicationHeader` (from/to/cc/bcc, subject, sent/received dates) reflecting the selected `sprk_communication` record. The attachments section renders the promoted shared `AttachmentList` (from task 021) with inline images filtered OUT; clicking an attachment opens the reused `RichFilePreviewDialog`. Compose into the reading-pane shell (task 032). No forked header or attachment component — reuse only.</prompt>
+  <role>SPAARKE platform developer. Expert in React 19 + Fluent UI v9 component composition. Follow ADRs strictly (ADR-021 Fluent v9/dark, ADR-012 shared components).</role>
+  <goal>A React 19 sub-view in `@spaarke/communication-components` that (1) renders `CommunicationHeader` bound to the selected record's from/to/cc/bcc, subject, and sent/received dates; (2) renders the promoted shared `AttachmentList` (task-021 Layer-1 core + data adapter) filtered to exclude inline (`cid:`-referenced) images; (3) wires attachment click to open `RichFilePreviewDialog`. Composes into the reading-pane shell. No `as React.ComponentType` cast (NFR-05); dark-mode correct (ADR-021).</goal>
+
+  <context>
+    <background>Spec FR-11 + FR-12. The reading pane needs the standard envelope header and the attachment list next to the body. Both already exist: `CommunicationHeader` (reused as-is) and the `AttachmentList` core (promoted to shared in task 021 with its data/BFF adapters as Layer-1 logic). Inline images belong in the `.eml` body render (task 033), so the attachments section must FILTER them out and show only true attachments; clicking one opens the reused `RichFilePreviewDialog`. This is pure composition — the §11-justified surface is the reading-pane shell (task 032).</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/reading-pane/EmailHeaderAndAttachments.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/reading-pane/ReadingPaneShell.tsx</file>
+      <file role="canonical-reference">src/client/code-pages/CommunicationPage/src/components/CommunicationHeader.tsx</file>
+      <file role="canonical-reference">src/client/pcf/CommunicationAttachments/CommunicationAttachments/AttachmentList.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="021" status="pending">Promoted shared `AttachmentList` + its Layer-1 data/BFF adapters — the attachment source this view renders.</dependency>
+      <dependency task="032" status="pending">Reading-pane shell — the mount point; supplies the selected record.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Reuse-only (FR-11/FR-12): the header MUST be `CommunicationHeader` and the attachment list MUST be the promoted shared `AttachmentList` — do NOT fork or reimplement either. Attachment preview MUST reuse `RichFilePreviewDialog`.</constraint>
+    <constraint source="project">Inline-image filtering (FR-12): images referenced inline (`cid:`) belong to the `.eml` body render (task 033) and MUST be excluded from the attachments list; only true file attachments appear.</constraint>
+    <constraint source="ADR-021">Fluent v9 only; header + attachment rows + preview dialog render correctly in dark mode via the host `FluentProvider` (no hardcoded colors).</constraint>
+    <constraint source="NFR-05">React 19 Layer-2 view consuming React-agnostic logic only; no `as React.ComponentType` cast introduced.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>React 19 view composition · Fluent v9 · shared component reuse</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-v9-components.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <patterns>
+      <pattern name="Envelope header" location="src/client/code-pages/CommunicationPage/src/components/CommunicationHeader.tsx">Reuse as-is; bind to the selected record's recipients/subject/dates.</pattern>
+      <pattern name="Attachment list + preview" location="src/client/pcf/CommunicationAttachments/CommunicationAttachments/AttachmentList.tsx">The promoted core (task 021) + `RichFilePreviewDialog` open-on-click; apply the inline-image filter before passing items to the list.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load CLAUDE.md, spec FR-11/FR-12, ADR-021/ADR-012. Declare RIGOR LEVEL: STANDARD (reuse composition). Confirm tasks 021 + 032 landed.</step>
+    <step order="1">Render `CommunicationHeader` bound to the selected record (from/to/cc/bcc, subject, sent/received dates).</step>
+    <step order="2">Fetch attachments via the task-021 Layer-1 data adapter; filter OUT inline (`cid:`) images; pass the remaining true attachments to the promoted shared `AttachmentList`.</step>
+    <step order="3">Wire attachment click → open `RichFilePreviewDialog` for the selected item.</step>
+    <step order="4">Compose the header + attachments into `ReadingPaneShell.tsx` at their slots.</step>
+    <step order="5">Add `&lt;ui-tests&gt;` incl. dark-mode + inline-exclusion. Build + typecheck (no `as React.ComponentType`).</step>
+    <step order="N-1">Update `projects/email-communication-solution-r5/tasks/TASK-INDEX.md`: set 034 to ✅.</step>
+    <step order="N">Document any deviation in `projects/email-communication-solution-r5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the promoted `AttachmentList` (task 021) does not expose enough to distinguish inline (`cid:`) images from true attachments, STOP and escalate per root CLAUDE.md §6 rather than reimplementing attachment classification in this view — the classification belongs in the shared Layer-1 core.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`CommunicationHeader` (code-page) and the promoted `AttachmentList` (task 021) + `RichFilePreviewDialog` all exist. Grep: `src/client/code-pages/CommunicationPage/src/components/CommunicationHeader.tsx`, `.../CommunicationAttachments/.../AttachmentList.tsx`.</existing>
+    <extension>Yes — this task only composes reused components into the reading-pane shell (task 032, the §11-justified surface). No new component surface is introduced; the sub-view is thin wiring.</extension>
+    <cost-of-doing-nothing>Without it the reading pane shows a body with no envelope header and no way to see/preview attachments — FR-11 and FR-12 fail and the pane is incomplete for triage.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Header reflects selected record">
+      <steps><step>Select an email with multiple To/Cc recipients and a subject.</step></steps>
+      <expected>`CommunicationHeader` shows the correct from/to/cc/bcc, subject, and sent/received dates for that record.</expected>
+    </test>
+    <test name="Attachments list excludes inline images">
+      <steps><step>Select an email with both true file attachments and inline `cid:` images.</step></steps>
+      <expected>Only true attachments appear in the list; inline images are excluded (they render in the body via task 033).</expected>
+    </test>
+    <test name="Attachment preview opens">
+      <steps><step>Click an attachment in the list.</step></steps>
+      <expected>`RichFilePreviewDialog` opens showing that attachment.</expected>
+    </test>
+    <test name="Dark mode (ADR-021)">
+      <steps><step>Toggle the host `FluentProvider` to dark theme.</step><step>View the header, attachment rows, and preview dialog.</step></steps>
+      <expected>All render correctly in dark mode with no hardcoded colors.</expected>
+    </test>
+  </ui-tests>
+
+  <tools><tool name="npm">Build/typecheck the shared TS package</tool><tool name="terminal">shell</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/reading-pane/EmailHeaderAndAttachments.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/reading-pane/ReadingPaneShell.tsx</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/reading-pane/__tests__/EmailHeaderAndAttachments.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a selected record, when the sub-view renders, then `CommunicationHeader` shows the correct from/to/cc/bcc, subject, and sent/received dates.</criterion>
+    <criterion testable="true">Given an email with inline images and true attachments, when the attachments list renders, then inline (`cid:`) images are excluded and only true attachments appear.</criterion>
+    <criterion testable="true">Given an attachment, when clicked, then `RichFilePreviewDialog` opens for that item.</criterion>
+    <criterion testable="true">Negative: given an email with zero attachments, when the sub-view renders, then the attachments section renders an empty state (no crash, no phantom rows).</criterion>
+    <criterion testable="true">Header, attachment rows, and preview dialog render correctly in dark mode (ADR-021); no `as React.ComponentType` cast introduced (NFR-05); package build + typecheck green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference spec FR-11, FR-12; design.md Lens 2 (reading-pane composition). Pure reuse — the §11-justified surface is the shell (task 032). Run `/conflict-check` before PR (touches `@spaarke/communication-components`). Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+
+  <completion-notes>
+    Built in `src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingHeader/**`
+    (NOT the POML's original `reading-pane/` path — task 032 landed the shell at
+    `src/components/EmailReadingPaneShell/**` with a `render*`-slot contract instead; see
+    `notes/task-032-reading-pane-shell.md`). `CommunicationHeader` lives in the private
+    `communication-page` package (wrong dependency direction to import into this shared
+    package — ADR-012), so `EmailReadingHeader` is a fresh implementation matching its visual
+    language, extended with Cc/Bcc + independent Sent/Received rows per FR-11. Attachments view
+    reuses the promoted (task 021) `CommunicationAttachmentsService` + `AttachmentList` +
+    `RichFilePreviewDialog` verbatim — inline-image filtering happens inside the reused service,
+    not re-implemented. Full deviation + quality-gate write-up:
+    `projects/email-communication-solution-r5/notes/task-034-header-and-attachments-view.md`.
+    10/10 new Jest tests green; `tsc --noEmit` clean for all new files (package-wide `npm run
+    build` blocked only by task 033's concurrently in-progress `EmailBodyView.tsx`, out of
+    scope). Barrel export owed to `src/components/index.ts`:
+    `export * from './EmailReadingHeader';` (not applied here per orchestrator convention).
+  </completion-notes>
+</task>

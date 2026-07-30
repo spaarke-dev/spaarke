@@ -10,7 +10,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { CommunicationAttachmentsApp } from '../CommunicationAttachments/CommunicationAttachmentsApp';
 import { authenticatedFetch } from '@spaarke/auth';
-import { AttachmentType } from '../CommunicationAttachments/types';
+import { AttachmentType } from '@spaarke/communication-components/logic/attachments';
 
 const DOC = '_sprk_document_value';
 

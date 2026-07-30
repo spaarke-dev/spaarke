@@ -94,6 +94,37 @@ The Record Type entity serves as the lookup target for resolver fields:
 
 ---
 
+## Single Direct Relationship — "Regarding" (clarification, 2026-07-30)
+
+> Added to settle a recurring "regarding vs related-to" confusion surfaced by
+> `email-communication-intelligence-r1` FR-12 (regarding-vs-related intent).
+
+**There is exactly ONE direct child→parent relationship in this pattern: `regarding`.** A child record
+(communication, event, todo, memo, …) points at exactly one primary parent per type via the typed
+`sprk_regarding{entity}` lookup, denormalized into the `sprk_regardingrecord*` resolver fields. This ADR
+defines **no** `related`, `related-to`, or `sprk_relatedrecord*` field family on a polymorphic child, and
+none should be added to express "this record merely references another record."
+
+**Cross-references are NOT a second field.** When a record is *about* one thing but *mentions / is
+subject-matter-related to* another (e.g. an email that opens a **new** matter while referencing an existing
+one), that cross-reference is expressed WITHOUT a second lookup family, via one of:
+
+1. **Derivation from the target records' own relationships** — parent/child/grandchild lineage between two
+   matters lives on the *matters* (their own `sprk_related*` / hierarchy fields), never as a second link on
+   the child communication. A "new" record is not structurally special; once created it is just a record.
+2. **An LLM summary note** — "references LIT-123456; appears to open a new matter" belongs in a narrative
+   field (e.g. `sprk_triagesummary`), which is informational, not a structural association.
+
+**Consequence for association intelligence (FR-12).** Recognizing that a communication *presents a new
+record while referencing an existing one* does not create a "related" link. It (a) **suppresses** the
+misfile — the referenced record's explicit-ID match is demoted from auto-file (`Resolved`) to `Suggested`
+so a human decides, rather than silently filing the email onto a record it is not actually about — and
+(b) may **propose creating** the new record (gated, human-confirmed). The one `regarding` relationship is
+untouched; no second mechanism is introduced. This is why FR-12 required **no** schema change and **no**
+ADR-024 exception: the tension dissolves once "related-to" is understood as intent + summary, not a field.
+
+---
+
 ## Implementation Components
 
 ### Active (Shared Services)
@@ -228,5 +259,6 @@ The resolver pattern integrates with the Field Mapping Framework. When a parent 
 
 ## Revision Log
 
+- **2026-07-30 (email-communication-intelligence-r1 FR-12, owner-requested)**: Added the "Single Direct Relationship — Regarding" clarification (Path B amendment per CLAUDE.md §6.5). States that `regarding` is the sole direct child→parent relationship; cross-references ("related-to") are derived from the target records' own relationships or noted in an LLM summary, never a second `sprk_relatedrecord*` field family on the child. FR-12's "regarding-vs-related intent" therefore introduces no related field and no ADR-024 exception — it suppresses the misfile (demote `Resolved`→`Suggested` on the referenced record) and may propose creating the new record (gated). No MUST/MUST NOT rule changes; a clarification of scope.
 - **2026-07-02 (SRFR-071)**: Extended field write from 4 → 5 (added `sprk_regardingrecordnumber`); no MUST/MUST NOT rule changes.
 - **2026-07-05 (SRFR-045)**: Retired AssociationResolver PCF (deleted source + spaarkedev1 solution). RegardingResolver v1.4.0 becomes the sole active resolver PCF for the polymorphic-child pattern. Added subgrid auto-detect capability: on form mount, iterate the bound catalog's `sprk_regarding{entityName}` field names via `Xrm.Page.getAttribute()`; first pre-populated lookup found (from a parent's "+ new" subgrid click) triggers auto-write of the 5 denormalized fields — via `setValue` in CREATE mode + `__sprk_regarding_pending__` bridge for the SRFR-040 presave webresource; via `applyResolverFields` + `webApi.updateRecord` in UPDATE mode. No MUST/MUST NOT rule changes; the auto-detect path uses the same 5-field write contract as the existing picker path.

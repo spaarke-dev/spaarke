@@ -45,7 +45,7 @@ import {
   Dismiss20Regular,
   Attach20Regular,
   SearchRegular,
-  Connector20Regular,
+  Search20Regular,
   ChevronDown20Regular,
   ChevronUp20Regular,
 } from '@fluentui/react-icons';
@@ -183,8 +183,38 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
-  // Trailing controls placed into the RichTextEditor toolbar slot (paperclip / search /
-  // connector). Kept visually grouped at the toolbar's trailing end.
+  // "Related to" body — chips + the link tile stacked (owner UAT 2026-07-30, item 10).
+  relatedBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: tokens.spacingVerticalS,
+  },
+  // "Link another record" tile — the ONLY way to relate an email now that the connector
+  // toolbar icon is gone (item 11). Non-bold label + leading search icon; bordered box that
+  // matches the reading-pane resolver's link tile. Token-only so both themes resolve (ADR-021).
+  linkTile: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    borderRadius: tokens.borderRadiusMedium,
+    border: `${tokens.strokeWidthThin} dashed ${tokens.colorNeutralStroke1}`,
+    backgroundColor: 'transparent',
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightRegular,
+    cursor: 'pointer',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+      color: tokens.colorNeutralForeground1,
+    },
+  },
+  // Trailing controls placed into the RichTextEditor toolbar slot (paperclip / search).
+  // Kept visually grouped at the toolbar's trailing end.
   toolbarSlot: {
     display: 'flex',
     alignItems: 'center',
@@ -394,6 +424,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             id: item.id,
             documentId: res.documentId,
             driveItemId: res.driveItemId,
+            linkUrl: res.linkUrl,
           });
         })
         .catch((err: unknown) => {
@@ -429,7 +460,9 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     [props.recordLookupCatalog]
   );
   const showRecordSearch = !state.readOnly && recordSearchCatalog.length > 0 && !!props.onLookupRecord;
-  const showConnector = !state.readOnly && !!props.onAddRelationship;
+  // Owner UAT 2026-07-30 (item 11): the connector toolbar icon is REMOVED. Relating an email to
+  // a record now happens via the "Link another record" tile inside the "Related to" section (item 10).
+  const canLinkRecord = !state.readOnly && !!props.onAddRelationship;
 
   const runDocumentLink = React.useCallback(() => {
     if (!props.onLookupRecord) return;
@@ -449,7 +482,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   );
 
   const toolbarSlot =
-    canAddLocal || canLinkDocument || showRecordSearch || showConnector ? (
+    canAddLocal || canLinkDocument || showRecordSearch ? (
       <div className={styles.toolbarSlot}>
         {(canAddLocal || canLinkDocument) && (
           <Menu positioning="below-end">
@@ -486,15 +519,6 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
               </MenuList>
             </MenuPopover>
           </Menu>
-        )}
-        {showConnector && (
-          <Tooltip content="Relate this email to a record" relationship="label">
-            <ToolbarButton
-              icon={<Connector20Regular />}
-              aria-label="Add relationship"
-              onClick={handleAddRelationship}
-            />
-          </Tooltip>
         )}
       </div>
     ) : undefined;
@@ -740,14 +764,35 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             </Text>
             {relatedCollapsed ? <ChevronDown20Regular /> : <ChevronUp20Regular />}
           </div>
-          {!relatedCollapsed &&
-            (state.associations.length > 0 ? (
-              <AssociationChips associations={state.associations} />
-            ) : (
-              <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-                Not related to any record yet.
-              </Text>
-            ))}
+          {!relatedCollapsed && (
+            <div className={styles.relatedBody}>
+              {state.associations.length > 0 && (
+                <AssociationChips
+                  associations={state.associations}
+                  onRemove={
+                    state.readOnly
+                      ? undefined
+                      : a =>
+                          dispatch({
+                            type: 'REMOVE_ASSOCIATION',
+                            entityType: a.entityType,
+                            entityId: a.entityId,
+                          })
+                  }
+                />
+              )}
+              {canLinkRecord ? (
+                <button type="button" className={styles.linkTile} onClick={handleAddRelationship}>
+                  <Search20Regular />
+                  <span>{state.associations.length > 0 ? 'Link another record' : 'Link a record'}</span>
+                </button>
+              ) : state.associations.length === 0 ? (
+                <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                  Not related to any record yet.
+                </Text>
+              ) : null}
+            </div>
+          )}
         </div>
       )}
 
@@ -777,15 +822,16 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
       {isChromed && (
         <div className={styles.header}>
           <Text as="h2" size={600} weight="semibold">
-            {state.mode === 'view'
-              ? 'Email'
-              : state.mode === 'reply'
-                ? 'Reply'
-                : state.mode === 'forward'
-                  ? 'Forward'
-                  : state.mode === 'draft'
-                    ? 'Edit Draft'
-                    : 'New Email'}
+            {props.titleOverride ??
+              (state.mode === 'view'
+                ? 'Email'
+                : state.mode === 'reply'
+                  ? 'Reply'
+                  : state.mode === 'forward'
+                    ? 'Forward'
+                    : state.mode === 'draft'
+                      ? 'Edit Draft'
+                      : 'New Email')}
           </Text>
           {props.onCancel && (
             <div className={styles.headerActions}>

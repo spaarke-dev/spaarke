@@ -1,0 +1,159 @@
+<task id="032" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>WS-3: render the computed label as an explicit non-editable number-atom</title>
+    <phase>3 WS-3 Numbering</phase>
+    <gate>blocked until 031</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.tsx` (TipTap editor) with `compose`/`frontend`/`fluent-ui` tags; the frontend/fluent-ui tags trigger `&lt;ui-tests&gt;`. Step 9.5 code-review + adr-check run unconditionally.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded, fully-specified TipTap render change (an explicit non-editable atom prefix carrying the 031-computed label) with an owner-locked decision (atom, not `&lt;ol&gt;`); no architectural judgment — the hard correctness work is in 031.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the shared `ComposeEditor.tsx` mount/render path — the same file 021 modified and 013 touched. WS-3 sequential stretch per plan.md group W3.</parallel-reason>
+    <deps>031</deps>
+    <tags>compose,frontend,fluent-ui</tags>
+    <estimated-effort>1-1.5 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Render the 031-computed numbering label as an EXPLICIT non-editable number-atom prefix on the paragraph node in
+    TipTap (design §4 WS-3 rendering; spec FR-13/FR-14; owner-locked decision). The editor NEVER relies on browser
+    `&lt;ol&gt;` CSS auto-count for a legal number — the number is a FIXED computed artifact of the source and must NOT
+    silently re-flow. READ-TIME ONLY within R4.5: no auto-renumber on edit — live renumber-on-insert/delete
+    (reflected in redline) is R5 G3; WS-3's engine (031) is the shared model G3 will build on (record the coupling
+    in notes). The explicit atom is chosen over `&lt;ol start=…&gt;` per the owner decision — more faithful for letters/
+    roman/"Article I"/style-linked schemes and decoupled from CSS list quirks. Add `&lt;ui-tests&gt;`: numbers render
+    identical to Word (incl. interrupted / multi-level / style-linked), interrupting a numbered run does NOT restart
+    at 1, and dark-mode (ADR-021).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer working the Compose TipTap editor surface. Expert in TipTap/ProseMirror node
+    rendering (non-editable atom nodes, `atom`/`selectable:false`/`contentEditable=false`), Fluent UI v9, and the
+    R4.5 invariant that a legal number is a fixed computed artifact — never a CSS auto-count. Understands the
+    owner-locked decision (explicit atom, not `&lt;ol start&gt;`) and the R4.5/R5 boundary (read-time correctness only;
+    edit-side renumber is G3). Follow ADRs — the client authors no bytes; ADR-021 dark-mode.
+  </role>
+
+  <goal>
+    The Compose editor renders each numbered paragraph's 031-computed label as an explicit, non-editable
+    number-atom prefix on the paragraph node — identical to Word for decimal / letters / roman / "Article I" /
+    style-linked schemes, with interrupted runs NOT restarting at 1 — with zero dependence on browser `&lt;ol&gt;` CSS
+    auto-count. The atom is read-only and does not participate in the tracked-edit stream (R4.5 read-time only;
+    edit-side renumber deferred to R5 G3, coupling recorded). `&lt;ui-tests&gt;` confirm Word-identical rendering
+    (interrupted / multi-level / style-linked) and dark-mode.
+  </goal>
+
+  <context>
+    <background>
+      031 computes the exact displayed label server-side and attaches it to each paragraph node. This task renders
+      it. Today list rendering uses the browser `&lt;ol&gt;` auto-count (`ComposeEditor.tsx`), which is exactly why an
+      interrupted run restarts at 1 and letters/roman/"Article I"/style-linked schemes are unfaithful. Per the
+      owner-locked decision (spec Owner Clarifications; design §4 WS-3), the label is rendered as an explicit
+      non-editable atom prefix — a fixed computed artifact of the source — NOT `&lt;ol start=…&gt;`. The atom must not
+      silently re-flow and must not become user-editable: making it editable or part of the tracked-edit stream
+      crosses into R5 G3 edit-side scope, out of R4.5. Read-time only: no auto-renumber on edit within R4.5.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — render the 031 computed label as a non-editable number-atom prefix on the paragraph node; stop relying on browser `&lt;ol&gt;` auto-count for a legal number. RE-GREP the list/paragraph render + the `&lt;ol&gt;` usage before editing.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — 031 attaches the computed label to the paragraph node; this task reads that field. Confirm the field name/shape 031 emits.</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/{nda-interrupted-clauses,heading-style-numbering,multilevel-1-1-1}.docx — the exemplars the `&lt;ui-tests&gt;` render + compare to Word.</file>
+      <file role="spec">projects/spaarkeai-compose-fidelity-r4.5/spec.md — FR-13 (explicit non-editable number-atom, not `&lt;ol&gt;` auto-count), FR-14 (read-time only; G3 coupling), Owner Clarifications (atom chosen over `&lt;ol start&gt;`).</file>
+      <file role="design">projects/spaarkeai-compose-fidelity-r4.5/design.md §4 WS-3 "Rendering" (option (a) explicit non-editable prefix atom — recommended + owner-locked).</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="031" status="pending">Provides the computed label attached to each paragraph node — this task renders it.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-13">The editor MUST render the computed label as an explicit NON-EDITABLE number-atom prefix on the paragraph node — NOT via browser `&lt;ol&gt;` CSS auto-count. Scope: the number is a fixed computed artifact of the source and must not silently re-flow; render the 031 label, do not recompute or auto-count client-side.</constraint>
+    <constraint source="spec / FR-14 / owner-locked">Read-time ONLY within R4.5 — no auto-renumber on edit. Scope: the atom is read-only and does not participate in the tracked-edit stream; record in notes that live renumber-on-insert/delete is R5 G3 and WS-3's engine (031) is the shared model G3 builds on.</constraint>
+    <constraint source="project / owner decision">Explicit atom is chosen over `&lt;ol start=…&gt;`. Scope: do NOT re-litigate — implement the atom; it is more faithful for letters/roman/"Article I"/style-linked and decoupled from CSS list quirks.</constraint>
+    <constraint source="ADR-021">The number-atom MUST honor dark-mode. Scope: `&lt;ui-tests&gt;` include a dark-mode check that the atom renders with correct contrast in both themes.</constraint>
+    <constraint source="ADR-028 / client-authors-no-bytes">The client renders the projection; it authors no `.docx` bytes. Scope: this is a display-only atom; no client-side byte authoring.</constraint>
+    <constraint source="project / no-regression">The atom must not break existing R4 list/paragraph rendering, selection, or the tracked-edit stream. Scope: verify bullets + existing constructs render unchanged; the atom is non-selectable and non-editable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>TipTap/ProseMirror non-editable atom nodes; Fluent UI v9; the fixed-computed-label invariant (no CSS auto-count for a legal number); R4.5/R5 read-vs-edit boundary; ADR-021 dark-mode</topic>
+    <files>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Non-editable atom prefix" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx">
+        Render the 031 label as an atom node (`atom:true`, `selectable:false`, `contentEditable=false`) prefixed on the paragraph — a fixed artifact that does not re-flow. Replace the `&lt;ol&gt;` auto-count reliance for legal numbers; existing bullet lists may remain, but a legal NUMBER comes from the atom.
+      </pattern>
+      <pattern name="Read-time-only boundary" location="projects/spaarkeai-compose-fidelity-r4.5/spec.md FR-14">
+        The atom does not participate in the tracked-edit stream and does not auto-renumber on edit. Live renumber-on-insert/delete (reflected in redline) is R5 G3 — record the coupling but do NOT implement edit-side behavior here.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL / 📋 REASON: modifies `.tsx` with `frontend`/`fluent-ui` tags → `&lt;ui-tests&gt;` / 📖 PROTOCOL STEPS incl. Step 9.5). Load spec FR-13/14 + Owner Clarifications + design §4 WS-3 rendering.</step>
+    <step order="1" name="RE-GREP the render path">Grep `ComposeEditor.tsx` for the list/paragraph render + `&lt;ol&gt;` usage, and confirm the field 031 emits the computed label on.</step>
+    <step order="2" name="Implement the number-atom">Add a non-editable, non-selectable atom node rendering the 031 computed label as a paragraph prefix. Ensure it does not re-flow and is not user-editable.</step>
+    <step order="3" name="Stop legal-number reliance on &lt;ol&gt; auto-count">Route legal numbers through the atom; keep bullets as-is. Verify interrupted runs render the continued number (from 031), not a CSS restart.</step>
+    <step order="4" name="Run ui-tests">Run the `&lt;ui-tests&gt;` (Word-identical incl. interrupted/multi-level/style-linked; interrupting does NOT restart at 1; dark-mode) via the `ui-test` skill against the corpus exemplars.</step>
+    <step order="5" name="Build">Client build green (`build:prod` where applicable); verify no regression to existing list/paragraph rendering + selection. `/conflict-check` before PR (shared `ComposeEditor.tsx`).</step>
+    <step order="6" name="Close out">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 032 to ✅. Record the G3 coupling + any deviation in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the number-atom participates in the tracked-edit stream OR becomes user-editable — STOP. That crosses into R5 G3 edit-side scope, out of R4.5. The atom is a read-only display of the source; edit-triggered renumber (reflected in redline) is deferred to R5 and must not be implemented here.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>List rendering uses the browser `&lt;ol&gt;` auto-count in `ComposeEditor.tsx` (grep the render path) — which is why interrupted runs restart at 1 and non-decimal/style-linked schemes are unfaithful. No explicit number rendering exists.</existing>
+    <extension>No — a legal number cannot depend on CSS counters (it re-flows/collapses); it needs an explicit non-editable atom carrying the 031-computed label. This is a new render node inside the existing editor, per the owner-locked decision.</extension>
+    <cost-of-doing-nothing>Numbers depend on CSS and re-flow / collapse to "1." on interruption; letters/roman/"Article I"/style-linked schemes render wrong — the rendered legal document does not match Word even after 031 computes correctly.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Numbers render identical to Word">
+      <steps><step>Open the NDA interrupted-clause, multi-level, and heading-style exemplars in Compose.</step><step>Compare each rendered number to Word's displayed label.</step></steps>
+      <expected>Every clause/section/heading number matches Word (decimal / letters / roman / "Article I" / style-linked); multi-level shows "4.2.1".</expected>
+    </test>
+    <test name="Interrupting a numbered run does not restart at 1">
+      <steps><step>Open the NDA doc where a numbered run is interrupted by a heading/body/table.</step><step>Read the number after the interruption.</step></steps>
+      <expected>The count continues (…, 3, 4) — it does NOT restart at 1.</expected>
+    </test>
+    <test name="Atom is non-editable + dark-mode (ADR-021)">
+      <steps><step>Attempt to place the caret inside / edit the number-atom.</step><step>Toggle dark mode.</step></steps>
+      <expected>The atom is not editable / not selectable and does not join the tracked-edit stream; renders with correct contrast in light and dark.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build the Compose client (`build:prod` where applicable).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (explicit non-editable number-atom rendering the 031 computed label)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a numbered paragraph, when rendered, then its 031-computed label appears as an explicit non-editable atom prefix — no browser `&lt;ol&gt;` CSS auto-count for a legal number.</criterion>
+    <criterion testable="true">Given an interrupted numbered run, when rendered, then the count continues (does not restart at 1) — the `&lt;ui-tests&gt;` confirm it.</criterion>
+    <criterion testable="true">Letters / roman / "Article I" / style-linked / multi-level numbers render identical to Word.</criterion>
+    <criterion testable="true">Negative: the number-atom is not user-editable and does not participate in the tracked-edit stream (attempting to edit it is inert) — if it does, the escalation fires.</criterion>
+    <criterion testable="true">The atom renders correctly in light and dark themes (ADR-021); existing bullet/list rendering + selection is unchanged (no regression).</criterion>
+    <criterion testable="true">Client build green; the G3 coupling (FR-14) is recorded in notes; `/conflict-check` clean before PR.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 032 as ✅ and any deviation is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Renders the flagship engine's output. The explicit-atom decision is owner-locked — do not re-open the
+    `&lt;ol start&gt;` alternative. Read-time correctness only; edit-side live renumber (with redline) is R5 G3 and
+    shares 031's engine — record the coupling. TASK-INDEX.md + current-task.md are owned by the main session.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

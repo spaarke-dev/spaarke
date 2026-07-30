@@ -1,0 +1,141 @@
+<task id="012" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>`sprk_emailreviewlog` append-only audit entity (item, actor-type, actor, action, AI-suggestion JSON, confidence, source-ref, timestamp)</title>
+    <phase>P1 — Schema &amp; catalog foundation</phase>
+    <gate>none (STANDARD — Step 9.5 skipped; new-surface schema with constraints)</gate>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001</dependencies>
+    <deps>001</deps>
+    <blocks>031, 060</blocks>
+    <tags>dataverse, schema</tags>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Creates a NEW Dataverse entity (`sprk_emailreviewlog`) — no BFF code, no Step 9.5 gates. STANDARD per §8 (new-surface schema creation with constraints). §11 Component Justification REQUIRED (new entity). Append-only semantics + machine-and-human-review-both-as-rows is the compliance differentiator (G-5); getting the shape wrong cascades into Job B apply (031). Verify-or-create: the operator may have pre-created it in parallel.</rigor-reason>
+    <parallel-group>P1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>New-entity authoring against a documented field spec — mechanical, no architectural judgment. Default execution tier at `medium` effort per §8.5 (schema/config).</model-tier-reason>
+    <effort>medium</effort>
+    <fr-refs>FR-08</fr-refs>
+  </metadata>
+
+  <prompt>
+    Create the NEW append-only `sprk_emailreviewlog` audit entity so every AI proposal AND every human decision is queryable per matter (FR-08). This is the compliance differentiator (G-5): machine-review and human-review are BOTH written as rows. Job B apply (031) writes an audit row on every confirmed proposal; the triage/proposal path writes a row for every AI suggestion.
+
+    **VERIFY-OR-CREATE**: the operator may have pre-created this entity in a parallel schema pass. FIRST check via Dataverse MCP `describe` whether `sprk_emailreviewlog` exists; if it exists, RECONCILE its attribute set against this spec (flag any missing/mismatched column; do NOT retype an in-use field). CREATE the entity + any missing attributes only if absent.
+
+    Create the entity with (use Spaarke naming conventions; verify option-set integer conventions via MCP before any Choice):
+
+    1. **`sprk_communication` lookup** (the reviewed item — the email; per FR-08 "item"). Enables per-matter query via the email's regarding.
+    2. **`sprk_actortype`** — Choice: `machine` (rule/model) vs `human` (user). Both are first-class rows.
+    3. **`sprk_actor`** — the actor identity: a `systemuser` lookup when human, OR a text rule/model id when machine (a text field carrying the model/rule id is acceptable; model the two-target case per Spaarke conventions — do NOT invent a polymorphic mechanism).
+    4. **`sprk_action`** — Choice: the decision/action taken (e.g. AI-proposed / human-approved / human-rejected / human-edited — confirm the closed set at task time).
+    5. **`sprk_aisuggestion`** — the prior AI suggestion as JSON (multiline Text): what the model proposed (old→new / category / etc.) so the human decision is auditable against it.
+    6. **`sprk_confidence`** — Decimal (0–1), the AI suggestion's confidence at proposal time.
+    7. **`sprk_sourceref`** — the cited source locator (email/attachment + locator) tying the suggestion to exact source text (NFR-06 trust/audit).
+    8. **`sprk_targetentity` / `sprk_targetfield`** (optional, for Job B rows) — the record + field the proposal targeted (old→new lives in the JSON).
+    9. **Timestamp** — creation timestamp (use the platform `createdon` if sufficient; add an explicit `sprk_occurredat` only if the audit semantics need it).
+
+    Enforce **append-only** semantics via Spaarke conventions (no update/delete surface for normal actors; security-role / form config as the convention allows). Deploy to the project solution. This is schema ONLY — the write LOGIC (Job B apply audit row) is task 031.
+  </prompt>
+
+  <role>
+    Spaarke Dataverse schema engineer. Fluent in the `dataverse-create-schema` skill (Web API + PowerShell), append-only audit-entity modeling, and typed-vs-text actor identity. You create exactly the entity FR-08 needs — machine and human review both as rows — with a defensible per-email audit trail, and you verify-before-create so an operator's parallel pass is reconciled, not duplicated.
+  </role>
+
+  <goal>
+    A NEW `sprk_emailreviewlog` entity exists (verify-or-create-reconciled) with: a `sprk_communication` lookup (item), `sprk_actortype` (machine/human), `sprk_actor` (systemuser lookup or model/rule id), `sprk_action`, `sprk_aisuggestion` JSON, `sprk_confidence` decimal, `sprk_sourceref` locator, optional `sprk_targetentity`/`sprk_targetfield`, and a timestamp — with append-only semantics. Both an AI proposal and a human decision can be written as distinct rows and queried per matter. Task 031 (Job B apply) can write the audit row against real schema. No existing entity/column retyped.
+  </goal>
+
+  <context>
+    <background>
+      NFR-06 (trust &amp; audit): every AI proposal carries a plain-language reason + citation to exact source text, and nothing record-mutating auto-finalizes. FR-08 makes this queryable: an append-only log where machine-review (the AI proposal) and human-review (the confirm/reject/edit decision) are BOTH rows, so per matter you can prove "AI proposed X from email Y at confidence Z; human approved/rejected at time T." Today there is no such entity — `AuditEnrichmentMiddleware` logs requests, not per-email review decisions (spec §New-Components). This task creates the entity; task 031 writes rows into it on Job B apply.
+
+      §11 Component Justification (new entity): (1) **Existing overlap** — `AuditEnrichmentMiddleware` (request logs) cannot prove per-email human+machine review (task 001 / grep-confirmed). (2) **Extension instead** — request logs are the wrong grain; there is no existing per-email review entity to extend. (3) **Concrete cost-of-doing-nothing** — without it there is no defensible per-email review record; the compliance differentiator (G-5, success-criterion 9 "every AI proposal + human decision queryable per matter") fails and Job B apply (031) has nowhere to write its audit row (FR-10 acceptance fails). Named contract failures, not "future flexibility."
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-intelligence-r1/notes/001-operator-schema-verification.md (task 001 output — whether `sprk_emailreviewlog` already exists; consume)</file>
+      <file>projects/email-communication-intelligence-r1/spec.md (FR-08, FR-10, NFR-06, §New-Components — the compliance differentiator)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ActionCore/UpdateRecordActionCore.cs (the Job B write core task 031 wraps; the audit row records its old→new + citation)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-08">Create `sprk_emailreviewlog` with: item (`sprk_communication` lookup), actor-type (machine/human), actor (user or model/rule id), action, prior AI suggestion + confidence, source-ref, timestamp — machine-review AND human-review BOTH as rows. Verify-before-create; reconcile any operator-pre-created shape.</constraint>
+    <constraint source="NFR-06">The `sprk_sourceref` locator + `sprk_aisuggestion` JSON MUST let an auditor tie a suggestion to exact cited source text; the schema supports "verify the cited text exists" (the verification logic is 030/031).</constraint>
+    <constraint source="project (append-only)">Enforce append-only semantics per Spaarke conventions — no normal-actor update/delete surface. MUST NOT model this as a mutable record.</constraint>
+    <constraint source="project">Model the actor two-target case (systemuser vs model/rule id) with typed conventions; MUST NOT invent a new polymorphic identity mechanism. Verify Choice integer conventions via MCP before creating `sprk_actortype`/`sprk_action`.</constraint>
+    <constraint source="ADR-027">Author the entity into the project's managed solution per subscription-isolation/solution conventions; no direct prod-only unmanaged changes.</constraint>
+    <constraint source="project">Schema ONLY. No write logic (Job B apply audit row is task 031), no BFF code.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+      <file>projects/email-communication-intelligence-r1/notes/001-operator-schema-verification.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>docs/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>docs/data-model/INDEX.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse entity creation" location=".claude/skills/dataverse-create-schema/SKILL.md">
+        Web API + PowerShell for entity + attribute + option-set creation. Verify conventions via MCP first; verify-or-create — reconcile an operator-pre-created entity rather than duplicating it.
+      </pattern>
+      <pattern name="Append-only audit grain" location="projects/email-communication-intelligence-r1/spec.md">
+        One row per review event; machine-review and human-review are distinct rows keyed to the same `sprk_communication` item; prior AI suggestion + confidence + source-ref captured so the human decision is auditable against the model's proposal.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>`AuditEnrichmentMiddleware` logs BFF requests, not per-email review decisions; task 001 confirms no per-email review entity exists.</existing>
+    <extension>Request logs are the wrong grain and cannot prove machine+human review of a specific email; there is no existing per-email review entity to extend, so a new append-only entity is the minimal surface.</extension>
+    <cost-of-doing-nothing>Without it there is no defensible per-email review record: success-criterion 9 (every AI proposal + human decision queryable per matter) fails and Job B apply (031) has nowhere to write its audit row (FR-10 fails). Concrete contract failures.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="1">Read task 001's note (whether `sprk_emailreviewlog` exists) + spec FR-08/FR-10/NFR-06 + `UpdateRecordActionCore.cs` (what Job B apply will record) to fix the exact attribute set + confirm the `sprk_actortype`/`sprk_action` closed value sets.</step>
+    <step order="2">Via Dataverse MCP `describe`, check whether `sprk_emailreviewlog` exists; if present, enumerate its attributes and reconcile against this spec (flag missing/mismatched columns; do NOT retype an in-use field).</step>
+    <step order="3">Create the entity (if absent) + any missing attributes via `dataverse-create-schema`: `sprk_communication` lookup, `sprk_actortype` (Choice), `sprk_actor` (systemuser lookup + model/rule-id text), `sprk_action` (Choice), `sprk_aisuggestion` (multiline JSON), `sprk_confidence` (Decimal 0–1), `sprk_sourceref`, optional `sprk_targetentity`/`sprk_targetfield`, timestamp. Verify Choice integer conventions via MCP first.</step>
+    <step order="4">Configure append-only semantics per Spaarke conventions (security-role / form config so normal actors cannot update/delete rows). Deploy to the project solution.</step>
+    <step order="5">Verify: a row can be created for a machine actor AND a human actor against the same `sprk_communication` item; both are queryable per matter (via the item's regarding); rows are not updatable/deletable by a normal actor.</step>
+    <step order="6">Document the created-entity inventory (logical names, types, targets, `sprk_actortype`/`sprk_action` value sets, `sprk_aisuggestion` JSON shape, append-only config) in `notes/012-emailreviewlog.md` for 031 + the §11 justification. Update `tasks/TASK-INDEX.md` (012 ✅) + `current-task.md`; confirm 031 unblocked.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Consume the 001 note + spec + `UpdateRecordActionCore.cs`</tool>
+    <tool name="mcp-dataverse-describe">Check for an existing entity + Choice integer conventions (read-only, before create)</tool>
+    <tool name="dataverse-create-schema">Create the entity + missing attributes + option sets</tool>
+    <tool name="dataverse-deploy">Deploy schema to the project solution</tool>
+    <tool name="write">The created-entity inventory note</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">Dataverse: `sprk_emailreviewlog` entity (append-only) — item lookup, actor-type, actor, action, AI-suggestion JSON, confidence, source-ref, optional target entity/field, timestamp</output>
+    <output type="docs">projects/email-communication-intelligence-r1/notes/012-emailreviewlog.md (entity inventory + value sets + AI-suggestion JSON shape + append-only config + §11 justification)</output>
+    <output type="docs">projects/email-communication-intelligence-r1/tasks/TASK-INDEX.md (status update 012 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`sprk_emailreviewlog` exists (verify-or-create-reconciled) with the FR-08 attributes: `sprk_communication` lookup, `sprk_actortype`, `sprk_actor`, `sprk_action`, `sprk_aisuggestion` JSON, `sprk_confidence` decimal, `sprk_sourceref`, timestamp.</criterion>
+    <criterion testable="true">A machine-actor row AND a human-actor row can both be written for the same `sprk_communication` item and queried per matter (both review types are first-class rows).</criterion>
+    <criterion testable="true">Append-only semantics are enforced per Spaarke conventions — a normal actor cannot update or delete a row.</criterion>
+    <criterion testable="true">The actor two-target case (systemuser vs model/rule id) is modeled with typed conventions — NO new polymorphic identity mechanism was invented.</criterion>
+    <criterion testable="true">NEGATIVE: no existing entity/column was retyped; an operator-pre-created entity was reconciled, not duplicated; a type conflict was escalated.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 001 (whether the entity pre-exists → verify-or-create). Blocks 031 (Job B apply writes the audit row) and gates the deploy (060). The single most important property is the compliance grain: machine-review AND human-review must BOTH be rows tied to the same item — a design that only logs human decisions (or only AI proposals) fails FR-08/G-5. The write LOGIC is 031, not this task.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply STANDARD rigor — schema creation, Step 9.5 gates SKIPPED. State the §11 Component Justification in the task note. Verify-or-create via MCP before creation; enforce append-only; NEVER retype an in-use field. Model tier `sonnet` @ effort `medium`.
+    </protocol>
+  </execution>
+</task>

@@ -787,6 +787,36 @@ registerWorkspaceWidget(
 );
 
 // ---------------------------------------------------------------------------
+// email-communication-solution-r5 task 041 (FR-01, 2026-07-28): Email direct
+// widget. Pattern D dual-use with the `email` section in LegalWorkspace
+// (`email.registration.ts`). BOTH mounts render the SAME shared
+// `EmailWorkspace` composition root (task 040) from
+// `@spaarke/communication-components`, unchanged — dual-mount-parity per that
+// component's own docblock. `EmailWorkspaceWidget.tsx` (this package) is a
+// thin host-adapter wrapper: Xrm-backed `dataverseClient`/`dataService`/
+// `navigationService`/`webApi` + `useAiSession()` for `authenticatedFetch`/
+// `bffBaseUrl` — mirrors `DataverseEntityViewWidget.tsx`'s Xrm-adapter
+// pattern. Type string `email` is distinct from `communications-list`,
+// `email-compose`, and the LegalWorkspace section id `communications`
+// (ADR-039 Path C — no collision, no server-side surface identity).
+safeRegisterWidget(
+  'email',
+  {
+    displayName: 'Email',
+    category: 'data',
+    icon: 'MailRegular',
+    allowMultiple: true,
+    // defaultOrder=245: positioned immediately after Communications (240),
+    // before the metrics dashboards (300+).
+    defaultOrder: 245,
+  },
+  () =>
+    import('./EmailWorkspaceWidget').then(m => ({
+      default: m.EmailWorkspaceWidget as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
+    }))
+);
+
+// ---------------------------------------------------------------------------
 // ai-spaarke-ai-workspace-UI-r1 #7 (2026-06-08) — Metrics dashboards
 //
 // Each dashboard ("Matters Report", "Invoice Report", "Project Report", …) is
@@ -836,6 +866,76 @@ registerWorkspaceWidget(
     defaultOrder: 300,
   },
   createMetricsDashboardFactory('matters-dashboard')
+);
+
+// ---------------------------------------------------------------------------
+// ai-advanced-capabilities-analysis-hub-r1 task 030 (FR-10) — Analysis hub +
+// per-type creation wizard.
+//
+// Two registrations, both owned by task 030 per the task-040/030
+// parallel-execution handoff (task 040 built CreateAnalysisWizardWidget but
+// deliberately did NOT self-register it — see that file's header doc + this
+// project's `notes/task-040-deviations.md` §6):
+//   17. 'analysis-hub'          — the platform home/launcher tab (this task).
+//   18. 'create-analysis-wizard' — the per-type creation wizard (task 040),
+//        opened by the hub's Agreement Review card via a `widget_load` dispatch.
+// ---------------------------------------------------------------------------
+
+registerWorkspaceWidget(
+  /**
+   * Widget type for the Analysis platform's home/launcher surface: three
+   * "Create new" work-type cards (Agreement Review live; Legal Research +
+   * Patent Application coming-soon) above a DataGrid of existing
+   * `sprk_analysis` records. Task 050 (entry routing) is expected to be the
+   * primary dispatcher of this type; it is also directly mountable for tests.
+   */
+  'analysis-hub',
+  {
+    displayName: 'Analysis',
+    category: 'analysis',
+    icon: 'DocumentSearchRegular',
+    // allowMultiple=false: the hub is a singleton home surface — a second
+    // "Create new" launcher tab would be confusing alongside the first.
+    allowMultiple: false,
+    /**
+     * defaultOrder=150: sits after the workspace/wizard dispatchers (80–140,
+     * since the hub is itself a launcher) and before the metrics dashboards
+     * group (300).
+     */
+    defaultOrder: 150,
+  },
+  () =>
+    import('./AnalysisHubWidget').then(m => ({
+      default: m.AnalysisHubWidget as import('../../types/widget-types').WorkspaceWidgetComponent,
+    }))
+);
+
+registerWorkspaceWidget(
+  /**
+   * Type string dispatched by AnalysisHubWidget's Agreement Review card
+   * (`widget_load` on the `workspace` channel) and, per task 050, any other
+   * entry point that starts a per-type Analysis creation flow. MUST match
+   * task 040's `CreateAnalysisWizardWidget` export — do not rename without
+   * updating both the hub's dispatch call site and this registration.
+   */
+  'create-analysis-wizard',
+  {
+    displayName: 'Create Analysis',
+    category: 'wizard',
+    icon: 'DocumentAdd24Regular',
+    // allowMultiple=false: mirrors 'create-matter-wizard' — opening a second
+    // Create Analysis wizard replaces the first tab rather than stacking.
+    allowMultiple: false,
+    /**
+     * defaultOrder=87: grouped with the other embedded-wizard dispatchers
+     * (create-matter-wizard 80, document-upload-wizard 85, search-select-wizard 90).
+     */
+    defaultOrder: 87,
+  },
+  () =>
+    import('./CreateAnalysisWizardWidget').then(m => ({
+      default: m.CreateAnalysisWizardWidget as import('../../types/widget-types').WorkspaceWidgetComponent,
+    }))
 );
 
 // ---------------------------------------------------------------------------

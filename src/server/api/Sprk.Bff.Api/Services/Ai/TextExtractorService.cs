@@ -859,7 +859,19 @@ public class TextExtractorService : ITextExtractor
                 "Successfully extracted {CharCount} characters from {FileName} using Document Intelligence ({PageCount} pages)",
                 text.Length, fileName, result.Pages.Count);
 
-            return TextExtractionResult.Succeeded(text, TextExtractionMethod.DocumentIntelligence);
+            // Preserve the page structure the SDK returns (task 041 / FR-13): a parallel per-page
+            // representation the attachment-grounded action extractor uses to CODE-DERIVE a machine-verified
+            // page locator. Built from Pages/Lines regardless of which branch produced `text` above, so it is
+            // available for both native-digital (Content) and scanned (OCR) documents. Additive — `text`
+            // (the flat representation existing callers read) is unchanged.
+            var pages = result.Pages
+                .Select((page, i) => new ExtractedPage(
+                    page.PageNumber > 0 ? page.PageNumber : i + 1,
+                    string.Join("\n", page.Lines.Select(l => l.Content))))
+                .ToList();
+
+            return TextExtractionResult.Succeeded(text, TextExtractionMethod.DocumentIntelligence)
+                with { Pages = pages };
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

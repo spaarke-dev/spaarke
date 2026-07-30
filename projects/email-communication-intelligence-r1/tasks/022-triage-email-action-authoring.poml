@@ -1,0 +1,135 @@
+<task id="022" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>`TRIAGE-EMAIL` Action authoring via `jps-action-create` — `{category, summary, obligations[], priority, reviewOutcome}` reusing `AiClassificationRung` signal, no 2nd full LLM pass</title>
+    <phase>P2 — Lean intelligence spine</phase>
+    <gate>none (STANDARD — Step 9.5 skipped; catalog-data authoring with constraints)</gate>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>001</dependencies>
+    <deps>001</deps>
+    <blocks>023, 024, 025, 030, 040, 042</blocks>
+    <tags>catalog, jps</tags>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Authors catalog DATA (a `sprk_analysisaction` TRIAGE-EMAIL JPS definition) via the `jps-action-create` skill — no BFF `.cs` change, no Step 9.5 gates. STANDARD per §8 (new-surface catalog authoring with constraints). The Binding + enrichment wiring (BFF-touching, FULL) is task 023. §11 Component Justification REQUIRED (new Action). NFR-07 eval-case obligation is carried by 023.</rigor-reason>
+    <parallel-group>P2-triage</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>JPS Action authoring against the `jps-action-create` skill + a documented output shape — well-specified, no architectural judgment. Default execution tier at `high` effort for prompt/output-field precision.</model-tier-reason>
+    <effort>high</effort>
+    <fr-refs>FR-05</fr-refs>
+  </metadata>
+
+  <prompt>
+    Author the `TRIAGE-EMAIL` Analysis Action as catalog DATA using the `jps-action-create` skill. This is a code-directed capability per ADR-039 (Action + Binding on the closed catalog) — it MUST NOT land on the frozen node-graph playbook engine or `IInvokePlaybookAi` (deleted). The Action produces the structured triage output the enrichment path persists:
+
+    `{ category, summary (2-line), obligations[], priority, reviewOutcome }`
+
+    Use `jps-action-create` to generate a valid JPS JSON `sprk_analysisaction` definition with: the instruction, the five typed output fields (category resolvable against the 013 taxonomy; summary a 2-line string; obligations an array; priority; reviewOutcome from the D-05 closed set), the scopes it needs, template params, and worked examples. Author it as a `prompted` Action (per spec FR-05 "prompted Action + Binding").
+
+    **Critical efficiency constraint (FR-05):** the Action MUST reuse the EXISTING classification signal (`AiClassificationRung` / `CommunicationClassificationResult`) — where the classification rung already ran on the email, the triage Action MUST NOT trigger a second full LLM pass to re-derive category/urgency. Author the Action so it consumes the already-produced classification as input (the input schema + Binding that feeds it are task 023) and only structures/summarizes/extracts on top — no redundant full re-classification.
+
+    Validate the authored JSON with `jps-validate` (schema + render check). This task authors the ACTION definition only — the Binding + input/output schema (mirror-first) + eval case + RAG grounding + enrichment trigger are task 023; the taxonomy it classifies into is task 013.
+  </prompt>
+
+  <role>
+    Spaarke AI capability author. Fluent in the `jps-action-create` + `jps-validate` skills, ADR-039 (grounded execution / closed catalogs / Action + Binding — the node engine is frozen), ADR-013 (AI reached only via `PublicContracts`), the existing `AiClassificationRung`/`CommunicationClassificationResult` classification substrate, and the "no second full LLM pass" efficiency rule. You author catalog data, not code; you reuse the existing classification signal rather than re-classifying.
+  </role>
+
+  <goal>
+    A valid `TRIAGE-EMAIL` `sprk_analysisaction` JPS definition exists (authored via `jps-action-create`, validated via `jps-validate`): a `prompted` Action producing `{category, summary, obligations[], priority, reviewOutcome}`, with category resolvable against the 013 taxonomy and reviewOutcome from the D-05 closed set. The Action is authored to CONSUME the existing classification signal (no second full LLM pass where `AiClassificationRung` already ran). It lands on the closed catalog (ADR-039), never the frozen node engine. Task 023 can attach the Binding + input schema + eval + RAG + trigger.
+  </goal>
+
+  <context>
+    <background>
+      r1 activates the already-produced-but-dark AI classification. The classification rung (`AiClassificationRung`) already yields category/urgency/obligations on the enrichment path; today that output is inert. FR-05 authors a `TRIAGE-EMAIL` Action that turns it into structured triage output ({category, summary, obligations[], priority, reviewOutcome}) — but WITHOUT paying for a second full LLM classification pass where the rung already ran. The Action is code-directed catalog data (ADR-039): a `sprk_analysisaction` row + (task 023) a `sprk_playbookconsumer` Binding, reached via `Services/Ai/PublicContracts/`. The frozen node-graph playbook engine (Insights family only) MUST NOT receive this capability.
+
+      §11 Component Justification (new Action = catalog data): (1) **Existing overlap** — there is no existing triage capability; `AiClassificationRung` produces a classification signal but not a category/summary/obligations/priority/reviewOutcome triage output. (2) **Extension instead** — the Action REUSES the classification signal (no re-classification) and adds the structuring/summarizing/extraction layer; it is new catalog data, not a new engine. (3) **Concrete cost-of-doing-nothing** — without it there is no category/summary/obligations/priority — Pillar 1 (triage) fails and success-criterion 4 (opening an email shows category/summary/obligations/priority) cannot pass. Named contract failure.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/AiClassificationRung.cs (the existing classification signal the Action reuses — NO second full LLM pass)</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Communication/CommunicationClassificationResult.cs (the classification shape the triage output builds on)</file>
+      <file>infra/dataverse/sprk_playbookconsumer-rows.json (Binding reference — the Binding is authored in 023)</file>
+      <file>infra/dataverse/inputschemas/create-task-v1.input.schema.json (mirror-first input-schema reference for 023)</file>
+      <file>projects/email-communication-intelligence-r1/notes/013-category-taxonomy.md (the taxonomy the category output resolves against — from task 013)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-05">Scope: author a `prompted` `TRIAGE-EMAIL` Action producing `{category, summary(2-line), obligations[], priority, reviewOutcome}`. Category resolvable against the 013 taxonomy; reviewOutcome from the D-05 closed set.</constraint>
+    <constraint source="FR-05 (no 2nd pass)">Scope: the Action MUST reuse the existing classification signal (`AiClassificationRung`/`CommunicationClassificationResult`); MUST NOT trigger a second full LLM classification pass where the rung already ran. Author it to consume the produced classification as input.</constraint>
+    <constraint source="ADR-039">Scope: land on the closed catalog (Action + Binding, `prompted`/`coded`); MUST NOT land on the frozen node-graph playbook engine, `PlaybookOrchestrationService`, `UpdateRecordNodeExecutor`, or `IInvokePlaybookAi` (deleted).</constraint>
+    <constraint source="ADR-013">Scope: the Action is reached via `Services/Ai/PublicContracts/`; MUST NOT reference `IOpenAiClient`/`IPlaybookService` internals. (The wiring is 023; the Action definition stays facade-clean.)</constraint>
+    <constraint source="project">Scope: this task authors the ACTION definition (`sprk_analysisaction` JPS JSON) ONLY; validate with `jps-validate`. The Binding, input/output schema, eval case, RAG grounding, and enrichment trigger are task 023.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/AiClassificationRung.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Communication/CommunicationClassificationResult.cs</file>
+      <file>infra/dataverse/sprk_playbookconsumer-rows.json</file>
+      <file>infra/dataverse/inputschemas/create-task-v1.input.schema.json</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+    </files>
+    <patterns>
+      <pattern name="JPS Action authoring" location=".claude/skills/jps-action-create/SKILL.md">
+        Generate a valid `sprk_analysisaction` JPS JSON: instruction + typed output fields + scopes + template params + examples; author `prompted`; validate with `jps-validate` (schema + render).
+      </pattern>
+      <pattern name="Reuse classification signal (no 2nd pass)" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/AiClassificationRung.cs">
+        The triage Action consumes the already-produced classification result as input and structures/summarizes on top — it does NOT re-run a full classification pass. The input schema/Binding that feed the produced signal are task 023.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>No triage capability exists; `AiClassificationRung` produces a classification signal but not the {category, summary, obligations[], priority, reviewOutcome} triage output.</existing>
+    <extension>The Action reuses the existing classification signal (no re-classification) and adds a structuring/summarizing/extraction layer as new catalog data (ADR-039) — not a new engine, not a second LLM pass.</extension>
+    <cost-of-doing-nothing>Without it there is no category/summary/obligations/priority triage output — Pillar 1 fails and success-criterion 4 (opening an email shows category/2-line summary/obligations/priority) cannot pass. Concrete contract failure.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="1">Read spec FR-05 + `AiClassificationRung.cs` + `CommunicationClassificationResult.cs` + the 013 taxonomy note + `ai-guide-consumer-wiring.md` / `SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md` to fix the output shape, the reuse-the-signal contract, and the D-05 reviewOutcome closed set.</step>
+    <step order="2">Invoke `jps-action-create` to author the `TRIAGE-EMAIL` `sprk_analysisaction` JPS JSON: instruction; five typed output fields ({category resolvable against 013 taxonomy, summary 2-line, obligations[], priority, reviewOutcome from D-05 set}); scopes; template params; worked examples. Author `prompted`. Structure the instruction so it consumes the produced classification (no second full pass).</step>
+    <step order="3">Validate the authored JSON with `jps-validate` (schema conformance + render check); fix any validation errors.</step>
+    <step order="4">Record the authored Action (id/name, output fields, the reuse-the-signal note, the D-05 reviewOutcome set) in `notes/022-triage-email-action.md` for task 023's Binding + eval + trigger, and the §11 justification.</step>
+    <step order="5">Update `tasks/TASK-INDEX.md` (022 ✅) + `current-task.md`; confirm 023 (Binding/schema/eval/RAG/trigger), 024, 025 unblocked and point them at the note.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Spec + classification rung/result + 013 taxonomy note + consumer-wiring guide</tool>
+    <tool name="jps-action-create">Author the `TRIAGE-EMAIL` `sprk_analysisaction` JPS JSON</tool>
+    <tool name="jps-validate">Schema + render validation of the authored Action</tool>
+    <tool name="write">The authored Action JSON + the authoring note</tool>
+  </tools>
+
+  <outputs>
+    <output type="catalog">`TRIAGE-EMAIL` `sprk_analysisaction` JPS JSON (prompted; five typed output fields; reuses the classification signal) — validated by `jps-validate`</output>
+    <output type="docs">projects/email-communication-intelligence-r1/notes/022-triage-email-action.md (authored-Action inventory + reuse-the-signal contract + D-05 reviewOutcome set + §11 justification)</output>
+    <output type="docs">projects/email-communication-intelligence-r1/tasks/TASK-INDEX.md (status update 022 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A valid `TRIAGE-EMAIL` `sprk_analysisaction` JPS definition exists (prompted) producing `{category, summary(2-line), obligations[], priority, reviewOutcome}`, and passes `jps-validate` (schema + render).</criterion>
+    <criterion testable="true">The `category` output is resolvable against the 013 taxonomy and `reviewOutcome` uses the D-05 closed value set (not "disposition").</criterion>
+    <criterion testable="true">The Action is authored to reuse the existing classification signal (`AiClassificationRung`/`CommunicationClassificationResult`) — its instruction/inputs do NOT re-run a full classification pass.</criterion>
+    <criterion testable="true">NEGATIVE: the capability lands on the closed catalog (ADR-039 Action + Binding), NOT the frozen node-graph engine / `IInvokePlaybookAi`; the Action definition references no `IOpenAiClient`/`IPlaybookService` internals.</criterion>
+    <criterion testable="true">NEGATIVE: this task authors ONLY the Action definition — no Binding, input/output schema, eval case, RAG wiring, or enrichment trigger (those are task 023).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Blocks 023 (Binding + input/output schema + eval + RAG + trigger), 024 (RI-confidence reads triage urgency), 025 (persist triage output). Parallel-safe (catalog data, distinct from the association engine). The load-bearing constraint is "no second full LLM pass" — author the Action to consume the produced classification, not to re-classify. The eval-case obligation (NFR-07) is discharged in 023 (the Binding merge gate), not here.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply STANDARD rigor — catalog authoring, Step 9.5 gates SKIPPED. Use `jps-action-create` + `jps-validate`. State the §11 Component Justification in the task note. MUST NOT land on the frozen node engine (ADR-039). Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>Deploy BFF + Dataverse (catalog Actions/Bindings + schema + config seed) to `spaarkedev1`; enforce + report the ≤60 MB BFF publish-size gate</title>
+    <phase>P6 — Integration &amp; wrap</phase>
+    <gate>after:all-impl</gate>
+    <status>not-started</status>
+    <tags>deploy</tags>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment execution against known deploy skills (bff-deploy + dataverse-deploy) with a prescriptive, ordered sequence and the ≤60 MB publish-size gate; no design judgment. STANDARD rigor with the hard size gate + escalation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive deployment against documented deploy skills/scripts; ordered + irreversible, but no design decisions.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>P6</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment must run after ALL implementation tasks; sequential; precedes UAT (061).</parallel-reason>
+    <dependencies>010, 011, 012, 013, 020, 021, 022, 023, 024, 025, 030, 031, 032, 040, 041, 042, 050, 051</dependencies>
+  </metadata>
+
+  <prompt>
+    Deploy the r1 backend to `spaarkedev1`: the **BFF** (`bff-deploy`) and the **Dataverse** changes (`dataverse-deploy`) — the `TRIAGE-EMAIL` + Job B/C/intent catalog Actions/Bindings + input schemas + eval cases, the triage fields on `sprk_communication`, `sprk_emailreviewlog`, and the taxonomy/priority config seed. r1 builds no UI, so there is no code-page/PCF deploy — the surfaces are r5's.
+
+    Enforce the **≤60 MB compressed BFF publish-size gate** BEFORE deploying the API: run `dotnet publish -c Release`, measure compressed output, record absolute size + delta vs the ~49.63 MB baseline (incl. PDBs). **HARD STOP at 60 MB** — escalate for architecture review before deploying if exceeded. Verify no new HIGH-severity CVE. Deploy the Dataverse catalog Actions/Bindings + schema + seed BEFORE the client-facing verification.
+  </prompt>
+
+  <role>
+    Spaarke release engineer, expert in the `bff-deploy` + `dataverse-deploy` skills, the scope/model-index refresh after Action authoring, and the `.claude/constraints/azure-deployment.md` publish-size gate. Follows each deploy skill's own prescriptive steps.
+  </role>
+
+  <goal>
+    The BFF and all Dataverse changes (catalog Actions/Bindings + input schemas + eval cases + triage fields + `sprk_emailreviewlog` + taxonomy/priority seed) are deployed to `spaarkedev1` and reachable; the BFF publish size is ≤60 MB and recorded (absolute + delta vs ~49.63 MB); no new HIGH CVE; a deployed-environment smoke test of the intelligence spine passes. Deployment record written to notes/.
+  </goal>
+
+  <context>
+    <background>
+      This is the integration deploy before operator UAT (061). r1 is backend-only — BFF + Dataverse; no code-page/PCF (surfaces are r5's, C-3). The scope/model index must be refreshed after the Action authoring so the deployed catalog is consistent. Deploy Dataverse catalog + schema + seed before verifying the client-facing flow (the Actions/Bindings + triage fields must exist for the spine to run).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/ (the BFF to deploy via bff-deploy)</file>
+      <file>infra/dataverse/ (catalog Actions/Bindings + input schemas + eval cases + config seed to deploy via dataverse-deploy)</file>
+      <file>.claude/constraints/azure-deployment.md (the ≤60 MB publish-size gate + HARD STOP rule)</file>
+      <file>scripts/Refresh-ScopeModelIndex.ps1 (refresh the scope catalog after Action authoring)</file>
+      <file>projects/email-communication-intelligence-r1/notes/ (deployment record + publish size)</file>
+    </relevant-files>
+    <dependencies>All Phase 1–5 implementation tasks (010–051).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="azure-deployment.md">Run `dotnet publish -c Release` and confirm compressed output ≤60 MB before deploying the BFF; record absolute size + delta vs ~49.63 MB baseline (incl. PDBs). HARD STOP at 60 MB — escalate for architecture review.</constraint>
+    <constraint source="CLAUDE.md §9">No secrets in config; use Key Vault for production secrets.</constraint>
+    <constraint source="project">Deploy the Dataverse catalog Actions/Bindings + schema + config seed BEFORE verifying the client-facing flow; refresh the scope/model index after Action authoring. Follow each deploy skill's own prescriptive steps.</constraint>
+    <constraint source="NFR-02">Verify no new HIGH-severity CVE (`dotnet list package --vulnerable --include-transitive`) before deploy.</constraint>
+    <constraint source="project">r1 is backend-only — no code-page/PCF deploy (surfaces are r5's).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Pre-check: confirm all Phase 1–5 implementation tasks (010–051) are ✅ in `TASK-INDEX.md`. If any remain 🔲/🔄, STOP and report.</step>
+    <step order="2">Run the BFF publish-size check (`dotnet publish -c Release ... -o deploy/api-publish/`); measure compressed size; HARD STOP if &gt;60 MB. Record absolute + delta vs ~49.63 MB.</step>
+    <step order="3">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVE.</step>
+    <step order="4">Deploy the Dataverse schema (triage fields on `sprk_communication`, `sprk_emailreviewlog`) + catalog Actions/Bindings + input schemas + eval cases + taxonomy/priority config seed (`dataverse-deploy` / seed scripts) to `spaarkedev1`.</step>
+    <step order="5">Refresh the scope/model index (`scripts/Refresh-ScopeModelIndex.ps1`) so the deployed catalog is consistent.</step>
+    <step order="6">Deploy the BFF (`bff-deploy`) to `spaarkedev1`.</step>
+    <step order="7">Smoke-test the intelligence spine against the deployed environment (capture → associate → triage → RI-confidence path reachable; Job B apply endpoint + queue-feed reachable).</step>
+    <step order="8">Write the deployment record + publish size to `projects/email-communication-intelligence-r1/notes/`; update `TASK-INDEX.md` (060 ✅) + `current-task.md` (ready for UAT 061).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the BFF compressed publish size exceeds 60 MB, STOP (HARD STOP per azure-deployment.md) and escalate for architecture review before deploying. If a new HIGH-severity CVE appears, STOP and escalate.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Publish + measure the BFF; CVE scan</tool>
+    <tool name="bff-deploy">Deploy the BFF</tool>
+    <tool name="dataverse-deploy">Deploy Dataverse catalog + schema + seed</tool>
+    <tool name="powershell">Refresh the scope/model index; deploy scripts</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-communication-intelligence-r1/notes/ (deployment record + publish size + CVE result)</output>
+    <output type="docs">projects/email-communication-intelligence-r1/tasks/TASK-INDEX.md + current-task.md (UPDATED — 060 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF compressed publish size is ≤60 MB and recorded (absolute + delta vs ~49.63 MB); deploy proceeds only under the ceiling.</criterion>
+    <criterion testable="true">No new HIGH-severity CVE before deploy.</criterion>
+    <criterion testable="true">All Dataverse changes (triage fields, `sprk_emailreviewlog`, catalog Actions/Bindings + input schemas + eval cases + taxonomy/priority seed) are deployed to `spaarkedev1` and reachable; the scope/model index is refreshed.</criterion>
+    <criterion testable="true">The BFF is deployed to `spaarkedev1` and a deployed-environment smoke test of the intelligence spine succeeds.</criterion>
+    <criterion testable="true">No secrets committed; production secrets in Key Vault.</criterion>
+    <criterion testable="true">No code-page/PCF deploy occurred (r1 is backend-only; surfaces are r5's).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Prescriptive/ordered — Dataverse catalog + schema + seed before BFF + client verification; refresh the scope/model index after Action authoring. HARD STOP at 60 MB. r1 deploys BFF + Dataverse only (no UI). Precedes operator UAT (061).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Apply STANDARD rigor; prescriptive steps; enforce the §10 / azure-deployment.md ≤60 MB size gate (HARD STOP). Model tier `sonnet` @ effort `medium`.</protocol>
+  </execution>
+</task>

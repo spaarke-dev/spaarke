@@ -27,10 +27,10 @@ export type {
 } from './PaneEventTypes';
 
 // React context provider
-export { PaneEventBusProvider, usePaneEventBus } from './PaneEventBusContext';
+export { PaneEventBusProvider, usePaneEventBus, useOptionalPaneEventBus } from './PaneEventBusContext';
 export type { PaneEventBusProviderProps } from './PaneEventBusContext';
 
 // React hooks
 export { usePaneEvent } from './usePaneEvent';
-export { useDispatchPaneEvent } from './useDispatchPaneEvent';
+export { useDispatchPaneEvent, useOptionalDispatchPaneEvent } from './useDispatchPaneEvent';
 export type { DispatchPaneEvent } from './useDispatchPaneEvent';

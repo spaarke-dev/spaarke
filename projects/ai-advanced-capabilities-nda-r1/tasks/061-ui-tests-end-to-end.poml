@@ -3,8 +3,8 @@
   <metadata>
     <title>UI tests — review panel, gutter comments, Review-NDA card, dark mode</title>
     <phase>6 Deploy &amp; Wrap-up</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>done</gate>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Browser UI test execution across deployed surfaces; verifies frontend behavior + ADR-021 dark mode.</rigor-reason>
     <model-tier>sonnet</model-tier>

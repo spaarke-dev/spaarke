@@ -177,12 +177,58 @@ public sealed class ParaIdPreParser
 
 /// <summary>
 /// One entry in the ordered paraId map: the paragraph's zero-based document-order
-/// <paramref name="Index"/>, its <paramref name="ParaId"/> (<c>w14:paraId</c>, 8-hex uppercase), and
+/// <paramref name="Index"/>, its <paramref name="ParaId"/> (<c>w14:paraId</c>, 8-hex uppercase),
 /// whether it was <paramref name="IsMinted"/> at Load (true) or collected verbatim from the source
-/// (false). Serializes to <c>{ index, paraId, isMinted }</c> — the shape the client contract mirrors
-/// (task 011 consumes it as hidden node attributes).
+/// (false), and (WS-3/WS-4) the FULL per-paragraph reference set the citation layer (041/042) builds on:
+/// the DETERMINISTIC computed numbering label (<paramref name="ComputedNumber"/>), its
+/// <paramref name="NumberingLevel"/> (the paragraph's own <c>ilvl</c>), the <paramref name="ListPath"/>
+/// ordinal chain (the raw numeric counter at every level 0..ilvl, e.g. <c>[4, 2]</c> for label
+/// <c>"4.2"</c>), and the <paramref name="HeadingLevel"/> outline level (Heading1..Heading6 → 1..6).
+/// <paramref name="ComputedNumber"/>/<paramref name="NumberingLevel"/>/<paramref name="ListPath"/> are
+/// <c>null</c> together for a non-numbered paragraph (never fabricated independently);
+/// <paramref name="HeadingLevel"/> is <c>null</c> for a non-heading paragraph, independent of numbering.
+/// Serializes to <c>{ index, paraId, isMinted, computedNumber, numberingLevel, listPath, headingLevel }</c>.
 /// </summary>
-public sealed record ParaIdMapEntry(int Index, string ParaId, bool IsMinted);
+/// <remarks>
+/// <para>
+/// <b>WS-3 / <see cref="ComputedNumber"/> (task 031, FR-11..FR-14).</b> This is the EXACT label Word's
+/// numbering algorithm computes for the paragraph — decimal "4.", letters "a)", roman "iv.", legal
+/// "1.1.1", multi-level "4.2.1", style-linked heading "4.2", or a bullet glyph — replayed server-side
+/// from the OOXML numbering model by <c>ComposeDocxProjectionBuilder</c>'s
+/// <c>NumberingComputationEngine</c> in the SINGLE document-order walk, so an interrupted numbered run
+/// continues (never restarts at 1) and heading-style numbers are no longer dropped. It is the read-side
+/// twin of <c>ComposeDocumentRenderer</c>'s write-side authoring. Attached here so the editor (task 032)
+/// can render it as an explicit non-editable number-atom (never a browser <c>&lt;ol&gt;</c> auto-count,
+/// FR-13) and WS-4 (task 040) can build the <c>paraId → legal-number</c> citation map on it. Only
+/// populated on the projection Build() path; the Load-side <c>ParaIdPreParser</c> leaves it <c>null</c>
+/// (numbering is a projection concern, not an identity-stamping concern). Read-time only — WS-3 does NOT
+/// auto-renumber on edit within R4.5; live renumber-on-insert/delete is R5 G3 (FR-14), which builds on
+/// this same computed model.
+/// </para>
+/// <para>
+/// <b>WS-4 / <see cref="NumberingLevel"/>, <see cref="ListPath"/>, <see cref="HeadingLevel"/> (task 040,
+/// FR-16).</b> Additive fields — this task does NOT recompute numbering; it lifts values the 031 engine
+/// already computes in the SAME single document-order Pass-1 walk onto this record.
+/// <see cref="NumberingLevel"/> is the paragraph's raw <c>w:ilvl</c> (0-based) exactly as
+/// <c>data-numbering-level</c> (task 032) already carries it on the projected HTML.
+/// <see cref="ListPath"/> is the engine's own <c>NumberingComputationResult.ListPath</c> — the SAME
+/// per-level counters <c>ComposeLabel</c>'s <c>%n</c> substitution draws from, so it can never diverge
+/// from <see cref="ComputedNumber"/>. <see cref="HeadingLevel"/> is the paragraph's style-derived outline
+/// level (<c>ComposeDocxProjectionBuilder.HeadingLevel</c>, the SAME classification Pass 2 uses to choose
+/// the <c>&lt;h#&gt;</c> tag) — independent of numbering, so a plain (non-style-linked) Heading1 still
+/// carries <c>HeadingLevel = 1</c> even when it carries no computed number. Consumed by task 041 (the
+/// persisted <c>paraId → number</c> map, projection payload + session ledger) and task 042 (the citation
+/// resolver) — see this project's <c>notes/task-040-*.md</c> for where the map now lives.
+/// </para>
+/// </remarks>
+public sealed record ParaIdMapEntry(
+    int Index,
+    string ParaId,
+    bool IsMinted,
+    string? ComputedNumber = null,
+    int? NumberingLevel = null,
+    IReadOnlyList<int>? ListPath = null,
+    int? HeadingLevel = null);
 
 /// <summary>
 /// FR-08 result: the ordered <c>paraId</c> map for a loaded document, one <see cref="ParaIdMapEntry"/>

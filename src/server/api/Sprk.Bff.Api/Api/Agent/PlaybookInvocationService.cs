@@ -258,13 +258,14 @@ public sealed class PlaybookInvocationService
     }
 
     /// <summary>
-    /// Builds a deep-link URL to the Analysis Workspace code page for a specific
-    /// analysis run, document, and playbook combination.
+    /// Builds a deep-link URL to the SpaarkeAi Analysis surface for a specific
+    /// analysis run, document, and playbook combination (retirement task 060 repoints this
+    /// from the now-retired legacy Analysis Workspace code page).
     /// </summary>
     /// <param name="analysisId">The analysis/run ID.</param>
     /// <param name="documentId">The source document ID.</param>
     /// <param name="playbookId">The playbook that was executed.</param>
-    /// <returns>Full Dataverse web resource URL for the Analysis Workspace.</returns>
+    /// <returns>Full Dataverse web resource URL for the SpaarkeAi Analysis surface.</returns>
     public string BuildAnalysisDeepLink(Guid analysisId, Guid documentId, Guid playbookId)
     {
         return _handoffUrlBuilder.BuildAnalysisWorkspaceUrl(

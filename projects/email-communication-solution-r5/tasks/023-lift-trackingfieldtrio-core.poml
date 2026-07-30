@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="email-communication-solution-r5">
+  <metadata>
+    <title>FR-14/FR-18: Lift the `TrackingFieldTrio` generic core (options injected, entity-agnostic) to `@spaarke/ui-components`; PCF consumes; view/behavior unchanged</title>
+    <phase>2 Layer-1 extraction</phase>
+    <gate>after:020</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Brownfield lift into the shared `@spaarke/ui-components` library consumed by many surfaces + a live PCF; NFR-04 (PCF + OOB form regression-free) is non-negotiable; the core must be made entity-agnostic (options injected) without changing flag read/write semantics; modifies `.tsx`, tags refactor/shared-lib/fluent-ui. FULL gate.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified lift with a named target lib + a named boundary change (hardcoded segment values → injected options). The current control is already a self-contained Fluent v9 component; no cross-file correctness reasoning of the 020 kind.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct source (TrackingFieldTrio PCF only) AND a DIFFERENT barrel from 021/022 — this task edits `@spaarke/ui-components/src/index.ts`, not the communication-components barrel. No barrel contention with 021/022; still serialize with any other concurrent editor of the ui-components barrel.</parallel-reason>
+    <deps>020</deps>
+    <tags>frontend, shared-lib, refactor, fluent-ui</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Lift the `TrackingFieldTrio` generic core — the Fluent v9 component that renders and read/writes the monitor / high-priority / access-permission flags — from the `TrackingFieldTrio` PCF into `@spaarke/ui-components`, making it ENTITY-AGNOSTIC: all option labels/colors/values and field display labels are passed IN via props (not hardcoded to `sprk_communication`). Both the OOB-form PCF and the Phase-3 reading-pane tracking view (task 035) consume this one shared component. The PCF re-imports the lifted core and injects its `sprk_communication` options; its read/write behavior and standard-control lifecycle are UNCHANGED. The lifted component must render under BOTH the PCF's React 16/17 and the code page's React 19 (no React-18/19-only runtime API, no cast).</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 (ADR-021), shared UI-component boundaries, and PCF standard controls (ADR-022). Follow ADRs strictly.</role>
+  <goal>A generic, entity-agnostic `TrackingFieldTrio` component in `src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/`, exported from the `@spaarke/ui-components` barrel, that takes ALL of its option set (access-permission segments — value + label + color) and field display labels as INJECTED props (no `sprk_communication`-specific hardcoding baked into the shared core), renders the three flags (monitor toggle, high-priority flag, access-permission segmented control) and read/writes their values through injected value+onChange props. The `TrackingFieldTrio` PCF imports the lifted component from `@spaarke/ui-components`, supplies its `sprk_communication` OptionSet metadata + field labels from `index.ts` `getAccessPermissionOptions()`, builds clean via `npm run build:prod`, and behaves identically. The lifted component uses no React-18/19-only runtime API (`createRoot`, `use()`, Actions) and no `as React.ComponentType` cast, so it renders under the PCF's platform React 16/17 AND the code page's React 19.</goal>
+
+  <context>
+    <background>Spec FR-14 (tracking flags: lift `TrackingFieldTrio` generic core to `@spaarke/ui-components` — options passed in, not hardcoded; render monitor/high-priority/access-permission; entity-agnostic) + FR-18 (two-layer extraction) + design Lens 4 ("Tracking flags trio — COMPLETE: lift generic core to `@spaarke/ui-components`; pass options in. Net-new to the form"). The reading pane (task 035) renders a React 19 tracking view over the SAME core. Today the control is a HYBRID: the three access-permission segment VALUES are hardcoded consts (`ACCESS_PERMISSION_STANDARD/LIMITED/RESTRICTED` = 100000000/1/2) while per-option labels/colors are already passed in via `accessPermissionOptions: IAccessPermissionOption[]` (derived from Dataverse OptionSet metadata in the PCF's `index.ts` `getAccessPermissionOptions()`), with `FALLBACK_SEGMENT_COLORS` as a metadata-less fallback; field display labels are also already injected. The lift must complete the injection so the SHARED core carries no entity-specific option data — the PCF becomes the thing that supplies `sprk_communication` options. This is a standard (non-virtual) control using `ReactDOM.render`; keep that lifecycle in the PCF. It targets a DIFFERENT lib (`@spaarke/ui-components`, generic) than 020/021/022 (`@spaarke/communication-components`).</background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/pcf/TrackingFieldTrio/TrackingFieldTrioApp.tsx</file>
+      <file role="modify">src/client/pcf/TrackingFieldTrio/index.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/index.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/types.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">020 establishes the Phase-2 extraction cadence (barrel-serialization discipline, regression-free PCF pattern) this task follows; no code dependency (different lib).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-14">The lifted shared core MUST be entity-agnostic: access-permission segments (value + label + color) and all field display labels are passed IN via props. The shared core MUST NOT bake in `sprk_communication`-specific option integers/labels — those move to the PCF caller (`getAccessPermissionOptions()`). A `FALLBACK_SEGMENT_COLORS`-style default is allowed only as a prop default, not entity-specific hardcoding.</constraint>
+    <constraint source="NFR-05">The lifted component MUST use no React-18/19-only runtime API (`createRoot`, `use()`, Actions) and introduce no `as React.ComponentType` cast, so it renders under the PCF's platform React 16/17 AND the code page's React 19. Grep-provable on the shared component.</constraint>
+    <constraint source="NFR-04">Zero regression: the `TrackingFieldTrio` PCF keeps its standard-control `ReactDOM.render`/`unmountComponentAtNode` lifecycle in `index.ts`; only the rendered component's SOURCE changes (local → `@spaarke/ui-components`) and the PCF injects its options. Monitor/high-priority/access-permission read+write, defaults, and OptionSet-metadata wiring must be identical.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 + dark mode: the lifted component uses Fluent v9 primitives and honors the host `FluentProvider` theme (light AND dark). No hardcoded light-only colors; injected segment colors must remain legible in dark mode (or theme tokens used).</constraint>
+    <constraint source="ADR-022">Slim-first shared component: a version-agnostic Fluent v9 component (like other `@spaarke/ui-components` exports) consumable across React majors; the PCF stays a platform-React control (no bundled React).</constraint>
+    <constraint source="project">Barrel coordination: add the `TrackingFieldTrio` export to `@spaarke/ui-components/src/index.ts` — a DIFFERENT barrel from 021/022. No contention with the P2 communication-components barrel; still serialize with any other concurrent ui-components barrel editor. Run `/conflict-check` before the PR (shared `@spaarke/ui-components`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Fluent v9 shared component lift; entity-agnostic option injection</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <patterns>
+      <pattern name="Current hybrid options wiring" location="src/client/pcf/TrackingFieldTrio/TrackingFieldTrioApp.tsx + index.ts">`accessPermissionOptions: IAccessPermissionOption[]` + field labels already injected from `getAccessPermissionOptions()`; segment VALUES currently hardcoded consts. Complete the injection so the shared core carries no entity data.</pattern>
+      <pattern name="Shared UI-component export shape" location="src/client/shared/Spaarke.UI.Components/src/components/">Existing `@spaarke/ui-components` component folders (e.g. FilePreview) show the `components/{Name}/{Name}.tsx` + `index.ts` + barrel-entry convention to mirror.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this task + spec FR-14/FR-18 + design Lens 4 + ADR-021/022. Declare RIGOR FULL / model sonnet / effort high. Read the current `TrackingFieldTrioApp.tsx` + `index.ts` to map what is already injected vs hardcoded.</step>
+    <step order="1">Create `src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/` and move the component into `TrackingFieldTrio.tsx`. Define the injected-props contract in `types.ts`: monitor value+onChange+label, high-priority value+onChange+label, access-permission `segments: {value, label, color}[]` + value + onChange + label, and any `FALLBACK_SEGMENT_COLORS` as a default. Keep `hexToRgba` + the Fluent v9 rendering.</step>
+    <step order="2">Make the shared core entity-agnostic: remove `sprk_communication`-specific hardcoding from the shared component (segment integers/labels come from props). Preserve `IAccessPermissionOption` (or a generic equivalent) as the injected option type.</step>
+    <step order="3">Export from the `@spaarke/ui-components` barrel: add the `TrackingFieldTrio` component + its option types to `src/client/shared/Spaarke.UI.Components/src/index.ts`.</step>
+    <step order="4">Update the PCF: `index.ts` keeps the standard-control `ReactDOM.render` lifecycle + `getAccessPermissionOptions()`, now importing `TrackingFieldTrio` from `@spaarke/ui-components` and INJECTING the `sprk_communication` options + field labels. DELETE the now-duplicate local component body. Do NOT change read/write behavior or the control lifecycle.</step>
+    <step order="5">Grep-verify: the shared component uses no React-18/19-only runtime API and no `as React.ComponentType` cast; no `sprk_communication`-specific option integers remain in the shared core.</step>
+    <step order="6">Build the shared lib (`npm run build`) + the PCF (`npm run build:prod`) — both clean. Run existing `TrackingFieldTrio` tests; they pass.</step>
+    <step order="7">Update `projects/email-communication-solution-r5/tasks/TASK-INDEX.md`: set 023 → ✅.</step>
+    <step order="8">Note the shared export path + the injected-props contract (so task 035's reader-pane tracking view consumes it) + any deviation in `projects/email-communication-solution-r5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If making the core entity-agnostic cannot be done without changing the flags' read/write semantics or the standard-control lifecycle — i.e. the option-injection boundary is entangled with the PCF's `ReactDOM.render` wiring such that the PCF view would need a rewrite (risking NFR-04) — STOP and escalate per root CLAUDE.md §6.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Flags read/write">
+      <steps><step>Render the lifted `TrackingFieldTrio` with injected values + onChange spies.</step><step>Toggle monitor, set high-priority, pick each access-permission segment.</step></steps>
+      <expected>Each control reflects its injected value and fires onChange with the correct new value (monitor bool, high-priority bool, access-permission segment value) — read/write identical to the PCF.</expected>
+    </test>
+    <test name="Entity-agnostic (options injected)">
+      <steps><step>Render the component with a NON-`sprk_communication` option set (different segment values/labels/colors).</step></steps>
+      <expected>The segmented control renders the injected options faithfully; no `sprk_communication`-specific integer/label leaks through — core is entity-agnostic (FR-14).</expected>
+    </test>
+    <test name="Dark-mode (ADR-021)">
+      <steps><step>Render under a dark `FluentProvider` theme.</step></steps>
+      <expected>All three flags + injected segment colors render legibly in dark mode; no hardcoded light-only colors.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build shared lib (`npm run build`) + PCF (`npm run build:prod`); installs use `npm install --legacy-peer-deps --no-audit --no-fund`.</tool>
+    <tool name="terminal">grep for React runtime APIs/casts + residual entity-specific option data.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/types.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts</output>
+    <output type="code">src/client/pcf/TrackingFieldTrio/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the lifted `TrackingFieldTrio` in `@spaarke/ui-components`, when grepped, then it uses no React-18/19-only runtime API (`createRoot`/`use(`/Actions) and no `as React.ComponentType` cast — it renders under both React 16/17 and React 19 (NFR-05).</criterion>
+    <criterion testable="true">Given the shared core, when inspected, then it contains no `sprk_communication`-specific access-permission integers/labels — all options + field labels are injected via props (entity-agnostic, FR-14).</criterion>
+    <criterion testable="true">Given the lifted component with injected values + onChange, when monitor/high-priority/access-permission are changed, then each fires onChange with the correct value (read/write identical to the PCF).</criterion>
+    <criterion testable="true">Given the `TrackingFieldTrio` PCF, when built with `npm run build:prod`, then it compiles clean importing the component from `@spaarke/ui-components`, injecting its `sprk_communication` options + labels, its local duplicate deleted, and its standard-control `ReactDOM.render` lifecycle + read/write behavior unchanged (regression-free, NFR-04).</criterion>
+    <criterion testable="true">Given a dark `FluentProvider` theme, when the component renders, then all three flags + injected segment colors are legible (ADR-021 dark mode).</criterion>
+    <criterion testable="true">Given the `@spaarke/ui-components` barrel, when imported, then it re-exports `TrackingFieldTrio` + its option types (available to task 035's reader-pane view); no business logic duplicated between PCF and shared lib.</criterion>
+    <criterion testable="true">Shared lib build + PCF `build:prod` both green; existing `TrackingFieldTrio` unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Cite spec FR-18 + FR-14 + NFR-04 + NFR-05 + ADR-021 in the PR. EXTRACTION/lift of existing code (COMPLETE-class) — no §11 `&lt;justification&gt;` (modify/refactor exempt). Targets `@spaarke/ui-components` (generic), a DIFFERENT barrel from 021/022 — no P2 barrel contention. Run `/conflict-check` before the PR (shared `@spaarke/ui-components`).
+
+**Completion summary (2026-07-28)**: Lifted the generic core to
+`src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/` (`TrackingFieldTrio.tsx` +
+`types.ts` + `index.ts` + `__tests__/TrackingFieldTrio.test.tsx`), exported from the `@spaarke/ui-components`
+barrel. Completed the entity-agnostic transformation: the shared core's render loop now iterates the
+INJECTED `accessPermissionOptions` array (value+label+color) instead of a hardcoded `sprk_communication`
+segment list; the color fallback moved from value-keyed to position-based (`idx % length`). The PCF's
+`index.ts` is now the sole holder of `sprk_communication`'s Access Permission integers/labels, with a
+fallback triple preserving pre-lift behavior when OptionSet metadata is unavailable (NFR-04). Avoided the
+`as React.ComponentType` cast (NFR-05) via a `tsconfig.json` `paths` remap pinning react/react-dom to the
+PCF's local React-16 types (mirrors the existing `MatterHeader` PCF pattern) — verified via a clean
+`npm run build:prod` with zero TS2786. Shared lib `npm run build` clean; 7/7 new unit tests pass
+(91.66%/95.45% coverage); PCF `build:prod` + lint clean (bundle 7.63 KiB). `/code-review` + `/adr-check`:
+0 Critical/Warning/Violation. Full writeup:
+`projects/email-communication-solution-r5/notes/task-023-trackingfieldtrio-core-lift.md`. Deviation: PCF
+manifest version bumped 1.0.5 → 1.0.6 (not in the POML's literal steps, but matches repo convention;
+packaged `Solution/` folder intentionally left untouched — deployment is out of this task's scope).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute.</protocol></execution>
+</task>

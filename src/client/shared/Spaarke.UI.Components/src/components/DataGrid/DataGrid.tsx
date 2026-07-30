@@ -179,6 +179,17 @@ export interface DataGridProps {
   /** OPTIONAL — fires when the user invokes a command bar action. */
   onCommandInvoke?: (commandId: string, selectedIds: string[], ctx: DataGridHostContext) => void;
 
+  /**
+   * OPTIONAL — override for the built-in `create-form` (`+ New`) command. When
+   * supplied, clicking New calls this INSTEAD of the default OOB create form
+   * (`Xrm.Navigation.openForm`) — the OOB form is fully suppressed, not opened
+   * in addition. Hosts use this to route New to a custom surface (e.g. the
+   * Analysis grid opens the tabbed Quick Start modal). Absent = default OOB
+   * create form (unchanged for every other grid). `onCommandInvoke` still fires
+   * first as an observer.
+   */
+  onCreateNew?: () => void;
+
   /** OPTIONAL — escape-hatch overrides for column renderers, badge map, filter chip allowlist. */
   overrides?: DataGridOverrides;
 
@@ -733,6 +744,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     onRecordOpen,
     onRecordAction: _onRecordAction,
     onCommandInvoke,
+    onCreateNew,
     overrides,
     pageSize: pageSizeOverride,
     availableViewsAllowlist: availableViewsAllowlistOverride,
@@ -1447,6 +1459,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
             // narrow to fit all 3.
             inlineLimit={3}
             onCommandInvoke={handleCommandInvoke}
+            onCreateNew={onCreateNew}
           />
         </div>
 

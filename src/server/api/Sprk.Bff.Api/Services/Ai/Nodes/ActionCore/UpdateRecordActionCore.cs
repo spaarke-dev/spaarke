@@ -39,12 +39,18 @@ internal sealed record RenderedLookup(
     string RenderedTargetId);
 
 /// <summary>Session-agnostic input for a record update — all values pre-rendered/typed.</summary>
+/// <remarks>
+/// <paramref name="ImpersonateSystemUserId"/> (task 031): OPTIONAL Dataverse <c>systemuserid</c> to run the PATCH
+/// AS (MSCRMCallerID impersonation). Null/empty = app-only — the executor path and every pre-031 caller leave it
+/// null, so their write is byte-unchanged. Only the Job B apply seam supplies it (the confirming user).
+/// </remarks>
 internal sealed record UpdateRecordActionInput(
     string EntityLogicalName,
     Guid RecordId,
     IReadOnlyList<RenderedFieldMapping>? FieldMappings,
     IReadOnlyDictionary<string, string?>? LegacyFields,
-    IReadOnlyList<RenderedLookup>? Lookups);
+    IReadOnlyList<RenderedLookup>? Lookups,
+    Guid? ImpersonateSystemUserId = null);
 
 /// <summary>
 /// Session-agnostic core that coerces already-rendered field values to their Dataverse
@@ -130,7 +136,8 @@ internal sealed class UpdateRecordActionCore
             input.EntityLogicalName,
             input.RecordId,
             updatePayload,
-            cancellationToken);
+            cancellationToken,
+            input.ImpersonateSystemUserId);
 
         return updatePayload.Keys.ToArray();
     }

@@ -72,19 +72,24 @@ function renderModal(props?: {
   onClose?: () => void;
   theme?: typeof webLightTheme;
   getFileContext?: () => { sessionId: string | null; fileIds: string[]; fileNames: string[] } | null;
-}): { onClose: jest.Mock } {
+  initialTab?: "create" | "analysis";
+  onCreateAnalysis?: (workTypeValue: number, workTypeLabel: string) => void;
+}): { onClose: jest.Mock; onCreateAnalysis: jest.Mock } {
   const theme = props?.theme ?? webLightTheme;
   const onClose = (props?.onClose as jest.Mock) ?? jest.fn();
+  const onCreateAnalysis = (props?.onCreateAnalysis as jest.Mock) ?? jest.fn();
   render(
     <FluentProvider theme={theme}>
       <QuickStartModal
         open={props?.open ?? true}
         onClose={onClose}
         getFileContext={props?.getFileContext}
+        initialTab={props?.initialTab}
+        onCreateAnalysis={onCreateAnalysis}
       />
     </FluentProvider>,
   );
-  return { onClose };
+  return { onClose, onCreateAnalysis };
 }
 
 // ---------------------------------------------------------------------------
@@ -205,6 +210,51 @@ describe("QuickStartModal", () => {
       bffBaseUrl: "https://test-bff.example.com",
       intent: "email-compose",
     });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Tabbed surface (ai-advanced-capabilities-analysis-hub-r1)
+  // -------------------------------------------------------------------------
+
+  it("defaults to the Create tab (GetStartedCardsWidget) and shows both tabs", () => {
+    renderModal();
+
+    expect(screen.getByTestId("quick-start-tablist")).toBeInTheDocument();
+    expect(screen.getByTestId("quick-start-tab-create")).toBeInTheDocument();
+    expect(screen.getByTestId("quick-start-tab-analysis")).toBeInTheDocument();
+    // Create tab active by default.
+    expect(screen.getByTestId("getstartedcards-widget")).toBeInTheDocument();
+    expect(screen.queryByTestId("analysis-cards-widget")).not.toBeInTheDocument();
+  });
+
+  it("opens directly on the Analysis tab when initialTab='analysis'", () => {
+    renderModal({ initialTab: "analysis" });
+
+    expect(screen.getByTestId("analysis-cards-widget")).toBeInTheDocument();
+    expect(screen.queryByTestId("getstartedcards-widget")).not.toBeInTheDocument();
+  });
+
+  it("switching to the Analysis tab reveals the analysis cards", async () => {
+    renderModal();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId("quick-start-tab-analysis"));
+
+    expect(screen.getByTestId("analysis-cards-widget")).toBeInTheDocument();
+    expect(screen.getByTestId("analysis-card-agreement-review")).toBeInTheDocument();
+  });
+
+  it("Agreement Review card fires onCreateAnalysis (Agreement Review work type) and closes", async () => {
+    const onClose = jest.fn();
+    const onCreateAnalysis = jest.fn();
+    renderModal({ initialTab: "analysis", onClose, onCreateAnalysis });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /Agreement Review/i }));
+
+    expect(onCreateAnalysis).toHaveBeenCalledTimes(1);
+    expect(onCreateAnalysis).toHaveBeenCalledWith(100000000, "Agreement Review");
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

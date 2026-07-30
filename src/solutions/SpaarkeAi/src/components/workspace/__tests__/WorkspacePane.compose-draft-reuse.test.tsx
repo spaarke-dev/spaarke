@@ -77,6 +77,7 @@ jest.mock('@spaarke/ai-widgets', () => {
 
 // No compose-launch mode + null activeLayout → auto-install effect early-returns (no default tab).
 jest.mock('../../shell/ThreePaneShell', () => ({
+  useAnalysisLaunch: () => null,
   usePaneCollapseContext: () => null,
   useComposeLaunch: () => null,
 }));

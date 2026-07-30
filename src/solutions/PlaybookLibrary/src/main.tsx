@@ -202,16 +202,29 @@ function App() {
   }, [isDialogContext, navigationService]);
 
   // -------------------------------------------------------------------------
-  // onComplete — open Analysis Workspace then close this dialog
+  // onComplete — open the new analysis in SpaarkeAi (sprk_spaarkeai), then
+  // close this dialog. Repointed off the retiring code page per
+  // ai-advanced-capabilities-analysis-hub-r1 task 061 (spec §13.5) to
+  // openSpaarkeAi's sprk_spaarkeai deep-link — the wire shape here mirrors
+  // src/solutions/SpaarkeAi/src/utils/launch-resolver.ts's buildLaunchUrl
+  // (analysisId wins over entity context; entityLogicalName/entityId/
+  // regarding thread the source document as regarding context).
   // -------------------------------------------------------------------------
 
   const handleComplete = React.useCallback(
     ({ analysisId }: { analysisId: string }) => {
-      // Navigate to Analysis Workspace in the parent/host frame so it opens
-      // as a new dialog on top of the Dataverse page (not nested inside this one).
-      const dataParam = resolvedEntityId
-        ? `analysisId=${analysisId}&documentId=${resolvedEntityId}`
-        : `analysisId=${analysisId}`;
+      // Navigate to SpaarkeAi in the parent/host frame so it opens as a new
+      // dialog on top of the Dataverse page (not nested inside this one).
+      const dataParams = new URLSearchParams();
+      dataParams.set("analysisId", analysisId);
+      if (resolvedEntityId) {
+        dataParams.set("entityId", resolvedEntityId);
+        if (resolvedEntityType) {
+          dataParams.set("entityLogicalName", resolvedEntityType);
+        }
+        dataParams.set("regarding", resolvedEntityId);
+      }
+      const dataParam = dataParams.toString();
 
       try {
         // Walk up frames to find a Xrm.Navigation that can open a new dialog.
@@ -234,13 +247,13 @@ function App() {
               xrmNav.navigateTo(
                 {
                   pageType: "webresource",
-                  webresourceName: "sprk_AnalysisWorkspace",
+                  webresourceName: "sprk_spaarkeai",
                   data: dataParam,
                 },
                 {
                   target: 2,
-                  width: { value: 95, unit: "%" },
-                  height: { value: 95, unit: "%" },
+                  width: { value: 80, unit: "%" },
+                  height: { value: 80, unit: "%" },
                 }
               );
               launched = true;
@@ -251,17 +264,17 @@ function App() {
 
         if (!launched) {
           console.warn(
-            "[PlaybookLibrary] Could not find Xrm.Navigation in parent frames to open Analysis Workspace"
+            "[PlaybookLibrary] Could not find Xrm.Navigation in parent frames to open SpaarkeAi"
           );
         }
       } catch (err) {
-        console.warn("[PlaybookLibrary] Failed to open Analysis Workspace:", err);
+        console.warn("[PlaybookLibrary] Failed to open SpaarkeAi:", err);
       }
 
       // Close the Playbook Library dialog
       handleClose();
     },
-    [resolvedEntityId, handleClose]
+    [resolvedEntityId, resolvedEntityType, handleClose]
   );
 
   // -------------------------------------------------------------------------

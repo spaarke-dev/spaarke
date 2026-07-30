@@ -247,3 +247,10 @@ export * from './MessageQuickView';
 // (posted as the first Message via the existing send engine). name/description
 // omitted — the shipped endpoint persists neither (§6.5 Path A, see task-024 notes).
 export * from './NewThreadModal';
+
+// TrackingFieldTrio - Entity-agnostic Monitor/High-Priority/Access-Permission
+// flag trio, lifted from the TrackingFieldTrio PCF (task 023, FR-14). Options
+// (segments + field labels) are injected via props — no `sprk_communication`
+// hardcoding in the shared core. Consumed by the PCF (deep `dist` import) and
+// the Phase-3 reading-pane tracking view (task 035).
+export * from './TrackingFieldTrio';

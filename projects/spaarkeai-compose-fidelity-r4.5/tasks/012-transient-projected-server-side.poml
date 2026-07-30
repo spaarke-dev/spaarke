@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>WS-1: open-in-Compose transient drafts projected server-side before mount</title>
+    <phase>1 WS-1 One reader</phase>
+    <gate>blocked until 011</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the transient-mount path (`.cs` + `.tsx`) on the `bff-api`/compose hot path so `mountTransient` no longer sets `projection: null`. FULL per root CLAUDE.md §8. Step 9.5 code-review + adr-check run.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Extends the projection-hydration pattern established by 010/011 to the third entry path; reuses the same server reader. No new abstraction.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared `Api/ComposeEndpoints.cs`/`Services/Compose/*` and client `ComposeWorkspace.tsx`/`ComposeEditor.tsx` (`mountTransient`) — the same files 010/011/013 touch. Sequential within group W1.</parallel-reason>
+    <deps>011</deps>
+    <tags>bff-api,compose</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Project open-in-Compose transient drafts server-side BEFORE mount so `mountTransient` no longer sets
+    `projection: null`. Route the transient bytes through the server reader (reuse task 011's stateless
+    `POST /api/compose/project` if the draft has bytes to send, or the existing projection call) and hydrate
+    `projection`, so the transient mount takes the projection branch — identical to stored-doc Load. This is FR-02,
+    the third and last entry path in WS-1's "one reader everywhere". Modify-only — reuse the existing reader and the
+    projection-hydration pattern from 010/011; introduce no new component.
+  </prompt>
+
+  <role>SPAARKE platform developer (BFF + Compose client). Expert in the transient-draft (open-in-Compose) mount path, `mountTransient`, and the R4 server projection. Follow ADRs strictly.</role>
+
+  <goal>
+    `mountTransient` hydrates a real `ComposeServerProjection` (never `projection: null`); open-in-Compose transient
+    drafts render via the projection branch, no `mammoth` reached. A seam slice covers the transient→projection path.
+  </goal>
+
+  <context>
+    <background>
+      Open-in-Compose transient drafts are the third entry path that bypasses the R4 projection: `mountTransient`
+      sets `projection: null`, forcing the editor mount into the lossy `mammoth` branch
+      (`ComposeEditor.tsx:1667`/`:1718`). To satisfy F-2 (one reader), the transient draft must be projected
+      server-side before mount and hydrate `projection` like upload (010) and browse (011). Where the transient
+      draft has bytes, reuse task 011's stateless `project` endpoint; where it already has a server round-trip
+      point, reuse that. Design §4 WS-1 ("Open-in-Compose transient drafts: project server-side before mount");
+      spec FR-02. Line numbers indicative — RE-GREP before editing.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — `mountTransient` (sets `projection: null` today); hydrate a real projection instead</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx — transient open-in-Compose effect / hand-off</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — task 011's stateless `POST /api/compose/project` (reuse for transient bytes)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — the single reader every path routes through</file>
+      <file role="modify">tests/integration/seam/ — seam slice for the transient→projection path (ADR-038)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">The stateless `POST /api/compose/project` endpoint — the reusable no-persist projection round-trip for transient drafts that carry bytes.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-02">`mountTransient` MUST NOT set `projection: null`; the transient mount MUST render via the projection branch. Scope: no `mammoth` branch reached for open-in-Compose drafts.</constraint>
+    <constraint source="project / reuse">Reuse the existing server reader and, where the draft carries bytes, task 011's stateless `project` endpoint — do NOT invent a new transient-only projection path or component. Scope: modify-only.</constraint>
+    <constraint source="ADR-007">`byte[]`-in / projection-out; no `Microsoft.Graph` above `SpeFileStore`. Scope: transient bytes → `ComposeDocxProjectionBuilder` inside `Services/Compose/`.</constraint>
+    <constraint source="ADR-013">No AI-internal type injected into the transient projection path; `Services/Compose/` stays pure (Tier-1 NetArchTest). Scope: consume `Services/Ai/PublicContracts/` seams only if ever needed — not needed here.</constraint>
+    <constraint source="ADR-038">Add a seam slice for the transient→projection vertical slice at its KEEP path; no `Mock&lt;HttpMessageHandler&gt;`/DI-registration/ctor-null tests. Scope: asserts the transient mount hydrates a projection, not null.</constraint>
+    <constraint source="project / BFF Hygiene §10">State the Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`); report compressed publish size + delta vs ~49.63 MB (~0 expected). Scope: run `/conflict-check` before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Transient-draft mount path; projection hydration; reuse of the stateless project endpoint; BFF hygiene + seam testing</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Projection hydration on entry" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx">
+        Tasks 010 (upload) + 011 (browse) hydrate `projection` from a server round-trip; `mountTransient` follows the same pattern instead of setting `projection: null`.
+      </pattern>
+      <pattern name="Stateless project endpoint (reuse)" location="src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs">
+        Task 011's `POST /api/compose/project` — reuse for transient drafts that carry bytes; no new endpoint.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration. Load spec FR-02, design §4 WS-1, ADR-007/013/038, `.claude/constraints/bff-extensions.md`.</step>
+    <step order="1" name="Re-grep the anchors">RE-GREP `mountTransient` in `ComposeEditor.tsx` (the `projection: null` site), the transient open-in-Compose effect in `ComposeWorkspace.tsx`, and task 011's `project` endpoint. Determine whether the transient draft carries bytes (→ reuse `project`) or already has a server round-trip point.</step>
+    <step order="2" name="Project the transient before mount">Wire the transient path to obtain a real projection server-side (reuse the `project` endpoint for byte-carrying drafts) and hydrate `projection`; remove the `projection: null` in `mountTransient` so the mount takes the projection branch.</step>
+    <step order="3" name="Checkpoint">Run `context-handoff` (silent: "✅ Checkpoint.").</step>
+    <step order="4" name="Seam slice">Add a seam slice asserting the transient→projection path hydrates a projection (not null) and renders via the projection branch (ADR-038).</step>
+    <step order="5" name="Build + hygiene">Build BFF + client; run suite + seam. Publish-size report (delta vs ~49.63 MB, ~0 expected). Run `/conflict-check`. State the Placement Justification for the PR.</step>
+    <step order="6" name="Set task ✅ in tasks/TASK-INDEX.md">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 012 status to ✅. Record any deviation in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a transient draft has NO server round-trip point at all (a pure client construct with no bytes to send and no existing endpoint) — STOP and surface per root CLAUDE.md §6. The likely resolution is reusing task 011's `project` endpoint; confirm the path before inventing a new transient-only projection route.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (`mountTransient` hydrates a projection)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx (transient effect projects server-side)</output>
+    <output type="test">tests/integration/seam/ (transient→projection seam slice)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an open-in-Compose transient draft, when it mounts, then `mountTransient` hydrates a real `ComposeServerProjection` (never `projection: null`) and the editor takes the projection branch — NOT `mammoth`.</criterion>
+    <criterion testable="true">Given a transient draft that carries bytes, when it is projected, then it reuses task 011's stateless `POST /api/compose/project` (no new transient-only endpoint or component is added).</criterion>
+    <criterion testable="true">Negative: the transient projection path injects no AI-internal type and reaches no `Microsoft.Graph` above `SpeFileStore` — Tier-1 NetArchTest green (ADR-007/013).</criterion>
+    <criterion testable="true">A seam slice asserts the transient mount hydrates a projection (not null); no banned mock/DI/ctor test added (ADR-038).</criterion>
+    <criterion testable="true">BFF build + Compose suite green; publish delta ~0 MB vs ~49.63 MB (≤60 MB); `/conflict-check` clean; Placement Justification stated in the PR.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 012 as ✅ and any deviation is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-02; design §4 WS-1. After 010/011/012, all three doorways (upload/browse/open-in-Compose) route through
+    the server projection — task 013 then deletes the now-unreachable `mammoth` fallback and grep-proves zero
+    Compose call sites. Numbering is still not fixed here (WS-3).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

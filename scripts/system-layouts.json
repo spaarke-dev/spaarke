@@ -73,6 +73,22 @@
       "sortOrder": 9,
       "isDefault": false,
       "description": "ai-spaarke-ai-workspace-UI-r2 post-merge parity (2026-07-01). LegalWorkspace work-assignments section (Active Work Assignments — sprk_workassignment). Row-click opens Layout 1 (85%×85%)."
+    },
+    {
+      "name": "Email",
+      "sectionId": "email",
+      "layoutTemplateId": "single-column",
+      "sortOrder": 10,
+      "isDefault": false,
+      "description": "email-communication-solution-r5 task 041 (FR-01). LegalWorkspace email section — Outlook-style two-pane reading surface over sprk_communication (EmailWorkspace, task 040). Pattern D dual-use with the `email` direct widget in @spaarke/ai-widgets/register-workspace-widgets.ts."
+    },
+    {
+      "name": "Analysis",
+      "sectionId": "analysis",
+      "layoutTemplateId": "single-column",
+      "sortOrder": 11,
+      "isDefault": false,
+      "description": "ai-advanced-capabilities-analysis-hub-r1 (front door, 2026-07-29). Analysis platform home/launcher — create-by-type cards (Agreement Review live) + a DataGrid of sprk_analysis records with view-by-type. Pattern D dual-use with the `analysis-hub` direct widget in @spaarke/ai-widgets/register-workspace-widgets.ts; the AnalysisHubWidget reads its PaneEventBus + AI session context optionally so the section is safe in any host."
     }
   ]
 }

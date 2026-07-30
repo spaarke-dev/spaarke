@@ -1,0 +1,77 @@
+{
+  "$comment": "email-communication-intelligence-r1 task 023 (NFR-07 blocking merge gate) — the email-triage eval family, joined to the SAME Category=GoldenUtteranceEval merge gate via TriageEmailEvalTests.cs (identical net-new-family pattern as the NDA-review / Assistant-Enhancements-R1 / Resourcefulness / Origin-classification families in this same directory — no shared golden-utterances.json edit, no CI-YAML change; the trait IS the registration). Unlike those chat/loop-dispatch families, TRIAGE-EMAIL is NOT chat/loop-projectable — it is invoked directly off the Communication enrichment path (CommunicationEnrichmentService.RunEmailTriageAsync via the ICommunicationTriageAi PublicContracts facade), so 'channel' is uniformly 'event' (the enrichment/event trigger, per the README's 3-channel vocabulary text|click|event) and 'utterance' is the event/affordance descriptor, not NL phrasing a user typed. Four families: structured-output (the representative inbound email → the Action's own worked example output shape), context-improvement (FR-06 — matter-grounded vs context-free prompt composition genuinely differs), binding-resolution (the email-triage Binding resolves through the REAL ConsumerRoutingService, same mechanical pattern as every sibling family), no-second-pass (FR-05 — the classification signal is a REQUIRED input the facade consumes, never re-derives).",
+  "schemaVersion": "triage-email-eval@v1",
+  "cases": [
+    {
+      "caseId": "TRIAGE-001",
+      "family": "structured-output",
+      "ucId": "UC-A-1",
+      "channel": "event",
+      "utterance": "[email-triage] inbound message enrichment fires after AiClassificationRung produced an urgent court-notice classification",
+      "notes": "The representative inbound email from infra/dataverse/actions/triage-email.action.json's own worked example (examples[0]) — asserts the Action's declared output shape (5 fields, correct $choices prefixes) and that the worked example's output populates all 5 fields with the expected values.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-triage",
+        "consumerCode": "default",
+        "catalogStatus": "mirrored",
+        "mirroredBy": "task 023 (infra/dataverse/sprk_playbookconsumer-rows.json)",
+        "actionCode": "triage-email",
+        "exampleOutput": {
+          "category": "Court / Filing",
+          "summary": "The court set a response deadline of Friday, August 15 in Smith v. Acme. Counsel requests confirmation of receipt and strategy guidance.",
+          "obligations": [
+            "Respond to the court by Friday, August 15",
+            "Confirm receipt to the sender",
+            "Provide strategy guidance"
+          ],
+          "priority": "Urgent",
+          "reviewOutcome": "Route"
+        }
+      }
+    },
+    {
+      "caseId": "TRIAGE-002",
+      "family": "context-improvement",
+      "ucId": "UC-A-1",
+      "channel": "event",
+      "utterance": "[email-triage] FR-06 — the same email triaged WITH the matter's prior correspondence available vs WITHOUT any (context-free)",
+      "notes": "Demonstrates the FR-06 grounding mechanism structurally (mechanical, no live model — same posture as every sibling family in this directory): CommunicationTriageGrounding.BuildFragment returns a non-empty, labeled grounding block when prior-correspondence RAG results exist, and null (context-free) when there are none — the SAME BoundInputs.RecordMemoryFragment extension point ActionRunner already composes ahead of the instruction/operand, so a populated fragment measurably changes the composed prompt the Action receives.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-triage",
+        "consumerCode": "default",
+        "groundedVsContextFreeDiffers": true
+      }
+    },
+    {
+      "caseId": "TRIAGE-003",
+      "family": "binding-resolution",
+      "ucId": "UC-A-1",
+      "channel": "event",
+      "utterance": "[email-triage] CommunicationEnrichmentService resolves the TRIAGE-EMAIL Action via IActionResolver -> IConsumerRoutingService.ResolveActionAsync('email-triage')",
+      "notes": "The exact read the Linear AI Consumer primitives perform (ActionResolver.ResolveAsync -> ConsumerRoutingService.ResolveActionAsync), read from the REAL mirror file — a drift in the mirror row (consumerType/actionCode typo) fails here, same mechanical posture as the NDA-review family's ConsumerRoutingService facts.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-triage",
+        "consumerCode": "default",
+        "catalogStatus": "mirrored",
+        "mirroredBy": "task 023 (infra/dataverse/sprk_playbookconsumer-rows.json)",
+        "actionCode": "triage-email"
+      }
+    },
+    {
+      "caseId": "TRIAGE-004",
+      "family": "no-second-pass",
+      "ucId": "UC-A-1",
+      "channel": "event",
+      "utterance": "[email-triage] enrichment feeds AiClassificationRung's ALREADY-PRODUCED classification signal into the Action's input — never a fresh classification call",
+      "notes": "Structural proof (FR-05): CommunicationTriageAi's constructor has NO dependency on ICommunicationClassificationAi/IOpenAiClient (it cannot invoke a second classification even by mistake); CommunicationTriageRequest.Classification is a REQUIRED input the caller supplies, reconstructed from the persisted sprk_associationprovenance signal (PersistedClassificationSignalReader), not re-derived. See PersistedClassificationSignalReaderTests.cs (unit, sibling KEEP path) for the reconstruction round-trip pin.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-triage",
+        "consumerCode": "default",
+        "noSecondClassificationPass": true
+      }
+    }
+  ]
+}

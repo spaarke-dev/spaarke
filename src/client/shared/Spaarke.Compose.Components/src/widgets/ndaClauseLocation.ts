@@ -29,6 +29,35 @@ function isHeadingNode(node: PMNode): boolean {
   return typeof pStyle === 'string' && /heading\s*[1-6]?/i.test(pStyle);
 }
 
+/**
+ * The WS-3/WS-4 computed legal number of a node, if it carries one (e.g. `"2"` / `"4.2"`). This is the
+ * `computedNumber` attribute `composeNumberAtomExtension.ts` (task 032) registers on `paragraph`/`heading`
+ * nodes from the projection's `data-computed-number` — the exact number Word displays + the editor renders
+ * as its non-editable number-atom. Deterministically produced server-side by
+ * `ComposeDocxProjectionBuilder`'s `NumberingComputationEngine` (task 031).
+ */
+function computedNumberOf(node: PMNode): string | undefined {
+  const cn = (node.attrs as { computedNumber?: unknown }).computedNumber;
+  return typeof cn === 'string' && cn.trim() ? cn.trim() : undefined;
+}
+
+/**
+ * The computed legal number of the block that CONTAINS `pos`, when that block is itself a numbered
+ * clause/section (e.g. the NDA's "2. If the Confidential Information …" — a numbered PARAGRAPH, not a
+ * heading). This is what lets the location label cite "Sec 2" for numbered-paragraph clauses that
+ * `findGoverningHeading` cannot see (they are not heading nodes). Returns undefined for unnumbered blocks.
+ */
+export function computedNumberAt(doc: PMNode, pos: number): string | undefined {
+  const clamped = Math.min(Math.max(pos, 0), doc.content.size);
+  const $pos = doc.resolve(clamped);
+  for (let depth = $pos.depth; depth >= 0; depth--) {
+    const found = computedNumberOf($pos.node(depth));
+    if (found) return found;
+  }
+  const at = doc.nodeAt(clamped);
+  return at ? computedNumberOf(at) : undefined;
+}
+
 /** Parse the page number from the model's free-text `sectionRef` (e.g. "(p. 3)"). */
 function parsePage(sectionRef: string): string | undefined {
   return /\(?\bp(?:g|age)?\.?\s*(\d+)\)?/i.exec(sectionRef)?.[1];
@@ -39,17 +68,26 @@ function parseParagraph(sectionRef: string): string | undefined {
   return /\bpara(?:graph)?\.?\s*(\d+)/i.exec(sectionRef)?.[1];
 }
 
-/** The heading governing `pos` + its 1-based ordinal among the document's headings, or null. */
-export function findGoverningHeading(doc: PMNode, pos: number): { heading: string; ordinal: number } | null {
+/**
+ * The heading governing `pos` + its 1-based ordinal among the document's headings, or null. Also carries
+ * the heading's own WS-3 `computedNumber` when it is a style-linked numbered heading (e.g. `"4.2"`), so the
+ * label can prefer the real legal number over the positional ordinal. `computedNumber` is undefined for
+ * plain (unnumbered) headings — Jest `toEqual` ignores undefined properties, so existing `{heading, ordinal}`
+ * expectations are unaffected.
+ */
+export function findGoverningHeading(
+  doc: PMNode,
+  pos: number
+): { heading: string; ordinal: number; computedNumber?: string } | null {
   let ordinal = 0;
-  let governing: { heading: string; ordinal: number } | null = null;
+  let governing: { heading: string; ordinal: number; computedNumber?: string } | null = null;
   doc.descendants((node, nodePos) => {
     if (!isHeadingNode(node)) return true;
     ordinal += 1;
     // The governing heading is the LAST heading that starts at or before the clause position.
     if (nodePos <= pos) {
       const heading = node.textContent.trim();
-      if (heading) governing = { heading, ordinal };
+      if (heading) governing = { heading, ordinal, computedNumber: computedNumberOf(node) };
     }
     return true; // keep descending (headings can nest; textContent covers the whole heading)
   });
@@ -68,15 +106,23 @@ export function findGoverningHeading(doc: PMNode, pos: number): { heading: strin
 export function deriveClauseLocationLabel(doc: PMNode, pos: number | null, sectionRef?: string): string {
   const ref = (sectionRef ?? '').trim();
   if (pos === null) return formatClauseLocation(ref);
+
+  // The clause's OWN computed legal number (a numbered paragraph, e.g. the NDA's "2. …") is the most
+  // precise citation and the one the reviewer sees rendered. Fall back to a style-linked governing
+  // heading's computed number, then to the positional heading ordinal (round-5 behavior).
+  const clauseNumber = computedNumberAt(doc, pos);
   const governing = findGoverningHeading(doc, pos);
-  if (!governing) return formatClauseLocation(ref); // no heading in the doc → model-only label
+  const sec = clauseNumber ?? governing?.computedNumber ?? (governing ? String(governing.ordinal) : undefined);
+
+  // No section signal at all (no computed number, no heading) → model-only label (never blank).
+  if (!sec) return formatClauseLocation(ref);
 
   const page = parsePage(ref);
   const paragraph = parseParagraph(ref);
   const parts: string[] = [];
   if (page) parts.push(`Pg ${page}`);
-  parts.push(`Sec ${governing.ordinal}`);
+  parts.push(`Sec ${sec}`);
   if (paragraph) parts.push(`Para ${paragraph}`);
-  parts.push(governing.heading);
+  if (governing) parts.push(governing.heading);
   return parts.join(' · ');
 }

@@ -84,7 +84,7 @@ import {
   groupConnectionsByAction,
   isConnectionConfirmed,
   entityLabel,
-} from './provenance';
+} from '@spaarke/communication-components/logic/connections';
 
 export type ReviewLayout = 'summary' | 'card' | 'rail';
 

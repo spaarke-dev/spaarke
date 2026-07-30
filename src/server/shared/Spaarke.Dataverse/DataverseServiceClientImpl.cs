@@ -155,10 +155,13 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
     public async Task<AnalysisEntity?> GetAnalysisAsync(string id, CancellationToken ct = default)
     {
+        // task 064 (ADR-040 Path A, spec §13.5 / FR-22): sprk_chathistory is no longer selected —
+        // AnalysisDocumentLoader.GetOrReloadFromDataverseAsync (the last reader) was repointed to
+        // rely on Cosmos as the transcript store-of-record. sprk_analysis is anchor + outputs only.
         var entity = await _serviceClient.RetrieveAsync(
             "sprk_analysis",
             Guid.Parse(id),
-            new ColumnSet("sprk_name", "sprk_workingdocument", "sprk_chathistory",
+            new ColumnSet("sprk_name", "sprk_workingdocument",
                          "statuscode", "createdon", "modifiedon", "sprk_documentid"),
             ct);
 
@@ -171,7 +174,6 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             Name = entity.GetAttributeValue<string>("sprk_name"),
             DocumentId = entity.GetAttributeValue<EntityReference>("sprk_documentid")?.Id ?? Guid.Empty,
             WorkingDocument = entity.GetAttributeValue<string>("sprk_workingdocument"),
-            ChatHistory = entity.GetAttributeValue<string>("sprk_chathistory"),
             StatusCode = entity.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 0,
             CreatedOn = entity.GetAttributeValue<DateTime>("createdon"),
             ModifiedOn = entity.GetAttributeValue<DateTime>("modifiedon")
@@ -1627,7 +1629,8 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         string entityLogicalName,
         Guid recordId,
         Dictionary<string, object?> fields,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Guid? impersonateSystemUserId = null)
     {
         if (fields.Count == 0)
         {
@@ -1644,23 +1647,43 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         var apiPath = $"{entitySetName}({recordId})";
         var body = System.Text.Json.JsonSerializer.Serialize(fields);
 
-        _logger.LogDebug("PATCH {ApiPath} with {FieldCount} fields", apiPath, fields.Count);
-
-        var response = await Task.Run(() =>
-            _serviceClient.ExecuteWebRequest(
-                HttpMethod.Patch,
-                apiPath,
-                body,
-                null,
-                "application/json"), ct);
-
-        if (!response.IsSuccessStatusCode)
+        // Job B apply (task 031): when a caller systemuserid is supplied, run the PATCH AS that user via a cloned
+        // ServiceClient with CallerId set (the SDK stamps MSCRMCallerID) — mirrors UserPrivilegeChecker's read-path
+        // impersonation. Null/empty = app-only (existing callers byte-unchanged). Fail-closed: if impersonation is
+        // requested but the clone cannot be established, the write throws rather than silently running app-only.
+        var impersonate = impersonateSystemUserId is { } imp && imp != Guid.Empty;
+        ServiceClient? impersonatedClient = impersonate ? _serviceClient.Clone() : null;
+        try
         {
-            var errorBody = await response.Content.ReadAsStringAsync(ct);
-            _logger.LogError(
-                "Failed to PATCH {Entity}({Id}): {StatusCode} {ErrorBody}",
-                entityLogicalName, recordId, response.StatusCode, errorBody);
-            response.EnsureSuccessStatusCode();
+            if (impersonatedClient is not null)
+                impersonatedClient.CallerId = impersonateSystemUserId!.Value;
+
+            var client = impersonatedClient ?? _serviceClient;
+
+            _logger.LogDebug(
+                "PATCH {ApiPath} with {FieldCount} fields{Impersonation}",
+                apiPath, fields.Count, impersonate ? $" (impersonating {impersonateSystemUserId})" : string.Empty);
+
+            var response = await Task.Run(() =>
+                client.ExecuteWebRequest(
+                    HttpMethod.Patch,
+                    apiPath,
+                    body,
+                    null,
+                    "application/json"), ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogError(
+                    "Failed to PATCH {Entity}({Id}): {StatusCode} {ErrorBody}",
+                    entityLogicalName, recordId, response.StatusCode, errorBody);
+                response.EnsureSuccessStatusCode();
+            }
+        }
+        finally
+        {
+            impersonatedClient?.Dispose();
         }
 
         _logger.LogInformation("Updated {Entity}({Id}) with {FieldCount} fields via Web API", entityLogicalName, recordId, fields.Count);
@@ -2406,6 +2429,56 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
         var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
         return results.Entities.Count > 0 ? results.Entities[0] : null;
+    }
+
+    public async Task<IReadOnlyList<Entity>> QueryAllRecordTypeRefsAsync(CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying full sprk_recordtype_ref catalog (identifier-rung roster)");
+
+        var query = new QueryExpression("sprk_recordtype_ref")
+        {
+            ColumnSet = new ColumnSet(
+                "sprk_recordtype_refid",
+                "sprk_recordlogicalname",
+                "sprk_regardingfield",
+                "sprk_regardingrecordnumberfield"),
+        };
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("statecode", ConditionOperator.Equal, 0)); // Active only
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        return results.Entities;
+    }
+
+    public async Task<IReadOnlyList<Entity>> QueryRecordsByNumberFieldAsync(
+        string entityLogicalName, string numberFieldLogicalName, string value, CancellationToken ct = default)
+    {
+        // Defensive: a dirty/typo'd catalog row (null/blank field) or an empty value degrades to no-match,
+        // never a wrong-field query (NFR-04). The identifier rung already guards, but guard here too.
+        if (string.IsNullOrWhiteSpace(entityLogicalName)
+            || string.IsNullOrWhiteSpace(numberFieldLogicalName)
+            || string.IsNullOrWhiteSpace(value))
+        {
+            return Array.Empty<Entity>();
+        }
+
+        _logger.LogDebug(
+            "Reverse-lookup {Entity}.{Field} == {Value}", entityLogicalName, numberFieldLogicalName, value);
+
+        var query = new QueryExpression(entityLogicalName)
+        {
+            // Return the number field (the id is always populated on the returned Entity). A small TopCount
+            // still detects same-field duplicates (2+ rows → the caller surfaces Ambiguous) while capping cost.
+            ColumnSet = new ColumnSet(numberFieldLogicalName),
+            TopCount = 5,
+        };
+        query.Criteria.Conditions.Add(
+            new ConditionExpression(numberFieldLogicalName, ConditionOperator.Equal, value));
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("statecode", ConditionOperator.Equal, 0)); // Active only
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        return results.Entities;
     }
 
     public async Task<Guid?> QuerySystemUserByAzureAdOidAsync(string azureAdObjectId, CancellationToken ct = default)

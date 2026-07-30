@@ -107,6 +107,14 @@
     <!-- MimeKit 4.15.1: fixes CVE-2026-30227 (CRLF injection in SMTP envelope address) -->
     <PackageReference Include="MimeKit" Version="4.15.1" />
     <PackageReference Include="MsgReader" Version="6.0.6" />
+    <!-- HtmlSanitizer (namespace Ganss.Xss) 9.1.973 — the AUTHORITATIVE server-side XSS boundary for the
+         .eml -> sanitized-HTML reading-pane render (email-communication-solution-r5 task 010 / spec NFR-03).
+         Owner-approved Path-A exception (CLAUDE.md §6.5): the BFF had no HTML sanitizer (direct or transitive)
+         and regex-sanitizing an XSS boundary is a known-unsafe anti-pattern, so a purpose-built allow-list
+         sanitizer is required. Consumed only by EmlToHtmlRenderer. Pulls AngleSharp (maintained HTML parser)
+         as its sole notable transitive; publish-size delta measured + reported in the task notes
+         (well under the +5 MB single-task line and the 60 MB ceiling — CLAUDE.md §10 / NFR-01). -->
+    <PackageReference Include="HtmlSanitizer" Version="9.1.973" />
 
     <!-- Observability -->
     <PackageReference Include="OpenTelemetry" Version="1.15.0" />

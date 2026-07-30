@@ -10,7 +10,14 @@
       "react": ["./node_modules/@types/react"],
       "react/*": ["./node_modules/@types/react/*"],
       "react-dom": ["./node_modules/@types/react-dom"],
-      "react-dom/*": ["./node_modules/@types/react-dom/*"]
+      "react-dom/*": ["./node_modules/@types/react-dom/*"],
+      "@spaarke/communication-components/logic/attachments": [
+        "../../shared/Spaarke.Communication.Components/src/logic/attachments/index"
+      ],
+      "@spaarke/communication-components/components/AttachmentList": [
+        "../../shared/Spaarke.Communication.Components/src/components/AttachmentList/index"
+      ],
+      "@spaarke/communication-components/*": ["../../shared/Spaarke.Communication.Components/src/*"]
     }
   },
   "exclude": [

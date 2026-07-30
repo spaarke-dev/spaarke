@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>WS-4: persist paraId → legal-number map (projection payload + session ledger)</title>
+    <phase>4 WS-4 Reference layer</phase>
+    <gate>blocked until 040</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.cs` on the `bff-api` hot path — persists the reference map into the R4 session ledger (`ComposeService.cs`) as well as the projection payload; touches session-state persistence. FULL per root CLAUDE.md §8 (modifying `.cs`, tags include `bff-api`). Step 9.5 code-review + adr-check run.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reuses the R4 session-ledger persistence (ADR-040) and the payload fields added in 040; no new store or architectural judgment (the escalation guards the new-store boundary).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared `Services/Compose/ComposeService.cs` (session-ledger persistence) + the projection payload from 040 — the same files 040/042 touch. Sequential within group W4; serialized behind 040.</parallel-reason>
+    <deps>040</deps>
+    <tags>bff-api,compose</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Persist the `paraId → legal-number` map BOTH in the projection payload (already emitted by 040) AND with the
+    document session ledger, so it survives edits. Per R4, an edit keeps a paragraph's `paraId` stable; new/split
+    paragraphs re-anchor per R4 — so the persisted map lets a reloaded session resolve `paraId → number` without a
+    recompute divergence, and edited docs keep a stable `paraId → number` for unchanged paragraphs. This is FR-17
+    (owner clarification: BOTH stores) and the persistence half of F-4 (stable reference). REUSE the R4 session-ledger
+    persistence (ADR-040 session ledger) — do NOT invent a new store; the ledger already carries per-session document
+    state and this map rides alongside it.
+  </prompt>
+
+  <role>SPAARKE platform developer (BFF + Compose). Expert in the R4 session ledger (ADR-040), the `paraId`-anchored re-anchor layer (`ParaIdPreParser` / `AnnotationReanchorService` / `DocxAnnotationReader`), and the projection payload extended in 040. Follow ADRs strictly.</role>
+
+  <goal>
+    The `paraId → legal-number` map is persisted in TWO places: the projection payload (from 040) AND the R4 document
+    session ledger. Reloading a session resolves the map without recompute divergence; an edited doc keeps a stable
+    `paraId → number` for unchanged paragraphs (new/split paragraphs re-anchor per R4). A seam slice covers
+    reload-resolves-map and edit-preserves-stable-mapping; the persistence reuses the existing session-ledger store
+    (no new store introduced).
+  </goal>
+
+  <context>
+    <background>
+      WS-4's reference fields now ride on the projection payload (040), which is emitted per read. But the analysis/
+      citation layer must resolve `paraId → number` for a session that has been reloaded or edited — after the
+      projection was first built. R4's session ledger (ADR-040) already persists per-session document state, and R4
+      keeps `paraId` stable across edits (new/split paragraphs re-anchor via `AnnotationReanchorService.cs:14-22`,
+      doc-order-index hints in `DocxAnnotationReader` `:323-333`). This task persists the map alongside that ledger so
+      the reference survives edits and reloads. Owner clarification (spec Owner Clarifications): the map persists in
+      BOTH the projection payload AND the session ledger. Design §4 WS-4; spec FR-17. Line numbers are indicative —
+      RE-GREP before editing.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — persist the `paraId → legal-number` map into the R4 session ledger alongside existing per-session document state (`paraId` ×47 usage; reanchor by Levenshtein + position)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjection.cs — the payload carrying the reference fields (040) that also feeds the ledger-persisted map</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs — `paraId` re-anchor layer (`:14-22`): edits keep `paraId` stable, new/split re-anchor — the map must ride this stability</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationReader.cs — `ParagraphHint` = doc-order index (`:323-333`); the re-anchor input the map coexists with</file>
+      <file role="canonical-reference">.claude/adr/ADR-040-session-ledger.md — the R4 session ledger this task reuses (do NOT invent a new store)</file>
+      <file role="modify">tests/integration/seam/ — seam slice: reload-resolves-map + edit-preserves-stable-mapping (ADR-038)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">The projection payload extended with `computedNumber`/`numberingLevel`/`listPath`/`headingLevel` — the source of the `paraId → legal-number` map this task also persists to the session ledger.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-17">The `paraId → legal-number` map MUST persist in BOTH the projection payload AND the document session ledger (owner clarification: BOTH). Scope: reloading a session resolves the map without recompute divergence; unchanged paragraphs keep a stable `paraId → number` across edits.</constraint>
+    <constraint source="ADR-040">REUSE the R4 session ledger for persistence — the map rides alongside the existing per-session document state. Scope: do NOT invent a new store, cache, table, or persistence surface; extend the ledger's existing session state (see escalation).</constraint>
+    <constraint source="project / §11">This is a modify-only extension of the existing session-ledger persistence + the 040 payload — no new component. Scope: if a new store appears necessary, that is a §11 new-surface event → STOP and surface (escalation), do not create silently.</constraint>
+    <constraint source="ADR-007">The projection + persistence stay `byte[]`-in / projection-out; no `Microsoft.Graph` type above `SpeFileStore`. Scope: map persistence happens inside `Services/Compose/` against the existing ledger.</constraint>
+    <constraint source="ADR-013">No AI-internal type injected into the persistence path — WS-4 exposes the reference map TO the analysis layer via the projection/ledger contract; it does NOT inject `IOpenAiClient`/executor into `Services/Compose/`. Scope: `Services/Compose/` stays pure (Tier-1 NetArchTest green).</constraint>
+    <constraint source="ADR-038">Add/extend a seam slice for reload-resolves-map + edit-preserves-mapping at the KEEP path (`tests/integration/seam/`); NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests. Scope: the seam exercises a real reload/edit round-trip through the ledger.</constraint>
+    <constraint source="project / BFF Hygiene §10">State the Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`); measure compressed publish size and report absolute + delta vs ~49.63 MB baseline (incl. PDBs) — expected ~0 MB. Scope: run `/conflict-check` before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>R4 session ledger reuse; paraId re-anchor stability across edits; reference-map persistence; BFF hygiene + seam testing</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="R4 session ledger" location=".claude/adr/ADR-040-session-ledger.md">
+        The existing per-session document-state store — the reference map rides alongside it; this task reuses it rather than inventing a new store.
+      </pattern>
+      <pattern name="paraId stability across edits" location="src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs:14-22">
+        Edits keep a paragraph's `paraId` stable; new/split paragraphs re-anchor. The persisted `paraId → number` map inherits this stability — unchanged paragraphs keep their number.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL / 📋 REASON / 📖 PROTOCOL STEPS). Load spec FR-17, design §4 WS-4, ADR-040 (session ledger), ADR-007/013/038, `.claude/constraints/bff-extensions.md`.</step>
+    <step order="1" name="Confirm the ledger can carry the map">RE-GREP the R4 session-ledger persistence in `ComposeService.cs` and confirm the existing session state can carry the `paraId → legal-number` map WITHOUT a new store. If it cannot, STOP per the escalation trigger before writing any new persistence surface.</step>
+    <step order="2" name="Persist to the projection payload">Confirm the map is present in the projection payload (from 040) — the immediate render/citation source. No new work if 040 already emits it; wire the ledger persistence from the same payload data.</step>
+    <step order="3" name="Persist to the session ledger">Persist the `paraId → legal-number` map into the R4 session ledger alongside existing per-session document state, so it survives reloads and edits (unchanged paragraphs keep a stable `paraId → number`; new/split re-anchor per R4).</step>
+    <step order="4" name="Checkpoint">Run `context-handoff` (silent: "✅ Checkpoint.").</step>
+    <step order="5" name="Seam slice">Add/extend a seam slice (`tests/integration/seam/`): (a) reload a session → the map resolves without recompute divergence; (b) edit a doc → unchanged paragraphs keep a stable `paraId → number`, new/split re-anchor (ADR-038; no banned mock/DI/ctor tests).</step>
+    <step order="6" name="Build + hygiene">Build BFF; run the Compose suite + new seam. Run `dotnet publish -c Release` and report compressed size + delta vs ~49.63 MB (incl. PDBs). Run `/conflict-check`. State the Placement Justification for the PR.</step>
+    <step order="7" name="Set task ✅ in tasks/TASK-INDEX.md">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 041 status to ✅. Record any deviation in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If persisting the map with the session ledger would require a NEW store (cache, table, blob, or persistence surface) rather than extending R4's existing session state — STOP and surface per root CLAUDE.md §11 (new-surface justification) + §6.5 (ADR Conflict). Confirm the ledger can carry the map FIRST; do not create a new persistence surface silently.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (map persisted to the R4 session ledger)</output>
+    <output type="test">tests/integration/seam/ (reload-resolves-map + edit-preserves-mapping seam slice)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a projected document, when its projection is produced, then the `paraId → legal-number` map is present in BOTH the projection payload AND the persisted session ledger.</criterion>
+    <criterion testable="true">Given a persisted session, when it is reloaded, then the `paraId → legal-number` map resolves without a recompute divergence from the original projection.</criterion>
+    <criterion testable="true">Given an edited document, when unchanged paragraphs are inspected, then each keeps its stable `paraId → number`; new/split paragraphs re-anchor per R4 (not a silent number loss).</criterion>
+    <criterion testable="true">The persistence reuses the R4 session ledger — no new store, cache, table, or persistence surface is introduced (§11 / ADR-040); if one appeared necessary the escalation fired.</criterion>
+    <criterion testable="true">Negative: the persistence path does NOT inject any AI-internal type into `Services/Compose/` and does NOT reach `Microsoft.Graph` above `SpeFileStore` — Tier-1 NetArchTest stays green (ADR-007/013).</criterion>
+    <criterion testable="true">A seam slice at the `tests/integration/seam/` KEEP path exercises reload + edit round-trips through the ledger; no `Mock&lt;HttpMessageHandler&gt;`/DI-registration/ctor-null test is added (ADR-038).</criterion>
+    <criterion testable="true">BFF build + Compose suite green; compressed publish size reported with ~0 MB delta vs ~49.63 MB baseline (≤60 MB ceiling); `/conflict-check` clean.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 041 as ✅ and any deviation is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-17; design §4 WS-4; owner clarification = BOTH stores. This is the persistence half of the reference
+    layer — 040 added the payload fields, 042 builds the citation resolver on top. The map's edit-survival rides on
+    R4's `paraId` stability (`AnnotationReanchorService`); this task does NOT change the re-anchor algorithm, only
+    persists the number map alongside it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
