@@ -519,6 +519,40 @@ describe('ComposeFormatToolbar — Refresh Profile button (G10 task 040)', () =>
 });
 
 // ---------------------------------------------------------------------------
+// UAT #5 (task 053) — "Reload from source" button. Distinct from Refresh Profile:
+// it reloads the latest SPE bytes on demand; the host wires it only for a doc with an SPE source.
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Reload from source button (UAT #5 task 053)', () => {
+  it('is not rendered when no onReloadFromSource handler is wired (born-in-editor / no SPE source)', () => {
+    renderFormatToolbar();
+    expect(screen.queryByTestId('compose-format-reload-from-source')).not.toBeInTheDocument();
+  });
+
+  it('renders and fires onReloadFromSource when clicked (doc with an SPE source)', async () => {
+    const user = userEvent.setup();
+    const onReloadFromSource = jest.fn();
+    renderFormatToolbar({}, { props: { onReloadFromSource } });
+
+    const btn = screen.getByTestId('compose-format-reload-from-source');
+    expect(btn).toBeInTheDocument();
+    await user.click(btn);
+    expect(onReloadFromSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('is distinct from the Refresh-Profile button (both can render together)', () => {
+    renderFormatToolbar({}, { props: { onReloadFromSource: jest.fn(), onRefreshProfile: jest.fn() } });
+    expect(screen.getByTestId('compose-format-reload-from-source')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-refresh-profile')).toBeInTheDocument();
+  });
+
+  it('ADR-021: renders under a dark theme', () => {
+    renderFormatToolbar({}, { theme: webDarkTheme, props: { onReloadFromSource: jest.fn() } });
+    expect(screen.getByTestId('compose-format-reload-from-source')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 6b. Track Changes toggle (item 4, UAT round-4)
 // ---------------------------------------------------------------------------
 

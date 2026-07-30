@@ -634,6 +634,11 @@ export interface ComposeEditorProps {
    *  (the host wires it only for a promoted doc — one that has a sprk_document record to re-profile). */
   onRefreshProfile?: () => void;
 
+  /** UAT #5 (task 053): "Reload from source" handler. Renders the toolbar button when set (the host wires
+   *  it only for a doc with an SPE source). Pulls the latest SPE bytes on demand — e.g. after an external
+   *  Word-web edit. The host honors the dirty-guard before discarding unsaved edits. */
+  onReloadFromSource?: () => void;
+
   /**
    * FR-23 (task 044) — display name attributed to comment threads/replies the CURRENT user creates
    * via the comment-thread panel. Resolved by the host (no network call happens here — ADR-028);
@@ -1618,6 +1623,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       canSave,
       isSaving,
       onRefreshProfile,
+      onReloadFromSource,
       commentAuthor = 'You',
       reviewSummary,
       activeWorkType = '*',
@@ -2649,6 +2655,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           canSave={canSave}
           isSaving={isSaving}
           onRefreshProfile={onRefreshProfile}
+          onReloadFromSource={onReloadFromSource}
           trackChangesEnabled={trackChangesEnabled}
           onToggleTrackChanges={toggleTrackChanges}
           // UAT round-2 items #1/#2 — the "Review" dropdown. Shown only when an NDA advisory review is

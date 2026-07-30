@@ -104,6 +104,7 @@ import {
   TableDismiss24Regular,
   ClipboardTaskListLtr24Regular,
   DocumentSync24Regular,
+  ArrowClockwise24Regular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -227,6 +228,10 @@ export interface ComposeFormatToolbarProps {
   /** G10 (FR-09, task 040): manual "Refresh Profile" handler. Renders the button when set (the host
    *  wires it only for a promoted doc — one with a sprk_document record to re-profile). */
   onRefreshProfile?: () => void;
+  /** UAT #5 (task 053): "Reload from source" handler. Renders the button when set (the host wires it only
+   *  for a doc with an SPE source). Pulls the latest SPE bytes on demand — e.g. after an external Word-web
+   *  edit the change-check missed. Distinct from Refresh Profile (which re-profiles, not reloads bytes). */
+  onReloadFromSource?: () => void;
 
   // ---- Review (ai-advanced-capabilities-nda-r1 UAT round-2 items #1/#2) — icon-only dropdown,
   //      right-aligned, rendered ONLY when an NDA advisory review is present. Two independent
@@ -357,6 +362,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     canSave,
     isSaving,
     onRefreshProfile,
+    onReloadFromSource,
     trackChangesEnabled,
     onToggleTrackChanges,
     hasReview,
@@ -835,6 +841,22 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
             disabled={controlDisabled}
             onClick={onToggleTrackChanges}
             data-testid="compose-format-track-changes"
+          />
+        </Tooltip>
+      ) : null}
+
+      {/* ---- Reload from source (UAT #5, task 053) — right-aligned; only for a doc with an SPE source.
+              Pulls the latest SPE bytes on demand (e.g. after an external Word-web edit). Distinct icon +
+              action from Refresh Profile (which re-profiles rather than reloading bytes). ---- */}
+      {onReloadFromSource ? (
+        <Tooltip content="Reload from source" relationship="label" withArrow>
+          <ToolbarButton
+            appearance="subtle"
+            icon={<ArrowClockwise24Regular />}
+            aria-label="Reload from source"
+            disabled={controlDisabled}
+            onClick={onReloadFromSource}
+            data-testid="compose-format-reload-from-source"
           />
         </Tooltip>
       ) : null}

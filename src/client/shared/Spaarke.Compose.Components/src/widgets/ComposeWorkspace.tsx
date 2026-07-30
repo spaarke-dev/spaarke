@@ -961,14 +961,33 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     anchoredAnnotations,
   ]);
 
+  // UAT #5 fix (task 053): Compose runs EMBEDDED in an iframe (LegalWorkspace embedded mode / model-driven
+  // host). Returning from the Word-for-Web tab fires the document's `visibilitychange` (→ visible) reliably,
+  // but the iframe `window`'s `focus` event often does NOT — so a `focus`-only listener meant the
+  // external-change check never ran and the banner never appeared. Listen for BOTH; an in-flight guard stops
+  // the two events (which can both fire on a single return) from double-running the check and double-advancing
+  // the shared SPE delta cursor.
+  const returnCheckInFlightRef = React.useRef(false);
   React.useEffect(() => {
     if (state.status !== 'loaded') return;
     if (!state.documentRef?.speDriveItemId) return;
-    const onFocus = (): void => {
-      void runReturnFromWordCheck();
+    const runGuarded = (): void => {
+      if (returnCheckInFlightRef.current) return;
+      returnCheckInFlightRef.current = true;
+      void runReturnFromWordCheck().finally(() => {
+        returnCheckInFlightRef.current = false;
+      });
+    };
+    const onFocus = (): void => runGuarded();
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'visible') runGuarded();
     };
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [state.status, state.documentRef?.speDriveItemId, runReturnFromWordCheck]);
 
   // gap 3.5 — resolve a flagged/orphaned anchor from the conflict panel. Discard is the only path
@@ -2667,6 +2686,29 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               // G10 (task 040): the manual "Refresh Profile" button — only for a PROMOTED doc (there is a
               // sprk_document to re-profile). Undefined for a transient/unpromoted mount → the button hides.
               onRefreshProfile={state.documentRef?.sprkDocumentId ? () => void triggerRefreshProfile() : undefined}
+              // UAT #5 (task 053): always-available "Reload from source" — pulls the latest SPE bytes (e.g.
+              // after an external Word-web edit that the change-check missed, or on demand). Gated on having an
+              // SPE source (speDriveItemId); undefined for a born-in-editor doc with no source to reload from.
+              // Honors the dirty-guard: confirm before discarding unsaved edits (no silent loss, NFR-08).
+              onReloadFromSource={
+                state.documentRef?.speDriveItemId
+                  ? () => {
+                      if (!state.documentRef) return;
+                      if (
+                        isDirty &&
+                        !window.confirm('Reload from source? Your unsaved Compose changes will be discarded.')
+                      ) {
+                        return;
+                      }
+                      dispatch({
+                        kind: 'requestLoad',
+                        documentRef: state.documentRef,
+                        sessionId: state.sessionId,
+                        externalChange: true,
+                      });
+                    }
+                  : undefined
+              }
               isSaving={isSavingNow}
               // UAT round-2 items #1/#2 — the editor's "Review" toolbar dropdown toggles this docked
               // summary panel (owned here) alongside its own right-gutter "Review Notes". `open` mirrors
