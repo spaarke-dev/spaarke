@@ -82,7 +82,12 @@ import { Badge, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-c
 import { DocumentAddRegular, DocumentMultipleRegular, DocumentSearchRegular } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 
-import { ActionCard, SprkAnalysisWorkType, ANALYSIS_REGARDING_TARGETS, resolveAnalysisFilePreview } from '@spaarke/ui-components';
+import {
+  ActionCard,
+  SprkAnalysisWorkType,
+  ANALYSIS_REGARDING_TARGETS,
+  resolveAnalysisFilePreview,
+} from '@spaarke/ui-components';
 import type { ActionCardProps, AssociationResult, ISprkAnalysisRecord } from '@spaarke/ui-components';
 import { buildBffApiUrl } from '@spaarke/auth';
 
