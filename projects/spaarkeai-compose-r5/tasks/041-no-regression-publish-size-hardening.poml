@@ -4,7 +4,7 @@
     <title>No-regression + publish-size hardening gate (byte-diff 24/24, full suite, publish ≤60 MB)</title>
     <phase>4 Profiling + hardening</phase>
     <gate>dep:010,011,012,013,014,020,021,022,030,031,032,033,040</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Verification/aggregation gate: runs existing harness + full seam/unit suites + ADR checks + dotnet publish. No production code change (only fixes if a gate fails, which would re-trigger the relevant task). Aggregates all impl work.</rigor-reason>
     <model-tier>sonnet</model-tier>
