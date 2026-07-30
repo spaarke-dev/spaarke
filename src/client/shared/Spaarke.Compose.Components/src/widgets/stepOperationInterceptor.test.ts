@@ -93,6 +93,9 @@ const schema = new Schema({
     italic: { parseDOM: [{ tag: 'em' }], toDOM: () => ['em', 0] },
     underline: { parseDOM: [{ tag: 'u' }], toDOM: () => ['u', 0] },
     link: { attrs: { href: { default: null } }, parseDOM: [{ tag: 'a' }], toDOM: () => ['a', 0] },
+    // A real mark that is NOT in the closed ComposeMarkType set (like production `strike`) — the
+    // unrepresentable-mark test subject now that `link` is representable (G5 task 033).
+    strike: { parseDOM: [{ tag: 's' }], toDOM: () => ['s', 0] },
     // R5 task 012 (G12) — the imported-revision marks importedRevisions.ts renders (name-matched to the
     // real InsertionMark/DeletionMark). `ledgerRef` = `imported:<w:id>` for a recovered Word revision.
     insertion: { attrs: { ledgerRef: { default: null } }, parseDOM: [{ tag: 'span.ins' }], toDOM: () => ['span', 0] },
@@ -236,10 +239,33 @@ describe('classifyStep — refusal + escalation seams', () => {
 
   it('surfaces a formatting mark outside the closed set as unrepresentable (not dropped)', () => {
     const doc = twoRunDoc();
-    const step = new AddMarkStep(abs(1), abs(5), schema.marks.link.create({ href: 'https://x' }));
+    const step = new AddMarkStep(abs(1), abs(5), schema.marks.strike.create());
     const cls = classifyStep(step, doc, {});
     expect(cls.kind).toBe('unrepresentable');
-    expect((cls as { reason: string }).reason).toContain('link');
+    expect((cls as { reason: string }).reason).toContain('strike');
+  });
+
+  // G5 (FR-05, task 033): a link add is now REPRESENTABLE — captured as a setMark(Link) op carrying the href.
+  it('captures a link add as a setMark(Link) op carrying the href (G5)', () => {
+    const doc = twoRunDoc();
+    const step = new AddMarkStep(abs(1), abs(5), schema.marks.link.create({ href: 'https://example.com/' }));
+    const cls = classifyStep(step, doc, {});
+    expect(cls.kind).toBe('ops');
+    const op = (cls as { ops: Array<Record<string, unknown>> }).ops[0];
+    expect(op.type).toBe('setMark');
+    expect(op.mark).toBe('Link');
+    expect(op.href).toBe('https://example.com/');
+  });
+
+  // G5: a link REMOVE is a clearMark(Link) (no href needed).
+  it('captures a link remove as a clearMark(Link) op (G5)', () => {
+    const doc = twoRunDoc();
+    const step = new RemoveMarkStep(abs(1), abs(5), schema.marks.link.create({ href: 'https://example.com/' }));
+    const cls = classifyStep(step, doc, {});
+    expect(cls.kind).toBe('ops');
+    const op = (cls as { ops: Array<Record<string, unknown>> }).ops[0];
+    expect(op.type).toBe('clearMark');
+    expect(op.mark).toBe('Link');
   });
 
   it('honors a caller override of the opaque-atom predicate', () => {

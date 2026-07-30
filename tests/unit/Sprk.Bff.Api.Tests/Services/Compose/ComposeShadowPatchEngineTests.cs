@@ -163,6 +163,82 @@ public sealed class ComposeShadowPatchEngineTests
             .Should().OnlyContain(r => r.RunProperties == null || r.RunProperties.Bold == null);
     }
 
+    // ── setMark(Link) / clearMark(Link) — G5 (FR-05, task 033) ───────────────────────────────────────
+
+    [Fact(DisplayName = "Apply: setMark(Link) wraps the covered runs in a w:hyperlink pointing at an EXTERNAL relationship")]
+    public void Apply_SetMarkLink_WrapsRunInHyperlinkWithExternalRelationship()
+    {
+        var docx = Pack(Para("5E140010", TextRun("Visit our site")));
+        var log = Log(new SetMarkOperation
+        {
+            ParaId = "5E140010",
+            Range = new ComposeRunRange(new ComposeRunPoint(0, 10), new ComposeRunPoint(0, 14)), // "site"
+            Mark = ComposeMarkType.Link,
+            Href = "https://example.com/",
+        });
+
+        var result = _engine.Apply(docx, log, timestamp: When);
+
+        using var doc = WordprocessingDocument.Open(new MemoryStream(result, writable: false), isEditable: false);
+        var mainPart = doc.MainDocumentPart!;
+        var para = mainPart.Document!.Body!.Descendants<Paragraph>()
+            .Single(p => string.Equals(p.ParagraphId?.Value, "5E140010", StringComparison.OrdinalIgnoreCase));
+
+        var hyperlink = para.Descendants<Hyperlink>().Single();
+        // The linked text "site" lives inside the w:hyperlink; the rest stays outside it.
+        hyperlink.Descendants<Text>().Select(t => t.Text).Should().Contain("site");
+        // The r:id resolves to an EXTERNAL relationship with the exact target — never a broken/relative rel.
+        var rel = mainPart.HyperlinkRelationships.Single(r => r.Id == hyperlink.Id!.Value);
+        rel.IsExternal.Should().BeTrue("a Compose hyperlink is an external target (TargetMode=External)");
+        rel.Uri.ToString().Should().Be("https://example.com/");
+    }
+
+    [Fact(DisplayName = "Apply: clearMark(Link) unwraps the hyperlink, keeping the run text")]
+    public void Apply_ClearMarkLink_UnwrapsHyperlinkKeepingText()
+    {
+        // Link the WHOLE run, then clear it over the same span — the run text survives; the w:hyperlink is
+        // gone. (Linking the whole run keeps it a single runIndex 0 inside the hyperlink, so the clear op's
+        // anchor resolves cleanly against the linked structure — a real clearMark targets current anchors.)
+        var docx = Pack(Para("5E140011", TextRun("Visit our site")));
+        var linked = _engine.Apply(docx, Log(new SetMarkOperation
+        {
+            ParaId = "5E140011",
+            Range = new ComposeRunRange(new ComposeRunPoint(0, 0), new ComposeRunPoint(0, 14)),
+            Mark = ComposeMarkType.Link,
+            Href = "https://example.com/",
+        }), timestamp: When);
+
+        var cleared = _engine.Apply(linked, Log(new ClearMarkOperation
+        {
+            ParaId = "5E140011",
+            Range = new ComposeRunRange(new ComposeRunPoint(0, 0), new ComposeRunPoint(0, 14)),
+            Mark = ComposeMarkType.Link,
+        }), timestamp: When);
+
+        var para = ParagraphById(cleared, "5E140011");
+        para.Descendants<Hyperlink>().Should().BeEmpty("clearMark(Link) unwraps the w:hyperlink");
+        string.Concat(para.Descendants<Text>().Select(t => t.Text)).Should().Be("Visit our site",
+            "unwrapping a link must keep the run text intact (no silent loss)");
+    }
+
+    [Fact(DisplayName = "Apply: setMark(Link) with no href is REFUSED (InvalidHyperlinkTarget, no silent-loss)")]
+    public void Apply_SetMarkLink_MissingHref_ThrowsInvalidHyperlinkTarget()
+    {
+        var docx = Pack(Para("5E140012", TextRun("Visit our site")));
+        var log = Log(new SetMarkOperation
+        {
+            ParaId = "5E140012",
+            Range = new ComposeRunRange(new ComposeRunPoint(0, 10), new ComposeRunPoint(0, 14)),
+            Mark = ComposeMarkType.Link,
+            Href = null, // missing target
+        });
+
+        var act = () => _engine.Apply(docx, log, timestamp: When);
+
+        act.Should().Throw<ComposePatchException>()
+            .Which.Kind.Should().Be(ComposePatchErrorKind.InvalidHyperlinkTarget);
+    }
+
     // ── comment (w:comment, EDGE-1) ─────────────────────────────────────────────────────────────────
 
     [Fact(DisplayName = "Apply: an anchored comment emits w:comment + matching comment-range marks (no text-search)")]

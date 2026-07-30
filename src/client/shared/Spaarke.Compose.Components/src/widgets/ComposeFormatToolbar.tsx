@@ -488,8 +488,10 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
   // (renderer), disabled loaded. Row/column/delete-table EDIT commands are NOT gated here — they round-trip
   // via the table op (G4).
   const tableInsertDisabled = controlDisabled || isLoadedBaseline;
-  // Hyperlinks are not representable in EITHER mode in R4 (R5 G5).
-  const hyperlinkDisabled = true;
+  // G5 (FR-05, task 033): hyperlinks are now representable on BOTH paths — authored (clean w:hyperlink via
+  // ComposeDocumentRenderer) and edit (the `Link` mark op → ComposeShadowPatchEngine tracked w:hyperlink).
+  // The SDL-4/5 R4 guard is removed; the control follows the same read-only gate as Bold/Italic.
+  const hyperlinkDisabled = controlDisabled;
 
   return (
     <Toolbar
@@ -627,10 +629,9 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={editor.isActive('link') ? <LinkDismiss24Regular /> : <Link24Regular />}
               label={editor.isActive('link') ? 'Remove link' : 'Add link'}
               active={editor.isActive('link')}
-              // task 038: hyperlinks are not representable in R4 in EITHER mode (no mark op, no
-              // content-model href — R5 G5). Disabled everywhere; controlDisabled is subsumed.
-              disabled={controlDisabled || hyperlinkDisabled}
-              deferredReason={FUTURE_RELEASE_TOOLTIP}
+              // G5 (FR-05, task 033): hyperlinks now round-trip on both paths — the control follows the
+              // read-only gate only (hyperlinkDisabled === controlDisabled), no longer deferred.
+              disabled={hyperlinkDisabled}
               onClick={toggleLink}
               testId="compose-format-link"
             />

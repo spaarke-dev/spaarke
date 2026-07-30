@@ -113,6 +113,16 @@ public enum ComposeMarkType
 
     /// <summary><c>w:u val="single"</c> — single underline.</summary>
     Underline,
+
+    /// <summary>
+    /// G5 (FR-05, task 033) — a hyperlink. The value-carrying mark the enum's doc note anticipated: a
+    /// <c>setMark</c> with <see cref="ComposeMarkType.Link"/> carries the target URL in
+    /// <see cref="SetMarkOperation.Href"/>, applied by the engine as a <c>w:hyperlink</c> wrapping the
+    /// anchored run range (external relationship on the main part). A <c>clearMark(Link)</c> unwraps it.
+    /// Additive, backward-compatible catalog extension (new enum member + optional op field) — no schema
+    /// version bump needed (client + server share the version constant + deploy together).
+    /// </summary>
+    Link,
 }
 
 /// <summary>
@@ -242,6 +252,15 @@ public sealed record SetMarkOperation : ComposeOperation
     /// <summary>The mark to apply.</summary>
     [JsonPropertyName("mark")]
     public required ComposeMarkType Mark { get; init; }
+
+    /// <summary>
+    /// G5 (FR-05, task 033) — the hyperlink target URL, REQUIRED when <see cref="Mark"/> is
+    /// <see cref="ComposeMarkType.Link"/> and ignored for every other mark. The engine wraps the anchored
+    /// run range in a <c>w:hyperlink</c> pointing at an external relationship with this target. Optional
+    /// (null) so a bold/italic/underline <c>setMark</c> is unchanged (backward-compatible).
+    /// </summary>
+    [JsonPropertyName("href")]
+    public string? Href { get; init; }
 }
 
 /// <summary>

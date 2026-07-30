@@ -129,6 +129,9 @@ const TIPTAP_MARK_TO_COMPOSE: Readonly<Record<string, ComposeMarkType>> = {
   bold: 'Bold',
   italic: 'Italic',
   underline: 'Underline',
+  // G5 (FR-05, task 033): the @tiptap/extension-link mark → the value-carrying `Link` ComposeMarkType.
+  // Its `href` is captured from step.mark.attrs.href in classifyMarkStep (unlike the boolean marks).
+  link: 'Link',
 };
 
 /** TextAlign attr value → the `Alignment` {@link ComposeBlockAttr} value (mirrors the server `ComposeAlignment`). */
@@ -438,12 +441,17 @@ function firstInlineMarks(fragment: Fragment): readonly Mark[] {
   return marks;
 }
 
-/** Map a ProseMirror mark-set to the closed {@link ComposeMarkType} set (drops non-char-format marks, e.g. link). */
+/**
+ * Map a ProseMirror mark-set to the closed {@link ComposeMarkType} set for an insertText op's `marks[]`
+ * (character-format marks only). G5 (task 033): `Link` is EXCLUDED here — the insertText `marks[]` array
+ * carries no href slot, so a link can only be represented via the value-carrying `setMark(Link, href)` op
+ * (classifyMarkStep), never as a bare insertText mark. Other non-char-format marks are likewise dropped.
+ */
 function marksToComposeMarks(marks: readonly Mark[]): ComposeMarkType[] {
   const out: ComposeMarkType[] = [];
   for (const m of marks) {
     const mapped = TIPTAP_MARK_TO_COMPOSE[m.type.name];
-    if (mapped && !out.includes(mapped)) out.push(mapped);
+    if (mapped && mapped !== 'Link' && !out.includes(mapped)) out.push(mapped);
   }
   return out;
 }
@@ -1096,12 +1104,18 @@ function classifyMarkStep(
   if (!anchorFrom || !anchorTo || anchorFrom.paraId !== anchorTo.paraId) {
     return { kind: 'defer-structural', step, reason: 'mark-step-anchor-unresolved' };
   }
-  const op: ComposeOperation = {
+  // G5 (FR-05, task 033): a Link setMark carries its target href (from the @tiptap/extension-link mark's
+  // attrs) alongside the mark; clearMark(Link) and the boolean marks carry none. Cast is needed because
+  // `type` is a runtime value, so TS can't narrow the union to SetMarkOperation for the excess `href` key.
+  const op = {
     type,
     paraId: anchorFrom.paraId,
     range: { start: pointOf(anchorFrom), end: pointOf(anchorTo) },
     mark: composeMark,
-  };
+    ...(composeMark === 'Link' && type === 'setMark'
+      ? { href: (step.mark.attrs as { href?: string }).href }
+      : {}),
+  } as ComposeOperation;
   return { kind: 'ops', ops: [op] };
 }
 

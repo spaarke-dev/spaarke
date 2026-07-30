@@ -258,10 +258,18 @@ public sealed class ComposeShadowPatchEngine
                         ApplyReplaceRange(rep);
                         break;
                     case SetMarkOperation setMark:
-                        ApplyMarkOverRange(setMark.ParaId, setMark.Range, setMark.Mark, on: true);
+                        // G5 (task 033): Link is a STRUCTURAL mark (w:hyperlink wrap), not an rPr toggle —
+                        // route it to its own applier; every other mark stays on the rPr path.
+                        if (setMark.Mark == ComposeMarkType.Link)
+                            ApplyLinkOverRange(setMark.ParaId, setMark.Range, setMark.Href, on: true);
+                        else
+                            ApplyMarkOverRange(setMark.ParaId, setMark.Range, setMark.Mark, on: true);
                         break;
                     case ClearMarkOperation clearMark:
-                        ApplyMarkOverRange(clearMark.ParaId, clearMark.Range, clearMark.Mark, on: false);
+                        if (clearMark.Mark == ComposeMarkType.Link)
+                            ApplyLinkOverRange(clearMark.ParaId, clearMark.Range, href: null, on: false);
+                        else
+                            ApplyMarkOverRange(clearMark.ParaId, clearMark.Range, clearMark.Mark, on: false);
                         break;
 
                     // Task 031 — the four structural paragraph ops are collected and applied LAST (below).
@@ -485,6 +493,84 @@ public sealed class ComposeShadowPatchEngine
             foreach (var run in covered)
             {
                 ApplyMarkToRun(run, mark, on);
+            }
+        }
+
+        // -- setMark(Link) / clearMark(Link) — G5 (FR-05, task 033) -----------------------------------
+        // A hyperlink is STRUCTURAL (a w:hyperlink wrapping runs + an EXTERNAL relationship on the main
+        // part), not an rPr toggle — so it has its own applier rather than riding ApplyMarkToRun. Surgical
+        // + (paraId,runIndex,offset)-anchored via IsolateRangeRuns (no text-search — I-7). Consistent with
+        // the v1 mark applier (see ApplyMarkOverRange note), the link is NOT additionally wrapped in a
+        // w:ins revision on the tracked path — tracking "a link was added" as a revision is the same
+        // documented later refinement as w:rPrChange for bold/italic. The wrapped runs stay addressable by
+        // (paraId,runIndex,offset) on the next edit because the engine's flatten already descends into
+        // w:hyperlink (CollectSlots), so an emitted link is never silently lost on a subsequent round-trip.
+        private void ApplyLinkOverRange(string paraId, ComposeRunRange range, string? href, bool on)
+        {
+            var covered = IsolateRangeRuns(paraId, range);
+            if (covered.Count == 0)
+            {
+                return;
+            }
+
+            // clearMark(Link) — unwrap any hyperlink parenting a covered run; nothing else to do.
+            if (!on)
+            {
+                UnwrapCoveredHyperlinks(covered);
+                return;
+            }
+
+            var trimmed = href?.Trim();
+            if (string.IsNullOrEmpty(trimmed) || !Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+            {
+                throw new ComposePatchException(
+                    ComposePatchErrorKind.InvalidHyperlinkTarget,
+                    "A setMark(Link) op requires an absolute href (e.g. https://…); a missing or relative target " +
+                    "is refused rather than written as a broken relationship (no silent-loss).");
+            }
+
+            // Re-link guard: if the covered runs already sit inside a hyperlink, unwrap it first so the new
+            // link cleanly replaces the old (never nests w:hyperlink inside w:hyperlink — invalid OOXML).
+            UnwrapCoveredHyperlinks(covered);
+
+            var first = covered[0];
+            var parent = first.Parent
+                ?? throw new ComposePatchException(
+                    ComposePatchErrorKind.OffsetUnsplittable,
+                    "The hyperlink target run has no parent element to wrap.");
+
+            var relId = _mainPart.AddHyperlinkRelationship(uri, isExternal: true).Id;
+            var hyperlink = new Hyperlink { Id = relId };
+            parent.InsertBefore(hyperlink, first);
+            foreach (var run in covered)
+            {
+                run.Remove();
+                hyperlink.AppendChild(run);
+            }
+        }
+
+        /// <summary>Unwrap any <c>w:hyperlink</c> that directly parents one of the <paramref name="covered"/>
+        /// runs, promoting its inline children back to the hyperlink's own parent — the clearMark(Link)
+        /// mechanic + the setMark(Link) re-link guard. Idempotent per hyperlink.</summary>
+        private static void UnwrapCoveredHyperlinks(IReadOnlyList<Run> covered)
+        {
+            var unwrapped = new HashSet<Hyperlink>();
+            foreach (var run in covered)
+            {
+                if (run.Parent is Hyperlink hyperlink && unwrapped.Add(hyperlink))
+                {
+                    var parent = hyperlink.Parent;
+                    if (parent is null)
+                    {
+                        continue;
+                    }
+                    foreach (var child in hyperlink.ChildElements.ToList())
+                    {
+                        child.Remove();
+                        parent.InsertBefore(child, hyperlink);
+                    }
+                    hyperlink.Remove();
+                }
             }
         }
 
@@ -2773,6 +2859,11 @@ public enum ComposePatchErrorKind
     /// <summary>A <c>setBlockAttr</c> op's <c>Value</c> is not a recognized member of the attribute's closed
     /// value set (e.g. an Alignment value outside Default/Left/Center/Right/Justify) → 422.</summary>
     InvalidBlockAttrValue,
+
+    /// <summary>G5 (task 033): a <c>setMark</c> with mark <c>Link</c> supplied no <c>Href</c>, or an href that
+    /// is not an absolute URI — refused rather than emitting a broken/relative relationship (no silent-loss)
+    /// → 422.</summary>
+    InvalidHyperlinkTarget,
 
     /// <summary>An <c>acceptRevision</c>/<c>rejectRevision</c> op's <c>revisionId</c> resolves to no native
     /// <c>w:ins</c>/<c>w:del</c> with that <c>w:id</c> in the target paragraph (no text-search fallback — G12/I-7)

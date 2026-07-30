@@ -102,7 +102,7 @@ export interface ComposeRunRange {
  * `ComposeMarkType` enum + the existing `ComposeInlineRun` mark surface). PascalCase
  * literals match the server's `JsonStringEnumConverter` member-name serialization.
  */
-export type ComposeMarkType = 'Bold' | 'Italic' | 'Underline';
+export type ComposeMarkType = 'Bold' | 'Italic' | 'Underline' | 'Link';
 
 /**
  * The closed set of paragraph-level (block) attributes a {@link SetBlockAttrOperation}
@@ -191,6 +191,13 @@ export interface SetMarkOperation extends ComposeOperationBase {
   range: ComposeRunRange;
   /** The mark to apply. */
   mark: ComposeMarkType;
+  /**
+   * G5 (FR-05, task 033) — the hyperlink target URL, REQUIRED when `mark === 'Link'` and ignored for
+   * every other mark. Mirrors the server `SetMarkOperation.Href`. The engine wraps the anchored run range
+   * in a `w:hyperlink` pointing at an external relationship with this target. Optional (backward-compatible
+   * — a Bold/Italic/Underline setMark omits it).
+   */
+  href?: string;
 }
 
 /** `clearMark` — remove the inline `mark` over the intra-paragraph run-local `range`. */

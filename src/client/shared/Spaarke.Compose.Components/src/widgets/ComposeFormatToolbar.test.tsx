@@ -213,34 +213,35 @@ describe('ComposeFormatToolbar — Font dropdown (relocated character formatting
 //    so the control is present-but-disabled and fires neither the prompt nor a command.
 // ---------------------------------------------------------------------------
 
-describe('ComposeFormatToolbar — Link disabled in both modes (task 038)', () => {
+describe('ComposeFormatToolbar — Link ENABLED both modes (G5 task 033)', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
 
-  it('the link button is present but DISABLED and does NOT open the URL prompt when clicked', async () => {
+  it('the link button is ENABLED and opens the URL prompt + fires setLink when clicked', async () => {
     const user = userEvent.setup();
     const promptSpy = jest.spyOn(window, 'prompt').mockReturnValue('https://example.test');
     const { controls } = renderFormatToolbar();
     await user.click(screen.getByTestId('compose-format-font-menu'));
 
     const link = screen.getByTestId('compose-format-link');
-    expect(link).toBeDisabled();
-    // Clicking a disabled control fires no prompt and no TipTap command.
+    expect(link).not.toBeDisabled();
     await user.click(link);
-    expect(promptSpy).not.toHaveBeenCalled();
-    expect(controls.commands).toHaveLength(0);
+    expect(promptSpy).toHaveBeenCalled();
+    expect(controls.commands).toContain('setLink');
   });
 
-  it('the link button stays DISABLED even when a link mark is active (no "Remove link" command)', async () => {
+  it('when a link mark is active, clicking removes it (unsetLink, no prompt)', async () => {
     const user = userEvent.setup();
+    const promptSpy = jest.spyOn(window, 'prompt');
     const { controls } = renderFormatToolbar({ active: new Set(['link']), linkHref: 'https://old.test' });
     await user.click(screen.getByTestId('compose-format-font-menu'));
 
     const link = screen.getByTestId('compose-format-link');
-    expect(link).toBeDisabled();
+    expect(link).not.toBeDisabled();
     await user.click(link);
-    expect(controls.commands).toHaveLength(0);
+    expect(promptSpy).not.toHaveBeenCalled(); // an active link removes directly, no URL prompt
+    expect(controls.commands).toContain('unsetLink');
   });
 });
 
@@ -374,18 +375,18 @@ describe('ComposeFormatToolbar — edit-path controls on a LOADED doc (task 038;
     expect(screen.getByTestId('compose-format-align-right')).not.toBeDisabled();
   });
 
-  it('the hyperlink button is DISABLED in BOTH modes (SDL-4/5 — links not representable in R4)', async () => {
+  it('the hyperlink button is ENABLED in BOTH modes (G5 task 033 — SDL-4/5 guard removed)', async () => {
     const user = userEvent.setup();
-    // Born-in-editor.
+    // Born-in-editor (authored clean w:hyperlink path).
     const { unmount } = renderFormatToolbar({}, { props: { hasLoadedBaseline: false } });
     await user.click(screen.getByTestId('compose-format-font-menu'));
-    expect(screen.getByTestId('compose-format-link')).toBeDisabled();
+    expect(screen.getByTestId('compose-format-link')).not.toBeDisabled();
     unmount();
 
-    // Loaded.
+    // Loaded (tracked w:hyperlink edit path).
     renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
     await user.click(screen.getByTestId('compose-format-font-menu'));
-    expect(screen.getByTestId('compose-format-link')).toBeDisabled();
+    expect(screen.getByTestId('compose-format-link')).not.toBeDisabled();
   });
 
   it('blockquote stays ENABLED on a loaded doc (not in the deferred set — the paste banner is its safety net)', async () => {
