@@ -26,7 +26,7 @@
 
 import { useCallback } from 'react';
 import type { PaneChannel, PaneChannelEventMap } from './PaneEventTypes';
-import { usePaneEventBus } from './PaneEventBusContext';
+import { usePaneEventBus, useOptionalPaneEventBus } from './PaneEventBusContext';
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -82,6 +82,32 @@ export function useDispatchPaneEvent(): DispatchPaneEvent {
   return useCallback(
     <C extends PaneChannel>(channel: C, event: PaneChannelEventMap[C]): void => {
       bus.dispatch(channel, event);
+    },
+    [bus]
+  );
+}
+
+/**
+ * Non-throwing counterpart to {@link useDispatchPaneEvent}: returns a stable
+ * dispatch function that forwards to the PaneEventBus when a
+ * `<PaneEventBusProvider>` is present, and **no-ops** when it is not — instead
+ * of throwing at render.
+ *
+ * For **dual-use widgets** (Pattern D) that render in BOTH the SpaarkeAi shell
+ * (bus present → dispatch works) AND a bus-less host (LegalWorkspace section /
+ * MDA / dev → dispatch silently no-ops so user interactions degrade gracefully
+ * instead of crashing). The returned function is always defined, so callers do
+ * not need a null check at the call site. Companion to `useOptionalPaneEventBus`.
+ */
+export function useOptionalDispatchPaneEvent(): DispatchPaneEvent {
+  const bus = useOptionalPaneEventBus();
+
+  return useCallback(
+    <C extends PaneChannel>(channel: C, event: PaneChannelEventMap[C]): void => {
+      // No provider in this host (e.g. standalone LegalWorkspace section / dev):
+      // silently drop the dispatch. The widget still renders; the interaction is
+      // simply inert where there is no bus to route it.
+      bus?.dispatch(channel, event);
     },
     [bus]
   );

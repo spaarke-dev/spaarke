@@ -19,13 +19,18 @@
  * deep-dist-path or cast needed there per task 023's notes).
  */
 import * as React from 'react';
-import { makeStyles, tokens, Text, MessageBar, MessageBarBody } from '@fluentui/react-components';
+import { makeStyles, tokens, mergeClasses, Text, MessageBar, MessageBarBody } from '@fluentui/react-components';
 import { TrackingFieldTrio } from '@spaarke/ui-components';
 import type { EmailTrackingPanelProps } from './EmailAssociationsAndTracking.types';
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS },
-  header: { fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground1 },
+  rootCompact: { gap: 0 },
+  header: {
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+  },
   disabled: { opacity: 0.6, pointerEvents: 'none' },
 });
 
@@ -42,6 +47,7 @@ export function EmailTrackingPanel(props: EmailTrackingPanelProps): React.ReactE
     highPriorityLabel = 'High priority',
     accessPermissionLabel = 'Access',
     readOnly = false,
+    compact = false,
   } = props;
   const s = useStyles();
   const [error, setError] = React.useState<string | null>(null);
@@ -75,8 +81,8 @@ export function EmailTrackingPanel(props: EmailTrackingPanelProps): React.ReactE
   );
 
   return (
-    <div className={s.root} data-testid="email-tracking-panel">
-      <Text className={s.header}>Tracking</Text>
+    <div className={mergeClasses(s.root, compact && s.rootCompact)} data-testid="email-tracking-panel">
+      {!compact && <Text className={s.header}>Tracking</Text>}
       {error && (
         <MessageBar intent="error">
           <MessageBarBody>{error}</MessageBarBody>
@@ -88,6 +94,7 @@ export function EmailTrackingPanel(props: EmailTrackingPanelProps): React.ReactE
           highPriority={highPriority}
           accessPermission={accessPermission}
           accessPermissionOptions={accessPermissionOptions}
+          showTitle={!compact}
           monitorLabel={monitorLabel}
           highPriorityLabel={highPriorityLabel}
           accessPermissionLabel={accessPermissionLabel}

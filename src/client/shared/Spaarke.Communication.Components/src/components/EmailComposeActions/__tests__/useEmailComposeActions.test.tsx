@@ -182,7 +182,7 @@ describe('useEmailComposeActions — NEGATIVE: no forked composer', () => {
     expect(result.current.composerDialog.type).toBe(SendEmailDialog);
   });
 
-  it('exposes only onReply/onReplyAll/onForward/onNew — onArchive/onCreate are left unwired (out of this task\'s scope)', () => {
+  it("exposes only onReply/onReplyAll/onForward/onNew — onArchive/onCreate are left unwired (out of this task's scope)", () => {
     const { result } = renderHook(() => useEmailComposeActions(makeDeps()));
     expect(result.current.actions.onArchive).toBeUndefined();
     expect(result.current.actions.onCreate).toBeUndefined();

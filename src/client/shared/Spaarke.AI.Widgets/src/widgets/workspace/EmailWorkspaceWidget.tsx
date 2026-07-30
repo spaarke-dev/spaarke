@@ -37,7 +37,14 @@
  */
 import * as React from 'react';
 import { EmailWorkspace } from '@spaarke/communication-components';
-import { XrmDataverseClient, createXrmDataService, createXrmNavigationService, getXrm } from '@spaarke/ui-components';
+import {
+  XrmDataverseClient,
+  createXrmDataService,
+  createXrmNavigationService,
+  createXrmEmailComposeHandlers,
+  searchUsersAndContacts,
+  getXrm,
+} from '@spaarke/ui-components';
 import { useAiSession } from '../../providers/useAiSession';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 
@@ -63,6 +70,23 @@ export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
   // PCF host passes as `context.webAPI`.
   const webApi = React.useMemo(() => getXrm()?.WebApi, []);
 
+  // Composer parity wiring (compose-wiring fixes #1/#2/#3/#5): recipient
+  // typeahead + Xrm-backed advanced-lookup handlers + Dataverse URL for
+  // attachment deep-links. Same shared factory the code-page mount uses, so both
+  // mounts stay in parity (NFR-06).
+  const handleSearchRecipients = React.useCallback(
+    (query: string) => searchUsersAndContacts(dataService, query),
+    [dataService]
+  );
+  // Pass auth + BFF URL so the factory also builds `onUploadLocalAttachment` (item 9b):
+  // new-file attachments upload to the deployment SPE container (resolved from the
+  // user's BU) and become governed `sprk_document`s.
+  const composeHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: bffBaseUrl ?? undefined }),
+    [authenticatedFetch, bffBaseUrl]
+  );
+  const dataverseUrl = React.useMemo(() => getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '', []);
+
   if (!webApi) {
     // No Dataverse host available (e.g. a non-MDA dev shell). EmailWorkspace's
     // required host props cannot be resolved — fail closed rather than mount
@@ -79,6 +103,13 @@ export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
       webApi={webApi}
       authenticatedFetch={authenticatedFetch}
       bffBaseUrl={bffBaseUrl}
+      onSearchRecipients={handleSearchRecipients}
+      onLookupRecipients={composeHandlers.onLookupRecipients}
+      recordLookupCatalog={composeHandlers.recordLookupCatalog}
+      onLookupRecord={composeHandlers.onLookupRecord}
+      onAddRelationship={composeHandlers.onAddRelationship}
+      onUploadLocalAttachment={composeHandlers.onUploadLocalAttachment}
+      dataverseUrl={dataverseUrl}
     />
   );
 };

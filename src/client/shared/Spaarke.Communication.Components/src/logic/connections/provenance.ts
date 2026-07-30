@@ -514,6 +514,104 @@ export function isConnectionConfirmed(conn: Connection, confirmedFields: Readonl
   return conn.status === 'confirmed' || confirmedFields.has(conn.field);
 }
 
+// ── Reading-pane resolver: single-source connection build + status summary ───────
+//
+// `sprk_associationstatus` = Resolved (task 002 verified integer). Kept local (a
+// plain Dataverse OptionSet value, not write logic) so both the reading-pane
+// resolver AND the collapsible-section status dot derive connections identically.
+export const ASSOCIATION_STATUS_RESOLVED_VALUE = 100000000;
+
+/** An empty provenance doc so `deriveConnections` still has a shape to walk when every association was filed manually (no engine trail). */
+function emptyProvenanceDoc(): ProvenanceDoc {
+  return {
+    version: 1,
+    direction: '',
+    decision: {
+      status: '',
+      autoFiled: false,
+      killSwitchEnabled: false,
+      autoFileThreshold: 0.85,
+      topDeterministicConfidence: 0,
+      topConfidence: 0,
+      aiInvolved: false,
+      reason: '',
+    },
+    rungsFired: [],
+    candidates: [],
+    signals: [],
+  };
+}
+
+/**
+ * THE single connection-build path for the reading-pane surface: parse the raw
+ * provenance JSON, derive engine slots, then fold in what's ACTUALLY filed on the
+ * record (authoritative — includes manual "Link another" associations). Used by BOTH
+ * `EmailConnectionsReview` (the resolver body) and `summarizeEmailConnections` (the
+ * section status dot) so they never disagree.
+ */
+export function buildEmailConnections(
+  provenanceJson: string | null | undefined,
+  associationStatus: number | null | undefined,
+  filed: FiledAssociation[] | undefined
+): Connection[] {
+  const doc = parseProvenance(provenanceJson) ?? emptyProvenanceDoc();
+  const isResolved = associationStatus === ASSOCIATION_STATUS_RESOLVED_VALUE;
+  return mergeFiledConnections(deriveConnections(doc, isResolved), filed ?? []);
+}
+
+/** Traffic-light tone for the Association section header (🔴 needs decision · 🟡 review · 🟢 all set). */
+export type AssociationTone = 'red' | 'yellow' | 'green';
+
+export interface AssociationSummary {
+  tone: AssociationTone;
+  /** One-line status shown next to the dot. */
+  label: string;
+  filedCount: number;
+  suggestedCount: number;
+  needsDecisionCount: number;
+}
+
+/**
+ * Reduce grouped connections to the single traffic-light status the collapsed
+ * Association section shows:
+ *   🔴 red    — no confirmed primary yet (a decision is still needed / unmatched).
+ *   🟡 yellow — filed, but suggestions/conflicts remain to review.
+ *   🟢 green  — filed and nothing left to review.
+ */
+export function summarizeConnections(grouped: {
+  needsDecision: Connection[];
+  filed: Connection[];
+  suggested: Connection[];
+}): AssociationSummary {
+  const filedCount = grouped.filed.length;
+  const suggestedCount = grouped.suggested.length;
+  const needsDecisionCount = grouped.needsDecision.length;
+  let tone: AssociationTone;
+  let label: string;
+  if (filedCount === 0) {
+    tone = 'red';
+    label = needsDecisionCount > 0 ? 'Needs your decision' : 'Not filed yet';
+  } else if (needsDecisionCount > 0 || suggestedCount > 0) {
+    tone = 'yellow';
+    label = 'Filed — suggestions to review';
+  } else {
+    tone = 'green';
+    label = 'All set';
+  }
+  return { tone, label, filedCount, suggestedCount, needsDecisionCount };
+}
+
+/** Convenience: build → group → summarize in one call for the section status dot. */
+export function summarizeEmailConnections(
+  provenanceJson: string | null | undefined,
+  associationStatus: number | null | undefined,
+  filed: FiledAssociation[] | undefined
+): AssociationSummary {
+  const connections = buildEmailConnections(provenanceJson, associationStatus, filed);
+  const grouped = groupConnectionsByAction(connections, [], new Set<string>(), new Set<string>());
+  return summarizeConnections(grouped);
+}
+
 /**
  * Partition connections + AI suggestions into the three action groups the rebuilt
  * modal renders. Pure (no React, no webApi) so the grouping is unit-testable.
@@ -541,4 +639,151 @@ export function groupConnectionsByAction(
   const aiSuggested = aiSuggestions.filter(a => !dismissedKeys.has(`ai:${a.entityType}`));
 
   return { needsDecision, filed, suggested, aiSuggested };
+}
+
+// ── Single-primary review model (reading-pane resolver redesign, 2026-07-29) ─────
+//
+// The reading-pane resolver makes exactly ONE primary association per email — the
+// record that owns the denormalized `sprk_regardingrecord*` fields (owner decision
+// "model A": the UI sets the single primary; the engine's multi-lookup auto-writes
+// are unchanged). This collapses the multi-slot provenance into a single-select,
+// three-state review keyed to the section status dot:
+//   • 'requires-review'    (🔴) — no engine auto-match; the reviewer picks from the
+//                                  top candidate cards (or links another record).
+//   • 'needs-confirmation' (🟡) — the engine auto-matched (100% / autoFiled) and
+//                                  wrote the denorm primary, but a human must confirm.
+//   • 'confirmed'          (🟢) — a human confirmed the primary (status Resolved).
+
+/** Confidence floor below which a candidate slot is left BLANK (owner rule: a <70% match could legitimately not exist). */
+export const PRIMARY_MATCH_MIN_CONFIDENCE = 0.7;
+
+/** Number of candidate slots the requires-review / needs-confirmation states render. */
+export const PRIMARY_CANDIDATE_SLOTS = 3;
+
+export type PrimaryReviewState = 'requires-review' | 'needs-confirmation' | 'confirmed';
+
+/** One flat candidate record (across all typed slots) shown as a 2-line card. */
+export interface PrimaryCandidate {
+  entity: string;
+  targetId: string;
+  targetName: string;
+  recordNumber?: string;
+  confidence: number;
+  matchReason?: string;
+}
+
+/** Denormalized primary fields read off the host record (for the confirmed chip + number resolution). */
+export interface PrimaryDenorm {
+  recordName?: string | null;
+  recordNumber?: string | null;
+  entityType?: string | null;
+}
+
+export interface PrimaryReviewModel {
+  state: PrimaryReviewState;
+  /** Up to `PRIMARY_CANDIDATE_SLOTS` candidates (≥ min confidence), highest first. */
+  candidates: PrimaryCandidate[];
+  /** The auto-matched (yellow) or confirmed (green) primary, when one exists. */
+  primary?: PrimaryCandidate;
+}
+
+function primaryKey(entity: string, id: string): string {
+  return `${entity}:${id.replace(/[{}]/g, '').toLowerCase()}`;
+}
+
+/** Flatten provenance candidates → ranked, de-duplicated `PrimaryCandidate` list (highest confidence first). */
+export function flattenPrimaryCandidates(doc: ProvenanceDoc): PrimaryCandidate[] {
+  const byKey = new Map<string, PrimaryCandidate>();
+  for (const c of doc.candidates) {
+    const key = primaryKey(c.targetEntity, c.targetId);
+    const cand: PrimaryCandidate = {
+      entity: c.targetEntity,
+      targetId: c.targetId,
+      targetName: c.targetName ?? c.targetId,
+      recordNumber: candidateRecordNumber(c),
+      confidence: c.reinforcedConfidence,
+      matchReason: candidateMatchReason(c),
+    };
+    const existing = byKey.get(key);
+    if (!existing || cand.confidence > existing.confidence) byKey.set(key, cand);
+  }
+  return Array.from(byKey.values()).sort((a, b) => b.confidence - a.confidence);
+}
+
+/** The confirmed primary: the filed lookup (authoritative), enriched with a matching candidate's number, else the denorm fields. */
+function resolveConfirmedPrimary(
+  ranked: PrimaryCandidate[],
+  filed: FiledAssociation[],
+  denorm?: PrimaryDenorm
+): PrimaryCandidate | undefined {
+  const f = filed[0];
+  if (f) {
+    const match = ranked.find(c => primaryKey(c.entity, c.targetId) === primaryKey(f.entityType, f.recordId));
+    return {
+      entity: f.entityType,
+      targetId: f.recordId,
+      targetName: f.recordName,
+      recordNumber: match?.recordNumber ?? denorm?.recordNumber ?? undefined,
+      confidence: match?.confidence ?? 1,
+      matchReason: match?.matchReason,
+    };
+  }
+  if (denorm?.recordName) {
+    return {
+      entity: denorm.entityType ?? '',
+      targetId: '',
+      targetName: denorm.recordName,
+      recordNumber: denorm.recordNumber ?? undefined,
+      confidence: 1,
+    };
+  }
+  return ranked[0];
+}
+
+/**
+ * Reduce the raw provenance + filed lookups + denorm fields into the single-primary
+ * three-state review model. Pure (no React, no webApi) so it is unit-testable and
+ * shared by BOTH the resolver body and the section status dot.
+ */
+export function derivePrimaryReview(
+  provenanceJson: string | null | undefined,
+  associationStatus: number | null | undefined,
+  filed: FiledAssociation[] | undefined,
+  denorm?: PrimaryDenorm
+): PrimaryReviewModel {
+  const doc = parseProvenance(provenanceJson) ?? emptyProvenanceDoc();
+  const ranked = flattenPrimaryCandidates(doc);
+  const candidates = ranked.filter(c => c.confidence >= PRIMARY_MATCH_MIN_CONFIDENCE).slice(0, PRIMARY_CANDIDATE_SLOTS);
+  const filedList = filed ?? [];
+
+  // 🟢 Confirmed — a human resolved it (status Resolved).
+  if (associationStatus === ASSOCIATION_STATUS_RESOLVED_VALUE) {
+    const primary = resolveConfirmedPrimary(ranked, filedList, denorm);
+    if (primary) return { state: 'confirmed', candidates, primary };
+  }
+
+  // 🟡 Needs confirmation — the engine auto-matched (autoFiled or a lone 100%), NOT
+  // an ambiguous conflict (2+ competing high-confidence candidates stay 🔴).
+  const hasConflict = doc.candidates.some(c => c.conflict);
+  const top = ranked[0];
+  const autoMatched = !hasConflict && (doc.decision.autoFiled === true || (top !== undefined && top.confidence >= 1));
+  if (autoMatched && top) {
+    const primary: PrimaryCandidate = { ...top, recordNumber: top.recordNumber ?? denorm?.recordNumber ?? undefined };
+    return { state: 'needs-confirmation', candidates, primary };
+  }
+
+  // 🔴 Requires review — the reviewer picks from candidates (or links another record).
+  return { state: 'requires-review', candidates };
+}
+
+/** Section status dot (🔴/🟡/🟢) + one-line label for the single-primary model. */
+export function summarizePrimaryReview(model: PrimaryReviewModel): { tone: AssociationTone; label: string } {
+  switch (model.state) {
+    case 'confirmed':
+      return { tone: 'green', label: 'Confirmed' };
+    case 'needs-confirmation':
+      return { tone: 'yellow', label: 'Needs confirmation' };
+    default:
+      return { tone: 'red', label: 'Requires review' };
+  }
 }

@@ -131,6 +131,7 @@ jest.mock('@spaarke/ai-widgets', () => {
 // stored-document ref (the ribbon Open-in-Compose contract). Pane-collapse
 // context is absent (modal host).
 jest.mock('../../shell/ThreePaneShell', () => ({
+  useAnalysisLaunch: () => null,
   usePaneCollapseContext: () => null,
   useComposeLaunch: () => ({
     composeMode: 'editor',

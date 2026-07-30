@@ -260,7 +260,9 @@ public class DataverseWebApiService : IDataverseService
             return null;
         }
 
-        var url = $"sprk_analysises({guid})?$select=sprk_name,sprk_workingdocument,sprk_chathistory,statuscode,createdon,modifiedon,_sprk_documentid_value";
+        // task 064 (ADR-040 Path A, spec §13.5 / FR-22): sprk_chathistory dropped from $select —
+        // see DataverseServiceClientImpl.GetAnalysisAsync for the removal rationale.
+        var url = $"sprk_analysises({guid})?$select=sprk_name,sprk_workingdocument,statuscode,createdon,modifiedon,_sprk_documentid_value";
         _logger.LogDebug("Retrieving analysis: {Id}", id);
 
         try
@@ -286,8 +288,6 @@ public class DataverseWebApiService : IDataverseService
                     ? Guid.Parse(docId.GetString()!) : Guid.Empty,
                 WorkingDocument = data.TryGetValue("sprk_workingdocument", out var wd) && wd.ValueKind != JsonValueKind.Null
                     ? wd.GetString() : null,
-                ChatHistory = data.TryGetValue("sprk_chathistory", out var ch) && ch.ValueKind != JsonValueKind.Null
-                    ? ch.GetString() : null,
                 StatusCode = data.TryGetValue("statuscode", out var status) ? status.GetInt32() : 0,
                 CreatedOn = data.TryGetValue("createdon", out var created) ? created.GetDateTime() : DateTime.MinValue,
                 ModifiedOn = data.TryGetValue("modifiedon", out var modified) ? modified.GetDateTime() : DateTime.MinValue

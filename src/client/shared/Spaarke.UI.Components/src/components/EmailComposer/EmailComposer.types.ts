@@ -271,10 +271,11 @@ export type EmailComposerAction =
   | { type: 'SET_MODE'; mode: EmailComposerMode; patch?: Partial<EmailComposerState> }
   | { type: 'ADD_ATTACHMENT'; item: IAttachmentItem }
   | { type: 'REMOVE_ATTACHMENT'; id: string }
-  | { type: 'RESOLVE_ATTACHMENT_DOCUMENT'; id: string; documentId: string; driveItemId?: string }
+  | { type: 'RESOLVE_ATTACHMENT_DOCUMENT'; id: string; documentId: string; driveItemId?: string; linkUrl?: string }
   | { type: 'TOGGLE_ATTACHMENT_SELECTED'; id: string }
   | { type: 'TOGGLE_ATTACHMENT_LINK'; id: string }
   | { type: 'ADD_ASSOCIATION'; association: ICommunicationAssociation }
+  | { type: 'REMOVE_ASSOCIATION'; entityType: string; entityId: string }
   | { type: 'SET_VALIDATION_ERRORS'; result: IValidationResult }
   | { type: 'BEGIN_SEND' }
   | { type: 'END_SEND' }
@@ -369,8 +370,14 @@ export interface IEmailComposerProps {
    * and are excluded from the send payload until resolved. Rejection (throw)
    * removes the item and surfaces an inline error; it never blocks the send of
    * the already-resolved attachments.
+   *
+   * An optional `linkUrl` (the uploaded document's SPE web URL) is patched onto
+   * the attachment too — it lights up the per-row **Link** toggle so the author
+   * can opt into inserting a body link to the doc alongside (or instead of)
+   * attaching the bytes (owner UAT 2026-07-30, item 9b). Omit it to offer
+   * Attach only.
    */
-  onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string }>;
+  onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
 
   // — Recipient directory lookup (RecipientField) —
   /** Mirrors `searchUsersAndContacts(dataService, query)` shape, pre-bound by the host. */
@@ -439,6 +446,16 @@ export interface IEmailComposerProps {
 
   /** Optional className applied to the root layout container. */
   className?: string;
+
+  /**
+   * Optional override for the chromed (page/dialog mount) header title. When
+   * supplied, it REPLACES the mode-derived word ('Reply'/'Forward'/'New
+   * Email'/…) — e.g. a caller can show `Reply: <subject>`. Additive/optional:
+   * omitted (the default for every existing caller) → the mode-derived title is
+   * used, unchanged. Ignored for the `inline` (wizard) mount, which renders no
+   * header.
+   */
+  titleOverride?: string;
 }
 
 // ---------------------------------------------------------------------------

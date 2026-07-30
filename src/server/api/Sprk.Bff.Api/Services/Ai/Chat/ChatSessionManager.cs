@@ -177,14 +177,33 @@ public class ChatSessionManager
             return cached;
         }
 
-        // Warm path: Cosmos DB fallback (decision D-06 — checked before Dataverse on Redis miss)
+        // Warm path: Cosmos DB fallback (decision D-06 — checked before Dataverse on Redis miss).
+        // AIPL-054 hardening (task 025 / spec FR-09): a stale/expired Redis session MUST resolve
+        // against the durable Cosmos transcript (ADR-040 Path A store-of-record) rather than
+        // silently falling through to an empty/partial result. The Cosmos read is wrapped so a
+        // transient Cosmos failure (throttling, timeout, transient network error) does NOT abort
+        // the whole lookup — it degrades to the Dataverse cold path instead of surfacing a 500 or
+        // (worse) letting a caller interpret the exception as "session not found" and mint a new
+        // empty session on top of a durable transcript that still exists.
         if (_persistence is not null)
         {
             _logger.LogDebug(
                 "Cache MISS for session {SessionId} — checking Cosmos DB before Dataverse (tenant={TenantId})",
                 sessionId, tenantId);
 
-            var storedSession = await _persistence.LoadSessionAsync(tenantId, sessionId, ct);
+            StoredSession? storedSession = null;
+            try
+            {
+                storedSession = await _persistence.LoadSessionAsync(tenantId, sessionId, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex,
+                    "Cosmos DB read failed for session {SessionId} (tenant={TenantId}) — " +
+                    "falling back to Dataverse rather than losing the recovery attempt (task 025 hardening)",
+                    sessionId, tenantId);
+            }
+
             if (storedSession is not null)
             {
                 // Map StoredSession back to ChatSession and re-warm the Redis hot cache
@@ -442,6 +461,84 @@ public class ChatSessionManager
         _logger.LogInformation(
             "Ledger ContextFingerprint stored: turn={Turn} fingerprintId={FingerprintId} sliceCount={SliceCount} tenant={TenantId} session={SessionId}",
             entry.Turn, entry.FingerprintId, entry.SliceCount, tenantId, sessionId);
+
+        return updated;
+    }
+
+    /// <summary>
+    /// HostContext.EntityType sentinel identifying an Analysis-owned chat session (task 020's
+    /// existing "sprk_analysisoutput" convention — see <c>ChatDataverseRepository.AnalysisHostContextEntityType</c>
+    /// and <c>AnalysisEndpoints.AnalysisHostContextEntityType</c>). MUST match both.
+    /// </summary>
+    internal const string AnalysisHostContextEntityType = "sprk_analysisoutput";
+
+    /// <summary>
+    /// Explicit promotion (task 023, spec FR-07): binds an EXISTING loose session to a NEW
+    /// <c>sprk_analysis</c> — a bind, NOT a mint. Distinct from
+    /// <c>AnalysisEndpoints.ForkAnalysis</c> (task 021), which mints a brand-new session bound to a
+    /// brand-new Analysis and archives the prior one. Promotion instead:
+    /// <list type="number">
+    ///   <item>Re-fetches the session (concurrent-write safety, mirrors <see cref="AppendToolChainAsync"/>).</item>
+    ///   <item>Writes the <c>sprk_analysis</c> FK onto the session's EXISTING <c>sprk_aichatsummary</c>
+    ///     row (<see cref="IChatDataverseRepository.BindSessionToAnalysisAsync"/> — no new Dataverse row).</item>
+    ///   <item>Updates the session's <see cref="ChatHostContext"/> in place to the Analysis-owned
+    ///     convention (<c>EntityType="sprk_analysisoutput"</c>, <c>EntityId=analysisId</c>) and writes
+    ///     through Redis + Cosmos via <see cref="UpdateSessionCacheAsync"/> — the SAME session id
+    ///     persists; no second session is created (ADR-040: no second session-state store).</item>
+    /// </list>
+    /// A session already Analysis-owned (HostContext.EntityType already the Analysis convention) MUST
+    /// be rejected by the caller (<c>AnalysisEndpoints.PromoteSession</c>) BEFORE this method runs —
+    /// promotion is a ONE-TIME bind, not an idempotent re-bind to a different Analysis.
+    /// </summary>
+    /// <param name="tenantId">Tenant ID (multi-tenant isolation).</param>
+    /// <param name="sessionId">The loose session's ID to promote.</param>
+    /// <param name="analysisId">The newly-created <c>sprk_analysis</c> record ID to bind to.</param>
+    /// <param name="analysisName">Display name of the Analysis — stored as the HostContext's EntityName.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The updated (now Analysis-owned) session, or <c>null</c> when the session no longer exists.</returns>
+    public virtual async Task<ChatSession?> PromoteSessionToAnalysisAsync(
+        string tenantId,
+        string sessionId,
+        Guid analysisId,
+        string analysisName,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(analysisName);
+
+        var session = await GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+        if (session is null)
+        {
+            _logger.LogWarning(
+                "PromoteSessionToAnalysisAsync: session not found — tenant={TenantId} session={SessionId}; promotion aborted.",
+                tenantId, sessionId);
+            return null;
+        }
+
+        // Durable FK bind on the EXISTING sprk_aichatsummary row (no new row, no new session).
+        // UNLIKE CreateSessionAsync's tolerant Dataverse-write posture, a bind failure here MUST
+        // propagate: the durable FK is promotion's entire deliverable (it is what makes the Analysis
+        // queryable via GetSessionsByAnalysisAsync / visible in the Analysis hub grid) — silently
+        // continuing would leave the caller believing promotion succeeded while the Analysis is
+        // orphaned with no bound session. The caller (AnalysisEndpoints.PromoteSession) catches this
+        // and compensates by deleting the just-created Analysis (same no-orphan discipline as
+        // ForkAnalysis's mint-failure compensation) — no partial-promotion state is left behind.
+        await _dataverseRepository.BindSessionToAnalysisAsync(tenantId, sessionId, analysisId, ct);
+
+        var analysisHostContext = new ChatHostContext(
+            EntityType: AnalysisHostContextEntityType,
+            EntityId: analysisId.ToString(),
+            EntityName: analysisName,
+            WorkspaceType: session.HostContext?.WorkspaceType,
+            PageType: session.HostContext?.PageType);
+
+        var updated = session with { HostContext = analysisHostContext };
+        await UpdateSessionCacheAsync(updated, ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Session {SessionId} promoted to analysis {AnalysisId} (tenant={TenantId}) — loose session bound in place (no new session minted).",
+            sessionId, analysisId, tenantId);
 
         return updated;
     }

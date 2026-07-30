@@ -209,6 +209,53 @@ describe('emailComposerReducer', () => {
     expect(off.attachments[0].linkSelected).toBe(false);
   });
 
+  it('RESOLVE_ATTACHMENT_DOCUMENT patches documentId + driveItemId + linkUrl (item 9b)', () => {
+    const withAtt: EmailComposerState = { ...start(), attachments: [att('l1', { source: 'local' })] };
+    const resolved = emailComposerReducer(withAtt, {
+      type: 'RESOLVE_ATTACHMENT_DOCUMENT',
+      id: 'l1',
+      documentId: 'doc-guid',
+      driveItemId: 'drive-item',
+      linkUrl: 'https://spe/doc',
+    });
+    expect(resolved.attachments[0].documentId).toBe('doc-guid');
+    expect(resolved.attachments[0].driveItemId).toBe('drive-item');
+    // linkUrl lights up the per-row Link toggle for an uploaded local file.
+    expect(resolved.attachments[0].linkUrl).toBe('https://spe/doc');
+  });
+
+  it('RESOLVE_ATTACHMENT_DOCUMENT without linkUrl preserves any existing linkUrl (no clobber)', () => {
+    const withAtt: EmailComposerState = {
+      ...start(),
+      attachments: [att('l1', { source: 'local', linkUrl: 'https://spe/existing' })],
+    };
+    const resolved = emailComposerReducer(withAtt, {
+      type: 'RESOLVE_ATTACHMENT_DOCUMENT',
+      id: 'l1',
+      documentId: 'doc-guid',
+    });
+    expect(resolved.attachments[0].linkUrl).toBe('https://spe/existing');
+  });
+
+  it('ADD_ASSOCIATION appends (dedup) and REMOVE_ASSOCIATION drops by entityType+entityId (item 10)', () => {
+    const a1 = { entityType: 'sprk_matter', entityId: 'm-1', entityName: 'Smith v. Jones' };
+    const added = emailComposerReducer(start(), { type: 'ADD_ASSOCIATION', association: a1 });
+    expect(added.associations).toHaveLength(1);
+    expect(added.isDirty).toBe(true);
+
+    // Re-adding the same record is a no-op (dedup on entityType+entityId).
+    const dup = emailComposerReducer(added, { type: 'ADD_ASSOCIATION', association: { ...a1, entityId: 'M-1' } });
+    expect(dup.associations).toHaveLength(1);
+
+    const removed = emailComposerReducer(added, {
+      type: 'REMOVE_ASSOCIATION',
+      entityType: 'sprk_matter',
+      entityId: 'M-1', // case-insensitive match
+    });
+    expect(removed.associations).toEqual([]);
+    expect(removed.isDirty).toBe(true);
+  });
+
   describe('SET_MODE transition matrix', () => {
     const viewState = (): EmailComposerState => initialState(baseProps({ mode: 'view', sourceRecord }));
 

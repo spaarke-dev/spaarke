@@ -1,59 +1,31 @@
 /**
  * EmailReadingHeader.types.ts
  *
- * Type contract for `<EmailReadingHeader />` + `<EmailReadingAttachments />`
- * (email-communication-solution-r5 task 034, spec FR-11/FR-12). These are the
- * two sub-views that fill the `EmailReadingPaneShell` (task 032) `renderHeader`
- * / `renderAttachments` slots — see
- * `projects/email-communication-solution-r5/notes/task-032-reading-pane-shell.md`.
+ * Type contract for `<EmailReadingHeader />` — the reading-pane TITLE BAR (the
+ * email subject on its own row with a light-gray background, rendered ABOVE the
+ * toolbar) + `<EmailReadingAttachments />` (the attachments sub-view, FR-12).
  *
- * Both components are host-agnostic (ADR-012): they take the portable
- * `IDataService` / `INavigationService` abstractions from `@spaarke/ui-components`
- * (NOT `ComponentFramework.WebApi` / raw `Xrm`) so the eventual `EmailWorkspace`
- * composition root (task 040) can inject either the Xrm-backed or BFF-backed
- * adapter without this view knowing which host it's running under.
+ * (Reading-pane MAIN-AREA redesign, email-communication-solution-r5: the header
+ * band used to carry the subject PLUS a compact tracking trio PLUS an "Open full
+ * form" icon. Per the locked owner design the tracking fields are REMOVED from
+ * the reading pane entirely, "Open full form" moved into the toolbar, and this
+ * component is now just the light-gray title bar showing the subject. It remains
+ * PURELY presentational — subject in, nothing out; no data fetch.)
+ *
+ * `EmailReadingAttachments` is unchanged — still host-agnostic (ADR-012), still
+ * takes the portable `IDataService` / `INavigationService` abstractions from
+ * `@spaarke/ui-components` (NOT `ComponentFramework.WebApi` / raw `Xrm`).
  */
 
-/**
- * Subset of a `sprk_communication` record this header reads. Field names
- * verified against `docs/data-model/sprk_communication.md` (also mirrored by
- * `ICommunicationRecord` in the `CommunicationPage` code page — see
- * deviation note in `EmailReadingHeader.tsx`).
- */
-export interface IEmailHeaderRecord {
-  sprk_communicationid?: string;
-  sprk_subject?: string | null;
-  sprk_from?: string | null;
-  sprk_to?: string | null;
-  sprk_cc?: string | null;
-  sprk_bcc?: string | null;
-  sprk_sentat?: string | null;
-  sprk_receiveddate?: string | null;
-}
-
-/** Props for `<EmailReadingHeader />` — the envelope header sub-view (FR-11). */
+/** Props for `<EmailReadingHeader />` — the reading-pane TITLE BAR. Purely presentational: the subject arrives from the host (`EmailWorkspace`), fed by the shared `EmailWorkspaceRecordState`. No internal data fetch. */
 export interface IEmailReadingHeaderProps {
-  /** The selected `sprk_communication` id (from the reading-pane shell's `renderHeader` slot). */
-  selectedId: string;
-  /**
-   * Host-injected data adapter (Xrm or BFF — ADR-012 portability). Retrieves
-   * the record's envelope fields via `retrieveRecord('sprk_communication', selectedId, select)`.
-   */
-  dataService: IEmailHeaderDataService;
-}
-
-/**
- * Minimal `retrieveRecord` surface this header consumes — a structural subset
- * of `@spaarke/ui-components` `IDataService` so tests can supply a lightweight
- * double without implementing the full 5-method contract.
- */
-export interface IEmailHeaderDataService {
-  retrieveRecord(entityName: string, id: string, options?: string): Promise<Record<string, unknown>>;
+  /** `EmailWorkspaceRecordState.subject` — `null` while loading or when the field is absent on this deployment. Renders "(no subject)" when falsy. */
+  subject: string | null;
 }
 
 /** Props for `<EmailReadingAttachments />` — the attachments sub-view (FR-12). */
 export interface IEmailReadingAttachmentsProps {
-  /** The selected `sprk_communication` id (from the reading-pane shell's `renderAttachments` slot). */
+  /** The selected `sprk_communication` id (from the reading-pane shell's `renderBody` slot). */
   selectedId: string;
   /**
    * Host-injected data adapter (Xrm or BFF — ADR-012 portability). Adapted
@@ -68,6 +40,13 @@ export interface IEmailReadingAttachmentsProps {
   navigation: IEmailAttachmentsNavigationService;
   /** BFF API base URL (host only) — passed to `AttachmentApiService` (task 021) for preview/open-link resolution. */
   apiBaseUrl: string;
+  /**
+   * Fired after the attachment list loads (or reloads) with the number of file
+   * attachments (inline images already excluded). Lets a collapsed host section
+   * show a header count ("Attachments (3)") without the user expanding it.
+   * Fires with `0` when the record has no attachments or on load failure.
+   */
+  onCountChange?: (count: number) => void;
 }
 
 /** Minimal `retrieveMultipleRecords` surface this view consumes. */

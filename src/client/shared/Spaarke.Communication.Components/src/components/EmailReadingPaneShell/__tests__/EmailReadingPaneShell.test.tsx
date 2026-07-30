@@ -2,12 +2,14 @@
  * EmailReadingPaneShell.test.tsx
  *
  * Unit/RTL tests for `<EmailReadingPaneShell />` (email-communication-solution-r5
- * task 032). Covers the closed acceptance set from the task POML: two-pane
- * layout with the reused `PanelSplitter` (FR-05), selection driving the right
- * pane's slot renderers, the "Select an email" empty state (FR-19), splitter
- * width persistence across remounts, the full-width toolbar's six actions
- * dispatching through host-supplied handlers (FR-08), and dark-mode theming
- * (ADR-021).
+ * task 032; reworked for the reading-pane layout redesign's two-slot contract
+ * — `renderHeader` rendered ABOVE the toolbar, `renderBody` rendered BELOW
+ * it). Covers the closed acceptance set from the task POML: two-pane layout
+ * with the reused `PanelSplitter` (FR-05), selection driving the right
+ * pane's slot renderers in the header-then-toolbar-then-body order, the
+ * "Select an email" empty state (FR-19), splitter width persistence across
+ * remounts, the full-width toolbar's six actions dispatching through
+ * host-supplied handlers (FR-08), and dark-mode theming (ADR-021).
  */
 import * as React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
@@ -45,9 +47,6 @@ function renderShell(overrides: Partial<EmailReadingPaneShellProps> = {}, theme 
       items={items}
       renderHeader={id => <div data-testid="header-slot">header:{id}</div>}
       renderBody={id => <div data-testid="body-slot">body:{id}</div>}
-      renderAttachments={id => <div data-testid="attachments-slot">attachments:{id}</div>}
-      renderConnections={id => <div data-testid="connections-slot">connections:{id}</div>}
-      renderTracking={id => <div data-testid="tracking-slot">tracking:{id}</div>}
       {...overrides}
     />,
     theme
@@ -76,7 +75,7 @@ describe('EmailReadingPaneShell', () => {
     expect(screen.queryByRole('toolbar')).not.toBeInTheDocument();
   });
 
-  it('selecting a card drives the right pane: header/body/attachments/connections/tracking slots are invoked with the selected id', () => {
+  it('selecting a card drives the right pane: header + body slots are invoked with the selected id, header rendered ABOVE the toolbar', () => {
     renderShell();
 
     fireEvent.click(screen.getByText('Email one'));
@@ -84,9 +83,44 @@ describe('EmailReadingPaneShell', () => {
     expect(screen.queryByText('Select an email')).not.toBeInTheDocument();
     expect(screen.getByTestId('header-slot')).toHaveTextContent('header:e1');
     expect(screen.getByTestId('body-slot')).toHaveTextContent('body:e1');
-    expect(screen.getByTestId('attachments-slot')).toHaveTextContent('attachments:e1');
-    expect(screen.getByTestId('connections-slot')).toHaveTextContent('connections:e1');
-    expect(screen.getByTestId('tracking-slot')).toHaveTextContent('tracking:e1');
+
+    // Layout order: header band, then the full-width toolbar, then the body region.
+    const readingPane = screen.getByTestId('email-reading-pane');
+    const nodes = Array.from(readingPane.querySelectorAll('[data-testid="header-slot"], [role="toolbar"], [data-testid="body-slot"]'));
+    expect(nodes.map(n => n.getAttribute('data-testid') ?? n.getAttribute('role'))).toEqual([
+      'header-slot',
+      'toolbar',
+      'body-slot',
+    ]);
+  });
+
+  it('renders the optional renderTop slot ABOVE the title-bar header (Association-at-top)', () => {
+    renderWithProvider(
+      <EmailReadingPaneShell
+        items={[makeItem({ id: 'e1', subject: 'Email one' })]}
+        renderTop={id => <div data-testid="top-slot">top:{id}</div>}
+        renderHeader={id => <div data-testid="header-slot">header:{id}</div>}
+        renderBody={id => <div data-testid="body-slot">body:{id}</div>}
+      />
+    );
+
+    fireEvent.click(screen.getByText('Email one'));
+
+    expect(screen.getByTestId('top-slot')).toHaveTextContent('top:e1');
+    // Layout order: top slot (Association), then header (title bar), then the
+    // full-width toolbar, then the body region.
+    const readingPane = screen.getByTestId('email-reading-pane');
+    const nodes = Array.from(
+      readingPane.querySelectorAll(
+        '[data-testid="top-slot"], [data-testid="header-slot"], [role="toolbar"], [data-testid="body-slot"]'
+      )
+    );
+    expect(nodes.map(n => n.getAttribute('data-testid') ?? n.getAttribute('role'))).toEqual([
+      'top-slot',
+      'header-slot',
+      'toolbar',
+      'body-slot',
+    ]);
   });
 
   it('notifies the host of selection changes via onSelectedIdChange without controlling selection', () => {
@@ -100,17 +134,23 @@ describe('EmailReadingPaneShell', () => {
   });
 
   describe('full-width toolbar (FR-08)', () => {
-    it('renders all six action buttons once a card is selected', () => {
+    it('renders the four email verbs (icon+text) + the right-aligned icon-only action group once a card is selected', () => {
       renderShell();
       fireEvent.click(screen.getByText('Email one'));
 
       expect(screen.getByRole('toolbar', { name: 'Email actions' })).toBeInTheDocument();
+      // Left group — icon+text verbs.
       expect(screen.getByRole('button', { name: 'Reply' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Reply All' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Forward' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'New' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
+      // Right group — icon-only (aria-label / tooltip).
+      expect(screen.getByRole('button', { name: 'Save to SharePoint' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Create Event' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Create To Do' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Link Invoice' })).toBeInTheDocument();
+      // "Open full form" was removed from the toolbar per owner UAT (2026-07-29).
+      expect(screen.queryByRole('button', { name: 'Open full form' })).not.toBeInTheDocument();
     });
 
     it('dispatches each record-scoped action through the host-supplied actions core with the selected id', () => {
@@ -119,8 +159,10 @@ describe('EmailReadingPaneShell', () => {
         onReplyAll: jest.fn(),
         onForward: jest.fn(),
         onNew: jest.fn(),
-        onArchive: jest.fn(),
-        onCreate: jest.fn(),
+        onSaveToSharePoint: jest.fn(),
+        onCreateEvent: jest.fn(),
+        onCreateTodo: jest.fn(),
+        onLinkInvoice: jest.fn(),
       };
       renderShell({ actions });
       fireEvent.click(screen.getByText('Email one'));
@@ -129,15 +171,19 @@ describe('EmailReadingPaneShell', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Reply All' }));
       fireEvent.click(screen.getByRole('button', { name: 'Forward' }));
       fireEvent.click(screen.getByRole('button', { name: 'New' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Save to SharePoint' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Create Event' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Create To Do' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Link Invoice' }));
 
       expect(actions.onReply).toHaveBeenCalledWith('e1');
       expect(actions.onReplyAll).toHaveBeenCalledWith('e1');
       expect(actions.onForward).toHaveBeenCalledWith('e1');
       expect(actions.onNew).toHaveBeenCalledWith();
-      expect(actions.onArchive).toHaveBeenCalledWith('e1');
-      expect(actions.onCreate).toHaveBeenCalledWith('e1');
+      expect(actions.onSaveToSharePoint).toHaveBeenCalledWith('e1');
+      expect(actions.onCreateEvent).toHaveBeenCalledWith('e1');
+      expect(actions.onCreateTodo).toHaveBeenCalledWith('e1');
+      expect(actions.onLinkInvoice).toHaveBeenCalledWith('e1');
     });
 
     it('New is always enabled (not record-scoped); record-scoped buttons enable only once a card is selected', () => {

@@ -289,6 +289,14 @@ export interface WorkspaceTabManagerComponentProps {
   onTabChange: (tabId: string) => void;
   /** Called when the user clicks the close button on a tab. */
   onTabClose: (tabId: string) => void;
+  /**
+   * Task 025 (spec FR-09) — called when a widget reports a live data-change patch via its
+   * `onDataChange` prop (e.g. AnalysisEditorWidget persisting in-progress edit state). Forwards
+   * to `WorkspaceTabManager.updateTab(tabId, mergedData)` so the edit rides the existing tab
+   * persistence write-through. Optional — omitted in contexts that don't wire tab persistence
+   * (e.g. isolated unit tests).
+   */
+  onTabDataChange?: (tabId: string, patch: unknown) => void;
 
   /**
    * When true, suppress the tab-bar strip and render only the active
@@ -321,12 +329,15 @@ interface ActiveWidgetContentProps {
    * while inactive can suppress "I am the active surface" side effects (active-document claim).
    */
   isActiveTab?: boolean;
+  /** Task 025 (FR-09) — see WorkspaceTabManagerComponentProps.onTabDataChange. */
+  onTabDataChange?: (tabId: string, patch: unknown) => void;
 }
 
 function ActiveWidgetContent({
   tab,
   styles,
   isActiveTab = true,
+  onTabDataChange,
 }: ActiveWidgetContentProps): React.JSX.Element {
   // Loading — registry promise not yet resolved.
   if (tab.isLoading || tab.Component === null) {
@@ -338,6 +349,15 @@ function ActiveWidgetContent({
   }
 
   const Widget = tab.Component as React.ComponentType<WorkspaceWidgetProps>;
+
+  // Task 025 (FR-09): a stable per-tab callback so a widget's live edit-state patch (e.g.
+  // AnalysisEditorWidget's in-progress draft) reaches WorkspaceTabManager.updateTab and rides
+  // the existing tab-persistence write-through. Undefined when the host didn't wire
+  // onTabDataChange (e.g. isolated unit-test render) — the widget's own onDataChange prop is
+  // then undefined too, which every widget must already tolerate (optional prop).
+  const onDataChange = onTabDataChange
+    ? (patch: unknown): void => onTabDataChange(tab.id, patch)
+    : undefined;
 
   // ai-spaarke-ai-workspace-UI-r1 brittleness Phase D.2 (2026-06-09):
   // Per-widget isolation — a render error in this widget is caught and
@@ -357,6 +377,7 @@ function ActiveWidgetContent({
           isLoading={false}
           tabId={tab.id}
           isActiveTab={isActiveTab}
+          onDataChange={onDataChange}
         />
       </WidgetErrorBoundary>
     </div>
@@ -379,6 +400,7 @@ export function WorkspaceTabManagerComponent({
   activeTabId,
   onTabChange,
   onTabClose,
+  onTabDataChange,
   hideTabBar = false,
 }: WorkspaceTabManagerComponentProps): React.JSX.Element {
   const styles = useStyles();
@@ -683,13 +705,19 @@ export function WorkspaceTabManagerComponent({
                 tab={composeTab}
                 styles={styles}
                 isActiveTab={isActiveComposeTab}
+                onTabDataChange={onTabDataChange}
               />
             </div>
           );
         })}
 
         {activeTab !== null && !activeIsCompose ? (
-          <ActiveWidgetContent tab={activeTab} styles={styles} isActiveTab />
+          <ActiveWidgetContent
+            tab={activeTab}
+            styles={styles}
+            isActiveTab
+            onTabDataChange={onTabDataChange}
+          />
         ) : activeTab === null ? (
           <div className={styles.errorState}>
             <WarningRegular className={styles.errorIcon} />

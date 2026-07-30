@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Deploy BFF (publish-size report + CVE check)</title>
+    <phase>7 Deploy</phase>
+    <gate>064 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment execution against known deploy skill/script; prescriptive/ordered, no design authoring — but it is BFF-touching so it carries the §10 publish-size + CVE gates.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runs a known deploy script + measures publish output; mechanical orchestration, no architectural judgment.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Ordered W7 deploy step; must run after all BFF code (through 064) merges and before the client deploy (071).</parallel-reason>
+    <deps>064</deps>
+    <tags>deploy, bff</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Publish and deploy the BFF (Sprk.Bff.Api) after all Phase 6 retirement/migration code has merged. Enforce the
+    §10 publish-size gate: run `dotnet publish -c Release`, report absolute compressed size + diff vs the ~49.63 MB
+    (incl. PDBs) baseline, HARD STOP if ≥60 MB and justify explicitly if the single-task delta is ≥+5 MB. Run the
+    vulnerable-package scan and confirm no new HIGH CVE. Then deploy via Deploy-BffApi.ps1 with the health check.
+  </prompt>
+
+  <role>
+    SPAARKE release engineer. Expert in the bff-deploy skill, Deploy-BffApi.ps1, and the §10 BFF Hygiene
+    publish-size + CVE gates. Follow azure-deployment.md and CLAUDE.md §10.
+  </role>
+
+  <goal>
+    The BFF is published, size-checked (≤60 MB compressed, diff vs baseline recorded), CVE-scanned (no new HIGH),
+    deployed via Deploy-BffApi.ps1, and its /healthz check is green — with the size + CVE evidence recorded in notes/.
+  </goal>
+
+  <context>
+    <background>
+      This project retires legacy AnalysisEndpoints routes, adds the session↔Analysis binding + fork endpoint, and
+      migrates /save + GET /{id} (tasks 020–064). All that BFF code lands before this deploy. §10 requires a
+      publish-size report + CVE scan on EVERY BFF-touching task; this deploy is the enforcement point. Deploy-BffApi.ps1
+      runs `dotnet publish -c Release` to deploy/api-publish, packages, deploys (direct for dev), verifies file
+      replacement, and checks /healthz.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">scripts/Deploy-BffApi.ps1</file>
+      <file role="canonical-reference">scripts/Capture-BffBaseline.ps1</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/</file>
+      <file role="new">projects/ai-advanced-capabilities-analysis-hub-r1/notes/deploy-bff-record.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="064" status="pending">Final BFF migration (/save + GET /{id} without sprk_chathistory; work-type hooks) merged — the last BFF code before deploy.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md-10">SCOPE: the BFF publish artifact. Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report absolute compressed size + diff vs the ~49.63 MB (incl. PDBs) baseline; state the PDB convention. HARD STOP at ≥60 MB; ≥+5 MB single-task delta requires explicit justification; ≥55 MB cumulative triggers architecture review.</constraint>
+    <constraint source="ADR-029">SCOPE: this BFF deploy. Publish-size ceiling ≤60 MB compressed is binding; do not deploy above the ceiling.</constraint>
+    <constraint source="CLAUDE.md-10">SCOPE: this BFF deploy. Run `dotnet list package --vulnerable --include-transitive`; confirm no NEW HIGH-severity CVE relative to baseline before deploying.</constraint>
+    <constraint source="ADR-028">SCOPE: deployed endpoints. All endpoints stay authenticated (except /healthz, /ping); do not weaken auth as part of deploy.</constraint>
+    <constraint source="CLAUDE.md-9">SCOPE: deploy config. No secrets committed; production secrets stay in Key Vault.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-deployment</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Deploy-BffApi.ps1" location="scripts/Deploy-BffApi.ps1">
+        Runs publish → package → deploy → hash-verify → /healthz. Invoke it (or the bff-deploy skill wrapping it) for the deploy; do not hand-roll az webapp deploy.
+      </pattern>
+      <pattern name="Capture-BffBaseline.ps1" location="scripts/Capture-BffBaseline.ps1">
+        Endpoint baseline capture — use to confirm the deployed endpoint surface matches expectations post-retirement.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare STANDARD rigor; load bff-extensions.md + azure-deployment.md; run /conflict-check for the BFF (Services/Ai sole-owned by redesign-r2).</step>
+    <step order="1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed output; compute diff vs ~49.63 MB (incl. PDBs) baseline. HARD STOP if ≥60 MB; justify if ≥+5 MB single-task delta. Record absolute size + diff + PDB convention in notes/deploy-bff-record.md.</step>
+    <step order="2">Run `dotnet list package --vulnerable --include-transitive`; confirm no new HIGH CVE; record the result in notes/deploy-bff-record.md.</step>
+    <step order="3">Deploy via Deploy-BffApi.ps1 (or the bff-deploy skill); wait for the /healthz health check to pass.</step>
+    <step order="4">Confirm /healthz returns Healthy on the deployed environment; smoke-test /ping.</step>
+    <step order="5">Update TASK-INDEX.md: set 070 status to ✅.</step>
+    <step order="6">Document any deviation (size justification, CVE waiver) in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the BFF publish compressed size is ≥60 MB, STOP (HARD STOP per §10 / azure-deployment.md) and escalate for architecture review before deploying — do not deploy above the ceiling.</trigger>
+    <trigger>If the CVE scan reports a NEW HIGH-severity vulnerability, STOP and escalate rather than deploying.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Publish the BFF + run the vulnerable-package scan.</tool>
+    <tool name="terminal">Run Deploy-BffApi.ps1 / the bff-deploy skill.</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-advanced-capabilities-analysis-hub-r1/notes/deploy-bff-record.md (publish size + diff + CVE result + health-check outcome)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `dotnet publish -c Release`, the compressed BFF size is ≤60 MB and the absolute size + diff vs the ~49.63 MB baseline (PDB convention stated) is recorded in notes/ (NFR-01).</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` shows no new HIGH-severity CVE relative to baseline (NFR-06).</criterion>
+    <criterion testable="true">Deploy-BffApi.ps1 completes and the /healthz check returns Healthy on the deployed environment.</criterion>
+    <criterion testable="true">Negative: if size ≥60 MB OR a new HIGH CVE is present, the deploy does NOT proceed and the task escalates (no silent deploy above the gate).</criterion>
+    <criterion testable="true">No secrets are committed; production secrets remain in Key Vault.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    First of the ordered W7 deploy steps (070 → 071 → 072 → 090). Publish-size baseline: ~49.63 MB incl. PDBs
+    (45.87 MB excl.) per spaarke-ai-architecture-redesign-r1 task 055. Spec §Success Criteria #8 + NFR-01/NFR-06.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute; prescriptive steps; enforce §10 publish-size + CVE gates.</protocol>
+  </execution>
+</task>

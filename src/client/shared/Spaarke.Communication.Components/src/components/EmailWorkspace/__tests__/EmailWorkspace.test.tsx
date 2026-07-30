@@ -173,19 +173,38 @@ describe('EmailWorkspace', () => {
 
     fireEvent.click(await screen.findByText('Quarterly filing update'));
 
-    // Header paints from the record (EmailReadingHeader) — subject appears in the reading pane too.
+    // Title bar paints from the record (EmailReadingHeader) — the subject appears
+    // on its own light-gray row (no tracking trio, no from/to/cc/bcc here).
     await waitFor(() => expect(screen.getByTestId('email-reading-header')).toBeInTheDocument());
+    // The tracking trio was REMOVED from the reading pane entirely (redesign).
+    expect(screen.queryByTestId('email-tracking-panel')).not.toBeInTheDocument();
+    // Recipients block reflects the record's From/To — Cc/Bcc rows are absent
+    // since FULL_RECORD carries neither (the mapping reads them defensively from
+    // the same no-`$select` read, never throwing).
+    const recipients = await screen.findByTestId('email-recipients');
+    expect(within(recipients).getByText('jane.doe@example.com')).toBeInTheDocument();
+    expect(within(recipients).getByText('legal-team@example.com')).toBeInTheDocument();
+    expect(within(recipients).queryByText('Cc')).not.toBeInTheDocument();
+    expect(within(recipients).queryByText('Bcc')).not.toBeInTheDocument();
     // Body degrades to sanitized `sprk_body` (no `.eml` archive in this fixture — a normal
     // state) — scope to the reading pane since the left card list's preview text also
     // contains a snippet of the same sentence.
     const readingPane = screen.getByTestId('email-reading-pane');
     await waitFor(() => expect(within(readingPane).getByText(/latest draft/i)).toBeInTheDocument());
-    // FR-15 "Open full form" trigger is rendered near the toolbar.
-    expect(screen.getByRole('button', { name: 'Open full form' })).toBeInTheDocument();
-    // Tracking panel reflects the record's tracking values.
-    expect(await screen.findByTestId('email-tracking-panel')).toBeInTheDocument();
-    // Associations review renders (no engine provenance in this fixture → review-only empty state, no crash).
-    expect(screen.getByTestId('email-connections-review')).toBeInTheDocument();
+    // "Open full form" was removed from the toolbar per owner UAT (2026-07-29).
+    expect(screen.queryByRole('button', { name: 'Open full form' })).not.toBeInTheDocument();
+    // The collapsible sections render with their headers. "Related to" is the
+    // merged association section (open by default) that BOTH shows the primary
+    // association state and resolves it — the old separate "Association" section
+    // is gone (single-primary redesign 2026-07-29).
+    expect(screen.getByText('Attachments')).toBeInTheDocument();
+    expect(screen.getByText('Related to')).toBeInTheDocument();
+    expect(screen.queryByText('Association')).not.toBeInTheDocument();
+    // "Related to" is open by default, so the redesigned resolver is already
+    // mounted; with no engine provenance in this fixture it shows the candidate
+    // slots + the "Link another record" affordance.
+    expect(await screen.findByTestId('email-connections-review')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /link another record/i })).toBeInTheDocument();
   });
 
   it('given a selected card WITH a `.eml` archive, resolves the archive document id and renders the server-rendered body (loading→loaded transition)', async () => {
@@ -212,9 +231,7 @@ describe('EmailWorkspace', () => {
     // Loaded: the resolved archive id flows through to `EmailBodyView`, which calls `authenticatedFetch`
     // against the `eml-render` endpoint for THAT document id — proving the wiring (not a re-test of
     // EmailBodyView's own render-branch logic, already covered by its task-033 suite).
-    await waitFor(() =>
-      expect(authenticatedFetch).toHaveBeenCalledWith(`/documents/${EML_DOCUMENT_ID}/eml-render`)
-    );
+    await waitFor(() => expect(authenticatedFetch).toHaveBeenCalledWith(`/documents/${EML_DOCUMENT_ID}/eml-render`));
     // Server HTML lands in the sandboxed iframe's `srcdoc` (EmailBodyView, task 033 —
     // content is NOT queryable via RTL text matchers since it's inside a real iframe).
     const iframe = await screen.findByTestId('email-body-iframe');

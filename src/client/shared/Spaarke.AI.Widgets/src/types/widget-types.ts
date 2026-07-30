@@ -49,6 +49,18 @@ export interface WorkspaceWidgetProps<T = unknown> {
    * widgets.
    */
   isActiveTab?: boolean;
+  /**
+   * Task 025 (spec FR-09) — optional callback for a widget that holds LIVE, unsaved edit state
+   * (e.g. AnalysisEditorWidget's in-progress draft while the user is editing) and needs that
+   * state to survive a tab close/reopen or page refresh. Calling this merges `patch` into the
+   * tab's own serialized `widgetData` (via a `widget_update` PaneEventBus event routed back
+   * through `WorkspaceTabManager.updateTab`), which then rides the EXISTING tab-persistence
+   * write-through (NFR-09, task 065 / task 025 Analysis-anchor fix) — no new persistence
+   * mechanism. Only present when the widget is hosted as a workspace TAB (mirrors `tabId`);
+   * absent in isolated/unit-test render contexts. Most widgets ignore this — it exists for
+   * widgets that need edit-state durability beyond the read-only `data` prop.
+   */
+  onDataChange?: (patch: Partial<T>) => void;
 }
 
 /**

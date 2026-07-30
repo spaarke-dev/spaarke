@@ -28,14 +28,7 @@
  * (ADR-022 / NFR-05): `React.FC` + standard hooks, no `as React.ComponentType`.
  */
 import * as React from 'react';
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Button,
-  Skeleton,
-  SkeletonItem,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Text, Button, Skeleton, SkeletonItem, Tooltip } from '@fluentui/react-components';
 import { ErrorCircle24Regular, ArrowClockwise16Regular, Info16Regular } from '@fluentui/react-icons';
 import { sanitizeEmailHtml } from '@spaarke/ui-components';
 import { authenticatedFetch as defaultAuthenticatedFetch } from '@spaarke/auth';
@@ -43,11 +36,37 @@ import type { EmailBodyViewProps } from './EmailBodyView.types';
 
 const useStyles = makeStyles({
   root: {
+    position: 'relative',
     display: 'flex',
     flexDirection: 'column',
     flex: '1 1 auto',
     minHeight: 0,
     width: '100%',
+  },
+  // Unobtrusive "full history unavailable" affordance — rendered at the VERY END
+  // of the body as a small (i) centered on a faint divider line (owner UAT).
+  // Replaces the old top banner that read as a warning ("distracting").
+  fallbackFooter: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    // Extra separation between the message text and the end-of-message note (owner UAT).
+    marginTop: tokens.spacingVerticalXXXL,
+    paddingInline: tokens.spacingHorizontalXL,
+    paddingBottom: tokens.spacingVerticalL,
+  },
+  footerLine: { flex: '1 1 auto', height: '1px', backgroundColor: tokens.colorNeutralStroke2 },
+  fallbackInfo: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    color: tokens.colorNeutralForeground3,
+    background: 'none',
+    border: 'none',
+    padding: tokens.spacingHorizontalXXS,
+    cursor: 'help',
+    ':hover': { color: tokens.colorNeutralForeground2 },
   },
   // The sandboxed iframe fills the pane. A `sandbox=""` iframe cannot be
   // measured from the parent (no `allow-same-origin`), so it cannot be
@@ -119,11 +138,7 @@ const useStyles = makeStyles({
 });
 
 /** Internal render phase — one of loading / eml / fallback / record-error. */
-type Phase =
-  | { kind: 'loading' }
-  | { kind: 'eml'; html: string }
-  | { kind: 'fallback' }
-  | { kind: 'record-error' };
+type Phase = { kind: 'loading' } | { kind: 'eml'; html: string } | { kind: 'fallback' } | { kind: 'record-error' };
 
 /**
  * Build the relative `eml-render` path. `authenticatedFetch` prefixes `/api`
@@ -205,11 +220,7 @@ export const EmailBodyView: React.FC<EmailBodyViewProps> = ({
           <ErrorCircle24Regular className={s.errorIcon} aria-hidden="true" />
           <Text>This email couldn&apos;t be loaded.</Text>
           {onRetryRecord ? (
-            <Button
-              appearance="secondary"
-              icon={<ArrowClockwise16Regular />}
-              onClick={onRetryRecord}
-            >
+            <Button appearance="secondary" icon={<ArrowClockwise16Regular />} onClick={onRetryRecord}>
               Retry
             </Button>
           ) : null}
@@ -221,12 +232,7 @@ export const EmailBodyView: React.FC<EmailBodyViewProps> = ({
   if (phase.kind === 'loading') {
     return (
       <div className={s.root}>
-        <Skeleton
-          className={s.skeleton}
-          aria-label="Loading email"
-          role="status"
-          data-testid="email-body-loading"
-        >
+        <Skeleton className={s.skeleton} aria-label="Loading email" role="status" data-testid="email-body-loading">
           <SkeletonItem className={s.skeletonLine} style={{ width: '90%' }} />
           <SkeletonItem className={s.skeletonLine} style={{ width: '75%' }} />
           <SkeletonItem className={s.skeletonLine} style={{ width: '82%' }} />
@@ -260,22 +266,31 @@ export const EmailBodyView: React.FC<EmailBodyViewProps> = ({
   const safeHtml = sanitizeEmailHtml(body ?? '');
   return (
     <div className={s.root} data-testid="email-body-fallback">
-      <div className={s.note} role="note" data-testid="email-body-fallback-note">
-        <Info16Regular className={s.noteIcon} aria-hidden="true" />
-        <span className={s.noteText}>
-          <Text className={s.noteTitle}>Full history unavailable</Text>
-          <Text>
-            Showing the latest message only — the archived copy of this email
-            isn&apos;t available, so quoted replies and inline images may be missing.
-          </Text>
-        </span>
-      </div>
       <div
         className={s.fallbackBody}
         data-testid="email-body-fallback-content"
         // eslint-disable-next-line react/no-danger -- content is client-sanitized via the hardened shared `sanitizeEmailHtml` (task 001, NFR-03) immediately above.
         dangerouslySetInnerHTML={{ __html: safeHtml }}
       />
+      {/* End-of-message (i) on a faint divider line — the least-intrusive place
+          to note the archived copy is unavailable (owner UAT). */}
+      <div className={s.fallbackFooter}>
+        <span className={s.footerLine} aria-hidden="true" />
+        <Tooltip
+          relationship="description"
+          content="Full history unavailable — showing the latest message only. The archived copy of this email isn't available, so quoted replies and inline images may be missing."
+        >
+          <button
+            type="button"
+            className={s.fallbackInfo}
+            data-testid="email-body-fallback-note"
+            aria-label="Full history unavailable"
+          >
+            <Info16Regular aria-hidden="true" />
+          </button>
+        </Tooltip>
+        <span className={s.footerLine} aria-hidden="true" />
+      </div>
     </div>
   );
 };

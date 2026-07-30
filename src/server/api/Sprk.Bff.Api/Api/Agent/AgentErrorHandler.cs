@@ -89,8 +89,9 @@ public sealed class AgentErrorHandler
 
     /// <summary>
     /// Returns an error card when a playbook execution times out.
-    /// Includes a deep-link action to open the Analysis Workspace where the user
-    /// can monitor or resume the analysis.
+    /// Includes a deep-link action to open the SpaarkeAi Analysis surface where the user
+    /// can monitor or resume the analysis (retirement task 060 repoints this from the
+    /// now-retired legacy Analysis Workspace code page).
     /// </summary>
     public string HandlePlaybookTimeout(Guid playbookId, Guid jobId, string correlationId)
     {
@@ -105,7 +106,7 @@ public sealed class AgentErrorHandler
             playbookId: playbookId);
 
         return BuildPlaybookTimeoutCard(
-            "The analysis is taking longer than expected. You can check its progress in the Analysis Workspace.",
+            "The analysis is taking longer than expected. You can check its progress in Spaarke AI.",
             correlationId,
             workspaceUrl);
     }
@@ -206,7 +207,7 @@ public sealed class AgentErrorHandler
 
     /// <summary>
     /// Builds a playbook timeout card with both a retry action and a deep-link
-    /// to the Analysis Workspace.
+    /// to the SpaarkeAi Analysis surface.
     /// </summary>
     private string BuildPlaybookTimeoutCard(
         string message,

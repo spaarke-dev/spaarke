@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Add-file-to-running-chat prompt (new session vs add-to-current)</title>
+    <phase>2 Session</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Client-only UX change (a two-choice prompt + branch on the file-attach path); no BFF surface, no architecture change — STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified UI prompt + branch over existing `ConversationPane` file-attach; low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-ui</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Client-only, distinct file surface (`ConversationPane` file-attach) from the BFF session tasks; can run alongside them once 023 lands the two-tier model.</parallel-reason>
+    <deps>023</deps>
+    <tags>frontend, session</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    When a user adds a file to a live chat, show a two-choice prompt: "new session" (archives the current session,
+    switchable back) vs "add to current session" (keeps the file in the current session context). Wire each choice to
+    the correct behavior on the existing `ConversationPane` file-attach path, reusing the fork/archive seam from tasks
+    021/022 for the "new session" branch.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the SpaarkeAi three-pane `ConversationPane` file-attach flow and Fluent v9
+    dialog patterns. Follow ADRs strictly (ADR-021 Fluent v9).
+  </role>
+
+  <goal>
+    Adding a file to a live chat presents a two-choice prompt; "new session" archives the current session (switchable
+    back) and starts a fresh one with the file; "add to current session" keeps the file in the current session
+    context; the client build is green.
+  </goal>
+
+  <context>
+    <background>
+      spec FR-08 (§3 #3): adding a file mid-conversation must not silently pick a behavior. "New session" reuses the
+      fork/archive path (task 021 fork or the archive seam from 022) so the prior session stays retrievable; "add to
+      current" simply attaches the file into the current session's context. This is a client-side prompt + branch on
+      the existing `ConversationPane` file-attach; no new BFF endpoint (fork already exists from task 021).
+    </background>
+    <relevant-files>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/.../ConversationPane (file-attach path + prompt)</file>
+      <file role="canonical-reference">src/solutions/SpaarkeAi/src/ (existing file-attach handler)</file>
+      <file role="canonical-reference">.claude/patterns/ui/choice-dialog-pattern.md (two-choice dialog)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="023" status="pending">Two-tier session model + archive/switch-back behavior the "new session" branch relies on.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: file-attach on a live chat. MUST show the two-choice prompt; "new session" archives the current session (switchable back from history), "add to current" keeps the file in the current session context — no silent default.</constraint>
+    <constraint source="project">SCOPE: the "new session" branch. Reuse the task-021 fork / task-022 archive seam; MUST NOT introduce a new client-side session store or fork logic.</constraint>
+    <constraint source="ADR-021">SCOPE: the prompt UI. Fluent UI v9 dialog + theme tokens; MUST render correctly in dark mode.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ConversationPane file-attach + two-choice prompt</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/patterns/ui/choice-dialog-pattern.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+    <patterns>
+      <pattern name="two-choice dialog" location=".claude/patterns/ui/choice-dialog-pattern.md">
+        Use the established choice-dialog pattern for the new-session vs add-to-current prompt.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare STANDARD rigor + reason; load knowledge; locate the `ConversationPane` file-attach path.</step>
+    <step order="1">Insert the two-choice prompt when a file is added to a live (non-empty) chat.</step>
+    <step order="2">Wire "new session" → archive current (switchable back) + start fresh with the file (reuse task-021/022 seam).</step>
+    <step order="3">Wire "add to current session" → attach the file into the current session's context.</step>
+    <step order="4">Build the SpaarkeAi client; manual/scripted UI check of both branches + dark mode.</step>
+    <step order="5">Update TASK-INDEX.md: set 024 status to ✅.</step>
+    <step order="6">Document any deviation in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Prompt appears on add-file to live chat">
+      <steps><step>Start a chat with at least one message, then attach a file.</step></steps>
+      <expected>A two-choice prompt ("new session" / "add to current session") appears; renders correctly in light + dark mode (ADR-021).</expected>
+    </test>
+    <test name="New-session branch archives + switches">
+      <steps><step>Attach a file, choose "new session".</step><step>Open history.</step></steps>
+      <expected>A fresh session starts with the file; the prior session is archived and switchable back from history.</expected>
+    </test>
+    <test name="Add-to-current branch keeps context">
+      <steps><step>Attach a file, choose "add to current session".</step></steps>
+      <expected>The file is added into the current session context; no new session; no archive.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build the SpaarkeAi client.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/ (ConversationPane file-attach prompt + branches)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a live chat with prior messages, when a file is attached, then a two-choice prompt ("new session" / "add to current session") is shown.</criterion>
+    <criterion testable="true">Given the prompt, when "new session" is chosen, then the current session is archived (switchable back) and a fresh session starts holding the file.</criterion>
+    <criterion testable="true">Given the prompt, when "add to current session" is chosen, then the file is kept in the current session context (no new session, no archive).</criterion>
+    <criterion testable="true">Negative: attaching a file does NOT silently pick a behavior without the prompt.</criterion>
+    <criterion testable="true">The prompt renders correctly in light + dark mode (ADR-021); client build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-08 / PLAN §2.5. Reuse the fork/archive seam from tasks 021/022 for the "new session" branch — no new client fork logic.
+
+    === COMPLETION (2026-07-29, STANDARD rigor, sonnet/high) ===
+    Two-choice `ChoiceDialog` (`FileAttachSessionPrompt.tsx`, new self-contained file — mirrors the
+    task-023 "keep it out of `ConversationPane.tsx`" merge-order precedent set by `HistoryOverlay.tsx`'s
+    "Promote to Analysis…" affordance) shown when a file attaches to a chat that already has messages
+    (`chatMessageCount > 0`, tracked via `onMessagesChange`). Options: "Start a new session" / "Add to
+    current session"; Cancel present (ChoiceDialog pattern) and applies NO default — dismissing just
+    leaves the file attached-but-unpromoted (negative acceptance criterion).
+
+    Files: `useAttachments.ts` (new `hasPriorMessages` dep; a not-yet-decided ready chip is excluded
+    from the existing auto-promote effect via `excludedFromAutoPromoteChipIdsRef` and queued into
+    `pendingFileSessionChoice`; new `chooseAddToCurrentSession` / `prepareFilesForNewSession` /
+    `dismissFileSessionChoice` controller methods); `FileAttachSessionPrompt.tsx` (new); `ConversationPane.tsx`
+    (moved the pre-existing `chatMessageCount` state up ~1400 lines so `hasPriorMessages` is available at
+    the `useAttachments` call site; +1 import; +1 dialog render wiring `prepareFilesForNewSession` together
+    with the EXISTING `handleNewSession` seam on the "new session" choice — no new session-switch logic).
+
+    DESIGN DEVIATION (surfaced, not silent — directional steps mode): the task suggested reusing the
+    task-021 `/fork` endpoint for "new session". Investigated and did NOT use it — `/fork`'s
+    `AnalysisForkRequest.DocumentId` MUST be a non-empty GUID of an EXISTING `sprk_document` (validated,
+    400 otherwise), but a file just-attached mid-chat is only a session-scoped upload-cache entry
+    (`POST /documents` mints a random `Guid.NewGuid().ToString("N")`, not a Dataverse `sprk_document`) —
+    there is no existing seam that synchronously turns a raw chat attachment into a real `sprk_document`
+    GUID. Forcing `/fork` here would require NEW document-creation plumbing, which is out of scope
+    ("MUST NOT introduce new client-side session store or fork logic") and a bigger risk than the
+    2-4 hour STANDARD budget. Grep confirmed `/fork` has ZERO existing client callers (task 024 would
+    have been the first) — task 021's own docs already flagged its DocumentId precondition as
+    document-first-flow-shaped, not raw-upload-shaped.
+
+    Instead: "new session" reuses the EXISTING `handleNewSession` seam (`clearChatSession()` +
+    `startNewSession()` — the same header "New session" button / task-021-era R4-5 mechanism) —
+    genuinely no new session/fork logic. "Archived (switchable back)" is satisfied AS-IS: verified
+    `ChatEndpoints.ListRecentSessionsAsync` → `SessionPersistenceService.ListRecentSessionsAsync` reads
+    Cosmos and is NOT filtered by the Dataverse `sprk_isarchived` marker (task 022 already documented
+    that marker as archival/advisory, not retrieval-gating) — so the prior session is fully retrievable
+    from History regardless of whether the marker is durably flipped. The file itself is carried over:
+    `prepareFilesForNewSession` queues the still-held `File` object (captured pre-remount); a new effect
+    detects the moment `chatSessionId` actually switches to the freshly-minted session and POSTs the SAME
+    `/documents` upload against the NEW session id, then settles the Event-path gesture via the EXISTING
+    `fireForPromotedFile` synthetic-batch seam (`useEventBatch.ts`) that `spaarkeai-compose-r2`'s manual
+    Browse-ingest ceremony already uses for a file promoted outside the attachment strip — no new
+    Event-path mechanism either.
+
+    If a durable Dataverse-flag flip + Analysis anchor for a raw mid-chat attachment IS wanted later,
+    that requires either (a) a "persist the raw attach to a real sprk_document" seam feeding `/fork`'s
+    DocumentId, or (b) a `/fork`-shaped-but-DocumentId-optional variant — both are net-new BFF surface,
+    out of this task's "no BFF change expected" scope; flagging for owner triage, not blocking this task.
+
+    GATES (STANDARD — Step 9.5 skipped per rigor level): `npm run typecheck` (tsc-surface-gate) — 0
+    surface-owned errors (291 pre-existing shared-lib errors deferred to Phase B, unrelated). New jest
+    suite `ConversationPane.file-attach-session-prompt.test.tsx` — 7/7 pass, covering: prompt appears on
+    live-chat attach; prompt does NOT appear on an empty/new chat (existing auto-promote unaffected);
+    negative — no `/documents` POST fires before a choice is made; "add to current" promotes into the
+    SAME session (no remount); "new session" archives-by-leaving-retrievable + remounts + carries the
+    file into the NEW session only (never the old); dismiss applies no default; dark mode (`webDarkTheme`)
+    smoke render. Full `src/components/conversation` suite (47 files / 426 tests) re-run green — no
+    regressions. `npm run lint` could not run in this environment (ESLint v10 config mismatch,
+    pre-existing/unrelated to this task — flagged, not fixed, out of scope).
+
+    Merge-order: zero edits to `ConversationPane.tsx`'s JSX body beyond +1 import, +1 dialog block,
+    +1 relocated `useState` — per the project CLAUDE.md merge-order note against
+    `spaarke-ai-architecture-redesign-r1`'s `ConversationPane` decomposition.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute (STANDARD: Step 9.5 gates skipped).</protocol>
+  </execution>
+</task>

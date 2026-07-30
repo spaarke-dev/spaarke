@@ -30,6 +30,8 @@ export interface EmailConnectionsReviewProps {
   associationProvenanceJson?: string | null;
   /** Denormalized regarding name — display fallback when there is no provenance/filed data at all. */
   regardingRecordName?: string | null;
+  /** Denormalized regarding record number (`sprk_regardingrecordnumber`) — used for the confirmed "{Type}: {number}" chip. */
+  regardingRecordNumber?: string | null;
   /** The record's actually-filed regarding lookups (incl. manual "Link another" ones the engine never suggested) — merged into engine-derived slots so the surface shows every association, not just suggestions. */
   filedAssociations?: FiledAssociation[];
   /** Write context (webApi + hostEntity + hostRecordId) for the additive write path. `hostRecordId` MUST match `communicationId`. */
@@ -40,10 +42,17 @@ export interface EmailConnectionsReviewProps {
   linkAnotherCatalog?: readonly RecordTypeCatalogEntry[];
   /** Resolve a friendly display name for a target (entity + GUID). Falls back to the slot's own `targetName` when omitted/undefined. */
   resolveDisplayName?: (entity: string, id: string) => string | undefined;
-  /** Hide every write affordance (Confirm/Change/Dismiss/Link another) — review-only display. */
+  /** Hide every write affordance (Confirm/Change/Remove/Link another) — review-only display. */
   readOnly?: boolean;
-  /** Called after ANY successful write (confirm/change/dismiss/link-another) so the host can refetch the record's provenance/filed-associations. */
+  /** Called after ANY successful write (confirm/change/remove/link-another) so the host can refetch the record's provenance/filed-associations. */
   onAssociationsChanged?: () => void;
+  /**
+   * Optional "Create new" affordance for the UNMATCHED state ("Not filed yet." →
+   * Find a record · Create new · Dismiss). When omitted, the "Create new" button
+   * is not rendered (the host has no create-a-record-to-associate flow wired) —
+   * "Find a record" (the shared picker) + "Dismiss" still appear.
+   */
+  onCreateNewRecord?: () => void;
 }
 
 export interface EmailTrackingPanelProps {
@@ -60,4 +69,14 @@ export interface EmailTrackingPanelProps {
   accessPermissionLabel?: string;
   /** Disables the controls (visual + pointer-events) — no write affordance. */
   readOnly?: boolean;
+  /**
+   * Compact rendering for placement in the reading-pane HEADER BAND
+   * (email-communication-solution-r5, layout redesign): hides the "Tracking"
+   * section label and the `TrackingFieldTrio` field-caption row, so only the
+   * Monitor/High-priority switches + Access segmented control render — no
+   * behavior change, purely a tighter visual footprint. Default `false`
+   * (the original full section rendering, unused by any current caller now
+   * that tracking lives in the header band, but preserved for reuse).
+   */
+  compact?: boolean;
 }

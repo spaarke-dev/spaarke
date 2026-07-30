@@ -35,7 +35,7 @@
  * @see ADR-012 -- Shared Component Library
  */
 import * as React from 'react';
-import { MessageBar, MessageBarBody, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { Button, MessageBar, MessageBarBody, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { PersonRegular, CalendarRegular, MailRegular } from '@fluentui/react-icons';
 
 import { WizardShell } from '../Wizard/WizardShell';
@@ -122,6 +122,21 @@ const useStyles = makeStyles({
   errorBar: {
     flexShrink: 0,
   },
+  existingRecordRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    alignItems: 'flex-start',
+  },
+  selectedExistingRecord: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -150,6 +165,14 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   const [association, setAssociation] = React.useState<AssociationResult | null>(
     config.associateToStep?.initialAssociation ?? null
   );
+
+  // -- Existing-record selection state (Add file(s) step -- task 040) --
+  // Populated via config.existingRecordPicker's "Select Existing" button.
+  // Mutually exclusive with uploadedFiles in the UI (selecting one clears
+  // the other); exposed to onFinish via IFinishContext.selectedExistingRecord.
+  const [selectedExistingRecord, setSelectedExistingRecord] = React.useState<AssociationResult | null>(null);
+  const [existingRecordLookupPending, setExistingRecordLookupPending] = React.useState(false);
+  const [existingRecordLookupError, setExistingRecordLookupError] = React.useState<string | null>(null);
 
   // -- Follow-on step selections --
   const [selectedActions, setSelectedActions] = React.useState<FollowOnActionId[]>([]);
@@ -203,6 +226,9 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
       // FR-16: when the wizard opens (or re-opens), seed the association with
       // the launch-context pre-fill if one was provided (null otherwise).
       setAssociation(config.associateToStep?.initialAssociation ?? null);
+      setSelectedExistingRecord(null);
+      setExistingRecordLookupPending(false);
+      setExistingRecordLookupError(null);
       setSelectedActions([]);
       setAssignWorkName('');
       setAssignWorkDescription('');
@@ -254,6 +280,8 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   // -- Refs for stale closure prevention in dynamic step renderContent --
   const associationRef = React.useRef(association);
   associationRef.current = association;
+  const selectedExistingRecordRef = React.useRef(selectedExistingRecord);
+  selectedExistingRecordRef.current = selectedExistingRecord;
   const createEventNameRef = React.useRef(createEventName);
   createEventNameRef.current = createEventName;
   const createEventTypeIdRef = React.useRef(createEventTypeId);
@@ -518,16 +546,58 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   }, [selectedActions, emailSubject, config]);
 
   // -- File handler callbacks --
-  const handleFilesAccepted = React.useCallback(
-    (files: IUploadedFile[]) => fileDispatch({ type: 'ADD_FILES', files }),
-    []
-  );
+  const handleFilesAccepted = React.useCallback((files: IUploadedFile[]) => {
+    fileDispatch({ type: 'ADD_FILES', files });
+    // Mutually exclusive with an existing-record selection (task 040).
+    setSelectedExistingRecord(null);
+  }, []);
   const handleValidationErrors = React.useCallback(
     (errors: IFileValidationError[]) => fileDispatch({ type: 'SET_VALIDATION_ERRORS', errors }),
     []
   );
   const handleRemoveFile = React.useCallback((fileId: string) => fileDispatch({ type: 'REMOVE_FILE', fileId }), []);
   const handleClearErrors = React.useCallback(() => fileDispatch({ type: 'CLEAR_VALIDATION_ERRORS' }), []);
+
+  // -- Existing-record picker (task 040) --------------------------------------
+  const handleSelectExistingRecord = React.useCallback(async () => {
+    const picker = config.existingRecordPicker;
+    if (!picker) return;
+
+    setExistingRecordLookupError(null);
+    setExistingRecordLookupPending(true);
+    try {
+      const results = await picker.navigationService.openLookup({
+        entityType: picker.entityType,
+        entityTypes: [picker.entityType],
+        defaultEntityType: picker.entityType,
+        allowMultiSelect: false,
+        defaultViewId: picker.defaultViewId,
+      });
+
+      if (!results || results.length === 0) return; // cancelled — no-op
+
+      const picked = results[0];
+      setSelectedExistingRecord({
+        entityType: picked.entityType || picker.entityType,
+        recordId: picked.id.replace(/[{}]/g, '').toLowerCase(),
+        recordName: picked.name,
+      });
+      // Mutually exclusive with uploaded files.
+      fileDispatch({ type: 'RESET' });
+    } catch (err) {
+      console.error('[CreateRecordWizard] existingRecordPicker lookup failed:', err);
+      setExistingRecordLookupError(
+        err instanceof Error ? err.message : `Failed to open the ${picker.entityLabel} lookup. Please try again.`
+      );
+    } finally {
+      setExistingRecordLookupPending(false);
+    }
+  }, [config.existingRecordPicker]);
+
+  const handleClearExistingRecord = React.useCallback(() => {
+    setExistingRecordLookupError(null);
+    setSelectedExistingRecord(null);
+  }, []);
 
   // -- Finish handler --
   const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig> => {
@@ -536,6 +606,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
       speContainerId: speContainerIdRef.current,
       selectedActions: selectedActionsRef.current,
       association: associationRef.current,
+      selectedExistingRecord: selectedExistingRecordRef.current,
       followOn: {
         // Assign Work fields
         assignWorkName: assignWorkNameRef.current,
@@ -607,10 +678,49 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
             </MessageBar>
           )}
 
-          <FileUploadZone onFilesAccepted={handleFilesAccepted} onValidationErrors={handleValidationErrors} />
+          {!selectedExistingRecord && (
+            <FileUploadZone onFilesAccepted={handleFilesAccepted} onValidationErrors={handleValidationErrors} />
+          )}
 
           {fileState.uploadedFiles.length > 0 && (
             <UploadedFileList files={fileState.uploadedFiles} onRemove={handleRemoveFile} />
+          )}
+
+          {/* Existing-record picker (task 040) — opt-in via config.existingRecordPicker */}
+          {config.existingRecordPicker && fileState.uploadedFiles.length === 0 && (
+            <div className={styles.existingRecordRow}>
+              {existingRecordLookupError && (
+                <MessageBar intent="error" className={styles.errorBar}>
+                  <MessageBarBody>{existingRecordLookupError}</MessageBarBody>
+                </MessageBar>
+              )}
+              {!selectedExistingRecord ? (
+                <Button
+                  appearance="secondary"
+                  onClick={handleSelectExistingRecord}
+                  disabled={existingRecordLookupPending}
+                  data-testid="select-existing-record-button"
+                >
+                  {existingRecordLookupPending
+                    ? 'Opening…'
+                    : `Select Existing ${config.existingRecordPicker.entityLabel}`}
+                </Button>
+              ) : (
+                <div className={styles.selectedExistingRecord} data-testid="selected-existing-record">
+                  <Text size={300} weight="semibold">
+                    {selectedExistingRecord.recordName}
+                  </Text>
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    onClick={handleClearExistingRecord}
+                    aria-label="Clear selection"
+                  >
+                    Clear
+                  </Button>
+                </div>
+              )}
+            </div>
           )}
         </>
       ),
@@ -701,6 +811,11 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
     handleValidationErrors,
     handleRemoveFile,
     handleClearErrors,
+    selectedExistingRecord,
+    existingRecordLookupError,
+    existingRecordLookupPending,
+    handleSelectExistingRecord,
+    handleClearExistingRecord,
   ]);
 
   // -- Render --
