@@ -168,6 +168,24 @@ public interface IComposeService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// G10 (FR-09, task 040): the manual "Refresh Profile" leg — re-run the Document Profile on demand for
+    /// an existing <c>sprk_document</c>, reusing the SAME fire-and-forget pipeline the save-hook +
+    /// reload/onload re-trigger use (never a second trigger). User-initiated and UNCONDITIONAL (unlike the
+    /// storm-guarded reload leg), but still best-effort/fire-and-forget — returns immediately; the profile
+    /// fields populate shortly after under the caller's OBO identity. Returns <c>true</c> when the profile
+    /// was dispatched.
+    /// </summary>
+    /// <param name="request">Refresh payload: the <c>sprk_documentid</c> (required) + optional SPE
+    /// drive-item id / eTag used only to stamp the profiled version so an immediate reopen does not
+    /// redundantly re-trigger.</param>
+    /// <param name="httpContext">HTTP context for OBO auth into the profile pipeline. Required.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<bool> RefreshProfileAsync(
+        RefreshComposeProfileRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// FR-29 read: projects the CURRENT <see cref="AnchoredAnnotation"/> and
     /// <see cref="DefinedTerm"/> collections stored on a Compose session (design.md §8).
     /// Read-only — used internally by <see cref="LoadAsync"/> and available standalone
@@ -725,6 +743,28 @@ public sealed record SaveComposeDocumentResult : ComposeDocumentResult
     /// though this property still reports the save's own resolved discriminant.
     /// </summary>
     public ComposeOrigin? Origin { get; init; }
+}
+
+/// <summary>
+/// G10 (FR-09, task 040): manual "Refresh Profile" payload — re-run the Document Profile on demand for an
+/// existing <c>sprk_document</c>. See <see cref="IComposeService.RefreshProfileAsync"/>.
+/// </summary>
+public sealed record RefreshComposeProfileRequest
+{
+    /// <summary>The <c>sprk_documentid</c> to re-profile. Required.</summary>
+    public required Guid DocumentRecordId { get; init; }
+
+    /// <summary>Tenant id (ADR-015 Tier 3 isolation). Required.</summary>
+    public required string TenantId { get; init; }
+
+    /// <summary>Optional SPE drive-item id — used only to stamp the profiled version (with
+    /// <see cref="ETag"/>) so an immediate reopen does not redundantly re-trigger the storm-guarded
+    /// reload leg.</summary>
+    public string? DocumentSpeId { get; init; }
+
+    /// <summary>Optional current SPE eTag — stamped as the profiled version when supplied alongside
+    /// <see cref="DocumentSpeId"/>.</summary>
+    public string? ETag { get; init; }
 }
 
 /// <summary>Promote request payload.</summary>

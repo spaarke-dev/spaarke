@@ -4,7 +4,7 @@
     <title>G10 — Document Profile re-run: add reload/onload re-trigger + manual "Refresh Profile" button</title>
     <phase>4 Profiling + hardening</phase>
     <gate>dep:020</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Touches BFF (ComposeService.cs save/load orchestration) + client (Refresh Profile button); modifies .cs and .tsx; tags include bff-api. Risk of a profiling storm (re-trigger loop) requires the FULL code-review + adr-check gate at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>

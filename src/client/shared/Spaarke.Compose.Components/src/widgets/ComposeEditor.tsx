@@ -630,6 +630,9 @@ export interface ComposeEditorProps {
   canSave?: boolean;
   /** True while a save is in flight. */
   isSaving?: boolean;
+  /** G10 (FR-09, task 040): manual "Refresh Profile" handler. Renders the toolbar button when set
+   *  (the host wires it only for a promoted doc — one that has a sprk_document record to re-profile). */
+  onRefreshProfile?: () => void;
 
   /**
    * FR-23 (task 044) — display name attributed to comment threads/replies the CURRENT user creates
@@ -1614,6 +1617,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       onSave,
       canSave,
       isSaving,
+      onRefreshProfile,
       commentAuthor = 'You',
       reviewSummary,
       activeWorkType = '*',
@@ -2651,6 +2655,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onSave={onSave}
           canSave={canSave}
           isSaving={isSaving}
+          onRefreshProfile={onRefreshProfile}
           trackChangesEnabled={trackChangesEnabled}
           onToggleTrackChanges={toggleTrackChanges}
           // UAT round-2 items #1/#2 — the "Review" dropdown. Shown only when an NDA advisory review is

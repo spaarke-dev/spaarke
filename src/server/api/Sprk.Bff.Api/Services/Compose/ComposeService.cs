@@ -471,6 +471,16 @@ public class ComposeService : IComposeService
             ? await ReadPersistedOriginAsync(request.DocumentRecordId.Value, cancellationToken).ConfigureAwait(false)
             : null;
 
+        // G10 (FR-09, task 040): reload/onload re-trigger of the Document Profile — storm-safe (fires only
+        // when the doc changed since Compose last profiled it). Path A only (an existing sprk_document to
+        // profile). Best-effort — never blocks or fails Load.
+        if (request.DocumentRecordId is { } reloadRecordId && !string.IsNullOrWhiteSpace(metadata.ETag))
+        {
+            await MaybeRetriggerProfileOnLoadAsync(
+                reloadRecordId, request.DocumentSpeId, metadata.ETag!, httpContext, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         return new LoadComposeDocumentResult
         {
             DocumentSpeId = request.DocumentSpeId,
@@ -1255,6 +1265,115 @@ public class ComposeService : IComposeService
                 "Compose save: failed to persist the version stamp for driveItem={DocumentSpeId} — the save itself succeeded; a future assert may miss this save.",
                 documentSpeId);
         }
+    }
+
+    // =========================================================================
+    // G10 (FR-09, task 040) — Document Profile re-run: reload/onload re-trigger (storm-safe) + the shared
+    // manual "Refresh Profile" leg. Both reuse the EXISTING fire-and-forget DispatchBackgroundProfile
+    // pipeline (never a second trigger). The storm guard is a DEDICATED per-doc "profiled-at eTag" stamp
+    // (IDistributedCache, ADR-009) — INTENTIONALLY separate from the FR-08 save-version stamp so it never
+    // perturbs the save-path staleness/re-anchor semantics. A reopen re-profiles ONLY when the live eTag
+    // differs from the last-profiled eTag (an external Word edit, or a doc Compose never profiled); an
+    // unchanged reopen matches the stamp → skip (no profiling storm on repeated reopens).
+    // =========================================================================
+
+    private const string ProfiledETagKeyPrefix = "sdap:compose:profiled-etag:";
+
+    private async Task<string?> GetProfiledETagAsync(string documentSpeId, CancellationToken ct)
+    {
+        if (_cache is null)
+        {
+            return null;
+        }
+        try
+        {
+            return await _cache.GetStringAsync(ProfiledETagKeyPrefix + documentSpeId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose profile (G10): failed to read the profiled-eTag stamp for driveItem={DocumentSpeId} — treating as never-profiled (may re-trigger once).",
+                documentSpeId);
+            return null;
+        }
+    }
+
+    private async Task SetProfiledETagAsync(string documentSpeId, string eTag, CancellationToken ct)
+    {
+        if (_cache is null || string.IsNullOrEmpty(eTag))
+        {
+            return;
+        }
+        try
+        {
+            await _cache.SetStringAsync(ProfiledETagKeyPrefix + documentSpeId, eTag, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose profile (G10): failed to persist the profiled-eTag stamp for driveItem={DocumentSpeId} — a future reopen may re-trigger once more (best-effort, never a storm).",
+                documentSpeId);
+        }
+    }
+
+    /// <summary>
+    /// G10 (FR-09, task 040): the reload/onload re-trigger. On a Path A reopen (an existing
+    /// <c>sprk_document</c>), re-dispatch the fire-and-forget Document Profile ONLY when the doc CHANGED
+    /// since Compose last profiled it (live eTag ≠ the profiled-eTag stamp) — then stamp the current eTag so
+    /// a subsequent unchanged reopen skips (the storm guard closes the loop). Best-effort: never blocks or
+    /// fails Load; a null <c>_documentProfileAi</c>/cache simply no-ops.
+    /// </summary>
+    private async Task MaybeRetriggerProfileOnLoadAsync(
+        Guid documentRecordId, string documentSpeId, string liveETag, HttpContext httpContext, CancellationToken ct)
+    {
+        try
+        {
+            var profiledETag = await GetProfiledETagAsync(documentSpeId, ct).ConfigureAwait(false);
+            if (string.Equals(profiledETag, liveETag, StringComparison.Ordinal))
+            {
+                return; // unchanged since the last profile — skip (no storm)
+            }
+
+            DispatchBackgroundProfile(documentRecordId, httpContext);
+            await SetProfiledETagAsync(documentSpeId, liveETag, ct).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Compose reload profile re-trigger (G10): document {DocumentRecordId} (driveItem={DocumentSpeId}) changed since last profile (profiledETag={ProfiledETag}, liveETag={LiveETag}) — profile re-dispatched fire-and-forget.",
+                documentRecordId, documentSpeId, profiledETag, liveETag);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose reload profile re-trigger (G10): failed for document {DocumentRecordId} — best-effort, Load unaffected.",
+                documentRecordId);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> RefreshProfileAsync(
+        RefreshComposeProfileRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.DocumentRecordId == Guid.Empty)
+        {
+            throw new ArgumentException("A DocumentRecordId is required to refresh a Compose document's profile.", nameof(request));
+        }
+
+        // G10 manual leg: a user-initiated on-demand re-run. UNCONDITIONAL (unlike the reload guard) — the
+        // user explicitly asked to refresh — but still fire-and-forget + best-effort. Stamp the current eTag
+        // (when known) so an immediately-following reopen does not redundantly re-trigger.
+        DispatchBackgroundProfile(request.DocumentRecordId, httpContext);
+        if (!string.IsNullOrWhiteSpace(request.DocumentSpeId) && !string.IsNullOrWhiteSpace(request.ETag))
+        {
+            await SetProfiledETagAsync(request.DocumentSpeId!, request.ETag!, cancellationToken).ConfigureAwait(false);
+        }
+
+        _logger.LogInformation(
+            "Compose manual profile refresh (G10): document {DocumentRecordId} — profile re-dispatched fire-and-forget on user request.",
+            request.DocumentRecordId);
+        return true;
     }
 
     /// <summary>

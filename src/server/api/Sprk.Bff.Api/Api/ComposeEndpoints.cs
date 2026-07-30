@@ -239,6 +239,19 @@ public static class ComposeEndpoints
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status500InternalServerError);
 
+        // G10 (FR-09, task 040): the manual "Refresh Profile" leg — re-run the Document Profile on demand.
+        // Fire-and-forget best-effort (202): reuses IComposeService.RefreshProfileAsync → the SAME
+        // DispatchBackgroundProfile pipeline the save-hook + reload re-trigger use (never a second trigger).
+        // Under the authenticated group (OBO); no SPE/Graph type crosses the endpoint (ADR-007).
+        group.MapPost("/documents/{documentRecordId:guid}/refresh-profile", RefreshProfileAsync)
+            .WithName("ComposeRefreshProfile")
+            .WithSummary("Re-run the Document Profile for a Compose document on demand (FR-09 / G10)")
+            .RequireRateLimiting("ai-context")
+            .Produces(StatusCodes.Status202Accepted)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status500InternalServerError);
+
         // (13) POST /api/compose/document/{documentSpeId}/reanchor-annotations — FR-27 (task 054):
         // after a Word round-trip produced a new SPE version (detected by 052/053), download the
         // CURRENT bytes, extract paragraph text, and re-anchor the client's prior Compose anchors
@@ -629,6 +642,59 @@ public static class ComposeEndpoints
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 detail: "An unexpected error occurred while checking for changes.");
+        }
+    }
+
+    // G10 (FR-09, task 040): the manual "Refresh Profile" leg. Delegates to
+    // IComposeService.RefreshProfileAsync → the SAME fire-and-forget DispatchBackgroundProfile pipeline the
+    // save-hook + reload re-trigger use (never a second trigger). Best-effort 202 (the profile runs in the
+    // background under OBO); a bad request 400s. No SPE/Graph type crosses the endpoint (ADR-007).
+    private static async Task<IResult> RefreshProfileAsync(
+        Guid documentRecordId,
+        [FromBody] RefreshProfileBody? body,
+        IComposeService composeService,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (documentRecordId == Guid.Empty) return BadRequest("documentRecordId is required in the route.");
+        if (body is null) return BadRequest("Request body is required.");
+        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
+
+        try
+        {
+            await composeService.RefreshProfileAsync(
+                new RefreshComposeProfileRequest
+                {
+                    DocumentRecordId = documentRecordId,
+                    TenantId = body.TenantId,
+                    DocumentSpeId = body.DocumentSpeId,
+                    ETag = body.ETag,
+                },
+                httpContext,
+                ct).ConfigureAwait(false);
+
+            logger.LogInformation(
+                "Compose refresh-profile: document {DocumentRecordId} — profile re-dispatched (best-effort) TraceId={TraceId}",
+                documentRecordId, httpContext.TraceIdentifier);
+
+            return Results.Accepted(value: new { documentRecordId, correlationId = httpContext.TraceIdentifier });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Compose refresh-profile: unexpected failure for document {DocumentRecordId} TraceId={TraceId}",
+                documentRecordId, httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while refreshing the document profile.");
         }
     }
 
@@ -2217,6 +2283,15 @@ public sealed record SpeDocChangedWebhookResponse(
 /// 052) — driveId is resolved internally by the orchestrator, so callers do not supply it.</summary>
 public sealed record CheckChangesBody(
     [property: JsonPropertyName("containerId")] string ContainerId);
+
+/// <summary>Request body for <c>POST /api/compose/documents/{documentRecordId}/refresh-profile</c>
+/// (FR-09 / G10). The <c>sprk_documentid</c> rides the route; the body carries the tenant + optional SPE
+/// pointer/eTag used only to stamp the profiled version so an immediate reopen does not redundantly
+/// re-trigger the storm-guarded reload leg.</summary>
+public sealed record RefreshProfileBody(
+    [property: JsonPropertyName("tenantId")] string TenantId,
+    [property: JsonPropertyName("documentSpeId")] string? DocumentSpeId = null,
+    [property: JsonPropertyName("eTag")] string? ETag = null);
 
 /// <summary>Response shape for <c>POST /api/compose/document/{id}/check-changes</c> (FR-26) —
 /// whether the document's SPE etag differs from the last-observed (Redis-stored) etag, plus the

@@ -492,6 +492,33 @@ describe('ComposeFormatToolbar — Save split-button (G7 task 022)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 6a. Refresh Profile button (G10 task 040)
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Refresh Profile button (G10 task 040)', () => {
+  it('is not rendered when no onRefreshProfile handler is wired (unpromoted doc)', () => {
+    renderFormatToolbar();
+    expect(screen.queryByTestId('compose-format-refresh-profile')).not.toBeInTheDocument();
+  });
+
+  it('renders and fires onRefreshProfile when clicked (promoted doc)', async () => {
+    const user = userEvent.setup();
+    const onRefreshProfile = jest.fn();
+    renderFormatToolbar({}, { props: { onRefreshProfile } });
+
+    const btn = screen.getByTestId('compose-format-refresh-profile');
+    expect(btn).toBeInTheDocument();
+    await user.click(btn);
+    expect(onRefreshProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it('ADR-021: renders under a dark theme', () => {
+    renderFormatToolbar({}, { theme: webDarkTheme, props: { onRefreshProfile: jest.fn() } });
+    expect(screen.getByTestId('compose-format-refresh-profile')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 6b. Track Changes toggle (item 4, UAT round-4)
 // ---------------------------------------------------------------------------
 

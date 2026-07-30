@@ -103,6 +103,7 @@ import {
   TableDeleteColumn24Regular,
   TableDismiss24Regular,
   ClipboardTaskListLtr24Regular,
+  DocumentSync24Regular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -223,6 +224,9 @@ export interface ComposeFormatToolbarProps {
   canSave?: boolean;
   /** True while a save is in flight. */
   isSaving?: boolean;
+  /** G10 (FR-09, task 040): manual "Refresh Profile" handler. Renders the button when set (the host
+   *  wires it only for a promoted doc — one with a sprk_document record to re-profile). */
+  onRefreshProfile?: () => void;
 
   // ---- Review (ai-advanced-capabilities-nda-r1 UAT round-2 items #1/#2) — icon-only dropdown,
   //      right-aligned, rendered ONLY when an NDA advisory review is present. Two independent
@@ -352,6 +356,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     onSave,
     canSave,
     isSaving,
+    onRefreshProfile,
     trackChangesEnabled,
     onToggleTrackChanges,
     hasReview,
@@ -830,6 +835,20 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
             disabled={controlDisabled}
             onClick={onToggleTrackChanges}
             data-testid="compose-format-track-changes"
+          />
+        </Tooltip>
+      ) : null}
+
+      {/* ---- Refresh Profile (G10 task 040) — right-aligned; only for a promoted doc ---- */}
+      {onRefreshProfile ? (
+        <Tooltip content="Refresh document profile" relationship="label" withArrow>
+          <ToolbarButton
+            appearance="subtle"
+            icon={<DocumentSync24Regular />}
+            aria-label="Refresh document profile"
+            disabled={controlDisabled}
+            onClick={onRefreshProfile}
+            data-testid="compose-format-refresh-profile"
           />
         </Tooltip>
       ) : null}

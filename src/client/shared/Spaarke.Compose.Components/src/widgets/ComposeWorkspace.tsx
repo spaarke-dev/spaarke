@@ -1336,6 +1336,32 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     onCreateOnSaveComplete,
   ]);
 
+  // G10 (FR-09, task 040): manual "Refresh Profile" — re-run the Document Profile on demand for a PROMOTED
+  // doc (it has a sprk_document record to profile). Fire-and-forget on the server (202); best-effort here —
+  // a failure is non-fatal (the profile is background/best-effort anyway). Only meaningful once the doc is
+  // promoted, so the button is wired (below) only when sprkDocumentId exists.
+  const triggerRefreshProfile = React.useCallback(async (): Promise<void> => {
+    const recordId = state.documentRef?.sprkDocumentId;
+    if (!recordId || !bffBaseUrl || !tenantId) return;
+    try {
+      await authenticatedFetch(
+        `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(recordId)}/refresh-profile`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tenantId,
+            documentSpeId: state.documentRef?.speDriveItemId || undefined,
+            eTag: state.etag || undefined,
+          }),
+        }
+      );
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[ComposeWorkspace] refresh-profile request failed (non-fatal):', err);
+    }
+  }, [state.documentRef?.sprkDocumentId, state.documentRef?.speDriveItemId, state.etag, bffBaseUrl, tenantId]);
+
   // FIX #1b — publish the editor's Save into the cross-pane bridge so the Assistant's "Add the
   // document to the DMS" chip (ConversationPane) drives the SAME create-on-save / save-to-matter
   // flow (`triggerSave`) via a DIRECT call — no PaneEventBus discriminant. No-op outside the bridge
@@ -2597,6 +2623,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 void triggerSave(mode ?? 'version');
               }}
               canSave={canSaveNow}
+              // G10 (task 040): the manual "Refresh Profile" button — only for a PROMOTED doc (there is a
+              // sprk_document to re-profile). Undefined for a transient/unpromoted mount → the button hides.
+              onRefreshProfile={state.documentRef?.sprkDocumentId ? () => void triggerRefreshProfile() : undefined}
               isSaving={isSavingNow}
               // UAT round-2 items #1/#2 — the editor's "Review" toolbar dropdown toggles this docked
               // summary panel (owned here) alongside its own right-gutter "Review Notes". `open` mirrors
