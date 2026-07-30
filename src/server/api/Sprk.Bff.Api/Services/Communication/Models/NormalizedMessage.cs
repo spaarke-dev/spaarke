@@ -1,3 +1,5 @@
+using Sprk.Bff.Api.Models.Ai;
+
 namespace Sprk.Bff.Api.Services.Communication.Models;
 
 /// <summary>
@@ -67,7 +69,42 @@ public sealed record NormalizedMessage
     /// read attachment bytes themselves).
     /// </summary>
     public string? AttachmentText { get; init; }
+
+    /// <summary>
+    /// Per-attachment extracted text with page structure — the machine-verifiable counterpart to the flat
+    /// <see cref="AttachmentText"/> blob. ADDITIVE (email-communication-intelligence-r1 task 041 / FR-13):
+    /// <see cref="AttachmentText"/> is UNCHANGED (the same bounded concatenation the deterministic rungs +
+    /// <c>CitationVerifier</c> already read); this list additionally retains WHICH attachment each span came
+    /// from and its page layout, so the attachment-grounded action extractor can produce a machine-verified
+    /// "cited to THIS attachment, page N" locator (locate the verbatim cited span in a specific attachment's
+    /// specific page) instead of a model-asserted one. Populated only on the inbound capture path
+    /// (<c>IncomingCommunicationProcessor.AddAttachmentTextAsync</c>) where attachment bytes are extracted;
+    /// empty on the stored-record reconstruction path (<c>CommunicationService.ReconstructEnvelopeAsync</c>
+    /// does not re-extract) and the messaging path — the FR-13 extraction step then simply finds no flagged
+    /// attachments and no-ops (best-effort, NFR-04).
+    /// </summary>
+    public IReadOnlyList<AttachmentExtractedText> AttachmentTexts { get; init; } = Array.Empty<AttachmentExtractedText>();
 }
+
+/// <summary>
+/// One attachment's extracted text, retaining the attachment identity and page structure the flat
+/// <see cref="NormalizedMessage.AttachmentText"/> concatenation discards. ADDITIVE (task 041 / FR-13).
+/// </summary>
+/// <param name="FileName">Attachment file name (the stable join key present at extraction time and on the
+/// child <c>sprk_document</c>).</param>
+/// <param name="DocumentId">The child <c>sprk_document</c> id when known at extraction time; otherwise null
+/// (the document record may be created later in the pipeline). The FileName remains the human-facing locator.</param>
+/// <param name="FullText">This attachment's full extracted text (bounded) — the exact per-attachment slice
+/// that contributes to <see cref="NormalizedMessage.AttachmentText"/>. Used for attachment-scoped verbatim
+/// citation verification (NFR-06).</param>
+/// <param name="Pages">Per-page text when the extractor reported page structure (PDFs / Office docs via
+/// Document Intelligence); empty for single-blob attachment types (e.g. plain text). Used to code-derive the
+/// page number of a verified cited span.</param>
+public sealed record AttachmentExtractedText(
+    string FileName,
+    Guid? DocumentId,
+    string FullText,
+    IReadOnlyList<ExtractedPage> Pages);
 
 /// <summary>
 /// Attachment descriptor on the normalized envelope. Carries the metadata the deterministic rungs

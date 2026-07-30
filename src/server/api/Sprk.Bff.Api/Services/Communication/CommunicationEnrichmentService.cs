@@ -68,6 +68,25 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     private const string CreateTaskSentinelFieldPrefix = "__create_task__:";
 
     /// <summary>
+    /// Task 041 (FR-13) — the <c>sprk_emailreviewlog.sprk_targetfield</c> sentinel PREFIX for an
+    /// attachment-grounded action-extraction proposal row. DISTINCT from
+    /// <see cref="CreateTaskSentinelFieldPrefix"/> so an attachment-extracted action and a body-extracted Job C
+    /// task on the same email each keep their own open/closed lifecycle under
+    /// <see cref="LoadOpenProposalFieldsAsync"/>'s existing per-field walk. Suffixed with a stable hash of
+    /// (attachment file name + candidate subject) so distinct actions across attachments do not collide.
+    /// </summary>
+    private const string AttachmentActionSentinelFieldPrefix = "__attach_action__:";
+
+    /// <summary>
+    /// Task 041 (FR-13) — the provenance label written to <c>sprk_emailreviewlog.sprk_actor</c> for
+    /// attachment-grounded action rows, distinguishing them from Job C (<see cref="ConsumerTypes.EmailCreateTask"/>)
+    /// rows in the audit trail. This is a plain provenance STRING, NOT a routed closed-catalog consumer type —
+    /// the AI extraction itself reuses the shipped CREATE-TASK-FROM-EMAIL Action (via <c>ICommunicationCreateTaskAi</c>),
+    /// so no new <see cref="ConsumerTypes"/> entry / Binding / eval family is introduced (§11 reuse).
+    /// </summary>
+    private const string AttachmentActionActor = "email-attachment-action";
+
+    /// <summary>
     /// The 7 core record types whose <c>sprk_communication</c> regarding lookup Job B may propose updates to
     /// (task 020 / note 001 — matter, project, invoice, work assignment, budget, service request, report
     /// card). Reads the WRITE field from the code source of truth (<see cref="RegardingFieldMap"/>), never a
@@ -192,6 +211,13 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         // email-propose's allow-list gating.
         await RunStepAsync("email-create-task", communicationId,
             () => RunEmailCreateTaskAsync(communicationId, message, triageResult, ct));
+
+        // Attachment-grounded action extraction (task 041, FR-13): best-effort, non-fatal (NFR-04). Runs after
+        // email-create-task; extracts an action stated ONLY in an attachment (grounded per-attachment on the
+        // extracted attachment text, deterministically cost-gated to likely action-triggers), cited to the
+        // attachment + a machine-verified page locator, and feeds the SAME Job C create leg (no forked create).
+        await RunStepAsync("email-attachment-action", communicationId,
+            () => RunEmailAttachmentActionAsync(communicationId, message, triageResult, ct));
 
         await RunStepAsync("assessment-event", communicationId,
             () => RunAssessmentEmissionAsync(communicationId, direction, message, triageResult, ct));
@@ -1324,6 +1350,315 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         _logger.LogInformation(
             "Enrichment[email-create-task] created task {TaskId} and stored Applied row | CommunicationId: {CommunicationId}, Entity: {Entity}, Subject: {Subject}.",
             createdTaskId, communicationId, entityLogicalName, candidate.Subject);
+    }
+
+    // ── Task 041 (FR-13): attachment-grounded action extraction ──────────────────
+    /// <summary>
+    /// Attachment-grounded action extraction (FR-13). For each attachment whose extracted text a
+    /// DETERMINISTIC pre-filter flags as a likely action-trigger (cost gate, NFR-08), grounds the shipped
+    /// CREATE-TASK-FROM-EMAIL Action (reused via <see cref="ICommunicationCreateTaskAi"/>) on ONLY that
+    /// attachment's text (empty subject/body — so the model can structurally only cite the attachment,
+    /// capturing an action stated ONLY in an attachment), then MACHINE-VERIFIES the cited span exists in that
+    /// attachment and CODE-DERIVES the page number of the span before feeding the SAME Job C create leg
+    /// (<see cref="IActionSeam.CreateTaskAsync"/>) — deadline-bearing candidates are stored PENDING for human
+    /// confirm (NFR-06 / ADR-015), never auto-finalized. Best-effort / non-fatal (NFR-04): any failure logs +
+    /// degrades, never throws up the enrichment/capture path. Reuses the extraction Action, the create leg,
+    /// the append-only audit convention, and the open-proposal idempotency walk — no new Action, facade,
+    /// create mechanism, or closed-catalog consumer type (§11).
+    /// </summary>
+    private async Task RunEmailAttachmentActionAsync(
+        Guid communicationId, NormalizedMessage message, CommunicationTriageResult? triageResult, CancellationToken ct)
+    {
+        try
+        {
+            var attachments = message.AttachmentTexts;
+            if (attachments is not { Count: > 0 })
+            {
+                _logger.LogDebug(
+                    "Enrichment[email-attachment-action] skipped: no per-attachment extracted text (no attachments, or a non-inbound path that does not re-extract) | CommunicationId: {CommunicationId}.",
+                    communicationId);
+                return;
+            }
+
+            // Cost gate (NFR-08): only attachments whose text carries action-trigger signals get an LLM pass.
+            var flagged = attachments.Where(a => AttachmentActionGate.IsLikelyActionTrigger(a.FullText)).ToList();
+            _logger.LogInformation(
+                "Enrichment[email-attachment-action] cost gate | CommunicationId: {CommunicationId}, Attachments: {Total}, Flagged: {Flagged}, Skipped: {Skipped}.",
+                communicationId, attachments.Count, flagged.Count, attachments.Count - flagged.Count);
+            if (flagged.Count == 0)
+            {
+                return;
+            }
+
+            var columns = CoreProposeTargets.Select(t => t.RegardingField).ToArray();
+            var record = await _genericEntityService.RetrieveAsync("sprk_communication", communicationId, columns, ct)
+                .ConfigureAwait(false);
+            if (record is null)
+            {
+                _logger.LogDebug(
+                    "Enrichment[email-attachment-action] skipped: communication record could not be retrieved | CommunicationId: {CommunicationId}.",
+                    communicationId);
+                return;
+            }
+
+            var associations = ResolveAssociatedCoreRecords(record);
+            if (associations.Count == 0)
+            {
+                _logger.LogDebug(
+                    "Enrichment[email-attachment-action] skipped: no association to a core record (nothing to attach a task to) | CommunicationId: {CommunicationId}.",
+                    communicationId);
+                return;
+            }
+
+            var (entityLogicalName, recordId) = associations[0];
+            var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
+            var openSentinels = await LoadOpenProposalFieldsAsync(communicationId, entityLogicalName, ct).ConfigureAwait(false);
+            var createdCount = 0;
+            var pendingCount = 0;
+
+            foreach (var attachment in flagged)
+            {
+                // Ground the extraction on ONLY this attachment's text (subject/body empty) — the model can
+                // structurally only cite the attachment, which is exactly FR-13's "action stated only in an
+                // attachment" case. The reused Action's citation.source will be "attachment".
+                var request = new CommunicationCreateTaskRequest
+                {
+                    EntityLogicalName = entityLogicalName,
+                    Triage = triageResult,
+                    Subject = string.Empty,
+                    BodyText = string.Empty,
+                    AttachmentText = attachment.FullText,
+                    TenantId = tenantId,
+                };
+
+                var candidates = await _createTaskAi.ExtractAsync(request, ct).ConfigureAwait(false);
+                if (candidates is not { Count: > 0 })
+                {
+                    continue;
+                }
+
+                foreach (var candidate in candidates)
+                {
+                    // Machine-verified locator gate (NFR-06, CODE-DERIVED — stronger than the shipped
+                    // merged-blob check): the verbatim cited span MUST be present in THIS attachment's text,
+                    // and the page is derived by locating it — never asserted by the model.
+                    var (present, page) = AttachmentActionGate.VerifyAgainstAttachment(attachment, candidate.Citation?.QuotedText);
+                    if (!present)
+                    {
+                        _logger.LogDebug(
+                            "Enrichment[email-attachment-action] dropped candidate '{Subject}': cited text not located in attachment '{FileName}' (NFR-06) | CommunicationId: {CommunicationId}.",
+                            candidate.Subject, attachment.FileName, communicationId);
+                        continue;
+                    }
+
+                    var sentinelField = BuildAttachmentActionSentinelField(attachment.FileName, candidate.Subject);
+                    if (openSentinels.Contains(sentinelField))
+                    {
+                        _logger.LogDebug(
+                            "Enrichment[email-attachment-action] skipped '{Subject}' from '{FileName}': an open Proposed row already exists (append-only, idempotent) | CommunicationId: {CommunicationId}.",
+                            candidate.Subject, attachment.FileName, communicationId);
+                        continue;
+                    }
+
+                    var locator = BuildAttachmentLocator(attachment.FileName, page);
+                    await StoreAttachmentActionProposedRowAsync(
+                        communicationId, entityLogicalName, recordId, sentinelField, attachment, page, locator, candidate, ct)
+                        .ConfigureAwait(false);
+
+                    if (candidate.DueDate.HasValue)
+                    {
+                        // NFR-06 / ADR-015: deadline-bearing candidates NEVER auto-finalize.
+                        pendingCount++;
+                        _logger.LogInformation(
+                            "Enrichment[email-attachment-action] deadline-bearing candidate '{Subject}' from '{Locator}' stored PENDING for human confirm (DueDate: {DueDate:yyyy-MM-dd}) | CommunicationId: {CommunicationId}.",
+                            candidate.Subject, locator, candidate.DueDate, communicationId);
+                        continue;
+                    }
+
+                    var description = BuildAttachmentActionTaskDescription(candidate, communicationId, locator);
+                    var createResult = await _actionSeam.CreateTaskAsync(
+                        new CreateTaskRequest
+                        {
+                            Subject = Truncate(candidate.Subject, 200),
+                            Description = description,
+                            DueDate = null,
+                            RegardingObjectId = recordId,
+                            RegardingObjectType = entityLogicalName,
+                        },
+                        ct).ConfigureAwait(false);
+
+                    if (createResult.Success && createResult.TaskId != Guid.Empty)
+                    {
+                        await WriteAttachmentActionAppliedRowAsync(
+                            communicationId, entityLogicalName, recordId, sentinelField, attachment, page, locator, candidate, createResult.TaskId, ct)
+                            .ConfigureAwait(false);
+                        createdCount++;
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "Enrichment[email-attachment-action] create-task did not succeed for '{Subject}' ({Error}); Proposed row left open for retry | CommunicationId: {CommunicationId}.",
+                            candidate.Subject, createResult.Error, communicationId);
+                    }
+                }
+            }
+
+            _logger.LogInformation(
+                "Enrichment[email-attachment-action] processed {FlaggedCount} flagged attachment(s) for {Entity}: {CreatedCount} created, {PendingCount} pending human confirm | CommunicationId: {CommunicationId}.",
+                flagged.Count, entityLogicalName, createdCount, pendingCount, communicationId);
+        }
+        catch (Exception ex)
+        {
+            // NFR-04: an attachment-action failure MUST NOT fail capture/enrichment — degrade + log, never throw.
+            _logger.LogWarning(
+                ex,
+                "Enrichment[email-attachment-action] failed (non-fatal) | CommunicationId: {CommunicationId}.",
+                communicationId);
+        }
+    }
+
+    /// <summary>Builds the attachment-action sentinel <c>sprk_targetfield</c> value: the
+    /// <see cref="AttachmentActionSentinelFieldPrefix"/> plus a stable hash of (attachment file name +
+    /// candidate subject), so distinct actions across attachments each get their own open/closed lifecycle
+    /// under <see cref="LoadOpenProposalFieldsAsync"/>.</summary>
+    private static string BuildAttachmentActionSentinelField(string fileName, string subject)
+    {
+        var material = (fileName ?? string.Empty).Trim().ToLowerInvariant() + "|" + (subject ?? string.Empty).Trim().ToLowerInvariant();
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(material));
+        return AttachmentActionSentinelFieldPrefix + Convert.ToHexString(hash)[..8];
+    }
+
+    /// <summary>The machine-verified human-readable locator for a cited attachment span: the file name plus
+    /// the derived page (<c>"contract.pdf p.3"</c>) or just the file name when the page is not resolvable.</summary>
+    private static string BuildAttachmentLocator(string fileName, int? page) =>
+        page.HasValue ? $"{fileName} p.{page.Value}" : fileName;
+
+    /// <summary>Provenance line for a created attachment-action task — cites the source communication + the
+    /// machine-verified attachment locator + the verbatim span.</summary>
+    private static string BuildAttachmentActionTaskDescription(TaskCandidate candidate, Guid communicationId, string locator)
+    {
+        var quoted = candidate.Citation?.QuotedText ?? string.Empty;
+        var provenance = $"Provenance: source communication {communicationId:D}; attachment {locator}. \"{quoted}\"";
+        return string.IsNullOrWhiteSpace(candidate.Description)
+            ? provenance
+            : $"{candidate.Description}\n\n{provenance}";
+    }
+
+    /// <summary>Stores ONE attachment-action candidate as a PENDING <c>Proposed</c> <c>sprk_emailreviewlog</c>
+    /// row — same append-only convention as Job B/C, with <c>kind="attachment-action"</c>, the
+    /// <see cref="AttachmentActionActor"/> provenance label, and the MACHINE-VERIFIED attachment + page in the
+    /// citation.</summary>
+    private async Task StoreAttachmentActionProposedRowAsync(
+        Guid communicationId,
+        string entityLogicalName,
+        Guid recordId,
+        string sentinelField,
+        AttachmentExtractedText attachment,
+        int? page,
+        string locator,
+        TaskCandidate candidate,
+        CancellationToken ct)
+    {
+        var suggestion = new
+        {
+            kind = "attachment-action",
+            subject = candidate.Subject,
+            description = candidate.Description,
+            dueDate = candidate.DueDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            regardingObjectType = entityLogicalName,
+            regardingObjectId = recordId,
+            citation = new
+            {
+                source = "attachment",
+                attachmentFileName = attachment.FileName,
+                attachmentDocumentId = attachment.DocumentId,
+                page,
+                locator,
+                quotedText = candidate.Citation?.QuotedText,
+            },
+            reason = candidate.Reason,
+            confidence = candidate.Confidence,
+            requireConfirm = candidate.DueDate.HasValue, // NFR-06/ADR-015: deadline-bearing requires confirm
+        };
+        var suggestionJson = JsonSerializer.Serialize(suggestion);
+
+        var name = $"Attachment action: {candidate.Subject}";
+        var entity = new Entity("sprk_emailreviewlog")
+        {
+            ["sprk_name"] = Truncate(name, 850),
+            ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+            ["sprk_actortype"] = new OptionSetValue(ReviewActorTypeMachine),
+            ["sprk_action"] = new OptionSetValue(ReviewActionProposed),
+            ["sprk_actor"] = AttachmentActionActor,
+            ["sprk_targetentity"] = Truncate(entityLogicalName, 100),
+            ["sprk_targetrecordid"] = Truncate(recordId.ToString(), 100),
+            ["sprk_targetfield"] = Truncate(sentinelField, 100),
+            ["sprk_confidence"] = (decimal)candidate.Confidence,
+            ["sprk_sourceref"] = Truncate(locator, 1000),
+            ["sprk_aisuggestion"] = suggestionJson,
+        };
+
+        await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Enrichment[email-attachment-action] stored Proposed row | CommunicationId: {CommunicationId}, TargetEntity: {Entity}, Subject: {Subject}, Locator: {Locator}, DeadlineBearing: {DeadlineBearing}.",
+            communicationId, entityLogicalName, candidate.Subject, locator, candidate.DueDate.HasValue);
+    }
+
+    /// <summary>Writes the terminal <c>Applied</c> row for an attachment-action candidate created immediately
+    /// (non-deadline-bearing) — mirrors Job C's append-only convention; the <c>Proposed</c> row is never
+    /// mutated.</summary>
+    private async Task WriteAttachmentActionAppliedRowAsync(
+        Guid communicationId,
+        string entityLogicalName,
+        Guid recordId,
+        string sentinelField,
+        AttachmentExtractedText attachment,
+        int? page,
+        string locator,
+        TaskCandidate candidate,
+        Guid createdTaskId,
+        CancellationToken ct)
+    {
+        var suggestion = new
+        {
+            kind = "attachment-action",
+            subject = candidate.Subject,
+            createdTaskId,
+            citation = new
+            {
+                source = "attachment",
+                attachmentFileName = attachment.FileName,
+                attachmentDocumentId = attachment.DocumentId,
+                page,
+                locator,
+                quotedText = candidate.Citation?.QuotedText,
+            },
+            confidence = candidate.Confidence,
+        };
+        var suggestionJson = JsonSerializer.Serialize(suggestion);
+
+        var name = $"Created attachment-action task: {candidate.Subject}";
+        var entity = new Entity("sprk_emailreviewlog")
+        {
+            ["sprk_name"] = Truncate(name, 850),
+            ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+            ["sprk_actortype"] = new OptionSetValue(ReviewActorTypeMachine),
+            ["sprk_action"] = new OptionSetValue(ReviewActionApplied),
+            ["sprk_actor"] = AttachmentActionActor,
+            ["sprk_targetentity"] = Truncate(entityLogicalName, 100),
+            ["sprk_targetrecordid"] = Truncate(recordId.ToString(), 100),
+            ["sprk_targetfield"] = Truncate(sentinelField, 100),
+            ["sprk_confidence"] = (decimal)candidate.Confidence,
+            ["sprk_sourceref"] = Truncate(locator, 1000),
+            ["sprk_aisuggestion"] = suggestionJson,
+        };
+
+        await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Enrichment[email-attachment-action] created task {TaskId} and stored Applied row | CommunicationId: {CommunicationId}, Entity: {Entity}, Subject: {Subject}, Locator: {Locator}.",
+            createdTaskId, communicationId, entityLogicalName, candidate.Subject, locator);
     }
 
     // ── Step 5: Responsive-Intelligence trigger (assessment event) ───────────────
