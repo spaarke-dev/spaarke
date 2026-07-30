@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Archive-durability decision + impl (AIPL-054 stub)</title>
+    <phase>2 Session</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF session archive path + Dataverse durability semantics; a data-durability decision (potential data loss) with an escalation boundary; tags bff/session/dataverse.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>An architectural decision (accept Cosmos/Redis-authoritative archive vs implement Dataverse summary-GUID caching) with a data-loss risk surface — judgment-heavy, not mechanical.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the same `ChatSessionManager`/`ChatDataverseRepository` archive path as 020/021; serial within Phase 2; `/conflict-check` before the BFF PR.</parallel-reason>
+    <deps>021</deps>
+    <tags>bff, session, dataverse</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Resolve the archive-durability gap (AIPL-054): `ChatSessionManager.DeleteSessionAsync → ArchiveSessionAsync` is
+    logging-only (`ChatDataverseRepository.cs:105-120`) — `sprk_isarchived` is never actually flipped; archive today =
+    Redis evict + Cosmos delete + `sprk_chathistory` snapshot. Decide and implement one of: (A) accept
+    Cosmos/Redis-authoritative archive semantics and document them, OR (B) implement `sprk_aichatsummary`
+    summary-record-GUID caching so the archive flag is durable in Dataverse. Either way, an archived prior session
+    MUST remain retrievable from history with no data loss.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the BFF session tiers (Redis→Cosmos→Dataverse anchor), the
+    `sprk_aichatsummary` archive path, and Dataverse write semantics. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    A decision (A or B) is documented with rationale, and the chosen semantics are implemented + tested: an archived
+    prior session is retrievable from history, the archive semantics are unambiguous (either flag durably flipped in
+    Dataverse, or Cosmos/Redis-authoritative with `sprk_isarchived` explicitly documented as advisory), and no
+    transcript data is lost. Publish-size ≤60 MB + no new HIGH CVE reported.
+  </goal>
+
+  <context>
+    <background>
+      Verified: `ChatSessionManager.DeleteSessionAsync`/`ArchiveSessionAsync` is logging-only at
+      `ChatDataverseRepository.cs:105-120` — `sprk_isarchived` is NOT flipped; reads/archive on the Dataverse tier are
+      stubs (AIPL-054). Today's effective archive is Redis evict + Cosmos delete + a `sprk_chathistory` snapshot. The
+      storage model is ADR-040 Path A (Cosmos = transcript store-of-record). Task 021's fork calls this archive path
+      for the prior session, so its durability is the correctness anchor for "prior session retrievable from history".
+      Option B (summary-GUID caching to durably flip the flag) risks scope-ballooning; it is bounded by an escalation
+      trigger.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs (lines 105-120 — archive stub)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs (DeleteSessionAsync/ArchiveSessionAsync)</file>
+      <file role="canonical-reference">ISessionPersistenceService (Cosmos write-through — the store-of-record)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (archive retrieval tests)</file>
+      <file role="new">projects/ai-advanced-capabilities-analysis-hub-r1/notes/ (archive-durability decision record)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="021" status="pending">Fork endpoint archives the prior session via this path; its retrieval correctness depends on the semantics chosen here.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-040">SCOPE: archive semantics. Cosmos stays the transcript store-of-record (Path A); if option A is chosen, `sprk_isarchived` is documented as advisory and Dataverse remains the anchor — do NOT create a second transcript store.</constraint>
+    <constraint source="ADR-013">SCOPE: the archive path. Reach any AI capability via `PublicContracts/`; MUST NOT fork `Services/Ai/` or inject AI-internal types.</constraint>
+    <constraint source="ADR-029">SCOPE: this BFF-touching task. State Placement Justification (modification of existing archive path), report `dotnet publish` compressed size + diff vs ~49.63 MB baseline (≤60 MB), confirm no new HIGH CVE.</constraint>
+    <constraint source="project">SCOPE: archive correctness. Whichever option is chosen, an archived prior session MUST remain retrievable from history with NO transcript data loss; the semantics MUST be explicitly documented (no silent logging-only stub left behind).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF session archive durability</topic>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/ai/public-contracts-facade.md</file>
+    </files>
+    <patterns>
+      <pattern name="archive stub" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs:105-120">
+        The logging-only archive to replace; option B flips `sprk_isarchived` on the cached summary-record GUID, option A documents Cosmos/Redis-authoritative and removes the misleading stub.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor + reason; load knowledge; read the archive stub at `ChatDataverseRepository.cs:105-120` + `ChatSessionManager` archive path.</step>
+    <step order="1">Assess options A vs B: what retrieval-from-history requires today (Cosmos read) vs what durably flipping `sprk_isarchived` requires (caching the summary-record GUID); scope option B honestly.</step>
+    <step order="2">Choose A or B; write the decision record (rationale, data-durability implications, what "archived" means afterward) to notes/.</step>
+    <step order="3">Implement the chosen option: (A) document Cosmos/Redis-authoritative semantics + remove the misleading logging-only stub / make it explicit; or (B) cache the summary-record GUID and durably flip `sprk_isarchived`.</step>
+    <step order="4">Add tests: an archived prior session is retrievable from history; no transcript data lost; if B, the flag is durably set.</step>
+    <step order="5">`/conflict-check` vs redesign-r2; `dotnet build` + `dotnet test`; `dotnet publish -c Release` size + CVE report.</step>
+    <step order="6">Update TASK-INDEX.md: set 022 status to ✅.</step>
+    <step order="7">Document any deviation in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If option B (summary-GUID caching) balloons beyond a bounded change (e.g. requires new persistence infrastructure, a schema addition, or cross-service refactoring), STOP and escalate for a scope decision per CLAUDE.md §6 — do not silently expand scope.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test BFF; `dotnet publish -c Release`; `dotnet list package --vulnerable`.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (archive retrieval tests)</output>
+    <output type="doc">projects/ai-advanced-capabilities-analysis-hub-r1/notes/ (archive-durability decision record + publish-size/CVE)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A decision (A or B) is recorded in notes/ with rationale + data-durability implications; the chosen "archived" semantics are unambiguous.</criterion>
+    <criterion testable="true">Given an archived prior session, when retrieved from history, then its transcript is returned with no data loss.</criterion>
+    <criterion testable="true">If option B: `sprk_isarchived` is durably flipped on the `sprk_aichatsummary` record (verified by test). If option A: the logging-only stub is removed or made explicit and the advisory nature of `sprk_isarchived` is documented.</criterion>
+    <criterion testable="true">Negative: no silent logging-only archive stub remains that implies durability it does not provide.</criterion>
+    <criterion testable="true">BFF publish-size ≤60 MB compressed (diff reported); no new HIGH CVE; all unit tests pass; build green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-06 risk / PLAN §2.3 / AIPL-054. Owner-locked storage model = Cosmos store-of-record (Path A), which
+    makes option A the lower-risk default unless durable Dataverse archive is explicitly needed. `/conflict-check` before the BFF PR.
+  </notes>
+
+  <completion status="completed" date="2026-07-28">
+    DECISION: **Option B — durable Dataverse archive** (owner-directed). `ChatDataverseRepository.ArchiveSessionAsync`
+    (was the AIPL-054 logging-only stub, lines 168–183) now durably flips `sprk_isarchived = true` on the prior
+    session's `sprk_aichatsummary` record. The "missing cached summary GUID" gap is closed IN-PLACE — a single
+    tenant-scoped QueryExpression on `sprk_sessionid` + `sprk_tenantid` (TopCount 1, NoLock) resolves the record GUID
+    (mirrors the sibling `GetSessionsByAnalysisAsync`), then a sparse `IGenericEntityService.UpdateAsync` flips the flag.
+    NO ChatSessionManager summary-GUID caching refactor, NO new persistence infra, NO schema change → escalation
+    trigger did NOT fire.
+
+    ADR-040 Path A honored: archive is a MARKER update only — the Cosmos transcript is NEVER deleted here; the archived
+    prior session stays retrievable / switchable-back (no transcript data loss). Non-fatal when no cold-tier anchor row
+    exists (CreateSessionAsync tolerates Dataverse write failure → Redis-only): logs a warning, no throw, no blind update.
+
+    FILES: src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs (ArchiveSessionAsync rewrite);
+    tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ChatDataverseRepositoryTests.cs (+3 tests: durable flip + tenant-scoped
+    query shape; marker-only never DeleteAsync + exactly one sprk_isarchived=true update; no-summary-row non-fatal);
+    projects/ai-advanced-capabilities-analysis-hub-r1/notes/task-022-archive-durability-decision.md (decision record).
+
+    Placement Justification (§10): modification of an EXISTING repository method — no new service/endpoint/DI/package/job.
+    Injects IGenericEntityService only (no AI-internal types; Services/Ai orchestration untouched).
+
+    GATES (Step 9.5): build green (0 errors); ChatDataverseRepositoryTests 10/10 pass; code-review PASS (0 Critical/0 Warning/1
+    Suggestion); adr-check CLEAN (ADR-040/013/014/028/010/002 compliant). /conflict-check soft pass (BFF hot-path; zero
+    Services/Ai orchestration edits; origin/master holds only the pre-020 baseline of this file — no competing ArchiveSessionAsync edit).
+
+    PUBLISH-SIZE: 47.51 MB compressed (zip, Optimal) — delta 0.00 MB vs 021 baseline 47.51 MB; well under 60 MB HARD ceiling.
+    CVE: no NEW HIGH (only pre-existing System.Security.Cryptography.Xml 8.0.3 transitive). ESCALATION: none.
+  </completion>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL: code-review + adr-check).</protocol>
+  </execution>
+</task>

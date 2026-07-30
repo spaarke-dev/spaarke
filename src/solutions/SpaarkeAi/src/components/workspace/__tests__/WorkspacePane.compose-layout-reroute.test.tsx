@@ -88,6 +88,7 @@ jest.mock('@spaarke/ai-widgets', () => {
 
 // Normal mode (NOT compose-launch) + null activeLayout → nothing auto-installs.
 jest.mock('../../shell/ThreePaneShell', () => ({
+  useAnalysisLaunch: () => null,
   usePaneCollapseContext: () => null,
   useComposeLaunch: () => null,
 }));

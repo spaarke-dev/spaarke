@@ -13,7 +13,8 @@ namespace Sprk.Bff.Api.Api.Agent;
 /// triggered from the M365 Copilot agent.
 ///
 /// Pattern: Agent starts playbook → receives job ID → polls this service for status.
-/// When timeout threshold is exceeded, returns deep-link to Analysis code page.
+/// When timeout threshold is exceeded, returns a deep-link to the SpaarkeAi Analysis surface
+/// (retirement task 060 repoints this from the now-retired legacy Analysis Workspace code page).
 /// </summary>
 public sealed class AgentPlaybookStatusService
 {

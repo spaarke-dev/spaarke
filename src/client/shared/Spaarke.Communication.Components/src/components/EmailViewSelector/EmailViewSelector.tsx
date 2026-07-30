@@ -30,7 +30,16 @@
  */
 import * as React from 'react';
 import { DataGridViewSelector, type SavedView } from '@spaarke/ui-components';
-import { MessageBar, MessageBarBody, Spinner, makeStyles, mergeClasses, tokens, webLightTheme, type Theme } from '@fluentui/react-components';
+import {
+  MessageBar,
+  MessageBarBody,
+  Spinner,
+  makeStyles,
+  mergeClasses,
+  tokens,
+  webLightTheme,
+  type Theme,
+} from '@fluentui/react-components';
 
 export interface EmailViewSelectorProps {
   /** All views to choose from (already mapped from `SavedQuerySummary` by `useEmailViews`). */

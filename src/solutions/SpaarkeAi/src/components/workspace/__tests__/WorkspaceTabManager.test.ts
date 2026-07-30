@@ -488,6 +488,34 @@ describe("WorkspaceTabManager — updateTab", () => {
     expect(mgr.getSnapshot().tabs[0].widgetData).toEqual({ v: 1 });
     void id1;
   });
+
+  // Task 025 (FR-09): updateTab was the ONE mutating method that did not fire
+  // onPersistChange — so a widget's live data update (e.g. AnalysisEditorWidget's
+  // in-progress edit draft, propagated via a widget_update event) never reached the
+  // persisted snapshot and was silently lost on tab close/reopen or page refresh.
+  it("onPersistChange_calledAfterUpdateTab_carriesUpdatedWidgetData", () => {
+    const onPersistChange = jest.fn();
+    const mgr = new WorkspaceTabManager({ onPersistChange });
+    const id1 = mgr.addTab("widget-1", { v: 1 });
+    onPersistChange.mockClear(); // clear the addTab call
+
+    mgr.updateTab(id1, { v: 99 });
+
+    expect(onPersistChange).toHaveBeenCalledTimes(1);
+    const snap = onPersistChange.mock.calls[0][0];
+    expect(snap.tabs.find((t: { id: string }) => t.id === id1)?.widgetData).toEqual({ v: 99 });
+  });
+
+  it("onPersistChange_notCalledOnUpdateTab_unknownId", () => {
+    const onPersistChange = jest.fn();
+    const mgr = new WorkspaceTabManager({ onPersistChange });
+    mgr.addTab("widget-1", { v: 1 });
+    onPersistChange.mockClear();
+
+    mgr.updateTab("ghost-tab", { v: 99 });
+
+    expect(onPersistChange).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

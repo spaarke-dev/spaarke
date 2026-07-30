@@ -21,7 +21,11 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 import { EmailConnectionsReview } from '../EmailConnectionsReview';
 import { EmailTrackingPanel } from '../EmailTrackingPanel';
-import { _resetNavPropCacheForTests, type FiledAssociation, type IResolverWriteContext } from '../../../logic/connections';
+import {
+  _resetNavPropCacheForTests,
+  type FiledAssociation,
+  type IResolverWriteContext,
+} from '../../../logic/connections';
 import type { EmailConnectionsReviewProps, EmailTrackingPanelProps } from '../EmailAssociationsAndTracking.types';
 
 function renderWithProvider(ui: React.ReactElement, theme = webLightTheme) {

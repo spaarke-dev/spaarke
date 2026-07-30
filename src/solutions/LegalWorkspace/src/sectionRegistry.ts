@@ -61,6 +61,11 @@ import { composeEditorRegistration } from "./sections/composeEditor.registration
 // Outlook-style reading pane over sprk_communication. Pattern D dual-use with
 // the `email` direct widget in @spaarke/ai-widgets/register-workspace-widgets.
 import { emailRegistration } from "./sections/email.registration";
+// ai-advanced-capabilities-analysis-hub-r1 (front door, 2026-07-29): Analysis
+// section — the Analysis platform home/launcher (create-by-type cards + grid of
+// sprk_analysis). Pattern D dual-use with the `analysis-hub` direct widget in
+// @spaarke/ai-widgets/register-workspace-widgets.
+import { analysisHubRegistration } from "./sections/analysisHub.registration";
 
 /**
  * Per-widget customization options for the LegalWorkspace section registry.
@@ -126,6 +131,7 @@ export function createLegalWorkspaceSectionRegistry(
     calendarRegistration,
     composeEditorRegistration,
     emailRegistration,
+    analysisHubRegistration,
   ] as const;
 
   if (process.env.NODE_ENV !== "production") {

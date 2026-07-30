@@ -106,9 +106,7 @@ describe('ComposeEditor — FR-13 number-atom rendering (task 032)', () => {
   });
 
   it('the native <ol> marker is suppressed (list-style-type: none) — the atom is the SOLE source of the number, avoiding "1. 4.2" double-numbering', async () => {
-    renderEditor(
-      '<ol><li><p data-paraid="00320003" data-computed-number="4.2.">Clause text</p></li></ol>'
-    );
+    renderEditor('<ol><li><p data-paraid="00320003" data-computed-number="4.2.">Clause text</p></li></ol>');
     await screen.findByRole('textbox');
 
     const rules = allCssRuleText();
@@ -137,10 +135,7 @@ describe('ComposeEditor — FR-13 number-atom rendering (task 032)', () => {
     ['light', webLightTheme],
     ['dark', webDarkTheme],
   ])('the atom renders in %s mode using semantic tokens, not hardcoded hex (ADR-021)', async (_label, theme) => {
-    renderEditor(
-      '<ol><li><p data-paraid="00320006" data-computed-number="1.">First</p></li></ol>',
-      theme
-    );
+    renderEditor('<ol><li><p data-paraid="00320006" data-computed-number="1.">First</p></li></ol>', theme);
 
     const editor = await screen.findByRole('textbox');
     await waitFor(() => expect(editor.querySelector('.compose-number-atom')).not.toBeNull());
@@ -155,9 +150,7 @@ describe('ComposeEditor — FR-13 number-atom rendering (task 032)', () => {
   });
 
   it('the atom is not user-editable and not interactive (pointer-events/user-select suppressed as defense-in-depth)', async () => {
-    renderEditor(
-      '<ol><li><p data-paraid="00320007" data-computed-number="1.">First</p></li></ol>'
-    );
+    renderEditor('<ol><li><p data-paraid="00320007" data-computed-number="1.">First</p></li></ol>');
     const editor = await screen.findByRole('textbox');
     await waitFor(() => expect(editor.querySelector('.compose-number-atom')).not.toBeNull());
 

@@ -69,7 +69,12 @@ import {
 } from '../../logic/connections';
 import type { EmailConnectionsReviewProps } from './EmailAssociationsAndTracking.types';
 import { useConnectionsReviewStyles } from './EmailConnectionsReview.styles';
-import { ASSOCIATION_STATUS_RESOLVED, EMPTY_PROVENANCE, DEFAULT_LINK_CATALOG, fieldFor } from './EmailConnectionsReview.helpers';
+import {
+  ASSOCIATION_STATUS_RESOLVED,
+  EMPTY_PROVENANCE,
+  DEFAULT_LINK_CATALOG,
+  fieldFor,
+} from './EmailConnectionsReview.helpers';
 import { DecisionBlock, FiledRow, SuggestedRow } from './EmailConnectionsReviewRows';
 
 export function EmailConnectionsReview(props: EmailConnectionsReviewProps): React.ReactElement {
@@ -143,7 +148,11 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
   const handleConfirm = React.useCallback(
     (conn: Connection, chosen?: { targetEntity: string; targetId: string; targetName?: string }): void => {
       const selection: IRegardingSelection = chosen
-        ? { entityType: chosen.targetEntity, recordId: chosen.targetId, recordName: chosen.targetName ?? chosen.targetId }
+        ? {
+            entityType: chosen.targetEntity,
+            recordId: chosen.targetId,
+            recordName: chosen.targetName ?? chosen.targetId,
+          }
         : { entityType: conn.entity, recordId: conn.targetId, recordName: conn.targetName };
       void persist(conn.field, selection);
     },
@@ -300,7 +309,13 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
               </div>
             ) : (
               <div className={s.linkRow}>
-                <Button size="small" appearance="subtle" icon={<Link20Regular />} disabled={busy} onClick={() => setLinking(true)}>
+                <Button
+                  size="small"
+                  appearance="subtle"
+                  icon={<Link20Regular />}
+                  disabled={busy}
+                  onClick={() => setLinking(true)}
+                >
                   Link another record…
                 </Button>
               </div>

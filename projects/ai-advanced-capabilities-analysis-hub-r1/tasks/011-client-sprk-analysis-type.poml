@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Client `sprk_analysis` TypeScript type (net-new)</title>
+    <phase>1 Data spine</phase>
+    <gate>blocked-until-010</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New file creation (a net-new type surface) with a fixed schema contract; no runtime behavior or ADR-blast-radius — STANDARD per the rigor tree.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified type modeling against a known owner-schema contract; no architectural judgment — Sonnet-5 @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>010</deps>
+    <tags>frontend, typescript, dataverse</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add a net-new client-side `sprk_analysis` TypeScript type modeling the Analysis record, including the owner-created
+    columns (work-type, the regarding field-set, description, and the `sprk_documentid` SPE subject-pointer). No client
+    `sprk_analysis` type exists today (spec §11.1). Model it after how existing Dataverse-record types are declared in
+    the SpaarkeAi client so the hub grid, wizard, and reopen paths consume a typed record — never `any`.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the SpaarkeAi client's Dataverse record typing conventions (how existing
+    record entities are typed) and strict TypeScript. Follow ADR-012 (shared-lib) placement where applicable.
+  </role>
+
+  <goal>
+    A `sprk_analysis` TS type (interface/type alias) exists in the SpaarkeAi client at the conventional type location,
+    modeling all owner-created columns with correct nullability/lookup shapes; the project compiles; downstream
+    consumers (grid/wizard/reopen) can reference it with no `any`-typed analysis records.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-02 / PLAN 1.1, the Analysis platform's hub grid, creation wizard, and reopen paths all need a typed
+      Analysis record, but no client `sprk_analysis` type exists (spec §11.1). This is the first net-new data-spine
+      surface; it must model the owner-created schema verified in task 010: `sprk_worktype` (Choice: agreement-analysis
+      / legal-research / patent-application), `sprk_regardingmatter/project/document` (lookups), `sprk_description`
+      (multiline), plus `sprk_documentid` (existing SPE subject-pointer lookup).
+    </background>
+    <relevant-files>
+      <file role="new">src/solutions/SpaarkeAi/src/ (conventional client type location — LOCATE existing record-type declarations first; do NOT assume a `types/` folder exists)</file>
+      <file role="canonical-reference">src/solutions/SpaarkeAi/src/utils/launch-resolver.ts (reference for how existing `sprk_*` record shapes/params are typed in this client)</file>
+      <file role="canonical-reference">projects/ai-advanced-capabilities-analysis-hub-r1/spec.md (Prerequisites schema contract)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Owner schema verified present (worktype + regarding field-set + description + FK).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE = a single client type modeling the owner-created columns exactly as verified in task 010. Do NOT add SPE pointer fields (`speDriveItemId`/`GraphDriveId`/`GraphItemId`) to the type — files are reached via `sprk_documentid` → `sprk_document` (task 013 / ADR-007).</constraint>
+    <constraint source="project">SCOPE = model, not fetch. This task defines the type only; it does not author the Dataverse query/service that populates it (consumers do that). The `sprk_worktype` values MUST be a closed union matching the option set: `'agreement-analysis' | 'legal-research' | 'patent-application'`.</constraint>
+    <constraint source="ADR-012">SCOPE = placement. If an equivalent record type already lives in `@spaarke/*` shared libs, extend/co-locate per shared-lib conventions rather than duplicating; otherwise place it at the SpaarkeAi client's conventional type location.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>client dataverse record typing</topic>
+    <files>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/data-model/</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+    </files>
+    <patterns>
+      <pattern name="existing sprk_* record typing" location="src/solutions/SpaarkeAi/src/utils/launch-resolver.ts">
+        Mirror how existing `sprk_*` record ids/shapes are typed here (lookup nullability, logical-name string literals) so the new type is idiomatic to this client.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare STANDARD rigor + reason. Grep the SpaarkeAi client for existing record-type declarations to find the conventional location + shape.</step>
+    <step order="1">Author the `sprk_analysis` type: id, name, `sprk_description`, `sprk_worktype` (closed union), the three regarding lookups (nullable), and `sprk_documentid` (nullable lookup). Match the client's existing lookup-shape convention.</step>
+    <step order="2">Export it from the client's type barrel/module so consumers can import it.</step>
+    <step order="3">Compile (`tsc`/build); confirm no type errors and no `any` in the new type.</step>
+    <step order="4">Update TASK-INDEX.md: set task 011 status to ✅.</step>
+    <step order="5">Document any deviation (e.g. chosen file location) in `projects/ai-advanced-capabilities-analysis-hub-r1/notes/`.</step>
+  </steps>
+
+  <justification>
+    <existing>None. Grep of `src/solutions/SpaarkeAi/src` + `@spaarke/*` finds no `sprk_analysis` client type (spec §11.1 confirms); existing `sprk_*` typing is per-feature and does not cover the Analysis record.</existing>
+    <extension>No — there is no existing Analysis type to extend; this is the first client model of the record. It mirrors existing `sprk_*` typing conventions but declares a new entity shape.</extension>
+    <cost-of-doing-nothing>The hub grid (030), creation wizard (040), and reopen path (031) would consume `any`-typed analysis records — no compile-time contract on work-type or regarding fields, and refactors of the schema would fail silently at runtime.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Typed analysis record renders without any (theme smoke)">
+      <steps>
+        <step>Construct a sample `sprk_analysis` value against the new type in an existing DataGrid/dev harness.</step>
+        <step>Render it in light theme, then toggle to dark theme.</step>
+      </steps>
+      <expected>The sample compiles against the type (no `any`), renders in both themes with correct Fluent v9 tokens (ADR-021 dark-mode: no hard-coded colors, readable in dark), and field values (work-type, regarding, description) bind to the typed fields.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Type-check / build the SpaarkeAi client (tsc).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/{located type location}/sprkAnalysis type + barrel export</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the SpaarkeAi client, when it compiles, then a `sprk_analysis` type exists and is exported, modeling work-type (closed union), the three regarding lookups, description, and `sprk_documentid`.</criterion>
+    <criterion testable="true">`sprk_worktype` is typed as the closed union `'agreement-analysis' | 'legal-research' | 'patent-application'` (not `string`).</criterion>
+    <criterion testable="true">Negative: the type does NOT declare any SPE pointer field (`speDriveItemId`/`GraphDriveId`/`GraphItemId`) — files are reached via the document hop.</criterion>
+    <criterion testable="true">Negative: no `any`-typed member on the Analysis type; the build has zero new type errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec FR-02 / §11.1 / Prerequisites. `sprk_documentid` stays as the SPE subject-pointer (distinct role from
+    `sprk_regardingdocument`, which is a regarding/context lookup). Consumers wire fetch/resolution in 012/013.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute (STANDARD rigor; Step 9.5 gates skipped).</protocol>
+  </execution>
+
+  <completion-note date="2026-07-28">
+    Created `src/solutions/SpaarkeAi/src/types/sprkAnalysis.ts` — first client `sprk_analysis` type
+    (`ISprkAnalysisRecord` + `SprkAnalysisWorkType`/`SprkAnalysisStatus` enums + `AnalysisWorkTypeId`
+    closed kebab union + `SPRK_ANALYSIS_SELECT`). Field shapes verified against
+    `docs/data-model/field-mapping-reference.md` (Analysis domain) +
+    `notes/schema-prerequisites.md` VERIFIED PRESENT section. First `types/` folder in SpaarkeAi
+    solution (precedented by sibling `code-pages/CommunicationPage/src/types/`); no barrel added,
+    matching that sibling's direct-import convention. No SPE pointer fields added (ADR-007
+    compliant); no `any`. `npm run typecheck` (tsc-surface-gate) → 0 surface-owned errors. Full
+    deviation rationale in `projects/ai-advanced-capabilities-analysis-hub-r1/notes/task-011-sprk-analysis-type.md`.
+  </completion-note>
+</task>

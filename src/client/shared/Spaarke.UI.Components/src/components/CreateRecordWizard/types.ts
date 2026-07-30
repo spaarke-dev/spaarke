@@ -228,6 +228,12 @@ export interface IFinishContext {
    * `null` when AssociateToStep is not configured or the user skipped it.
    */
   association: AssociationResult | null;
+  /**
+   * Record picked via `config.existingRecordPicker`'s "Select Existing"
+   * button in the Add file(s) step. `null` when `existingRecordPicker` is
+   * not configured, or the user uploaded files instead of picking a record.
+   */
+  selectedExistingRecord: AssociationResult | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -267,6 +273,31 @@ export interface ICreateRecordWizardConfig {
    * Defaults to `false`/undefined (Add file(s) step present, as before).
    */
   hideFilesStep?: boolean;
+  /**
+   * Optional "select an existing record" affordance rendered inside the
+   * built-in "Add file(s)" step, alongside the upload dropzone
+   * (ai-advanced-capabilities-analysis-hub-r1 task 040 — the Analysis
+   * wizard's Step 1 "upload OR select existing Document"). When provided, a
+   * "Select Existing" button opens `navigationService.openLookup` scoped to
+   * `entityType`; the picked record is exposed to `onFinish` via
+   * `IFinishContext.selectedExistingRecord`.
+   *
+   * Selecting an existing record and uploading new files are mutually
+   * exclusive in the UI — picking one clears the other, so `onFinish` only
+   * ever needs to branch on whichever is populated.
+   *
+   * Omitted by every other consumer — fully backward compatible, opt-in only.
+   */
+  existingRecordPicker?: {
+    /** Navigation service used to open the Dataverse lookup side pane. */
+    navigationService: INavigationService;
+    /** Logical name of the entity to search (e.g. `"sprk_document"`). */
+    entityType: string;
+    /** Human-readable label used in button/hint text (e.g. `"Document"`). */
+    entityLabel: string;
+    /** Optional saved view id to scope the lookup dialog. */
+    defaultViewId?: string;
+  };
   /**
    * Optional configuration for an AssociateToStep prepended as step 1.
    *

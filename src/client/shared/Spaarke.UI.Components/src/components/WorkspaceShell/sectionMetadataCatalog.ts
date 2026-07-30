@@ -42,6 +42,7 @@ import {
   BriefcaseSearchRegular,
   EditRegular,
   MailRegular,
+  DocumentSearchRegular,
 } from '@fluentui/react-icons';
 import type { SectionCategory } from './types';
 
@@ -281,6 +282,21 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     icon: MailRegular,
     defaultHeight: '720px',
     entityName: 'sprk_communication',
+  },
+  // ai-advanced-capabilities-analysis-hub-r1 (front door, 2026-07-29): Analysis
+  // section — the Analysis platform home/launcher (create-by-type cards + grid of
+  // sprk_analysis). Pattern D dual-use with the `analysis-hub` direct widget in
+  // `@spaarke/ai-widgets/register-workspace-widgets.ts`. NOT an entity-list grid
+  // section (the grid is nested inside the hub widget, which owns its own
+  // sprk_gridconfiguration), so `entityName` is omitted and `contentSizing` stays
+  // 'grow' (the hub is a bounded flex column that fills its section).
+  {
+    id: 'analysis',
+    label: 'Analysis',
+    description: 'Create and reopen AI analyses — Agreement Review, Legal Research, Patent Application',
+    category: 'ai',
+    icon: DocumentSearchRegular,
+    defaultHeight: '640px',
   },
 ] as const;
 

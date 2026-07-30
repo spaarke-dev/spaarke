@@ -137,6 +137,16 @@ export interface CommandBarProps {
   /** Fires when the user invokes ANY command (default or custom). */
   onCommandInvoke?: (commandId: string, selectedIds: ReadonlyArray<string>) => void;
   /**
+   * Optional override for the built-in `create-form` (`+ New`) command. When
+   * supplied, clicking New calls this INSTEAD of `defaultCreateFormHandler`
+   * (which opens the OOB create form via `Xrm.Navigation.openForm`) — the OOB
+   * form is fully SUPPRESSED, not run in addition. Hosts use this to route New
+   * to a custom surface (e.g. the Analysis grid opens the tabbed Quick Start
+   * modal instead). Absent = the OOB create form (unchanged for every other
+   * grid). `onCommandInvoke` still fires first as an observer.
+   */
+  onCreateNew?: () => void;
+  /**
    * Number of items rendered as inline subtle buttons before the overflow `…` menu.
    * Defaults to 2 to match Power Apps OOB (Refresh + Delete inline; rest in overflow).
    * Set to 0 to push EVERYTHING into the overflow menu.
@@ -309,6 +319,7 @@ export const CommandBar: React.FC<CommandBarProps> = props => {
     parentContext,
     theme = webLightTheme,
     onCommandInvoke,
+    onCreateNew,
     inlineLimit = DEFAULT_INLINE_LIMIT,
     className,
   } = props;
@@ -370,6 +381,15 @@ export const CommandBar: React.FC<CommandBarProps> = props => {
       // Dialog will then intercept.
       onCommandInvoke?.(item.id, selectedIds);
 
+      // `create-form` override: when the host supplies `onCreateNew`, route New
+      // there and SUPPRESS the default OOB create-form handler entirely (the
+      // Analysis grid opens the tabbed Quick Start modal instead of the OOB
+      // form). Every other grid (no override) falls through to the default.
+      if (item.action === 'create-form' && onCreateNew) {
+        onCreateNew();
+        return;
+      }
+
       if (item.action === 'delete-selected') {
         if (selectedIds.length === 0) return;
         setDeleteDialogOpen(true);
@@ -385,7 +405,7 @@ export const CommandBar: React.FC<CommandBarProps> = props => {
         console.error(`[CommandBar] Handler for "${item.id}" threw:`, err);
       }
     },
-    [onCommandInvoke, selectedIds, resolveHandler, handlerContext]
+    [onCommandInvoke, onCreateNew, selectedIds, resolveHandler, handlerContext]
   );
 
   // ── Bulk delete confirmation handler — only runs after Dialog confirm ──

@@ -30,7 +30,7 @@ function renderLayout(props: { leftCollapsed?: boolean; onLeftMount: () => void 
         rightPane={<div data-testid="right-content">right</div>}
         leftCollapsed={props.leftCollapsed}
       />
-    </FluentProvider>,
+    </FluentProvider>
   );
 }
 
@@ -52,7 +52,7 @@ describe('ThreePaneLayout — collapse hides (does not unmount) pane children', 
             rightPane={<div data-testid="right-content">right</div>}
             leftCollapsed={leftCollapsed}
           />
-        </FluentProvider>,
+        </FluentProvider>
       );
 
     // Collapse: content STILL in the DOM (hidden, not removed) — and NOT remounted.

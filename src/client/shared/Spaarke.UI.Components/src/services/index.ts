@@ -242,3 +242,14 @@ export type {
   MembershipResponseBody,
   MembershipFetch,
 } from './membership';
+
+// Analysis file open/preview via the sprk_documentid → sprk_document SPE hop (ADR-007).
+// Hoisted from the SpaarkeAi solution (2026-07-29 audit) so AnalysisHubWidget consumes it
+// directly instead of restating the document-hop + preview-url closure locally.
+export { resolveAnalysisDocumentId, resolveAnalysisFilePreview } from './analysisFileResolution';
+export type {
+  AnalysisFilePreviewDeps,
+  AnalysisFilePreviewResolution,
+  AnalysisFilePreviewResolved,
+  AnalysisFilePreviewNoDocument,
+} from './analysisFileResolution';

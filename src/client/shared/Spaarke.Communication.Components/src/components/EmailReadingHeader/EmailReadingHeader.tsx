@@ -29,7 +29,15 @@
  * semantic tokens only (ADR-021) — themes correctly via the host `FluentProvider`.
  */
 import * as React from 'react';
-import { makeStyles, tokens, Text, Skeleton, SkeletonItem, MessageBar, MessageBarBody } from '@fluentui/react-components';
+import {
+  makeStyles,
+  tokens,
+  Text,
+  Skeleton,
+  SkeletonItem,
+  MessageBar,
+  MessageBarBody,
+} from '@fluentui/react-components';
 import { Mail20Regular } from '@fluentui/react-icons';
 import type { IEmailHeaderRecord, IEmailReadingHeaderProps } from './EmailReadingHeader.types';
 
@@ -55,8 +63,7 @@ const useStyles = makeStyles({
   errorWrap: { padding: tokens.spacingHorizontalM },
 });
 
-const HEADER_SELECT =
-  '$select=sprk_subject,sprk_from,sprk_to,sprk_cc,sprk_bcc,sprk_sentat,sprk_receiveddate';
+const HEADER_SELECT = '$select=sprk_subject,sprk_from,sprk_to,sprk_cc,sprk_bcc,sprk_sentat,sprk_receiveddate';
 
 function fmtDate(iso: string | null | undefined): string | null {
   if (!iso) return null;

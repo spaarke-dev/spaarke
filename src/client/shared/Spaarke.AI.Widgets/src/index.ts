@@ -248,6 +248,34 @@ export type {
 export { serializeCreateMatterWizardState } from './widgets/workspace/CreateMatterWizardWidget';
 
 // ---------------------------------------------------------------------------
+// Widgets: CreateAnalysisWizardWidget — embedded per-type Analysis creation
+// flow (ai-advanced-capabilities-analysis-hub-r1 task 040)
+//
+// Three-step embedded wizard (Add file(s) → Analysis Details → Next Steps)
+// that creates a `sprk_analysis` record. Exported (not self-registered) so
+// the hub (task 030) and entry routing (task 050) can register/consume it —
+// see the file's own header doc + `register-workspace-widgets.ts`
+// ('create-analysis-wizard' registration).
+// ---------------------------------------------------------------------------
+
+export { CreateAnalysisWizardWidget } from './widgets/workspace/CreateAnalysisWizardWidget';
+export type { CreateAnalysisWizardData } from './widgets/workspace/CreateAnalysisWizardWidget';
+export { serializeCreateAnalysisWizardState } from './widgets/workspace/CreateAnalysisWizardWidget';
+
+// ---------------------------------------------------------------------------
+// Widgets: AnalysisHubWidget — Analysis platform home/launcher tab
+// (ai-advanced-capabilities-analysis-hub-r1 task 030, spec FR-10)
+//
+// Three "Create new" work-type cards (Agreement Review live; Legal Research +
+// Patent Application coming-soon) above a DataGrid of existing `sprk_analysis`
+// records (composed via `DataverseEntityViewWidget`, not re-implemented).
+// Registered under 'analysis-hub' via register-workspace-widgets.ts.
+// ---------------------------------------------------------------------------
+
+export { AnalysisHubWidget } from './widgets/workspace/AnalysisHubWidget';
+export type { AnalysisHubWidgetData } from './widgets/workspace/AnalysisHubWidget';
+
+// ---------------------------------------------------------------------------
 // Widgets: DocumentUploadWizardWidget — embedded document upload (AIPU2-104)
 //
 // Three-step file upload flow (Select → Details → Review & Upload) embedded
@@ -385,6 +413,13 @@ export type { PlaybookGalleryData, PlaybookSummary } from './widgets/context/Pla
 
 export { GetStartedCardsWidget } from './widgets/context/GetStartedCardsWidget';
 export type { GetStartedCardId, GetStartedCardsWidgetProps } from './widgets/context/GetStartedCardsWidget';
+
+// Widgets: AnalysisCardsWidget — the 3 analysis work-type launch cards for the
+// tabbed Quick Start modal's "Analysis" tab (ai-advanced-capabilities-analysis-hub-r1).
+// Layout mirror of GetStartedCardsWidget; consumed by SpaarkeAi's QuickStartModal.
+// ---------------------------------------------------------------------------
+export { AnalysisCardsWidget } from './widgets/context/AnalysisCardsWidget';
+export type { AnalysisCardId, AnalysisCardsWidgetProps } from './widgets/context/AnalysisCardsWidget';
 
 // R6 Pillar 7 / task 096 — export PinnedMemoryListWidget so the SpaarkeAi
 // shell can mount it inline in the Context pane (selectedTool ===

@@ -77,7 +77,7 @@ function parseParagraph(sectionRef: string): string | undefined {
  */
 export function findGoverningHeading(
   doc: PMNode,
-  pos: number,
+  pos: number
 ): { heading: string; ordinal: number; computedNumber?: string } | null {
   let ordinal = 0;
   let governing: { heading: string; ordinal: number; computedNumber?: string } | null = null;

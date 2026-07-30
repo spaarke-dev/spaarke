@@ -59,6 +59,7 @@ import {
 import { FileUploadZone } from '@spaarke/ui-components/components/FileUpload/FileUploadZone';
 import { UploadedFileList } from '@spaarke/ui-components/components/FileUpload/UploadedFileList';
 import type { IUploadedFile, IFileValidationError } from '@spaarke/ui-components/components/FileUpload/fileUploadTypes';
+import { buildBffApiUrl } from '@spaarke/auth';
 
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import type { WidgetState } from '../../types/shared';
@@ -396,7 +397,7 @@ const DocumentUploadWizardWidget: React.FC<WorkspaceWidgetProps<DocumentUploadWi
         }
       }
 
-      const response = await data.authenticatedFetch(`${data.bffBaseUrl}/documents/upload`, {
+      const response = await data.authenticatedFetch(buildBffApiUrl(data.bffBaseUrl, '/documents/upload'), {
         method: 'POST',
         body: formData,
       });
