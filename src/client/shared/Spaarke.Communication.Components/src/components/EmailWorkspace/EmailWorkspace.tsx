@@ -311,15 +311,21 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
 
   return (
     <div className={s.root} data-testid="email-workspace">
-      <div className={s.viewSelectorRow}>
-        <EmailViewSelector
-          views={views}
-          activeViewId={selectedViewId}
-          onViewChange={setSelectedViewId}
-          isLoading={isLoading}
-          error={error}
-        />
-      </div>
+      {/* Single-record ("form") mode hides the whole list chrome — both the card list
+          AND this view-selector row ("All Incoming Email") — so opening one email via
+          `openEmailRecord(id, { single: true })` reads as a clean single email, not the
+          list+reading workspace (owner UAT 2026-07-31). List mode renders it unchanged. */}
+      {!hideListPane && (
+        <div className={s.viewSelectorRow}>
+          <EmailViewSelector
+            views={views}
+            activeViewId={selectedViewId}
+            onViewChange={setSelectedViewId}
+            isLoading={isLoading}
+            error={error}
+          />
+        </div>
+      )}
 
       <div className={s.body}>
         <EmailReadingPaneShell
