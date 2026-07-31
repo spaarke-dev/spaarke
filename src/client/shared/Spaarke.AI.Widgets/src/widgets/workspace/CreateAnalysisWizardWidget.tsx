@@ -288,7 +288,13 @@ interface ContactLookupControlProps {
   placeholder?: string;
 }
 
-const ContactLookupControl: React.FC<ContactLookupControlProps> = ({ value, onPick, onClear, disabled, placeholder }) => (
+const ContactLookupControl: React.FC<ContactLookupControlProps> = ({
+  value,
+  onPick,
+  onClear,
+  disabled,
+  placeholder,
+}) => (
   <Input
     readOnly
     value={value?.name ?? ''}
