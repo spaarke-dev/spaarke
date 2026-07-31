@@ -62,7 +62,8 @@ describe('SendEmailDialog', () => {
     renderWithProviders(
       <SendEmailDialog open onClose={jest.fn()} authenticatedFetch={authenticatedFetch} bffBaseUrl={BFF} />
     );
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    // modalType="alert" (item 12 — no light dismiss) renders role="alertdialog", not "dialog".
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
     // dialog mount renders the engine's own action bar.
     expect(screen.getByRole('region', COMPOSER_ACTIONS)).toBeInTheDocument();
   });

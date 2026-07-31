@@ -142,6 +142,15 @@ public static class AiModule
             // the streaming response contains only FunctionCallContent (no text tokens).
             services.AddChatClient(sp => BuildInnerClient(sp, azureOpenAiEndpoint, azureOpenAiChatModel))
                 .UseFunctionInvocation();
+
+            // IEmailDraftAi — compose "sparkle" facade (email-communication-solution-r5 Wave E, ADR-013/§10).
+            // Real impl wraps the IChatClient just registered; the Null-Object mirror below covers the gate-off
+            // case so the facade is ALWAYS resolvable for the /api/communications/draft endpoint (ADR-032, §10 § F.1).
+            services.AddScoped<Services.Ai.PublicContracts.IEmailDraftAi, Services.Ai.PublicContracts.EmailDraftAi>();
+        }
+        else
+        {
+            services.AddScoped<Services.Ai.PublicContracts.IEmailDraftAi, Services.Ai.PublicContracts.NullEmailDraftAi>();
         }
 
         // LlamaParseClient — registered via IHttpClientFactory (ADR-010).

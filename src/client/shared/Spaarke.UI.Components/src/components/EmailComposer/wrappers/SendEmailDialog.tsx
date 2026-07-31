@@ -15,7 +15,7 @@
  * No `@spaarke/auth` import (ADR-028) — `authenticatedFetch` is injected via props.
  */
 import * as React from 'react';
-import { Dialog, DialogSurface, DialogBody, makeStyles } from '@fluentui/react-components';
+import { Dialog, DialogSurface, DialogBody, makeStyles, mergeClasses } from '@fluentui/react-components';
 
 import { EmailComposer } from '../EmailComposer';
 import type {
@@ -28,9 +28,18 @@ import type {
   IRecordLookupTarget,
   IPickedRecord,
   IRecipient,
+  IEmailTemplateSummary,
+  IEmailTemplateRenderResult,
+  IEmailAiDraftAction,
+  IEmailAiDraftRequest,
+  IEmailAiDraftResult,
 } from '../EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
-import type { ICommunicationAssociation, SendCommunicationError } from '../../../services/communicationApi';
+import type {
+  ICommunicationAssociation,
+  SendCommunicationError,
+  CommunicationSendMode,
+} from '../../../services/communicationApi';
 import type { ILookupItem } from '../../../types/LookupTypes';
 
 /** Regarding record to auto-associate the sent email with (R3 task 020, FR-07). */
@@ -60,6 +69,15 @@ const useDialogStyles = makeStyles({
     flexDirection: 'column',
     // Surface itself never scrolls — the body owns the scroll region below.
     overflow: 'hidden',
+  },
+  // Maximized (owner UAT 2026-07-30, item 11): fill the app container / mounted surface —
+  // NOT the physical screen. `100%` resolves against the Dialog's positioning context (the
+  // viewport/host surface the dialog is mounted in); the `maxWidth` cap is lifted so the
+  // surface can span the full width. Toggled back to the default rectangle on restore.
+  surfaceMaximized: {
+    maxWidth: '100%',
+    width: '100%',
+    height: '100%',
   },
   body: {
     display: 'flex',
@@ -116,11 +134,40 @@ export interface ISendEmailDialogProps {
    */
   onAddRelationship?: () => Promise<IPickedRecord | null>;
   /**
+   * Compose template picker (Wave E). `onListEmailTemplates` lists selectable OOB
+   * `template` records; `onRenderEmailTemplate` renders the chosen one (merging field
+   * codes from the primary regarding). Both forwarded to the engine via `...composerProps`;
+   * omit either → the toolbar template button is hidden.
+   */
+  onListEmailTemplates?: () => Promise<IEmailTemplateSummary[]>;
+  onRenderEmailTemplate?: (args: {
+    templateId: string;
+    regardingEntityType?: string;
+    regardingRecordId?: string;
+  }) => Promise<IEmailTemplateRenderResult>;
+  /**
+   * AI "sparkle" draft (Wave E). `onDraftWithAi` generates/refines the body via the BFF; optional
+   * `aiDraftActions` overrides the preset quick-actions. Both forwarded to the engine via
+   * `...composerProps`; omit `onDraftWithAi` → the sparkle button is hidden.
+   */
+  onDraftWithAi?: (req: IEmailAiDraftRequest) => Promise<IEmailAiDraftResult>;
+  aiDraftActions?: IEmailAiDraftAction[];
+  /**
    * Resolve a locally-picked file to a governed `sprk_document` (item 9b) so it
    * flows into the send payload. Forwarded verbatim to the engine via the
    * `...composerProps` spread; omitted → local picks stay display-only.
    */
   onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
+  /**
+   * Seeds the initial From/send mode while keeping the switcher interactive (item 3).
+   * The email surface passes `'user'`. Forwarded to the engine via `...composerProps`.
+   */
+  defaultSendMode?: CommunicationSendMode;
+  /**
+   * The signed-in user's mailbox address, shown as the "From: <user>" label when the
+   * user option is selected (item 3). Host-resolved (context-agnostic engine).
+   */
+  fromMailbox?: string;
   /**
    * Optional header-title override forwarded to the engine (e.g.
    * `Reply: <subject>`). Additive/optional; omitted → the engine's mode-derived
@@ -182,6 +229,15 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
   const { open, onClose, mode, onSent, onError, regarding, associations, ...composerProps } = props;
   const dialogStyles = useDialogStyles();
 
+  // Maximize/restore (owner UAT 2026-07-30, item 11). The surface size is owned here (the
+  // engine owns the header where the toggle button lives), so the composer receives an
+  // `onToggleMaximize` callback + the current `isMaximized` flag and renders the button.
+  const [maximized, setMaximized] = React.useState(false);
+  // Always restore to the default rectangle whenever the dialog is (re)opened.
+  React.useEffect(() => {
+    if (!open) setMaximized(false);
+  }, [open]);
+
   // Fold `regarding` into the EXISTING association mechanism (ADR-024) — one
   // more `ICommunicationAssociation`, deduped against any explicit associations.
   // No second association path is introduced.
@@ -200,17 +256,24 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
   return (
     <Dialog
       open={open}
+      // modalType="alert" disables light-dismiss (backdrop click) AND Escape-to-close so an
+      // accidental click outside can't discard an in-progress draft (owner UAT 2026-07-30,
+      // item 12). The dialog now closes ONLY via the explicit X / Cancel affordances, which
+      // call onClose directly.
+      modalType="alert"
       onOpenChange={(_event, data) => {
         if (!data.open) onClose();
       }}
     >
-      <DialogSurface className={dialogStyles.surface}>
+      <DialogSurface className={mergeClasses(dialogStyles.surface, maximized && dialogStyles.surfaceMaximized)}>
         <DialogBody className={dialogStyles.body}>
           <EmailComposer
             {...composerProps}
             associations={mergedAssociations}
             mount="dialog"
             mode={mode ?? 'compose'}
+            isMaximized={maximized}
+            onToggleMaximize={() => setMaximized(m => !m)}
             onSent={result => {
               onSent?.(result.communicationId);
               onClose();

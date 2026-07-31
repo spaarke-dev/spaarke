@@ -44,6 +44,11 @@ const useStyles = makeStyles({
   title: {
     minWidth: 0,
     fontFamily: '"Segoe UI", system-ui, sans-serif',
+    // 18pt email title (owner UAT #10). No Fluent font-size token maps to
+    // exactly 18px (base400 = 16px, base500 = 20px), so set it explicitly; the
+    // line-height token still themes correctly (ADR-021).
+    fontSize: '18px',
+    lineHeight: tokens.lineHeightBase500,
   },
 });
 
@@ -52,7 +57,7 @@ export const EmailReadingHeader: React.FC<IEmailReadingHeaderProps> = ({ subject
 
   return (
     <div className={s.titleBar} data-testid="email-reading-header">
-      <Text as="h1" size={500} weight="semibold" className={s.title} truncate wrap={false}>
+      <Text as="h1" weight="semibold" className={s.title} truncate wrap={false}>
         {subject || '(no subject)'}
       </Text>
     </div>

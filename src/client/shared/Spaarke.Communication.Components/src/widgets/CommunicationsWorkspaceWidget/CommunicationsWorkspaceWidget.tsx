@@ -76,6 +76,7 @@ import {
   ConversationView,
   getCurrentUserId,
   createXrmNavigationService,
+  openEmailRecord,
 } from '@spaarke/ui-components';
 import type { IConversationRendererProps } from '@spaarke/ui-components';
 import { useCommunicationArrivals, type ArrivalEvent } from './useCommunicationArrivals';
@@ -211,15 +212,18 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
         currentUserSystemUserId={currentUserSystemUserId}
         onMarkThreadRead={onMarkThreadRead}
         // An email is a sprk_communication row (TimelineMessage.id IS the
-        // sprk_communication GUID) — open it as a centred record modal via the
-        // SAME Xrm-backed navigation adapter the shell already uses (§B UAT
-        // 2026-07-27 item 3; no second mechanism, root CLAUDE.md §11).
+        // sprk_communication GUID) — open it in the NEW Spaarke Email surface
+        // (Pattern B: the `sprk_emailpage` code page as a centred modal, single-
+        // record "form" mode) rather than the OOB communication main form. Uses
+        // the shared `openEmailRecord` launcher (Xrm-coupled, best-effort) — the
+        // same shared Email reading pane both mounts render (Wave E, owner UAT
+        // 2026-07-30; supersedes the OOB openRecordModal here).
         onOpenEmail={msg => {
-          void navigationService.openRecordModal?.('sprk_communication', msg.id);
+          void openEmailRecord(msg.id, { single: true });
         }}
       />
     ),
-    [currentUserSystemUserId, navigationService]
+    [currentUserSystemUserId]
   );
 
   // FR-22 awareness count as the ThreadList header accessory (round 3 item 3) —

@@ -256,6 +256,61 @@ describe('emailComposerReducer', () => {
     expect(removed.isDirty).toBe(true);
   });
 
+  describe('SET_PRIMARY_ASSOCIATION (item 8 — single-primary "Related to")', () => {
+    const withAssociations = (associations: EmailComposerState['associations']): EmailComposerState => ({
+      ...start(),
+      associations,
+    });
+
+    it('promotes the picked record to index 0, REPLACING the old primary, and marks dirty', () => {
+      const oldPrimary = { entityType: 'sprk_matter', entityId: 'm-1', entityName: 'Old Primary' };
+      const picked = { entityType: 'sprk_matter', entityId: 'm-2', entityName: 'New Primary' };
+      const next = emailComposerReducer(withAssociations([oldPrimary]), {
+        type: 'SET_PRIMARY_ASSOCIATION',
+        association: picked,
+      });
+      // Picked is index 0 (primary); the old index-0 primary is dropped (single-primary model).
+      expect(next.associations).toEqual([picked]);
+      expect(next.associations[0].entityId).toBe('m-2');
+      expect(next.isDirty).toBe(true);
+    });
+
+    it('preserves SECONDARY associations (index 1+) while replacing only the primary', () => {
+      const oldPrimary = { entityType: 'sprk_matter', entityId: 'm-1', entityName: 'Old Primary' };
+      const secondaryA = { entityType: 'sprk_document', entityId: 'd-1', entityName: 'Doc A' };
+      const secondaryB = { entityType: 'contact', entityId: 'c-1', entityName: 'Contact B' };
+      const picked = { entityType: 'sprk_matter', entityId: 'm-9', entityName: 'New Primary' };
+      const next = emailComposerReducer(withAssociations([oldPrimary, secondaryA, secondaryB]), {
+        type: 'SET_PRIMARY_ASSOCIATION',
+        association: picked,
+      });
+      expect(next.associations).toEqual([picked, secondaryA, secondaryB]);
+    });
+
+    it('DEDUPS the picked record out of the preserved secondaries (case-insensitive, braces stripped)', () => {
+      const oldPrimary = { entityType: 'sprk_matter', entityId: 'm-1', entityName: 'Old Primary' };
+      // Same record as `picked` but as a secondary, with different case + braces — must be deduped.
+      const dupSecondary = { entityType: 'SPRK_MATTER', entityId: '{M-9}', entityName: 'Dup' };
+      const keepSecondary = { entityType: 'sprk_document', entityId: 'd-1', entityName: 'Doc A' };
+      const picked = { entityType: 'sprk_matter', entityId: 'm-9', entityName: 'New Primary' };
+      const next = emailComposerReducer(withAssociations([oldPrimary, dupSecondary, keepSecondary]), {
+        type: 'SET_PRIMARY_ASSOCIATION',
+        association: picked,
+      });
+      expect(next.associations).toEqual([picked, keepSecondary]);
+    });
+
+    it('works from the empty state (no existing primary to replace)', () => {
+      const picked = { entityType: 'sprk_matter', entityId: 'm-1', entityName: 'First Primary' };
+      const next = emailComposerReducer(withAssociations([]), {
+        type: 'SET_PRIMARY_ASSOCIATION',
+        association: picked,
+      });
+      expect(next.associations).toEqual([picked]);
+      expect(next.isDirty).toBe(true);
+    });
+  });
+
   describe('SET_MODE transition matrix', () => {
     const viewState = (): EmailComposerState => initialState(baseProps({ mode: 'view', sourceRecord }));
 
