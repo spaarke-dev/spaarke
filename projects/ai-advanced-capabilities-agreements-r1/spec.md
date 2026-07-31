@@ -1,8 +1,9 @@
 # Agreement Analysis — Review Depth & Output Deliverables (agreements-r1) — AI Implementation Specification
 
 > **Status**: Ready for Implementation
-> **Created**: 2026-07-30
-> **Source**: `design.md` (+ `design-discussion.md`, `notes/HANDOFF-from-compose-fidelity-r4.5.md`, `notes/word-comment-export-gap.md`, `notes/COORDINATION-with-analysis-hub-r1.md`)
+> **Created**: 2026-07-30 · **Revised**: 2026-07-31 (hub-r1 built-state review — scope additions FR-16/FR-17, registry
+> correction, contract facts; see [`notes/HUB-R1-REVIEW-2026-07-30.md`](notes/HUB-R1-REVIEW-2026-07-30.md))
+> **Source**: `design.md` (+ `design-discussion.md`, `notes/HANDOFF-from-compose-fidelity-r4.5.md`, `notes/word-comment-export-gap.md`, `notes/COORDINATION-with-analysis-hub-r1.md`, hub reverse doc `projects/ai-advanced-capabilities-analysis-hub-r1/notes/COORDINATION-hub-r1-TO-agreements-r1.md`)
 
 ## Executive Summary
 
@@ -35,6 +36,10 @@ rename/WS-4 wiring).
 - **Output deliverables**: schema split (`flaggedClause`/`assessment`) · #5 Review Summary Memo (assemble + persist to
   `sprk_analysisoutput`) · #6 memo toolbar dropdown (docx download + email via `EmailComposer`) · #7 Word-comment export
   fidelity + configurable comment author.
+- **Durable review (accepted from hub, 2026-07-31 — the "Phase 2/3" remainder of the owner's must-have)**:
+  the **compose-disposition durable-recall re-route** (reopen restores the review with zero LLM calls — FR-16) · the
+  **wizard→review auto-run bridge** (durable `sprk_document` → session file context → bind → dispatch — FR-17) · the
+  `sprk_agreementtype` **code mirror + behavior-column values + remaining seed rows** (part of FR-06).
 
 ### Out of Scope
 - **PDF ingest** (#1) → deferred to a `compose-r5` platform project. r1 builds/validates on **DOCX**.
@@ -58,7 +63,14 @@ rename/WS-4 wiring).
 - `src/server/api/Sprk.Bff.Api/Services/Compose/**` — memo docx generation via `ComposeDocumentRenderer` /
   `ComposeShadowPatchEngine` (no `ApplyComment` change).
 - `infra/dataverse/actions/*.action.json` + `infra/dataverse/outputschemas/*.schema.json` — generalized Action +
-  schema split; `sprk_analysisoutput` memo persistence.
+  schema split; `sprk_analysisoutput` memo persistence; NEW `sprk_agreementtype` code mirror + seed JSON (FR-06).
+- **FR-16 seam files** (verified): [data] the agreement-review Binding row (`sprk_disposition`) + Action output schema;
+  [server — likely no change] `OutputRouter.cs`, `ChatEndpoints.ProjectComposeOutputs`, `SessionLedgerEntries.cs`;
+  [client] `ConversationPane.dispatchComposeAction` (session routing + apply-leg gating), `ComposeWorkspace.tsx`
+  `materializeComposeDraftFromLedger` (findings branch) + `registerAiReviewComments`, `useNdaReviewAdvisoryCommentsBridge.ts`
+  (retire or keep for live-turn UX), `NdaReviewSummaryPanel` feed (restore from re-materialized state).
+- **FR-17 seam files**: `CreateAnalysisWizardWidget.tsx` (finish hook), session file-context registration,
+  `AnalysisEndpoints.cs` fork/promote consumers (+ the promote bind-result fix in `ChatSessionManager.cs` if taken here).
 - Eval: `tests/integration/contract/Eval/**` (golden-utterance / output-schema coverage for the schema + prompt changes).
 
 ## Requirements
@@ -76,15 +88,21 @@ rename/WS-4 wiring).
    clause number.
 4. **FR-04 — DEF-01 advisory-comment placement fix** — Acceptance: a target matching >1 location (or below the
    confidence bar) is reported `ambiguous`/`not_found`, never silently placed; `ComposeEditor.advisoryComments.test.tsx`
-   is re-enabled **with the original assertion** (`placed=1`) and passes.
+   asserts the **original strict behavior** (`placed=1`) and passes. *(Verified: no skip markers — the assertion was
+   weakened, not skipped; restore it, don't hunt a skip flag.)*
 5. **FR-05 — Split the Action output schema** into discrete `flaggedClause` / `assessment` (+ existing `standardRef`) —
    Acceptance: the Action emits the discrete fields; neither memo (#5) nor export (#7) string-parses markers; the
-   golden-utterance / output-schema eval suite is updated and green. **Foundational — sequence before FR-12/FR-14.**
+   golden-utterance / output-schema eval suite is updated and green. **Foundational — sequence before FR-12/FR-14, and
+   design together with FR-16's findings-materializer branch (same payload contract).**
 6. **FR-06 — One general `agreement-review` Action + sub-domain registry** — Acceptance: a single type-agnostic Action
    (method prompt: role + advisory grounding rules + "compare against retrieved standard") runs the review; NDA's
-   B1–B16 taxonomy/rubric live in the NDA **knowledge pack**, not the prompt; a data-driven registry
-   (`{subDomain, displayName, knowledgePackRef, classificationCue}`) has `nda` + `general` entries; adding a stub entry
-   routes with no code change.
+   B1–B16 taxonomy/rubric live in the NDA **knowledge pack**, not the prompt. **Registry = the `sprk_agreementtype`
+   Dataverse table** (hub-built, env-only today): agreements-r1 authors the **code mirror** (TS type + seed/infra JSON —
+   zero code references exist), fills the **behavior columns** (`sprk_knowledgepackref`, `sprk_classificationcue`,
+   `sprk_confidencethreshold`) via `update_record` (no schema work), and loads the remaining 7 identity seed rows (or
+   hands the list to hub). `subDomain` ≡ `sprk_key`; the `sprk_analysis` lookup's logical name is **`sprk_agreementtype`**
+   (OData `_sprk_agreementtype_value`). Adding a row routes with no code change; the classifier falls back to the single
+   `sprk_isfallback=Yes` row.
 7. **FR-07 — Document classifier + orientation** — Acceptance: on the interactive path, a dropped file is classified on
    the **Reasoning tier** (work-type = agreement? + sub-domain) reusing the Layer-1 node contract (typed enum +
    confidence); on success the session **orients** (`activeWorkType='agreement-analysis'`, knowledge pack bound, tool
@@ -106,12 +124,36 @@ rename/WS-4 wiring).
 13. **FR-13 — #5 Review Summary Memo** — Acceptance: a generated memo lists each changed section with
     {location, before(original), after(final change-disposition), why, golden-ref}; persists to `sprk_analysisoutput`
     (structured fields + JSON body for the section array); no new entity; before/after derived from final dispositions
-    (no per-accept event capture).
+    (no per-accept event capture). *(Strengthened rationale: `DELETE /sessions/{id}` erases the Cosmos ledger — this
+    memo is the ONLY review artifact surviving session deletion; `analysisId` available via `session.HostContext.EntityId`,
+    which flows into every dispatch envelope as `HostEntityId`.)*
 14. **FR-14 — #6 Memo toolbar dropdown** — Acceptance: a toolbar control offers **Generate memo** (downloadable `.docx`
     via `ComposeDocumentRenderer`) and **Email memo** (opens `EmailComposer` with body + subject prefilled).
 15. **FR-15 — #7 Word-comment export fidelity + configurable author** — Acceptance: a saved-and-opened-in-Word agreement
     shows each comment as configurable **Author** · **"Flagged clause"** (not "Grounded fact") · **"Assessment says: …"**
     · **"Standard: …"** (citation, ideally full clause text) — mirroring the gutter; server `ApplyComment` unchanged.
+16. **FR-16 — Durable-recall re-route (hub Part C.1, "Phase 3")** — route `agreement-review` findings through the
+    compose-disposition durable path so **reopen restores the review deterministically with ZERO LLM calls**. Four
+    changes (verified set): (a) Binding `sprk_disposition` informational→`compose` (Dataverse data); (b) extend the
+    FR-04 refresh-durability materializer (`ComposeWorkspace.materializeComposeDraftFromLedger`) with a **findings
+    branch** calling `placeAdvisoryComments` (preserves riskLevel/sectionRef/standardRef — consumes the FR-05 shape);
+    (c) **DEF-09 session routing** — the review dispatch targets the document session (`sessionIdOverride`) so the
+    write and the materialize-read coincide; (d) **apply-leg gating** — findings-only outputs do not enter
+    Accept/Reject/undo or stage spurious redlines. Acceptance: reopening a reviewed analysis re-materializes gutter
+    Review Notes **AND** repopulates `NdaReviewSummaryPanel` from re-materialized state (not just the live event); no
+    re-dispatch occurs (assert zero LLM calls); an over-128KB findings payload does **not** silently vanish
+    (chunked/budgeted or explicitly surfaced — the ledger's inline-payload cap truncation marker is skipped by the
+    projection); a later draft-alternative output does not retract findings durability (FR-29 annotations second layer
+    / supersede semantics respected).
+17. **FR-17 — Wizard→review auto-run bridge (hub "Phase 2")** — on Create-Analysis wizard finish (durable
+    `sprk_document` with `sprk_graphitemid`/`driveid`), the machine: registers the durable doc as **session file
+    context** (bridges the wizard-vs-session fileId impedance — today dispatch hard-errors "No session files were
+    available"), **binds** the session to the Analysis (`POST /api/ai/analysis/fork` or `/promote` — both live and
+    non-wizard-callable; promote requires a documentId), **auto-dispatches** the agreement review, and the advisory
+    comments render in the already-open editable Compose. Acceptance: wizard-finish on an agreement yields a bound
+    session + a completed review with comments visible, no manual re-upload; a promoted session is **durably** bound
+    (visible via `GET /api/ai/chat/sessions/by-analysis/{id}` — the promote silent-FK gap is fixed or designed around,
+    never shipped as-is).
 
 ### Non-Functional Requirements
 - **NFR-01 — BFF publish ≤60 MB** compressed (per BFF-touching task; no new NuGet expected; report absolute + diff).
@@ -183,6 +225,9 @@ split (data/prompt), the Reasoning-tier classifier node, and memo docx-gen + `sp
 | Action output-schema split (`flaggedClause`/`assessment`) (#5/#7) | `nda-review.schema.json` (`explanation`, `standardRef`) | This IS an extension of the Action data (two output fields) | Both consumers string-parse one prose blob — brittle, duplicated |
 | Comment-export mirror (#7) | `composeSessionCommentThreadsToAnchoredComments`, display-only relabel `ComposeCommentGutter.tsx:343-347` | **Fix/extend** the export mapping — relabel + append `standardRef` | Saved-in-Word comments stay raw prose + hardcoded author |
 | Configurable comment author (#7a) | Hardcoded literal `ComposeEditor.tsx:2146` | **Extend** — one prop/config | Author stuck as "AI Advisory Review" |
+| Findings branch in the ledger materializer (FR-16) | `materializeComposeDraftFromLedger` (edits[]/single-edit/comments[] branches), `placeAdvisoryComments`, FR-29 annotations store | **Extend** — one new payload branch reusing `placeAdvisoryComments`; server untouched | Reopen re-derives the review only by re-dispatching (LLM cost/latency/non-determinism) — unacceptable for legal work product |
+| Wizard→session file-context bridge (FR-17) | `SessionDispatchOrchestrator.ResolveTargetFiles` (session files), wizard's `EntityCreationService` upload path | **Extend** — register the durable doc into session file context before dispatch | Wizard-finish cannot run a review at all (hard error "No session files were available") — the owner's Phase-2 must-have fails |
+| `sprk_agreementtype` code mirror (FR-06) | NONE — zero code references exist (env-only table) | N/A — the mirror IS the gap | Every consumer hand-writes schema facts from the live env; naming drift (e.g. `sprk_agreementtypeid` doc error) propagates into code |
 
 *(No net-new services or Dataverse entities. Memo reuses `sprk_analysisoutput`; batch reuses shipped dispatch; the
 schema split + registry are data/prompt. The one Dataverse column need — `sprk_subdomain` — is specified to and owned
@@ -212,6 +257,10 @@ by `analysis-hub-r1`, see Coordination A2.)*
 10. [ ] Memo dropdown → downloadable `.docx` + `EmailComposer` prefilled — Verify: UI test (FR-14).
 11. [ ] Word comments mirror gutter (author/Flagged clause/Assessment/Standard) — Verify: save→open-in-Word manual + export-mapping test (FR-15).
 12. [ ] BFF publish ≤60 MB — Verify: `dotnet publish` size check per BFF task (NFR-01).
+13. [ ] Reopen restores the review with zero LLM calls (gutter notes + summary panel re-materialize; no re-dispatch;
+    over-cap payloads surfaced not vanished) — Verify: reopen integration test + LLM-call assertion (FR-16).
+14. [ ] Wizard-finish auto-runs the review (file bridged to session context, session durably bound, comments render) —
+    Verify: wizard-finish e2e + `by-analysis` durable-binding check (FR-17).
 
 ## Dependencies
 
@@ -220,13 +269,17 @@ by `analysis-hub-r1`, see Coordination A2.)*
 - R4.5 WS-3 numbering + WS-4 `CitationResolver`/`ComputedNumber` — deployed to dev 2026-07-28.
 
 ### External / Cross-Project
-- **`analysis-hub-r1`** (near-deploy) — the wizard (explicit entry), `sprk_analysis` spine + **`sprk_subdomain`**
-  column, `activeWorkType`/`subDomain` launch envelope, session↔Analysis binding. **Full contract + 3 time-sensitive
-  asks (A1 wizard type-picker, A2 `sprk_subdomain` column, A3 launch envelope) in
-  [`notes/COORDINATION-with-analysis-hub-r1.md`](notes/COORDINATION-with-analysis-hub-r1.md).** agreements-r1 ships
-  value on the interactive/chat path regardless of hub timing; only the explicit-wizard path + durable classifier-
-  started Analysis depend on the hub.
-- **`compose-r5`** (future) — PDF ingest; r1 validates on DOCX and inherits PDF later.
+- **`analysis-hub-r1`** — **UPDATED 2026-07-31 (verified)**: tasks 001–070 + Phase 1 **shipped and merged to master**;
+  BFF deployed to `spaarke-bff-dev`. The substrate we consume is LIVE: `sprk_analysis` spine, fork/promote +
+  session↔Analysis FK, wizard-as-modal, `activeWorkType` scoping, editable-Compose open, entry matrix,
+  `sprk_agreementtype` table (env-only, 3/10 seeds). **A1 picker + A3 `subDomain` param are NOT built** (ownership
+  TBD — hub is in wrap-up); hub Phases 2/3 are **ours** (FR-17/FR-16). Hub remainder: 071 user-gated env work, 072 e2e,
+  090 wrap-up. Contracts + corrections: [`notes/HUB-R1-REVIEW-2026-07-30.md`](notes/HUB-R1-REVIEW-2026-07-30.md);
+  historical asks: [`notes/COORDINATION-with-analysis-hub-r1.md`](notes/COORDINATION-with-analysis-hub-r1.md) (A1–A6
+  answered in the hub's reverse doc).
+- **`compose-r5`** (future) — PDF ingest; r1 validates on DOCX and inherits PDF later. *(Note: compose-r5 is active on
+  Editing Completeness work — G12 batch revision reconciliation etc.; watch shared Compose files for conflicts, and PRs
+  #701–#704 churned `WorkspacePane`/`EmailComposer`/`ConversationView` which our #6 email work touches.)*
 - A Reasoning-class Azure OpenAI deployment (provisioned in nda-r1) for the classifier + review.
 
 ## Owner Clarifications
@@ -244,6 +297,8 @@ by `analysis-hub-r1`, see Coordination A2.)*
 | Wizard | Does this project build the Agreement Analysis wizard? | **No** — hub-owned (option A); coordinate | Wizard = hub; machine = here |
 | Autonomous path | Is email/no-human intake in scope? | **No** — illustrative only; out of scope for both | Build human-present paths; keep headless-capable (NFR-05) |
 | Schema split | Split `explanation` or parse client-side? | **Split once** at the Action layer (`flaggedClause`/`assessment`) | Foundational task; eval obligation |
+| Hub Part C.1 + Phase 2/3 | Accept the durable-review scope hub routed to us? | **Yes** ("proceed as recommended", 2026-07-31) | NEW FR-16 (durable recall) + FR-17 (auto-run bridge); agreements-r1 is the critical path of the owner's 3-phase must-have |
+| Registry substrate | Own the `sprk_agreementtype` behavior columns + code mirror? | **Yes** — values via `update_record`, mirror + remaining seeds authored here | FR-06 expanded; per-type threshold column already exists |
 
 ## Assumptions
 
@@ -253,17 +308,25 @@ by `analysis-hub-r1`, see Coordination A2.)*
   label** — affects export/memo assembly + grounding retrieval. *(Owner note "ideally full clause text".)*
 - **Explicit-path sanity-check**: assuming the classifier **optionally** validates a wizard-supplied type and only
   *warns* on a mismatch (the user's explicit choice wins) — affects FR-09 wiring.
-- **`sprk_subdomain` lands with the hub schema** (Coordination A2); if not, agreements-r1 persists sub-domain via the
-  existing `sprk_analysis` surface or defers persistence — affects FR-06/FR-13 persistence wiring.
+- **Sub-domain persistence** *(resolved 2026-07-31, replaces the `sprk_subdomain` assumption)*: the
+  `sprk_analysis.sprk_agreementtype` **lookup exists in the env** (→ `sprk_agreementtype` table); we assume the hub's
+  wizard/write path resolves `sprk_key` → lookup when writing `sprk_analysis`, and we write it on the classifier path.
+- **`subDomain` launch param + wizard picker fall to agreements-r1** unless the hub takes them in wrap-up — small,
+  well-scoped (param: `SpaarkeAiLaunchParams` + `buildLaunchUrl` + `main.tsx`; picker: wizard infoStep or card layer).
+  Affects FR-09 sequencing only.
 
 ## Unresolved Questions
 
 - [ ] **Batch max-selection cap** (soft ~25 vs none) — Blocks: final #3 sub-toolbar behavior (assumption in place).
 - [ ] **`Standard:` reference depth** (citation vs full clause text) + whether grounding reliably supplies full text —
   Blocks: nothing (assumption in place); confirm during the RAG/export task.
-- [ ] **Hub decisions A1/A2/A4** (wizard type-picker timing · `sprk_subdomain` column · classifier-path session
-  binding callability) — Blocks: the explicit-wizard path + durable classifier-started Analysis (not the interactive
-  path). Track via the Coordination doc.
+- [ ] **🚨 Picker landmine + A1 ownership** — all 3 `sprk_agreementtype` seed rows have **`sprk_isselectable=false`**
+  (incl. `nda`); the proposed picker filter renders EMPTY. Owner: fix seeds or invert semantics + decide who builds the
+  picker (hub is in wrap-up) — Blocks: the explicit-wizard sub-domain selection (FR-09 explicit path), not the classifier path.
+- [ ] **Promote silent-FK fix ownership** (hub-side or FR-17 here) — `ChatSessionManager.cs:527` ignores the bind
+  result; 201 without durable FK — Blocks: FR-17's durable-binding acceptance.
+- [ ] **`sprk_key` unique/alternate-key constraint** — unverified in env — Blocks: nothing yet; confirm before code
+  keys on `sprk_key` (FR-06).
 - [ ] **Rename blast radius** — confirm no consumer outside Compose imports `ndaClauseLocation`/`NdaReviewSummaryPanel`
   by name (grep at task time) — Blocks: FR-02 (pure-rename risk only).
 
