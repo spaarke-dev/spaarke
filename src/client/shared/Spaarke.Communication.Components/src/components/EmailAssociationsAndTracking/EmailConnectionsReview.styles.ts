@@ -22,24 +22,25 @@ export const useConnectionsReviewStyles = makeStyles({
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
     gap: tokens.spacingHorizontalM,
+    // Cells sized to content; every card box carries the same `minHeight: 72px` floor
+    // and its text stays ONE line (identity is nowrap + ellipsis, the reason is clamped
+    // to one line and the wording is streamlined), so all four card boxes render the
+    // same size (owner UAT 2026-07-31). A selected card's Confirm button hangs BELOW
+    // its box in the extra cell space without changing the box heights.
     alignItems: 'start',
   },
   // Right-hand column holding the "Link another record" affordance / picker.
   linkCol: { flexShrink: 0, alignSelf: 'flex-start', display: 'flex', alignItems: 'center', maxWidth: '100%' },
-  // "Link another record" — a VISUAL SIBLING of the candidate cards (owner UAT
-  // #5): identical box (border / radius / padding / neutral surface), content
-  // TOP-aligned, the label at the same size + weight as a card's primary line,
-  // and the search icon CENTERED (not pushed to a corner). Clicking it opens the
-  // record-type dropdown directly (owner UAT #6).
-  // owner UAT 2026-07-30 R2 item 7 — a VISUAL SIBLING of the candidate `card`
-  // below: identical border / radius / padding / neutral surface / hover and the
-  // same inter-line `gap` (spacingVerticalXXS), so the "Link another record" tile
-  // matches the reference cards exactly. No explicit `fontFamily` anywhere in these
-  // cards — they inherit Fluent's default Segoe UI (there is no Arial to remove).
+  // "Link another record" — a VISUAL SIBLING of the candidate cards: identical box
+  // (border / radius / padding / neutral surface / hover). Layout per owner UAT
+  // 2026-07-31: the LABEL is top-left aligned (like a candidate card's primary line)
+  // and the SEARCH ICON is centered in the remaining space below. `flexGrow: 1` +
+  // the grid's `align-items: stretch` make it exactly as tall as the sibling cards.
   linkCard: {
     boxSizing: 'border-box',
     width: '100%',
     minWidth: 0,
+    minHeight: '72px',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'stretch',
@@ -51,22 +52,33 @@ export const useConnectionsReviewStyles = makeStyles({
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground1,
     cursor: 'pointer',
+    // A native <button> does NOT inherit font-family (it defaults to the UA font,
+    // which rendered as Arial) — the sibling cards are <div>s that inherit Segoe UI.
+    // Force inheritance so the label matches the candidate cards (owner UAT item 3).
+    fontFamily: 'inherit',
     ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
+  // Top-left label — same size/weight as a candidate card's primary identity line.
   linkCardLabel: {
     minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    // Match the candidate card's primary line exactly (owner UAT #5): base300 + semibold.
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
-  // Search icon centered within the card body (owner UAT #5).
-  linkCardIconRow: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' },
-  linkCardIcon: { flexShrink: 0, color: tokens.colorNeutralForeground3, fontSize: '20px' },
+  // Search icon CENTERED in the space beneath the label (owner UAT 2026-07-31).
+  linkCardIconRow: {
+    display: 'flex',
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  linkCardIcon: { flexShrink: 0, color: tokens.colorBrandForeground1, fontSize: '20px' },
   // One grid cell — the card itself plus its own Confirm slot directly beneath it.
+  // Stretches to the row height (grid `align-items: stretch`); the card inside fills it.
   cardCell: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS, minWidth: 0 },
 
   card: {
@@ -74,6 +86,9 @@ export const useConnectionsReviewStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
     minWidth: 0,
+    // Shared height floor so candidate / blank / link card boxes all render the same
+    // size (content stays one line, so it never exceeds the floor) (owner UAT item 3).
+    minHeight: '72px',
     textAlign: 'left',
     paddingBlock: tokens.spacingVerticalS,
     paddingInline: tokens.spacingHorizontalM,
@@ -100,7 +115,7 @@ export const useConnectionsReviewStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: '64px',
+    minHeight: '72px',
     paddingInline: tokens.spacingHorizontalM,
     border: `${tokens.strokeWidthThin} dashed ${tokens.colorNeutralStroke2}`,
     borderRadius: tokens.borderRadiusMedium,
@@ -138,14 +153,15 @@ export const useConnectionsReviewStyles = makeStyles({
     fontVariantNumeric: 'tabular-nums',
     color: tokens.colorNeutralForeground3,
   },
-  // ── Card line 2 — plain-English match reason ──
+  // ── Card line 2 — plain-English match reason (clamped to ONE line so every card
+  //    box stays the same height; the wording is streamlined to fit) ──
   cardReason: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     display: '-webkit-box',
-    WebkitLineClamp: 2,
+    WebkitLineClamp: 1,
     WebkitBoxOrient: 'vertical',
   },
 

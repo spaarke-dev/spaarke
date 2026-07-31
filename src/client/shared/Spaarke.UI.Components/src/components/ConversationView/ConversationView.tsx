@@ -1278,7 +1278,7 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
                         />
                       )}
 
-                  {/* Forward affordance (task 022 / FR-08) — rendered in the anchor
+                      {/* Forward affordance (task 022 / FR-08) — rendered in the anchor
                     wrapper so it applies uniformly to BOTH the chat bubble and
                     the email-in-flow block WITHOUT editing either subcomponent.
                     It only hands the message back to the host via
@@ -1290,7 +1290,7 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
                     button that does nothing. The accessible name is
                     contextualized per message so N Forward buttons are
                     distinguishable to a screen reader. */}
-                  {/* Trailing per-message actions (Forward + Delete). Delete
+                      {/* Trailing per-message actions (Forward + Delete). Delete
                       (round 7 item 8) is offered for MESSAGE-type rows only — email
                       deletion is owned by the email surface (not here). Both are
                       revealed on row hover/focus (NFR-05) and kept in the DOM/tab

@@ -1,24 +1,23 @@
 /**
- * relatedPrimary.test.tsx — owner UAT 2026-07-30 (item 8): single-primary "Related to".
+ * relatedPrimary.test.tsx — compose "Related to" is an IN-MEMORY, MULTI-association list
+ * (owner UAT 2026-07-31 — supersedes the R2 single-primary replace-confirm).
  *
- * The "Related to" section models a SINGLE primary regarding record (associations[0], which the
- * BFF maps onto sprk_regardingrecord* at send time). Picking a record via "Link another record"
- * does NOT append silently — it opens a "set as primary regarding?" replace-confirm Dialog. On
- * confirm the pick is promoted to associations[0] (the GREEN primary chip); on cancel it is
- * discarded. This exercises the render/interaction wiring end-to-end (the reducer transition
- * itself is covered in EmailComposer.reducer.test.ts).
+ * No `sprk_communication` record exists yet in compose/reply/forward, so associations live in
+ * reducer state and ride the send payload. "Link another record" APPENDS each pick (deduped by
+ * entityType+entityId); the chip × REMOVES one. index 0 is the primary the BFF maps onto
+ * sprk_regardingrecord* at send. There is NO replace-confirm dialog anymore.
  */
 import * as React from 'react';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
 import { EmailComposer } from '../EmailComposer';
 import type { ICommunicationAssociation } from '../../../services/communicationApi';
-import type { IEmailComposerProps, IPickedRecord } from '../EmailComposer.types';
+import type { IEmailComposerProps, IPickedRecord, IEmailComposerHandle } from '../EmailComposer.types';
 
 const noopFetch = jest.fn();
 
 function renderComposer(overrides: Partial<IEmailComposerProps>) {
-  const ref = React.createRef<import('../EmailComposer.types').IEmailComposerHandle>();
+  const ref = React.createRef<IEmailComposerHandle>();
   const utils = renderWithProviders(
     <EmailComposer
       ref={ref}
@@ -31,67 +30,62 @@ function renderComposer(overrides: Partial<IEmailComposerProps>) {
   return { ref, ...utils };
 }
 
-describe('EmailComposer — single-primary "Related to" replace-confirm (item 8)', () => {
-  const existingPrimary: ICommunicationAssociation = {
+describe('EmailComposer — in-memory multi "Related to" (owner UAT 2026-07-31)', () => {
+  const existing: ICommunicationAssociation = {
     entityType: 'sprk_matter',
     entityId: 'm-old',
     entityName: 'Old Matter',
   };
+  const second: ICommunicationAssociation = { entityType: 'sprk_matter', entityId: 'm-2', entityName: 'Second Matter' };
   const picked: IPickedRecord = { entityType: 'sprk_matter', id: 'm-new', name: 'New Matter' };
 
-  it('picking a record opens the replace-confirm, and confirming promotes it to the GREEN primary', async () => {
+  it('shows the "Link another record" tile even when an association already exists', () => {
+    renderComposer({ associations: [existing], onAddRelationship: jest.fn().mockResolvedValue(null) });
+    expect(screen.getByRole('button', { name: /link another record/i })).toBeInTheDocument();
+  });
+
+  it('picking a record APPENDS it to the in-memory list (both kept, no replace-confirm)', async () => {
     const onAddRelationship = jest.fn().mockResolvedValue(picked);
-    const { ref, container } = renderComposer({ associations: [existingPrimary], onAddRelationship });
+    const { ref } = renderComposer({ associations: [existing], onAddRelationship });
 
-    // Existing primary is rendered as the green (data-primary) chip.
-    expect(container.querySelector('[data-primary="true"]')?.textContent).toContain('Old Matter');
-
-    // Pick another record via "Link another record".
     fireEvent.click(screen.getByRole('button', { name: /link another record/i }));
 
-    // The replace-confirm Dialog opens and names the CURRENT primary it will replace.
-    await screen.findByText('Set as primary regarding record');
-    const replaceLine = screen.getByText(/Will replace the currently selected record/);
-    expect(replaceLine.textContent).toContain('Old Matter');
-
-    // Confirm → the pick becomes the primary (index 0); the old primary is dropped.
-    fireEvent.click(screen.getByRole('button', { name: 'Set as primary' }));
-
-    await waitFor(() => {
-      const primary = container.querySelector('[data-primary="true"]');
-      expect(primary?.textContent).toContain('New Matter');
-    });
-    // Single-primary model: the old primary was replaced, not kept.
-    const associations = ref.current?.getState().associations ?? [];
-    expect(associations).toHaveLength(1);
-    expect(associations[0].entityId).toBe('m-new');
+    await waitFor(() => expect(ref.current?.getState().associations).toHaveLength(2));
+    const ids = (ref.current?.getState().associations ?? []).map(a => a.entityId);
+    expect(ids).toEqual(['m-old', 'm-new']); // appended; the existing one is NOT replaced
+    expect(screen.queryByText(/Set as primary/i)).not.toBeInTheDocument();
     expect(ref.current?.getState().isDirty).toBe(true);
   });
 
-  it('cancelling the confirm discards the pick (nothing added)', async () => {
-    const onAddRelationship = jest.fn().mockResolvedValue(picked);
-    const { ref } = renderComposer({ associations: [existingPrimary], onAddRelationship });
+  it('the chip × removes that association from the in-memory list', async () => {
+    const { ref } = renderComposer({ associations: [existing, second], onAddRelationship: jest.fn() });
+    expect(ref.current?.getState().associations).toHaveLength(2);
 
-    fireEvent.click(screen.getByRole('button', { name: /link another record/i }));
-    await screen.findByText('Set as primary regarding record');
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getAllByLabelText('Remove')[0]);
 
-    await waitFor(() => {
-      expect(screen.queryByText('Set as primary regarding record')).not.toBeInTheDocument();
-    });
-    const associations = ref.current?.getState().associations ?? [];
-    expect(associations).toHaveLength(1);
-    expect(associations[0].entityId).toBe('m-old'); // unchanged
+    await waitFor(() => expect(ref.current?.getState().associations).toHaveLength(1));
+    expect(ref.current?.getState().associations[0].entityId).toBe('m-2');
   });
 
-  it('empty state: no primary yet → the confirm omits the "will replace" line', async () => {
+  it('empty state reads "Link a record" and appends the first pick', async () => {
     const onAddRelationship = jest.fn().mockResolvedValue(picked);
-    renderComposer({ associations: [], onAddRelationship });
+    const { ref } = renderComposer({ associations: [], onAddRelationship });
 
-    // With no associations the affordance reads "Link a record".
     fireEvent.click(screen.getByRole('button', { name: /link a record/i }));
-    await screen.findByText('Set as primary regarding record');
-    // Nothing to replace → no replace line.
-    expect(screen.queryByText(/Will replace the currently selected record/)).not.toBeInTheDocument();
+
+    await waitFor(() => expect(ref.current?.getState().associations).toHaveLength(1));
+    expect(ref.current?.getState().associations[0].entityId).toBe('m-new');
+  });
+
+  it('appending the SAME record twice dedups (no duplicate)', async () => {
+    const onAddRelationship = jest.fn().mockResolvedValue(picked);
+    const { ref } = renderComposer({ associations: [], onAddRelationship });
+
+    fireEvent.click(screen.getByRole('button', { name: /link a record/i }));
+    await waitFor(() => expect(ref.current?.getState().associations).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: /link another record/i }));
+    await waitFor(() => expect(onAddRelationship).toHaveBeenCalledTimes(2));
+    expect(ref.current?.getState().associations).toHaveLength(1); // deduped
   });
 });
