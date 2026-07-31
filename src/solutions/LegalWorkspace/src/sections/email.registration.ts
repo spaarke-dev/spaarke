@@ -48,6 +48,9 @@ import {
   XrmDataverseClient,
   createXrmDataService,
   createXrmNavigationService,
+  createXrmEmailComposeHandlers,
+  resolveCurrentUserEmail,
+  searchUsersAndContacts,
   getXrm,
 } from "@spaarke/ui-components";
 import { EmailWorkspace } from "@spaarke/communication-components";
@@ -79,6 +82,34 @@ const EmailSectionMount: React.FC<EmailSectionMountProps> = ({ bffBaseUrl }) => 
   // PCF host passes as `context.webAPI`.
   const webApi = React.useMemo(() => getXrm()?.WebApi, []);
 
+  // Composer parity wiring — WITHOUT these the compose modal (reply/forward/new)
+  // loses recipient lookup, the "Related to" Link-another-record tile, templates,
+  // the AI sparkle, and send-time share links. The standalone EmailPage code page
+  // wires the SAME handlers; this section mount must match so BOTH surfaces behave
+  // identically (owner UAT 2026-07-31 — widget-vs-code-page parity).
+  const composeHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: bffBaseUrl || undefined }),
+    [bffBaseUrl],
+  );
+  const handleSearchRecipients = React.useCallback(
+    (query: string) => searchUsersAndContacts(dataService, query),
+    [dataService],
+  );
+  const dataverseUrl = React.useMemo(
+    () => getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? "",
+    [],
+  );
+  const [fromMailbox, setFromMailbox] = React.useState<string | undefined>();
+  React.useEffect(() => {
+    let cancelled = false;
+    void resolveCurrentUserEmail().then((email) => {
+      if (!cancelled) setFromMailbox(email);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   if (!webApi) {
     // No Dataverse host available. EmailWorkspace's required host props
     // cannot be resolved — fail closed rather than mount a partially-wired
@@ -94,6 +125,18 @@ const EmailSectionMount: React.FC<EmailSectionMountProps> = ({ bffBaseUrl }) => 
     webApi,
     authenticatedFetch,
     bffBaseUrl,
+    onSearchRecipients: handleSearchRecipients,
+    onLookupRecipients: composeHandlers.onLookupRecipients,
+    recordLookupCatalog: composeHandlers.recordLookupCatalog,
+    onLookupRecord: composeHandlers.onLookupRecord,
+    onAddRelationship: composeHandlers.onAddRelationship,
+    onUploadLocalAttachment: composeHandlers.onUploadLocalAttachment,
+    onResolveShareLink: composeHandlers.onResolveShareLink,
+    onListEmailTemplates: composeHandlers.onListEmailTemplates,
+    onRenderEmailTemplate: composeHandlers.onRenderEmailTemplate,
+    onDraftWithAi: composeHandlers.onDraftWithAi,
+    fromMailbox,
+    dataverseUrl,
   });
 };
 
