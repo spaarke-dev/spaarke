@@ -206,7 +206,7 @@ describe('EmailConnectionsReview (single-primary redesign 2026-07-29)', () => {
     expect(screen.getByRole('button', { name: 'Confirm' })).toBeInTheDocument();
   });
 
-  it('CONFIRMED: a Resolved + filed primary renders its card but NO Confirm (the chip + Remove live in the section header)', () => {
+  it('CONFIRMED: shows ONLY the "Link another record" tile — no candidate cards or blank slots (the chip lives in the section header) (owner UAT 2026-07-31)', () => {
     renderWithProvider(
       <EmailConnectionsReview
         {...baseProps({
@@ -222,8 +222,37 @@ describe('EmailConnectionsReview (single-primary redesign 2026-07-29)', () => {
       />
     );
 
-    expect(screen.getByRole('radio', { name: /Acme v Beta/ })).toBeInTheDocument();
+    // Confirmed → the primary is the section-header chip (rendered by the parent), so
+    // the cards row shows NO candidate card, no Confirm, and no "No confident match".
+    expect(screen.queryByRole('radio', { name: /Acme v Beta/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/No confident match/i)).not.toBeInTheDocument();
+    // Only the link tile remains.
+    expect(screen.getByRole('button', { name: /Link another record/i })).toBeInTheDocument();
+  });
+
+  it('HAS MATCHES: renders only the actual candidate cards + Link tile — NO "No confident match" fillers (owner UAT 2026-07-31)', () => {
+    renderWithProvider(
+      <EmailConnectionsReview
+        {...baseProps({
+          associationProvenanceJson: provenance([
+            cand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Acme v Beta', 0.95, { number: 'MAT-1' }),
+          ]),
+        })}
+      />
+    );
+
+    expect(screen.getByRole('radio', { name: /Acme v Beta/ })).toBeInTheDocument();
+    // A single match → no blank filler slots padding the row to a fixed count.
+    expect(screen.queryByText(/No confident match/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Link another record/i })).toBeInTheDocument();
+  });
+
+  it('NO MATCHES: renders a single "No confident match" card + the Link tile (owner UAT 2026-07-31)', () => {
+    renderWithProvider(<EmailConnectionsReview {...baseProps({ associationProvenanceJson: provenance([]) })} />);
+
+    expect(screen.getAllByText(/No confident match/i)).toHaveLength(1);
+    expect(screen.getByRole('button', { name: /Link another record/i })).toBeInTheDocument();
   });
 
   it('offers a "Link another record" tile (interactive) and hides it in readOnly', () => {
