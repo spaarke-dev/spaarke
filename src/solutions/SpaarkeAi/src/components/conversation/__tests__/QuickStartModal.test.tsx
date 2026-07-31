@@ -242,19 +242,19 @@ describe("QuickStartModal", () => {
     await user.click(screen.getByTestId("quick-start-tab-analysis"));
 
     expect(screen.getByTestId("analysis-cards-widget")).toBeInTheDocument();
-    expect(screen.getByTestId("analysis-card-agreement-review")).toBeInTheDocument();
+    expect(screen.getByTestId("analysis-card-nda-analysis")).toBeInTheDocument();
   });
 
-  it("Agreement Review card fires onCreateAnalysis (Agreement Review work type) and closes", async () => {
+  it("NDA Analysis card fires onCreateAnalysis (Agreement Review work type) and closes", async () => {
     const onClose = jest.fn();
     const onCreateAnalysis = jest.fn();
     renderModal({ initialTab: "analysis", onClose, onCreateAnalysis });
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole("button", { name: /Agreement Review/i }));
+    await user.click(screen.getByRole("button", { name: /NDA Analysis/i }));
 
     expect(onCreateAnalysis).toHaveBeenCalledTimes(1);
-    expect(onCreateAnalysis).toHaveBeenCalledWith(100000000, "Agreement Review");
+    expect(onCreateAnalysis).toHaveBeenCalledWith(100000000, "NDA Analysis");
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

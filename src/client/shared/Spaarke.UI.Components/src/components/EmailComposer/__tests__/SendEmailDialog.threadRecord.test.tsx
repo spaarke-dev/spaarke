@@ -132,7 +132,8 @@ describe('SendEmailDialog — thread pin + auto-association (FR-07/FR-19)', () =
       },
       webDarkTheme
     );
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    // modalType="alert" (item 12 — no light dismiss) renders role="alertdialog", not "dialog".
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
     const styledEls = container.querySelectorAll<HTMLElement>('[style]');
     for (const el of Array.from(styledEls)) {
       expect(el.style.color).toBe('');

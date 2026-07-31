@@ -10,7 +10,9 @@
  *   - 🔴 REQUIRES REVIEW    — no engine auto-match. Top-3 candidate cards (always
  *     3 slots; a slot is blank when its candidate is < 70%). Click a card to
  *     select it → [✓ Confirm] appears directly BENEATH that card. Or "Link
- *     another record" (all regarding targets via the shared `PolymorphicPicker`).
+ *     another record" — a card-styled tile whose single click opens the
+ *     record-type dropdown directly, then the host's polymorphic lookup dialog
+ *     (all regarding targets; reuses the shared picker's `getXrmForPicker` bridge).
  *   - 🟡 NEEDS CONFIRMATION — the engine auto-matched (100% / autoFiled) and wrote
  *     the denorm primary; the top card is GREEN and pre-selected, but a human must
  *     Confirm (or switch to another candidate — downgrade allowed).
@@ -27,9 +29,17 @@
  * dark-mode correct). No `as React.ComponentType` cast (NFR-05).
  */
 import * as React from 'react';
-import { MessageBar, MessageBarBody } from '@fluentui/react-components';
+import {
+  MessageBar,
+  MessageBarBody,
+  Menu,
+  MenuTrigger,
+  MenuPopover,
+  MenuList,
+  MenuItem,
+} from '@fluentui/react-components';
 import { Search20Regular } from '@fluentui/react-icons';
-import { PolymorphicPicker } from '@spaarke/ui-components';
+import { getXrmForPicker } from '@spaarke/ui-components';
 import {
   derivePrimaryReview,
   applyRegardingSelection,
@@ -54,7 +64,6 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
     regardingRecordNumber,
     filedAssociations = [],
     writeContext,
-    pickerWebApi = {},
     linkAnotherCatalog,
     readOnly = false,
     onAssociationsChanged,
@@ -64,13 +73,11 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
   const [selectedKey, setSelectedKey] = React.useState<string | undefined>(undefined);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [linking, setLinking] = React.useState(false);
 
   // Session-local review state is per-selected-email — reset on selection change.
   React.useEffect(() => {
     setSelectedKey(undefined);
     setError(null);
-    setLinking(false);
   }, [communicationId]);
 
   // SAME data path as the engine (no client recompute; ADR-045).
@@ -121,10 +128,35 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
 
   const onLinkSelected = React.useCallback(
     (entityType: string, recordId: string, recordName: string): void => {
-      setLinking(false);
       void confirmCandidate({ entity: entityType, targetId: recordId, targetName: recordName, confidence: 1 });
     },
     [confirmCandidate]
+  );
+
+  // "Link another record" → SINGLE click opens the record-type dropdown directly
+  // (owner UAT #6). Picking a type opens the host's polymorphic lookup dialog
+  // (`Xrm.Utility.lookupObjects`, reused via the shared picker's `getXrmForPicker`
+  // bridge). In a non-MDA / dev host that bridge is absent, so the lookup no-ops
+  // (expected). A picked record is filed via the same additive confirm path.
+  const handleLinkPick = React.useCallback(
+    async (entityType: string): Promise<void> => {
+      setError(null);
+      try {
+        const xrm = getXrmForPicker();
+        if (!xrm?.Utility?.lookupObjects) return; // dev/non-MDA host — no-op (expected)
+        const results = await xrm.Utility.lookupObjects({
+          entityTypes: [entityType],
+          defaultEntityType: entityType,
+          allowMultiSelect: false,
+        });
+        if (!results || results.length === 0) return; // user cancelled
+        const picked = results[0];
+        onLinkSelected(entityType, picked.id.replace(/[{}]/g, '').toLowerCase(), picked.name);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not open the record picker.');
+      }
+    },
+    [onLinkSelected]
   );
 
   return (
@@ -161,27 +193,35 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
           );
         })}
 
-        {/* Link another record — a tile matching the candidate cards. Clicking it
-            reveals the record-type dropdown + right-pane lookup IN PLACE (same grid
-            cell — no jump to a separate link); all regarding targets via the shared
-            picker (§11 reuse). */}
+        {/* Link another record — a tile that is a VISUAL SIBLING of the candidate
+            cards (owner UAT #5). A SINGLE click opens the record-type dropdown
+            directly (owner UAT #6): choosing a type opens the host's polymorphic
+            lookup dialog for all regarding targets. No intermediate reveal step. */}
         {!readOnly && (
           <div className={s.cardCell}>
-            {linking ? (
-              <PolymorphicPicker
-                title="Link another record"
-                catalog={catalog}
-                webApi={pickerWebApi}
-                onSelect={onLinkSelected}
-                onError={m => setError(m)}
-                disabled={busy}
-              />
-            ) : (
-              <button type="button" className={s.linkCard} disabled={busy} onClick={() => setLinking(true)}>
-                <span className={s.linkCardLabel}>Link another record</span>
-                <Search20Regular className={s.linkCardIcon} aria-hidden="true" />
-              </button>
-            )}
+            <Menu positioning="below-start">
+              <MenuTrigger disableButtonEnhancement>
+                <button type="button" className={s.linkCard} disabled={busy} data-testid="link-another-record">
+                  <span className={s.linkCardLabel}>Link another record</span>
+                  <span className={s.linkCardIconRow}>
+                    <Search20Regular className={s.linkCardIcon} aria-hidden="true" />
+                  </span>
+                </button>
+              </MenuTrigger>
+              <MenuPopover>
+                <MenuList>
+                  {catalog.map(entry => (
+                    <MenuItem
+                      key={entry.recordTypeRefId}
+                      onClick={() => void handleLinkPick(entry.logicalName)}
+                      data-testid={`link-another-record-item-${entry.logicalName}`}
+                    >
+                      {entry.displayName}
+                    </MenuItem>
+                  ))}
+                </MenuList>
+              </MenuPopover>
+            </Menu>
           </div>
         )}
       </div>

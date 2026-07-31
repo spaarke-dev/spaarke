@@ -15,6 +15,15 @@ public record OpenLinksResponse(
     string FileName
 );
 
+/// <summary>
+/// Response for POST /api/documents/{documentId}/share-link (email-communication-solution-r5 R2 item 12).
+/// The recipient-openable SPE sharing link URL.
+/// </summary>
+public record ShareLinkResponse(
+    /// <summary>The sharing link URL (Graph createLink WebUrl) that opens the file.</summary>
+    string Url
+);
+
 public record UpdateFileRequest(
     string? Name = null,
     string? ParentReferenceId = null

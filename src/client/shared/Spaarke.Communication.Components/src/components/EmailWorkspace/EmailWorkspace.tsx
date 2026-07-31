@@ -21,9 +21,12 @@
  *      4. RECIPIENTS — From/To always; Cc/Bcc only when non-empty (`EmailRecipients`).
  *      5. ATTACHMENTS — collapsible (COLLAPSED by default), header count
  *         "Attachments (N)" → `EmailReadingAttachments`.
- *      6. RELATED TO — collapsible (COLLAPSED), confirmed associations as pills
- *         (`EmailRelatedToPills`) — confirmed-state display ONLY.
- *      7. BODY — `EmailBodyView`, placed AFTER the Related-to section.
+ *      6. RELATED TO — the merged single-primary resolver (`EmailConnectionsReview`
+ *         + a confirmed `ConfirmedChip` in the header). OPEN by default while it
+ *         still needs action (🔴 requires-review / 🟡 needs-confirmation), and
+ *         COLLAPSED once the primary is 🟢 confirmed (owner UAT #7).
+ *      7. SUBJECT + BODY — the email subject line (owner UAT #4) directly above
+ *         `EmailBodyView`, both placed AFTER the Related-to section.
  *   (The old Tracking trio — monitor/high-priority/access — is REMOVED from the
  *   reading pane entirely per the redesign.)
  *
@@ -37,7 +40,7 @@
  * standard hooks only, no `as React.ComponentType` cast.
  */
 import * as React from 'react';
-import { makeStyles, tokens } from '@fluentui/react-components';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
 import type { ICommunicationAssociation } from '@spaarke/ui-components';
 import { EmailViewSelector, useEmailViews } from '../EmailViewSelector';
 import { EmailReadingPaneShell } from '../EmailReadingPaneShell';
@@ -68,18 +71,22 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     flexShrink: 0,
-    // Widget-style header: border + subtle elevation to match the other workspace
-    // widgets' title rows (owner UAT). NOTE: in the deployed app the widget host
-    // frames this further; this is the component-side approximation.
+    // owner UAT 2026-07-30 R2 item 2 — the view dropdown ("All Incoming Email ⌄")
+    // IS the widget's header/title; there is no separate "Email" label. Give it the
+    // elevated Fluent card look the other workspace widget headers use ("Active
+    // Documents ⌄"): a `colorNeutralBackground1` surface + `shadow4` + rounded
+    // corners, so the view name + chevron reads as the widget title. A small bottom
+    // margin lets the rounded elevation read above the reading pane. NOTE: in the
+    // deployed app the widget host frames this further; this is the component-side
+    // approximation. Semantic tokens only (ADR-021).
     position: 'relative',
     zIndex: 1,
     paddingInline: tokens.spacingHorizontalL,
-    paddingBlock: tokens.spacingVerticalS,
+    paddingBlock: tokens.spacingVerticalM,
+    marginBottom: tokens.spacingVerticalXS,
     backgroundColor: tokens.colorNeutralBackground1,
-    borderBottomWidth: tokens.strokeWidthThin,
-    borderBottomStyle: 'solid',
-    borderBottomColor: tokens.colorNeutralStroke2,
-    boxShadow: tokens.shadow2,
+    borderRadius: tokens.borderRadiusMedium,
+    boxShadow: tokens.shadow4,
   },
   body: {
     display: 'flex',
@@ -94,6 +101,18 @@ const useStyles = makeStyles({
   recipientsWrap: {
     paddingBlock: tokens.spacingVerticalM,
     paddingInline: tokens.spacingHorizontalXL,
+  },
+  // Subject line shown directly ABOVE the message body (owner UAT #4) — mirrors
+  // Outlook, where the subject sits right above the message. Same value as the
+  // title bar; semibold. Semantic tokens only (ADR-021).
+  bodySubject: {
+    display: 'block',
+    paddingInline: tokens.spacingHorizontalXL,
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalS,
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase400,
+    color: tokens.colorNeutralForeground1,
   },
 });
 
@@ -110,11 +129,23 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
   onLookupRecord,
   onAddRelationship,
   onUploadLocalAttachment,
+  onResolveShareLink,
+  onListEmailTemplates,
+  onRenderEmailTemplate,
+  onDraftWithAi,
+  aiDraftActions,
+  fromMailbox,
   dataverseUrl,
   linkAnotherCatalog,
   initialSelectedId,
+  hideList,
 }) => {
   const s = useStyles();
+
+  // Single-record ("form") mode: only hide the list when a record is actually
+  // pre-selected (otherwise a hidden list with no selection would be a dead-end
+  // "Select an email" placeholder). Default falsy → unchanged list+reading path.
+  const hideListPane = Boolean(hideList) && Boolean(initialSelectedId);
 
   // Left pane: saved-view discovery + the raw rows the view's FetchXML selects.
   const { views, selectedViewId, setSelectedViewId, rows, isLoading, error } =
@@ -125,6 +156,26 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
   // Mirrors the shell's internally-owned `selectedId` so this component can drive
   // the ONE shared per-selection Dataverse read below.
   const [selectedId, setSelectedId] = React.useState<string | undefined>(initialSelectedId);
+
+  // owner UAT 2026-07-30 R2 item 3 — auto-select the FIRST email once the rows
+  // load, so the reading pane opens on an email instead of the empty "Select an
+  // email" placeholder. Fires ONCE (a ref guards re-selection on later renders),
+  // only when no id is pre-selected and not in single-record `hideList` mode — it
+  // never fights a user's manual selection. The resolved first id is fed to the
+  // shell as its `initialSelectedId`; the shell adopts it (see its item-3 effect)
+  // and notifies back through `onSelectedIdChange`, keeping this mirror in sync.
+  const autoSelectedRef = React.useRef(false);
+  const [autoFirstId, setAutoFirstId] = React.useState<string | undefined>(undefined);
+  React.useEffect(() => {
+    if (autoSelectedRef.current || hideListPane || initialSelectedId) return;
+    const firstId = cardItems[0]?.id;
+    if (firstId) {
+      autoSelectedRef.current = true;
+      setAutoFirstId(firstId);
+    }
+  }, [cardItems, hideListPane, initialSelectedId]);
+
+  const effectiveInitialSelectedId = initialSelectedId ?? autoFirstId;
 
   const record = useEmailWorkspaceRecord(dataService, selectedId);
 
@@ -163,6 +214,12 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
     onLookupRecord,
     onAddRelationship,
     onUploadLocalAttachment,
+    onResolveShareLink,
+    onListEmailTemplates,
+    onRenderEmailTemplate,
+    onDraftWithAi,
+    aiDraftActions,
+    fromMailbox,
     dataverseUrl,
     associations: parentAssociations,
     onSent: record.reload,
@@ -261,7 +318,8 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
         <EmailReadingPaneShell
           items={cardItems}
           isLoading={isLoading}
-          initialSelectedId={initialSelectedId}
+          initialSelectedId={effectiveInitialSelectedId}
+          hideList={hideListPane}
           onSelectedIdChange={setSelectedId}
           actions={toolbarActions}
           renderHeader={() => <EmailReadingHeader subject={record.recordState?.subject ?? null} />}
@@ -291,6 +349,11 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
                   · 🟢 confirmed) AND resolves it. Replaces the old split of a
                   top "Association" resolver + a separate read-only pills list. */}
               <CollapsibleSection
+                // Re-key on the confirmed boundary so the section adopts the
+                // correct default open-state when the async record load resolves
+                // (or when the user confirms): 🟢 confirmed → collapsed; 🔴/🟡 →
+                // open so the user can still act (owner UAT #7).
+                key={`related-to-${primaryModel.state === 'confirmed' ? 'confirmed' : 'active'}`}
                 id="related-to"
                 title="Related to"
                 status={{ tone: associationSummary.tone, label: associationSummary.label }}
@@ -314,7 +377,7 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
                     />
                   ) : undefined
                 }
-                defaultOpen
+                defaultOpen={primaryModel.state !== 'confirmed'}
               >
                 <EmailConnectionsReview
                   communicationId={id}
@@ -329,6 +392,13 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
                   onAssociationsChanged={record.reload}
                 />
               </CollapsibleSection>
+
+              {/* Subject line directly above the message body (owner UAT #4) —
+                  same value the title bar shows; gives the reader the subject
+                  right above the message, Outlook-style. */}
+              <Text as="h2" className={s.bodySubject} data-testid="email-body-subject" truncate wrap={false}>
+                {record.recordState?.subject || '(no subject)'}
+              </Text>
 
               <EmailBodyView
                 selectedId={id}

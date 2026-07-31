@@ -18,12 +18,11 @@ function renderWithProvider(ui: React.ReactElement, theme = webLightTheme) {
 
 describe('EmailRecipients', () => {
   it('always renders From and To rows, even when Cc/Bcc are omitted', () => {
-    renderWithProvider(
-      <EmailRecipients from="jane.doe@example.com" to="john.smith@example.com" />
-    );
+    renderWithProvider(<EmailRecipients from="jane.doe@example.com" to="john.smith@example.com" />);
 
     expect(screen.getByTestId('email-recipients')).toBeInTheDocument();
-    expect(screen.getByText('From')).toBeInTheDocument();
+    // owner UAT R2 item 6 — "From" is now plain "From:" text (not a boxed label).
+    expect(screen.getByText('From:')).toBeInTheDocument();
     expect(screen.getByText('jane.doe@example.com')).toBeInTheDocument();
     expect(screen.getByText('To')).toBeInTheDocument();
     expect(screen.getByText('john.smith@example.com')).toBeInTheDocument();
@@ -33,12 +32,7 @@ describe('EmailRecipients', () => {
 
   it('renders Cc/Bcc rows only when they have a value', () => {
     renderWithProvider(
-      <EmailRecipients
-        from="jane.doe@example.com"
-        to="john.smith@example.com"
-        cc="legal-team@example.com"
-        bcc={null}
-      />
+      <EmailRecipients from="jane.doe@example.com" to="john.smith@example.com" cc="legal-team@example.com" bcc={null} />
     );
 
     expect(screen.getByText('Cc')).toBeInTheDocument();
@@ -49,7 +43,7 @@ describe('EmailRecipients', () => {
   it('renders empty From/To rows (not a crash) when the values are null', () => {
     renderWithProvider(<EmailRecipients from={null} to={null} />);
 
-    expect(screen.getByText('From')).toBeInTheDocument();
+    expect(screen.getByText('From:')).toBeInTheDocument();
     expect(screen.getByText('To')).toBeInTheDocument();
   });
 

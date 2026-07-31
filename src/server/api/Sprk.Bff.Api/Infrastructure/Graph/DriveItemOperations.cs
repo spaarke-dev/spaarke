@@ -1076,6 +1076,41 @@ public class DriveItemOperations
     }
 
     /// <summary>
+    /// Creates a recipient-openable SPE sharing link for a DriveItem via OBO (the caller's own SPE
+    /// access authorizes the operation — email-communication-solution-r5 R2 item 12). Mirrors the
+    /// Graph <c>createLink</c> body used by <see cref="SpeAdminGraphService.CreateSharingLinkAsync"/>,
+    /// but OBO with the driveId already resolved (no container→drive re-resolution). Returns the
+    /// sharing URL, or <c>null</c> when Graph returns no link. No Graph SDK types are returned.
+    /// </summary>
+    /// <param name="linkType">"view", "edit", or "embed".</param>
+    /// <param name="scope">"anonymous", "organization", or "users".</param>
+    public async Task<string?> CreateSharingLinkAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        string linkType,
+        string scope,
+        DateTimeOffset? expiration = null,
+        CancellationToken ct = default)
+    {
+        var graphClient = await _factory.ForUserAsync(ctx, ct);
+
+        var requestBody = new Microsoft.Graph.Drives.Item.Items.Item.CreateLink.CreateLinkPostRequestBody
+        {
+            Type = linkType,
+            Scope = scope,
+            ExpirationDateTime = expiration
+        };
+
+        var permission = await graphClient.Drives[driveId]
+            .Items[itemId]
+            .CreateLink
+            .PostAsync(requestBody, cancellationToken: ct);
+
+        return permission?.Link?.WebUrl;
+    }
+
+    /// <summary>
     /// Retrieves drive-item metadata via OBO context, projecting the Graph DTO into
     /// a Spaarke-domain <see cref="SpeDriveItemSummary"/> record (no Graph SDK types
     /// returned to the caller).

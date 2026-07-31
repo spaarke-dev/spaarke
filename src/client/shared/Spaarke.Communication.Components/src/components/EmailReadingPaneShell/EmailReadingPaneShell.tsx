@@ -46,6 +46,17 @@ const DEFAULT_STORAGE_KEY = 'sprk-email-reading-pane-splitter';
 const DEFAULT_READING_PANE_WIDTH_PX = 480;
 const DEFAULT_MIN_LIST_WIDTH_PX = 280;
 const DEFAULT_MIN_READING_PANE_WIDTH_PX = 360;
+/**
+ * Default split ratio (owner UAT): the reading (detail) pane fills 80% of the
+ * container, leaving a 20% email list — an Outlook-style reading-first layout.
+ * The reused `useTwoPanelLayout` hook (a different package — not forked here)
+ * only accepts a PIXEL default, so the outer `EmailReadingPaneShell` wrapper
+ * measures the actual container width once and derives the 80% pixel default it
+ * hands to the inner shell. Hosts where the container can't be measured (e.g.
+ * jsdom under test) fall back to `defaultReadingPaneWidth`. The hook clamps to
+ * both panes' minimum widths, so the two panes always sum to 100% (no overflow).
+ */
+const READING_PANE_DEFAULT_FRACTION = 0.8;
 
 const useStyles = makeStyles({
   root: {
@@ -114,7 +125,7 @@ const useStyles = makeStyles({
   },
 });
 
-export const EmailReadingPaneShell: React.FC<EmailReadingPaneShellProps> = ({
+const EmailReadingPaneShellInner: React.FC<EmailReadingPaneShellProps> = ({
   items,
   isLoading = false,
   initialSelectedId,
@@ -123,6 +134,7 @@ export const EmailReadingPaneShell: React.FC<EmailReadingPaneShellProps> = ({
   renderTop,
   renderHeader,
   renderBody,
+  hideList = false,
   storageKey = DEFAULT_STORAGE_KEY,
   defaultReadingPaneWidth = DEFAULT_READING_PANE_WIDTH_PX,
   minListWidth = DEFAULT_MIN_LIST_WIDTH_PX,
@@ -140,6 +152,20 @@ export const EmailReadingPaneShell: React.FC<EmailReadingPaneShellProps> = ({
     },
     [onSelectedIdChange]
   );
+
+  // owner UAT 2026-07-30 R2 item 3 — adopt a LATE-arriving `initialSelectedId`.
+  // The shell seeds `selectedId` from `initialSelectedId` on mount, but the host
+  // auto-selects the first email only AFTER the async row load resolves (long
+  // after mount), so that first value would otherwise be missed. Adopt it ONLY
+  // while nothing is selected yet — a user's manual click (selectedId defined)
+  // is never overridden. Notifies the host through the same callback so its
+  // mirrored selection (driving the per-selection record read) stays in sync.
+  React.useEffect(() => {
+    if (initialSelectedId && selectedId === undefined) {
+      setSelectedId(initialSelectedId);
+      onSelectedIdChange?.(initialSelectedId);
+    }
+  }, [initialSelectedId, selectedId, onSelectedIdChange]);
 
   // Circular scroll-down cue — visible only while the reading pane has content
   // below the fold (an alternative to the native scrollbar, per owner UAT;
@@ -200,19 +226,39 @@ export const EmailReadingPaneShell: React.FC<EmailReadingPaneShellProps> = ({
       ref={containerRef as React.RefObject<HTMLDivElement>}
       data-testid="email-reading-pane-shell"
     >
-      <div className={s.listPane} style={{ width: primaryWidth }} data-testid="email-list-pane">
-        <EmailCardList items={items} isLoading={isLoading} selectedId={selectedId} onSelect={handleSelect} />
-      </div>
+      {!hideList && (
+        <>
+          {/* owner UAT 2026-07-30 R2 item 1 — floor the list pane at `minListWidth`.
+              The reused hook computes `primaryWidth` as `calc(100% - detailWidthPx - splitter)`;
+              when the whole widget container collapses and re-expands (all SpaarkeAi
+              workspace panes closed then reopened), a stale/large `detailWidthPx` can
+              drive that calc to ~0 and the list vanishes. A CSS `minWidth` (the pane is
+              already `flexShrink: 0`) guarantees it can never render below `minListWidth`;
+              the reading pane (`flexShrink: 1`, `minWidth: 0`) absorbs the difference. The
+              20/80 default and `hideList` single-record mode are unaffected. */}
+          <div
+            className={s.listPane}
+            style={{ width: primaryWidth, minWidth: minListWidth }}
+            data-testid="email-list-pane"
+          >
+            <EmailCardList items={items} isLoading={isLoading} selectedId={selectedId} onSelect={handleSelect} />
+          </div>
 
-      <PanelSplitter
-        onMouseDown={splitterHandlers.onMouseDown}
-        onKeyDown={splitterHandlers.onKeyDown}
-        onDoubleClick={splitterHandlers.onDoubleClick}
-        isDragging={isDragging}
-        currentRatio={currentRatio}
-      />
+          <PanelSplitter
+            onMouseDown={splitterHandlers.onMouseDown}
+            onKeyDown={splitterHandlers.onKeyDown}
+            onDoubleClick={splitterHandlers.onDoubleClick}
+            isDragging={isDragging}
+            currentRatio={currentRatio}
+          />
+        </>
+      )}
 
-      <div className={s.readingPane} style={{ width: detailWidth }} data-testid="email-reading-pane">
+      <div
+        className={s.readingPane}
+        style={{ width: hideList ? '100%' : detailWidth }}
+        data-testid="email-reading-pane"
+      >
         {selectedId ? (
           <React.Fragment key={selectedId}>
             {renderTop?.(selectedId)}
@@ -243,6 +289,38 @@ export const EmailReadingPaneShell: React.FC<EmailReadingPaneShellProps> = ({
       </div>
     </div>
   );
+};
+
+EmailReadingPaneShellInner.displayName = 'EmailReadingPaneShellInner';
+
+/**
+ * Outer wrapper that establishes the 20%/80% default split (owner UAT #2).
+ * Because the reused `useTwoPanelLayout` hook only takes a PIXEL default, this
+ * measures the real container width once (before the inner shell mounts) and
+ * derives the 80% reading-pane pixel default from it, so the ratio holds at any
+ * container size. When the container can't be measured (0-width — e.g. jsdom
+ * under test), it falls back to the caller's `defaultReadingPaneWidth`.
+ */
+export const EmailReadingPaneShell: React.FC<EmailReadingPaneShellProps> = props => {
+  const { defaultReadingPaneWidth = DEFAULT_READING_PANE_WIDTH_PX } = props;
+  const s = useStyles();
+  const measureRef = React.useRef<HTMLDivElement | null>(null);
+  const [resolvedReadingPaneWidth, setResolvedReadingPaneWidth] = React.useState<number | null>(null);
+
+  React.useLayoutEffect(() => {
+    const width = measureRef.current?.getBoundingClientRect().width ?? 0;
+    setResolvedReadingPaneWidth(
+      width > 0 ? Math.round(width * READING_PANE_DEFAULT_FRACTION) : defaultReadingPaneWidth
+    );
+  }, [defaultReadingPaneWidth]);
+
+  // Measure pass — a full-size container to size against, replaced synchronously
+  // (before paint, via the layout effect) by the real shell below.
+  if (resolvedReadingPaneWidth === null) {
+    return <div className={s.root} ref={measureRef} aria-hidden="true" />;
+  }
+
+  return <EmailReadingPaneShellInner {...props} defaultReadingPaneWidth={resolvedReadingPaneWidth} />;
 };
 
 EmailReadingPaneShell.displayName = 'EmailReadingPaneShell';

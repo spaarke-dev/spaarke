@@ -24,6 +24,11 @@ import type {
   IRecordLookupTarget,
   IPickedRecord,
   IRecipient,
+  IEmailTemplateSummary,
+  IEmailTemplateRenderResult,
+  IEmailAiDraftAction,
+  IEmailAiDraftRequest,
+  IEmailAiDraftResult,
 } from '@spaarke/ui-components';
 import type { EmailToolbarActionHandlers } from '../EmailReadingPaneShell';
 import type { ComposerFields } from '../../logic/actions';
@@ -90,6 +95,37 @@ export interface EmailComposeActionsDeps {
    * omitted → local picks stay display-only.
    */
   onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
+  /**
+   * Resolve a recipient-openable SPE sharing link for a linked document (R2 item 12). Forwarded to
+   * the composer; omitted → links keep their original internal URL.
+   */
+  onResolveShareLink?: (documentId: string) => Promise<string | null>;
+  /**
+   * Compose template picker (Wave E). `onListEmailTemplates` lists selectable OOB `template`
+   * records; `onRenderEmailTemplate` renders the chosen one (merging field codes from the
+   * primary regarding). Forwarded verbatim to the composer for ALL modes. Optional
+   * (host-supplied Xrm/BFF handlers via `createXrmEmailComposeHandlers`); omit either → the
+   * toolbar template button is hidden.
+   */
+  onListEmailTemplates?: () => Promise<IEmailTemplateSummary[]>;
+  onRenderEmailTemplate?: (args: {
+    templateId: string;
+    regardingEntityType?: string;
+    regardingRecordId?: string;
+  }) => Promise<IEmailTemplateRenderResult>;
+  /**
+   * AI "sparkle" draft (Wave E). `onDraftWithAi` generates/refines the body via the BFF; optional
+   * `aiDraftActions` overrides the preset quick-actions. Forwarded to the composer for ALL modes.
+   * Optional (host-supplied Xrm/BFF handler); omit `onDraftWithAi` → the sparkle button is hidden.
+   */
+  onDraftWithAi?: (req: IEmailAiDraftRequest) => Promise<IEmailAiDraftResult>;
+  aiDraftActions?: IEmailAiDraftAction[];
+  /**
+   * The signed-in user's mailbox address (item 3). The email surface defaults the composer's
+   * From to send-as the current user; passing this shows the real address in the "From:" row
+   * instead of a generic "My mailbox". Host-resolved (Xrm). Optional — omitted → generic label.
+   */
+  fromMailbox?: string;
   /**
    * Dataverse client URL (no trailing slash) used to build attachment
    * deep-links when carrying a parent email's attachments onto reply/forward.

@@ -5,20 +5,26 @@
 
 ---
 
+> **Recovery**: Read **`notes/HANDOFF-2026-07-31.md`** first — full status + the execution-machinery map for Phases 2/3.
+
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Status** | **Tabbed Quick Start BUILT + deployed to spaarkedev1** (commit `980e6bc21`, NOT yet pushed). Front door + audit fixes already shipped on PR #694. |
-| **Next Action** | **UAT the tabbed Quick Start** on spaarkedev1 (hard-refresh Ctrl+Shift+R — aggressive web-resource cache). Then push PR #694 + 090 wrap-up + `/test-diet`. |
-| **Branch** | `work/ai-advanced-capabilities-analysis-hub-r1` · PR #694 · **1 commit ahead of origin** (980e6bc21, unpushed) · working tree clean |
+| **Status** | Tabbed Quick Start + 4 UAT rounds SHIPPED (merged via PR #694 + more). **Phase 1 of the analysis-execution loop SHIPPED + deployed** (NDA Analysis card + open analysis document in the editable **Compose** surface). Phase 2 (auto-run review) + Phase 3 (durable history recall) NOT built. |
+| **Next Action** | **Owner UAT of Phase 1** on spaarkedev1 (hard-refresh Ctrl+Shift+R): NDA Analysis card → wizard → upload → doc opens in the **editable Compose surface** with agreement-analysis tools (not a preview). Then **Phase 2**: confirm approach + build (bind session + auto-dispatch `nda-review`). |
+| **Branch** | `work/ai-advanced-capabilities-analysis-hub-r1` · **0 behind / 5 ahead of origin/master** (merge `206d721d7`; NOT pushed) · working tree clean |
 
-### UAT checklist (tabbed Quick Start — commit 980e6bc21)
-1. Open the Analysis workspace tab → it's now a **plain dataset grid** (no top cards). Row-click opens the OOB `sprk_analysis` form modal.
-2. Grid **`+ New`** → opens the **Quick Start** modal on the **Analysis** tab (3 cards; Agreement Review live, other 2 "coming soon").
-3. **Agreement Review** card → Quick Start closes → **Create Analysis wizard opens AS A MODAL**. On finish → result tab opens; Analysis grid tab stays.
-4. Assistant ⋮ menu / chips "More…" → Quick Start opens on the **Create** tab (7 GetStarted cards, unchanged). Tab switching works.
-5. Opened inside a Matter/Project record → wizard's regarding is pre-set to that record.
+### The MUST-HAVE end-state (owner, this session)
+NDA Analysis card → wizard → upload → **review RUNS** → file in **editable Compose/TipTap** with advisory comments + summary; **durable** (analysis + conversation history + review results bound to `sprk_analysis`); **reopen** → Compose + history + prior review. Cards are specific paths (option 2): live = **NDA Analysis** (worktype 100000000, wired to `nda-review` capability).
+
+### Phases
+- **Phase 1 (DONE, deployed):** open analysis document in editable Compose (wizard-finish + analysis-open). `8b93ad9e2`.
+- **Phase 2 (NEXT — confirm approach):** on finish bind a chat session to the analysis (`HostContext.EntityType='sprk_analysisoutput'`) + auto-dispatch the `nda-review` binding → advisory comments in Compose. **Machinery map in HANDOFF §4.**
+- **Phase 3:** durable recall — reopen restores session (history) + re-projects review results into Compose. Coordinates with `agreements-r1` + `Services/Ai` (owned by architecture-redesign-r2; PublicContracts only).
+
+### Deploy recap
+`pwsh scripts/Deploy-SpaarkeAi.ps1` (prebuilt `dist/spaarkeai.html`). Rebuild ui-components + ai-widgets dist first if changed; clear vite cache; `npm run build` in SpaarkeAi. Web resource `sprk_spaarkeai` on spaarkedev1.
 
 ### The next build (tabbed Quick Start) — 6-step flow (HANDOFF-2026-07-30.md §3)
 1. Analysis widget → plain dataset grid (remove cards + task-031 reopen; row-click = OOB form Layout 1); `+ New` overridden → dispatch `open_quick_start{tab:'analysis', regarding}`.

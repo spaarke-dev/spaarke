@@ -26,24 +26,31 @@ export const useConnectionsReviewStyles = makeStyles({
   },
   // Right-hand column holding the "Link another record" affordance / picker.
   linkCol: { flexShrink: 0, alignSelf: 'flex-start', display: 'flex', alignItems: 'center', maxWidth: '100%' },
-  // "Link another record" rendered as a CARD matching the candidate tiles, with a
-  // search icon on the right (owner UAT) → opens the type dropdown + right-pane lookup.
+  // "Link another record" — a VISUAL SIBLING of the candidate cards (owner UAT
+  // #5): identical box (border / radius / padding / neutral surface), content
+  // TOP-aligned, the label at the same size + weight as a card's primary line,
+  // and the search icon CENTERED (not pushed to a corner). Clicking it opens the
+  // record-type dropdown directly (owner UAT #6).
+  // owner UAT 2026-07-30 R2 item 7 — a VISUAL SIBLING of the candidate `card`
+  // below: identical border / radius / padding / neutral surface / hover and the
+  // same inter-line `gap` (spacingVerticalXXS), so the "Link another record" tile
+  // matches the reference cards exactly. No explicit `fontFamily` anywhere in these
+  // cards — they inherit Fluent's default Segoe UI (there is no Arial to remove).
   linkCard: {
     boxSizing: 'border-box',
-    width: '200px',
-    maxWidth: '100%',
-    minHeight: '64px',
+    width: '100%',
+    minWidth: 0,
     display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: tokens.spacingHorizontalS,
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: tokens.spacingVerticalXXS,
+    textAlign: 'left',
     paddingBlock: tokens.spacingVerticalS,
     paddingInline: tokens.spacingHorizontalM,
     border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground1,
     cursor: 'pointer',
-    textAlign: 'left',
     ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
   linkCardLabel: {
@@ -51,11 +58,13 @@ export const useConnectionsReviewStyles = makeStyles({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+    // Match the candidate card's primary line exactly (owner UAT #5): base300 + semibold.
     fontSize: tokens.fontSizeBase300,
-    // Not bold (owner UAT) — the link tile is a quiet affordance, not a match.
-    fontWeight: tokens.fontWeightRegular,
+    fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
+  // Search icon centered within the card body (owner UAT #5).
+  linkCardIconRow: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' },
   linkCardIcon: { flexShrink: 0, color: tokens.colorNeutralForeground3, fontSize: '20px' },
   // One grid cell — the card itself plus its own Confirm slot directly beneath it.
   cardCell: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS, minWidth: 0 },
@@ -143,7 +152,9 @@ export const useConnectionsReviewStyles = makeStyles({
   // ── Per-card Confirm slot (shows directly under the selected card) ──
   confirmSlot: { display: 'flex' },
 
-  // ── Confirmed chip: "{Type}: {number}" + remove (×) ──
+  // ── Confirmed primary chip: "{Type}: {number}" + remove (×). Styled clearly
+  //    GREEN so the confirmed primary reads as distinct from any non-primary
+  //    entry (owner UAT #9). Green tokens only — dark-mode correct (ADR-021). ──
   chipRow: { display: 'flex', flexWrap: 'wrap', gap: tokens.spacingHorizontalS, alignItems: 'center' },
   chip: {
     display: 'inline-flex',
@@ -154,11 +165,11 @@ export const useConnectionsReviewStyles = makeStyles({
     paddingInline: tokens.spacingHorizontalS,
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorPaletteGreenBackground1,
-    border: `${tokens.strokeWidthThin} solid ${tokens.colorPaletteGreenBorder1}`,
+    border: `${tokens.strokeWidthThin} solid ${tokens.colorPaletteGreenBorder2}`,
   },
-  chipType: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200, flexShrink: 0 },
+  chipType: { color: tokens.colorPaletteGreenForeground2, fontSize: tokens.fontSizeBase200, flexShrink: 0 },
   chipValue: {
-    color: tokens.colorNeutralForeground1,
+    color: tokens.colorPaletteGreenForeground1,
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
     fontVariantNumeric: 'tabular-nums',
@@ -166,7 +177,8 @@ export const useConnectionsReviewStyles = makeStyles({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  // Clickable variant of the chip value — opens the associated record.
+  // Clickable variant of the chip value — opens the associated record (green to
+  // match the confirmed-primary treatment; owner UAT #9).
   chipLink: {
     background: 'none',
     border: 'none',
@@ -176,18 +188,23 @@ export const useConnectionsReviewStyles = makeStyles({
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
     fontVariantNumeric: 'tabular-nums',
-    color: tokens.colorBrandForegroundLink,
+    color: tokens.colorPaletteGreenForeground1,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     maxWidth: '220px',
-    ':hover': { color: tokens.colorBrandForegroundLinkHover, textDecorationLine: 'underline' },
+    ':hover': { color: tokens.colorPaletteGreenForeground2, textDecorationLine: 'underline' },
   },
   chipRemove: { minWidth: 'auto', paddingInline: 0, height: '20px' },
 
   // ── Shared affordances ──
   actionsRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, flexWrap: 'wrap' },
-  linkRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, paddingTop: tokens.spacingVerticalXS },
+  linkRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalXS,
+  },
   linkBtn: { paddingInline: 0 },
   hint: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 },
   empty: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 },

@@ -28,6 +28,11 @@ import type {
   IRecordLookupTarget,
   IPickedRecord,
   IRecipient,
+  IEmailTemplateSummary,
+  IEmailTemplateRenderResult,
+  IEmailAiDraftAction,
+  IEmailAiDraftRequest,
+  IEmailAiDraftResult,
 } from '@spaarke/ui-components';
 import type { IResolverWriteContext } from '../../logic/connections';
 
@@ -107,6 +112,35 @@ export interface EmailWorkspaceProps {
    */
   onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
   /**
+   * Resolve a recipient-openable SPE sharing link for a linked document (R2 item 12). Mount-supplied
+   * Xrm/BFF handler; omitted → links keep their original internal URL.
+   */
+  onResolveShareLink?: (documentId: string) => Promise<string | null>;
+  /**
+   * Compose template picker (Wave E) — `onListEmailTemplates` lists OOB `template` records,
+   * `onRenderEmailTemplate` renders the chosen one (merging field codes from the primary
+   * regarding). Forwarded to the composer via `useEmailComposeActions`. Mount-supplied Xrm/BFF
+   * handlers; omit either → the toolbar template button is hidden.
+   */
+  onListEmailTemplates?: () => Promise<IEmailTemplateSummary[]>;
+  onRenderEmailTemplate?: (args: {
+    templateId: string;
+    regardingEntityType?: string;
+    regardingRecordId?: string;
+  }) => Promise<IEmailTemplateRenderResult>;
+  /**
+   * AI "sparkle" draft (Wave E). `onDraftWithAi` generates/refines the compose body via the BFF;
+   * optional `aiDraftActions` overrides the preset quick-actions. Mount-supplied Xrm/BFF handler;
+   * omit `onDraftWithAi` → the sparkle button is hidden.
+   */
+  onDraftWithAi?: (req: IEmailAiDraftRequest) => Promise<IEmailAiDraftResult>;
+  aiDraftActions?: IEmailAiDraftAction[];
+  /**
+   * The signed-in user's mailbox address (item 3) — the compose "From:" row defaults to
+   * send-as the current user and shows this address. Mount-resolved (Xrm). Optional.
+   */
+  fromMailbox?: string;
+  /**
    * Dataverse client URL (no trailing slash) — used to build deep-links for the
    * parent email's carried-forward attachments. Optional.
    */
@@ -115,4 +149,14 @@ export interface EmailWorkspaceProps {
   linkAnotherCatalog?: readonly RecordTypeCatalogEntry[];
   /** Optional id to select on first mount (forwarded to `EmailReadingPaneShell`). */
   initialSelectedId?: string;
+  /**
+   * Single-record ("hide list") mode. When `true` AND an `initialSelectedId` is
+   * set, the left list pane is hidden and only the reading pane for that record
+   * renders — so the surface reads like a per-record "form" (Pattern B
+   * `single`/`view=record` launch) rather than the list+reading workspace.
+   * Additive + optional: default (falsy) preserves the exact list+reading layout,
+   * so the SpaarkeAi widget mount and the standalone code-page list mode are
+   * unaffected. Forwarded to `EmailReadingPaneShell`'s `hideList`.
+   */
+  hideList?: boolean;
 }
