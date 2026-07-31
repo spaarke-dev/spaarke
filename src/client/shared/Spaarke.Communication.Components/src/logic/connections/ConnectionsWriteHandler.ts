@@ -296,6 +296,60 @@ export async function unlinkRegarding(
   }
 }
 
+/**
+ * REMOVE the single primary regarding association from the reading-pane confirmed
+ * chip (owner UAT 2026-07-31 item 2). Unlike `unlinkRegarding` (which only nulls a
+ * typed lookup and deliberately preserves the denorm primary for the additive
+ * multi-lookup model), this fully clears the primary because the single-primary
+ * reading-pane model has exactly ONE:
+ *   - nulls the typed regarding lookup (when the primary carries a real `entityType`;
+ *     a denorm-only primary has none, which is why plain `unlinkRegarding` silently
+ *     no-ops and the chip could not be deleted),
+ *   - clears the 5 denormalized `sprk_regardingrecord*` fields (id / name / number /
+ *     url + the `sprk_RegardingRecordType` lookup),
+ *   - resets `sprk_associationstatus` to null so the section returns to the
+ *     requires-review / needs-confirmation state derived from provenance, letting the
+ *     reviewer re-pick.
+ * No-op success in CREATE mode (no host GUID).
+ */
+export async function clearPrimaryRegarding(
+  ctx: IResolverWriteContext,
+  entityType: string,
+  fetchImpl: typeof fetch = globalThis.fetch
+): Promise<IResolverWriteResult> {
+  const cleanId = ctx.hostRecordId?.replace(/[{}]/g, '');
+  if (!cleanId || cleanId.length !== 36) {
+    return { success: true }; // Nothing to clear without a persisted record.
+  }
+
+  const payload: Record<string, unknown> = {
+    sprk_regardingrecordid: null,
+    sprk_regardingrecordname: null,
+    sprk_regardingrecordnumber: null,
+    sprk_regardingrecordurl: null,
+    'sprk_RegardingRecordType@odata.bind': null,
+    sprk_associationstatus: null,
+  };
+
+  // Also null the entity-specific typed lookup when the primary is a real typed
+  // association (a denorm-only primary has entityType '' → nothing to null).
+  const target = entityType.trim().toLowerCase();
+  if (target) {
+    const navProps = await discoverHostNavProps(ctx.hostEntity, fetchImpl);
+    const navProp = navProps.find(n => n.referencedEntity?.toLowerCase() === target);
+    if (navProp) {
+      payload[`${navProp.navPropName}@odata.bind`] = null;
+    }
+  }
+
+  try {
+    await ctx.webApi.updateRecord(ctx.hostEntity, cleanId, payload);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'clear primary failed' };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Public: advance association status (plain host-field write — NOT regarding logic)
 // ---------------------------------------------------------------------------

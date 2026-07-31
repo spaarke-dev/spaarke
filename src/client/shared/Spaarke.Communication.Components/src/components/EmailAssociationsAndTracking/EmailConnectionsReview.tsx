@@ -62,6 +62,7 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
     associationProvenanceJson,
     regardingRecordName,
     regardingRecordNumber,
+    regardingRecordType,
     filedAssociations = [],
     writeContext,
     linkAnotherCatalog,
@@ -86,8 +87,16 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
       derivePrimaryReview(associationProvenanceJson, associationStatus, filedAssociations, {
         recordName: regardingRecordName,
         recordNumber: regardingRecordNumber,
+        recordTypeLabel: regardingRecordType,
       }),
-    [associationProvenanceJson, associationStatus, filedAssociations, regardingRecordName, regardingRecordNumber]
+    [
+      associationProvenanceJson,
+      associationStatus,
+      filedAssociations,
+      regardingRecordName,
+      regardingRecordNumber,
+      regardingRecordType,
+    ]
   );
 
   const catalog = linkAnotherCatalog ?? DEFAULT_LINK_CATALOG;
@@ -202,10 +211,8 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
             <Menu positioning="below-start">
               <MenuTrigger disableButtonEnhancement>
                 <button type="button" className={s.linkCard} disabled={busy} data-testid="link-another-record">
+                  <Search20Regular className={s.linkCardIcon} aria-hidden="true" />
                   <span className={s.linkCardLabel}>Link another record</span>
-                  <span className={s.linkCardIconRow}>
-                    <Search20Regular className={s.linkCardIcon} aria-hidden="true" />
-                  </span>
                 </button>
               </MenuTrigger>
               <MenuPopover>

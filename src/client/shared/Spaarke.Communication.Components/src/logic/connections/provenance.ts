@@ -670,6 +670,13 @@ export interface PrimaryCandidate {
   recordNumber?: string;
   confidence: number;
   matchReason?: string;
+  /**
+   * Human record-type label for the confirmed chip (e.g. "Matter"), used when the
+   * primary was filed via the DENORM fields only (all typed lookups null) so there
+   * is no `entity` logical name to resolve. Sourced from the host record's
+   * `sprk_regardingrecordtype` lookup FormattedValue. Owner UAT 2026-07-31 item 1.
+   */
+  typeLabel?: string;
 }
 
 /** Denormalized primary fields read off the host record (for the confirmed chip + number resolution). */
@@ -677,6 +684,8 @@ export interface PrimaryDenorm {
   recordName?: string | null;
   recordNumber?: string | null;
   entityType?: string | null;
+  /** `sprk_regardingrecordtype` FormattedValue (e.g. "Matter") — the human type label for the confirmed chip. */
+  recordTypeLabel?: string | null;
 }
 
 export interface PrimaryReviewModel {
@@ -726,6 +735,7 @@ function resolveConfirmedPrimary(
       recordNumber: match?.recordNumber ?? denorm?.recordNumber ?? undefined,
       confidence: match?.confidence ?? 1,
       matchReason: match?.matchReason,
+      typeLabel: denorm?.recordTypeLabel ?? undefined,
     };
   }
   if (denorm?.recordName) {
@@ -735,6 +745,9 @@ function resolveConfirmedPrimary(
       targetName: denorm.recordName,
       recordNumber: denorm.recordNumber ?? undefined,
       confidence: 1,
+      // Denorm-only primary: no typed `entity` to resolve, so the chip type comes
+      // from the `sprk_regardingrecordtype` label ("Matter") (owner UAT item 1).
+      typeLabel: denorm.recordTypeLabel ?? undefined,
     };
   }
   return ranked[0];
