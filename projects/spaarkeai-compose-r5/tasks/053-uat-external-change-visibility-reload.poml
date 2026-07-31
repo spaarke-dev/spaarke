@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>UAT #5 — external-change detection on visibilitychange + always-on "Reload from source" button</title>
+    <phase>5 UAT remediation</phase>
+    <gate>dep:042</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx client (pcf/react tag) with a save/load interaction; small but on the contended ComposeWorkspace.tsx. Code-review + adr-check at Step 9.5 (UI/theme + no-silent-loss).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, well-specified client wiring (add a listener + a toolbar button dispatching an existing action); no architecture change.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ComposeWorkspace.tsx / toolbar shared with 050/052/054. Serialize.</parallel-reason>
+    <deps>042</deps>
+    <tags>compose, frontend, pcf, react</tags>
+    <estimated-effort>S (0.5-1d)</estimated-effort>
+  </metadata>
+
+  <prompt>UAT #5: a Word-web edit landed in SPE but Compose never showed the external-change banner and there is no manual refresh. Root cause (verified): the change-check triggers on window 'focus' only (ComposeWorkspace.tsx:970); Compose runs embedded in an iframe, so returning from the Word tab fires document 'visibilitychange' (not wired) → the check never runs. Also there is no unconditional reload button (banner Reload gated on dirty; toolbar sync icon is Refresh-Profile). FIX (client-only): add a document 'visibilitychange' listener beside the focus one; add an always-available "Reload from source" toolbar button that dispatches the existing requestLoad to pull the latest SPE bytes.</prompt>
+
+  <role>Fluent UI v9 React developer familiar with the Compose client (ComposeWorkspace/ComposeEditor/ComposeFormatToolbar), the requestLoad/mount lifecycle, and the external-change banner wiring.</role>
+
+  <goal>Returning to the Compose tab after editing in Word-for-Web reliably runs the change-check (via visibilitychange, in addition to focus) so the external-change banner fires when SPE bytes changed; and a always-available "Reload from source" toolbar button lets the user pull the latest SPE version on demand (independent of dirty state). No silent loss: if the editor is dirty, the existing dirty-guard/warning behavior is preserved on reload.</goal>
+
+  <context>
+    <background>runReturnFromWordCheck (ComposeWorkspace.tsx:908-962) sets externalChangeDetected (dirty) or requestLoad{externalChange:true} (clean); it is invoked ONLY by window 'focus' (:964-972). No visibilitychange, no interval. Banner (ComposeExternalChangeBanner.tsx) Reload only renders when hasUnsavedEdits. Toolbar DocumentSync24Regular is Refresh-Profile (ComposeFormatToolbar.tsx:842-854), not reload-bytes. Manual reload should dispatch the same action the banner onReload uses (requestLoad with documentRef+sessionId, pattern :2554-2562) → re-runs Load (GET /api/compose/documents/{id}) and remounts with fresh bytes. Thread a new toolbar handler like onRefreshProfile (workspace→ComposeEditor→ComposeFormatToolbar).</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeExternalChangeBanner.tsx</file>
+    </relevant-files>
+    <dependencies>042 (deployed build baseline).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Client-only change — no server/engine/endpoint changes. Reuse the existing requestLoad action + runReturnFromWordCheck; do NOT add a new load path or a polling interval (keep it event-driven).</constraint>
+    <constraint source="project">No silent data loss: on reload with a dirty editor, preserve the existing dirty-guard (do not discard pending edits without the established warning/confirm).</constraint>
+    <constraint source="ADR-021">"Reload from source" button renders correctly in light + dark mode; accessible label.</constraint>
+    <constraint source="project">De-duplicate triggers: focus + visibilitychange must not double-run the change-check redundantly (guard so a single return doesn't fire twice).</constraint>
+    <constraint source="ADR-028">Any load uses the existing @spaarke/auth path (no raw fetch).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r5/notes/uat-remediation-r5.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern name="Banner onReload dispatch" location="ComposeWorkspace.tsx:2554-2562">The requestLoad action to reuse for the manual reload button.</pattern>
+      <pattern name="Toolbar handler threading" location="onRefreshProfile through ComposeWorkspace→ComposeEditor→ComposeFormatToolbar">Mirror this to thread onReloadFromSource.</pattern>
+      <pattern name="Focus listener" location="ComposeWorkspace.tsx:964-972">Add visibilitychange beside it.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Add a document 'visibilitychange' listener next to the window 'focus' one (ComposeWorkspace.tsx:964-972) that runs runReturnFromWordCheck when the tab becomes visible; guard against double-firing with focus.</step>
+    <step order="2">Add a "Reload from source" toolbar button (ComposeFormatToolbar.tsx) with an accessible label + distinct icon (not the Refresh-Profile sync icon), threaded via a new onReloadFromSource prop (workspace→ComposeEditor→toolbar), dispatching the existing requestLoad (documentRef + sessionId). Available regardless of dirty state; preserve the dirty-guard on reload.</step>
+    <step order="3">UI tests: visibilitychange runs the check; the Reload button renders (light+dark), triggers requestLoad, and honors the dirty-guard.</step>
+    <step order="4">Build client bundle + run tests green.</step>
+    <step order="5">Update TASK-INDEX.md (✅); write notes/task-053-deviations.md.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Client build + UI tests.</tool>
+    <tool name="terminal">Inspect ComposeWorkspace listeners/toolbar.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the Compose tab regains visibility after a Word-web edit, when visibilitychange fires, then runReturnFromWordCheck runs and (SPE changed) the external-change banner appears — asserted by a UI test.</criterion>
+    <criterion testable="true">Given the Compose toolbar, when the user clicks "Reload from source", then requestLoad is dispatched and the editor remounts with the latest SPE bytes (available regardless of dirty state).</criterion>
+    <criterion testable="true">Given a dirty editor, when reload is invoked, then the existing dirty-guard/warning is honored (no silent loss).</criterion>
+    <criterion testable="true">Given light + dark mode, the Reload button renders correctly (ADR-021); focus + visibilitychange do not double-run the check.</criterion>
+  </acceptance-criteria>
+
+  <notes>UAT #5. Client-only, small. Root cause in notes/uat-remediation-r5.md. The server webhook delivery leg remains deferred (dev unprovisioned) — this task fixes the reliable client-side detection + a manual escape hatch, which is what UAT asked for.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

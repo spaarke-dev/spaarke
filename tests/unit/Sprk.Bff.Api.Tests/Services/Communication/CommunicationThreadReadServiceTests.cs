@@ -481,7 +481,11 @@ public class CommunicationThreadReadServiceTests
         if (inReplyTo is not null) row["sprk_inreplyto"] = El(inReplyTo);
         if (direction is not null) row["sprk_direction"] = El(direction.Value);
         if (sentBy is not null) row["_sprk_sentby_value"] = El(sentBy.Value.ToString());
-        if (sentByName is not null) row["sprk_sentbyname"] = El(sentByName);
+        // The sender display name rides the _sprk_sentby_value lookup's FormattedValue annotation (what an
+        // impersonated annotated query returns) — NOT the denormalized sprk_sentbyname column, which is
+        // broken in the env (IsValidODataAttribute=false) and is therefore neither selected nor read by the
+        // service (messaging-r3 2026-07-22). ParseMessageRow reads SentByName from THIS annotation.
+        if (sentByName is not null) row["_sprk_sentby_value@OData.Community.Display.V1.FormattedValue"] = El(sentByName);
         return row;
     }
 

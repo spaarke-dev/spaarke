@@ -147,7 +147,7 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
 
         var operationLog = new
         {
-            schemaVersion = "compose-ops-v1",
+            schemaVersion = "compose-ops-v2",
             operations = new object[]
             {
                 new { type = "insertText", paraId = ParaIds[0], at = new { runIndex = 0, offset = 0 }, text = "[R4-STALE-REANCHOR]" },
@@ -250,7 +250,7 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
         const string unresolvableParaId = "DEADBEEF";
         var operationLog = new
         {
-            schemaVersion = "compose-ops-v1",
+            schemaVersion = "compose-ops-v2",
             operations = new object[]
             {
                 new { type = "insertText", paraId = unresolvableParaId, at = new { runIndex = 0, offset = 0 }, text = "should never land" },

@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>UAT #10/#11 — Word/WOPI save lock: add release primitive + "Unlock &amp; Save" affordance</title>
+    <phase>5 UAT remediation</phase>
+    <gate>dep:042</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Net-new SPE facade capability (Graph checkin/discard) + endpoint + client 423 branch; auth/identity + SPE hop sensitive (bff-api). Mandatory code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Touches the Graph/SPE facade (ADR-007 boundary) + a new endpoint + client save-error UX; the WOPI-lock domain has platform limits that require careful, honest handling (no universal unlock).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeEndpoints.cs + ComposeWorkspace.tsx save handler shared with 050/053. Serialize.</parallel-reason>
+    <deps>042</deps>
+    <tags>bff-api, compose, frontend, auth</tags>
+    <estimated-effort>M (2-4d)</estimated-effort>
+  </metadata>
+
+  <prompt>UAT SEV-1: "checked out or open in Word" save error persists after Word is closed and the browser is refreshed, with no way to release. Root cause (verified): it is a SharePoint/WOPI co-authoring lock held server-side in SPE, created by Word-for-Web; the save reads it LIVE (Graph 423 on the driveItem PUT, UploadSessionManager.cs:454-461 → DocumentLockedByWordException → 423 copy ComposeEndpoints.cs:1489-1501). Browser refresh only resets the React client. Spaarke has NO release primitive; the Dataverse DocumentCheckoutService discard only flips Dataverse flags, never the SPE lock. FIX: add a real SPE lock-release primitive (driveItem checkin/discardCheckout), an endpoint next to Save, a distinct client 423 branch, and an "Unlock &amp; Save" banner action. Be HONEST: Graph has no universal WOPI unlock — a pure transient co-auth lock may still need to time out; the UX must message clearly when it cannot force-release.</prompt>
+
+  <role>SPAARKE platform developer expert in the SPE/Graph facade (SpeFileStore, UploadSessionManager, OBO identity), the Compose save endpoints, and the Fluent v9 Compose banner/save-error UX.</role>
+
+  <goal>A user hitting the Word-lock save error can attempt release from the UI: a distinct 423 client branch renders an "Unlock &amp; Save" action that calls a new endpoint which invokes a Graph driveItem checkin/discardCheckout (release) primitive on the SPE facade under the correct identity, then re-attempts the save. For a genuine checkout this releases and saves; for a transient co-authoring lock that cannot be force-released, the UX clearly explains it must be closed in Word / will clear shortly (no silent failure, Compose changes remain pending/safe). Seam slice covers the release endpoint path.</goal>
+
+  <context>
+    <background>Detection: Graph PUT .../items/{itemId}/content at UploadSessionManager.cs:399; 423 translate :454-461 (IsResourceLockedCode :520 matches any "locked" code); typed DocumentLockedByWordException (SpeConcurrencyExceptions.cs:43). Endpoint 423 copy: ComposeEndpoints.cs:1489-1501. Client save handler has NO 423 branch (falls through generic, ComposeWorkspace.tsx:1256-1261); catch prefix :1340. Banner: ComposeBannerStack.tsx. NO Graph checkOut/checkIn/discardCheckout exists anywhere (SpeFileStore.cs:39-351 has only upload/replace/download/delete/subscription). Dataverse discard: DocumentOperationsEndpoints.cs:48/:323 → DocumentCheckoutService.DiscardAsync:334 (Dataverse flags only, ClearDocumentCheckoutStatusAsync:1071). Closest UX pattern: useComposeCheckoutLifecycle.ts:308 forceCloseAndAcquire. Design refs: projects/spaarkeai-compose-r4/tasks/052-http-423-lock-protocol.poml, projects/spaarkeai-compose-r2/notes/spikes/spike-7-checkout-collision.md.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/UploadSessionManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeConcurrencyExceptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeBannerStack.tsx</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useComposeCheckoutLifecycle.ts</file>
+      <file>tests/integration/seam/Compose/</file>
+    </relevant-files>
+    <dependencies>042 (deployed build baseline).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">The Graph checkin/discardCheckout release primitive lives in the SPE facade (Infrastructure/Graph — SpeFileStore/UploadSessionManager); NO Microsoft.Graph types leak above SpeFileStore. Services/Compose consumes the facade, not Graph.</constraint>
+    <constraint source="ADR-028">Client calls the new endpoint via @spaarke/auth (no raw fetch/bearer). Release runs under the correct user (OBO) / app identity per existing SPE write identity.</constraint>
+    <constraint source="ADR-013">No AI internals in Services/Compose/. ADR-049: engine untouched (this is endpoint/facade + client UX, not the byte-author).</constraint>
+    <constraint source="ADR-038">Seam DoD — through-the-wire slice for the release endpoint (success + a lock-that-cannot-be-released path). NO Mock&lt;HttpMessageHandler&gt;/DI/ctor tests.</constraint>
+    <constraint source="ADR-021">"Unlock &amp; Save" action + the 423 banner render correctly in dark mode.</constraint>
+    <constraint source="project">NFR-03/04: no new runtime package (Graph SDK already present); publish ≤60 MB (report delta). /conflict-check before BFF PR. Honesty: do NOT claim a universal unlock — message the transient-lock case truthfully; never lose pending Compose changes.</constraint>
+    <constraint source="CLAUDE.md §10">BFF task — Placement Justification: reuse SPE facade + Compose endpoints; the release is a driveItem operation, not a new service family.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r5/notes/uat-remediation-r5.md</file>
+      <file>projects/spaarkeai-compose-r4/tasks/052-http-423-lock-protocol.poml</file>
+      <file>projects/spaarkeai-compose-r2/notes/spikes/spike-7-checkout-collision.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="SPE write facade" location="SpeFileStore.cs:217-232 ReplaceFileContentAsUserAsync + UploadSessionManager.cs:399/:454-461">Where the release primitive is added alongside the write; identity model to mirror.</pattern>
+      <pattern name="423 detect" location="UploadSessionManager.cs:520 IsResourceLockedCode; SpeConcurrencyExceptions.cs:43">Consider disambiguating genuine checkout vs transient lock if the driveItem publication/checkout state is probeable.</pattern>
+      <pattern name="Force-close UX" location="useComposeCheckoutLifecycle.ts:308 forceCloseAndAcquire">Closest client pattern to mirror for the Unlock action (retarget to the new SPE-release endpoint, then re-invoke triggerSave).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Determine what Graph exposes for release on an SPE driveItem: discardCheckout / checkin for a genuine checkout; probe publication/checkout state if possible to distinguish it from a transient WOPI co-authoring lock (which has no programmatic force-release). Document the capability boundary.</step>
+    <step order="2">Add the release primitive to the SPE facade (SpeFileStore + UploadSessionManager) under the existing write identity; keep all Graph types below SpeFileStore.</step>
+    <step order="3">Add an endpoint next to Save (ComposeEndpoints.cs) that invokes release then reports outcome (released / cannot-force-release). Keep pending Compose changes safe regardless.</step>
+    <step order="4">Client: add a distinct 423 branch in the save handler (ComposeWorkspace.tsx:1256-1261) dispatching a lock-specific state; render "Unlock &amp; Save" in ComposeBannerStack.tsx (mirror forceCloseAndAcquire) that calls the endpoint then re-invokes triggerSave; on cannot-force-release, show honest guidance.</step>
+    <step order="5">Seam slice: release endpoint success path + a lock-not-releasable path. Add UI tests (button renders, triggers, dark mode).</step>
+    <step order="6">NFR gates: no new package; publish delta; /conflict-check before BFF PR; build + tests green.</step>
+    <step order="7">Update TASK-INDEX.md (✅); write notes/task-052-deviations.md incl. the Graph release-capability boundary finding.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Graph offers NO programmatic release for the lock type observed in UAT (pure WOPI co-auth lock), STOP short of over-promising: implement discardCheckout for genuine checkouts, and escalate the transient-lock UX decision (message + optional retry) per §6.5 rather than shipping a button that silently does nothing.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, seam tests, publish size.</tool>
+    <tool name="npm">Client build + UI tests.</tool>
+    <tool name="terminal">Inspect Graph facade; /conflict-check.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeBannerStack.tsx</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a genuine SPE checkout blocking save, when the user clicks "Unlock &amp; Save", then the new endpoint invokes a Graph release (checkin/discardCheckout) via the SPE facade and the save re-attempt succeeds — asserted by a seam slice.</criterion>
+    <criterion testable="true">Given a transient WOPI co-auth lock that cannot be force-released, when the user clicks Unlock, then the UX shows honest guidance (close in Word / will clear shortly) and Compose changes remain pending/safe — no silent failure.</criterion>
+    <criterion testable="true">Given a 423 on save, when surfaced, then the client shows a distinct lock branch (not the generic message) with the Unlock action; renders in dark mode (ADR-021).</criterion>
+    <criterion testable="true">Architecture: no Microsoft.Graph type above SpeFileStore (ADR-007); client uses @spaarke/auth (ADR-028); no new runtime package; publish ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>UAT #10/#11. Root cause + refs in notes/uat-remediation-r5.md. The lock is external (Word-for-Web/SharePoint) — be honest about the platform limit; prioritize a real release for genuine checkouts + truthful UX for transient locks.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

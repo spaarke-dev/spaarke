@@ -60,6 +60,18 @@ public class ComposeService : IComposeService
     private const string FileSizeAttribute = "sprk_filesize";
     private const string MimeTypeAttribute = "sprk_mimetype";
     private const string FilePathAttribute = "sprk_filepath";
+    // G1 (FR-01, task 020): the durable cross-session authored-vs-imported origin marker (owner-created
+    // choice field; notes/g1-origin-field-asbuilt.md). Written ONLY at create-on-save
+    // (PromoteIfEphemeralAsync) and read on Path A loads (LoadAsync) — see ComposeOrigin remarks for the
+    // AS-BUILT integer values + BINDING null-handling contract.
+    private const string ComposeOriginAttribute = "sprk_composeorigin";
+    // G7 (FR-06, task 022): the client-minted transient dedup key (owner-created Single-line-text column +
+    // single-column alt-key sprk_composetransientkey_uk; notes/g7-transient-key-schema.md). Stamped ONLY at
+    // create-on-save (PromoteIfEphemeralAsync). Resolved via the alt-key in TryFindDocumentByTransientKeyAsync
+    // BEFORE minting a transient SPE item, so repeated create-on-save calls with the same key replace one
+    // record in place instead of minting duplicates (the 8-duplicate defect). Resolve by KEY, never by
+    // content (I-7/NFR-02).
+    private const string ComposeTransientKeyAttribute = "sprk_composetransientkey";
 
     // FR-05 create-on-save backbone — the consumer-declared ordered step set the
     // JobAwareCompletionStateProjector projects (container → record → profile-analysis → indexing).
@@ -447,6 +459,28 @@ public class ComposeService : IComposeService
         // session naturally has an empty ledger.
         var actionHistory = GetActionHistory(session);
 
+        // G1 (FR-01, task 020): read the persisted sprk_composeorigin marker for Path A loads (an
+        // existing sprk_document record) so the client can route a reopened Authored doc onto the
+        // clean payload instead of the op-log/tracked path (NFR-02 — never inferred from SPE-id or
+        // content). Path B continuation (no DocumentRecordId — the doc is not yet promoted) has no
+        // row to read; Origin stays null. Best-effort: a read failure OR a legacy row with no stored
+        // value degrades to Origin=null — NEVER fails Load. The BINDING null-handling contract (see
+        // ComposeOrigin remarks) is the CALLER's obligation: null MUST be treated as Imported, never
+        // strict-equal to Authored.
+        ComposeOrigin? origin = request.DocumentRecordId.HasValue
+            ? await ReadPersistedOriginAsync(request.DocumentRecordId.Value, cancellationToken).ConfigureAwait(false)
+            : null;
+
+        // G10 (FR-09, task 040): reload/onload re-trigger of the Document Profile — storm-safe (fires only
+        // when the doc changed since Compose last profiled it). Path A only (an existing sprk_document to
+        // profile). Best-effort — never blocks or fails Load.
+        if (request.DocumentRecordId is { } reloadRecordId && !string.IsNullOrWhiteSpace(metadata.ETag))
+        {
+            await MaybeRetriggerProfileOnLoadAsync(
+                reloadRecordId, request.DocumentSpeId, metadata.ETag!, httpContext, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         return new LoadComposeDocumentResult
         {
             DocumentSpeId = request.DocumentSpeId,
@@ -465,7 +499,45 @@ public class ComposeService : IComposeService
             Projection = projection,
             ImportedRevisions = importedRevisions,
             ImportedComments = importedComments,
+            Origin = origin,
         };
+    }
+
+    /// <summary>
+    /// G1/G2 (FR-01/FR-02, tasks 020/021): reads the durable <c>sprk_composeorigin</c> marker for an
+    /// existing <c>sprk_document</c>. Server-authoritative — the origin decision is the persisted marker,
+    /// never inferred from SPE-id presence or document content (NFR-02 / I-7). Best-effort: a read failure
+    /// OR a legacy row with no stored value returns <c>null</c> and NEVER throws — callers apply the BINDING
+    /// null-handling contract (treat <c>null</c> as <see cref="ComposeOrigin.Imported"/>, never strict-equal
+    /// to <see cref="ComposeOrigin.Authored"/>). Consumed by <see cref="LoadAsync"/> (returns it to the
+    /// client) and <see cref="SaveAsync"/> (selects the engine's clean-vs-tracked apply mode).
+    /// </summary>
+    private async Task<ComposeOrigin?> ReadPersistedOriginAsync(Guid documentRecordId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var documentEntity = await _dataverse.RetrieveAsync(
+                    DocumentLogicalName,
+                    documentRecordId,
+                    new[] { ComposeOriginAttribute },
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (documentEntity is not null
+                && documentEntity.Contains(ComposeOriginAttribute)
+                && documentEntity[ComposeOriginAttribute] is OptionSetValue originOptionSet)
+            {
+                return (ComposeOrigin)originOptionSet.Value;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose: sprk_composeorigin lookup failed for record={DocumentRecordId} — origin treated as null (callers apply the BINDING null-handling contract: null = Imported).",
+                documentRecordId);
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -621,6 +693,48 @@ public class ComposeService : IComposeService
         var hasOperations = request.OperationLog is { Operations.Count: > 0 };
         var hasComments = request.Comments is { Count: > 0 };
 
+        // G1 (FR-01, task 020): the durable origin discriminator — mirrors the SAME ContentModel-presence
+        // signal the born-in-editor render branch above already keys off (ResolveSaveBaselineAsync's "(a0)
+        // BORN-IN-EDITOR" check). ContentModel present → the renderer authors the whole document from the
+        // client's content model (Authored, no retained baseline to delta onto); ContentModel absent → the
+        // save carries retained SPE bytes, whether a delta (op-log) or a byte-identical replace (Imported).
+        // Resolved ONLY from this server-side discriminant — NEVER from SPE-id presence or a content/text
+        // match (NFR-02, I-7). Computed on every save (not only create-on-save) so it can ride the returned
+        // SaveComposeDocumentResult for immediate client/consumer use (e.g. task 021's clean-apply engine
+        // mode selection) — but it is PERSISTED onto sprk_document ONLY at create-on-save (see the
+        // PromoteComposeDocumentRequest.Origin wiring below); a replace-path save of an already-promoted
+        // document never mutates the stored value.
+        // UAT #1A hardening (task 050): Authored requires a ContentModel AND no retained original bytes — i.e. a
+        // genuine born-in-editor doc with no baseline to delta onto. A save that carries retained original bytes
+        // (Content) is IMPORTED even if a ContentModel is also (erroneously) present, so a client-side routing
+        // slip can never durably mis-stamp an imported doc Authored (which would force every later op-log save
+        // onto the clean branch and silently drop redlines — the SEV-1 UAT regression). ContentModel absent →
+        // Imported. Still resolved ONLY from server-side request shape — never from SPE-id presence or a
+        // content/text match (NFR-02, I-7).
+        var origin = request.ContentModel is not null && request.Content.IsEmpty
+            ? ComposeOrigin.Authored
+            : ComposeOrigin.Imported;
+
+        // G2 (FR-02, task 021 / R5-D2 Candidate A): the CLEAN-APPLY decision for the op-log/engine path.
+        // A reopened AUTHORED doc sends an op-log (ContentModel null) — the ContentModel discriminant above
+        // would mislabel it Imported, so the DURABLE sprk_composeorigin marker is authoritative here (read
+        // server-side, never inferred from SPE-id/content — NFR-02/I-7). When the marker says Authored, the
+        // engine applies edits CLEAN (plain runs, physical deletes, no w:pPrChange) so an authored doc's own
+        // cross-session edits carry NO redlines (REQ-1); Imported/legacy-null stay on the tracked default
+        // (REQ-2 not regressed). Best-effort: a marker read failure degrades to tracked (safe — worst case an
+        // authored doc shows redlines, never data loss). ContentModel-present saves take the renderer path
+        // (no engine Apply) and are already clean by construction.
+        var cleanApply = false;
+        if (request.ContentModel is null && request.DocumentRecordId is { } originRecordId)
+        {
+            var persistedOrigin = await ReadPersistedOriginAsync(originRecordId, cancellationToken).ConfigureAwait(false);
+            if (persistedOrigin == ComposeOrigin.Authored)
+            {
+                origin = ComposeOrigin.Authored;
+                cleanApply = true;
+            }
+        }
+
         // ────────────────────────────────────────────────────────────────────────────
         // FR-08 (task 050, design §5 "Save + concurrency"): version-stamp + assert-before-apply +
         // re-anchor-on-stale. Only meaningful for an EXISTING item (a transient create has no prior base
@@ -636,6 +750,7 @@ public class ComposeService : IComposeService
         // ────────────────────────────────────────────────────────────────────────────
         string? preWriteETag = null;
         ReanchorSummary? reanchorSummary = null;
+        PartialApplySummary? partialApplySummary = null; // prong 1 (task 055) — set iff best-effort recovery ran
 
         if (!isTransientCreate && !string.IsNullOrWhiteSpace(request.DriveId))
         {
@@ -654,7 +769,7 @@ public class ComposeService : IComposeService
                 if (isStale)
                 {
                     var (patchedBytes, summary) = await ReanchorStaleSaveAsync(
-                            request, contentToPersist, httpContext, observedAt, cancellationToken)
+                            request, contentToPersist, httpContext, observedAt, trackChanges: !cleanApply, cancellationToken)
                         .ConfigureAwait(false);
 
                     contentToPersist = patchedBytes;
@@ -694,12 +809,56 @@ public class ComposeService : IComposeService
             // Pure/in-memory BEFORE any SPE write: a refusal (unresolved paraId/anchor, unsupported schema
             // version, opaque-atom/structural refusal) throws ComposePatchException here — mapped to a
             // ProblemDetails by the endpoint — so no partial or wrong SPE version can land.
-            contentToPersist = _patchEngine.Apply(
-                contentToPersist,
-                request.OperationLog ?? new ComposeOperationLog(),
-                request.Comments,
-                ResolveRevisionAuthor(httpContext),
-                observedAt);
+            var revisionAuthor = ResolveRevisionAuthor(httpContext);
+            var editLog = request.OperationLog ?? new ComposeOperationLog();
+            try
+            {
+                contentToPersist = _patchEngine.Apply(
+                    contentToPersist,
+                    editLog,
+                    request.Comments,
+                    revisionAuthor,
+                    observedAt,
+                    trackChanges: !cleanApply);
+            }
+            catch (ComposePatchException ex) when (!IsBatchLevelPatchRefusal(ex.Kind))
+            {
+                // Prong 1 (task 055 — keep-edits graceful degradation). An OP-LEVEL anchoring refusal (a
+                // single op whose paraId/anchor can't resolve) no longer loses the WHOLE editing session:
+                // best-effort apply the resolvable paragraph-units and SURFACE the unresolvable ops so the
+                // client prompts the user to redo just those edits. Never silently applies a wrong edit (the
+                // paragraph is the atomic unit under the engine's intra-paragraph sequential rebasing) and
+                // never silently drops one. Prong 2's paraOffset anchor already fixed the common root cause;
+                // this is the residual safety net. BATCH-level refusals (malformed docx / schema skew) are
+                // filtered OUT by the `when` guard and still throw hard → the endpoint's ProblemDetails.
+                _logger.LogWarning(ex,
+                    "Compose save: batch patch refusal ({Kind}) on the loaded-doc path — entering best-effort per-paragraph recovery (session={SessionId}).",
+                    ex.Kind, request.SessionId);
+
+                var bestEffortBytes = ApplyBestEffortByParagraph(
+                    contentToPersist, editLog, request.Comments, revisionAuthor, observedAt,
+                    trackChanges: !cleanApply, out var partial);
+
+                if (partial.AppliedCount == 0)
+                {
+                    // Nothing resolved — there is no partial success to preserve. Fail HARD exactly as before
+                    // prong 1 (a typed ProblemDetails via the endpoint), rather than persist a no-op version +
+                    // a partial-apply banner. Prong 1's value is salvaging a batch where SOME edits are fine;
+                    // a wholly-unanchorable batch stays a hard refusal (the op-log survives client-side for a
+                    // retry). Re-throws the ORIGINAL op-level refusal.
+                    _logger.LogWarning(
+                        "Compose save: best-effort recovery resolved ZERO of {Total} op(s) — re-throwing the original refusal ({Kind}) as a hard failure (session={SessionId}).",
+                        partial.Total, ex.Kind, request.SessionId);
+                    throw;
+                }
+
+                contentToPersist = bestEffortBytes;
+                partialApplySummary = partial;
+
+                _logger.LogWarning(
+                    "Compose save: best-effort recovery applied {Applied}/{Total} op(s); {Unresolved} surfaced as unresolvable (session={SessionId}).",
+                    partial.AppliedCount, partial.Total, partial.UnresolvedCount, request.SessionId);
+            }
         }
         // UAT round-3 (2026-07-27) — advisory comments on the CREATE-ON-SAVE / ContentModel path.
         // The block above only bakes comments when ContentModel is null (a loaded-doc delta save). But a
@@ -776,37 +935,82 @@ public class ComposeService : IComposeService
 
         if (isTransientCreate)
         {
-            if (string.IsNullOrWhiteSpace(request.ContainerId))
+            // ─── G7 (FR-06, task 022): transient-key dedup — the 8-duplicate fix ───
+            // A transient draft has no SPE id until its first save mints one; this branch minted a NEW SPE
+            // item on EVERY create-on-save call, so a lost/raced round-trip (concurrent saves, a re-created
+            // mount, a new tab) produced another item → another sprk_document row. The client mints a stable
+            // transient key once at mount and sends it on every create-on-save; BEFORE minting, resolve it
+            // against the durable sprk_composetransientkey_uk alt-key. A hit REUSES the existing record's SPE
+            // item (replace in place, no new mint, no new row). Save-New (ForkNew) deliberately SKIPS the
+            // dedup to fork a fresh record. Resolves by KEY, never by content (I-7/NFR-02).
+            TransientKeyMatch? dedupMatch = null;
+            if (!request.ForkNew && !string.IsNullOrWhiteSpace(request.TransientKey))
             {
-                _logger.LogWarning(
-                    "Compose create-on-save: transient draft with no client-supplied ContainerId — failing the '{Step}' step honestly (session={SessionId}). No server-side BU→container resolver (multi-container INV-7).",
-                    StepContainer, request.SessionId);
-                return BuildContainerFailedResult(request, observedAt);
+                dedupMatch = await TryFindDocumentByTransientKeyAsync(request.TransientKey!, cancellationToken)
+                    .ConfigureAwait(false);
             }
 
-            // Fork B: mint the SPE drive-item in the supplied container under the user's OBO
-            // identity (the Compose user holds the file ACL; MI does not — same constraint that
-            // deferred profile). Idempotency: this branch only runs when DocumentSpeId is absent;
-            // once created, the client re-Saves with the returned id → the replace path below, so
-            // the drive-item is never double-created.
-            var driveId = await _spe.ResolveDriveIdAsync(request.ContainerId, cancellationToken).ConfigureAwait(false);
-            using var createStream = new MemoryStream(contentToPersist, writable: false);
-            var created = await _spe.UploadSmallAsUserAsync(
-                    httpContext, driveId, fileName, createStream, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (created is null || string.IsNullOrEmpty(created.Id))
+            if (dedupMatch is { } match
+                && !string.IsNullOrWhiteSpace(match.SpeId)
+                && !string.IsNullOrWhiteSpace(match.DriveId))
             {
-                _logger.LogError(
-                    "Compose create-on-save: SPE drive-item creation returned null/empty for container={ContainerId} — failing the '{Step}' step (session={SessionId}).",
-                    request.ContainerId, StepContainer, request.SessionId);
-                return BuildContainerFailedResult(request, observedAt);
-            }
+                // Dedup hit: the transient key already resolved to a record with a live SPE item — replace
+                // that item's content in place. No new mint, no new row (the promote step below finds the
+                // existing record by sprk_graphitemid → idempotent no-op).
+                using var replaceStream = new MemoryStream(contentToPersist, writable: false);
+                var replaced = await _spe.ReplaceFileContentAsUserAsync(
+                        httpContext, match.DriveId!, match.SpeId!, replaceStream, cancellationToken)
+                    .ConfigureAwait(false);
 
-            saved = created;
-            effectiveSpeId = created.Id;
-            effectiveDriveId = created.DriveId ?? driveId;
-            fileName = created.Name ?? fileName;
+                if (replaced is null || string.IsNullOrEmpty(replaced.Id))
+                {
+                    throw new InvalidOperationException(
+                        $"Compose transient-key dedup: SPE replace failed for existing item drive={match.DriveId} item={match.SpeId} (transientKey matched record {match.RecordId}).");
+                }
+
+                saved = replaced;
+                effectiveSpeId = match.SpeId!;
+                effectiveDriveId = match.DriveId;
+                fileName = replaced.Name ?? fileName;
+
+                _logger.LogInformation(
+                    "Compose create-on-save: transientKey matched existing sprk_document {DocumentRecordId} (driveItem={DocumentSpeId}) — replaced in place, no duplicate mint (session={SessionId}).",
+                    match.RecordId, match.SpeId, request.SessionId);
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(request.ContainerId))
+                {
+                    _logger.LogWarning(
+                        "Compose create-on-save: transient draft with no client-supplied ContainerId — failing the '{Step}' step honestly (session={SessionId}). No server-side BU→container resolver (multi-container INV-7).",
+                        StepContainer, request.SessionId);
+                    return BuildContainerFailedResult(request, observedAt);
+                }
+
+                // Fork B: mint the SPE drive-item in the supplied container under the user's OBO identity
+                // (the Compose user holds the file ACL; MI does not — same constraint that deferred profile).
+                // First save of this transient key (or a deliberate Save-New fork): once created, the record
+                // is stamped with the transient key (promote step below) so the NEXT create-on-save with the
+                // same key takes the dedup replace path above — never a double mint.
+                var driveId = await _spe.ResolveDriveIdAsync(request.ContainerId, cancellationToken).ConfigureAwait(false);
+                using var createStream = new MemoryStream(contentToPersist, writable: false);
+                var created = await _spe.UploadSmallAsUserAsync(
+                        httpContext, driveId, fileName, createStream, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (created is null || string.IsNullOrEmpty(created.Id))
+                {
+                    _logger.LogError(
+                        "Compose create-on-save: SPE drive-item creation returned null/empty for container={ContainerId} — failing the '{Step}' step (session={SessionId}).",
+                        request.ContainerId, StepContainer, request.SessionId);
+                    return BuildContainerFailedResult(request, observedAt);
+                }
+
+                saved = created;
+                effectiveSpeId = created.Id;
+                effectiveDriveId = created.DriveId ?? driveId;
+                fileName = created.Name ?? fileName;
+            }
         }
         else
         {
@@ -862,6 +1066,13 @@ public class ComposeService : IComposeService
             FileSize = saved.Size ?? contentToPersist.Length,
             MimeType = DocxContentType,
             FilePath = saved.WebUrl,
+            // G1 (FR-01, task 020): persisted onto sprk_composeorigin ONLY when this call actually
+            // creates the row (PromoteIfEphemeralAsync's idempotent existing-row branch ignores it).
+            Origin = origin,
+            // G7 (FR-06, task 022): stamped onto sprk_composetransientkey ONLY when this call creates the
+            // row, so the next create-on-save with the same key dedups via the alt-key (see the transient
+            // branch above). Null on the replace path / older clients — no dedup identity, unchanged behavior.
+            TransientKey = request.TransientKey,
         };
 
         var promotion = await PromoteIfEphemeralAsync(promoteRequest, httpContext, cancellationToken)
@@ -955,6 +1166,8 @@ public class ComposeService : IComposeService
             WasPromotedThisSave = promotion.WasCreated,
             CompletionState = completion,
             ReanchorSummary = reanchorSummary,
+            PartialApply = partialApplySummary,
+            Origin = origin,
         };
     }
 
@@ -1108,6 +1321,115 @@ public class ComposeService : IComposeService
         }
     }
 
+    // =========================================================================
+    // G10 (FR-09, task 040) — Document Profile re-run: reload/onload re-trigger (storm-safe) + the shared
+    // manual "Refresh Profile" leg. Both reuse the EXISTING fire-and-forget DispatchBackgroundProfile
+    // pipeline (never a second trigger). The storm guard is a DEDICATED per-doc "profiled-at eTag" stamp
+    // (IDistributedCache, ADR-009) — INTENTIONALLY separate from the FR-08 save-version stamp so it never
+    // perturbs the save-path staleness/re-anchor semantics. A reopen re-profiles ONLY when the live eTag
+    // differs from the last-profiled eTag (an external Word edit, or a doc Compose never profiled); an
+    // unchanged reopen matches the stamp → skip (no profiling storm on repeated reopens).
+    // =========================================================================
+
+    private const string ProfiledETagKeyPrefix = "sdap:compose:profiled-etag:";
+
+    private async Task<string?> GetProfiledETagAsync(string documentSpeId, CancellationToken ct)
+    {
+        if (_cache is null)
+        {
+            return null;
+        }
+        try
+        {
+            return await _cache.GetStringAsync(ProfiledETagKeyPrefix + documentSpeId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose profile (G10): failed to read the profiled-eTag stamp for driveItem={DocumentSpeId} — treating as never-profiled (may re-trigger once).",
+                documentSpeId);
+            return null;
+        }
+    }
+
+    private async Task SetProfiledETagAsync(string documentSpeId, string eTag, CancellationToken ct)
+    {
+        if (_cache is null || string.IsNullOrEmpty(eTag))
+        {
+            return;
+        }
+        try
+        {
+            await _cache.SetStringAsync(ProfiledETagKeyPrefix + documentSpeId, eTag, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose profile (G10): failed to persist the profiled-eTag stamp for driveItem={DocumentSpeId} — a future reopen may re-trigger once more (best-effort, never a storm).",
+                documentSpeId);
+        }
+    }
+
+    /// <summary>
+    /// G10 (FR-09, task 040): the reload/onload re-trigger. On a Path A reopen (an existing
+    /// <c>sprk_document</c>), re-dispatch the fire-and-forget Document Profile ONLY when the doc CHANGED
+    /// since Compose last profiled it (live eTag ≠ the profiled-eTag stamp) — then stamp the current eTag so
+    /// a subsequent unchanged reopen skips (the storm guard closes the loop). Best-effort: never blocks or
+    /// fails Load; a null <c>_documentProfileAi</c>/cache simply no-ops.
+    /// </summary>
+    private async Task MaybeRetriggerProfileOnLoadAsync(
+        Guid documentRecordId, string documentSpeId, string liveETag, HttpContext httpContext, CancellationToken ct)
+    {
+        try
+        {
+            var profiledETag = await GetProfiledETagAsync(documentSpeId, ct).ConfigureAwait(false);
+            if (string.Equals(profiledETag, liveETag, StringComparison.Ordinal))
+            {
+                return; // unchanged since the last profile — skip (no storm)
+            }
+
+            DispatchBackgroundProfile(documentRecordId, httpContext);
+            await SetProfiledETagAsync(documentSpeId, liveETag, ct).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Compose reload profile re-trigger (G10): document {DocumentRecordId} (driveItem={DocumentSpeId}) changed since last profile (profiledETag={ProfiledETag}, liveETag={LiveETag}) — profile re-dispatched fire-and-forget.",
+                documentRecordId, documentSpeId, profiledETag, liveETag);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose reload profile re-trigger (G10): failed for document {DocumentRecordId} — best-effort, Load unaffected.",
+                documentRecordId);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> RefreshProfileAsync(
+        RefreshComposeProfileRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.DocumentRecordId == Guid.Empty)
+        {
+            throw new ArgumentException("A DocumentRecordId is required to refresh a Compose document's profile.", nameof(request));
+        }
+
+        // G10 manual leg: a user-initiated on-demand re-run. UNCONDITIONAL (unlike the reload guard) — the
+        // user explicitly asked to refresh — but still fire-and-forget + best-effort. Stamp the current eTag
+        // (when known) so an immediately-following reopen does not redundantly re-trigger.
+        DispatchBackgroundProfile(request.DocumentRecordId, httpContext);
+        if (!string.IsNullOrWhiteSpace(request.DocumentSpeId) && !string.IsNullOrWhiteSpace(request.ETag))
+        {
+            await SetProfiledETagAsync(request.DocumentSpeId!, request.ETag!, cancellationToken).ConfigureAwait(false);
+        }
+
+        _logger.LogInformation(
+            "Compose manual profile refresh (G10): document {DocumentRecordId} — profile re-dispatched fire-and-forget on user request.",
+            request.DocumentRecordId);
+        return true;
+    }
+
     /// <summary>
     /// FR-08 (task 050): the base moved under the client since it was loaded (the persisted version stamp's
     /// eTag no longer matches the live SPE eTag). Re-anchors <paramref name="request"/>'s operation log +
@@ -1123,6 +1445,7 @@ public class ComposeService : IComposeService
         byte[] originalBaseline,
         HttpContext httpContext,
         DateTimeOffset observedAt,
+        bool trackChanges,
         CancellationToken cancellationToken)
     {
         // Re-download the CURRENT (live) bytes — the base the op log must now be checked against. A
@@ -1269,7 +1592,8 @@ public class ComposeService : IComposeService
                     new ComposeOperationLog { SchemaVersion = request.OperationLog?.SchemaVersion ?? ComposeOperationSchema.Version, Operations = autoOps },
                     autoComments,
                     ResolveRevisionAuthor(httpContext),
-                    observedAt);
+                    observedAt,
+                    trackChanges: trackChanges);
         }
         catch (ComposePatchException ex)
         {
@@ -1297,6 +1621,196 @@ public class ComposeService : IComposeService
         }
 
         return (patched, summary);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────
+    // Prong 1 (task 055) — best-effort per-paragraph recovery for an OP-LEVEL patch refusal on the loaded-doc
+    // save path. Distinct from ReanchorStaleSaveAsync above (which handles a STALE BASE — an eTag mismatch —
+    // by content-similarity re-anchoring across old→current paragraphs). Here the base is CURRENT; a single op
+    // just fails to anchor. Rather than lose the whole editing session (the pre-prong-1 behavior: any refusal
+    // → 422), apply the resolvable paragraph-units and surface the unresolvable ops.
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A <see cref="ComposePatchErrorKind"/> that condemns the WHOLE batch (the docx itself is unreadable, or
+    /// the op-log schema version is unsupported) rather than a single op's anchor — for these, best-effort
+    /// partial apply is meaningless, so the save must still fail hard (mapped to a ProblemDetails by the
+    /// endpoint). Every OTHER kind is an op-level anchoring/resolution refusal eligible for prong-1 recovery.
+    /// </summary>
+    private static bool IsBatchLevelPatchRefusal(ComposePatchErrorKind kind) =>
+        kind is ComposePatchErrorKind.MalformedDocument or ComposePatchErrorKind.UnsupportedSchemaVersion;
+
+    /// <summary>
+    /// True for a STRUCTURAL / whole-document op — one that splits/merges/inserts/deletes paragraphs, edits a
+    /// table's structure, or reconciles EVERY tracked revision (scope=All). These span or renumber paragraphs
+    /// (and mint child paraIds later ops depend on), so under the engine's intra-paragraph sequential rebasing
+    /// they are NOT safe to apply piecemeal: prong-1 groups them into ONE all-or-nothing unit applied LAST
+    /// (mirroring the engine's own structural-last pass). Inline ops (text/mark/setBlockAttr/single-revision)
+    /// are grouped by paraId instead — the paragraph being the safe atomic unit.
+    /// </summary>
+    private static bool IsStructuralOrGlobalOp(ComposeOperation op) => op switch
+    {
+        SplitParagraphOperation or MergeParagraphOperation or InsertParagraphOperation
+            or DeleteParagraphOperation or TableOperation => true,
+        AcceptRevisionOperation { Scope: ComposeRevisionScope.All } => true,
+        RejectRevisionOperation { Scope: ComposeRevisionScope.All } => true,
+        _ => false,
+    };
+
+    /// <summary>
+    /// Prong 1 (task 055). Applies <paramref name="log"/> onto <paramref name="baseline"/> in the LARGEST
+    /// units provably safe under the engine's intra-paragraph sequential rebasing, applying every unit that
+    /// resolves and surfacing every unit that refuses (never a wrong edit, never a silent drop):
+    /// <list type="bullet">
+    /// <item>Inline ops (text/mark/setBlockAttr/single-revision) grouped by <c>paraId</c> — the paragraph is
+    ///   atomic (dropping one op would leave later same-paragraph ops mis-anchored), applied in first-seen
+    ///   order; each paragraph's anchored comments ride its unit so the engine's comments-first-per-Apply
+    ///   ordering (EDGE-1) is preserved per paragraph.</item>
+    /// <item>Structural / All-revision ops as ONE all-or-nothing unit applied LAST (keeps minted-paraId
+    ///   lineage intact).</item>
+    /// </list>
+    /// Each unit runs through the SAME <see cref="ComposeShadowPatchEngine.Apply"/> onto the cumulative bytes,
+    /// so the byte result for the resolvable paragraphs matches the clean-batch path. A unit throwing a
+    /// batch-level refusal (a malformed cumulative package — not expected mid-recovery) propagates.
+    /// </summary>
+    private byte[] ApplyBestEffortByParagraph(
+        byte[] baseline,
+        ComposeOperationLog log,
+        IReadOnlyList<ComposeAnchoredComment>? comments,
+        string author,
+        DateTimeOffset observedAt,
+        bool trackChanges,
+        out PartialApplySummary summary)
+    {
+        var ops = log.Operations ?? Array.Empty<ComposeOperation>();
+        var schemaVersion = log.SchemaVersion;
+
+        // Inline ops grouped by paraId (first-seen order preserved) + a single structural/global unit.
+        var inlineOrder = new List<string>();
+        var inlineOps = new Dictionary<string, List<ComposeOperation>>(StringComparer.OrdinalIgnoreCase);
+        var structural = new List<ComposeOperation>();
+        foreach (var op in ops)
+        {
+            if (IsStructuralOrGlobalOp(op))
+            {
+                structural.Add(op);
+                continue;
+            }
+            if (!inlineOps.TryGetValue(op.ParaId, out var list))
+            {
+                list = new List<ComposeOperation>();
+                inlineOps[op.ParaId] = list;
+                inlineOrder.Add(op.ParaId);
+            }
+            list.Add(op);
+        }
+
+        // Distribute anchored comments into their paraId's unit; a comment whose paraId carries no inline op
+        // gets its own comment-only unit (still applied in the inline pass, so it lands before any structural
+        // change to that paragraph — mirrors the engine's comments-first ordering).
+        var commentsByPara = new Dictionary<string, List<ComposeAnchoredComment>>(StringComparer.OrdinalIgnoreCase);
+        var unbakeableComments = 0;
+        foreach (var c in comments ?? Array.Empty<ComposeAnchoredComment>())
+        {
+            var key = c.ParaId ?? string.Empty;
+            if (!commentsByPara.TryGetValue(key, out var list))
+            {
+                list = new List<ComposeAnchoredComment>();
+                commentsByPara[key] = list;
+                if (!inlineOps.ContainsKey(key))
+                {
+                    inlineOrder.Add(key); // comment-only paragraph unit
+                    inlineOps[key] = new List<ComposeOperation>();
+                }
+            }
+            list.Add(c);
+        }
+
+        var unresolved = new List<UnresolvedComposeOp>();
+        var appliedCount = 0;
+        var current = baseline;
+
+        // Inline paragraph units first, then the structural unit LAST.
+        foreach (var paraId in inlineOrder)
+        {
+            var unitOps = inlineOps[paraId];
+            commentsByPara.TryGetValue(paraId, out var unitComments);
+            var (bytes, refusal) = TryApplyPatchUnit(current, schemaVersion, unitOps, unitComments, author, observedAt, trackChanges);
+            if (refusal is null)
+            {
+                current = bytes;
+                appliedCount += unitOps.Count;
+            }
+            else
+            {
+                foreach (var op in unitOps)
+                    unresolved.Add(new UnresolvedComposeOp(op.ParaId, op.GetType().Name, refusal.Kind.ToString(), refusal.Message));
+                if (unitComments is not null)
+                    unbakeableComments += unitComments.Count;
+            }
+        }
+
+        if (structural.Count > 0)
+        {
+            var (bytes, refusal) = TryApplyPatchUnit(current, schemaVersion, structural, null, author, observedAt, trackChanges);
+            if (refusal is null)
+            {
+                current = bytes;
+                appliedCount += structural.Count;
+            }
+            else
+            {
+                foreach (var op in structural)
+                    unresolved.Add(new UnresolvedComposeOp(op.ParaId, op.GetType().Name, refusal.Kind.ToString(), refusal.Message));
+            }
+        }
+
+        if (unbakeableComments > 0)
+        {
+            _logger.LogWarning(
+                "Compose save: best-effort recovery could not bake {UnbakeableComments} advisory comment(s) whose paragraph unit refused.",
+                unbakeableComments);
+        }
+
+        summary = new PartialApplySummary(
+            Total: ops.Count,
+            AppliedCount: appliedCount,
+            UnresolvedCount: unresolved.Count,
+            Unresolved: unresolved,
+            ComputedAtUtc: observedAt);
+        return current;
+    }
+
+    /// <summary>
+    /// Applies ONE prong-1 unit through the patch engine, returning the patched bytes on success or the
+    /// ORIGINAL bytes + the op-level <see cref="ComposePatchException"/> on refusal. A batch-level refusal
+    /// (malformed / schema — see <see cref="IsBatchLevelPatchRefusal"/>) is rethrown (the cumulative bytes are
+    /// unusable). A unit with no ops and no comments is a byte-identical no-op (the engine's passthrough).
+    /// </summary>
+    private (byte[] Bytes, ComposePatchException? Refusal) TryApplyPatchUnit(
+        byte[] input,
+        string schemaVersion,
+        IReadOnlyList<ComposeOperation> unitOps,
+        IReadOnlyList<ComposeAnchoredComment>? unitComments,
+        string author,
+        DateTimeOffset observedAt,
+        bool trackChanges)
+    {
+        try
+        {
+            var bytes = _patchEngine.Apply(
+                input,
+                new ComposeOperationLog { SchemaVersion = schemaVersion, Operations = unitOps },
+                unitComments,
+                author,
+                observedAt,
+                trackChanges: trackChanges);
+            return (bytes, null);
+        }
+        catch (ComposePatchException ex) when (!IsBatchLevelPatchRefusal(ex.Kind))
+        {
+            return (input, ex);
+        }
     }
 
     /// <summary>0-based index of the FIRST current paraId equal to <paramref name="paraId"/> (case-sensitive
@@ -1543,6 +2057,23 @@ public class ComposeService : IComposeService
         // hard precondition of this method). Mark it so downstream readers stop rejecting it.
         entity[HasFileAttribute] = true;
 
+        // G1 (FR-01, task 020): persist the durable origin marker ONLY at create-on-save (this branch —
+        // the idempotent existing-row branch above never reaches here, so a subsequent replace-path save
+        // never mutates an already-persisted origin). Defaults to Imported (the Dataverse field's own
+        // default) when the caller supplies none (e.g. a standalone /promote call that predates G1) —
+        // never left unset, so a fresh row is never silently null-origin.
+        entity[ComposeOriginAttribute] = new OptionSetValue((int)(request.Origin ?? ComposeOrigin.Imported));
+
+        // G7 (FR-06, task 022): stamp the client-minted transient dedup key ONLY at create (this branch;
+        // the idempotent existing-row branch above never reaches here). The single-column alt-key
+        // sprk_composetransientkey_uk makes this the durable dedup identity for repeated create-on-save
+        // calls (see TryFindDocumentByTransientKeyAsync + the SaveAsync transient branch). Omitted for a
+        // replace-path save or an older client that predates G7 (nulls are not enforced-unique).
+        if (!string.IsNullOrWhiteSpace(request.TransientKey))
+        {
+            entity[ComposeTransientKeyAttribute] = request.TransientKey!;
+        }
+
         if (request.FileSize.HasValue)
         {
             // sprk_filesize is a Whole Number (int) column; the OrganizationService write path is
@@ -1569,13 +2100,26 @@ public class ComposeService : IComposeService
         }
         catch (InvalidOperationException ex)
         {
-            // Narrow race — concurrent Save promoted first. Re-resolve.
+            // Narrow race — a concurrent Save promoted first. Re-resolve by BOTH keys:
+            //   • sprk_graphitemid_uk — the classic case (two saves of the SAME minted SPE item), OR
+            //   • G7 (task 022) sprk_composetransientkey_uk — two truly-concurrent FIRST saves of the same
+            //     transient draft each minted their OWN SPE item (different graphitemid) but carry the SAME
+            //     transient key, so the loser's create fails the transient-key unique constraint. Re-resolving
+            //     by the transient key lands the loser on the winner's record → ONE record, no duplicate
+            //     (the loser's minted item is orphaned, an acceptable rare edge — never a duplicate ROW).
             _logger.LogWarning(ex,
-                "Compose promote: create failed for driveItem={DocumentSpeId} — likely concurrent promotion. Re-resolving via alternate key.",
+                "Compose promote: create failed for driveItem={DocumentSpeId} — likely concurrent promotion. Re-resolving via alternate key (graphItemId, then transientKey).",
                 request.DocumentSpeId);
 
             var raceWinnerId = await TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
                 .ConfigureAwait(false);
+
+            if (!raceWinnerId.HasValue && !string.IsNullOrWhiteSpace(request.TransientKey))
+            {
+                var transientKeyWinner = await TryFindDocumentByTransientKeyAsync(request.TransientKey!, cancellationToken)
+                    .ConfigureAwait(false);
+                raceWinnerId = transientKeyWinner?.RecordId;
+            }
 
             if (!raceWinnerId.HasValue)
             {
@@ -2132,6 +2676,57 @@ public class ComposeService : IComposeService
             _logger.LogDebug(ex,
                 "Compose promote alt-key lookup threw InvalidOperationException for driveItem={DocumentSpeId} — treating as not-found",
                 driveItemId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// G7 (FR-06, task 022): the resolved dedup identity for a transient key — the <c>sprk_document</c> row id
+    /// plus the SPE pointer (<c>sprk_graphitemid</c> + <c>sprk_graphdriveid</c>) needed to REPLACE its content
+    /// in place instead of minting a duplicate. <see cref="SpeId"/>/<see cref="DriveId"/> are <c>null</c> only
+    /// for a row that somehow carries a transient key but no SPE pointer (a G7-created row always has both) —
+    /// the caller then falls back to minting.
+    /// </summary>
+    private sealed record TransientKeyMatch(Guid RecordId, string? SpeId, string? DriveId);
+
+    /// <summary>
+    /// G7 (FR-06, task 022): looks up an existing <c>sprk_document</c> row by the client-minted transient key
+    /// via the <c>sprk_composetransientkey_uk</c> alternate key, returning its id + SPE pointer (so the caller
+    /// can replace in place). Returns <c>null</c> when no row carries the key (the first save of this draft,
+    /// or a Save-New fork). Resolves by KEY, never by content (I-7/NFR-02). Mirrors
+    /// <see cref="TryFindDocumentByGraphItemIdAsync"/> exactly (same best-effort not-found on a thrown
+    /// InvalidOperationException).
+    /// </summary>
+    private async Task<TransientKeyMatch?> TryFindDocumentByTransientKeyAsync(
+        string transientKey,
+        CancellationToken cancellationToken)
+    {
+        var key = new KeyAttributeCollection
+        {
+            { ComposeTransientKeyAttribute, transientKey },
+        };
+
+        try
+        {
+            var entity = await _dataverse.RetrieveByAlternateKeyAsync(
+                DocumentLogicalName,
+                key,
+                new[] { DocumentIdAttribute, GraphItemIdAttribute, GraphDriveIdAttribute },
+                cancellationToken).ConfigureAwait(false);
+
+            if (entity is null)
+            {
+                return null;
+            }
+
+            var speId = entity.Contains(GraphItemIdAttribute) ? entity[GraphItemIdAttribute] as string : null;
+            var driveId = entity.Contains(GraphDriveIdAttribute) ? entity[GraphDriveIdAttribute] as string : null;
+            return new TransientKeyMatch(entity.Id, speId, driveId);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogDebug(ex,
+                "Compose transient-key alt-key lookup threw InvalidOperationException for transientKey — treating as not-found");
             return null;
         }
     }

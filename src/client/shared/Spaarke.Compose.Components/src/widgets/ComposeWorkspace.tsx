@@ -99,7 +99,12 @@ import { authenticatedFetch, ApiError } from '@spaarke/auth';
 // `DataverseLookupField` and the 1c ribbon launcher (`DocumentComposeLaunch.ts`)
 // already use. No new lookup UI, no new BFF endpoint (ADR-039: this is a data query,
 // not a dispatch).
-import { createXrmNavigationService, createXrmDataService, type LookupResult } from '@spaarke/ui-components';
+import {
+  createXrmNavigationService,
+  createXrmDataService,
+  RichFilePreviewDialog,
+  type LookupResult,
+} from '@spaarke/ui-components';
 
 // FIX #5 (UAT): the separate `ComposeToolbar` command bar (Open-in-Word + Save +
 // Push) was folded into the consolidated single-row `ComposeFormatToolbar` that
@@ -114,6 +119,7 @@ import { ComposeEmptyState } from './ComposeEmptyState';
 import { ComposeConflictDialog } from './ComposeConflictDialog';
 // Return-from-Word re-anchor UX (task 054 — BUILT; mounted here by task 103, gap 3.5).
 import { ComposeReanchorBanner } from './ComposeReanchorBanner';
+import { ComposeExternalChangeBanner } from './ComposeExternalChangeBanner';
 import { ComposeReanchorConflictPanel } from './ComposeReanchorConflictPanel';
 import { useComposeReanchor } from './useComposeReanchor';
 import type { ReanchorResolutionDecision } from './ComposeReanchor.types';
@@ -141,6 +147,8 @@ import type {
   // FR-03 (task 011, spaarkeai-compose-fidelity-r4.5): shared normalize-target type for the
   // Load/Upload/Browse->project projection hydration sites (see `normalizeProjection` below).
   ComposeServerProjection,
+  // G7 (task 022): the Save split-button choice threaded into triggerSave.
+  ComposeSaveMode,
 } from '../types/compose-contracts';
 // R4 FR-06 (task 032, the write-path cutover): the op-log schema constant stamped on the operation log
 // `triggerSave` sends — the server (ComposeShadowPatchEngine) validates it against the version it compiles
@@ -192,6 +200,22 @@ function mintDocumentSessionId(): string {
     return c.randomUUID();
   }
   return `compose-doc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * G7 (FR-06, task 022): mint the stable transient-draft dedup key, ONCE per transient mount. Sent on
+ * every create-on-save so repeated calls (concurrent saves, a re-created mount, a new tab) dedup to ONE
+ * `sprk_document` record via the server `sprk_composetransientkey_uk` alt-key instead of minting
+ * duplicates (the 8-duplicate defect). Minted at the mount dispatch site (never per-save — a per-save
+ * mint would BE the bug) and carried on `documentRef.transientKey`. Same `crypto.randomUUID()`-preferring
+ * shape as {@link mintDocumentSessionId} so jsdom/older runtimes still mint a stable value.
+ */
+function mintTransientKey(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c?.randomUUID) {
+    return c.randomUUID();
+  }
+  return `compose-tk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 // ASP.NET Core deserializes byte[] request-body fields from a base64 string (System.Text.Json
@@ -587,6 +611,34 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   notifyComposeSaveCompletedRef.current = notifyComposeSaveCompleted;
 
   // -------------------------------------------------------------------------
+  // "Open Document" — preview the source Dataverse Document in a modal.
+  // Reuses the SHARED `RichFilePreviewDialog` (@spaarke/ui-components) + the BFF
+  // `GET /api/documents/{id}/preview-url` endpoint — the SAME mechanism the
+  // ConversationPane "Open preview" chat affordance (FIX #7a) uses. No new
+  // component and no new endpoint (§11 reuse / §10 BFF hygiene). The button on the
+  // format toolbar opens this modal, keyed off the current doc's sprk_document id.
+  // -------------------------------------------------------------------------
+  const previewNavigationService = React.useMemo(() => createXrmNavigationService(), []);
+  const [documentPreviewOpen, setDocumentPreviewOpen] = React.useState(false);
+  // Fetch the ephemeral iframe preview URL for the current document (RichFilePreview's
+  // `fetchPreviewUrl` contract). ADR-028: goes through `@spaarke/auth` authenticatedFetch —
+  // no raw fetch/bearer. Non-fatal on failure (the modal shows its own fallback).
+  const fetchDocumentPreviewUrl = React.useCallback(async (): Promise<string | null> => {
+    const docId = state.documentRef?.sprkDocumentId;
+    if (!docId || !bffBaseUrl) return null;
+    try {
+      const response = await authenticatedFetch(
+        `${bffBaseUrl}/api/documents/${encodeURIComponent(docId)}/preview-url`,
+        { method: 'GET' }
+      );
+      const data = (await response.json()) as { previewUrl?: string };
+      return data.previewUrl ?? null;
+    } catch {
+      return null;
+    }
+  }, [state.documentRef?.sprkDocumentId, bffBaseUrl]);
+
+  // -------------------------------------------------------------------------
   // FR-29 / FR-33 (R2, tasks 060/102) — anchored annotations + defined-terms +
   // action-history rehydrate, and annotation save-on-mutation
   // -------------------------------------------------------------------------
@@ -747,6 +799,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             warnings?: { code: string; count: number }[];
             schemaVersion?: string;
           };
+          // G1 (FR-01, task 020): the persisted cross-session origin marker (Path A only — an
+          // existing sprk_document record; ComposeEndpoints.cs LoadComposeDocumentResponse.origin).
+          // Parsed defensively (optional) so an older BFF that predates the field still loads;
+          // undefined/null normalize to `null` below — the BINDING null-handling contract treats
+          // that the SAME as 'imported', never strict-equal to 'authored'.
+          origin?: 'authored' | 'imported' | null;
         };
 
         // Decode base64 -> bytes. atob() returns a binary string (one char per byte).
@@ -787,6 +845,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           importedRevisions: hydratedImportedRevisions,
           importedComments: hydratedImportedComments,
           projection: hydratedProjection,
+          // G1 (FR-01, task 020): normalize undefined (older BFF / Path B continuation) to `null`.
+          origin: payload.origin ?? null,
         });
       } catch (err) {
         if (ac.signal.aborted) return;
@@ -897,13 +957,34 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // 3.5 — re-anchor the prior Compose anchors against the updated document → banner/panel.
       const priorAnchors = anchoredAnnotationsToPriorAnchors(anchoredAnnotations);
       await runReanchor({ documentSpeId: speId, driveId: effectiveDriveId, tenantId, priorAnchors });
+
+      // G8 (FR-07, task 030): surface the external change + refresh the projection. Detection resolved
+      // by document/version identity (checkChanges above), never content match (NFR-02/I-7).
+      //   • CLEAN editor → remount transparently from the server-authoritative bytes. requestLoad
+      //     carries externalChange:true so the "Document updated…" banner still renders post-reload.
+      //   • DIRTY editor → do NOT remount (NFR-08 — that would silently discard unsaved edits). Set the
+      //     banner flag instead; the banner offers an explicit Reload the user chooses (discard-and-
+      //     remount is a user action, never silent). This is the guarded path the escalation trigger
+      //     requires — a dirty doc is deferred to the user, not silently remounted.
+      const editorDirty = editorRef.current?.isDirty() ?? false;
+      if (editorDirty) {
+        dispatch({ kind: 'externalChangeDetected' });
+      } else if (state.documentRef) {
+        dispatch({
+          kind: 'requestLoad',
+          documentRef: state.documentRef,
+          sessionId: state.sessionId,
+          externalChange: true,
+        });
+      }
     } catch {
       // Poll/reanchor failures are non-fatal — the editing session continues.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     state.status,
-    state.documentRef?.speDriveItemId,
+    state.documentRef,
+    state.sessionId,
     effectiveDriveId,
     bffBaseUrl,
     tenantId,
@@ -913,14 +994,33 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     anchoredAnnotations,
   ]);
 
+  // UAT #5 fix (task 053): Compose runs EMBEDDED in an iframe (LegalWorkspace embedded mode / model-driven
+  // host). Returning from the Word-for-Web tab fires the document's `visibilitychange` (→ visible) reliably,
+  // but the iframe `window`'s `focus` event often does NOT — so a `focus`-only listener meant the
+  // external-change check never ran and the banner never appeared. Listen for BOTH; an in-flight guard stops
+  // the two events (which can both fire on a single return) from double-running the check and double-advancing
+  // the shared SPE delta cursor.
+  const returnCheckInFlightRef = React.useRef(false);
   React.useEffect(() => {
     if (state.status !== 'loaded') return;
     if (!state.documentRef?.speDriveItemId) return;
-    const onFocus = (): void => {
-      void runReturnFromWordCheck();
+    const runGuarded = (): void => {
+      if (returnCheckInFlightRef.current) return;
+      returnCheckInFlightRef.current = true;
+      void runReturnFromWordCheck().finally(() => {
+        returnCheckInFlightRef.current = false;
+      });
+    };
+    const onFocus = (): void => runGuarded();
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'visible') runGuarded();
     };
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [state.status, state.documentRef?.speDriveItemId, runReturnFromWordCheck]);
 
   // gap 3.5 — resolve a flagged/orphaned anchor from the conflict panel. Discard is the only path
@@ -979,14 +1079,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // -------------------------------------------------------------------------
   // BFF Save — POST /api/compose/documents/{speId}/save
   // -------------------------------------------------------------------------
-  const triggerSave = React.useCallback(async (): Promise<void> => {
+  const triggerSave = React.useCallback(async (saveMode: ComposeSaveMode = 'version'): Promise<void> => {
     if (state.status !== 'loaded') return;
     if (!state.documentRef || !editorRef.current) return;
 
+    // G7 (FR-06, task 022): "Save New Document" (fork) forces the create-on-save path — a brand-new
+    // sprk_document record — EVEN when the doc already has a real SPE item. A fresh transient key is
+    // minted so the fork gets its OWN dedup identity, and `forkNew` tells the server to SKIP the
+    // transient-key dedup lookup for this call (a deliberate new document, not a new version).
+    const forkNew = saveMode === 'new';
     // FR-05 (task 100): a TRANSIENT (Browse/Upload) draft has NO SPE drive-item — it persists via
     // create-on-save into the client-resolved BU container, not the replace path. Branch on the
-    // absence of a real speDriveItemId (mountTransient sets it to '').
-    const isTransientCreate = !state.documentRef.speDriveItemId;
+    // absence of a real speDriveItemId (mountTransient sets it to ''), OR on a deliberate Save-New fork.
+    const isTransientCreate = forkNew || !state.documentRef.speDriveItemId;
+    // G7: the dedup key to send on a create-on-save. A fork mints a fresh key (its own identity going
+    // forward); a normal transient save reuses the mount-time key so repeated saves dedup to ONE record.
+    const effectiveTransientKey = forkNew ? mintTransientKey() : state.documentRef.transientKey;
     const saveContainerId = state.documentRef.containerId ?? containerIdRef.current;
     // UAT 2026-07-19 P2: prefer the drive the document actually lives in (captured from the save
     // response after a create-on-save — the born-in-editor doc lands in the BU container's drive,
@@ -1040,7 +1148,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // anchor landed in later-deleted content (`deletedContentFlag`) are surfaced by the snapshot and EXCLUDED
       // from what we apply — never-silently-dropped, but not re-applied onto content a later edit removed. The
       // born-in-editor create-on-save path authors the whole document via `contentModel`, so it sends no op-log.
-      const opLogSnapshot = !isTransientCreate && editorIsDirty ? editorRef.current.serializeOperationLog() : null;
+      // UAT #1A fix (task 050): an IMPORTED transient mount (Browse/upload — `state.docxBytes` present) that is
+      // dirty ALSO captures the op-log, so its create-on-save applies TRACKED redlines via the engine (not the
+      // renderer). Only a true born-in-editor doc (`!state.docxBytes`) skips the op-log on the transient path.
+      const opLogSnapshot =
+        editorIsDirty && (!isTransientCreate || !!state.docxBytes)
+          ? editorRef.current.serializeOperationLog()
+          : null;
       const operationLog = opLogSnapshot
         ? {
             schemaVersion: COMPOSE_OPERATION_SCHEMA_VERSION,
@@ -1096,20 +1210,40 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // redlines ride the ID-anchored `operationLog` (case 1 only — see below).
       let requestBody: Record<string, unknown>;
       if (isTransientCreate) {
-        // A born-in-editor create-on-save: an AI-draft/blank/EDITED mount RENDERS from the content model;
-        // an UNEDITED browse-local mount with retained bytes persists them byte-identical (FR-06a).
-        const bornInEditorRender = editorIsDirty || !state.docxBytes;
+        // UAT #1A fix (task 050): the born-in-editor discriminant is retained-bytes presence ONLY — the SAME
+        // signal the replace path uses (`bornInEditor = !state.docxBytes`). Previously this ALSO OR'd in
+        // `editorIsDirty`, so a DIRTY imported transient (Browse/upload mount WITH original bytes) rendered from
+        // the content model → plain untracked runs → NO redline in Word, and the server stamped it Authored
+        // (which then forced every later reopen-save onto the clean branch). Now an imported transient (has
+        // bytes) sends its retained original + the tracked op-log so the engine applies w:ins/w:del
+        // (create-on-save carries no DocumentRecordId → cleanApply is false → trackChanges true). Only a TRUE
+        // born-in-editor doc (no retained bytes) renders from the content model.
+        const bornInEditorRender = !state.docxBytes;
         requestBody = {
           containerId: saveContainerId,
           tenantId,
           sessionId: state.sessionId,
           displayName: state.documentRef.fileName ?? null,
           comments: anchoredComments,
-          // C2: the baseline paraId map (harmless on the born-in-editor path — the server skips the stamp there).
+          // C2: the baseline paraId map — needed on the imported-transient op-log branch so the server can stamp
+          // client-minted ids onto the retained baseline before the engine resolves anchors (harmless on the
+          // born-in-editor render branch — the server skips the stamp when ContentModel is present).
           paraIdMap,
+          // G7 (task 022): the transient dedup key (repeated create-on-save → ONE record) + the Save-New
+          // fork flag (forkNew=true skips dedup → a deliberately new record). effectiveTransientKey is the
+          // mount-time key for a normal transient save, or a freshly-minted one for a fork.
+          transientKey: effectiveTransientKey,
+          forkNew,
           ...(bornInEditorRender
             ? { contentModel: editorRef.current.buildContentModel() }
-            : { content: encodeRetained(state.docxBytes!) }),
+            : {
+                // Imported transient (Browse/upload-mounted, has original bytes): send the retained ORIGINAL
+                // bytes as the baseline + the tracked op-log so the server applies redlines via
+                // ComposeShadowPatchEngine — NOT the renderer. operationLog is undefined on a clean mount →
+                // the server persists the retained bytes byte-identical (FR-06a).
+                content: encodeRetained(state.docxBytes!),
+                operationLog,
+              }),
         };
       } else {
         // task 039 (UAT round 1+2, born-in-editor 2nd-save fix): a BORN-IN-EDITOR doc (blank page / AI-draft)
@@ -1120,6 +1254,23 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // The server renders the .docx and ReplaceFileContentAsUserAsync's it onto the EXISTING item (same
         // speDriveItemId) — updating in place, no duplicate record. A LOADED/imported doc (docxBytes present)
         // keeps the op-log + baseline path below EXACTLY as-is → tracked changes (REQ-2 not regressed).
+        //
+        // G1/G2 (FR-01/FR-02, tasks 020/021 — Candidate A): a REOPENED AUTHORED doc (persisted
+        // sprk_composeorigin=authored, `state.docxBytes` present) now takes the SAME op-log path as an
+        // imported doc — it sends its retained baseline + operation log, and the SERVER applies the ops
+        // CLEAN (plain runs, physical deletes, no redlines) by reading the durable marker (engine
+        // trackChanges:false). This is the highest-fidelity path: only document.xml is re-serialized, every
+        // other package part + untouched subtree stays byte-identical — NOT a re-author-from-content-model
+        // (which drops headers/footers/styles on rich docs and violates ADR-049 I-1/I-2/I-4). The client no
+        // longer branches on origin here; the durable marker drives clean-vs-tracked server-side (NFR-02 —
+        // never inferred). See notes/g2-clean-apply-decision.md (operator resolution 2026-07-29).
+        //
+        // The ONLY contentModel case that remains on the replace route is an in-session BORN-IN-EDITOR
+        // re-save (`!state.docxBytes`): a blank/AI-draft doc holds NO retained baseline (its create-on-save
+        // returned the drive-ITEM id as VersionId, not a real SPE version), so the baseline-less op-log path
+        // 400s (task 039). It re-authors via contentModel, mirroring the create path — this is authored
+        // ORIGINATION through the renderer (the two-byte-author split), never authored EDITING through the op
+        // log; both stay clean.
         const bornInEditor = !state.docxBytes;
         requestBody = {
           // UAT 2026-07-19 P2: the drive the doc lives in (documentRef.driveId after a create-on-save),
@@ -1128,19 +1279,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           driveId: saveDriveId,
           tenantId,
           sessionId: state.sessionId,
+          // G2: the server reads the durable sprk_composeorigin marker for THIS record to pick clean-vs-
+          // tracked apply — so documentRecordId MUST ride every reopened-doc save (already sent since G1).
           documentRecordId: state.documentRef.sprkDocumentId ?? null,
           displayName: state.documentRef.fileName ?? null,
           comments: anchoredComments,
           // C2: the baseline paraId map so the server can stamp minted ids before the engine resolves anchors
-          // (harmless on the born-in-editor branch — the server skips the stamp when ContentModel is present).
+          // (harmless on the contentModel branch — the server skips the stamp when ContentModel is present).
           paraIdMap,
           ...(bornInEditor
-            ? // Born-in-editor: re-author the whole document server-side from the content model. No baseline /
-              // op-log — the doc was authored in the editor, there is nothing to diff onto.
+            ? // In-session born-in-editor re-save: re-author from the content model (no retained baseline to
+              // delta onto — task 039). The renderer authors clean bytes; no op-log.
               { contentModel: editorRef.current.buildContentModel() }
             : {
-                // Loaded/imported dirty save (UNCHANGED — REQ-2). The load-time version id = the op-log's BASE
-                // VERSION; lets the server re-fetch the baseline even without the client bytes.
+                // Loaded/imported OR reopened-authored dirty save. The load-time version id = the op-log's BASE
+                // VERSION; lets the server re-fetch the baseline even without the client bytes. The server
+                // applies the op-log tracked (imported) or CLEAN (authored, per the durable marker) — REQ-1/REQ-2.
                 baselineVersionId: state.versionId ?? undefined,
                 // Same-session fast-path: still holding the retained original → send it (byte-identical).
                 content: state.docxBytes ? encodeRetained(state.docxBytes) : undefined,
@@ -1172,6 +1326,21 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         } catch {
           detail = (await response.text().catch(() => '')).slice(0, 400);
         }
+        // UAT #10/#11 (task 052): a 423 means the doc is held by a Word-for-web CO-AUTHORING lock (Spaarke
+        // never does a formal checkout, so a 423 is ALWAYS co-authoring). There is no programmatic unlock —
+        // flag it so the banner shows the honest "Open in Word" bar with Retry + Reload-from-Word (not a fake
+        // Unlock, and not the old misleading "checked out — check it in" copy). The server detail already
+        // carries the honest message.
+        if (response.status === 423) {
+          dispatch({
+            kind: 'saveFailed',
+            errorMessage:
+              detail ||
+              'This document is open in Word — close it there, then Retry. It also releases automatically within a few minutes. Your Compose changes are safe and still pending.',
+            isLock: true,
+          });
+          return;
+        }
         const msg =
           response.status === 403
             ? `You do not have permission to save this document. ${detail}`.trim()
@@ -1195,6 +1364,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         eTag?: string;
         size: number;
         wasPromotedThisSave: boolean;
+        // Prong 1 (task 055): best-effort partial-apply summary — present only when some ops couldn't be
+        // anchored server-side (the save still succeeded with the resolvable edits). Absent on the common
+        // clean-batch path. Drives the honest "N edits couldn't be saved — please redo them" banner.
+        partialApply?: {
+          total: number;
+          appliedCount: number;
+          unresolvedCount: number;
+        } | null;
       };
 
       // #1(b): the persisted document id drives the Assistant's persistent "Saved to the DMS" chat
@@ -1222,6 +1399,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // save of a born-in-editor doc can resolve its baseline (server re-fetch by versionId).
         driveId: payload.driveId,
         versionId: payload.versionId,
+        // Prong 1 (task 055): surface a best-effort partial-apply outcome (some ops couldn't be anchored)
+        // so the banner prompts the user to redo just those edits. Only carried when the server actually
+        // recovered — a clean batch omits it (→ null → clears any prior partial-apply banner).
+        partialApply:
+          payload.partialApply && payload.partialApply.unresolvedCount > 0 ? payload.partialApply : null,
       });
       // Clear the local dirty flag so the Save button disables until the
       // next edit. ComposeEditor's internal dirtyRef also resets on the
@@ -1268,6 +1450,41 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     tenantId,
     onCreateOnSaveComplete,
   ]);
+
+  // G10 (FR-09, task 040): manual "Refresh Profile" — re-run the Document Profile on demand for a PROMOTED
+  // doc (it has a sprk_document record to profile). Fire-and-forget on the server (202); best-effort here —
+  // a failure is non-fatal (the profile is background/best-effort anyway). Only meaningful once the doc is
+  // promoted, so the button is wired (below) only when sprkDocumentId exists.
+  // UAT #9 (task 054): transient "profiling…" spinner state so the manual click gives visible feedback.
+  const [isRefreshingProfile, setIsRefreshingProfile] = React.useState(false);
+  const triggerRefreshProfile = React.useCallback(async (): Promise<void> => {
+    const recordId = state.documentRef?.sprkDocumentId;
+    if (!recordId || !bffBaseUrl || !tenantId) return;
+    // UAT #9 (task 054): the profile re-run is a fire-and-forget 202 with no server-visible result. Surface
+    // a brief "profiling…" spinner on the button so the user SEES that the click did something (the UAT
+    // complaint was that neither the automatic re-trigger nor the manual button gave any visible signal).
+    setIsRefreshingProfile(true);
+    try {
+      await authenticatedFetch(
+        `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(recordId)}/refresh-profile`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tenantId,
+            documentSpeId: state.documentRef?.speDriveItemId || undefined,
+            eTag: state.etag || undefined,
+          }),
+        }
+      );
+      // Keep the spinner visible briefly so a fast 202 still registers as a deliberate action.
+      window.setTimeout(() => setIsRefreshingProfile(false), 1500);
+    } catch (err) {
+      setIsRefreshingProfile(false);
+      // eslint-disable-next-line no-console
+      console.warn('[ComposeWorkspace] refresh-profile request failed (non-fatal):', err);
+    }
+  }, [state.documentRef?.sprkDocumentId, state.documentRef?.speDriveItemId, state.etag, bffBaseUrl, tenantId]);
 
   // FIX #1b — publish the editor's Save into the cross-pane bridge so the Assistant's "Add the
   // document to the DMS" chip (ConversationPane) drives the SAME create-on-save / save-to-matter
@@ -1790,6 +2007,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             containerId: containerIdRef.current,
             sessionId: browseDocumentSessionId,
             projection,
+            // G7 (task 022): mint the transient dedup key once for this Browse mount → every create-on-save
+            // sends it so repeated saves target ONE record (no duplicate mint).
+            transientKey: mintTransientKey(),
           });
           // A freshly Browse-mounted file is unsaved by definition — mark dirty so Save
           // (create-on-save, task 013) is enabled immediately.
@@ -1835,6 +2055,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       fileName,
       containerId: containerIdRef.current,
       sessionId: mintDocumentSessionId(),
+      // G7 (task 022): transient dedup key for this born-in-editor mount.
+      transientKey: mintTransientKey(),
     });
     // A freshly-created born-in-editor doc is unsaved by definition — enable Save (create-on-save).
     setIsDirty(true);
@@ -2102,6 +2324,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // FR-05 (task 100): thread the host-resolved BU container for create-on-save.
           containerId: containerIdRef.current,
           projection: hydratedUploadProjection,
+          // G7 (task 022): transient dedup key for this assistant-upload mount.
+          transientKey: mintTransientKey(),
         });
         // A freshly-mounted upload is unsaved by definition — mark dirty so Save
         // (create-on-save, task 013) is enabled immediately.
@@ -2164,6 +2388,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         fileName: initialDraftRef.fileName,
         containerId: containerIdRef.current,
         sessionId: draftDocumentSessionId,
+        // G7 (task 022): transient dedup key for this inline (Part B) draft mount.
+        transientKey: mintTransientKey(),
       });
       setIsDirty(true);
       return;
@@ -2234,6 +2460,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           html: bodyHtml,
           fileName: match?.payload?.title,
           containerId: containerIdRef.current,
+          // G7 (task 022): transient dedup key for this ledger-resolved (Part A) draft mount.
+          transientKey: mintTransientKey(),
         });
         // A freshly-seeded draft is unsaved by definition — mark dirty so Save (create-on-save) is
         // enabled immediately.
@@ -2298,6 +2526,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
   // Toolbar documentId (Open-in-Word handoff) — accepts SPE id or sprk_documentid.
   const toolbarDocumentId = state.documentRef?.sprkDocumentId ?? state.documentRef?.speDriveItemId ?? '';
+
+  // "Open Document" preview gating — the BFF preview-url endpoint resolves a document
+  // by its sprk_document id, so the button appears only for a PROMOTED doc (one with a
+  // sprk_document record) and a configured BFF base URL. Undefined handler → button hidden
+  // (mirrors the onRefreshProfile gating pattern).
+  const previewDocumentId = state.documentRef?.sprkDocumentId ?? '';
+  const canPreviewDocument = previewDocumentId.length > 0 && bffBaseUrl.length > 0;
 
   // FR-05 (task 100, gap 1.5): a transient (Browse/Upload) draft has no SPE pointer yet — the Save
   // button must be enabled for it (create-on-save) even though its editor dirty flag is false for
@@ -2427,9 +2662,46 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             onDismiss={resetReanchor}
           />
 
+          {/* G8 (FR-07, task 030) — external-change refresh banner. A CLEAN editor was already
+              remounted transparently (this is the informational confirmation); a DIRTY editor shows
+              the explicit Reload action so unsaved edits are never silently discarded (NFR-08). */}
+          <ComposeExternalChangeBanner
+            pending={state.externalChangePending}
+            hasUnsavedEdits={isDirty}
+            onReload={() => {
+              if (state.documentRef) {
+                dispatch({
+                  kind: 'requestLoad',
+                  documentRef: state.documentRef,
+                  sessionId: state.sessionId,
+                  externalChange: true,
+                });
+              }
+            }}
+            onDismiss={() => dispatch({ kind: 'externalChangeDismissed' })}
+          />
+
           {/* Banner stack — errors / warnings / checkout status / assistant pending */}
           <ComposeBannerStack
             errorMessage={state.errorMessage}
+            // UAT #10/#11 (task 052): when the save failed with a Word co-authoring lock (423), show the
+            // honest "Open in Word" bar with Retry (re-run the save once Word is closed) + Reload-from-Word
+            // (pull Word's latest version as the new baseline). No fake "Unlock" — none exists.
+            saveErrorIsLock={state.saveErrorIsLock}
+            onRetrySave={() => void triggerSave()}
+            onReloadFromWord={
+              state.documentRef?.speDriveItemId
+                ? () => {
+                    if (!state.documentRef) return;
+                    dispatch({
+                      kind: 'requestLoad',
+                      documentRef: state.documentRef,
+                      sessionId: state.sessionId,
+                      externalChange: true,
+                    });
+                  }
+                : undefined
+            }
             checkoutStatus={state.checkoutStatus}
             checkoutLockedBy={state.checkoutLockedBy}
             checkoutFailureMessage={state.checkoutFailureMessage}
@@ -2438,6 +2710,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             hideImportWarnings
             pendingAssistantInsert={state.pendingAssistantInsert}
             saveSuccessToken={state.saveSuccessToken}
+            // Prong 1 (task 055): when the last save could only anchor PART of the batch, show the honest
+            // "N edits couldn't be saved — please redo them" warning (replaces the plain Saved ✓ bar).
+            partialApply={state.partialApply}
             // FIX #7a: the transient "Open preview" link was REMOVED from the Saved ✓ banner — the
             // persistent affordance now lives in the Assistant chat (a "Saved to the DMS" message
             // with "Open preview", posted via the save-completed conduit). The banner keeps its
@@ -2500,10 +2775,43 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 void openInWordFlushed('desktop');
               }}
               wordActionsDisabled={wordActionsDisabled}
-              onSave={() => {
-                void triggerSave();
+              // G7 (task 022): the toolbar Save split-button threads its choice ('version' default /
+              // 'new' fork) into triggerSave. Ctrl+S / the cross-pane bridge call triggerSave() → 'version'.
+              onSave={(mode) => {
+                void triggerSave(mode ?? 'version');
               }}
               canSave={canSaveNow}
+              // G10 (task 040): the manual "Refresh Profile" button — only for a PROMOTED doc (there is a
+              // sprk_document to re-profile). Undefined for a transient/unpromoted mount → the button hides.
+              onRefreshProfile={state.documentRef?.sprkDocumentId ? () => void triggerRefreshProfile() : undefined}
+              isRefreshingProfile={isRefreshingProfile}
+              // "Open Document" — opens the source Dataverse Document in the shared preview modal
+              // (RichFilePreviewDialog + BFF preview-url). Wired only for a doc with a preview
+              // source (a promoted sprk_document); undefined → the toolbar button hides.
+              onOpenDocument={canPreviewDocument ? () => setDocumentPreviewOpen(true) : undefined}
+              // UAT #5 (task 053): always-available "Reload from source" — pulls the latest SPE bytes (e.g.
+              // after an external Word-web edit that the change-check missed, or on demand). Gated on having an
+              // SPE source (speDriveItemId); undefined for a born-in-editor doc with no source to reload from.
+              // Honors the dirty-guard: confirm before discarding unsaved edits (no silent loss, NFR-08).
+              onReloadFromSource={
+                state.documentRef?.speDriveItemId
+                  ? () => {
+                      if (!state.documentRef) return;
+                      if (
+                        isDirty &&
+                        !window.confirm('Reload from source? Your unsaved Compose changes will be discarded.')
+                      ) {
+                        return;
+                      }
+                      dispatch({
+                        kind: 'requestLoad',
+                        documentRef: state.documentRef,
+                        sessionId: state.sessionId,
+                        externalChange: true,
+                      });
+                    }
+                  : undefined
+              }
               isSaving={isSavingNow}
               // UAT round-2 items #1/#2 — the editor's "Review" toolbar dropdown toggles this docked
               // summary panel (owned here) alongside its own right-gutter "Review Notes". `open` mirrors
@@ -2519,6 +2827,28 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             />
           </div>
         </>
+      ) : null}
+
+      {/* "Open Document" preview modal — opened from the format toolbar's "Open Document"
+          button. Reuses the shared RichFilePreviewDialog + the BFF
+          GET /api/documents/{id}/preview-url endpoint (the SAME mechanism the ConversationPane
+          "Open preview" chat affordance uses — no new component/endpoint, §11 reuse). Keyed off
+          the current doc's sprk_document id; theme-aware via the dialog's semantic tokens (ADR-021).
+          Rendered only once the doc is promoted (canPreviewDocument). */}
+      {canPreviewDocument ? (
+        <RichFilePreviewDialog
+          open={documentPreviewOpen}
+          documentId={previewDocumentId}
+          documentName={state.documentRef?.fileName ?? 'Document'}
+          onClose={() => setDocumentPreviewOpen(false)}
+          fetchPreviewUrl={fetchDocumentPreviewUrl}
+          onOpenFile={() => undefined}
+          onEmailDocument={() => undefined}
+          onCopyLink={() => undefined}
+          onOpenRecord={() => {
+            void previewNavigationService.openRecord('sprk_document', previewDocumentId);
+          }}
+        />
       ) : null}
 
       {/*

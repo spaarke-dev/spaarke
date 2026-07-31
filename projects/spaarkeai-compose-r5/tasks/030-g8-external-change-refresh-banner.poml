@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>G8 — External-change refresh + remount banner (webhook delivery leg + client remount)</title>
+    <phase>3 Concurrency + UX</phase>
+    <gate>dep:020</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches the BFF (webhook delivery/subscription leg) AND the client mount lifecycle in Spaarke.Compose.Components; a remount that mishandles unsaved edits is a data-loss path (NFR-08). Tags include bff-api/frontend; modifies .cs/.tsx; carries a judgment boundary. Code-review + adr-check run at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Wiring two already-registered legs (webhook delivery + client remount/banner) onto existing endpoints and mount effects; well-specified, not an architectural or op-catalog change.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>file-overlap on ComposeEditor.tsx (banner) with task 031, plus shared ComposeWorkspace.tsx mount-lifecycle region. Serialize with 031; run /conflict-check before the shared-client PR (analysis-hub-r1 shares this surface, NFR-09).</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, frontend, fluent-ui, react</tags>
+    <estimated-effort>M (2-4d)</estimated-effort>
+  </metadata>
+
+  <prompt>Complete the two incomplete legs of the external-change refresh feature (spec FR-07 / gap G8). The `check-changes` endpoint (ComposeEndpoints.cs:233) and the `spe-doc-changed` webhook (:209) are ALREADY registered with real handlers. Do NOT re-register them. Wire (a) the webhook DELIVERY/subscription leg (E2E-pending) and (b) the CLIENT mount-lifecycle remount plus a non-blocking banner reading "Document updated from document management system version". After a 423 lock releases, a refresh remounts the projection. The existing 423 lock message MUST still work. If a remount would discard unsaved local edits, STOP and escalate.</prompt>
+
+  <role>SPAARKE platform developer with .NET 8 BFF webhook/subscription expertise and React (Fluent UI v9) mount-lifecycle experience in the Spaarke.Compose.Components widget surface.</role>
+
+  <goal>The external-change refresh feature is end-to-end complete: (1) the SPE `spe-doc-changed` webhook delivery/subscription leg is wired so an external edit reaches the already-registered handler; (2) ComposeWorkspace.tsx/ComposeEditor.tsx mount lifecycle remounts the projection and renders a non-blocking banner ("Document updated from document management system version") after an external change is detected; (3) after a 423 lock releases (Open-in-Web/Desktop closed), a refresh remounts without data loss; (4) the existing 423 lock message is unchanged and still works. Backed by mount-effect UI coverage plus a webhook-delivery seam slice.</goal>
+
+  <context>
+    <background>Per spec FR-07 (G8) and plan P3-1, the check-changes endpoint and spe-doc-changed webhook are registered with real handlers — the true gap is the webhook delivery/subscription leg (E2E-pending) plus the client remount/banner wiring, NOT "unwired" endpoints. Discovery correction (spec §Affected Areas (c)) confirms this. This closes the concurrency UX so an external Office edit is reflected in Compose without silent divergence or data loss.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</file>
+      <file>tests/integration/seam/Compose/</file>
+    </relevant-files>
+    <dependencies>Task 020 (G1 origin routing / mount-lifecycle region on post-R4.5 ComposeWorkspace.tsx). Rebase onto the post-R4.5 ComposeService.cs / ComposeWorkspace.tsx.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Honor I-1…I-7 + D1–D5. The remount re-projects the server-authoritative bytes; the client stays view+controller. A refresh does not author bytes.</constraint>
+    <constraint source="ADR-049">I-7 / NFR-02: no text-search anywhere in the write path; external-change detection resolves by document/version identity, never content match.</constraint>
+    <constraint source="ADR-007">No Microsoft.Graph above SpeFileStore; the SPE hop for the webhook/subscription stays in the endpoint/facade layer, not the engine. Profile/refresh re-trigger is a domain event.</constraint>
+    <constraint source="ADR-038">Seam DoD: the webhook-delivery leg carries a through-the-wire WebApplicationFactory seam slice in tests/integration/seam/Compose/. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="project">NFR-08: removing the guard MUST NOT reintroduce a user-triggerable error or silent-loss path. The remount MUST NOT discard unsaved local edits (see escalation). The R4 op-log-preservation net stays until the replacing feature is seam-proven.</constraint>
+    <constraint source="project">NFR-09 (analysis-hub-r1): MUST NOT regress the downstream consumer's reopen-restore parity. ComposeEditor.tsx + ConversationPane routing are shared surface; run /conflict-check before the shared-client PR.</constraint>
+    <constraint source="project">NFR-01/NFR-04: corpus byte-diff harness (24/24) MUST NOT regress; report absolute BFF publish size + delta vs ~46.11 MB baseline on this BFF-touching task; ≤60 MB compressed ceiling.</constraint>
+    <constraint source="project">NFR-03: MIT/permissive only; no new runtime package; the banner uses existing Fluent v9 components already in the surface.</constraint>
+    <constraint source="CLAUDE.md §10">BFF task — state Placement Justification in the PR (cite .claude/constraints/bff-extensions.md). The webhook wiring stays in the endpoint/facade layer; no new endpoint family (G8 completes endpoints that already exist).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Registered G8 endpoints" location="src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs">webhook spe-doc-changed :209 / handler ~:438; check-changes :233 / handler ~:582. Complete the delivery/subscription leg — do NOT re-register.</pattern>
+      <pattern name="Deferred-notice banner styling" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx">Existing Compose banner/notice styling at :1650-1665 — anchor the external-change banner's visual direction here.</pattern>
+      <pattern name="Transient-mount identity" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx">isTransientCreate :975 / triggerSave :968 — reuse R4.5 mount effects; do not fork.</pattern>
+      <pattern name="Seam-test suite" location="tests/integration/seam/Compose/">Canonical WebApplicationFactory seam slices to model the webhook-delivery slice on.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the existing registered handlers (ComposeEndpoints.cs webhook :209 / :438, check-changes :233 / :582) and the ComposeWorkspace.tsx mount-lifecycle region (isTransientCreate :975). Confirm what is already wired vs the two incomplete legs. Do NOT re-register endpoints.</step>
+    <step order="2">Wire the webhook DELIVERY/subscription leg so an external SPE edit reaches the already-registered spe-doc-changed handler (subscription registration / delivery path). Keep the SPE hop in the endpoint/facade layer (ADR-007); resolve by document/version identity, not content match (NFR-02).</step>
+    <step order="3">Wire the CLIENT mount-lifecycle remount: on external-change detection (via check-changes / webhook signal), remount the projection from the server-authoritative bytes. Guard the remount so unsaved local edits are never silently discarded (see escalation).</step>
+    <step order="4">Add the non-blocking banner "Document updated from document management system version" to ComposeEditor.tsx, anchored to the existing deferred-notice styling (:1650-1665). Verify the existing 423 lock message still renders and works after a lock releases (a refresh remounts the projection).</step>
+    <step order="5">Add a webhook-delivery seam slice in tests/integration/seam/Compose/ (through-the-wire WebApplicationFactory) proving an external-change signal reaches the handler and drives the check-changes contract. Add the &lt;ui-tests&gt; below.</step>
+    <step order="6">Run /conflict-check before opening the shared-client PR (ComposeEditor.tsx + ComposeWorkspace.tsx overlap with 031 and analysis-hub-r1). State Placement Justification and report publish-size delta vs ~46.11 MB in the PR.</step>
+    <step order="7">Run/verify: build (BFF + Spaarke.Compose.Components) + the task's seam slice + ui-tests + corpus byte-diff (24/24) pass.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If completing the remount would discard un-saved local edits (i.e., the mount lifecycle cannot preserve pending in-editor changes across a projection remount), STOP and escalate to the operator — this is a data-loss risk (NFR-08). Do not ship a remount that can silently lose a user's unsaved work.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build the BFF, run the seam slice, run dotnet publish for the size delta.</tool>
+    <tool name="npm">Build Spaarke.Compose.Components and run the client/ui tests.</tool>
+    <tool name="terminal">Run /conflict-check and inspect the registered endpoints/handlers.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="banner-renders">Given an external-change signal, when Compose detects it, then the non-blocking banner "Document updated from document management system version" renders using the existing deferred-notice styling (ComposeEditor.tsx :1650-1665) and does not block editing.</test>
+    <test name="remount-preserves-edits">Given a remount after external change, when the projection re-mounts from server bytes, then the render matches the refreshed projection and no unsaved local edit is silently dropped (if it would be, the flow escalates rather than remounts).</test>
+    <test name="lock-message-still-works">Given a 423 lock (Open-in-Web/Desktop), when the lock is active, then the existing 423 lock message still renders; after the lock releases, a refresh remounts the projection.</test>
+    <test name="dark-mode">Given ADR-021 dark mode, when the banner renders in dark theme, then it uses theme tokens (no hard-coded colors) and remains legible in both light and dark.</test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the two already-registered G8 endpoints, when this task completes, then the webhook delivery/subscription leg is wired (an external SPE edit reaches the registered spe-doc-changed handler) and NO endpoint is re-registered.</criterion>
+    <criterion testable="true">Given an external edit (Open-in-Web/Desktop), when it is detected, then Compose remounts the projection and renders the non-blocking "Document updated from document management system version" banner without data loss.</criterion>
+    <criterion testable="true">Given a 423 lock that then releases, when a refresh occurs, then the existing 423 lock message still works and the projection remounts.</criterion>
+    <criterion testable="true">Given a webhook-delivery seam slice in tests/integration/seam/Compose/, when it runs through the WebApplicationFactory, then it proves the external-change signal reaches the handler (no banned mock/DI/ctor test shapes).</criterion>
+    <criterion testable="true">Negative / no-regression: the corpus byte-diff harness stays 24/24, BFF publish stays ≤60 MB (delta vs ~46.11 MB reported), and no new user-triggerable error or silent-loss path is introduced (NFR-08); analysis-hub-r1 reopen-restore parity is not regressed (NFR-09).</criterion>
+    <criterion testable="true">Negative: no text-search is used to detect the external change — detection resolves by document/version identity (NFR-02).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-07 / gap G8; plan P3-1; discovery correction §Affected Areas (c). Endpoints already registered — the gap is delivery + client wiring. parallel-safe=false due to ComposeEditor.tsx overlap with 031 and shared ComposeWorkspace.tsx mount. Deps 020. Banner text is fixed: "Document updated from document management system version".</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

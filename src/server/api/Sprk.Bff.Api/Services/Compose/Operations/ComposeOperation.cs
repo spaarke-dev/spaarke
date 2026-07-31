@@ -56,8 +56,13 @@ namespace Sprk.Bff.Api.Services.Compose.Operations;
 /// </summary>
 public static class ComposeOperationSchema
 {
-    /// <summary>Current schema version — <c>compose-ops-v1</c> (Phase 0, R4).</summary>
-    public const string Version = "compose-ops-v1";
+    /// <summary>Current schema version — <c>compose-ops-v2</c> (R5 task 012, G12/FR-11). Bumped from
+    /// <c>compose-ops-v1</c> when the closed catalog gained the <c>acceptRevision</c>/<c>rejectRevision</c>
+    /// revision-reconciliation ops: adding op types is backward-INCOMPATIBLE (a v1 engine can't
+    /// deserialize the new discriminators), so the bump makes a shared-deploy skew fail as a deterministic
+    /// <see cref="ComposePatchErrorKind.UnsupportedSchemaVersion"/> 400 rather than a confusing 500
+    /// (task-004 op-schema design §4.3).</summary>
+    public const string Version = "compose-ops-v2";
 }
 
 /// <summary>
@@ -69,9 +74,22 @@ public static class ComposeOperationSchema
 /// </summary>
 /// <param name="RunIndex">0-based index of the run within its paragraph.</param>
 /// <param name="Offset">Run-local character offset within that run (0-based).</param>
+/// <param name="ParaOffset">
+/// ROBUST ANCHOR (task 055 — ADDITIVE, backward-compatible). The PARAGRAPH-RELATIVE
+/// character offset (0-based) the client measured over its editor-visible run flatten
+/// (<c>stepOperationInterceptor.runLocalPoint</c>'s input <c>k</c>). Optional/nullable
+/// so a pre-fix op log (or any producer that omits it) round-trips unchanged. When
+/// present, the engine resolves the real OOXML <c>(run, run-local-offset)</c> by walking
+/// THIS paragraph's editor-run flatten to <see cref="ParaOffset"/> — the anchor stays
+/// stable across the TipTap↔OOXML run-merge boundary (TipTap merges same-format runs,
+/// so the client <see cref="RunIndex"/> may not match OOXML's fine-grained runs). When
+/// absent (null) the engine falls back to <see cref="RunIndex"/>/<see cref="Offset"/>
+/// EXACTLY as before. Still purely a numeric offset — never a text/content match (I-7).
+/// </param>
 public sealed record ComposeRunPoint(
     [property: JsonPropertyName("runIndex")] int RunIndex,
-    [property: JsonPropertyName("offset")] int Offset);
+    [property: JsonPropertyName("offset")] int Offset,
+    [property: JsonPropertyName("paraOffset")] int? ParaOffset = null);
 
 /// <summary>
 /// A RUN-LOCAL range anchor within a SINGLE paragraph, from <paramref name="Start"/>
@@ -108,6 +126,16 @@ public enum ComposeMarkType
 
     /// <summary><c>w:u val="single"</c> — single underline.</summary>
     Underline,
+
+    /// <summary>
+    /// G5 (FR-05, task 033) — a hyperlink. The value-carrying mark the enum's doc note anticipated: a
+    /// <c>setMark</c> with <see cref="ComposeMarkType.Link"/> carries the target URL in
+    /// <see cref="SetMarkOperation.Href"/>, applied by the engine as a <c>w:hyperlink</c> wrapping the
+    /// anchored run range (external relationship on the main part). A <c>clearMark(Link)</c> unwraps it.
+    /// Additive, backward-compatible catalog extension (new enum member + optional op field) — no schema
+    /// version bump needed (client + server share the version constant + deploy together).
+    /// </summary>
+    Link,
 }
 
 /// <summary>
@@ -137,7 +165,7 @@ public enum ComposeBlockAttr
 }
 
 /// <summary>
-/// Base of the CLOSED operation discriminated union (FR-11). Exactly ten derived
+/// Base of the CLOSED operation discriminated union (FR-11). Exactly thirteen derived
 /// types, tagged by the <c>type</c> discriminator with the FR-11 literal names.
 /// Every op carries a <see cref="ParaId"/> — the durable <c>w14:paraId</c> coarse
 /// anchor. System.Text.Json polymorphic (de)serialization is driven by
@@ -155,6 +183,9 @@ public enum ComposeBlockAttr
 [JsonDerivedType(typeof(InsertParagraphOperation), "insertParagraph")]
 [JsonDerivedType(typeof(DeleteParagraphOperation), "deleteParagraph")]
 [JsonDerivedType(typeof(SetBlockAttrOperation), "setBlockAttr")]
+[JsonDerivedType(typeof(AcceptRevisionOperation), "acceptRevision")]
+[JsonDerivedType(typeof(RejectRevisionOperation), "rejectRevision")]
+[JsonDerivedType(typeof(TableOperation), "table")]
 public abstract record ComposeOperation
 {
     /// <summary>
@@ -234,6 +265,15 @@ public sealed record SetMarkOperation : ComposeOperation
     /// <summary>The mark to apply.</summary>
     [JsonPropertyName("mark")]
     public required ComposeMarkType Mark { get; init; }
+
+    /// <summary>
+    /// G5 (FR-05, task 033) — the hyperlink target URL, REQUIRED when <see cref="Mark"/> is
+    /// <see cref="ComposeMarkType.Link"/> and ignored for every other mark. The engine wraps the anchored
+    /// run range in a <c>w:hyperlink</c> pointing at an external relationship with this target. Optional
+    /// (null) so a bold/italic/underline <c>setMark</c> is unchanged (backward-compatible).
+    /// </summary>
+    [JsonPropertyName("href")]
+    public string? Href { get; init; }
 }
 
 /// <summary>
@@ -354,6 +394,178 @@ public sealed record SetBlockAttrOperation : ComposeOperation
     public required ComposeBlockAttr Attr { get; init; }
 
     /// <summary>The attribute value (interpreted per <see cref="Attr"/>); <c>null</c> clears to style default.</summary>
+    [JsonPropertyName("value")]
+    public string? Value { get; init; }
+}
+
+/// <summary>
+/// The scope of an <see cref="AcceptRevisionOperation"/> / <see cref="RejectRevisionOperation"/>: reconcile
+/// a SINGLE imported revision (addressed by its native OOXML <c>w:id</c>) or ALL tracked revisions in the
+/// document (batch, deterministic document order). Serialized as its PascalCase member name (same convention
+/// as <see cref="ComposeBlockAttr"/> / <see cref="ComposeParagraphPosition"/>); the client union mirrors the
+/// literals. R5 task 004 op-schema design §3; task 012 implements <see cref="Single"/>, task 013 adds
+/// <see cref="All"/>.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ComposeRevisionScope
+{
+    /// <summary>Reconcile exactly one revision, addressed by <c>revisionId</c> (its native <c>w:id</c>).</summary>
+    Single,
+
+    /// <summary>Reconcile EVERY tracked revision in the document, in document order (batch — task 013).</summary>
+    All,
+}
+
+/// <summary>
+/// <c>acceptRevision</c> — ACCEPT a pre-existing IMPORTED Word tracked change (native <c>w:ins</c>/<c>w:del</c>
+/// recovered on Load as an <c>ImportedRevision</c>), reconciling it into settled content so a subsequent Save
+/// no longer refuses with <see cref="ComposePatchErrorKind.TrackedChangeReconciliationUnsupported"/> (the ET-2
+/// gap / FR-11). Accepting a <c>w:ins</c> STRIPS the insertion wrapper keeping the inserted run as normal
+/// content; accepting a <c>w:del</c> REMOVES the run entirely. The revision is located BY <see cref="RevisionId"/>
+/// (its native <c>w:id</c>) within paragraph <see cref="ComposeOperation.ParaId"/> — NEVER by a text/content
+/// match (invariant I-7 / NFR-02).
+/// </summary>
+public sealed record AcceptRevisionOperation : ComposeOperation
+{
+    /// <summary><see cref="ComposeRevisionScope.Single"/> = one revision by <see cref="RevisionId"/>;
+    /// <see cref="ComposeRevisionScope.All"/> = every tracked revision (task 013 batch).</summary>
+    [JsonPropertyName("scope")]
+    public required ComposeRevisionScope Scope { get; init; }
+
+    /// <summary>The native OOXML <c>w:ins</c>/<c>w:del</c> <c>w:id</c> to accept (= <c>ImportedRevision.id</c>).
+    /// Required (non-null) for <see cref="ComposeRevisionScope.Single"/>; <c>null</c> for
+    /// <see cref="ComposeRevisionScope.All"/>.</summary>
+    [JsonPropertyName("revisionId")]
+    public string? RevisionId { get; init; }
+}
+
+/// <summary>
+/// <c>rejectRevision</c> — REJECT a pre-existing imported Word tracked change (native <c>w:ins</c>/<c>w:del</c>),
+/// the INVERSE of <see cref="AcceptRevisionOperation"/>: rejecting a <c>w:ins</c> REMOVES the inserted run;
+/// rejecting a <c>w:del</c> RESTORES the deleted run as normal content (<c>w:delText</c> → <c>w:t</c>, wrapper
+/// stripped). Located BY <see cref="RevisionId"/> within paragraph <see cref="ComposeOperation.ParaId"/> —
+/// never by text/content match (I-7 / NFR-02). Structurally identical to
+/// <see cref="AcceptRevisionOperation"/> (two discriminators, one per semantic action — the catalog's
+/// existing <c>setMark</c>/<c>clearMark</c> convention).
+/// </summary>
+public sealed record RejectRevisionOperation : ComposeOperation
+{
+    /// <summary><see cref="ComposeRevisionScope.Single"/> = one revision by <see cref="RevisionId"/>;
+    /// <see cref="ComposeRevisionScope.All"/> = every tracked revision (task 013 batch).</summary>
+    [JsonPropertyName("scope")]
+    public required ComposeRevisionScope Scope { get; init; }
+
+    /// <summary>The native OOXML <c>w:ins</c>/<c>w:del</c> <c>w:id</c> to reject (= <c>ImportedRevision.id</c>).
+    /// Required (non-null) for <see cref="ComposeRevisionScope.Single"/>; <c>null</c> for
+    /// <see cref="ComposeRevisionScope.All"/>.</summary>
+    [JsonPropertyName("revisionId")]
+    public string? RevisionId { get; init; }
+}
+
+/// <summary>
+/// The closed set of STRUCTURAL table edits a <see cref="TableOperation"/> may express (G4 / FR-04, R5 task
+/// 014). Serialized as its PascalCase member name (same convention as <see cref="ComposeBlockAttr"/> /
+/// <see cref="ComposeRevisionScope"/>); the client union mirrors the literals. Each kind maps to a Word-valid
+/// TRACKED table-structure edit on the imported/tracked path — insert/delete a row (<c>w:trPr/w:ins</c> /
+/// <c>w:trPr/w:del</c>), insert/delete a column (<c>w:tcPr/w:cellIns</c> / <c>w:tcPr/w:cellDel</c> per row +
+/// <c>w:tblGridChange</c>), set a cell's content (in-cell <c>w:ins</c>/<c>w:del</c>), or change table-level
+/// properties (<c>w:tblPrChange</c>). Whole-table CREATE is intentionally NOT a kind here — a brand-new table on
+/// a tracked baseline is a whole-block author, out of this catalog's structural-edit scope (task-004 design §2).
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ComposeTableOpKind
+{
+    /// <summary>Insert a new row (<c>w:tr</c> with <c>w:trPr/w:ins</c>) before/after <see cref="TableOperation.Row"/>.</summary>
+    InsertRow,
+
+    /// <summary>Delete a row (mark the target <c>w:tr</c> with <c>w:trPr/w:del</c> + strike its cell content).</summary>
+    DeleteRow,
+
+    /// <summary>Insert a new column (a <c>w:tc</c> per row with <c>w:tcPr/w:cellIns</c>) before/after <see cref="TableOperation.Column"/>.</summary>
+    InsertColumn,
+
+    /// <summary>Delete a column (mark each row's target <c>w:tc</c> with <c>w:tcPr/w:cellDel</c> + strike its content).</summary>
+    DeleteColumn,
+
+    /// <summary>Replace a cell's content as a tracked change (existing runs → <c>w:del</c>, new text → <c>w:ins</c>).</summary>
+    SetCellContent,
+
+    /// <summary>Change a table-level property recorded as a tracked <c>w:tblPrChange</c>.</summary>
+    SetTableProps,
+}
+
+/// <summary>
+/// The closed set of table-level properties a <see cref="ComposeTableOpKind.SetTableProps"/> op may change
+/// (G4 / FR-04). Kept intentionally small + closed; new props are added by the same catalog-extension process,
+/// never by a free-form bag. The op <see cref="TableOperation.Value"/> is interpreted per member (mirrors the
+/// <see cref="SetBlockAttrOperation"/> <c>attr</c>/<c>value</c> pattern). Serialized as its PascalCase member name.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ComposeTableProp
+{
+    /// <summary>Table alignment; value = <c>Left</c>/<c>Center</c>/<c>Right</c>.</summary>
+    Alignment,
+
+    /// <summary>Table width; value = <c>"auto"</c> | <c>"pct:NN"</c> | <c>"dxa:NNNN"</c>.</summary>
+    Width,
+
+    /// <summary>Table borders; value = <c>None</c>/<c>Single</c>/<c>Double</c>.</summary>
+    Borders,
+}
+
+/// <summary>
+/// <c>table</c> — a STRUCTURAL edit to a table on the imported/tracked path (G4 / FR-04, R5 task 014). The op is
+/// anchored by the base <see cref="ComposeOperation.ParaId"/>, which is the <c>w14:paraId</c> of a paragraph
+/// INSIDE the target table (canonical: the table's first cell's first paragraph — cell paragraphs are
+/// paraId-stamped exactly like body paragraphs). The applier resolves that paragraph O(1) by paraId, then walks
+/// the OpenXml ancestry <c>w:p → w:tc → w:tr → w:tbl</c> to reach the <c>w:tbl</c> — <b>no table-id, no new anchor
+/// type, and NEVER a text/content search</b> (invariant I-7 / NFR-02). <see cref="Row"/>/<see cref="Column"/>
+/// coordinates address the cell WITHIN the resolved table (0-based). The applier emits Word-valid TRACKED table
+/// structure per <see cref="Kind"/>; clean-vs-tracked is an engine-mode concern (G2), not a per-op field.
+/// </summary>
+public sealed record TableOperation : ComposeOperation
+{
+    /// <summary>Which structural table edit to apply (closed enum).</summary>
+    [JsonPropertyName("kind")]
+    public required ComposeTableOpKind Kind { get; init; }
+
+    /// <summary>0-based row index within the table (required for InsertRow/DeleteRow/SetCellContent; <c>null</c>
+    /// for column-only / table-prop ops).</summary>
+    [JsonPropertyName("row")]
+    public int? Row { get; init; }
+
+    /// <summary>0-based grid-column index within the table (required for InsertColumn/DeleteColumn/SetCellContent;
+    /// <c>null</c> for row-only / table-prop ops).</summary>
+    [JsonPropertyName("column")]
+    public int? Column { get; init; }
+
+    /// <summary>For InsertRow/InsertColumn — insert the new row/column BEFORE or AFTER
+    /// <see cref="Row"/>/<see cref="Column"/>. Reuses the existing <see cref="ComposeParagraphPosition"/> enum.</summary>
+    [JsonPropertyName("position")]
+    public ComposeParagraphPosition? Position { get; init; }
+
+    /// <summary>The minted <c>w14:paraId</c>s stamped on the NEW cells' paragraphs, ordered by grid position
+    /// (InsertRow → one per column, left→right; InsertColumn → one per row, top→bottom). Follows the
+    /// <see cref="SplitParagraphOperation.NewParaId"/> minted-durable-id precedent — lets subsequent ops target
+    /// the new cells. Empty for non-insert kinds.</summary>
+    [JsonPropertyName("newParaIds")]
+    public IReadOnlyList<string> NewParaIds { get; init; } = Array.Empty<string>();
+
+    /// <summary>For SetCellContent — the cell's new text content (Tier 3 — document content). <c>null</c> otherwise.</summary>
+    [JsonPropertyName("text")]
+    public string? Text { get; init; }
+
+    /// <summary>For SetCellContent — optional inline marks on the set content. Empty = inherit. Reuses
+    /// <see cref="ComposeMarkType"/>.</summary>
+    [JsonPropertyName("marks")]
+    public IReadOnlyList<ComposeMarkType> Marks { get; init; } = Array.Empty<ComposeMarkType>();
+
+    /// <summary>For SetTableProps — which table-level property to change (closed enum). <c>null</c> otherwise.</summary>
+    [JsonPropertyName("tableProp")]
+    public ComposeTableProp? TableProp { get; init; }
+
+    /// <summary>For SetTableProps — the property value, interpreted per <see cref="TableProp"/> (mirrors the
+    /// <see cref="SetBlockAttrOperation"/> <c>value</c> pattern). <c>null</c> clears to the style default.</summary>
     [JsonPropertyName("value")]
     public string? Value { get; init; }
 }

@@ -138,3 +138,69 @@ describe('TrackChangesExtension plugin (enabled state via meta)', () => {
     editor.destroy();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G11 (FR-10, task 032) — toggling the user's own overlay OFF must KEEP imported/AI
+// redlines visible (UAT BUG-B, confirmed a clarity bug, NOT data loss). Regression lock:
+// imported/AI redlines are FIRST-CLASS schema marks (insertion/deletion), toggle-independent;
+// the Track-Changes toggle only flips the DECORATION overlay (the user's own free-typed edits).
+// ─────────────────────────────────────────────────────────────────────────────
+describe('G11 (task 032) — overlay toggle never hides imported/AI redline marks', () => {
+  it('an imported/AI insertion MARK survives toggling the overlay off AND back on (BUG-B)', () => {
+    const editor = makeEditor('<p>the quick brown fox</p>');
+    stampFirstParaId(editor, 'AAAAAAA1');
+    const insMark = editor.state.schema.marks.insertion;
+    // An imported/AI redline is applied as a schema mark (exactly how importedRevisions + AI suggestions render).
+    editor.view.dispatch(editor.state.tr.addMark(1, 4, insMark.create({ ledgerRef: 'imported@t1' })));
+    expect(editor.getHTML()).toContain('compose-mark-insertion');
+
+    // Toggle the overlay OFF — the plugin state flips, but the mark is document CONTENT (not a decoration),
+    // so it stays rendered. This is the exact BUG-B invariant: turning off the user's overlay must not
+    // hide an imported/AI redline.
+    editor.view.dispatch(editor.state.tr.setMeta(trackChangesPluginKey, { enabled: false }));
+    expect(trackChangesPluginKey.getState(editor.state)?.enabled).toBe(false);
+    expect(editor.getHTML()).toContain('compose-mark-insertion');
+
+    // Toggle back ON — still present, and never duplicated.
+    editor.view.dispatch(editor.state.tr.setMeta(trackChangesPluginKey, { enabled: true }));
+    expect(editor.getHTML()).toContain('compose-mark-insertion');
+    editor.destroy();
+  });
+
+  it('the overlay decoration set covers the user block but NEVER the imported-mark block (overlay-vs-mark separation)', () => {
+    // p1 = user free-typed edit (diffs vs baseline, no marks) → in the overlay.
+    // p2 = imported redline mark → skipped by the overlay (its redline is the toggle-independent mark).
+    const editor = makeEditor('<p>the user edited line</p><p>the imported line</p>');
+    // Stamp paraIds on BOTH blocks.
+    const positions: number[] = [];
+    editor.state.doc.descendants((node, p) => {
+      if (node.type.name === 'paragraph') positions.push(p);
+      return true;
+    });
+    editor.view.dispatch(
+      editor.state.tr
+        .setNodeMarkup(positions[0], undefined, { ...editor.state.doc.nodeAt(positions[0])!.attrs, paraId: 'P-USER' })
+        .setNodeMarkup(positions[1], undefined, { ...editor.state.doc.nodeAt(positions[1])!.attrs, paraId: 'P-IMP' })
+    );
+    // Apply an imported insertion mark inside the SECOND paragraph.
+    const p2 = editor.state.doc.child(1);
+    const p2Start = editor.state.doc.resolve(0).posAtIndex(1) + 1;
+    const insMark = editor.state.schema.marks.insertion;
+    editor.view.dispatch(editor.state.tr.addMark(p2Start, p2Start + 4, insMark.create({ ledgerRef: 'imp@t1' })));
+
+    const baseline = new Map([
+      ['P-USER', 'the user typed line'], // differs → overlay decorates
+      ['P-IMP', 'the original line'], // differs BUT the block carries a mark → skipped
+    ]);
+    const set = buildTrackChangeDecorations(editor.state.doc, baseline);
+
+    // Some overlay decoration lands in the user block; NONE in the imported-mark block.
+    const userFrom = positions[0];
+    const userTo = positions[0] + editor.state.doc.child(0).nodeSize;
+    const impFrom = positions[1];
+    const impTo = positions[1] + p2.nodeSize;
+    expect(set.find(userFrom, userTo).length).toBeGreaterThan(0);
+    expect(set.find(impFrom, impTo).length).toBe(0);
+    editor.destroy();
+  });
+});

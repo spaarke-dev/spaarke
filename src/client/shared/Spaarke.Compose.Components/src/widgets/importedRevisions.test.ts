@@ -144,6 +144,59 @@ describe('applyImportedRevisions (FR-24, task 050)', () => {
     editor.destroy();
   });
 
+  // R5 task 012 (G12) — imported-deletion end-of-paragraph re-anchor for a paragraph-boundary-spanning
+  // deletion. A deletion of a whole paragraph's content (across the para mark) carries EMPTY anchorText (all
+  // its runs are inside w:del → the reader's settled-text anchor is ""). On our OWN round-trip the paraId
+  // still matches and it re-anchors precisely; cross-Word-session (regenerated + stale paraId) the fully-
+  // deleted paragraph is gone from the flattened editor, so the doc-order hint now lands on a DIFFERENT,
+  // already-identified paragraph — which must NOT silently absorb the struck text (I-7 "never guess").
+  describe('imported-deletion boundary-spanning re-anchor (G12 / task 012)', () => {
+    it('re-anchors a whole-paragraph (empty-anchorText) deletion precisely by paraId on the own round-trip', () => {
+      const editor = makeEditor('<p>Keeper one.</p><p></p><p>Keeper two.</p>');
+      stampParaIds(editor, [
+        { index: 0, paraId: 'AAAA0001', isMinted: false },
+        { index: 1, paraId: 'CCCC0003', isMinted: false }, // the fully-deleted paragraph, now empty
+        { index: 2, paraId: 'BBBB0002', isMinted: false },
+      ]);
+
+      const result = applyImportedRevisions(editor, [
+        revision({ kind: 'deletion', id: 'r7', text: 'entire deleted sentence', anchorText: '', paragraphHint: 1, paraId: 'CCCC0003' }),
+      ]);
+
+      expect(result).toEqual({ applied: 1, unresolved: 0, unresolvedItems: [] });
+      const html = editor.getHTML();
+      // The struck text lands in ITS OWN (empty) paragraph — the keepers are untouched.
+      expect(html).toContain('Keeper one.</p>');
+      expect(html).toContain('<p>Keeper two.');
+      expect(html).toMatch(/<p><span[^>]*data-ledger-ref="imported:r7"[^>]*>entire deleted sentence<\/span><\/p>/);
+      editor.destroy();
+    });
+
+    it('does NOT mis-anchor an empty-anchorText deletion onto a distinct identified paragraph when its paraId is stale', () => {
+      // Cross-Word-session: the fully-deleted paragraph is gone; both survivors carry their own (regenerated)
+      // ids, and the revision's paraId no longer matches any of them. The hint index now points at a REAL
+      // keeper paragraph — the deletion must surface as unresolved, never append its struck text there.
+      const editor = makeEditor('<p>Keeper one.</p><p>Keeper two.</p>');
+      stampParaIds(editor, [
+        { index: 0, paraId: 'AAAA0001', isMinted: false },
+        { index: 1, paraId: 'BBBB0002', isMinted: false },
+      ]);
+
+      const boundarySpanning = revision({
+        kind: 'deletion', id: 'r8', text: 'was a whole clause', anchorText: '', paragraphHint: 1, paraId: 'DEADDEAD',
+      });
+
+      const result = applyImportedRevisions(editor, [boundarySpanning]);
+
+      expect(result).toEqual({ applied: 0, unresolved: 1, unresolvedItems: [boundarySpanning] });
+      const html = editor.getHTML();
+      // Neither keeper absorbed the struck text.
+      expect(html).not.toContain('was a whole clause');
+      expect(html).toContain('Keeper two.</p>');
+      editor.destroy();
+    });
+  });
+
   it('is a no-op for an empty/undefined revision list', () => {
     const editor = makeEditor('<p>Untouched.</p>');
     expect(applyImportedRevisions(editor, [])).toEqual({ applied: 0, unresolved: 0, unresolvedItems: [] });

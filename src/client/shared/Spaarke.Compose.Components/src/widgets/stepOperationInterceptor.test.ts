@@ -30,8 +30,10 @@
  */
 import { Schema, Slice, Fragment } from '@tiptap/pm/model';
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { EditorState } from '@tiptap/pm/state';
-import { ReplaceStep, AddMarkStep, AttrStep } from '@tiptap/pm/transform';
+import { EditorState, TextSelection } from '@tiptap/pm/state';
+import type { Command } from '@tiptap/pm/state';
+import { ReplaceStep, AddMarkStep, RemoveMarkStep, AttrStep } from '@tiptap/pm/transform';
+import { wrapInList, sinkListItem } from '@tiptap/pm/schema-list';
 
 import {
   classifyStep,
@@ -39,6 +41,7 @@ import {
   createStepInterceptorPlugin,
   STEP_INTERCEPTOR_IGNORE_META,
   RebasedOperationLog,
+  buildBatchRevisionOp,
   type StepClassification,
 } from './stepOperationInterceptor';
 import {
@@ -61,6 +64,18 @@ const schema = new Schema({
       parseDOM: [{ tag: 'p' }],
       toDOM: () => ['p', 0],
     },
+    // R5 task 011 — heading + list nodes mirror the StarterKit schema ComposeEditor mounts, so a heading
+    // toggle / list wrap produces the same ReplaceAroundStep/ReplaceStep shape the classifier sees in prod.
+    heading: {
+      group: 'block',
+      content: 'inline*',
+      attrs: { paraId: { default: null }, level: { default: 1 }, textAlign: { default: null } },
+      parseDOM: [{ tag: 'h1', attrs: { level: 1 } }],
+      toDOM: node => [`h${node.attrs.level as number}`, 0],
+    },
+    orderedList: { group: 'block', content: 'listItem+', parseDOM: [{ tag: 'ol' }], toDOM: () => ['ol', 0] },
+    bulletList: { group: 'block', content: 'listItem+', parseDOM: [{ tag: 'ul' }], toDOM: () => ['ul', 0] },
+    listItem: { content: 'paragraph block*', parseDOM: [{ tag: 'li' }], toDOM: () => ['li', 0] },
     // Mirrors task 021's non-editable leaf (atom: true). Name intentionally DIFFERENT
     // from task 021's (`composeBlockAtom`) to prove the guard is schema-driven, not name-coupled.
     opaqueAtom: {
@@ -78,6 +93,13 @@ const schema = new Schema({
     italic: { parseDOM: [{ tag: 'em' }], toDOM: () => ['em', 0] },
     underline: { parseDOM: [{ tag: 'u' }], toDOM: () => ['u', 0] },
     link: { attrs: { href: { default: null } }, parseDOM: [{ tag: 'a' }], toDOM: () => ['a', 0] },
+    // A real mark that is NOT in the closed ComposeMarkType set (like production `strike`) — the
+    // unrepresentable-mark test subject now that `link` is representable (G5 task 033).
+    strike: { parseDOM: [{ tag: 's' }], toDOM: () => ['s', 0] },
+    // R5 task 012 (G12) — the imported-revision marks importedRevisions.ts renders (name-matched to the
+    // real InsertionMark/DeletionMark). `ledgerRef` = `imported:<w:id>` for a recovered Word revision.
+    insertion: { attrs: { ledgerRef: { default: null } }, parseDOM: [{ tag: 'span.ins' }], toDOM: () => ['span', 0] },
+    deletion: { attrs: { ledgerRef: { default: null } }, parseDOM: [{ tag: 'span.del' }], toDOM: () => ['span', 0] },
   },
 });
 
@@ -217,10 +239,33 @@ describe('classifyStep — refusal + escalation seams', () => {
 
   it('surfaces a formatting mark outside the closed set as unrepresentable (not dropped)', () => {
     const doc = twoRunDoc();
-    const step = new AddMarkStep(abs(1), abs(5), schema.marks.link.create({ href: 'https://x' }));
+    const step = new AddMarkStep(abs(1), abs(5), schema.marks.strike.create());
     const cls = classifyStep(step, doc, {});
     expect(cls.kind).toBe('unrepresentable');
-    expect((cls as { reason: string }).reason).toContain('link');
+    expect((cls as { reason: string }).reason).toContain('strike');
+  });
+
+  // G5 (FR-05, task 033): a link add is now REPRESENTABLE — captured as a setMark(Link) op carrying the href.
+  it('captures a link add as a setMark(Link) op carrying the href (G5)', () => {
+    const doc = twoRunDoc();
+    const step = new AddMarkStep(abs(1), abs(5), schema.marks.link.create({ href: 'https://example.com/' }));
+    const cls = classifyStep(step, doc, {});
+    expect(cls.kind).toBe('ops');
+    const op = (cls as { ops: Array<Record<string, unknown>> }).ops[0];
+    expect(op.type).toBe('setMark');
+    expect(op.mark).toBe('Link');
+    expect(op.href).toBe('https://example.com/');
+  });
+
+  // G5: a link REMOVE is a clearMark(Link) (no href needed).
+  it('captures a link remove as a clearMark(Link) op (G5)', () => {
+    const doc = twoRunDoc();
+    const step = new RemoveMarkStep(abs(1), abs(5), schema.marks.link.create({ href: 'https://example.com/' }));
+    const cls = classifyStep(step, doc, {});
+    expect(cls.kind).toBe('ops');
+    const op = (cls as { ops: Array<Record<string, unknown>> }).ops[0];
+    expect(op.type).toBe('clearMark');
+    expect(op.mark).toBe('Link');
   });
 
   it('honors a caller override of the opaque-atom predicate', () => {
@@ -711,5 +756,256 @@ describe('RebasedOperationLog — op-log survives a rejected save, cleared only 
     expect(remaining.orderedOps).toHaveLength(1);
     expect((remaining.orderedOps[0].operation as InsertTextOperation).text).toBe('B');
     expect(log.size).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Heading / list block-attribute changes → setBlockAttr (R5 task 011, G3)
+// ---------------------------------------------------------------------------
+//
+// The R4 SDL-1/2 guard deferred heading + list edits as `defer-structural`. Task 011's classifier EMITS the
+// closed-set setBlockAttr op (Style / ListOrdered / ListLevel) for these block-boundary steps, mirroring the
+// server op schema. paraId is read from the PRE-STEP block (durable). These exercise the concrete acceptance
+// behavior "a heading/list edit EMITS setBlockAttr, no longer defer-structural".
+
+/** A single heading node, paraId `id`, level `level`, text `text`. */
+function oneHeading(id: string, text: string, level: number): PMNode {
+  const h = schema.nodes.heading.create({ paraId: id, level }, text ? [schema.text(text)] : []);
+  return schema.nodes.doc.create(null, [h]);
+}
+
+/** Run a ProseMirror command against `state`, returning the transaction it dispatched (or null). */
+function runCommand(state: EditorState, cmd: Command): { tr: EditorState['tr']; state: EditorState } | null {
+  let captured: EditorState['tr'] | null = null;
+  cmd(state, tr => {
+    captured = tr;
+  });
+  return captured ? { tr: captured, state } : null;
+}
+
+/** Place the selection inside the first paragraph/heading at absolute char offset `k`, then return the state. */
+function withCaretAt(state: EditorState, pos: number): EditorState {
+  return state.apply(state.tr.setSelection(TextSelection.create(state.doc, pos)));
+}
+
+describe('classifyStep — heading style changes → setBlockAttr(Style) (R5 task 011)', () => {
+  it('toggling a paragraph to Heading 2 emits setBlockAttr{attr:Style, value:Heading2} anchored to the pre-step paraId', () => {
+    const doc = onePara('AAAA0001', 'Section title');
+    const state = EditorState.create({ doc });
+    const tr = state.tr.setBlockType(1, 1, schema.nodes.heading, { level: 2 });
+
+    const ops = expectOps(classifyStep(tr.steps[0], doc, {}));
+    expect(ops).toEqual([{ type: 'setBlockAttr', paraId: 'AAAA0001', attr: 'Style', value: 'Heading2' }]);
+  });
+
+  it('changing an existing Heading1 to Heading3 emits setBlockAttr{Style:Heading3}', () => {
+    const doc = oneHeading('BBBB0002', 'Recitals', 1);
+    const state = EditorState.create({ doc });
+    const tr = state.tr.setBlockType(1, 1, schema.nodes.heading, { level: 3 });
+
+    const ops = expectOps(classifyStep(tr.steps[0], doc, {}));
+    expect(ops).toEqual([{ type: 'setBlockAttr', paraId: 'BBBB0002', attr: 'Style', value: 'Heading3' }]);
+  });
+
+  it('toggling a Heading back to a paragraph emits setBlockAttr{Style:Normal}', () => {
+    const doc = oneHeading('CCCC0003', 'Body now', 1);
+    const state = EditorState.create({ doc });
+    const tr = state.tr.setBlockType(1, 1, schema.nodes.paragraph, {});
+
+    const ops = expectOps(classifyStep(tr.steps[0], doc, {}));
+    expect(ops).toEqual([{ type: 'setBlockAttr', paraId: 'CCCC0003', attr: 'Style', value: 'Normal' }]);
+  });
+});
+
+describe('classifyStep — list wrap / unwrap / re-nest → setBlockAttr(ListOrdered/ListLevel) (R5 task 011)', () => {
+  it('wrapping a paragraph in a numbered list emits setBlockAttr{ListOrdered:true}', () => {
+    const doc = onePara('AAAA0001', 'first item');
+    const state = withCaretAt(EditorState.create({ doc }), 3);
+    const run = runCommand(state, wrapInList(schema.nodes.orderedList));
+    expect(run).not.toBeNull();
+
+    const ops = expectOps(classifyStep(run!.tr.steps[0], doc, {}));
+    expect(ops).toEqual([{ type: 'setBlockAttr', paraId: 'AAAA0001', attr: 'ListOrdered', value: 'true' }]);
+  });
+
+  it('wrapping a paragraph in a bullet list emits setBlockAttr{ListOrdered:false}', () => {
+    const doc = onePara('AAAA0001', 'first item');
+    const state = withCaretAt(EditorState.create({ doc }), 3);
+    const run = runCommand(state, wrapInList(schema.nodes.bulletList));
+    expect(run).not.toBeNull();
+
+    const ops = expectOps(classifyStep(run!.tr.steps[0], doc, {}));
+    expect(ops).toEqual([{ type: 'setBlockAttr', paraId: 'AAAA0001', attr: 'ListOrdered', value: 'false' }]);
+  });
+
+  it('sinking (indenting) a list item emits setBlockAttr{ListLevel} at the deeper depth', () => {
+    const p = (id: string, t: string): PMNode => schema.nodes.paragraph.create({ paraId: id }, [schema.text(t)]);
+    const li = (id: string, t: string): PMNode => schema.nodes.listItem.create(null, p(id, t));
+    const ol = schema.nodes.orderedList.create(null, [li('AAAA0001', 'a'), li('BBBB0002', 'b')]);
+    const doc = schema.nodes.doc.create(null, [ol]);
+
+    // Caret inside the SECOND item's paragraph. li(a)=[1,6): p(a) content at 3. li(b)=[6,11): p(b) content at 8.
+    const state = withCaretAt(EditorState.create({ doc }), 8);
+    const run = runCommand(state, sinkListItem(schema.nodes.listItem));
+    expect(run).not.toBeNull();
+
+    const ops = expectOps(classifyStep(run!.tr.steps[0], run!.state.doc, {}));
+    expect(ops).toEqual([{ type: 'setBlockAttr', paraId: 'BBBB0002', attr: 'ListLevel', value: '1' }]);
+  });
+});
+
+describe('RebasedOperationLog — heading/list setBlockAttr is CAPTURED (no silent loss, R5 task 011)', () => {
+  it('a heading-toggle transaction lands a setBlockAttr(Style) op in the serialized log', () => {
+    const doc = onePara('AAAA0001', 'title');
+    const log = new RebasedOperationLog();
+    const state = EditorState.create({ doc });
+    const tr = state.tr.setBlockType(1, 1, schema.nodes.heading, { level: 2 });
+
+    const appended = log.recordTransaction(tr);
+
+    expect(appended).toEqual([{ type: 'setBlockAttr', paraId: 'AAAA0001', attr: 'Style', value: 'Heading2' }]);
+    const snapshot = log.serialize(tr.doc);
+    // The op survives serialize with its durable pre-step paraId (never dropped, never mis-addressed).
+    expect(snapshot.orderedOps).toHaveLength(1);
+    expect(snapshot.orderedOps[0].operation).toEqual({
+      type: 'setBlockAttr',
+      paraId: 'AAAA0001',
+      attr: 'Style',
+      value: 'Heading2',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R5 task 012 (G12) — accept/reject of an IMPORTED tracked change → acceptRevision/rejectRevision
+// ---------------------------------------------------------------------------
+//
+// importedRevisions.ts renders a recovered Word revision as an insertion/deletion mark keyed
+// `imported:<w:id>`. usePendingRedline.accept/reject then DROPS the mark (RemoveMarkStep, keep text) or
+// DELETES the text (ReplaceStep). The interceptor must map each to the closed-catalog op addressed by the
+// native revision id — never a deleteRange / clearMark — so a save reconciles the pre-existing change.
+
+/** A paragraph whose leading "Hello" run (char [0,5)) carries `markName` with `imported:<id>`. */
+function importedRevisionDoc(markName: 'insertion' | 'deletion', ledgerRef: string): PMNode {
+  const mark = schema.marks[markName].create({ ledgerRef });
+  const p = schema.nodes.paragraph.create({ paraId: PARA_ID }, [schema.text('Hello', [mark]), schema.text(' world')]);
+  return schema.nodes.doc.create(null, [p]);
+}
+
+describe('classifyStep — accept/reject an imported tracked change (G12 / task 012)', () => {
+  it('dropping an imported INSERTION mark (keep text) → acceptRevision by native id', () => {
+    const doc = importedRevisionDoc('insertion', 'imported:42');
+    const step = new RemoveMarkStep(abs(0), abs(5), schema.marks.insertion.create({ ledgerRef: 'imported:42' }));
+    const ops = expectOps(classifyStep(step, doc, {}));
+    expect(ops).toEqual([{ type: 'acceptRevision', paraId: PARA_ID, scope: 'Single', revisionId: '42' }]);
+  });
+
+  it('deleting an imported INSERTION run (drop text) → rejectRevision by native id', () => {
+    const doc = importedRevisionDoc('insertion', 'imported:42');
+    const step = new ReplaceStep(abs(0), abs(5), Slice.empty);
+    const ops = expectOps(classifyStep(step, doc, {}));
+    expect(ops).toEqual([{ type: 'rejectRevision', paraId: PARA_ID, scope: 'Single', revisionId: '42' }]);
+  });
+
+  it('dropping an imported DELETION mark (restore text) → rejectRevision by native id', () => {
+    const doc = importedRevisionDoc('deletion', 'imported:77');
+    const step = new RemoveMarkStep(abs(0), abs(5), schema.marks.deletion.create({ ledgerRef: 'imported:77' }));
+    const ops = expectOps(classifyStep(step, doc, {}));
+    expect(ops).toEqual([{ type: 'rejectRevision', paraId: PARA_ID, scope: 'Single', revisionId: '77' }]);
+  });
+
+  it('deleting imported DELETION struck text (accept the deletion) → acceptRevision by native id', () => {
+    const doc = importedRevisionDoc('deletion', 'imported:77');
+    const step = new ReplaceStep(abs(0), abs(5), Slice.empty);
+    const ops = expectOps(classifyStep(step, doc, {}));
+    expect(ops).toEqual([{ type: 'acceptRevision', paraId: PARA_ID, scope: 'Single', revisionId: '77' }]);
+  });
+
+  it('does NOT divert an AI-suggested redline (non-`imported:` ledgerRef) to a revision op', () => {
+    // An AI redline is keyed `{bindingId}@t{n}` — dropping its insertion mark is NOT an imported-revision
+    // reconciliation; it falls through to the mark classifier (which surfaces `insertion` as unrepresentable,
+    // not a revision op). The key assertion: no accept/rejectRevision is emitted.
+    const doc = importedRevisionDoc('insertion', 'b1@t1');
+    const step = new RemoveMarkStep(abs(0), abs(5), schema.marks.insertion.create({ ledgerRef: 'b1@t1' }));
+    const cls = classifyStep(step, doc, {});
+    expect(cls.kind).not.toBe('ops');
+  });
+
+  it('a delete spanning an imported insertion PLUS plain text is NOT diverted (no content silently dropped)', () => {
+    // The "Hello" run is an imported insertion; " world" is plain. A delete of both is NOT a pure accept/reject
+    // reconciliation — it must fall through to normal classification (a deleteRange), never emit only a
+    // rejectRevision that would drop " world" server-side.
+    const doc = importedRevisionDoc('insertion', 'imported:42'); // "Hello"[ins] + " world"[plain], one paragraph
+    const step = new ReplaceStep(abs(0), abs(11), Slice.empty); // delete "Hello world"
+    const ops = expectOps(classifyStep(step, doc, {}));
+    expect(ops.some(o => o.type === 'acceptRevision' || o.type === 'rejectRevision')).toBe(false);
+    expect(ops[0].type).toBe('deleteRange');
+  });
+
+  it('an id-less imported revision (`imported:<paraId>#<i>` fallback) is not emitted as a revision op', () => {
+    // No native w:id to reconcile by → never emit an op the server could only RevisionNotFound.
+    const doc = importedRevisionDoc('insertion', 'imported:0A1B2C3D#0');
+    const step = new RemoveMarkStep(abs(0), abs(5), schema.marks.insertion.create({ ledgerRef: 'imported:0A1B2C3D#0' }));
+    const cls = classifyStep(step, doc, {});
+    expect(cls.kind).not.toBe('ops');
+  });
+});
+
+describe('RebasedOperationLog — imported-revision ops are captured + deduped (G12 / task 012)', () => {
+  it('an acceptRevision survives serialize with its durable paraId + revisionId (never dropped)', () => {
+    const doc = importedRevisionDoc('insertion', 'imported:9');
+    const log = new RebasedOperationLog();
+    const state = EditorState.create({ doc });
+    const tr = state.tr.step(new RemoveMarkStep(abs(0), abs(5), schema.marks.insertion.create({ ledgerRef: 'imported:9' })));
+
+    const appended = log.recordTransaction(tr);
+    expect(appended).toEqual([{ type: 'acceptRevision', paraId: PARA_ID, scope: 'Single', revisionId: '9' }]);
+
+    const snapshot = log.serialize(tr.doc);
+    expect(snapshot.orderedOps).toHaveLength(1);
+    expect(snapshot.orderedOps[0].operation).toEqual({
+      type: 'acceptRevision',
+      paraId: PARA_ID,
+      scope: 'Single',
+      revisionId: '9',
+    });
+  });
+
+  it('dedupes one revision split across two mark-drop steps in a single accept transaction', () => {
+    // Two separated insertion-marked runs (same native id) → two RemoveMarkSteps in one accept transaction;
+    // the log must carry exactly ONE acceptRevision (the 2nd would RevisionNotFound server-side).
+    const ins = schema.marks.insertion.create({ ledgerRef: 'imported:5' });
+    const p = schema.nodes.paragraph.create({ paraId: PARA_ID }, [
+      schema.text('AAA', [ins]),
+      schema.text(' mid '),
+      schema.text('CCC', [ins]),
+    ]);
+    const doc = schema.nodes.doc.create(null, [p]);
+    const log = new RebasedOperationLog();
+    const state = EditorState.create({ doc });
+    const tr = state.tr
+      .step(new RemoveMarkStep(abs(0), abs(3), ins)) // AAA
+      .step(new RemoveMarkStep(abs(8), abs(11), ins)); // CCC
+
+    log.recordTransaction(tr);
+    const revOps = log.serialize(tr.doc).orderedOps.map(o => o.operation).filter(o => o.type === 'acceptRevision');
+    expect(revOps).toHaveLength(1);
+    expect(revOps[0]).toMatchObject({ type: 'acceptRevision', revisionId: '5' });
+  });
+});
+
+describe('buildBatchRevisionOp — accept-all / reject-all (G12 batch / task 013)', () => {
+  it('builds an All-scope acceptRevision op with a null revisionId + presence-anchor paraId', () => {
+    const op = buildBatchRevisionOp('acceptRevision', PARA_ID);
+    // All-scope batch: revisionId is null (server reconciles every revision in document order), scope is All,
+    // paraId is the real presence-anchor id (keeps the isComposeOperation guard + base contract meaningful).
+    expect(op).toEqual({ type: 'acceptRevision', paraId: PARA_ID, scope: 'All', revisionId: null });
+    expect(isComposeOperation(op)).toBe(true);
+  });
+
+  it('builds an All-scope rejectRevision op (inverse discriminator, same batch shape)', () => {
+    const op = buildBatchRevisionOp('rejectRevision', PARA_ID);
+    expect(op).toEqual({ type: 'rejectRevision', paraId: PARA_ID, scope: 'All', revisionId: null });
+    expect(isComposeOperation(op)).toBe(true);
   });
 });

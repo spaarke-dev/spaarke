@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>UAT #1B — persist computed numbering into saved OOXML so Word matches Compose</title>
+    <phase>5 UAT remediation</phase>
+    <gate>dep:050</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Fidelity-sensitive OOXML authoring on the save path; risks the R4.5 read engine and byte-diff. Mandatory code-review + adr-check + byte-diff at Step 9.5.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Writes numbering back into numbering.xml/numPr — high fidelity risk, must not regress the R4.5 read-only NumberingComputationEngine nor byte-identical docs. Novel authoring on the frozen boundary.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares ComposeService.cs / the projection+engine save path with 050. Serialize.</parallel-reason>
+    <deps>050</deps>
+    <tags>bff-api, compose</tags>
+    <estimated-effort>L (3-5d)</estimated-effort>
+  </metadata>
+
+  <prompt>UAT #1B: Compose shows correct sequential numbering (1..6) but Word shows all "1." because R4.5's NumberingComputationEngine computes numbers for the READ projection only (data-computed-number attribute) and never writes them into the OOXML; save keeps numbering.xml/numPr byte-identical, so Word renders the source doc's real (restarting) numbering. Owner scoped a fix IN: author the computed numbering into the SAVED OOXML so Word matches Compose — WITHOUT regressing the R4.5 read path or byte-diff on docs whose numbering is already correct.</prompt>
+
+  <role>SPAARKE platform developer expert in OOXML numbering (abstractNum/num instances, numPr, lvlOverride/startOverride), the R4.5 NumberingComputationEngine (read model), and the Compose byte-surgical save (ComposeShadowPatchEngine, I-4 untouched-subtree byte-identity).</role>
+
+  <goal>On save, paragraphs whose computed display number diverges from what the source OOXML would render get their numbering materialized into the saved package (numPr / a synthesized or overridden num instance) so Word renders the SAME sequence Compose shows. Docs whose numbering already renders correctly are unchanged (byte-diff 24/24 holds; no gratuitous numbering rewrite). The R4.5 read/projection engine is reused as the source of truth for the computed sequence — NOT re-implemented. A NEW seam/corpus slice (the nda-interrupted-clauses fixture) proves the saved doc renders the correct sequence.</goal>
+
+  <context>
+    <background>NumberingComputationEngine nested in ComposeDocxProjectionBuilder.cs:1357 replays Word's counter to fix the interrupted-run reset-to-1 DISPLAY defect (:1314-1322 read-time-only; attrs :1782-1810). Save is byte-surgical: only document.xml is re-serialized, numbering.xml/styles.xml copied verbatim (ComposeShadowPatchEngine.cs:52-56). List numbering is only ever authored for setBlockAttr List ops (EnsureListNumbering/AuthorListNumbering ~:1089/:1120), which prefer referencing an existing numId. Fixture: tests/fixtures/compose-corpus/nda-interrupted-clauses.docx (the exact restart-to-1 case). This is a known R4.5 read-vs-write boundary (REQ-3 split / FR-14) — the fix is net-new WRITE-side authoring, kept minimal + divergence-scoped.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file>tests/fixtures/compose-corpus/nda-interrupted-clauses.docx</file>
+      <file>tests/integration/seam/Compose/</file>
+    </relevant-files>
+    <dependencies>050 (routing/origin must be correct first so numbering is authored on the tracked op-log path, not the lossy renderer).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Honor I-1..I-7 + D1-D5, especially I-4 (untouched subtrees byte-identical). Numbering authoring must be SCOPED to paragraphs whose display diverges — do NOT rewrite numbering globally. Engine stays byte[]-in/byte[]-out.</constraint>
+    <constraint source="project">I-7 / NFR-02: no text-search in the write path — key numbering off paraId/numPr/computed-model, not content matching.</constraint>
+    <constraint source="project">R5-D4 / REQ-3: REUSE the R4.5 NumberingComputationEngine as the computed-sequence source — do NOT fork or re-implement the counter algorithm. Do NOT regress the read/projection path.</constraint>
+    <constraint source="ADR-013">No AI internals in Services/Compose/. ADR-007: no Graph above SpeFileStore.</constraint>
+    <constraint source="ADR-038">Seam DoD — NEW slice on the nda-interrupted-clauses fixture proving saved-doc numbering renders correctly. NO Mock&lt;HttpMessageHandler&gt;/DI/ctor tests.</constraint>
+    <constraint source="project">NFR-01/03/04: byte-diff 24/24 MUST hold for already-correct docs (only divergent docs change); no new runtime package; publish ≤60 MB (report delta). /conflict-check before BFF PR.</constraint>
+    <constraint source="CLAUDE.md §10">BFF task — Placement Justification in the PR; numbering authoring stays in Services/Compose/.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/uat-remediation-r5.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/numbering-engine-reuse-decision.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Computed numbering (read source)" location="ComposeDocxProjectionBuilder.cs:1357 NumberingComputationEngine">Reuse for the computed sequence; do not fork.</pattern>
+      <pattern name="Existing list authoring" location="ComposeShadowPatchEngine.cs ~:1089/:1120 EnsureListNumbering/AuthorListNumbering">Reference for how numbering instances are authored/referenced today.</pattern>
+      <pattern name="Byte-diff harness" location="tests/integration/seam/Compose/ (ComposeShadowPatchEngineByteDiffSeamTests)">Must stay 24/24 for already-correct docs.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Decide the authoring strategy: for paragraphs where the computed number diverges from the source's rendered number, materialize the sequence via the minimal OOXML change (candidate: per-paragraph numPr with a synthesized/overridden num instance carrying startOverride/lvlOverride so Word renders the computed value). Confirm the approach preserves I-4 for non-divergent paragraphs. If the only viable approach forces a global numbering rewrite (breaking byte-diff on correct docs), STOP and escalate.</step>
+    <step order="2">Implement the write-side authoring on the save/apply path, sourcing the sequence from the reused NumberingComputationEngine (shared read model), gated to divergent paragraphs only.</step>
+    <step order="3">Add a NEW seam slice on nda-interrupted-clauses.docx: save → reload → assert the rendered/authored numbering matches the computed sequence (and that a control doc with already-correct numbering is byte-unchanged).</step>
+    <step order="4">Verify NFR gates: byte-diff 24/24 (already-correct docs unchanged); publish size + delta; zero new package; /conflict-check before BFF PR.</step>
+    <step order="5">Build + Compose suite green.</step>
+    <step order="6">Update TASK-INDEX.md (✅); write notes/task-051-deviations.md documenting the OOXML strategy chosen.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If authoring computed numbering cannot be scoped to divergent paragraphs without regressing I-4/byte-diff on already-correct docs, or without touching the R4.5 read engine, STOP and escalate per §6.5 with the OOXML options considered — this fix must not degrade existing fidelity.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, seam/unit tests, publish size, byte-diff harness.</tool>
+    <tool name="terminal">Inspect projection/engine numbering code; /conflict-check.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a doc whose numbering renders as restart-to-1 in Word (nda-interrupted-clauses fixture), when saved via Compose, then the saved OOXML renders the SAME sequence Compose displays — asserted by a NEW seam slice.</criterion>
+    <criterion testable="true">Given a doc whose numbering is already correct, when saved, then its numbering bytes are unchanged (byte-diff 24/24 holds; no gratuitous rewrite).</criterion>
+    <criterion testable="true">Given the computed sequence, when authored, then it is sourced from the reused R4.5 NumberingComputationEngine (no forked counter) and the read/projection path is not regressed.</criterion>
+    <criterion testable="true">Negative/no-regression: no new runtime package; publish ≤60 MB; I-4 preserved for non-divergent paragraphs; I-7 (no write-path text-search) preserved.</criterion>
+  </acceptance-criteria>
+
+  <notes>UAT #1B, owner-scoped IN. Known R4.5 read-vs-write boundary — this adds the write leg minimally and divergence-scoped. Depends on 050 (correct routing) so numbering is authored on the tracked path, not the lossy renderer.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

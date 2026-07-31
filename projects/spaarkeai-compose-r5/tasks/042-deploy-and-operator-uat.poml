@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>Deploy BFF + Compose client bundle (coordinated) and run operator UAT against §9 graduation criteria</title>
+    <phase>4 Profiling + hardening</phase>
+    <gate>dep:041</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deployment to shared dev surfaces (spaarke-bff-dev + sprk_spaarkeai web resource) is irreversible/high-blast-radius and touches BFF + Dataverse; requires the FULL gate + coordinated timing.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deploy + UAT is a well-specified prescriptive sequence using existing deploy skills; no architectural judgment, but high operational care.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploys to shared "last deploy wins" surfaces (spaarke-bff-dev, sprk_spaarkeai) — must be serialized against any concurrent Compose/SpaarkeAi deploy.</parallel-reason>
+    <deps>041</deps>
+    <tags>deploy, bff-api, dataverse</tags>
+    <estimated-effort>M (2-4d)</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy R5 from master-with-R4.5: the BFF to spaarke-bff-dev (bff-deploy skill) and the Compose client bundle to the shared sprk_spaarkeai web resource (code-page-deploy skill). COORDINATE deploy timing — both are shared "last deploy wins" surfaces; check no concurrent Compose/SpaarkeAi deploy is in flight before deploying. Then run operator UAT against the spec §9 graduation criteria.</prompt>
+
+  <role>SPAARKE platform developer with BFF (Azure App Service) + Dataverse code-page deployment experience, familiar with the shared-surface deploy contention ("last deploy wins") on spaarke-bff-dev and the sprk_spaarkeai web resource.</role>
+
+  <goal>R5 is deployed and operator-UAT-verified: (1) the BFF is deployed to spaarke-bff-dev via the bff-deploy skill and the Compose client bundle is deployed to the shared sprk_spaarkeai web resource via the code-page-deploy skill, with deploy timing coordinated (no concurrent Compose/SpaarkeAi deploy clobbered); (2) operator UAT passes against the §9 graduation criteria — REQ-1 (clean authored reopen), REQ-3 (heading/list/table/hyperlink apply), G12 (accept/reject single + batch, no 422), G7 (no duplicates), G8/G9/G11, G10 (profile); (3) a UAT result record is written to notes/. Any failed §9 criterion stops the task and files a defect.</goal>
+
+  <context>
+    <background>Per spec §9 (graduation) and plan P4-3: R5 builds/deploys from master-with-R4.5. Both deploy targets are shared with R4.5 and SpaarkeAi ("last deploy wins"), so timing must be coordinated to avoid clobbering a concurrent deploy. After deploy, the operator runs UAT against the full §9 graduation criteria to confirm editing-completeness end-to-end before the project closes.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>src/client/shared/Spaarke.Compose.Components/</file>
+      <file>projects/spaarkeai-compose-r5/notes/hardening-report.md</file>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+    </relevant-files>
+    <dependencies>041 (no-regression + publish-size hardening gate must pass before deploy).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">COORDINATION (BINDING): both spaarke-bff-dev and the sprk_spaarkeai web resource are shared "last deploy wins" surfaces. Check no concurrent Compose/SpaarkeAi deploy is in flight; coordinate timing before deploying. Build/deploy from master-with-R4.5.</constraint>
+    <constraint source="project">NFR-04: confirm the deployed BFF publish is ≤60 MB compressed (carry forward the task-041 hardening-report figure).</constraint>
+    <constraint source="project">NFR-09: after deploy, the Compose save/versioning/redline contract MUST NOT have regressed the downstream analysis-hub-r1 reopen-restore / clean-retirement parity — verify in UAT where the §9 criteria touch it.</constraint>
+    <constraint source="ADR-007">Deploy keeps the SPE hop in the endpoint/facade layer; no Graph-above-SpeFileStore change introduced by deploy config.</constraint>
+    <constraint source="CLAUDE.md §10">BFF deploy — reference the task-041 publish-size figure; no new BFF surface added at deploy time.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/hardening-report.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+    </files>
+    <patterns>
+      <pattern name="BFF deploy" location=".claude/skills/bff-deploy/SKILL.md">Deploy Sprk.Bff.Api to spaarke-bff-dev via the deployment script.</pattern>
+      <pattern name="Code-page deploy" location=".claude/skills/code-page-deploy/SKILL.md">Build + deploy the Compose client bundle to the shared sprk_spaarkeai web resource.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm task 041 hardening gate passed (byte-diff 24/24, suites green, publish ≤60 MB). Do not deploy if the gate did not pass.</step>
+    <step order="2">Check for concurrent deploys: verify no in-flight Compose/SpaarkeAi deploy is targeting spaarke-bff-dev or the sprk_spaarkeai web resource. If one is detected, STOP and coordinate timing before proceeding ("last deploy wins").</step>
+    <step order="3">Deploy the BFF to spaarke-bff-dev using the bff-deploy skill (build/deploy from master-with-R4.5). Confirm the deployment succeeded and the health endpoint responds.</step>
+    <step order="4">Deploy the Compose client bundle to the shared sprk_spaarkeai web resource using the code-page-deploy skill. Confirm the resource updated.</step>
+    <step order="5">Run operator UAT against the §9 graduation criteria: REQ-1 (reopened authored doc edits are CLEAN, imported still track); REQ-3 edit (heading / list / table / hyperlink apply, each guard removed); G12 (accept/reject a pre-existing imported tracked change — single AND batch — saves with no 422); G7 (Save-Version replaces in place, Save-New forks, transient/upload no longer mints duplicates); G8 (external-change remount + banner); G9 (comment scroll-sync); G11 (track-changes-off keeps imported redlines visible); G10 (Compose save re-runs the profile + reload + manual button).</step>
+    <step order="6">Record the UAT results (pass/fail per §9 criterion) in projects/spaarkeai-compose-r5/notes/uat-results.md. If any criterion fails, STOP and file a defect (do not mark UAT complete).</step>
+    <step order="7">Run/verify: post-deploy smoke — BFF health + Compose workspace loads against the deployed surfaces.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a concurrent deploy to sprk_spaarkeai or spaarke-bff-dev is detected, STOP and coordinate timing before deploying (do not clobber a concurrent deploy). If any §9 graduation criterion fails UAT, STOP and file the defect — do not mark the project deployable/complete on a failed criterion.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build the BFF for deploy.</tool>
+    <tool name="npm">Build the Compose client bundle for the web resource.</tool>
+    <tool name="terminal">Run the bff-deploy and code-page-deploy skills; check for concurrent deploys; run post-deploy smoke.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-r5/notes/uat-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the hardening gate passed, when deploying, then the BFF deploys to spaarke-bff-dev and the Compose bundle deploys to sprk_spaarkeai, both from master-with-R4.5, with deploy timing coordinated (no concurrent deploy clobbered).</criterion>
+    <criterion testable="true">Given the deployed surfaces, when operator UAT runs, then REQ-1 (clean authored reopen) and REQ-3 (heading/list/table/hyperlink apply) pass.</criterion>
+    <criterion testable="true">Given a doc with pre-existing imported tracked changes, when G12 accept/reject is exercised (single AND batch) and saved, then it succeeds with no 422.</criterion>
+    <criterion testable="true">Given the versioning UX, when G7 is exercised, then Save-Version replaces in place, Save-New forks, and transient/upload saves no longer mint duplicate records (no G7 duplicates).</criterion>
+    <criterion testable="true">Given the concurrency/UX + profiling gaps, when exercised, then G8 (remount+banner), G9 (scroll-sync), G11 (redline visibility), and G10 (profile re-run) all pass UAT.</criterion>
+    <criterion testable="true">Negative: if a concurrent deploy is detected OR any §9 criterion fails, then deploy/UAT stops and (respectively) coordinates timing or files a defect — the project is not marked deployable on a failed criterion.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec §9 (graduation) / plan P4-3. Prescriptive because deployment is ordered + irreversible against shared surfaces. Use bff-deploy + code-page-deploy skills. Coordinate deploy timing on the shared sprk_spaarkeai + spaarke-bff-dev surfaces.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>G9 — Comment pane scroll-sync (position-link to in-document anchors)</title>
+    <phase>3 Concurrency + UX</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Client-only UX change in Spaarke.Compose.Components; no persistence change, no BFF, no op-catalog change. New file creation / interaction wiring on an existing component surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified client interaction (scroll-track the Comments pane to anchor positions); no architectural or high-blast-radius decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>file-overlap on ComposeEditor.tsx with task 030 (external-change banner). Serialize with 030; run /conflict-check before the shared-client PR (analysis-hub-r1 shares this surface, NFR-09).</parallel-reason>
+    <deps>none</deps>
+    <tags>frontend, fluent-ui, react</tags>
+    <estimated-effort>S-M (1-3d)</estimated-effort>
+  </metadata>
+
+  <prompt>Position-link the Comments pane so it scroll-tracks in-document anchor positions instead of showing a flat list (spec FR-08 / gap G9). Coordinate ComposeCommentThread* rendering (ComposeEditor.tsx :1798-1812) with editor scroll: scrolling the document moves the pane to the corresponding comment anchor, and selecting a comment scrolls the document to its anchor. Client-only — NO persistence change. If scroll-sync causes reflow jank, prefer correctness over animation.</prompt>
+
+  <role>SPAARKE platform developer with React (Fluent UI v9) expertise in scroll/position coordination and the Spaarke.Compose.Components comment-thread surface.</role>
+
+  <goal>The Comments pane is position-linked to in-document anchor positions: scrolling the document scroll-tracks the pane to the matching comment anchor, and selecting/activating a comment scrolls the editor to its anchor. Rendering of ComposeCommentThread* (ComposeEditor.tsx :1798-1812) is coordinated with editor scroll. No persistence/save contract changes. Backed by ui-tests covering both scroll directions and dark mode.</goal>
+
+  <context>
+    <background>Per spec FR-08 (G9) and plan P3-2, the Comments pane today renders as a flat list not linked to in-document anchor positions. Position-linking it improves comment UX so reviewers can navigate threaded comments by document position. This is a Comments-UX-only change; the redline/save/persistence contract is untouched (protecting NFR-08/NFR-09).</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeCommentThread</file>
+    </relevant-files>
+    <dependencies>None. Serialize with task 030 due to ComposeEditor.tsx overlap.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Client is view+controller only; scroll-sync reads editor/anchor positions and does NOT author bytes or alter the OOXML model. No persistence change.</constraint>
+    <constraint source="project">NFR-08: this UX change MUST NOT introduce a user-triggerable error or silent-loss path; comment persistence and the save contract are unchanged.</constraint>
+    <constraint source="project">NFR-09 (analysis-hub-r1): ComposeEditor.tsx is shared surface; MUST NOT regress the downstream consumer's reopen-restore parity. Run /conflict-check before the shared-client PR.</constraint>
+    <constraint source="project">NFR-03: MIT/permissive only; NO new runtime package. Use existing scroll/observer primitives and Fluent v9 components already in the surface.</constraint>
+    <constraint source="project">Failure mode: if scroll-sync causes reflow jank, prefer correctness (the pane tracks the right anchor) over animation smoothness. Do not add heavy animation to mask jank.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Comment-thread rendering" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx">ComposeCommentThread* rendering at :1798-1812 — anchor the pane styling here; coordinate with editor scroll.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the ComposeCommentThread* rendering region (ComposeEditor.tsx :1798-1812) and identify each comment's in-document anchor position (paraId/anchor) and the editor scroll container.</step>
+    <step order="2">Position-link the pane: on editor scroll, scroll-track the Comments pane to the comment whose anchor is at/near the current viewport position (replace the flat-list ordering with anchor-position ordering/tracking).</step>
+    <step order="3">Wire the reverse direction: selecting/activating a comment in the pane scrolls the editor to its in-document anchor. Keep it client-only; no persistence change.</step>
+    <step order="4">Prefer correctness over animation: if reflow jank appears, favor a correct anchor match (throttle/observe rather than animate). Anchor the pane styling to the existing comment-pane visual direction (:1798-1812) — do not restyle "clean and modern".</step>
+    <step order="5">Add the &lt;ui-tests&gt; below. Run /conflict-check before opening the shared-client PR (ComposeEditor.tsx overlap with 030 and analysis-hub-r1).</step>
+    <step order="6">Run/verify: build (Spaarke.Compose.Components) + the ui-tests pass; confirm no save/persistence contract changed.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>No hard escalation (UX-only). Note the failure mode: if scroll-sync forces a persistence/anchor-storage change to work correctly (i.e., it cannot stay client-only), STOP and surface it — the task is scoped as no-persistence-change.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build Spaarke.Compose.Components and run the client/ui tests.</tool>
+    <tool name="terminal">Run /conflict-check on the shared-client surface.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/ (ui-tests for the comment pane)</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="doc-scroll-tracks-pane">Given a document with multiple comment anchors, when the user scrolls the document, then the Comments pane scroll-tracks to the comment whose in-document anchor matches the current viewport position.</test>
+    <test name="pane-select-scrolls-doc">Given the Comments pane, when the user selects a comment, then the editor scrolls to that comment's in-document anchor position.</test>
+    <test name="pane-styling-anchored">Given the position-linked pane, when it renders, then it uses the existing ComposeCommentThread* comment-pane styling (ComposeEditor.tsx :1798-1812) — not a new visual treatment.</test>
+    <test name="dark-mode">Given ADR-021 dark mode, when the pane renders in dark theme, then it uses theme tokens (no hard-coded colors) and remains legible in both light and dark.</test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a document with comment anchors, when the user scrolls the document, then the Comments pane tracks to the matching comment anchor (position-linked, not a flat list).</criterion>
+    <criterion testable="true">Given the Comments pane, when a comment is selected, then the editor scrolls to that comment's in-document anchor.</criterion>
+    <criterion testable="true">Given the change, when the ui-tests run, then both scroll directions pass and the pane uses the existing comment-pane styling in light and dark themes.</criterion>
+    <criterion testable="true">Negative / no-regression: no persistence or save contract changes; comment storage is unchanged; analysis-hub-r1 reopen-restore parity is not regressed (NFR-09); no new runtime package (NFR-03).</criterion>
+    <criterion testable="true">Negative: if reflow jank occurs, correctness (right anchor match) is preserved over animation smoothness; no heavy animation is added to mask jank.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-08 / gap G9; plan P3-2. Client-only Comments UX. parallel-safe=false due to ComposeEditor.tsx overlap with 030. No hard escalation; failure mode noted (prefer correctness over animation). Anchor visual direction to the existing comment-pane styling.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

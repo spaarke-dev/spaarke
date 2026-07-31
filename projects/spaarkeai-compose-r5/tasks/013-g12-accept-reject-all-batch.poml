@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>G12 accept-all/reject-all batch — batch ops with deterministic reconciliation ordering</title>
+    <phase>1 Edit-path ops</phase>
+    <gate>dep:012</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New batch ops on the closed catalog + batch reconciliation logic in the shared engine; determinism + Word-validity correctness bar. Save/apply change requires ADR-038 seam DoD; downstream-consumer coupling (NFR-09).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Batch reconciliation ordering must be provably deterministic and Word-valid over multi-revision docs — a correctness-sensitive extension of 012's primitives requiring careful OOXML reasoning.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies ComposeShadowPatchEngine.cs (shared engine) and extends the closed op catalog; must run after 012 whose single-by-id primitives it composes. Serialize against 010/011/012/014.</parallel-reason>
+    <deps>012</deps>
+    <tags>bff-api, compose, engine, op-schema</tags>
+    <estimated-effort>2-4 days (M)</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add accept-all and reject-all batch ops to the closed catalog with DETERMINISTIC reconciliation ordering so
+    results are stable across runs and Word-valid. Compose them from task 012's single-by-id revision-resolution
+    primitives — do not re-implement per-revision semantics. Prove with batch seam cases on a multi-revision corpus
+    doc that accept-all / reject-all then save succeeds (no 422) with identical byte output across repeated runs.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in OOXML tracked-change reconciliation, deterministic ordering of dependent
+    revision edits, and the closed ComposeOperation catalog. Honor ADR-049 + ADR-039 + CLAUDE.md §10.
+  </role>
+
+  <goal>
+    The closed catalog gains accept-all/reject-all batch ops (mirrored server↔client). ComposeShadowPatchEngine
+    applies them by iterating 012's single-by-id primitives in a deterministic, documented order so repeated runs on
+    the same input produce byte-identical output that is Word-valid. Batch seam cases on a multi-revision corpus doc
+    prove accept-all / reject-all then save succeeds (no 422); corpus byte-diff (24/24) does not regress.
+  </goal>
+
+  <context>
+    <background>
+      Spec FR-11 (G12) batch — owner-selected (single-by-id AND accept-all/reject-all). Task 012 lands the
+      single-by-id primitives; this task composes them into batch ops. The design risk is ordering: reconciling
+      revisions in an arbitrary order can produce non-deterministic or Word-invalid output when edits are adjacent
+      or nested. A stable, documented ordering is the core deliverable. NFR-09: analysis-hub-r1's retirement parity
+      depends on stable accept/reject behavior.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts</file>
+      <file>tests/integration/seam/Compose/</file>
+    </relevant-files>
+    <dependencies>012 (single-by-id acceptRevision/rejectRevision primitives — this task composes them into batch ops).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Batch ops EXTEND the closed ComposeOperation catalog under version control — never fork, no side channel, no new AI dispatch endpoint. Server ↔ client mirror stays in exact sync.</constraint>
+    <constraint source="ADR-049">Surgical ops; untouched subtrees byte-identical. Resolve every revision by id — NO text-search in the write path (I-7 / NFR-02).</constraint>
+    <constraint source="ADR-010">Patch engine = stateless concrete singleton; batch reconciliation carries no per-request state across calls.</constraint>
+    <constraint source="ADR-013">No AI internals in Services/Compose/ (Tier-1 NetArchTest).</constraint>
+    <constraint source="ADR-038">Add batch through-the-wire WebApplicationFactory seam cases in tests/integration/seam/Compose/ on a multi-revision corpus fixture. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="project">NFR-01 corpus byte-diff (24/24) MUST NOT regress. NFR-07 Word-valid output. NFR-09 — MUST NOT regress analysis-hub-r1 accept/reject parity. Determinism: repeated batch runs on the same input MUST produce byte-identical output.</constraint>
+    <constraint source="CLAUDE.md-10">BFF task — Placement Justification in the PR; engine stays in Services/Compose/. Publish ≤60 MB; report absolute + delta vs ~46.11 MB. Run /conflict-check. Zero new runtime package (NFR-03).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+    </files>
+    <patterns>
+      <pattern name="Compose from single-by-id primitives" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs">
+        Reuse 012's accept-ins/accept-del/reject-inverse resolution; the batch applier orders the revision set deterministically and applies each primitive — do not re-derive per-revision semantics.
+      </pattern>
+      <pattern name="Closed-catalog op addition (mirror)" location="src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs">
+        Add accept-all/reject-all to [JsonDerivedType] :148-157 and mirror in client compose-operations.ts :54-64 — one schema both ends implement.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>Closest neighbors: 012's single acceptRevision/rejectRevision ops in ComposeOperation.cs. No batch accept-all/reject-all op exists in the catalog (verified against [JsonDerivedType] :148-157 / compose-operations.ts :54-64).</existing>
+    <extension>Yes — EXTEND the closed catalog with two batch ops that compose 012's primitives under a deterministic ordering (ADR-039: extend, never fork). Not a new class hierarchy, not a new endpoint.</extension>
+    <cost-of-doing-nothing>Without batch ops the user must accept/reject each revision individually; a naive client loop would apply them in a non-deterministic order producing unstable or Word-invalid output. The owner-selected accept-all/reject-all capability (FR-11) is unmet.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="1">Read 012's single-by-id primitives and the multi-revision corpus fixture; enumerate ordering hazards (adjacent/nested/paragraph-boundary revisions).</step>
+    <step order="2">Design and document a deterministic reconciliation order (e.g. a total order over revision ids / document positions) that yields Word-valid output regardless of input order; record the ordering rule in notes/.</step>
+    <step order="3">Add accept-all/reject-all ops to ComposeOperation.cs [JsonDerivedType] :148-157 and mirror in compose-operations.ts :54-64.</step>
+    <step order="4">Implement the batch applier: sort the revision set by the deterministic order and apply 012's primitives; touch nothing else.</step>
+    <step order="5">Update client stepOperationInterceptor.ts to emit accept-all/reject-all ops.</step>
+    <step order="6">Add batch seam cases on the multi-revision corpus doc: accept-all then save (no 422); reject-all then save; run each twice and assert byte-identical output across runs (determinism) and untouched subtrees byte-identical.</step>
+    <step order="7">Run the corpus byte-diff harness (confirm 24/24) and dotnet publish -c Release; report absolute size + delta vs ~46.11 MB. Run /conflict-check; state Placement Justification.</step>
+    <step order="8">Run/verify: build + this task's seam/unit tests pass.</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="10">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the reconciliation ordering is non-deterministic across runs (repeated accept-all/reject-all on the same input yields differing byte output) or cannot be made Word-valid for adjacent/nested revisions, STOP and redesign the ordering — do not ship a batch op with unstable output.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish the BFF; run the byte-diff harness (twice for determinism).</tool>
+    <tool name="npm">Build the Spaarke.Compose.Components client for op-mirror + interceptor changes.</tool>
+    <tool name="terminal">Run /conflict-check before the PR.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs (accept-all/reject-all ops)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs (deterministic batch reconciliation)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts + widgets/stepOperationInterceptor.ts</output>
+    <output type="test">tests/integration/seam/Compose/ (accept-all/reject-all batch seam cases on a multi-revision corpus doc)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a multi-revision corpus doc, when accept-all is applied and saved, then the save succeeds (no 422) and all revisions are accepted with Word-valid output.</criterion>
+    <criterion testable="true">Given a multi-revision corpus doc, when reject-all is applied and saved, then the save succeeds (no 422) and all revisions are rejected with Word-valid output.</criterion>
+    <criterion testable="true">Given the same input, when accept-all (or reject-all) is run repeatedly, then the byte output is identical across runs (deterministic ordering) and the ordering rule is documented in notes/.</criterion>
+    <criterion testable="true">Given the batch applier, then it composes 012's single-by-id primitives (no re-implemented per-revision semantics) and resolves revisions by id — no text-search.</criterion>
+    <criterion testable="true">Given the closed catalog, then accept-all/reject-all exist in both ComposeOperation.cs and compose-operations.ts in exact sync; no side channel or new AI dispatch endpoint (ADR-039).</criterion>
+    <criterion testable="true">Given the seam cases run, then untouched subtrees are byte-identical, corpus byte-diff stays 24/24, analysis-hub-r1 accept/reject parity is not regressed (NFR-09), and dotnet publish -c Release is ≤60 MB with delta reported vs ~46.11 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    NEW batch ops → &lt;justification&gt; emitted above. Owner-selected (FR-11): single AND batch. Depends on 012's
+    primitives. The deterministic ordering rule is the load-bearing deliverable — document it. Run /conflict-check
+    (shared Spaarke.Compose surface with analysis-hub-r1).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files first. Follow task-execute pre-execution checklist incl. Step 9.5 gates (code-review + adr-check, FULL/BFF). Enforce §10 publish-size gate and /conflict-check.</protocol>
+  </execution>
+</task>

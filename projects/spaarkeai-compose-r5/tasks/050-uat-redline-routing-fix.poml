@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>UAT #1A — imported/reopened tracked edit must persist w:ins/w:del to Word (save routing + origin fix)</title>
+    <phase>5 UAT remediation</phase>
+    <gate>dep:042</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Fidelity-critical save-routing on ComposeService.cs (bff-api); genuine SEV-1 regression; touches the two-byte-author selection. Mandatory code-review + adr-check + byte-diff at Step 9.5.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Save-path routing on the frozen-engine boundary; misroute silently flattens tracked changes. High blast radius; requires careful reasoning about ContentModel-vs-oplog selection and origin durability without regressing born-in-editor drafts (D-two-author split).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies shared contended ComposeService.cs (+ possibly client save payload in ComposeWorkspace.tsx). Serialize with 051/052/053/054.</parallel-reason>
+    <deps>042</deps>
+    <tags>bff-api, compose, frontend</tags>
+    <estimated-effort>M (2-4d)</estimated-effort>
+  </metadata>
+
+  <prompt>UAT SEV-1 regression: a tracked edit made in Compose on an IMPORTED doc does not appear as a tracked change in Word after save. Root cause (verified): the dirty save is routed to ComposeDocumentRenderer.SynthesizeDocument (ContentModel path — plain untracked runs by design) instead of the tracked ComposeShadowPatchEngine.Apply(trackChanges:true) op-log path; and origin is mis-derived from ContentModel presence (ComposeService.cs:707) so the imported doc is durably stamped Authored, forcing every later op-log save to cleanApply/trackChanges:false. FIX the routing so imported/reopened edits go through the tracked op-log path; renderer stays for born-in-editor first-save only. FIX the origin discriminant so an imported doc stays Imported. Do NOT merge the two byte-authors (D-two-author split stands).</prompt>
+
+  <role>SPAARKE platform developer expert in the Compose Shadow Document architecture (ADR-049), the ComposeService save/load orchestration, the two-byte-author split (ComposeDocumentRenderer vs ComposeShadowPatchEngine), and OOXML tracked-change markup.</role>
+
+  <goal>An imported (or reopened-imported) Compose doc whose user makes a tracked edit persists real w:ins/w:del (author/date) to the SPE bytes so Word shows the tracked changes; a born-in-editor NEW doc still saves clean via the renderer (unchanged). The origin marker (sprk_composeorigin) reflects the doc's true provenance (imported stays Imported; only genuinely-authored/blank docs are Authored) and is NOT inferred from ContentModel presence. A NEW seam slice proves an imported-doc edit round-trips w:ins/w:del; byte-diff 24/24 holds; born-in-editor clean-save path is not regressed.</goal>
+
+  <context>
+    <background>Per notes/g2-clean-apply-decision.md (2026-07-29 operator resolution) reopened/imported saves must route back to op-log + clean signal; only born-in-editor first-save uses the renderer. That routing is NOT holding for this flow. Save routing: ResolveSaveBaselineAsync returns renderer output when request.ContentModel is not null (ComposeService.cs:1157-1160) and the op-log apply block is skipped (:782). cleanApply is set when persistedOrigin==Authored (:718-727) and passed as trackChanges:!cleanApply (:802-808). Origin derive: ComposeService.cs:707 (ContentModel present ? Authored : Imported), stamped :1016-1018/:1821. The tracked engine path is correct (ComposeShadowPatchEngine.cs:404-415/:2371-2392/:2677-2679); this is purely a routing + origin-classification defect.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file>projects/spaarkeai-compose-r5/notes/g2-clean-apply-decision.md</file>
+      <file>tests/integration/seam/Compose/</file>
+    </relevant-files>
+    <dependencies>042 (deployed build is the baseline this fixes).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Honor I-1..I-7 + D1-D5. Two-byte-author split is intentional — do NOT merge renderer and engine. Imported/tracked docs go through ComposeShadowPatchEngine; born-in-editor through the renderer. Engine stays byte[]-in/byte[]-out.</constraint>
+    <constraint source="project">I-7 / NFR-02: NO text-search in the write path. The routing decision must key off durable provenance (persisted origin / baseline-bytes presence / documentRef), NOT content matching.</constraint>
+    <constraint source="ADR-013">No AI internals in Services/Compose/ (Tier-1 NetArchTest).</constraint>
+    <constraint source="ADR-007">No Microsoft.Graph above SpeFileStore.</constraint>
+    <constraint source="ADR-038">Seam DoD — NEW through-the-wire WebApplicationFactory slice proving an imported-doc tracked edit persists w:ins/w:del. NO Mock&lt;HttpMessageHandler&gt;, DI-registration, or ctor-null tests.</constraint>
+    <constraint source="project">NFR-01/03/04: corpus byte-diff 24/24 MUST NOT regress; no new runtime package; BFF publish ≤60 MB (report absolute + delta vs ~46.11 MB). Run /conflict-check before the BFF PR.</constraint>
+    <constraint source="project">MUST NOT regress born-in-editor NEW-doc clean-save (renderer path) nor analysis-hub-r1 reopen-restore (NFR-09). Prove the born-in-editor path still produces clean bytes.</constraint>
+    <constraint source="CLAUDE.md §10">BFF task — state Placement Justification in the PR; routing/origin logic stays in Services/Compose/ save orchestration; no new service/endpoint family.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/g2-clean-apply-decision.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/uat-remediation-r5.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Save routing" location="ComposeService.cs ResolveSaveBaselineAsync (:1157-1160), op-log apply gate (:782), cleanApply select (:718-727,:802-808)">The routing seam to fix.</pattern>
+      <pattern name="Origin derive/stamp" location="ComposeService.cs:707 (+:1016-1018,:1821)">The origin discriminant to correct.</pattern>
+      <pattern name="Tracked engine (correct)" location="ComposeShadowPatchEngine.cs:404-415,:2371-2392,:2677-2679">Reference: what correct tracked output looks like.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Reproduce/trace the routing for an imported-doc dirty edit: confirm whether the CLIENT sends a ContentModel for imported/reopened edits (ComposeWorkspace.tsx save payload) and/or the SERVER routes to the renderer purely on ContentModel presence. Establish the correct discriminant (durable provenance / baseline-bytes present / documentRef indicates imported) — never text-search.</step>
+    <step order="2">Fix the routing: imported/reopened dirty edits apply through the op-log tracked path (ComposeShadowPatchEngine.Apply with trackChanges driven by real origin, not a mis-stamped one). Born-in-editor first-save keeps the renderer. If the client must send the operation log instead of a ContentModel for this flow, make that change client-side too.</step>
+    <step order="3">Fix the origin discriminant (ComposeService.cs:707): derive origin from durable provenance, NOT ContentModel presence. Imported doc stays Imported across saves; ensure the stamp at create-on-save reflects true origin. Verify an already-mis-stamped doc can recover (a subsequent tracked save is not permanently forced clean).</step>
+    <step order="4">Add the NEW seam slice: imported-doc load → tracked edit op → save → reload/inspect bytes assert w:ins/w:del present with author/date. Add a companion slice proving born-in-editor NEW doc still saves clean (no w:ins/w:del).</step>
+    <step order="5">Verify NFR gates: byte-diff harness 24/24; dotnet publish size + delta; zero new package; /conflict-check before BFF PR.</step>
+    <step order="6">Build + run Compose seam/unit suite green.</step>
+    <step order="7">Update TASK-INDEX.md (✅) and write a deviation note in notes/task-050-deviations.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a correct routing fix cannot be made without merging the two byte-authors or without text-search in the write path (violating D-two-author / I-7), STOP and escalate per CLAUDE.md §6.5 — do not ship a fix that breaches an invariant.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, seam/unit tests, publish size.</tool>
+    <tool name="npm">Client build + tests if the save payload changes.</tool>
+    <tool name="terminal">Grep/inspect ComposeService.cs; /conflict-check.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an imported Compose doc, when a user makes a tracked edit and saves, then the persisted SPE bytes contain w:ins/w:del with author/date (visible as tracked changes in Word) — asserted by a NEW seam slice.</criterion>
+    <criterion testable="true">Given a born-in-editor NEW doc, when saved, then the bytes are clean (no w:ins/w:del) — the renderer path is not regressed (asserted).</criterion>
+    <criterion testable="true">Given an imported doc, when saved, then sprk_composeorigin is Imported (origin is not inferred from ContentModel presence); a doc previously mis-stamped can still produce tracked output on a subsequent save.</criterion>
+    <criterion testable="true">Negative/no-regression: byte-diff 24/24, zero new runtime package, publish ≤60 MB; I-7 (no write-path text-search) preserved; two-byte-author split intact.</criterion>
+  </acceptance-criteria>
+
+  <notes>UAT #1A. Root causes in notes/uat-remediation-r5.md. The engine tracked path is already correct — this is a routing + origin-classification fix. The g2-clean-apply-decision.md resolution is the intended design; make it hold.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

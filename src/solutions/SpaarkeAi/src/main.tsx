@@ -276,6 +276,9 @@ async function bootstrap(): Promise<void> {
           // task 041 (FR-13): active work type — scopes the Compose AI toolbar via
           // getToolsForSurface. Cross-cutting; applies regardless of door shape.
           activeWorkType?: string;
+          // agreements-r1 contract A3: level-2 agreement sub-domain (sprk_agreementtype.sprk_key)
+          // carried alongside activeWorkType so the review machine opens oriented.
+          subDomain?: string;
         }
       | undefined;
     if (!seed) {
@@ -302,6 +305,7 @@ async function bootstrap(): Promise<void> {
           fileName: seed.draft.fileName ?? undefined,
         },
         activeWorkType: seed.activeWorkType,
+        subDomain: seed.subDomain,
       };
       return <ComposeLaunchContext.Provider value={composeDraftLaunch}>{app}</ComposeLaunchContext.Provider>;
     }
@@ -326,6 +330,7 @@ async function bootstrap(): Promise<void> {
           fileName: seed.upload.fileName ?? undefined,
         },
         activeWorkType: seed.activeWorkType,
+        subDomain: seed.subDomain,
       };
       return <ComposeLaunchContext.Provider value={composeUploadLaunch}>{app}</ComposeLaunchContext.Provider>;
     }
@@ -343,6 +348,7 @@ async function bootstrap(): Promise<void> {
       },
       driveId: seed.speDriveId ?? "",
       activeWorkType: seed.activeWorkType,
+      subDomain: seed.subDomain,
     };
     return <ComposeLaunchContext.Provider value={composeLaunch}>{app}</ComposeLaunchContext.Provider>;
   };
@@ -478,6 +484,39 @@ async function bootstrap(): Promise<void> {
     dataParam ? decodeURIComponent(dataParam) : ""
   );
 
+  // UAT round 4 (2026-07-30): when SpaarkeAi is embedded as a web resource on an OOB
+  // Dataverse FORM (e.g. the sprk_analysis Analysis form, opened via row-click / ribbon
+  // "View" → openRecordModal), Dataverse does NOT pass the record id via URL/`data`
+  // params — so the page cold-loaded the DEFAULT workspace (Daily Briefing + Get Started
+  // cards) instead of THAT record. Resolve the host form's record via the SUPPORTED
+  // `Xrm.Utility.getPageContext()` API (works in modal/navigateTo forms where the
+  // deprecated `Xrm.Page` may be absent); fall back to `Xrm.Page` for older embed
+  // contexts. Returns the parent form's { entityName, entityId } or undefined.
+  const readParentFormRecordRef = (): { entityName: string; entityId: string } | undefined => {
+    const clean = (raw?: string): string | undefined =>
+      raw ? raw.replace(/^\{|\}$/g, "").toLowerCase() : undefined;
+    for (const w of [window.parent, window.top]) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const xrm: any = (w as any)?.Xrm;
+        if (!xrm) continue;
+        const input = xrm.Utility?.getPageContext?.()?.input;
+        if (input?.entityName && input?.entityId) {
+          const id = clean(input.entityId);
+          if (id) return { entityName: input.entityName as string, entityId: id };
+        }
+        const entity = xrm.Page?.data?.entity;
+        const name: string | undefined = entity?.getEntityName?.();
+        const id = clean(entity?.getId?.());
+        if (name && id) return { entityName: name, entityId: id };
+      } catch {
+        /* cross-origin / no Xrm — standalone or non-form host */
+      }
+    }
+    return undefined;
+  };
+  const parentFormRef = readParentFormRecordRef();
+
   // Accept BOTH param keys: the R2 app + UAT URL contract use `entityType`, but
   // the shared ribbon launcher (launch-resolver.ts buildLaunchUrl) emits
   // `entityLogicalName`. Reading only `entityType` silently dropped the host
@@ -488,11 +527,13 @@ async function bootstrap(): Promise<void> {
     dataParams.get("entityType") ??
     searchParams.get("entityLogicalName") ??
     dataParams.get("entityLogicalName") ??
+    parentFormRef?.entityName ??
     undefined;
 
   const entityId =
     searchParams.get("entityId") ??
     dataParams.get("entityId") ??
+    (parentFormRef && parentFormRef.entityName === entityLogicalName ? parentFormRef.entityId : undefined) ??
     undefined;
 
   const matterId =
@@ -574,9 +615,13 @@ async function bootstrap(): Promise<void> {
   // the deterministic CODE path (openSpaarkeAi deep-link + main.tsx mode
   // routing), NOT the reactive in-chat surface-launch registry.
   // -------------------------------------------------------------------------
+  // When embedded on the OOB `sprk_analysis` form (see readParentFormRecordRef above),
+  // adopt that record as the analysis to open (existing-mode). An explicit URL/`data`
+  // `analysisId` still wins.
   const analysisId =
     searchParams.get("analysisId") ??
     dataParams.get("analysisId") ??
+    (parentFormRef?.entityName === "sprk_analysis" ? parentFormRef.entityId : undefined) ??
     undefined;
 
   const worktype =

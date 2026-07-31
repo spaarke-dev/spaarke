@@ -99,7 +99,7 @@ public sealed class Def14_ComposeSaveLockedDocumentTests : IClassFixture<Def14Co
         response.StatusCode.Should().Be(HttpStatusCode.Locked,
             "a checked-out / open-in-Word SPE item must surface as 423, not the opaque 500 DEF-14 reported");
         var payload = await response.Content.ReadAsStringAsync();
-        payload.Should().Contain("checked out", "the 423 copy tells the user how to recover");
+        payload.Should().Contain("open in Word", "the 423 copy honestly names the Word co-authoring lock and how to recover (UAT #10/#11 task 052 — no more misleading 'checked out / check it in')");
         payload.Should().NotContain("ODataError", "the raw Graph error must never leak to the client");
         ((int)response.StatusCode).Should().NotBe(500);
     }
@@ -137,7 +137,7 @@ public sealed class Def14_ComposeSaveLockedDocumentTests : IClassFixture<Def14Co
         response.StatusCode.Should().Be(HttpStatusCode.Locked,
             "a create-on-save that hits a locked/checked-out SPE target must surface as 423, not an opaque 500");
         var payload = await response.Content.ReadAsStringAsync();
-        payload.Should().Contain("checked out", "the 423 copy tells the user how to recover");
+        payload.Should().Contain("open in Word", "the 423 copy honestly names the Word co-authoring lock and how to recover (UAT #10/#11 task 052 — no more misleading 'checked out / check it in')");
         payload.Should().NotContain("ODataError", "the raw Graph error must never leak to the client");
         ((int)response.StatusCode).Should().NotBe(500);
     }

@@ -71,6 +71,7 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
     onLookupRecord,
     onAddRelationship,
     onUploadLocalAttachment,
+    onResolveShareLink,
     onListEmailTemplates,
     onRenderEmailTemplate,
     onDraftWithAi,
@@ -204,6 +205,7 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
       onLookupRecord={onLookupRecord}
       onAddRelationship={onAddRelationship}
       onUploadLocalAttachment={onUploadLocalAttachment}
+      onResolveShareLink={onResolveShareLink}
       onListEmailTemplates={onListEmailTemplates}
       onRenderEmailTemplate={onRenderEmailTemplate}
       onDraftWithAi={onDraftWithAi}

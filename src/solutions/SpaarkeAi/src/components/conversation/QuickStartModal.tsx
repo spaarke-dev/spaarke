@@ -145,14 +145,22 @@ export interface QuickStartModalProps {
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
+  // FIXED-size surface (ai-advanced-capabilities-analysis-hub-r1 UAT #1): the modal
+  // must NOT resize when switching tabs (Create has 7 cards, Analysis has 3). The
+  // width lives on the SURFACE (Fluent's DialogSurface defaults to ~600px max, which
+  // is narrower than the 3-column card grid → the cards used to overflow the modal).
+  // A fixed 720px surface fully contains the grid; the content fills it.
+  surface: {
+    width: '720px',
+    maxWidth: '720px',
+  },
   content: {
     display: 'flex',
     flexDirection: 'column',
-    minWidth: '480px',
-    maxWidth: '720px',
-    minHeight: '320px',
-    maxHeight: '70vh',
+    width: '100%',
+    height: '460px',
     padding: 0,
+    overflow: 'hidden',
   },
   title: {
     color: tokens.colorNeutralForeground1,
@@ -199,12 +207,14 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({
     setSelectedTab(data.value);
   }, []);
 
-  // Analysis tab: only "Agreement Review" is live. Selecting it closes Quick Start
-  // and hands the work type to the host, which dispatches `open_create_analysis_wizard`.
+  // Analysis tab: only "NDA Analysis" is live. Selecting it closes Quick Start and
+  // hands the work type to the host, which dispatches `open_create_analysis_wizard`.
+  // NDA Analysis uses the Agreement Review work-type value (100000000 — the only live
+  // one) but is a specific review path labelled for the user.
   const handleAnalysisCardClick = React.useCallback(
     (cardId: AnalysisCardId): void => {
-      if (cardId !== 'agreement-review') return; // coming-soon cards are disabled anyway
-      onCreateAnalysis?.(SprkAnalysisWorkType.AgreementAnalysis, 'Agreement Review');
+      if (cardId !== 'nda-analysis') return; // coming-soon cards are disabled anyway
+      onCreateAnalysis?.(SprkAnalysisWorkType.AgreementAnalysis, 'NDA Analysis');
       onClose();
     },
     [onCreateAnalysis, onClose],
@@ -303,7 +313,7 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({
       }}
       modalType="modal"
     >
-      <DialogSurface data-testid="quick-start-modal">
+      <DialogSurface className={styles.surface} style={{ maxWidth: '720px', width: '720px' }} data-testid="quick-start-modal">
         <DialogBody>
           <DialogTitle className={styles.title}>Quick Start</DialogTitle>
           <DialogContent className={styles.content}>

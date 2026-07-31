@@ -19,6 +19,7 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
@@ -247,6 +248,17 @@ public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDispos
         // though these tests never invoke those routes. (continue/resume retired —
         // ai-advanced-capabilities-analysis-hub-r1 task 062, spec §13.5/FR-20, 2026-07-29.)
         builder.Services.AddSingleton(Mock.Of<IAnalysisOrchestrationService>());
+
+        // Fork/Promote sibling endpoints take the concrete ChatSessionManager plus
+        // IChatDataverseRepository. Any complex param (concrete OR interface) that is NOT a
+        // registered service is mis-inferred as a second request body → "Failure to infer ..."
+        // at MapAnalysisEndpoints time. These tests never invoke Fork/Promote, so doubles that
+        // are never resolved at request time suffice to satisfy map-time inference.
+        builder.Services.AddSingleton(Mock.Of<IChatDataverseRepository>());
+        builder.Services.AddSingleton<ChatSessionManager>(sp => new ChatSessionManager(
+            sp.GetRequiredService<ITenantCache>(),
+            sp.GetRequiredService<IChatDataverseRepository>(),
+            sp.GetRequiredService<ILogger<ChatSessionManager>>()));
 
         builder.WebHost.UseTestServer();
 
