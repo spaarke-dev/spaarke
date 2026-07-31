@@ -41,6 +41,8 @@ export type { XrmEmailComposeHandlers } from './createXrmEmailComposeHandlers';
 // `Xrm.Navigation.openForm`.
 export { openEmailRecord, EMAIL_PAGE_WEBRESOURCE_NAME } from './openEmailRecord';
 export type { OpenEmailRecordOptions } from './openEmailRecord';
+export { openEmailCompose } from './openEmailCompose';
+export type { OpenEmailComposeOptions, OpenEmailComposeMode } from './openEmailCompose';
 
 // Sub-components (exported for advanced/direct composition + task 023 unit tests)
 export { RecipientField } from './subcomponents/RecipientField';
