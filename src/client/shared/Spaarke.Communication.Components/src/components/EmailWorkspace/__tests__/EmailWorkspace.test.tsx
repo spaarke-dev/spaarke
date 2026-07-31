@@ -172,6 +172,22 @@ describe('EmailWorkspace', () => {
     expect(screen.queryByText('Select an email')).not.toBeInTheDocument();
   });
 
+  it('single-record mode (hideList + id) hides ALL list chrome — the list pane AND the view-selector row — so it reads as one email, not the workspace (owner UAT 2026-07-31)', async () => {
+    renderWorkspace({ hideList: true, initialSelectedId: COMMUNICATION_ID });
+
+    // The reading pane still renders the pre-selected email...
+    expect(await screen.findByTestId('email-reading-pane')).toBeInTheDocument();
+    // ...but the list chrome is gone: no card list AND no "Email — Inbox" view selector.
+    expect(screen.queryByTestId('email-list-pane')).not.toBeInTheDocument();
+    expect(screen.queryByText('Email — Inbox')).not.toBeInTheDocument();
+  });
+
+  it('list mode still renders the view-selector row (regression guard for the single-mode hide)', async () => {
+    renderWorkspace();
+    expect(await screen.findByText('Email — Inbox')).toBeInTheDocument();
+    expect(await screen.findByTestId('email-list-pane')).toBeInTheDocument();
+  });
+
   it('auto-selects the FIRST of several rows and drives the per-selection read for it (owner UAT R2 item 3)', async () => {
     const ROW_A = {
       ...VIEW_ROW,
