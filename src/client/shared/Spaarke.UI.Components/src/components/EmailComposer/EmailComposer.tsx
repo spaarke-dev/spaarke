@@ -58,12 +58,11 @@ import {
   Search20Regular,
   ChevronDown20Regular,
   ChevronUp20Regular,
-  ArrowMaximize20Regular,
-  ArrowMinimize20Regular,
   DocumentText20Regular,
   Sparkle20Regular,
 } from '@fluentui/react-icons';
 import type { CommunicationSendMode } from '../../services/communicationApi';
+import { ModalWindowControls } from '../ModalWindowControls';
 
 import { sendCommunication, SendCommunicationError } from '../../services/communicationApi';
 import type { ICommunicationAssociation } from '../../services/communicationApi';
@@ -1329,22 +1328,16 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
                       ? 'Edit Draft'
                       : 'New Email')}
           </Text>
-          {/* Window controls cluster on the upper-RIGHT: maximize/restore only (owner UAT
-              2026-07-30 R2 item 8 — corrected to upper-right 2026-07-31). The close 'X' button
-              was REMOVED — the modal is closed via the Cancel/Close button in ComposerActionBar
-              (wired to the same `props.onCancel`). Maximize renders only when the host wires
+          {/* Standard Spaarke modal window controls (maximize/restore + close ×) in the
+              upper-RIGHT — the shared `ModalWindowControls` so every modal matches (owner
+              UAT 2026-07-31 item 4). Close routes to the SAME `props.onCancel` the
+              ComposerActionBar Cancel button uses. Maximize shows only when the host wires
               `onToggleMaximize` (e.g. SendEmailDialog, which owns the surface sizing). */}
-          {props.onToggleMaximize && (
-            <div className={styles.headerActions}>
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={props.isMaximized ? <ArrowMinimize20Regular /> : <ArrowMaximize20Regular />}
-                aria-label={props.isMaximized ? 'Restore dialog size' : 'Maximize dialog'}
-                onClick={() => props.onToggleMaximize?.()}
-              />
-            </div>
-          )}
+          <ModalWindowControls
+            isMaximized={props.isMaximized}
+            onToggleMaximize={props.onToggleMaximize}
+            onClose={props.onCancel}
+          />
         </div>
       )}
 

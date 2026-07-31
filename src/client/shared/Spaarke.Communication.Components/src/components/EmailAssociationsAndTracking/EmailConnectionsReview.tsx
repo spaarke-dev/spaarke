@@ -62,6 +62,7 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
     associationProvenanceJson,
     regardingRecordName,
     regardingRecordNumber,
+    regardingRecordType,
     filedAssociations = [],
     writeContext,
     linkAnotherCatalog,
@@ -86,8 +87,16 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
       derivePrimaryReview(associationProvenanceJson, associationStatus, filedAssociations, {
         recordName: regardingRecordName,
         recordNumber: regardingRecordNumber,
+        recordTypeLabel: regardingRecordType,
       }),
-    [associationProvenanceJson, associationStatus, filedAssociations, regardingRecordName, regardingRecordNumber]
+    [
+      associationProvenanceJson,
+      associationStatus,
+      filedAssociations,
+      regardingRecordName,
+      regardingRecordNumber,
+      regardingRecordType,
+    ]
   );
 
   const catalog = linkAnotherCatalog ?? DEFAULT_LINK_CATALOG;

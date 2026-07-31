@@ -49,7 +49,7 @@ import { EmailReadingHeader, EmailReadingAttachments } from '../EmailReadingHead
 import { EmailRecipients } from '../EmailRecipients';
 import { EmailConnectionsReview, ConfirmedChip, useConnectionsReviewStyles } from '../EmailAssociationsAndTracking';
 import { useEmailComposeActions } from '../EmailComposeActions';
-import { derivePrimaryReview, summarizePrimaryReview, unlinkRegarding } from '../../logic/connections';
+import { derivePrimaryReview, summarizePrimaryReview, clearPrimaryRegarding } from '../../logic/connections';
 import { launchCreate, type CreateKind } from '../../logic/actions';
 import { CollapsibleSection } from './CollapsibleSection';
 import { COMMUNICATION_ENTITY, mapRowToEmailCardItem } from './EmailWorkspace.mapping';
@@ -278,6 +278,7 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
         {
           recordName: record.recordState?.regardingRecordName,
           recordNumber: record.recordState?.regardingRecordNumber,
+          recordTypeLabel: record.recordState?.regardingRecordType,
         }
       ),
     [record.recordState, filedAssociations]
@@ -292,7 +293,13 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
     (entity: string, communicationId: string): void => {
       void (async () => {
         try {
-          await unlinkRegarding({ webApi, hostEntity: COMMUNICATION_ENTITY, hostRecordId: communicationId }, entity);
+          // Fully clear the single primary (denorm fields + typed lookup + status),
+          // NOT just a typed-lookup unlink — a denorm-only primary has no typed
+          // lookup to null, so plain unlink silently no-oped (owner UAT item 2).
+          await clearPrimaryRegarding(
+            { webApi, hostEntity: COMMUNICATION_ENTITY, hostRecordId: communicationId },
+            entity
+          );
           record.reload();
         } catch (err) {
           console.warn('[EmailWorkspace] remove association failed:', err);
@@ -385,6 +392,7 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
                   associationProvenanceJson={record.recordState?.associationProvenanceJson ?? null}
                   regardingRecordName={record.recordState?.regardingRecordName ?? null}
                   regardingRecordNumber={record.recordState?.regardingRecordNumber ?? null}
+                  regardingRecordType={record.recordState?.regardingRecordType ?? null}
                   filedAssociations={filedAssociations}
                   writeContext={{ webApi, hostEntity: COMMUNICATION_ENTITY, hostRecordId: id }}
                   pickerWebApi={webApi}

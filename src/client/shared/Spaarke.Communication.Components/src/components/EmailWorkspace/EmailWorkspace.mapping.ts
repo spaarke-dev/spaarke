@@ -210,6 +210,8 @@ export interface EmailWorkspaceRecordState {
   sprk_body: string;
   regardingRecordName: string | null;
   regardingRecordNumber: string | null;
+  /** `sprk_regardingrecordtype` FormattedValue (e.g. "Matter") — human type label for the confirmed chip. */
+  regardingRecordType: string | null;
   associationStatus: number | null;
   associationProvenanceJson: string | null;
   filedAssociations: FiledAssociation[];
@@ -231,6 +233,12 @@ export function toWorkspaceRecordState(raw: RawCommunicationRecord): EmailWorksp
     sprk_body: asString(raw['sprk_body']),
     regardingRecordName: asNullableString(raw['sprk_regardingrecordname']),
     regardingRecordNumber: asNullableString(raw['sprk_regardingrecordnumber']),
+    // The `sprk_regardingrecordtype` lookup's FormattedValue (e.g. "Matter") from the
+    // no-$select retrieveRecord — the human record-type label for the confirmed chip
+    // when the primary is denorm-only (owner UAT 2026-07-31 item 1).
+    regardingRecordType: asNullableString(
+      raw['_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue']
+    ),
     associationStatus: asNullableNumber(raw['sprk_associationstatus']),
     associationProvenanceJson: asNullableString(raw['sprk_associationprovenance']),
     filedAssociations: readFiledAssociations(raw),

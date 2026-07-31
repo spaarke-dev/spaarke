@@ -37,7 +37,9 @@ export const useConnectionsReviewStyles = makeStyles({
     boxSizing: 'border-box',
     width: '100%',
     minWidth: 0,
-    minHeight: '64px',
+    // Match the candidate card's rendered height (2 short lines + padding) so all four
+    // cards line up on the row (owner UAT 2026-07-31 item 3).
+    minHeight: '72px',
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
@@ -49,6 +51,10 @@ export const useConnectionsReviewStyles = makeStyles({
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground1,
     cursor: 'pointer',
+    // A native <button> does NOT inherit font-family (it defaults to the UA font,
+    // which rendered as Arial) — the sibling cards are <div>s that inherit Segoe UI.
+    // Force inheritance so the label matches the candidate cards (owner UAT item 3).
+    fontFamily: 'inherit',
     ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
   linkCardLabel: {
@@ -73,6 +79,8 @@ export const useConnectionsReviewStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
     minWidth: 0,
+    // Shared height floor so candidate / blank / link cards line up (owner UAT item 3).
+    minHeight: '72px',
     textAlign: 'left',
     paddingBlock: tokens.spacingVerticalS,
     paddingInline: tokens.spacingHorizontalM,
@@ -99,7 +107,7 @@ export const useConnectionsReviewStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: '64px',
+    minHeight: '72px',
     paddingInline: tokens.spacingHorizontalM,
     border: `${tokens.strokeWidthThin} dashed ${tokens.colorNeutralStroke2}`,
     borderRadius: tokens.borderRadiusMedium,

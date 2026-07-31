@@ -32,6 +32,8 @@ export interface EmailConnectionsReviewProps {
   regardingRecordName?: string | null;
   /** Denormalized regarding record number (`sprk_regardingrecordnumber`) — used for the confirmed "{Type}: {number}" chip. */
   regardingRecordNumber?: string | null;
+  /** `sprk_regardingrecordtype` FormattedValue (e.g. "Matter") — the human type label for the confirmed chip when the primary is denorm-only. */
+  regardingRecordType?: string | null;
   /** The record's actually-filed regarding lookups (incl. manual "Link another" ones the engine never suggested) — merged into engine-derived slots so the surface shows every association, not just suggestions. */
   filedAssociations?: FiledAssociation[];
   /** Write context (webApi + hostEntity + hostRecordId) for the additive write path. `hostRecordId` MUST match `communicationId`. */
