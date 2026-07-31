@@ -3,8 +3,8 @@
   <metadata>
     <title>FR-17 — wizard→review auto-run bridge (fileId impedance + durable bind)</title>
     <phase>3 Durable Review</phase>
-    <gate>blocked (deps 023,031)</gate>
-    <status>not-started</status>
+    <gate>blocked (escalated 2026-07-31 — bind+auto-dispatch converge on ConversationPane.tsx/task-041 OR new BFF endpoint; see notes/033-execution-notes.md)</gate>
+    <status>blocked</status>
     <rigor>FULL</rigor>
     <rigor-reason>Cross-surface bridge (wizard→session→dispatch); the owner's Phase-2 must-have leg; auth+durability semantics.</rigor-reason>
     <model-tier>opus</model-tier>

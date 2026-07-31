@@ -120,6 +120,7 @@ import { ComposeCommentThread, type ComposeCommentPendingRange } from './Compose
 import {
   AgreementReviewSummaryPanel,
   NDA_REVIEW_DISCLAIMER_TEXT,
+  formatClauseLocation,
   type NdaReviewFindingSummary,
 } from './AgreementReviewSummaryPanel';
 import { deriveClauseLocationLabel } from './clauseLocation';
@@ -134,6 +135,14 @@ import {
   MAX_COMMENT_GUTTER_WIDTH_PX,
   resolveMatchingThreadId,
 } from './ComposeCommentGutter';
+// Task 041 (FR-11 multi-select batch AI action) — the sequential batch loop (ADR-016) + its
+// persistent progress/summary Dialog. See batchNoteToolRunner.ts's file header for why the loop
+// mechanics are a standalone module rather than inlined here.
+import { runBatchNoteTool as runBatchNoteToolSequential, type BatchNoteToolProgress } from './batchNoteToolRunner';
+import {
+  ComposeBatchNoteToolProgressModal,
+  type BatchNoteToolOutcomeDisplay,
+} from './ComposeBatchNoteToolProgressModal';
 import { authenticatedFetch } from '@spaarke/auth';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
@@ -2485,28 +2494,28 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       resolve?.(result);
     }, []);
 
-    // Run a note tool: dispatch the compose EDIT action against the NOTE's live clause span — the SAME
-    // slot shape `ComposeAiToolbar.handleActionClick` builds for a selection — routed to the document
-    // session so the result materializes as an inline redline (DEF-09) and the Assistant confirms with
-    // the model's rationale (round-8 #7).
-    const runNoteTool = React.useCallback(
-      async (threadId: string, toolId: string): Promise<void> => {
-        if (!editor || !enqueueComposeAction || !sessionId) return;
-        const action = getComposeAiToolbarActions().find(a => a.id === toolId);
-        // Guard: must be a wired tool that declares the review-note surface (Contextual AI Tool Library).
-        if (!action?.bindingId || !(action.surfaces ?? ['selection']).includes('review-note')) return;
-        // Free-text tool (inputPrompt): collect the instruction BEFORE resolving the span/dispatch.
-        let instruction: string | undefined;
-        if (action.inputPrompt) {
-          const entered = await promptForInstruction(action);
-          if (!entered || !entered.trim()) return;
-          instruction = entered.trim();
+    // Task 041 (FR-11 batch reuse) — build + dispatch ONE note-tool request against `threadId`'s
+    // LIVE clause span. This IS `runNoteTool`'s prior request-building body (round-8 #3/#4),
+    // extracted UNCHANGED so `runNoteTool` (single, fire-and-forget below) and the batch loop
+    // (`runBatchNoteToolAsync`, sequential + awaited) share ONE code path — the spec 041 "each
+    // note's outcome is byte-equivalent in form to an individually-run note's outcome" acceptance
+    // criterion holds BY CONSTRUCTION (same function builds the request either way), not by
+    // convention. REJECTS (never silently no-ops) when the note's anchor can't be resolved or the
+    // editor/queue isn't ready — `runNoteTool` still swallows that via its own `.catch()` (unchanged
+    // single-note UX); the batch loop RELIES on the rejection for per-note failure isolation
+    // (`batchNoteToolRunner.runBatchNoteTool` catches it and records a failed outcome).
+    const dispatchNoteToolRequest = React.useCallback(
+      (threadId: string, action: ComposeAiToolbarAction, instruction: string | undefined): Promise<void> => {
+        if (!editor || !enqueueComposeAction || !sessionId) {
+          return Promise.reject(new Error('The editor is not ready to run AI tools.'));
         }
         const span = findCommentAnchorRange(editor.state.doc, threadId);
-        if (!span) return;
+        if (!span) {
+          return Promise.reject(new Error('This note’s clause could not be located in the current document.'));
+        }
         const rawText = editor.state.doc.textBetween(span.from, span.to, ' ');
         const selectionText = rawText.length > 16000 ? rawText.slice(0, 16000) : rawText;
-        void enqueueComposeAction({
+        return enqueueComposeAction({
           id: `${action.id}#note-${threadId}#${(noteToolSeqRef.current += 1)}`,
           bindingId: action.bindingId,
           args: {
@@ -2525,10 +2534,102 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // so the result materializes as an inline redline — independent of the registry's
           // `materializesInEditor` flag (which the catalog seed may not preserve).
           documentSessionId: sessionId,
-        }).catch(() => undefined);
+        }).then(() => undefined);
       },
-      [editor, enqueueComposeAction, sessionId, documentRef, promptForInstruction]
+      [editor, enqueueComposeAction, sessionId, documentRef]
     );
+
+    // Run a note tool: dispatch the compose EDIT action against the NOTE's live clause span — the SAME
+    // slot shape `ComposeAiToolbar.handleActionClick` builds for a selection — routed to the document
+    // session so the result materializes as an inline redline (DEF-09) and the Assistant confirms with
+    // the model's rationale (round-8 #7). UNCHANGED behavior post-refactor: still fire-and-forget,
+    // still swallows a failed dispatch (the single-note ⋮ menu path never awaited this Promise anyway —
+    // see `ComposeCommentGutter`'s `onRunNoteTool` prop, typed `=> void`).
+    const runNoteTool = React.useCallback(
+      async (threadId: string, toolId: string): Promise<void> => {
+        if (!editor || !enqueueComposeAction || !sessionId) return;
+        const action = getComposeAiToolbarActions().find(a => a.id === toolId);
+        // Guard: must be a wired tool that declares the review-note surface (Contextual AI Tool Library).
+        if (!action?.bindingId || !(action.surfaces ?? ['selection']).includes('review-note')) return;
+        // Free-text tool (inputPrompt): collect the instruction BEFORE resolving the span/dispatch.
+        let instruction: string | undefined;
+        if (action.inputPrompt) {
+          const entered = await promptForInstruction(action);
+          if (!entered || !entered.trim()) return;
+          instruction = entered.trim();
+        }
+        void dispatchNoteToolRequest(threadId, action, instruction).catch(() => undefined);
+      },
+      [editor, enqueueComposeAction, sessionId, promptForInstruction, dispatchNoteToolRequest]
+    );
+
+    // ----- Task 041 (FR-11) — sequential batch note-tool run + progress ---------------------------
+    // UI state for `ComposeBatchNoteToolProgressModal`: `progress` non-null WHILE the sequential loop
+    // is running (batchNoteToolRunner.ts owns the loop itself — ADR-016 one-in-flight); `outcomes`
+    // non-null once it finishes (the end-of-batch summary — failure isolation). `null` overall = no
+    // batch modal rendered.
+    const [batchRun, setBatchRun] = React.useState<{
+      toolLabel: string;
+      progress: BatchNoteToolProgress | null;
+      outcomes: readonly BatchNoteToolOutcomeDisplay[] | null;
+    } | null>(null);
+
+    const runBatchNoteToolAsync = React.useCallback(
+      async (threadIds: readonly string[], toolId: string): Promise<void> => {
+        if (!editor || !enqueueComposeAction || !sessionId || threadIds.length === 0) return;
+        const action = getComposeAiToolbarActions().find(a => a.id === toolId);
+        if (!action?.bindingId || !(action.surfaces ?? ['selection']).includes('review-note')) return;
+        // Free-text tool (inputPrompt): collect the instruction ONCE, up front — applied to EVERY
+        // selected note (a per-note prompt across up to BATCH_NOTE_TOOL_SOFT_CAP notes would be
+        // impractical). Cancelling aborts the WHOLE batch — zero dispatches, mirroring the single-note
+        // path's own cancel behavior.
+        let instruction: string | undefined;
+        if (action.inputPrompt) {
+          const entered = await promptForInstruction(action);
+          if (!entered || !entered.trim()) return;
+          instruction = entered.trim();
+        }
+        setBatchRun({
+          toolLabel: action.label,
+          progress: { total: threadIds.length, completed: 0, currentThreadId: threadIds[0] ?? null, outcomes: [] },
+          outcomes: null,
+        });
+        const outcomes = await runBatchNoteToolSequential(
+          threadIds,
+          tid => dispatchNoteToolRequest(tid, action, instruction),
+          progress => setBatchRun(prev => (prev ? { ...prev, progress } : prev))
+        );
+        // Resolve a display label per outcome (clause location when known) for the summary's failure
+        // list — mirrors the gutter card's own no-editor fallback (`formatClauseLocation`), not the
+        // live `deriveClauseLocationLabel` (this modal has no reason to hold an editor position).
+        const displayOutcomes: BatchNoteToolOutcomeDisplay[] = outcomes.map(o => {
+          const thread = advisoryComments.threads.find(t => t.id === o.threadId);
+          const label = thread?.sectionRef ? formatClauseLocation(thread.sectionRef) : 'Note';
+          return { ...o, label };
+        });
+        setBatchRun(prev => (prev ? { ...prev, progress: null, outcomes: displayOutcomes } : prev));
+      },
+      [
+        editor,
+        enqueueComposeAction,
+        sessionId,
+        promptForInstruction,
+        dispatchNoteToolRequest,
+        advisoryComments.threads,
+      ]
+    );
+
+    // `ComposeCommentGutter.onRunBatchNoteTool` is typed `=> void` (fire-and-forget, mirroring
+    // `onRunNoteTool`'s own convention) — the gutter never awaits a dispatch outcome; this component
+    // owns the whole async lifecycle via `batchRun` state instead.
+    const runBatchNoteTool = React.useCallback(
+      (threadIds: readonly string[], toolId: string): void => {
+        void runBatchNoteToolAsync(threadIds, toolId);
+      },
+      [runBatchNoteToolAsync]
+    );
+
+    const closeBatchRun = React.useCallback((): void => setBatchRun(null), []);
 
     // ----- Task 044 — FR-23 "Comments" panel toggle -------------------------
     // Toggling OPEN captures the editor's live selection at click time (see the state declaration
@@ -3190,7 +3291,21 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             onSelectThread={selectThread}
             noteTools={enqueueComposeAction ? noteTools : undefined}
             onRunNoteTool={enqueueComposeAction ? runNoteTool : undefined}
+            onRunBatchNoteTool={enqueueComposeAction ? runBatchNoteTool : undefined}
+            isBatchRunning={batchRun?.progress != null}
           />
+          {/* Task 041 (FR-11) — the persistent batch progress/summary Dialog. Rendered only while a
+              batch is running or showing its just-finished summary (`batchRun !== null`); Fluent's
+              Dialog portals to document.body regardless of where it mounts in the tree, so co-locating
+              it here (next to the gutter that triggers it) needs no new cross-pane conduit. */}
+          {batchRun ? (
+            <ComposeBatchNoteToolProgressModal
+              toolLabel={batchRun.toolLabel}
+              progress={batchRun.progress}
+              outcomes={batchRun.outcomes}
+              onClose={closeBatchRun}
+            />
+          ) : null}
           {/* UAT round-6 #3b — the floating "Comments" (TipTap OOB session-comments) toggle FAB was
               REMOVED per reviewer request (those comments aren't used in the NDA advisory flow; the
               advisory Review Notes gutter is the comment surface). The ComposeCommentThread panel +

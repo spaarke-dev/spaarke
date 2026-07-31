@@ -23,6 +23,7 @@ import {
   layoutCommentGutterCards,
   parseAdvisoryNote,
   resolveMatchingThreadId,
+  BATCH_NOTE_TOOL_SOFT_CAP,
 } from './ComposeCommentGutter';
 
 // ---------------------------------------------------------------------------
@@ -844,6 +845,268 @@ describe('ComposeCommentGutter', () => {
     expect(body).toHaveTextContent('Flagged clause');
     expect(body).not.toHaveTextContent('Grounded fact');
     expect(body.textContent).toContain('…');
+    editor.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. Task 041 (FR-11) — multi-select + batch sub-toolbar
+// ---------------------------------------------------------------------------
+
+const BATCH_TOOLS = [{ id: 'compose-draft-alternative', label: 'Draft compliant alternative' }];
+
+/** Renders a gutter with `count` distinct, non-overlapping threads (stable coordsAtPos stub). */
+function renderGutterWithNThreads(
+  editor: Editor,
+  count: number,
+  extraProps: Partial<React.ComponentProps<typeof ComposeCommentGutter>> = {}
+) {
+  const threads = Array.from({ length: count }, (_, i) =>
+    makeThread({ id: `thread-${i + 1}`, sectionRef: `Section ${i + 1}` })
+  );
+  for (let i = 0; i < count; i++) {
+    applyCommentAnchor(editor, `thread-${i + 1}`, 1, 5);
+  }
+  jest.spyOn(editor.view, 'coordsAtPos').mockImplementation(() => ({ top: 0, bottom: 20, left: 0, right: 0 }));
+  const scrollContainerRef = React.createRef<HTMLDivElement>();
+  return render(
+    <FluentProvider theme={webLightTheme}>
+      <div ref={scrollContainerRef}>
+        <ComposeCommentGutter
+          editor={editor}
+          threads={threads}
+          scrollContainerRef={scrollContainerRef}
+          noteTools={BATCH_TOOLS}
+          {...extraProps}
+        />
+      </div>
+    </FluentProvider>
+  );
+}
+
+describe('ComposeCommentGutter — task 041 multi-select batch AI action', () => {
+  it('renders no checkboxes and no sub-toolbar when onRunBatchNoteTool is not wired (standalone mount, no regression)', async () => {
+    const editor = makeEditor();
+    renderGutterWithNThreads(editor, 2);
+    await screen.findByTestId('compose-comment-gutter-card-thread-1');
+    expect(screen.queryByTestId('compose-comment-gutter-checkbox-thread-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-comment-gutter-batch-toolbar')).not.toBeInTheDocument();
+    editor.destroy();
+  });
+
+  it('renders a checkbox per note when onRunBatchNoteTool is wired; zero selected shows no sub-toolbar', async () => {
+    const editor = makeEditor();
+    renderGutterWithNThreads(editor, 2, { onRunBatchNoteTool: jest.fn() });
+    expect(await screen.findByTestId('compose-comment-gutter-checkbox-thread-1')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-comment-gutter-checkbox-thread-2')).toBeInTheDocument();
+    expect(screen.queryByTestId('compose-comment-gutter-batch-toolbar')).not.toBeInTheDocument();
+    editor.destroy();
+  });
+
+  it('checking a box does NOT select/expand the card (stopPropagation) and shows the sub-toolbar with a live count', async () => {
+    const editor = makeEditor();
+    const onSelectThread = jest.fn();
+    renderGutterWithNThreads(editor, 2, { onRunBatchNoteTool: jest.fn(), onSelectThread });
+
+    const checkbox = await screen.findByTestId('compose-comment-gutter-checkbox-thread-1');
+    fireEvent.click(checkbox);
+
+    expect(onSelectThread).not.toHaveBeenCalled();
+    expect(screen.getByTestId('compose-comment-gutter-checkbox-thread-1')).toBeChecked();
+    expect(screen.getByTestId('compose-comment-gutter-batch-count')).toHaveTextContent('1 selected');
+    editor.destroy();
+  });
+
+  it('the checkbox is a real, keyboard-accessible checkbox (role + name), toggled via a native change event', async () => {
+    const editor = makeEditor();
+    renderGutterWithNThreads(editor, 1, { onRunBatchNoteTool: jest.fn() });
+    await screen.findByTestId('compose-comment-gutter-card-thread-1');
+
+    const checkbox = screen.getByRole('checkbox', { name: /Select note: Section 1/i });
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(checkbox);
+    expect(checkbox).toBeChecked();
+    editor.destroy();
+  });
+
+  it('"Select all" appears ONLY when exactly 1 note is selected, and selects every rendered thread', async () => {
+    const editor = makeEditor();
+    renderGutterWithNThreads(editor, 3, { onRunBatchNoteTool: jest.fn() });
+    await screen.findByTestId('compose-comment-gutter-card-thread-1');
+
+    // Not selected yet — no "select all" affordance.
+    expect(screen.queryByTestId('compose-comment-gutter-batch-select-all')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-checkbox-thread-1'));
+    const selectAll = await screen.findByTestId('compose-comment-gutter-batch-select-all');
+    expect(selectAll).toHaveTextContent('Select all (3)');
+
+    fireEvent.click(selectAll);
+    expect(screen.getByTestId('compose-comment-gutter-batch-count')).toHaveTextContent('3 selected');
+    // With >1 selected, "select all" no longer renders (spec: exactly 1).
+    expect(screen.queryByTestId('compose-comment-gutter-batch-select-all')).not.toBeInTheDocument();
+    editor.destroy();
+  });
+
+  it('"Clear" empties the selection and hides the sub-toolbar', async () => {
+    const editor = makeEditor();
+    renderGutterWithNThreads(editor, 2, { onRunBatchNoteTool: jest.fn() });
+    fireEvent.click(await screen.findByTestId('compose-comment-gutter-checkbox-thread-1'));
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-checkbox-thread-2'));
+    expect(screen.getByTestId('compose-comment-gutter-batch-count')).toHaveTextContent('2 selected');
+
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-batch-clear'));
+    expect(screen.queryByTestId('compose-comment-gutter-batch-toolbar')).not.toBeInTheDocument();
+    expect(screen.getByTestId('compose-comment-gutter-checkbox-thread-1')).not.toBeChecked();
+    editor.destroy();
+  });
+
+  it('the action dropdown offers exactly the noteTools set (no batch-only actions) — choosing one + Run dispatches, then clears selection', async () => {
+    const editor = makeEditor();
+    const onRunBatchNoteTool = jest.fn();
+    renderGutterWithNThreads(editor, 2, { onRunBatchNoteTool });
+
+    fireEvent.click(await screen.findByTestId('compose-comment-gutter-checkbox-thread-1'));
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-checkbox-thread-2'));
+
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-batch-tool-dropdown'));
+    const option = await screen.findByTestId('compose-comment-gutter-batch-tool-compose-draft-alternative');
+    fireEvent.click(option);
+
+    const runButton = screen.getByTestId('compose-comment-gutter-batch-run');
+    expect(runButton).toBeEnabled();
+    fireEvent.click(runButton);
+
+    // Dispatch order = the gutter's OWN threads-prop order.
+    expect(onRunBatchNoteTool).toHaveBeenCalledWith(['thread-1', 'thread-2'], 'compose-draft-alternative');
+    expect(onRunBatchNoteTool).toHaveBeenCalledTimes(1);
+    // Selection cleared post-dispatch — sub-toolbar disappears.
+    expect(screen.queryByTestId('compose-comment-gutter-batch-toolbar')).not.toBeInTheDocument();
+    editor.destroy();
+  });
+
+  it('the Run button stays disabled until an action is chosen', async () => {
+    const editor = makeEditor();
+    renderGutterWithNThreads(editor, 1, { onRunBatchNoteTool: jest.fn() });
+    fireEvent.click(await screen.findByTestId('compose-comment-gutter-checkbox-thread-1'));
+    expect(screen.getByTestId('compose-comment-gutter-batch-run')).toBeDisabled();
+    editor.destroy();
+  });
+
+  it(`selecting MORE than the ${BATCH_NOTE_TOOL_SOFT_CAP}-note soft cap shows a confirm BEFORE any dispatch; Cancel dispatches nothing`, async () => {
+    const editor = makeEditor();
+    const onRunBatchNoteTool = jest.fn();
+    const count = BATCH_NOTE_TOOL_SOFT_CAP + 1;
+    renderGutterWithNThreads(editor, count, { onRunBatchNoteTool });
+    await screen.findByTestId('compose-comment-gutter-checkbox-thread-1');
+
+    // Select 1, then "select all" to exceed the cap in one gesture (mirrors the UI test scenario).
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-checkbox-thread-1'));
+    fireEvent.click(await screen.findByTestId('compose-comment-gutter-batch-select-all'));
+    expect(screen.getByTestId('compose-comment-gutter-batch-count')).toHaveTextContent(`${count} selected`);
+
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-batch-tool-dropdown'));
+    fireEvent.click(await screen.findByTestId('compose-comment-gutter-batch-tool-compose-draft-alternative'));
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-batch-run'));
+
+    // Confirm prompt appears BEFORE any dispatch.
+    const confirm = await screen.findByTestId('compose-comment-gutter-batch-cap-confirm');
+    expect(confirm).toHaveTextContent(`${count} notes`);
+    expect(onRunBatchNoteTool).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-batch-cap-confirm-cancel'));
+    expect(screen.queryByTestId('compose-comment-gutter-batch-cap-confirm')).not.toBeInTheDocument();
+    expect(onRunBatchNoteTool).not.toHaveBeenCalled();
+    // Cancel preserves the selection (the reviewer can still choose to proceed or adjust it).
+    expect(screen.getByTestId('compose-comment-gutter-batch-count')).toHaveTextContent(`${count} selected`);
+    editor.destroy();
+  });
+
+  it(`"Run anyway" on the cap confirm dispatches all ${BATCH_NOTE_TOOL_SOFT_CAP + 1} selected notes`, async () => {
+    const editor = makeEditor();
+    const onRunBatchNoteTool = jest.fn();
+    const count = BATCH_NOTE_TOOL_SOFT_CAP + 1;
+    renderGutterWithNThreads(editor, count, { onRunBatchNoteTool });
+    await screen.findByTestId('compose-comment-gutter-checkbox-thread-1');
+
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-checkbox-thread-1'));
+    fireEvent.click(await screen.findByTestId('compose-comment-gutter-batch-select-all'));
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-batch-tool-dropdown'));
+    fireEvent.click(await screen.findByTestId('compose-comment-gutter-batch-tool-compose-draft-alternative'));
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-batch-run'));
+    await screen.findByTestId('compose-comment-gutter-batch-cap-confirm');
+
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-batch-cap-confirm-continue'));
+
+    expect(onRunBatchNoteTool).toHaveBeenCalledTimes(1);
+    const [dispatchedIds] = onRunBatchNoteTool.mock.calls[0];
+    expect(dispatchedIds).toHaveLength(count);
+    expect(screen.queryByTestId('compose-comment-gutter-batch-cap-confirm')).not.toBeInTheDocument();
+    editor.destroy();
+  });
+
+  it('a selection of exactly the cap value dispatches immediately with no confirm', async () => {
+    const editor = makeEditor();
+    const onRunBatchNoteTool = jest.fn();
+    renderGutterWithNThreads(editor, BATCH_NOTE_TOOL_SOFT_CAP, { onRunBatchNoteTool });
+    await screen.findByTestId('compose-comment-gutter-checkbox-thread-1');
+
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-checkbox-thread-1'));
+    fireEvent.click(await screen.findByTestId('compose-comment-gutter-batch-select-all'));
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-batch-tool-dropdown'));
+    fireEvent.click(await screen.findByTestId('compose-comment-gutter-batch-tool-compose-draft-alternative'));
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-batch-run'));
+
+    expect(screen.queryByTestId('compose-comment-gutter-batch-cap-confirm')).not.toBeInTheDocument();
+    expect(onRunBatchNoteTool).toHaveBeenCalledTimes(1);
+    expect(onRunBatchNoteTool.mock.calls[0][0]).toHaveLength(BATCH_NOTE_TOOL_SOFT_CAP);
+    editor.destroy();
+  });
+
+  it('isBatchRunning disables the dropdown + Run button (checkboxes stay interactive)', async () => {
+    const editor = makeEditor();
+    renderGutterWithNThreads(editor, 1, { onRunBatchNoteTool: jest.fn(), isBatchRunning: true });
+    fireEvent.click(await screen.findByTestId('compose-comment-gutter-checkbox-thread-1'));
+
+    expect(screen.getByTestId('compose-comment-gutter-batch-tool-dropdown')).toBeDisabled();
+    expect(screen.getByTestId('compose-comment-gutter-batch-run')).toBeDisabled();
+    editor.destroy();
+  });
+
+  it('ADR-021: the sub-toolbar and cap-confirm dialog render with only semantic tokens — no hex — in dark mode', async () => {
+    const editor = makeEditor();
+    const count = BATCH_NOTE_TOOL_SOFT_CAP + 1;
+    const threads = Array.from({ length: count }, (_, i) =>
+      makeThread({ id: `thread-${i + 1}`, sectionRef: `Section ${i + 1}` })
+    );
+    for (let i = 0; i < count; i++) applyCommentAnchor(editor, `thread-${i + 1}`, 1, 5);
+    jest.spyOn(editor.view, 'coordsAtPos').mockImplementation(() => ({ top: 0, bottom: 20, left: 0, right: 0 }));
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    const { container } = render(
+      <FluentProvider theme={webDarkTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={threads}
+            scrollContainerRef={scrollContainerRef}
+            noteTools={BATCH_TOOLS}
+            onRunBatchNoteTool={jest.fn()}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    fireEvent.click(await screen.findByTestId('compose-comment-gutter-checkbox-thread-1'));
+    fireEvent.click(await screen.findByTestId('compose-comment-gutter-batch-select-all'));
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-batch-tool-dropdown'));
+    fireEvent.click(await screen.findByTestId('compose-comment-gutter-batch-tool-compose-draft-alternative'));
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-batch-run'));
+    await screen.findByTestId('compose-comment-gutter-batch-cap-confirm');
+
+    expect(container.innerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    // The cap-confirm Dialog portals outside `container` (Fluent Dialog renders via a portal) —
+    // check the full document body too.
+    expect(document.body.innerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     editor.destroy();
   });
 });

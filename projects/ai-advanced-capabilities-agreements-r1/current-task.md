@@ -4,7 +4,16 @@
 
 ## Active task
 
-- **Task**: WAVE 6 — 023 ∥ 032 dispatched (Waves 0-5 ✅; last commit bf921a23a, pushed)
+- **Task**: WAVE 7 — 041 running; 033 🔄 PARTIAL (planned stop): FK fix 2f8f11123 verified in-tree + FK-regression
+  test DELIVERED (PromoteDurableFkVisibilityTests 3/3); bridge leg = shipped DEF-10 auto-register (audited);
+  BIND+AUTO-DISPATCH legs blocked ONLY on ConversationPane.tsx (041's file this wave). DECISION (main session,
+  per §11/ADR-013): path **B-i** — mint compose session Analysis-owned via HostContext sentinel (create-time FK
+  write binds; zero new surface; rides the 2f8f11123-hardened path). Fork/promote REJECTED (both CreateAnalysisAsync
+  → duplicate analysis). RESUME the 033 agent after 041 commits to wire legs 2/3 in ConversationPane.
+  (Merged master 9d83f2a05; UAT ok per owner Q5.)
+- **Wave 6**: 023 ✅ (one decision point; sanity warn-only; lookup-write corrected A1 stale column; 826/826)
+  · 032 ✅ (FR-16 CLOSED: panel restore, Leg-B cap notice, multi-select materialization, supersede
+  BindingId-safe, dedupe guard proven; cross-device Leg-B residual documented)
 - **Wave 5**: 022 ✅ (both envelope legs; NOTIFY doc for hub relay incl. stale-columnName flag) · 031 ✅
   (documentSessionWaiter threads sessionIdOverride across all 4 review dispatch sites; gating verified
   already-correct; bridge KEPT; same-mount externalChange dedupe residual → folded into 032's brief).

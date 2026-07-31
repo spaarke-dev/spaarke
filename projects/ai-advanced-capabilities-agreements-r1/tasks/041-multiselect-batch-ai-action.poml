@@ -4,7 +4,7 @@
     <title>#3 Multi-select Review Notes + sequential batch AI action with progress</title>
     <phase>4 Review-Depth UX</phase>
     <gate>blocked (deps 021,031,040)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Client-heavy new interaction surface (selection model + sub-toolbar + batch orchestration) on hot files; rate-limit compliance.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -98,6 +98,22 @@
     <criterion testable="true">Negative: zero-selected shows no sub-toolbar; &gt;cap prompts confirm before any dispatch.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-11; design Lens 2 #3. Batch-cap ~25 is the spec assumption — owner-tunable constant.</notes>
+  <notes>Spec FR-11; design Lens 2 #3. Batch-cap ~25 is the spec assumption — owner-tunable constant.
+
+  COMPLETED 2026-07-31. Dispatch trace (step 0) found the single-note request-builder lives in
+  `ComposeEditor.tsx` (`runNoteTool`), not `ConversationPane.tsx` as the relevant-files list
+  anticipated — `ConversationPane.dispatchComposeAction` is reached only via the bridged
+  `enqueueComposeAction` prop, and already serializes ALL compose actions FIFO
+  (`useSerialActionQueue`). Per directional-mode latitude, the batch loop was built in
+  `ComposeEditor.tsx` (where the per-note anchor/selection data actually lives) rather than
+  `ConversationPane.tsx`, which is UNTOUCHED by this task. See
+  notes/041-execution-notes.md for the full trace + deviation rationale.
+
+  Delivered: selection checkboxes + sub-toolbar + cap-confirm (`ComposeCommentGutter.tsx`),
+  sequential batch loop + shared single/batch request builder (`ComposeEditor.tsx`), a new pure
+  ADR-016 sequential runner (`batchNoteToolRunner.ts`) and a lightened persistent progress/summary
+  Dialog (`ComposeBatchNoteToolProgressModal.tsx`). 70 new/extended tests, all green; Compose.Components
+  full suite 836/851 (15 pre-existing unrelated failures, confirmed by name match to the task's own
+  baseline note); SpaarkeAi full suite 826/826 (untouched, verified unaffected).</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
