@@ -68,13 +68,15 @@
  * @see ADR-024  — Polymorphic Resolver Pattern — exactly one regarding field
  */
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
+  Dropdown,
   Field,
   Input,
   MessageBar,
   MessageBarBody,
+  Option,
   Spinner,
   Text,
   Textarea,
@@ -182,6 +184,13 @@ export interface CreateAnalysisWizardData {
   workTypeValue?: number;
   /** Display label for the work type (used in the wizard title). Defaults to "Agreement Review". */
   workTypeLabel?: string;
+  /**
+   * Optional agreement sub-domain hint (the `sprk_agreementtype.sprk_key`, e.g. `'nda'`)
+   * to pre-select in the Agreement Type picker — set when the launch surface already
+   * implies the type (e.g. the "NDA Analysis" Quick Start card). Falls back to the
+   * registry's fallback row (`sprk_isfallback`) when absent.
+   */
+  defaultSubDomain?: string;
   /** Search callback for the Access (owner) lookup — searches systemuser. */
   searchUsers?: (query: string) => Promise<ILookupItem[]>;
   /** Search callback for the To Do Assignee lookup — searches contact/systemuser per host convention. */
@@ -326,6 +335,18 @@ const ContactLookupControl: React.FC<ContactLookupControlProps> = ({ value, onPi
   />
 );
 
+/**
+ * A selectable row from the `sprk_agreementtype` reference table (the data-driven
+ * agreement sub-domain registry — rows owned by agreements-r1). `key` is the stable
+ * `sprk_key` slug carried as `subDomain` in the launch envelope; `id` is the lookup GUID.
+ */
+interface AgreementTypeRow {
+  id: string;
+  key: string;
+  name: string;
+  isFallback: boolean;
+}
+
 /** Adapt IDataService to the webApi shape CreateRecordWizard/PolymorphicResolverService expect. */
 function buildWebApiAdapter(dataService: IDataService) {
   return {
@@ -375,6 +396,12 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
   attorneyRef.current = attorney;
   const paralegalRef = useRef(paralegal);
   paralegalRef.current = paralegal;
+
+  // ── Agreement Type (sub-domain) picker — reads the sprk_agreementtype registry ──
+  const [agreementTypes, setAgreementTypes] = useState<AgreementTypeRow[]>([]);
+  const [selectedAgreementTypeId, setSelectedAgreementTypeId] = useState<string | null>(null);
+  const selectedAgreementTypeIdRef = useRef<string | null>(null);
+  selectedAgreementTypeIdRef.current = selectedAgreementTypeId;
 
   // ── Next-steps state (Send Email / Create To Do) ────────────────────────
   const [emailTo, setEmailTo] = useState('');
@@ -439,6 +466,42 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
     },
     [navigationService]
   );
+
+  // ── Load the Agreement Type registry (sprk_agreementtype) for the picker ────
+  // Data-driven: only `sprk_isselectable` rows appear; default selection is the
+  // launch hint (defaultSubDomain → sprk_key) else the fallback row (sprk_isfallback).
+  // The lookup is optional — an unavailable/empty table leaves the picker blank and
+  // the analysis still creates.
+  const defaultSubDomain = data?.defaultSubDomain;
+  useEffect(() => {
+    if (!dataService) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await dataService.retrieveMultipleRecords(
+          'sprk_agreementtype',
+          '?$select=sprk_agreementtypeid,sprk_key,sprk_name,sprk_isfallback' +
+            '&$filter=sprk_isselectable eq true&$orderby=sprk_name'
+        );
+        if (cancelled) return;
+        const rows: AgreementTypeRow[] = (result.entities ?? []).map((e: Record<string, unknown>) => ({
+          id: String(e.sprk_agreementtypeid ?? ''),
+          key: String(e.sprk_key ?? ''),
+          name: String(e.sprk_name ?? '(unnamed)'),
+          isFallback: Boolean(e.sprk_isfallback),
+        }));
+        setAgreementTypes(rows);
+        const byHint = defaultSubDomain ? rows.find(r => r.key === defaultSubDomain) : undefined;
+        const initial = byHint ?? rows.find(r => r.isFallback) ?? null;
+        if (initial) setSelectedAgreementTypeId(initial.id);
+      } catch {
+        // Reference table unavailable (dev / not yet seeded) — picker stays empty.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [dataService, defaultSubDomain]);
 
   // ── Next-steps card set: Send Email / Create To Do (spec FR-12) ─────────
   const followOnCards: FollowOnCardConfig[] = useMemo(
@@ -565,6 +628,23 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
                 rows={3}
                 aria-label="Analysis description"
               />
+            </Field>
+
+            <Field label="Agreement Type">
+              <Dropdown
+                aria-label="Agreement type"
+                placeholder="Select agreement type"
+                disabled={agreementTypes.length === 0}
+                value={agreementTypes.find(r => r.id === selectedAgreementTypeId)?.name ?? ''}
+                selectedOptions={selectedAgreementTypeId ? [selectedAgreementTypeId] : []}
+                onOptionSelect={(_, d) => setSelectedAgreementTypeId(d.optionValue ?? null)}
+              >
+                {agreementTypes.map(r => (
+                  <Option key={r.id} value={r.id} text={r.name}>
+                    {r.name}
+                  </Option>
+                ))}
+              </Dropdown>
             </Field>
 
             <div className={styles.assignRow}>
@@ -708,6 +788,23 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
             payload[`${navPropFor('sprk_assignedparalegal1', 'sprk_AssignedParalegal1')}@odata.bind`] =
               `/contacts(${paralegalPick.id.replace(/[{}]/g, '')})`;
           }
+        }
+
+        // -- Agreement sub-domain (A1/A2): bind the sprk_agreementtype lookup — the
+        // level-2 type the review machine orients on. Same discover-nav-prop pattern
+        // as the assignees; PascalCase fallback matches the schema name when metadata
+        // discovery is unavailable (e.g. dev).
+        const agreementTypeId = selectedAgreementTypeIdRef.current;
+        if (agreementTypeId) {
+          let atNavProps: Awaited<ReturnType<typeof discoverNavProps>> = [];
+          try {
+            atNavProps = await discoverNavProps('sprk_analysis');
+          } catch {
+            /* fall through to hardcoded nav-prop name below */
+          }
+          const atNavProp =
+            atNavProps.find(e => e.columnName === 'sprk_agreementtypeid')?.navPropName ?? 'sprk_AgreementType';
+          payload[`${atNavProp}@odata.bind`] = `/sprk_agreementtypes(${agreementTypeId.replace(/[{}]/g, '')})`;
         }
 
         // -- Associate-to: ADR-024 resolver fields + Field-Mapping inheritance --
