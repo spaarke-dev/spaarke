@@ -132,6 +132,35 @@ const DEFAULT_AI_DRAFT_ACTIONS: IEmailAiDraftAction[] = [
   { intent: 'grammar', label: 'Fix grammar & tone' },
 ];
 
+/**
+ * Resolve recipient-openable SPE sharing links for the attachments the author toggled **Link** on
+ * (owner UAT 2026-07-30 R2 item 12). Runs at SEND: for each `linkSelected` attachment that has a
+ * `documentId`, calls the host `onResolveShareLink(documentId)` and overrides `linkUrl` with the
+ * returned sharing URL so the body-link block points at the actual file (not the internal
+ * Dataverse/SPE-storage URL). Best-effort + non-blocking: a null/throw keeps the prior `linkUrl`, so
+ * a share-link hiccup never fails the send. No handler → attachments returned unchanged. Exported for
+ * unit tests. This lives here (not the pure reducer) because it performs host I/O.
+ */
+export async function resolveAttachmentShareLinks(
+  attachments: readonly IAttachmentItem[],
+  onResolveShareLink: ((documentId: string) => Promise<string | null>) | undefined
+): Promise<IAttachmentItem[]> {
+  if (!onResolveShareLink) return attachments.slice();
+  return Promise.all(
+    attachments.map(async a => {
+      if (a.linkSelected === true && a.documentId) {
+        try {
+          const url = await onResolveShareLink(a.documentId);
+          if (url) return { ...a, linkUrl: url };
+        } catch {
+          /* best-effort — keep the prior linkUrl; never block the send */
+        }
+      }
+      return a;
+    })
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Attachment source defaults
 // ---------------------------------------------------------------------------
@@ -880,7 +909,13 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
 
     dispatch({ type: 'BEGIN_SEND' });
     try {
-      const request = mapStateToSendRequest(stateRef.current, props.threadId);
+      // R2 item 12: swap linked document attachments' internal URL for a recipient-openable SPE
+      // sharing link (best-effort; a failure keeps the prior URL and never blocks the send).
+      const resolvedAttachments = await resolveAttachmentShareLinks(
+        stateRef.current.attachments,
+        props.onResolveShareLink
+      );
+      const request = mapStateToSendRequest({ ...stateRef.current, attachments: resolvedAttachments }, props.threadId);
       const response = await sendCommunication(request, {
         authenticatedFetch: props.authenticatedFetch,
         bffBaseUrl: props.bffBaseUrl,

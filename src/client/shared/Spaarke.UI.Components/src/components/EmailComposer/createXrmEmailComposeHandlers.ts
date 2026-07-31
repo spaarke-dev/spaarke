@@ -99,6 +99,12 @@ export interface XrmEmailComposeHandlers {
    * supplied — omitted otherwise (composer hides the sparkle button).
    */
   onDraftWithAi?: (req: IEmailAiDraftRequest) => Promise<IEmailAiDraftResult>;
+  /**
+   * Resolve a recipient-openable SPE sharing link for a `sprk_document` (R2 item 12) via the BFF
+   * (`POST /api/documents/{id}/share-link`). Only present when `authenticatedFetch` + `bffBaseUrl`
+   * are supplied — omitted otherwise (links keep their original internal URL).
+   */
+  onResolveShareLink?: (documentId: string) => Promise<string | null>;
 }
 
 /** Best-effort SPE upload never reads this — map for display parity only, default 'pdf'. */
@@ -341,6 +347,27 @@ export function createXrmEmailComposeHandlers(options?: {
         }
       : undefined;
 
+  // Recipient-openable SPE sharing link for a linked document (R2 item 12): POST the documentId to
+  // the BFF, which resolves the doc's drive/item + creates an anonymous view link. Best-effort —
+  // returns null on any non-2xx so the send keeps the prior (internal) URL. Only wired with auth + BFF.
+  const onResolveShareLink =
+    authenticatedFetch && bffBaseUrl
+      ? async (documentId: string): Promise<string | null> => {
+          try {
+            const base = bffBaseUrl.replace(/\/+$/, '');
+            const resp = await authenticatedFetch(
+              `${base}/api/documents/${encodeURIComponent(documentId)}/share-link`,
+              { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
+            );
+            if (!resp.ok) return null;
+            const data = (await resp.json()) as { url?: string };
+            return data.url ?? null;
+          } catch {
+            return null;
+          }
+        }
+      : undefined;
+
   return {
     recordLookupCatalog: EMAIL_RECORD_LOOKUP_CATALOG,
     onLookupRecipients,
@@ -350,5 +377,6 @@ export function createXrmEmailComposeHandlers(options?: {
     onListEmailTemplates,
     onRenderEmailTemplate,
     onDraftWithAi,
+    onResolveShareLink,
   };
 }

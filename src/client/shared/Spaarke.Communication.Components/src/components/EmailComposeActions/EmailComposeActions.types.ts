@@ -96,6 +96,11 @@ export interface EmailComposeActionsDeps {
    */
   onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
   /**
+   * Resolve a recipient-openable SPE sharing link for a linked document (R2 item 12). Forwarded to
+   * the composer; omitted → links keep their original internal URL.
+   */
+  onResolveShareLink?: (documentId: string) => Promise<string | null>;
+  /**
    * Compose template picker (Wave E). `onListEmailTemplates` lists selectable OOB `template`
    * records; `onRenderEmailTemplate` renders the chosen one (merging field codes from the
    * primary regarding). Forwarded verbatim to the composer for ALL modes. Optional
