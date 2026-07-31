@@ -237,6 +237,16 @@ export interface ComposeActionHistoryEntry {
  * on the server, which flattens table-cell + nested-table paragraphs); `paraId`
  * is the 8-hex `w14:paraId` (`ST_LongHexNumber`, `0 < x < 0x80000000`); `isMinted`
  * is true when the server minted the id (the source `.docx` paragraph had none).
+ *
+ * WS-3/WS-4 fields (ai-advanced-capabilities-agreements-r1 task 011 — client mirror of
+ * `Sprk.Bff.Api.Services.Compose.ParaIdMapEntry`'s additive fields, spaarkeai-compose-fidelity-r4.5
+ * tasks 031/040): populated ONLY on a Load response built from the projection `Build()` path (the
+ * server doc comment: "Only populated on the projection Build() path; the Load-side ParaIdPreParser
+ * leaves it null"), so every field below is optional and `undefined`-safe for older callers/fixtures
+ * that predate WS-4. `computedNumber`/`listPath` are what `composeCitationResolver.ts` (task 011)
+ * reads to resolve a review finding's `sectionRef` ("Section 4.2" / "4.2(b)(iii)" / "Sections 4–7")
+ * deterministically to a paraId — see that module for the citation-resolution semantics, mirrored
+ * from `Services/Compose/CitationResolver.cs`.
  */
 export interface ParaIdMapEntry {
   /** Paragraph position in document order (server `body.Descendants<Paragraph>()` order). */
@@ -245,6 +255,16 @@ export interface ParaIdMapEntry {
   paraId: string;
   /** True when the server minted this id (source paragraph had no `w14:paraId`). */
   isMinted: boolean;
+  /** The exact Word-computed legal number label (e.g. `"4.2"`, `"a)"`, `"•"` for a bullet glyph), or
+   *  `undefined` for a non-numbered paragraph / a pre-WS-4 response. */
+  computedNumber?: string;
+  /** The paragraph's raw `w:ilvl` (0-based numbering level), or `undefined` alongside `computedNumber`. */
+  numberingLevel?: number;
+  /** The per-level ordinal counter chain (e.g. `[4, 2]` for label `"4.2"`) — the exact matching key
+   *  `composeCitationResolver.ts` uses; `undefined` alongside `computedNumber`. */
+  listPath?: readonly number[];
+  /** The paragraph's style-derived outline level (independent of numbering), or `undefined`. */
+  headingLevel?: number;
 }
 
 // ---------------------------------------------------------------------------

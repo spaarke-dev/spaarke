@@ -4,7 +4,19 @@
 
 ## Active task
 
-- **Task**: WAVE 1 ✅ COMPLETE — 003 + 020 + 052 all done; committing now
+- **Task**: WAVE 2 ✅ COMPLETE — 011 + 050 done; committing, then Wave 3 (012 ∥ 021)
+- **011**: client-side CitationResolver mirror (composeCitationResolver.ts, §11-justified); deterministic
+  sectionRef→paraId ahead of text fallback in placeAdvisoryComments; projection already carried
+  computedNumber/listPath (typed compose-contracts.ts); 37/37 new tests; zero regressions (stash A/B).
+- **050**: POST /api/ai/chat/sessions/{id}/review-memo (client-supplies-resolved-sections per SummaryPage
+  precedent — 051 builds on this); ReviewMemoAssembler pure/stateless; +1 additive method on
+  AnalysisResultPersistence (conflict-mitigated); 9625/0 regression; publish 48.24 MB (−1.39). ⚠️ OWNER
+  AWARENESS: (a) added missing sprk_value column (Multiline 200K) to sprk_analysisoutput in spaarkedev1 —
+  fixes latent pre-existing write bug, §6.5 Path C documented; (b) memo endpoint design = client-supplied
+  dispositions — reviewer sign-off suggested at PR time.
+- **Wave-2 conflict note**: multi-container-multi-index-r1 branch (STALE since 2026-06-10) has a 71-line
+  unmerged refactor of AnalysisResultPersistence.cs — 050 kept its edits there minimal/additive.
+- **Wave 1 summary (kept for recovery)**:
 - **003**: KNW-011 restructured (B1–B16, 14 chunks) + KNW-012 authored (G1–G16, 13 chunks) at
   projects/x-ai-spaarke-platform-enhancements-r1/notes/design/knowledge-sources/ (shared pack home);
   production-filter retrieval verified + negative tenant check. ⚠️ FINDING: ActionRunner never sets

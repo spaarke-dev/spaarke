@@ -3,6 +3,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Resilience;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai.Export;
+using Sprk.Bff.Api.Services.Ai.ReviewMemo;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Telemetry;
@@ -266,4 +267,66 @@ public class AnalysisResultPersistence
         // (writer-identity rule per sdap-auth-patterns.md Pattern 4).
         await _postUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, cancellationToken);
     }
+
+    /// <summary>
+    /// FR-13 (ai-advanced-capabilities-agreements-r1 task 050) — persists the assembled Review Summary
+    /// Memo to <c>sprk_analysisoutput</c> via the SAME <see cref="IAnalysisDataverseService.CreateAnalysisOutputAsync"/>
+    /// KEEP-list path <see cref="StoreDocumentProfileOutputsAsync"/> already uses. No new entity: the
+    /// memo's structured header (<see cref="ReviewMemoDocument.SchemaVersion"/>/<see cref="ReviewMemoDocument.OverallRisk"/>/
+    /// <see cref="ReviewMemoDocument.SectionCount"/>) travels alongside the section array in ONE JSON
+    /// body (<c>sprk_value</c>) — everything a later reader needs, self-contained per ADR-015 (the memo
+    /// is the ONLY review artifact that survives <c>DELETE /sessions</c>; it carries no Cosmos/ledger
+    /// back-reference of any kind).
+    /// </summary>
+    /// <remarks>
+    /// <b>Schema note</b>: <c>sprk_analysisoutput.sprk_value</c> (Multiline Text) was ADDED by this task
+    /// (2026-07-31, via Dataverse Web API + <c>PublishXml</c>) — the column did not previously exist on
+    /// the live table even though this class's <see cref="AnalysisOutputEntity.Value"/> →
+    /// <c>sprk_value</c> write path predates this task. Both existing callers
+    /// (<see cref="StoreDocumentProfileOutputsAsync"/> here and <c>AppOnlyAnalysisService</c>) wrap the
+    /// create in a best-effort try/catch that SWALLOWED the resulting Dataverse fault as a warning, so
+    /// the gap was latent rather than a visible failure. Adding the column is a pre-existing-bug fix
+    /// that benefits those callers too, not scope introduced by the memo feature. See task 050 execution
+    /// notes §Audit for the full trace (CLAUDE.md §6.5 Path C — completing an already-coded contract,
+    /// not an ADR conflict).
+    /// </remarks>
+    /// <param name="analysisId">The <c>sprk_analysis</c> GUID to persist the memo under (sentinel-aware
+    /// resolution happens in the caller — <c>ReviewMemoEndpoints.GenerateReviewMemo</c>).</param>
+    /// <param name="memo">The assembled, self-contained memo (see <see cref="ReviewMemoAssembler"/>).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The new <c>sprk_analysisoutputid</c>.</returns>
+    public async Task<Guid> PersistReviewMemoAsync(
+        Guid analysisId,
+        ReviewMemoDocument memo,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(memo);
+
+        var json = JsonSerializer.Serialize(memo);
+
+        var output = new AnalysisOutputEntity
+        {
+            Name = ReviewMemoOutputName,
+            Value = json,
+            AnalysisId = analysisId,
+            // OutputTypeId intentionally left null: a "Review Summary Memo" sprk_aioutputtype row
+            // was seeded (task 050 notes), but its GUID is environment-specific data, not portable
+            // C# — hardcoding it here would 400 in any org that doesn't happen to share the same
+            // GUID. Categorization by sprk_name (below) is env-portable; a future task can wire the
+            // lookup by sprk_outputtypecode ("REVMEMO") once IAnalysisDataverseService exposes a
+            // by-code resolver.
+            OutputTypeId = null,
+        };
+
+        var outputId = await _analysisService.CreateAnalysisOutputAsync(output, cancellationToken);
+
+        _logger.LogInformation(
+            "Persisted Review Summary Memo output {OutputId} for analysis {AnalysisId} ({SectionCount} sections, overallRisk={OverallRisk})",
+            outputId, analysisId, memo.SectionCount, memo.OverallRisk);
+
+        return outputId;
+    }
+
+    /// <summary>Display name for the persisted memo row — the categorization signal (see <see cref="PersistReviewMemoAsync"/> remarks on <c>OutputTypeId</c>).</summary>
+    private const string ReviewMemoOutputName = "Review Summary Memo";
 }

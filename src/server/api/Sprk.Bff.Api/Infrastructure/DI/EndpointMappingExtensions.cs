@@ -154,6 +154,11 @@ public static class EndpointMappingExtensions
             app.Configuration.GetValue<bool>("Analysis:Enabled", true))
         {
             app.MapAnalysisEndpoints();
+            // FR-13 (ai-advanced-capabilities-agreements-r1 task 050) — Review Summary Memo
+            // assembly + persistence. Mapped INSIDE this SAME compound gate (bff-extensions.md
+            // §F.1 asymmetric-registration rule): AnalysisResultPersistence (this endpoint's
+            // dependency) is registered only when this gate is ON (AnalysisServicesModule.cs).
+            app.MapReviewMemoEndpoints();
             app.MapPlaybookEndpoints();
             // MapAiPlaybookBuilderEndpoints removed 2026-07-07 (redesign-r1 task 050, FR-P4-04 server
             // leg): /api/ai/playbook-builder/* had zero client callers after task 053 deleted the

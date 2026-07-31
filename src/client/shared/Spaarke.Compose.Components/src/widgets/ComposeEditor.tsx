@@ -176,8 +176,17 @@ import {
 } from './stepOperationInterceptor';
 import { Extension } from '@tiptap/core';
 import { COMPOSE_R4_OPAQUE_ATOMS } from './opaqueAtomNode';
-import { applyImportedRevisions, renderUnresolvedRevisionPlaceholders } from './importedRevisions';
+import {
+  applyImportedRevisions,
+  renderUnresolvedRevisionPlaceholders,
+  collectBlocks,
+  type BlockInfo,
+} from './importedRevisions';
 import { applyImportedCommentAnchors, groupImportedComments } from './importedComments';
+// ai-advanced-capabilities-agreements-r1 task 011 (spec FR-03) — the WS-4 CLIENT CITATION RESOLVER
+// mirroring `Services/Compose/CitationResolver.cs`. See that module's header for the reuse-first
+// justification (CLAUDE.md §11) for why this is a mirror, not a new BFF endpoint.
+import { resolveCitation } from './composeCitationResolver';
 import type {
   ParaIdMapEntry,
   ComposeServerProjection,
@@ -923,17 +932,28 @@ export interface ComposeEditorHandle {
 
   /**
    * NDA-REVIEW advisory comments (ai-advanced-capabilities-nda-r1 task 031). For each flagged
-   * clause, resolves `targetText` against the CURRENT document via `resolveTargetSpans('strict')`
-   * — the SAME anchoring primitive {@link highlightCitedSpan} uses — and, on a unique match,
-   * creates a PERSISTENT comment thread (`useComposeCommentThreads.createThread`) carrying
-   * `explanation` as the thread's text. Uses a DEDICATED `useComposeCommentThreads` instance
-   * (author = the configurable `advisoryCommentAuthor` prop, task 052 — defaults to
-   * `'AI Advisory Review'`), separate from the session Comments panel's own instance —
-   * both apply the SAME `commentAnchor` mark to the document, so both are visible as
-   * comment-anchor spans; a future right-gutter layout unifies the browsing UI across both
-   * authors. Ranges that fail strict resolution (`not_found` / `ambiguous`) are reported via the
-   * result's `failed` list — NEVER silently dropped (FR-19 "do not guess" rule). No-op (returns
-   * every item as `not_found`) if the editor is unmounted.
+   * clause, resolves an anchor span and, on a match, creates a PERSISTENT comment thread
+   * (`useComposeCommentThreads.createThread`) carrying `explanation` as the thread's text. Uses a
+   * DEDICATED `useComposeCommentThreads` instance (author = the configurable `advisoryCommentAuthor`
+   * prop, task 052 — defaults to `'AI Advisory Review'`), separate from the session Comments panel's
+   * own instance — both apply the SAME `commentAnchor` mark to the document, so both are visible as
+   * comment-anchor spans; a future right-gutter layout unifies the browsing UI across both authors.
+   * Ranges that fail resolution (`not_found` / `ambiguous`) are reported via the result's `failed`
+   * list — NEVER silently dropped (FR-19 "do not guess" rule). No-op (returns every item as
+   * `not_found`) if the editor is unmounted.
+   *
+   * ai-advanced-capabilities-agreements-r1 task 011 (spec FR-03) — FIXED, binding anchor-resolution
+   * order (never the reverse): (1) DETERMINISTIC — when `item.sectionRef` is present and the `paraIdMap`
+   * prop carries WS-4 `computedNumber`/`listPath` data, {@link resolveDeterministicAnchorSpan} resolves
+   * it via the client `CitationResolver` mirror (`composeCitationResolver.ts`) to the exact paraId's
+   * live span — no text-search (ADR-049). (2) LEGACY TEXT — ONLY when step 1 is skipped (no
+   * `sectionRef`) or returns no match (unparseable citation, zero resolved paragraphs, or a resolved
+   * paraId no longer present in the document): `targetText` resolves against the current document via
+   * `resolveTargetSpans('strict')` + UAT round-3 S1's graceful fallbacks (`resolveAdvisoryAnchorSpan`)
+   * — the SAME anchoring primitive {@link highlightCitedSpan} uses. A `sectionRef` that resolves
+   * deterministically is NEVER overridden by a fuzzy text guess. An item whose `sectionRef` AND
+   * `targetText` both fail to resolve reports `not_found` — no comment is placed (feeds task 012's
+   * DEF-01 "never silently place an ambiguous/unresolvable target" contract).
    */
   placeAdvisoryComments(items: readonly AdvisoryCommentInput[]): AdvisoryCommentPlacementResult;
 
@@ -1616,6 +1636,46 @@ function resolveAdvisoryAnchorSpan(editor: Editor, targetText: string): { from: 
     }
   }
   return null;
+}
+
+/**
+ * ai-advanced-capabilities-agreements-r1 task 011 (spec FR-03) — the DETERMINISTIC advisory-anchor
+ * path. Resolves a finding's `sectionRef` ("Section 4.2" / "4.2(b)(iii)" / "Sections 4–7") against the
+ * WS-4 `paraIdMap` (`computedNumber`/`listPath`, already on the Load response — see
+ * `composeCitationResolver.ts`'s header for why this reads that array rather than calling the server),
+ * then anchors to the resolved paragraph(s)' LIVE document span via {@link collectBlocks} — the SAME
+ * paraId→span primitive `applyImportedCommentAnchors`/`applyImportedRevisions` already use (no new
+ * paraId-walk; `blocks` is built ONCE per `placeAdvisoryComments` call, not per item).
+ *
+ * A RANGE citation ("Sections 4–7") resolves to MULTIPLE paragraphs (CitationResolver semantics); this
+ * anchors the single resulting comment thread across the full span — from the FIRST matched
+ * paragraph's start to the LAST matched paragraph's end, in document order (both `resolveCitation`'s
+ * `matches` and `collectBlocks`'s doc-order walk preserve document order, so `matches[0]`/`matches[length-1]`
+ * are the range's true first/last clauses).
+ *
+ * Returns `null` — never a guess — when `sectionRef` is absent, the `paraIdMap` prop is missing/empty
+ * (pre-WS-4 caller or a response predating the reference layer), the citation is unparseable, it
+ * resolves to zero paragraphs, or a resolved paraId is no longer present in the live document (map/doc
+ * drift). The caller falls through to {@link resolveAdvisoryAnchorSpan} (legacy text/position
+ * resolution) in every one of those cases — the FIXED fallback order this task's constraints require
+ * (deterministic first; legacy ONLY when sectionRef is absent/unresolvable; ADR-049 — no text-search
+ * placement when a deterministic paraId resolution exists).
+ */
+function resolveDeterministicAnchorSpan(
+  blocks: readonly BlockInfo[],
+  sectionRef: string | undefined,
+  referenceMap: readonly ParaIdMapEntry[] | undefined
+): { from: number; to: number } | null {
+  if (!sectionRef || !referenceMap || referenceMap.length === 0) return null;
+
+  const resolution = resolveCitation(sectionRef, referenceMap);
+  if (resolution.matches.length === 0) return null;
+
+  const firstBlock = blocks.find(b => b.paraId === resolution.matches[0].paraId);
+  const lastBlock = blocks.find(b => b.paraId === resolution.matches[resolution.matches.length - 1].paraId);
+  if (!firstBlock || !lastBlock || lastBlock.to <= firstBlock.from) return null;
+
+  return { from: firstBlock.from, to: lastBlock.to };
 }
 
 // ---------------------------------------------------------------------------
@@ -2548,10 +2608,16 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         highlightCitedSpan: (sourceText, sectionLabel) => qaHighlight.highlight(sourceText, sectionLabel),
         clearCitedHighlight: () => qaHighlight.clear(),
         // NDA-REVIEW advisory comments (ai-advanced-capabilities-nda-r1 task 031): resolve each
-        // flagged clause via the SAME resolveTargetSpans('strict') anchoring highlightCitedSpan
-        // uses, then createThread (the dedicated `advisoryComments` instance above) instead of an
-        // ephemeral highlight. FR-19 "do not guess" — a failed resolution is reported, never
+        // flagged clause, then createThread (the dedicated `advisoryComments` instance above) instead
+        // of an ephemeral highlight. FR-19 "do not guess" — a failed resolution is reported, never
         // silently dropped.
+        //
+        // ai-advanced-capabilities-agreements-r1 task 011 (spec FR-03) — FIXED fallback order: the
+        // deterministic sectionRef→paraId path (resolveDeterministicAnchorSpan) is tried FIRST for
+        // every item; the legacy resolveTargetSpans('strict')/resolveAdvisoryAnchorSpan text path
+        // is the fallback, used ONLY when the deterministic path returns no span (no sectionRef, no
+        // WS-4 reference data, an unparseable citation, or zero/unresolvable matches) — never the
+        // reverse (ADR-049: no text-search when a deterministic paraId resolution exists).
         placeAdvisoryComments: items => {
           if (!editor) {
             return {
@@ -2561,12 +2627,19 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           }
           let placed = 0;
           const failed: AdvisoryCommentFailure[] = [];
+          // Built ONCE per call (a single doc walk), not per item — the SAME paraId→span primitive
+          // applyImportedCommentAnchors/applyImportedRevisions already use (no new paraId-walk).
+          const blocks = collectBlocks(editor);
           for (const item of items) {
-            // UAT round-3 S1: strict-first, then graceful fallbacks (first-occurrence / verbatim prefix)
-            // so a finding whose excerpt lightly diverges or recurs still highlights instead of being
-            // dropped — see resolveAdvisoryAnchorSpan. A comment mis-anchor is non-destructive (unlike a
-            // redline edit), so this is a safe relaxation of strict placement, scoped to advisory comments.
-            const span = resolveAdvisoryAnchorSpan(editor, item.targetText);
+            // (1) DETERMINISTIC — task 011: sectionRef → paraId via the WS-4 CitationResolver mirror.
+            // (2) LEGACY TEXT — UAT round-3 S1: strict-first, then graceful fallbacks (first-occurrence /
+            // verbatim prefix) so a finding whose excerpt lightly diverges or recurs still highlights
+            // instead of being dropped — see resolveAdvisoryAnchorSpan. A comment mis-anchor is
+            // non-destructive (unlike a redline edit), so this is a safe relaxation of strict placement,
+            // scoped to advisory comments.
+            const span =
+              resolveDeterministicAnchorSpan(blocks, item.sectionRef, paraIdMap) ??
+              resolveAdvisoryAnchorSpan(editor, item.targetText);
             if (!span) {
               failed.push({ targetText: item.targetText, kind: 'not_found' });
               continue;
@@ -2600,8 +2673,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       // via `React.useMemo`), so depending on it directly would rebuild this handle every render.
       // `advisoryComments.threads` (read by getAdvisoryCommentThreads) is intentionally included so
       // the handle refreshes when new threads are added — it changes only on an actual createThread
-      // call (React state), not every render.
-      [editor, redline, qaHighlight, advisoryComments.createThread, advisoryComments.threads]
+      // call (React state), not every render. `paraIdMap` (task 011) is included so a doc
+      // reload/reassignment that changes the WS-4 reference map rebuilds the deterministic
+      // resolution closure rather than reading a stale array.
+      [editor, redline, qaHighlight, advisoryComments.createThread, advisoryComments.threads, paraIdMap]
     );
 
     // ----- Render ---------------------------------------------------------

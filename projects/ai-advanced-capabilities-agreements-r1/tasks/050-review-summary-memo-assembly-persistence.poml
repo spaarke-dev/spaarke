@@ -3,8 +3,8 @@
   <metadata>
     <title>FR-13 — Review Summary Memo assembly (final dispositions) + persistence to sprk_analysisoutput</title>
     <phase>5 Output Deliverables</phase>
-    <gate>blocked (deps 002)</gate>
-    <status>not-started</status>
+    <gate>clear (deps 002 done)</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF-touching (memo assembly/persistence) + the business deliverable's correctness (before/after semantics).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -99,6 +99,26 @@
     <criterion testable="true">BFF publish ≤60 MB reported; build + tests green.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-13; Decisions #3/#4. 051 consumes this content for docx/email. The memo is the deletion-surviving artifact — its self-containedness is the point.</notes>
+  <notes>Spec FR-13; Decisions #3/#4. 051 consumes this content for docx/email. The memo is the deletion-surviving artifact — its self-containedness is the point.
+
+  COMPLETED 2026-07-31. Full trace: projects/ai-advanced-capabilities-agreements-r1/notes/050-execution-notes.md.
+  Summary: (1) Audit found NO server-side persisted disposition store exists pre-FR-16 (AnchoredAnnotation
+  has no disposition field; ComposeCommentThreadModel.resolved is explicitly client-only/never-persisted) —
+  resolved by mirroring the SHIPPED ComposeSummaryPageGenerator/SummaryPage precedent: the client supplies
+  the resolved section list (mirror-first per-finding fields + afterText), the server assembles + persists
+  deterministically (no second LLM call, no per-accept event capture — Decision #4 satisfied by a
+  generation-time snapshot, not an event log). (2) Found + fixed a pre-existing schema gap: sprk_analysisoutput
+  had no sprk_value column even though AnalysisOutputEntity.Value already wrote to it (both existing callers
+  swallowed the resulting Dataverse fault as a warning) — added the Multiline Text column via Dataverse Web
+  API (dataverse-create-schema pattern), verified via MCP describe before/after. (3) New files:
+  Services/Ai/ReviewMemo/ReviewMemoAssembler.cs (pure assembly + wire DTOs), Api/Ai/ReviewMemoEndpoints.cs
+  (POST /api/ai/chat/sessions/{sessionId}/review-memo, mapped inside the Analysis:Enabled &amp;&amp;
+  DocumentIntelligence:Enabled compound gate per bff-extensions.md §F.1). Minimal-additive edit to
+  AnalysisResultPersistence.cs (one new method) per the multi-container-multi-index-r1 conflict-mitigation
+  guidance. Tests: tests/unit/domain/ReviewMemo/ReviewMemoAssemblerTests.cs (5 tests, first backfill of that
+  KEEP path — added the missing &lt;Compile Include&gt; glob) + tests/integration/contract/Api/Ai/ReviewMemoEndpointContractTests.cs
+  (6 tests). Full suite: 9625 passed / 0 failed / 101 skipped. Publish: 48.24 MB compressed incl. PDBs
+  (baseline ~49.63 MB, delta -1.39 MB). CVE scan: 5 HIGH on System.Security.Cryptography.Xml — pre-existing,
+  confirmed via git diff no csproj package changes.</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
