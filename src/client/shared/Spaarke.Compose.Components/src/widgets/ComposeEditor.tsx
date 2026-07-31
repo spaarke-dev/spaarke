@@ -656,6 +656,17 @@ export interface ComposeEditorProps {
   commentAuthor?: string;
 
   /**
+   * task 052 (FR-15, Word-comment export mirror; ADR-012 lib-level configurability) — display name
+   * attributed to advisory (NDA/agreement-review finding) comment threads placed via
+   * {@link ComposeEditorHandle.placeAdvisoryComments}, separate from the session Comments panel's
+   * own `commentAuthor` above (the two use dedicated `useComposeCommentThreads` instances — see
+   * that field's own placement JSDoc). Defaults to `'AI Advisory Review'` — the PRE-EXISTING
+   * hardcoded literal this prop replaces — so every current mount keeps its exact current behavior
+   * until a host opts into a different name.
+   */
+  advisoryCommentAuthor?: string;
+
+  /**
    * ai-advanced-capabilities-nda-r1 (UAT round-2 items #1/#2) — the review-summary panel's
    * visibility state, threaded from the host (`ComposeWorkspace`) so the editor's own "Review"
    * toolbar dropdown can toggle it alongside the right-gutter "Review Notes". The host owns the
@@ -713,6 +724,24 @@ export interface AdvisoryCommentInput {
   riskLevel?: string;
   /** Optional standard/playbook reference the flag cites. */
   standardRef?: string;
+  /**
+   * task 052 (FR-15, Word-comment export mirror) — the review Action's discrete grounded-fact /
+   * reasoned-judgment fields (`ai-advanced-capabilities-agreements-r1` task 002 schema split:
+   * `explanation` → `flaggedClause` + `assessment`). When a caller supplies these, the created
+   * thread's export mirrors the gutter's structured "Flagged clause: … / Assessment says: …" text
+   * with NO string-parsing (see `./advisoryNoteFormatting.getAdvisoryNoteSegments`). Optional and
+   * additive: `explanation` remains required above (unchanged) as the thread's `text`/legacy-degrade
+   * source; no current caller populates these two yet (the client bridge that projects the review
+   * Action's `flaggedSections[]` still reads the pre-002 `explanation` field — see the task 052
+   * execution notes) — they are here so that wiring, once landed, needs no further ComposeEditor
+   * change.
+   */
+  flaggedClause?: string;
+  /** Reasoned-judgment prose (task 002 discrete field) — see `flaggedClause` above. */
+  assessment?: string;
+  /** Full resolved standard-clause text, when the caller has it (task 052 "full clause text when
+   *  available" criterion) — see `ComposeCommentThreadModel.standardText`. */
+  standardText?: string;
 }
 
 /**
@@ -898,7 +927,8 @@ export interface ComposeEditorHandle {
    * — the SAME anchoring primitive {@link highlightCitedSpan} uses — and, on a unique match,
    * creates a PERSISTENT comment thread (`useComposeCommentThreads.createThread`) carrying
    * `explanation` as the thread's text. Uses a DEDICATED `useComposeCommentThreads` instance
-   * (author `'AI Advisory Review'`), separate from the session Comments panel's own instance —
+   * (author = the configurable `advisoryCommentAuthor` prop, task 052 — defaults to
+   * `'AI Advisory Review'`), separate from the session Comments panel's own instance —
    * both apply the SAME `commentAnchor` mark to the document, so both are visible as
    * comment-anchor spans; a future right-gutter layout unifies the browsing UI across both
    * authors. Ranges that fail strict resolution (`not_found` / `ambiguous`) are reported via the
@@ -1636,6 +1666,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       onOpenDocument,
       isRefreshingProfile,
       commentAuthor = 'You',
+      advisoryCommentAuthor = 'AI Advisory Review',
       reviewSummary,
       activeWorkType = '*',
     } = props;
@@ -2190,10 +2221,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     const qaHighlight = useDocQaHighlight(editor);
 
     // ----- NDA-REVIEW advisory comments (ai-advanced-capabilities-nda-r1 task 031) -----------
-    // A DEDICATED useComposeCommentThreads instance (author 'AI Advisory Review'), separate from
-    // ComposeCommentThread's own panel instance below — see placeAdvisoryComments' JSDoc on
-    // ComposeEditorHandle for why the two stay independent.
-    const advisoryComments = useComposeCommentThreads(editor, 'AI Advisory Review');
+    // A DEDICATED useComposeCommentThreads instance (author = the configurable `advisoryCommentAuthor`
+    // prop, task 052 — default 'AI Advisory Review' preserves the pre-existing hardcoded behavior),
+    // separate from ComposeCommentThread's own panel instance below — see placeAdvisoryComments'
+    // JSDoc on ComposeEditorHandle for why the two stay independent.
+    const advisoryComments = useComposeCommentThreads(editor, advisoryCommentAuthor);
 
     // ----- UAT round-4 #8 — bidirectional linked highlight (doc anchor ↔ gutter card) --------------
     // A single "selected advisory thread" id, shared between the in-document anchor (turns yellow via
@@ -2543,6 +2575,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               riskLevel: item.riskLevel,
               sectionRef: item.sectionRef,
               standardRef: item.standardRef,
+              // task 052 (FR-15): additive passthrough — undefined today until the upstream
+              // bridge supplies them (see AdvisoryCommentInput's own JSDoc).
+              flaggedClause: item.flaggedClause,
+              assessment: item.assessment,
+              standardText: item.standardText,
             });
             if (threadId) {
               placed += 1;

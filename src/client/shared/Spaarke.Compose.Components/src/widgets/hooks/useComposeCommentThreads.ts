@@ -52,15 +52,24 @@ export interface ComposeCommentRange {
 }
 
 /**
- * task 032 (right-gutter comment layout) — optional NDA-REVIEW advisory metadata a caller may attach
- * at thread-creation time (currently only `ComposeEditor.placeAdvisoryComments`). Stored verbatim on
- * the resulting {@link ComposeCommentThreadModel} for the right-rail gutter card to render a risk
- * badge + citation — see that type's own field docs for the UI-only / never-exported-to-docx scope.
+ * task 032 (right-gutter comment layout) — optional NDA/agreement-REVIEW advisory metadata a
+ * caller may attach at thread-creation time (currently only `ComposeEditor.placeAdvisoryComments`).
+ * Stored verbatim on the resulting {@link ComposeCommentThreadModel} for the right-rail gutter card
+ * to render a risk badge + citation, AND (task 052, FR-15) for the Word-comment export mapping to
+ * compose the structured "Flagged clause / Assessment says / Standard" text — see that type's own
+ * field docs for the current UI-only vs exported split per field.
  */
 export interface ComposeCommentThreadMetadata {
   riskLevel?: string;
   sectionRef?: string;
   standardRef?: string;
+  /** Grounded-fact prose (task 002 discrete field) — see `ComposeCommentThreadModel.flaggedClause`. */
+  flaggedClause?: string;
+  /** Reasoned-judgment prose (task 002 discrete field) — see `ComposeCommentThreadModel.assessment`. */
+  assessment?: string;
+  /** Full resolved standard-clause text, when the caller has it — see
+   *  `ComposeCommentThreadModel.standardText`. */
+  standardText?: string;
 }
 
 export interface UseComposeCommentThreadsResult {
@@ -133,6 +142,9 @@ export function useComposeCommentThreads(
           riskLevel: metadata?.riskLevel,
           sectionRef: metadata?.sectionRef,
           standardRef: metadata?.standardRef,
+          flaggedClause: metadata?.flaggedClause,
+          assessment: metadata?.assessment,
+          standardText: metadata?.standardText,
         },
       ]);
       return id;

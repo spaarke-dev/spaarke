@@ -32,10 +32,18 @@
 import * as React from 'react';
 import type { DispatchPaneEvent } from '@spaarke/ai-widgets';
 
-/** One `flaggedSections[]` entry from the NDA-REVIEW Action output contract (task 020). */
+/**
+ * One `flaggedSections[]` entry from the review Action output contract. Two vintages coexist:
+ * the pre-split shape carried `explanation`; the agreements-r1 task-002 schema split replaced it
+ * with discrete `flaggedClause` (grounded fact) + `assessment` (reasoned judgment). This bridge
+ * accepts BOTH — ledger replays of pre-split runs still project, and post-split runs carry the
+ * discrete fields through so gutter/export render the structured form (task 052).
+ */
 interface NdaReviewFlaggedSection {
   quotedText?: unknown;
   explanation?: unknown;
+  flaggedClause?: unknown;
+  assessment?: unknown;
   sectionRef?: unknown;
   riskLevel?: unknown;
   standardRef?: unknown;
@@ -80,12 +88,19 @@ export interface AdvisoryCommentProjection {
   sectionRef?: string;
   riskLevel?: string;
   standardRef?: string;
+  /** Grounded-fact prose (task-002 split) — present on post-split payloads only. */
+  flaggedClause?: string;
+  /** Reasoned-judgment prose (task-002 split) — present on post-split payloads only. */
+  assessment?: string;
 }
 
 /**
- * Projects an NDA-REVIEW result's `flaggedSections[]` into advisory-comment items. Entries
- * missing a usable `quotedText` or `explanation` are skipped (defensive against a malformed/
- * partial LLM payload) — never thrown; the caller sees fewer items rather than a crash.
+ * Projects a review result's `flaggedSections[]` into advisory-comment items. Entries missing a
+ * usable `quotedText`, or carrying NONE of `explanation`/`flaggedClause`/`assessment`, are skipped
+ * (defensive against a malformed/partial LLM payload) — never thrown; the caller sees fewer items
+ * rather than a crash. For post-split payloads (no `explanation`), the projection composes the
+ * thread-text/legacy-degrade `explanation` from the discrete fields AND carries them through
+ * unchanged so downstream rendering/export never string-parses (task 052).
  * Exported for direct unit testing.
  */
 export function projectFlaggedSectionsToAdvisoryComments(
@@ -94,14 +109,21 @@ export function projectFlaggedSectionsToAdvisoryComments(
   const items: AdvisoryCommentProjection[] = [];
   for (const section of flaggedSections) {
     const targetText = asNonEmptyString(section.quotedText);
-    const explanation = asNonEmptyString(section.explanation);
-    if (!targetText || !explanation) continue;
+    if (!targetText) continue;
+    const legacyExplanation = asNonEmptyString(section.explanation);
+    const flaggedClause = asNonEmptyString(section.flaggedClause);
+    const assessment = asNonEmptyString(section.assessment);
+    const explanation =
+      legacyExplanation ?? [flaggedClause, assessment].filter(Boolean).join('\n\n');
+    if (!explanation) continue;
     items.push({
       targetText,
       explanation,
       sectionRef: asNonEmptyString(section.sectionRef),
       riskLevel: asNonEmptyString(section.riskLevel),
       standardRef: asNonEmptyString(section.standardRef),
+      flaggedClause,
+      assessment,
     });
   }
   return items;

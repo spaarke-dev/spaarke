@@ -1776,6 +1776,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           sectionRef: item.sectionRef,
           riskLevel: item.riskLevel,
           standardRef: item.standardRef,
+          // agreements-r1 task-002 schema split: discrete grounded-fact / judgment fields, so the
+          // created threads render/export the structured "Flagged clause / Assessment says" form
+          // (task 052) with no string-parsing. Undefined for legacy (pre-split) payloads.
+          flaggedClause: item.flaggedClause,
+          assessment: item.assessment,
         }))
       );
       if (result && result.failed.length > 0) {

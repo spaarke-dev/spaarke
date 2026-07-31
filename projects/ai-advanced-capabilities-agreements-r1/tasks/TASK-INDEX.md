@@ -12,11 +12,11 @@
 |----|-------|-------|--------|------|-------|------|--------|----------|
 | 001 | sprk_agreementtype mirror + seeds + behavior values | 0 | ✅ | none | FULL* | sonnet | high | A |
 | 002 | agreement-review Action generalization + schema split + evals | 0 | ✅ | none | FULL | opus | high | A |
-| 003 | Knowledge packs (NDA taxonomy home + general fallback) | 0 | 🔲 | 001,002 | STANDARD | sonnet | high | B |
+| 003 | Knowledge packs (NDA taxonomy home + general fallback) | 0 | ✅ | 001,002 | STANDARD | sonnet | high | B |
 | 010 | Rename clauseLocation + panel naming (pure rename) | 1 | ✅ | none | FULL | sonnet | medium | A |
 | 011 | WS-4 anchoring (ComputedNumber/CitationResolver) | 1 | 🔲 | 010 | FULL | sonnet | xhigh | C |
 | 012 | DEF-01 placement fix + restore original assertion | 1 | 🔲 | 011 | FULL | sonnet | xhigh | D |
-| 020 | Classifier Action (Reasoning tier, registry-driven) | 2 | 🔲 | 001 | FULL | opus | high | B |
+| 020 | Classifier Action (Reasoning tier, registry-driven) | 2 | ✅ | 001 | FULL | opus | high | B |
 | 021 | Interactive orientation + confirmation gate | 2 | 🔲 | 020,003 | FULL | sonnet | xhigh | D |
 | 022 | subDomain envelope (cold-load + open-existing legs) | 2 | 🔲 | 001 | FULL | sonnet | high | F |
 | 023 | Explicit-path bind + sanity-check + lookup write | 2 | 🔲 | 020,022 | FULL | sonnet | high | G |
@@ -29,7 +29,7 @@
 | 042 | Separated location-labelled confirmations | 4 | 🔲 | 041 | FULL | sonnet | medium | I |
 | 050 | Memo assembly + persistence (sprk_analysisoutput) | 5 | 🔲 | 002 | FULL | sonnet | xhigh | C |
 | 051 | Memo toolbar (docx download + EmailComposer) | 5 | 🔲 | 050 | FULL | sonnet | high | I |
-| 052 | Word-comment export mirror + configurable author | 5 | 🔲 | 002,010 | FULL | sonnet | high | B |
+| 052 | Word-comment export mirror + configurable author | 5 | ✅ | 002,010 | FULL | sonnet | high | B |
 | 060 | Deploy (BFF + code page + Dataverse data) | 6 | 🔲 | 003,012,023,032,033,042,051,052 | FULL | sonnet | high | — |
 | 061 | E2E UI tests (5 flows incl. zero-LLM reopen) | 6 | 🔲 | 060 | STANDARD | sonnet | high | — |
 | 090 | Wrap-up + test-diet + registration-recipe handoff | 6 | 🔲 | 060,061 | FULL | sonnet | high | — |

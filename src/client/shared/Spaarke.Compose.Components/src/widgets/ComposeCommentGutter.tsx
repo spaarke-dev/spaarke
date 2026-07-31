@@ -86,6 +86,15 @@ import { ChevronDoubleDown16Regular, MoreVertical20Regular, SparkleRegular } fro
 import { findCommentAnchorRange, type ComposeCommentThreadModel } from './ComposeCommentThread.types';
 import { riskBadgeColor, formatClauseLocation } from './AgreementReviewSummaryPanel';
 import { deriveClauseLocationLabel } from './clauseLocation';
+// task 052 (FR-15, Word-comment export mirror): the label map + parse/compose logic moved to this
+// shared module so the export mapping (`ComposeCommentThread.types.ts`) consumes the SAME source —
+// re-exported below (`parseAdvisoryNote`/`AdvisoryNoteSegment`) so existing import sites (this
+// file's own test suite) are unaffected.
+import { getAdvisoryNoteSegments, parseAdvisoryNote } from './advisoryNoteFormatting';
+import type { AdvisoryNoteSegment } from './advisoryNoteFormatting';
+
+export { parseAdvisoryNote };
+export type { AdvisoryNoteSegment };
 
 /** Right-rail column DEFAULT width — cards clear of the document's own right margin. */
 export const COMMENT_GUTTER_WIDTH_PX = 220;
@@ -322,63 +331,6 @@ const useStyles = makeStyles({
 function truncate(text: string, max: number): string {
   const trimmed = text.trim();
   return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
-}
-
-/** One labelled aspect of an advisory note ("Grounded fact" / "Advisory judgment"), or an unlabelled run. */
-export interface AdvisoryNoteSegment {
-  /** The aspect label (e.g. "Grounded fact"), or undefined for text with no recognized label. */
-  label?: string;
-  /** The aspect's prose. */
-  body: string;
-}
-
-/** The labels the NDA-REVIEW Action authors its advisory explanations with (case-insensitive). */
-const ADVISORY_NOTE_LABELS = ['Grounded fact', 'Advisory judgment', 'Judgment'] as const;
-
-/**
- * UAT round-6 #5 — the DISPLAY labels the reviewer asked for, mapped from the model's authored markers:
- * "Grounded fact" → "Flagged clause", "Advisory judgment" / "Judgment" → "Assessment says". Detection
- * still keys on the model's original words; only the rendered label changes.
- */
-const ADVISORY_NOTE_DISPLAY_LABEL: Record<string, string> = {
-  'grounded fact': 'Flagged clause',
-  'advisory judgment': 'Assessment says',
-  judgment: 'Assessment says',
-};
-
-/**
- * UAT round-5 #7 — split an advisory note into its "Grounded fact" / "Advisory judgment" aspects so each
- * renders as its own labelled, separated paragraph (the reviewer asked what the labels mean + for them to
- * be bold + separate for readability). The Action authors explanations as
- * "Grounded fact: … Advisory judgment: …" (also older "Judgment: …"); we split on those markers. Text
- * with no recognized label returns a single unlabelled segment (rendered plainly, unchanged) — so a note
- * that doesn't follow the convention never gets mangled.
- */
-export function parseAdvisoryNote(text: string): AdvisoryNoteSegment[] {
-  const trimmed = (text ?? '').trim();
-  if (!trimmed) return [];
-  // Find every label occurrence (label + following “:”/“—”/“-”), in document order.
-  const pattern = new RegExp(`\\b(${ADVISORY_NOTE_LABELS.join('|')})\\b\\s*[:—-]\\s*`, 'gi');
-  const marks: { label: string; start: number; bodyStart: number }[] = [];
-  for (let m = pattern.exec(trimmed); m !== null; m = pattern.exec(trimmed)) {
-    marks.push({ label: m[1], start: m.index, bodyStart: m.index + m[0].length });
-  }
-  if (marks.length === 0) return [{ body: trimmed }];
-  const segments: AdvisoryNoteSegment[] = [];
-  // Any prose before the first label is kept as an unlabelled lead segment (never dropped).
-  if (marks[0].start > 0) {
-    const lead = trimmed.slice(0, marks[0].start).trim();
-    if (lead) segments.push({ body: lead });
-  }
-  for (let i = 0; i < marks.length; i++) {
-    const end = i + 1 < marks.length ? marks[i + 1].start : trimmed.length;
-    const body = trimmed.slice(marks[i].bodyStart, end).trim();
-    // UAT round-6 #5 — display the reviewer's preferred label ("Flagged clause" / "Assessment says"),
-    // falling back to the model's own word for any unmapped label.
-    const label = ADVISORY_NOTE_DISPLAY_LABEL[marks[i].label.toLowerCase()] ?? marks[i].label;
-    segments.push({ label, body });
-  }
-  return segments;
 }
 
 export interface ComposeCommentGutterProps {
@@ -786,7 +738,13 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
       {threads.map(thread => {
         const top = cardTops[thread.id];
         if (top === undefined) return null; // anchor unresolved (deleted) — omitted, never guessed
-        const fullText = thread.text.trim();
+        // task 052 (FR-15): the SAME shared source the export mapping uses — discrete task-002
+        // fields (flaggedClause/assessment) when the thread carries them, legacy marker-parsed
+        // `text` otherwise. `fullText` (for the truncation-length check below) is derived from the
+        // resolved segments' bodies, NOT the raw `thread.text`, so a legacy marker-laden note's
+        // truncation threshold reflects its VISIBLE length (markers are never shown to the reviewer).
+        const allSegments = getAdvisoryNoteSegments(thread);
+        const fullText = allSegments.map(seg => seg.body).join(' ').trim();
         const isExpanded = expandedIds.has(thread.id);
         const isTruncatable = fullText.length > COLLAPSED_BODY_MAX_CHARS;
         const showStructured = isExpanded || !isTruncatable;
@@ -794,7 +752,6 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
         // says" segments (with the renamed labels) — including when COLLAPSED (the reviewer saw the raw
         // model labels "Grounded fact" / "Advisory judgment" in the collapsed preview). Collapsed shows
         // just the FIRST segment with a truncated body; expanding reveals every segment in full.
-        const allSegments = parseAdvisoryNote(fullText);
         const segments = showStructured
           ? allSegments
           : allSegments.length > 0

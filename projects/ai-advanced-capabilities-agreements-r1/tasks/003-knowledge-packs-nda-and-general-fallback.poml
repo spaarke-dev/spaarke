@@ -3,8 +3,8 @@
   <metadata>
     <title>Knowledge packs — NDA pack (taxonomy home) + general fallback + registry refs</title>
     <phase>0 Foundation</phase>
-    <gate>blocked (deps 001,002)</gate>
-    <status>not-started</status>
+    <gate>unblocked (deps 001,002 both completed this session)</gate>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Grounding-data authoring + registry value updates; no product code. The grounding-zero risk is covered by an explicit verification step, not code review.</rigor-reason>
     <model-tier>sonnet</model-tier>

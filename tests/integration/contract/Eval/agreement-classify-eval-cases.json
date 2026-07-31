@@ -1,0 +1,91 @@
+{
+  "$comment": "ai-advanced-capabilities-agreements-r1 task 020 (FR-07 / design Lens 3d) — the agreement-classify eval family. Merge-gate wiring identical to every sibling family in this directory: [Trait(\"Category\",\"GoldenUtteranceEval\")] on AgreementClassifyEvalTests joins the dedicated eval-gate job with ZERO CI-YAML change. This suite does NOT touch the shared golden-utterances.json — a net-new family is the established way a project adds gate coverage. What is proven MECHANICALLY here (no live model — the Reasoning-tier Azure OpenAI deployment is env-blocked per nda-r1 task 013, exactly as task 002 reported): (1) the classifier's CLOSED output contract {isAgreement, candidates[{subDomainKey, confidence}], composite, reasoning} shape via each case's worked expectation; (2) the registry-GROUNDING — every expected subDomainKey is a real sprk_agreementtype key the AgreementTypeRegistryPromptAssembler actually injects into the prompt (no case references a key the classifier cannot emit); (3) the Reasoning-tier catalog config; (4) the gate-relevant invariants (non-agreement -> no candidates; composite -> >=2 distinct candidates). The per-case CONFIDENCE VALUES and the model's actual routing are the LIVE-graded part and are env-blocked; each case records a confidenceBand (the calibration the gate at >=0.85 depends on) as the documented expectation for when the deployment lands. Case ids are namespaced AC-### so they never collide with GU-###/NDA-###/TRIAGE-###/AR1-### ids.",
+  "schemaVersion": "agreement-classify-eval@v1",
+  "actionCode": "agreement-classify",
+  "cases": [
+    {
+      "caseId": "AC-001",
+      "family": "positive-specific",
+      "channel": "chat-upload",
+      "utterance": "A mutual non-disclosure agreement dropped into the Assistant with 'review this document'.",
+      "notes": "Textbook NDA: defined 'Confidential Information', disclosure/use restrictions, standard exclusions, term/survival — matches the nda registry cue squarely. High confidence -> the task-021 gate auto-proceeds and binds the NDA pack.",
+      "expected": {
+        "isAgreement": true,
+        "composite": false,
+        "candidateKeys": ["nda"],
+        "acceptableKeys": ["nda"],
+        "confidenceBands": { "nda": "high" }
+      }
+    },
+    {
+      "caseId": "AC-002",
+      "family": "positive-fallback",
+      "channel": "chat-upload",
+      "utterance": "A commercial real-property lease dropped into the Assistant with 'review this'.",
+      "notes": "The lease row exists in the registry but carries NO classification cue yet (its per-type pack is a sibling project). So the classifier should either name 'lease' at a LOWER confidence (cue-less, key-derived guidance) OR route to the 'general' fallback — the acceptance criterion accepts either. Below the 0.85 bar -> the gate confirms rather than auto-running. composite stays false.",
+      "expected": {
+        "isAgreement": true,
+        "composite": false,
+        "candidateKeys": [],
+        "acceptableKeys": ["lease", "general"],
+        "confidenceBands": { "lease": "low", "general": "medium" }
+      }
+    },
+    {
+      "caseId": "AC-003",
+      "family": "negative-nonagreement",
+      "channel": "chat-upload",
+      "utterance": "An invoice (line items, amount due, remittance instructions) dropped into the Assistant with 'review this'.",
+      "notes": "NOT an agreement — an invoice creates no bilateral enforceable obligations of the agreement kind. isAgreement=false, NO fabricated candidates. This is the negative case nda-r1 learned to author early (it exposed the missing scope guard last time).",
+      "expected": {
+        "isAgreement": false,
+        "composite": false,
+        "candidateKeys": [],
+        "acceptableKeys": [],
+        "confidenceBands": {}
+      }
+    },
+    {
+      "caseId": "AC-004",
+      "family": "negative-nonagreement",
+      "channel": "chat-upload",
+      "utterance": "A court pleading (caption, docket number, 'COMES NOW', prayer for relief) dropped into the Assistant.",
+      "notes": "NOT an agreement — a pleading is a court filing. isAgreement=false, empty candidates. Distinguishes work-type at level 1 (design Lens 3d: agreement vs pleading/correspondence/memo).",
+      "expected": {
+        "isAgreement": false,
+        "composite": false,
+        "candidateKeys": [],
+        "acceptableKeys": [],
+        "confidenceBands": {}
+      }
+    },
+    {
+      "caseId": "AC-005",
+      "family": "composite",
+      "channel": "chat-upload",
+      "utterance": "An employment agreement whose body includes a self-contained non-disclosure/confidentiality addendum.",
+      "notes": "COMPOSITE / multiplicity: two distinct registered sub-domains substantively present -> BOTH candidates, composite=true. Task 021 renders a choice-of-lens ('employment · just the NDA · both'); 'both' binds multiple packs (1-to-many routing). A single incidental confidentiality CLAUSE would NOT be composite — this case is a genuinely self-contained addendum.",
+      "expected": {
+        "isAgreement": true,
+        "composite": true,
+        "candidateKeys": ["employment", "nda"],
+        "acceptableKeys": ["employment", "nda"],
+        "confidenceBands": { "employment": "high", "nda": "medium" }
+      }
+    },
+    {
+      "caseId": "AC-006",
+      "family": "low-confidence-ambiguous",
+      "channel": "chat-upload",
+      "utterance": "A short, atypical two-party arrangement that reads like an agreement but matches no specific registered type well.",
+      "notes": "Honest UNCERTAINTY: clearly an agreement but of no clear specific type -> the fallback key at a LOW confidence (do not force-fit a specific type). Below 0.85 -> the gate confirms the proposed type / offers pick-another. This exercises the calibrated-confidence honesty the >=0.85 gate depends on — under-confidence merely asks a human (cheap); inflated confidence causes a silent wrong-grounding run (the worst outcome).",
+      "expected": {
+        "isAgreement": true,
+        "composite": false,
+        "candidateKeys": ["general"],
+        "acceptableKeys": ["general"],
+        "confidenceBands": { "general": "low" }
+      }
+    }
+  ]
+}

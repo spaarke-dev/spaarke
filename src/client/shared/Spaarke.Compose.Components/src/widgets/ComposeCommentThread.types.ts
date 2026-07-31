@@ -35,6 +35,10 @@ import type { ComposeAnchoredComment } from '../types/compose-operations';
 // task 031: the anchor-range primitive lives in a leaf module now (see the re-export note below).
 // Imported here for LOCAL use by composeSessionCommentThreadsToAnchoredComments.
 import { findCommentAnchorRange } from './commentAnchorRange';
+// task 052 (FR-15, Word-comment export mirror): the ONE shared source for how an advisory
+// thread's content composes into its exported `w:comment` text — see that module's file header
+// for the full discrete-fields-vs-legacy-marker-parse rationale.
+import { composeAdvisoryCommentExportText } from './advisoryNoteFormatting';
 
 /** Author + timestamp stamp shared by a thread's root comment and every reply. */
 export interface ComposeCommentAuthorStamp {
@@ -85,20 +89,55 @@ export interface ComposeCommentThreadModel extends ComposeCommentAuthorStamp {
   /** Ordered replies — always rendered FLAT (see {@link ComposeCommentReply.parentReplyId}). */
   replies: ComposeCommentReply[];
   /**
-   * task 032 (right-gutter comment layout) — optional NDA-REVIEW advisory metadata, carried through
-   * from {@link ../ComposeEditor.AdvisoryCommentInput} via `placeAdvisoryComments` →
-   * `useComposeCommentThreads.createThread`'s metadata parameter, so the right-rail gutter card can
-   * render a risk badge + section/standard citation without a side lookup. UI-ONLY — never written to
-   * native `w:comment` on save (the docx export functions below read only `author`/`text`/`timestamp`,
-   * so these fields are silently ignored there, by design). Absent for session (non-advisory) Comments
-   * panel threads, which never pass metadata to `createThread`.
+   * task 032 (right-gutter comment layout) — optional NDA/agreement-REVIEW advisory metadata,
+   * carried through from {@link ../ComposeEditor.AdvisoryCommentInput} via `placeAdvisoryComments`
+   * → `useComposeCommentThreads.createThread`'s metadata parameter, so the right-rail gutter card
+   * can render a risk badge + section/standard citation without a side lookup.
+   *
+   * SCOPE LIFT (task 052, FR-15, 2026-07-31 — supersedes the prior "UI-only, never exported"
+   * note): `riskLevel`/`sectionRef` stay UI-only (a coarse badge + the gutter's own location-label
+   * derivation — neither is part of the on-screen note's labelled body, so neither belongs in the
+   * exported comment text). `standardRef` (+ `flaggedClause`/`assessment` below) are DIFFERENT —
+   * the on-screen gutter always renders them as part of the note's visible content ("Flagged
+   * clause: …" / "Assessment says: …" / "Standard: …"), so silently dropping them at export made
+   * the saved-then-reopened-in-Word comment materially incomplete relative to what the reviewer
+   * saw (the root cause tracked in
+   * `projects/ai-advanced-capabilities-agreements-r1/notes/word-comment-export-gap.md`). Both
+   * `composeCommentThreadsToDocxAnnotations` and `composeSessionCommentThreadsToAnchoredComments`
+   * below now compose the root comment's exported text via
+   * {@link composeAdvisoryCommentExportText} (`./advisoryNoteFormatting`), which reads these
+   * fields. Absent for session (non-advisory) Comments panel threads, which never pass metadata to
+   * `createThread` — those threads' `text` exports completely unchanged (see
+   * `isAdvisoryCommentThread`).
    */
-  /** Coarse qualitative risk signal (NEVER a numeric score, per ADR-039). */
+  /** Coarse qualitative risk signal (NEVER a numeric score, per ADR-039). UI-only — not exported. */
   riskLevel?: string;
-  /** Section/clause reference from the NDA-REVIEW output (e.g. "3.2"). */
+  /** Section/clause reference from the review Action's output (e.g. "3.2"). UI-only — not exported
+   *  as its own line (used for the gutter's location-label derivation only). */
   sectionRef?: string;
-  /** Optional standard/playbook reference the flag cites. */
+  /**
+   * Grounded-fact prose — "what the clause does" (ai-advanced-capabilities-agreements-r1 task 002
+   * Action-output schema split: `explanation` → discrete `flaggedClause` + `assessment`). Exported
+   * as the note's "Flagged clause: …" line when present. Absent on a legacy (pre-002) thread, whose
+   * `text` alone may or may not still carry the old embedded "Grounded fact:"/"Advisory judgment:"
+   * markers — see {@link getAdvisoryNoteSegments} in `./advisoryNoteFormatting`.
+   */
+  flaggedClause?: string;
+  /** Reasoned-judgment prose — "why it matters" (task 002 discrete field). Exported as the note's
+   *  "Assessment says: …" line when present (only meaningful alongside `flaggedClause`). */
+  assessment?: string;
+  /** Optional standard/playbook reference the flag cites (e.g. "B5 - Use & disclosure
+   *  obligations"). Exported as the note's "Standard: …" line (task 052 scope lift — see above). */
   standardRef?: string;
+  /**
+   * Full resolved standard-clause text, when the thread happens to carry it — task 052's "full
+   * clause text when available" criterion. Nothing currently populates this (the gutter's own
+   * `StandardRefChip` resolves it on demand via an async BFF call, which the export mapping cannot
+   * make — it is a pure, synchronous, `byte[]`-free function per ADR-049/ADR-007); a future durable
+   * -recall or prefetch wiring that sets it will export it automatically (payload-driven — no
+   * mapping-function change needed). Absent ⇒ export cites `standardRef` alone.
+   */
+  standardText?: string;
 }
 
 /**
@@ -124,7 +163,10 @@ export function composeCommentThreadsToDocxAnnotations(
     result.push({
       kind: DocxTrackChangeKind.Comment,
       targetText: thread.anchorText,
-      commentText: thread.text,
+      // task 052 (FR-15): the ROOT comment's exported text mirrors the gutter (structured for an
+      // advisory thread, verbatim for a plain session comment) — see the shared helper's file
+      // header. Replies are never restructured (see composeAdvisoryCommentExportText's own doc).
+      commentText: composeAdvisoryCommentExportText(thread),
       author: thread.author,
       date: thread.timestamp,
     });
@@ -228,7 +270,13 @@ export function composeSessionCommentThreadsToAnchoredComments(
     result.push({
       paraId: start.paraId,
       range,
-      commentText: thread.text,
+      // task 052 (FR-15, Word-comment export mirror): the LIVE save path. Composes the SAME
+      // structured "Flagged clause / Assessment says / Standard" text the gutter renders for an
+      // advisory thread (discrete task-002 fields when present, legacy marker-parsed `text`
+      // otherwise); a plain (non-advisory) session comment's text is unchanged. Payload-driven only
+      // — a durable-recalled thread (tasks 030-032) with the same fields composes identically to a
+      // live one, regardless of provenance.
+      commentText: composeAdvisoryCommentExportText(thread),
       author: thread.author,
       date: thread.timestamp,
     });

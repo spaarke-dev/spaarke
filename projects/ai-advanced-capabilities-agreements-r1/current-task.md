@@ -4,12 +4,27 @@
 
 ## Active task
 
-- **Task**: WAVE 0 — 001 ∥ 002 ∥ 010 (parallel, task-execute Step 0.3 parallel mode)
-- **Status**: in-progress — 001 ✅ (7 rows seeded w/ GUIDs; alt-key dup-test PASS; KNW-012 forward ref for 003;
-  footgun fix 7e022e7dd still hub-branch-only). 002 ✅ (generalize-IN-PLACE on GUID row 34c9ecf2…; actionCode→
-  agreement-review, consumerType "nda-review" RETAINED by design — FR-01 territory for 020-023; 71 dotnet tests pass;
-  live LLM eval env-blocked; B1–B16 taxonomy hand-off in notes/002-execution-notes.md for 003; deferred:
-  ComposeSummaryPageGenerator.cs stale doc-comments → 030). 010 running.
+- **Task**: WAVE 1 ✅ COMPLETE — 003 + 020 + 052 all done; committing now
+- **003**: KNW-011 restructured (B1–B16, 14 chunks) + KNW-012 authored (G1–G16, 13 chunks) at
+  projects/x-ai-spaarke-platform-enhancements-r1/notes/design/knowledge-sources/ (shared pack home);
+  production-filter retrieval verified + negative tenant check. ⚠️ FINDING: ActionRunner never sets
+  KnowledgeSourceIds (whole-corpus retrieval; NDA gets ~2/14 chunks) — registry→KnowledgeSourceIds scoping
+  belongs to Phase 2 (021/023 must wire it).
+- **020**: agreement-classify Action via ActionRunner (sole Reasoning-resolver caller); registry injection via
+  Services/Ai/Classification/ assembler (no new executor/endpoint); publish 47 MB (Δ≈0); 24 new + 80 regression
+  tests pass; NO Binding row (021/023 own trigger); live evals env-blocked.
+- **052**: export-mapping seam + shared advisoryNoteFormatting.ts; author config; Word UAT → 060/061.
+- **MAIN-SESSION HOTFIX (002 fallout, surfaced by 052)**: live-path bridge migrated to post-split shape —
+  PaneEventTypes.ComposeAdvisoryCommentItem +flaggedClause/assessment; useNdaReviewAdvisoryCommentsBridge
+  accepts both vintages (composes legacy explanation from discrete fields); ComposeWorkspace maps discrete
+  fields → placeAdvisoryComments. Bridge tests 14/14; AI.Context/Outputs/Widgets + Compose + SpaarkeAi + BFF
+  all build green (sibling node_modules chain installed in this worktree).
+- **Wave 0 carry-forward**: 002 generalized IN-PLACE (consumerType "nda-review" retained → 020-023 territory);
+  B1–B16 taxonomy hand-off in notes/002-execution-notes.md; KNW-012 forward ref → 003 reconciles; footgun fix
+  7e022e7dd still hub-branch-only; ComposeSummaryPageGenerator.cs stale doc-comments → 030; live LLM eval env-blocked.
+- **Conflict check (Wave 1)**: compose-r5 FULLY MERGED (risk retired). Soft: multi-container-multi-index-r1 (56
+  unmerged) touches ReferenceRetrievalService.cs — 003 reads it only; verify against CURRENT master filter.
+- **Next action**: on agent completion — verify, TASK-INDEX ✅, build-verify (BFF if .cs; both Compose/UI libs), commit, Wave 2 (011 ∥ 050).
 - **Orchestration**: agents do NOT write .claude/, current-task.md, TASK-INDEX.md, or git commits —
   main session aggregates, runs wave-end build verification (npm builds for UI.Components +
   Compose.Components; dotnet build if 002 touched .cs eval tests), then single wave commit.

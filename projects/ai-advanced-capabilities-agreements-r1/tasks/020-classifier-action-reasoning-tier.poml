@@ -4,7 +4,7 @@
     <title>Document classifier — Reasoning-tier work-type + sub-domain detection (registry-driven)</title>
     <phase>2 Classifier + Routing</phase>
     <gate>blocked (deps 001)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New AI capability on the dispatch surface (ADR-039 catalogs); classification correctness gates every downstream review; eval obligation.</rigor-reason>
     <model-tier>opus</model-tier>

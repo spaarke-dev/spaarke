@@ -3,8 +3,8 @@
   <metadata>
     <title>FR-15 — Word-comment export mirror + configurable author (#7)</title>
     <phase>5 Output Deliverables</phase>
-    <gate>blocked (deps 002,010)</gate>
-    <status>not-started</status>
+    <gate>startable (deps 002,010 both completed)</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Export fidelity for legal work product; Compose shared-lib .tsx/.ts changes; lifts a deliberate never-export scope decision.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -98,6 +98,16 @@
     <criterion testable="true">Negative: server ApplyComment untouched (git diff proof); durable-recalled threads export identically to live ones.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-15; notes/word-comment-export-gap.md is the authoritative root-cause map. Shares the relabel source with the gutter — the "do it once, both win" design.</notes>
+  <notes>Spec FR-15; notes/word-comment-export-gap.md is the authoritative root-cause map. Shares the relabel source with the gutter — the "do it once, both win" design.
+
+COMPLETED 2026-07-31 (sonnet/high, FULL rigor). Full execution record: notes/052-execution-notes.md.
+SEAM DECISION: export-mapping seam confirmed (POML default) — composes in composeSessionCommentThreadsToAnchoredComments (LIVE save path) + composeCommentThreadsToDocxAnnotations (legacy sibling, updated for consistency), NOT at placeAdvisoryComments-time, so the gutter keeps raw fields for its own styled/interactive rendering (risk badge, clickable Standard popover).
+DELIVERED: new shared helper src/client/shared/Spaarke.Compose.Components/src/widgets/advisoryNoteFormatting.ts (isAdvisoryCommentThread / getAdvisoryNoteSegments / composeAdvisoryCommentExportText — hoisted from ComposeCommentGutter.tsx's local label map + parseAdvisoryNote, now the ONE source both gutter + export consume); ComposeCommentThreadModel gains flaggedClause/assessment/standardText (scope-lift documented at the field-group doc comment); ComposeEditorProps gains advisoryCommentAuthor (default 'AI Advisory Review', threaded through useComposeCommentThreads, replacing the ComposeEditor.tsx:2196 hardcoded literal); AdvisoryCommentInput + ComposeCommentThreadMetadata gain the same 3 fields, additively threaded through placeAdvisoryComments/createThread.
+TESTS (NEW): advisoryNoteFormatting.test.ts, ComposeCommentThread.exportMirror.test.ts (mapping-level: discrete-field composition, legacy degrade both marker and no-marker, plain-comment passthrough, save-reopen round-trip, durable-recall parity fixture), ComposeEditor.advisoryCommentAuthor.test.tsx (real-editor author-config proof, kept separate from the DEF-01-affected advisoryComments suite).
+BUILD/TEST: tsc 0 errors. Touched/new suites: 80/81 pass (1 pre-existing DEF-01 failure in ComposeEditor.advisoryComments.test.tsx, task 012 scope). Full package regression (67 suites/757 tests): 741/757 pass, 16 failures across the SAME 6 pre-existing suites verified byte-identical via git-stash isolation against pre-052 code (4 ComposeWorkspace suites + stepOperationInterceptor.test.ts + the DEF-01 suite) — zero new failures introduced.
+NEGATIVE CRITERION: src/server/** untouched by this task (git diff --stat confirms; the one src/server change present in the worktree belongs to a concurrent parallel task, not this diff).
+MANUAL WORD VERIFICATION: DEFERRED to deploy-wave UAT (tasks 060/061) per the task's own instruction — this session cannot open Word. Noted nuance for that UAT: ApplyComment (server, unchanged) writes commentText as a single OOXML run; this task's \n\n segment separators are literal LF characters (no <w:br/>), so confirm Word's actual line-break rendering at UAT.
+IMPORTANT FINDING (documented, NOT fixed — out of this task's file scope): src/solutions/SpaarkeAi/src/components/conversation/useNdaReviewAdvisoryCommentsBridge.ts still reads the pre-002 `explanation` field (removed by task 002's schema split) — every flagged section from a live post-002 review is currently silently dropped before reaching placeAdvisoryComments. Needs a follow-up task (whichever next touches ConversationPane.tsx/the bridge) to read flaggedClause/assessment instead and extend ComposeAdvisoryCommentItem (Spaarke.AI.Widgets) with the 2 new fields. Does not block this task's acceptance criteria (verified at the fixture/mapping level per design) but is material to observing FR-15 end-to-end.
+  </notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
