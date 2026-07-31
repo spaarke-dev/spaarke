@@ -11,10 +11,11 @@
 >   - **(5th, handoff hadn't recorded) `CommunicationArrivedProducerSeamTests` deep link** — bell `ActionUrl` now appends `&sprk_openconversation=1` (round-7 item 11 notification→modal, so the ConversationPanel PCF auto-opens). Test stale; updated expected URL.
 >   - Then **merged origin/master** (14 commits, ZERO file overlap → clean auto-merge, `1bd96454b`), rebuilt BFF (0 errors), re-ran full suite: **9578 passed / 0 failed / 101 skipped**; Compose byte-diff **25/25**. Pushed.
 >
+> **✅ ALSO DONE (2026-07-31): 055 prong 1 (keep-edits recovery)** — commit `da28aa268`. Best-effort per-paragraph save recovery in `ComposeService.SaveAsync`: an op-level patch refusal no longer loses the whole session — apply the resolvable paragraph-units, surface the unresolvable ops (`PartialApplySummary` on the save response + honest client banner), never silently apply/drop. `AppliedCount==0` → re-throw (wholly-unanchorable batch stays a hard 422/409). NEW `ComposePartialApplyRecoverySeamTests` (3) + banner tests (+5). Compose 830/0 (byte-diff 25/25); full BFF 9581/0/101; publish 46.86 MB (≤60); zero new package. All four task-055 deliverables now complete. See `notes/task-055-deviations.md`.
+>
 > **Remaining:**
-> - (1) **Prong 1 (055 fast-follow, DEFERRED — optional safety net):** keep-edits recovery — on an anchor-refusal batch, best-effort apply resolvable ops + surface unresolvable (reuse `ReanchorStaleSaveAsync` AUTO/REVIEW/ORPHAN model). Prong 2 already fixed the root cause, so this is graceful degradation, not a blocker.
-> - (2) **Operator re-deploys BFF + `sprk_spaarkeai` client together** → re-UAT (esp. the 422 flow on a FRESH upload + Open-Document modal). **Do NOT deploy autonomously.**
-> - (3) **090 wrap-up** (/test-diet + /code-review + /adr-check + /merge-to-master).
+> - (1) **Operator re-deploys BFF + `sprk_spaarkeai` client together** → re-UAT (esp. the 422 flow on a FRESH upload + Open-Document modal + the new partial-apply banner). **Do NOT deploy autonomously.**
+> - (2) **090 wrap-up** (/test-diet + /code-review + /adr-check + /merge-to-master).
 >
 > Out-of-scope UAT items (#2,3,4,7,8) captured in `notes/uat-remediation-r5.md` (other projects; no issues filed per owner).
 
