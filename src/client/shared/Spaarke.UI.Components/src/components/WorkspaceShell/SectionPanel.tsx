@@ -116,6 +116,18 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
+  // Section-header title typography (round-8 update 1). Matches the DataGrid-owned
+  // headers (Documents/Matters) so every workspace section header reads the same:
+  // 20px (fontSizeBase500) · 800 weight · #242424 (colorNeutralForeground1 in
+  // light; semantic token adapts in dark — ADR-021). Segoe UI is the default
+  // fontFamilyBase (no override needed). fontWeight 800 has no Fluent token, so the
+  // numeric literal is intentional (a weight, not a color).
+  titleText: {
+    fontSize: tokens.fontSizeBase500,
+    fontWeight: 800,
+    lineHeight: tokens.lineHeightBase500,
+    color: tokens.colorNeutralForeground1,
+  },
   toolbarRow: {
     display: 'flex',
     flexDirection: 'row',
@@ -206,11 +218,7 @@ export const SectionPanel: React.FC<SectionPanelProps> = ({
       {/* Title bar */}
       <div className={styles.titleBar}>
         <div className={styles.titleArea}>
-          {titleContent ?? (
-            <Text size={400} weight="semibold">
-              {title}
-            </Text>
-          )}
+          {titleContent ?? <Text className={styles.titleText}>{title}</Text>}
           {showBadge && (
             <Badge appearance="filled" color="brand" size="small">
               {badgeCount}

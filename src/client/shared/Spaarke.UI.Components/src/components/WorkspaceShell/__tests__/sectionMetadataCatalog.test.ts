@@ -22,8 +22,14 @@ import {
 } from '../sectionMetadataCatalog';
 
 describe('SECTION_METADATA_CATALOG', () => {
-  it('contains exactly the 7 canonical system sections in default order', () => {
-    const expectedIdsInOrder = [
+  it('contains the canonical system sections in default relative order', () => {
+    // The catalog GROWS as new entity sections are added (matters, projects,
+    // invoices, work-assignments, communications, compose-editor, email, …), so an
+    // exact-length/exact-list assertion breaks on every legitimate addition
+    // (round-8: was "exactly 7", catalog is now larger). Instead assert the
+    // canonical system sections are all PRESENT and appear in their expected
+    // RELATIVE order — robust to future additions, still catches reordering/removal.
+    const canonicalInOrder = [
       'get-started',
       'quick-summary',
       'latest-updates',
@@ -32,7 +38,13 @@ describe('SECTION_METADATA_CATALOG', () => {
       'daily-briefing',
       'calendar',
     ];
-    expect(SECTION_METADATA_CATALOG.map(m => m.id)).toEqual(expectedIdsInOrder);
+    const catalogIds = SECTION_METADATA_CATALOG.map(m => m.id);
+    for (const id of canonicalInOrder) {
+      expect(catalogIds).toContain(id);
+    }
+    const positions = canonicalInOrder.map(id => catalogIds.indexOf(id));
+    const ascending = [...positions].sort((a, b) => a - b);
+    expect(positions).toEqual(ascending);
   });
 
   it('includes Calendar with the correct label and category (FR-01)', () => {

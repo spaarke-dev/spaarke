@@ -1,8 +1,12 @@
-$version = "1.9.0"
+$version = "1.10.0"
 $solutionName = "CommunicationConversationPanelSolution"
-$outputPath = "bin"
+# Output is anchored to the SCRIPT dir (not the caller's CWD) so the zip always
+# lands in Solution/bin/ regardless of where pack.ps1 is invoked from — the
+# recurring "zip saved in the wrong place" bug (round-8 UAT). Sources below already
+# use $PSScriptRoot; the output now matches.
+$outputPath = Join-Path $PSScriptRoot "bin"
 if (-not (Test-Path $outputPath)) { New-Item -ItemType Directory -Path $outputPath | Out-Null }
-$zipPath = "$outputPath/${solutionName}_v${version}.zip"
+$zipPath = Join-Path $outputPath "${solutionName}_v${version}.zip"
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::Open($zipPath, 'Create')

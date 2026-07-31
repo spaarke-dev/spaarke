@@ -201,7 +201,8 @@ const useStyles = makeStyles({
   // edge for both mine-right and others-left messages.
   messageActions: {
     display: 'flex',
-    justifyContent: 'flex-end',
+    // Round-8 UAT: actions sit on the message's OWN side (near the bubble), not
+    // pinned to the far pane edge — see messageActionsOwn / messageActionsOther.
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
     // Unobtrusive by default; the reveal is opacity-only so the button keeps
@@ -216,6 +217,15 @@ const useStyles = makeStyles({
     ':focus-within': {
       opacity: 1,
     },
+  },
+  // Own (right-aligned bubble) → actions hug the right, under the bubble.
+  messageActionsOwn: {
+    justifyContent: 'flex-end',
+  },
+  // Others (left-aligned bubble) → actions hug the left, next to the message —
+  // NOT floated to the far right of the pane (round-8 UAT feedback).
+  messageActionsOther: {
+    justifyContent: 'flex-start',
   },
   visuallyHidden: {
     position: 'absolute',
@@ -295,9 +305,11 @@ const useFilterStyles = makeStyles({
     flex: 1,
     minWidth: 0,
   },
-  // Thread name, left-aligned in the tools row (round 7 item 9). `marginInlineEnd:
-  // auto` pushes the trailing tools to the right edge; ellipsis keeps a long name
-  // from crowding the tools.
+  // Thread name, left-aligned in the tools row (round 7 item 9 / round 8 update 2).
+  // `marginInlineEnd: auto` pushes the trailing tools to the right edge; ellipsis
+  // keeps a long name from crowding the tools. Typography per operator spec:
+  // 14px (fontSizeBase300) · 600 (fontWeightSemibold) · #242424
+  // (colorNeutralForeground1 in light; semantic token adapts in dark — ADR-021).
   title: {
     flexShrink: 1,
     minWidth: 0,
@@ -305,6 +317,7 @@ const useFilterStyles = makeStyles({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+    fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
@@ -1043,35 +1056,35 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
                   </Text>
                 </div>
               ) : (
-                <div
-                  key={item.key}
-                  ref={setAnchorRef(item.entry.message.id)}
-                  data-message-id={item.entry.message.id}
-                  data-highlighted={highlightedId === item.entry.message.id ? 'true' : undefined}
-                  className={mergeClasses(
-                    styles.messageAnchor,
-                    highlightedId === item.entry.message.id && styles.messageAnchorHighlight
-                  )}
-                >
-                  {/* Email-type communications render as a compact in-flow block
+                (() => {
+                  const isOwn = isOwnMessage(item.entry.message, currentUserSystemUserId);
+                  const isEmail = item.entry.message.channelType === 'email';
+                  return (
+                    <div
+                      key={item.key}
+                      ref={setAnchorRef(item.entry.message.id)}
+                      data-message-id={item.entry.message.id}
+                      data-highlighted={highlightedId === item.entry.message.id ? 'true' : undefined}
+                      className={mergeClasses(
+                        styles.messageAnchor,
+                        highlightedId === item.entry.message.id && styles.messageAnchorHighlight
+                      )}
+                    >
+                      {/* Email-type communications render as a compact in-flow block
                     (subject/from/to + single "Email" indicator + open-icon,
                     task 021 / FR-04); message-type keep the chat bubble. Only
                     the child swaps — the anchor wrapper (scrollToMessage) +
                     filters are untouched. */}
-                  {item.entry.message.channelType === 'email' ? (
-                    <EmailInFlowBlock
-                      message={item.entry.message}
-                      isOwn={isOwnMessage(item.entry.message, currentUserSystemUserId)}
-                      onOpen={onOpenEmail}
-                    />
-                  ) : (
-                    <MessageBubble
-                      message={item.entry.message}
-                      isOwn={isOwnMessage(item.entry.message, currentUserSystemUserId)}
-                      status={isOwnMessage(item.entry.message, currentUserSystemUserId) ? 'sent' : undefined}
-                      onOpenAttachment={onOpenAttachment}
-                    />
-                  )}
+                      {isEmail ? (
+                        <EmailInFlowBlock message={item.entry.message} isOwn={isOwn} onOpen={onOpenEmail} />
+                      ) : (
+                        <MessageBubble
+                          message={item.entry.message}
+                          isOwn={isOwn}
+                          status={isOwn ? 'sent' : undefined}
+                          onOpenAttachment={onOpenAttachment}
+                        />
+                      )}
 
                   {/* Forward affordance (task 022 / FR-08) — rendered in the anchor
                     wrapper so it applies uniformly to BOTH the chat bubble and
@@ -1090,38 +1103,46 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
                       deletion is owned by the email surface (not here). Both are
                       revealed on row hover/focus (NFR-05) and kept in the DOM/tab
                       order. Rendered when at least one action applies. */}
-                  {(onForwardMessage || item.entry.message.channelType !== 'email') && (
-                    <div className={styles.messageActions} data-message-actions>
-                      {onForwardMessage && (
-                        <Tooltip content={forwardLabel(item.entry.message)} relationship="label">
-                          <Button
-                            appearance="subtle"
-                            size="small"
-                            icon={<ArrowForwardRegular />}
-                            aria-label={forwardLabel(item.entry.message)}
-                            onClick={() => onForwardMessage(item.entry.message)}
-                          />
-                        </Tooltip>
-                      )}
-                      {item.entry.message.channelType !== 'email' && (
-                        <Tooltip content="Delete message" relationship="label">
-                          <Button
-                            appearance="subtle"
-                            size="small"
-                            icon={<DeleteRegular />}
-                            aria-label="Delete message"
-                            onClick={() =>
-                              setPendingDeleteMessage({
-                                id: item.entry.message.id,
-                                label: item.entry.message.body?.slice(0, 60) ?? 'this message',
-                              })
-                            }
-                          />
-                        </Tooltip>
+                      {(onForwardMessage || !isEmail) && (
+                        <div
+                          className={mergeClasses(
+                            styles.messageActions,
+                            isOwn ? styles.messageActionsOwn : styles.messageActionsOther
+                          )}
+                          data-message-actions
+                        >
+                          {onForwardMessage && (
+                            <Tooltip content={forwardLabel(item.entry.message)} relationship="label">
+                              <Button
+                                appearance="subtle"
+                                size="small"
+                                icon={<ArrowForwardRegular />}
+                                aria-label={forwardLabel(item.entry.message)}
+                                onClick={() => onForwardMessage(item.entry.message)}
+                              />
+                            </Tooltip>
+                          )}
+                          {!isEmail && (
+                            <Tooltip content="Delete message" relationship="label">
+                              <Button
+                                appearance="subtle"
+                                size="small"
+                                icon={<DeleteRegular />}
+                                aria-label="Delete message"
+                                onClick={() =>
+                                  setPendingDeleteMessage({
+                                    id: item.entry.message.id,
+                                    label: item.entry.message.body?.slice(0, 60) ?? 'this message',
+                                  })
+                                }
+                              />
+                            </Tooltip>
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
-                </div>
+                  );
+                })()
               )
             )}
         </div>
