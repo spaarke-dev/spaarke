@@ -367,3 +367,40 @@ export async function sendTimelineMessage(
 ): Promise<SendCommunicationResult> {
   return sendCommunication(options, client);
 }
+
+// ---------------------------------------------------------------------------
+// deactivateMessage — DELETE /api/communications/{id} (round 7 item 8)
+// ---------------------------------------------------------------------------
+//
+// Soft-deletes (deactivates) a single message (`sprk_communication`). The server sets statecode to Inactive rather
+// than physically deleting the row, so the action is reversible + preserves audit/archive history (operator decision,
+// round 7). The deactivated message drops out of the thread read on the next poll. Same authenticatedFetch/BFF path +
+// ProblemDetails error shape as every other call in this module (ADR-028 / ADR-019). `<ConversationView />` calls this
+// on a confirmed delete, then forces a poll to refresh.
+// ---------------------------------------------------------------------------
+
+/**
+ * Deactivates (soft-deletes) a message (`DELETE /api/communications/{id}`). Throws
+ * {@link CommunicationTimelineReadError} on any non-2xx response — including a 403 when the caller cannot see/modify the
+ * message. Email-type communications are NOT deleted via this path (round 7 item 8 — email deletion is owned by the
+ * email surface); the caller only offers this for message-type rows.
+ */
+export async function deactivateMessage(
+  messageId: string,
+  client: ICommunicationTimelineApiClientOptions
+): Promise<void> {
+  if (!messageId) {
+    throw new Error('deactivateMessage: messageId is required.');
+  }
+  if (!client.authenticatedFetch) {
+    throw new Error('deactivateMessage: authenticatedFetch is required.');
+  }
+
+  const path = `/api/communications/${encodeURIComponent(messageId)}`;
+  const url = client.bffBaseUrl ? client.bffBaseUrl.replace(/\/+$/, '') + path : path;
+  const response = await client.authenticatedFetch(url, { method: 'DELETE' });
+
+  if (!response.ok) {
+    throw await CommunicationTimelineReadError.fromResponse(response);
+  }
+}

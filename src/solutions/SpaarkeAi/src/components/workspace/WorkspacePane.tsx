@@ -36,8 +36,9 @@ import {
   createXrmNavigationService,
   searchUsersAndContacts,
   ANALYSIS_REGARDING_TARGETS,
-} from '@spaarke/ui-components';
-import type { AssociationResult } from '@spaarke/ui-components';
+  resolveAnalysisFilePreview,
+} from "@spaarke/ui-components";
+import type { AssociationResult } from "@spaarke/ui-components";
 import {
   usePaneEvent,
   useDispatchPaneEvent,
@@ -312,6 +313,27 @@ export function WorkspacePane(): React.JSX.Element {
     (query: string) => searchUsersAndContacts(analysisWizardDataService, query),
     [analysisWizardDataService]
   );
+
+  // SPE container resolver for the Analysis wizard's file upload (UAT #7 fix,
+  // 2026-07-30). The wizard's `onFinish` throws "No storage container is configured
+  // for your business unit" when `speContainerId` is empty — the root cause was that
+  // the modal host never supplied a `resolveSpeContainerId`. This is the SAME
+  // current-user → business-unit → `sprk_containerid` chain every shipped Create
+  // wizard uses (useWizardPageBootstrap.ts / the Create* code pages). Pure Dataverse
+  // Web API via the Xrm host global (no BFF/OBO); the GUID-strip on userId is required.
+  const resolveAnalysisSpeContainerId = React.useCallback(async (): Promise<string> => {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const xrm: any =
+      (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+    /* eslint-enable @typescript-eslint/no-explicit-any */
+    if (!xrm?.WebApi?.retrieveRecord) throw new Error("Xrm.WebApi not available");
+    const userId: string = xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "");
+    const user = await xrm.WebApi.retrieveRecord("systemuser", userId, "?$select=_businessunitid_value");
+    const buId = user["_businessunitid_value"] as string;
+    if (!buId) throw new Error("Could not resolve business unit");
+    const bu = await xrm.WebApi.retrieveRecord("businessunit", buId, "?$select=sprk_containerid");
+    return (bu["sprk_containerid"] as string) || "";
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Create Analysis wizard MODAL host (ai-advanced-capabilities-analysis-hub-r1
@@ -909,12 +931,16 @@ export function WorkspacePane(): React.JSX.Element {
       return () => window.clearTimeout(timerId);
     }
 
-    // mode === 'existing' — resolve the bound session, then switch to it in place.
+    // mode === 'existing' — load the analysis's latest conversation history (if a
+    // session is bound) AND surface the analysis's document. UAT round 4: for an
+    // analysis with no bound session yet (e.g. freshly created), the modal must still
+    // SHOW the analysis (its linked document) rather than an empty workspace.
     const analysisId = analysisLaunch.analysisId;
     if (!analysisId || !bffBaseUrl) return;
     let cancelled = false;
     const timerId = window.setTimeout(() => {
       void (async () => {
+        let sessionRestored = false;
         try {
           const lookupUrl = buildBffApiUrl(
             bffBaseUrl,
@@ -924,18 +950,86 @@ export function WorkspacePane(): React.JSX.Element {
             headers: { Accept: 'application/json' },
           });
           if (cancelled) return;
-          // 404 (no session ever bound) / any non-OK → graceful no-op. The modal
-          // renders the default welcome; never mint an empty session (task 031
-          // escalation contract).
-          if (!response.ok) return;
-          const session = (await response.json()) as { sessionId?: string };
-          if (cancelled || !session.sessionId) return;
-          dispatch('conversation', {
-            type: 'session_switch',
-            sessionId: session.sessionId,
+          // 404 (no session ever bound) / any non-OK → fall through to the
+          // document-only surface below; never mint an empty session (task 031).
+          if (response.ok) {
+            const session = (await response.json()) as { sessionId?: string };
+            if (!cancelled && session.sessionId) {
+              sessionRestored = true;
+              // Restores the transcript (Assistant history) + the session-keyed
+              // review/findings widgets (which include the analysis's document).
+              dispatch("conversation", {
+                type: "session_switch",
+                sessionId: session.sessionId,
+              });
+            }
+          }
+        } catch {
+          // Network/parse failure — fall through to the document-only surface.
+        }
+
+        // No bound session → open the analysis's linked document in the EDITABLE
+        // Compose/TipTap surface (Phase 1, UAT round 5): the analysis surface IS the
+        // review surface, not a read-only preview. Resolve the SPE pointer from the
+        // linked sprk_document (`sprk_graphitemid` = drive-item, `sprk_graphdriveid` =
+        // drive — BOTH required by ComposeEditor; mirrors DocumentComposeLaunch).
+        // Falls back to the read-only document-viewer if the pointer is incomplete.
+        if (cancelled || sessionRestored) return;
+        try {
+          const rec = (await analysisWizardDataService.retrieveRecord(
+            "sprk_analysis",
+            analysisId,
+            "?$select=sprk_name,sprk_worktype,_sprk_documentid_value" +
+              "&$expand=sprk_documentid($select=sprk_filename,sprk_graphitemid,sprk_graphdriveid)",
+          )) as Record<string, unknown>;
+          if (cancelled) return;
+          const doc = (rec["sprk_documentid"] ?? {}) as Record<string, unknown>;
+          const speDriveItemId = doc["sprk_graphitemid"] as string | undefined;
+          const speDriveId = doc["sprk_graphdriveid"] as string | undefined;
+          const documentId = rec["_sprk_documentid_value"] as string | undefined;
+          const fileName =
+            (doc["sprk_filename"] as string | undefined) ?? (rec["sprk_name"] as string | undefined) ?? "Document";
+          // Agreement/NDA work-type (100000000) scopes the Compose AI toolbar tools.
+          const activeWorkType = rec["sprk_worktype"] === 100000000 ? "agreement-analysis" : undefined;
+
+          if (speDriveItemId && speDriveId) {
+            dispatch("workspace", {
+              type: "widget_load",
+              widgetType: "compose",
+              widgetData: {
+                compose: {
+                  speDriveItemId,
+                  speDriveId,
+                  ...(documentId ? { sprkDocumentId: documentId } : {}),
+                  fileName,
+                  ...(activeWorkType ? { activeWorkType } : {}),
+                },
+              },
+              displayName: fileName,
+            });
+            return;
+          }
+
+          // Incomplete SPE pointer → read-only preview fallback (ADR-007 hop).
+          const preview = resolveAnalysisFilePreview(
+            rec as Parameters<typeof resolveAnalysisFilePreview>[0],
+            { bffBaseUrl, authenticatedFetch },
+          );
+          if (preview.status !== "resolved") return;
+          dispatch("workspace", {
+            type: "widget_load",
+            widgetType: "document-viewer",
+            widgetData: {
+              filename: preview.documentName,
+              contentType: "application/octet-stream",
+              textContent: "",
+              documentId: preview.documentId,
+              fetchPreviewUrl: preview.fetchPreviewUrl,
+            },
+            displayName: preview.documentName,
           });
         } catch {
-          // Network/parse failure — graceful no-op (the modal shows the default surface).
+          // Could not resolve the document — leave the workspace to the default surface.
         }
       })();
     }, 0);
@@ -944,9 +1038,9 @@ export function WorkspacePane(): React.JSX.Element {
       window.clearTimeout(timerId);
     };
     // Run once per mount when auth + restore are ready; the ref guard prevents
-    // re-runs. authenticatedFetch is a stable module-level reference.
+    // re-runs. authenticatedFetch + analysisWizardDataService are stable refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysisLaunch, isAuthenticated, tabRestoreSettled, bffBaseUrl]);
+  }, [analysisLaunch, isAuthenticated, tabRestoreSettled, bffBaseUrl, analysisWizardDataService]);
 
   // ---------------------------------------------------------------------------
   // Auto-open pinned workspaces — task 092 / round 5 / task 101 fix
@@ -1429,6 +1523,7 @@ export function WorkspacePane(): React.JSX.Element {
               navigationService: analysisWizardNavigationService,
               searchUsers: analysisWizardSearchUsers,
               searchAssignees: analysisWizardSearchUsers,
+              resolveSpeContainerId: resolveAnalysisSpeContainerId,
               authenticatedFetch,
               bffBaseUrl,
               ...(chatSessionId ? { sessionId: chatSessionId } : {}),
@@ -1797,6 +1892,7 @@ export function WorkspacePane(): React.JSX.Element {
               navigationService: analysisWizardNavigationService,
               searchUsers: analysisWizardSearchUsers,
               searchAssignees: analysisWizardSearchUsers,
+              resolveSpeContainerId: resolveAnalysisSpeContainerId,
               authenticatedFetch,
               bffBaseUrl,
               ...(chatSessionId ? { sessionId: chatSessionId } : {}),

@@ -274,6 +274,16 @@ export interface ICreateRecordWizardConfig {
    */
   hideFilesStep?: boolean;
   /**
+   * When `true`, the "Add file(s)" step is REQUIRED: the Skip button is hidden and
+   * Next stays disabled until the user uploads at least one file OR picks an existing
+   * record (via `existingRecordPicker`). Use for wizards whose `onFinish` cannot
+   * proceed without a document (e.g. the Analysis wizard — the analysis IS a document
+   * review). Defaults to `false`/undefined — the step stays skip-able + Next always
+   * enabled (the grounding-optional default for every other wizard, FR-A5). Mutually
+   * sensible with `hideFilesStep` OFF; ignored when `hideFilesStep` is `true`.
+   */
+  requireFilesStep?: boolean;
+  /**
    * Optional "select an existing record" affordance rendered inside the
    * built-in "Add file(s)" step, alongside the upload dropzone
    * (ai-advanced-capabilities-analysis-hub-r1 task 040 — the Analysis
@@ -449,6 +459,18 @@ export interface ICreateRecordWizardProps {
   config: ICreateRecordWizardConfig;
   /** When true, renders without Dialog wrapper (Dataverse modal provides chrome). */
   embedded?: boolean;
+  /**
+   * Optional modal max-width, forwarded to `WizardShell` (non-embedded mode only).
+   * Defaults to WizardShell's `95vw`. Set a fixed px value (e.g. `'640px'`) so an
+   * in-app modal (`embedded={false}`) matches the Dataverse Create-wizard modal size
+   * instead of filling the viewport. Ignored in embedded mode.
+   */
+  maxWidth?: string;
+  /**
+   * Optional modal height, forwarded to `WizardShell` (non-embedded mode only).
+   * Defaults to WizardShell's `70vh`. Ignored in embedded mode.
+   */
+  height?: string;
 }
 
 // ---------------------------------------------------------------------------

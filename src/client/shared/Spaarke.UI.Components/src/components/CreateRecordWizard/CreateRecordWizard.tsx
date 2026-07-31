@@ -149,7 +149,14 @@ const EMPTY_SEARCH = () => Promise.resolve([] as ILookupItem[]);
 // CreateRecordWizard
 // ---------------------------------------------------------------------------
 
-export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, onClose, config, embedded }) => {
+export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
+  open,
+  onClose,
+  config,
+  embedded,
+  maxWidth,
+  height,
+}) => {
   const styles = useStyles();
   const shellRef = React.useRef<IWizardShellHandle>(null);
 
@@ -653,8 +660,14 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
       // `isSkippable: true` -- Next was disabled with no file even though Skip
       // always bypassed the same requirement. Always-true removes that
       // confusing dead-end and makes "no file needed" true for both buttons.
-      canAdvance: () => true,
-      isSkippable: true,
+      // `config.requireFilesStep` (ai-advanced-capabilities-analysis-hub-r1 UAT)
+      // OPTS BACK IN to a required document for wizards whose onFinish cannot
+      // proceed without one (the Analysis wizard): Next is gated on a file or an
+      // existing-record pick, and the Skip button is hidden. Every other wizard
+      // omits the flag → unchanged grounding-optional default (always advanceable).
+      canAdvance: () =>
+        config.requireFilesStep ? fileState.uploadedFiles.length > 0 || selectedExistingRecord !== null : true,
+      isSkippable: !config.requireFilesStep,
       renderContent: () => (
         <>
           <div>
@@ -832,6 +845,8 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
       onFinish={handleFinish}
       finishingLabel={config.finishingLabel ?? 'Creating\u2026'}
       finishLabel="Finish"
+      {...(maxWidth ? { maxWidth } : {})}
+      {...(height ? { height } : {})}
     />
   );
 };

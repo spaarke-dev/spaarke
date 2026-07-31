@@ -510,3 +510,35 @@ export async function setThreadPinned(
 
   return (await response.json()) as ISetThreadPinnedResultDto;
 }
+
+// ---------------------------------------------------------------------------
+// deactivateThread — DELETE /api/communications/threads/{threadId} (round 7 item 7)
+// ---------------------------------------------------------------------------
+//
+// Soft-deletes (deactivates) a thread. The server sets the thread's statecode to Inactive rather than physically
+// deleting the row, so the action is reversible + preserves audit/archive history (operator decision, round 7). The
+// deactivated thread drops out of the list on the next load. Same authenticatedFetch/BFF path + ProblemDetails error
+// shape as every other write in this module (ADR-028 / ADR-019). `<ConversationWorkspace />` calls this on a confirmed
+// delete, then refreshes the list + re-selects.
+// ---------------------------------------------------------------------------
+
+/**
+ * Deactivates (soft-deletes) a thread (`DELETE /api/communications/threads/{threadId}`). Throws
+ * {@link CommunicationThreadListError} on any non-2xx response — including a 403 when the caller cannot see/modify the
+ * thread — exactly like the read/write wrappers above.
+ */
+export async function deactivateThread(threadId: string, client: IThreadListApiClientOptions): Promise<void> {
+  if (!threadId) {
+    throw new Error('deactivateThread: threadId is required.');
+  }
+  if (!client.authenticatedFetch) {
+    throw new Error('deactivateThread: authenticatedFetch is required.');
+  }
+
+  const url = resolveUrl(client.bffBaseUrl, `/api/communications/threads/${encodeURIComponent(threadId)}`);
+  const response = await client.authenticatedFetch(url, { method: 'DELETE' });
+
+  if (!response.ok) {
+    throw await CommunicationThreadListError.fromResponse(response);
+  }
+}
