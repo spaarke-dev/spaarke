@@ -35,6 +35,7 @@ public sealed class AutoFileGate
         var enabled = o.Enabled;
         var threshold = o.Threshold;
         var rung23 = o.Rung2And3AutoFileEnabled;
+        var core = o.CoreWritableEntities;
 
         if (!string.IsNullOrWhiteSpace(tenantKey) &&
             o.Tenants.TryGetValue(tenantKey, out var overrideEntry) &&
@@ -43,9 +44,13 @@ public sealed class AutoFileGate
             if (overrideEntry.Enabled.HasValue) enabled = overrideEntry.Enabled.Value;
             if (overrideEntry.Threshold.HasValue) threshold = overrideEntry.Threshold.Value;
             if (overrideEntry.Rung2And3AutoFileEnabled.HasValue) rung23 = overrideEntry.Rung2And3AutoFileEnabled.Value;
+            if (overrideEntry.CoreWritableEntities is not null) core = overrideEntry.CoreWritableEntities;
         }
 
-        return new AutoFileSettings(enabled, threshold, rung23);
+        var coreSet = new HashSet<string>(
+            core ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+
+        return new AutoFileSettings(enabled, threshold, rung23, coreSet);
     }
 }
 
@@ -57,4 +62,14 @@ public sealed class AutoFileGate
 /// (ExplicitReference) and rung 1 (ThreadContinuity) are auto-file-eligible. <c>true</c> = legacy
 /// pre-C-1 behavior — rungs 0–3 are all auto-file-eligible.
 /// </param>
-public readonly record struct AutoFileSettings(bool Enabled, double Threshold, bool Rung2And3AutoFileEnabled = false);
+/// <param name="CoreWritableEntities">
+/// Entity logical names that may be auto-associated (written) at capture (061 UAT round-3). Resolved from
+/// <see cref="AutoFileOptions.CoreWritableEntities"/> (case-insensitive). A regarding target whose entity
+/// is NOT in this set is surfaced as a Suggested review candidate, never written automatically. Null is
+/// treated as the empty set.
+/// </param>
+public readonly record struct AutoFileSettings(
+    bool Enabled,
+    double Threshold,
+    bool Rung2And3AutoFileEnabled = false,
+    IReadOnlySet<string>? CoreWritableEntities = null);

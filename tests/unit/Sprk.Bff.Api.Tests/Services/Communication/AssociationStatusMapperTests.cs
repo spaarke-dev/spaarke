@@ -48,11 +48,13 @@ public class AssociationStatusMapperTests
     }
 
     [Fact]
-    public void Decide_FallbackContactMatchOnly_AtOrAboveThreshold_DoesNotAutoFile_ButWritesTheContact()
+    public void Decide_ContactMatchOnly_AtOrAboveThreshold_DoesNotAutoFile_AndIsCandidateNotWritten()
     {
-        // A contact/participant match is a fallback identity signal — not what the email is about. Even at
-        // high deterministic confidence it must NOT auto-file to Resolved; it lands Suggested (review for the
-        // substantive matter/project/invoice) while the contact is still written (a correct association).
+        // 061 UAT round-3 (owner, 2026-07-31): a contact is NON-CORE — it must NEVER be auto-associated.
+        // Even at high deterministic confidence it does not auto-file AND is not written; it is surfaced as a
+        // Suggested review candidate the user confirms (r5's review surface writes it on confirm). This
+        // TIGHTENS the prior rule ("a contact doesn't auto-file but is still written") to "a contact isn't
+        // auto-associated at all."
         var contactId = Guid.NewGuid();
         var mapper = AssociationTestSupport.Mapper(enabled: true, threshold: 0.85);
 
@@ -62,21 +64,18 @@ public class AssociationStatusMapperTests
 
         decision.Status.Should().Be(AssociationStatusCodes.Suggested);
         decision.AutoFiled.Should().BeFalse();
-        decision.RegardingWrites.Should().ContainKey(PersonField); // fallback still written (filed)
-        decision.RegardingWrites[PersonField].Id.Should().Be(contactId);
+        decision.RegardingWrites.Should().NotContainKey(PersonField); // non-core: never auto-written
+        // Still surfaced for the reviewer to confirm.
+        decision.Provenance.Candidates.Should().Contain(c => c.Field == PersonField && c.TargetId == contactId.ToString("D") && !c.Written);
     }
 
     [Fact]
-    public void Decide_SubstantiveMatterPlusFallbackContact_AutoFilesOnTheMatter()
+    public void Decide_CoreMatterPlusNonCoreContact_AutoFilesTheMatter_ButLeavesContactAsCandidate()
     {
-        // A substantive matter match ≥ threshold auto-files Resolved; the co-occurring contact fallback is
-        // written too. (The contact no longer suppresses — nor is required for — the substantive auto-file.)
-        //
-        // C-1 DECOUPLING (021): the contact fallback here is identified via rung 2 (ParticipantCorrelation),
-        // which is no longer auto-file-eligible for the STATUS decision — but it IS still in the deterministic
-        // WRITE set (rung 0–3), so it is persisted alongside the auto-filed matter exactly as the shipped
-        // design specifies ("fallback matches are still WRITTEN"). r5's review surface displays it. This
-        // proves the C-1 narrowing changed only the auto-file STATUS, not the Resolved-branch write set.
+        // 061 UAT round-3: a core matter match ≥ threshold auto-files Resolved and IS written; the
+        // co-occurring contact is NON-CORE, so it is surfaced as a Suggested candidate but NEVER written
+        // automatically (owner: "never auto-associate contacts/orgs/invoices"). This is the exact fix for the
+        // UAT screenshot where "Ralph Schroeder (Contact)" showed under "Filed automatically".
         var matterId = Guid.NewGuid();
         var contactId = Guid.NewGuid();
         var mapper = AssociationTestSupport.Mapper(enabled: true, threshold: 0.85);
@@ -92,7 +91,76 @@ public class AssociationStatusMapperTests
         decision.Status.Should().Be(AssociationStatusCodes.Resolved);
         decision.AutoFiled.Should().BeTrue();
         decision.RegardingWrites.Should().ContainKey(MatterField);
-        decision.RegardingWrites.Should().ContainKey(PersonField);
+        decision.RegardingWrites.Should().NotContainKey(PersonField); // contact is non-core: candidate only
+        decision.Provenance.Candidates.Should().Contain(c => c.Field == PersonField && !c.Written);
+    }
+
+    [Fact]
+    public void Decide_InvoiceViaExplicitReference_DoesNotAutoFile_AndIsCandidateNotWritten()
+    {
+        // 061 UAT round-3: an invoice is NON-CORE even when matched by a rung-0 ExplicitReference at high
+        // confidence — the write/auto-file gate is by ENTITY TYPE, not by rung strength. The owner named
+        // invoices explicitly as "never auto-associate." It surfaces as a Suggested candidate.
+        var invoiceId = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(enabled: true, threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[] { Match("sprk_regardinginvoice", invoiceId, 0.90, RungKind.ExplicitReference, entity: "sprk_invoice") },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Suggested);
+        decision.AutoFiled.Should().BeFalse();
+        decision.RegardingWrites.Should().NotContainKey("sprk_regardinginvoice");
+        decision.Provenance.Candidates.Should().Contain(c => c.Field == "sprk_regardinginvoice" && !c.Written);
+    }
+
+    [Fact]
+    public void Decide_ServiceRequestViaExplicitReference_IsCore_AutoFilesAndWritten()
+    {
+        // 061 UAT round-3: the owner included service request in the core-writable set — so a rung-0 match on
+        // a service request DOES auto-file and IS written, exactly like a matter/project. Guards the boundary
+        // of the core set (a type ON the list behaves as core; a type OFF it is candidate-only).
+        var srId = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(enabled: true, threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[] { Match("sprk_regardingservicerequest", srId, 0.90, RungKind.ExplicitReference, entity: "sprk_servicerequest") },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Resolved);
+        decision.AutoFiled.Should().BeTrue();
+        decision.RegardingWrites.Should().ContainKey("sprk_regardingservicerequest");
+        decision.RegardingWrites["sprk_regardingservicerequest"].Id.Should().Be(srId);
+    }
+
+    [Fact]
+    public void Decide_TwoConflictingMattersPlusContact_Ambiguous_WritesNothing_UatRound3Regression()
+    {
+        // Exact 061 UAT round-3 shape (comm cfd3f282): two matters conflict at ≥ threshold → Ambiguous (the
+        // matters are NOT written, surfaced as "Needs your decision"); a contact is reinforced by
+        // thread/participant/contact-name rungs. Before the fix the contact was WRITTEN → r5 rendered it under
+        // "Filed automatically". After the fix NOTHING is auto-written: the matters are withheld (conflict) and
+        // the contact is non-core (candidate only). The contact still surfaces as a Suggested candidate.
+        var matterA = Guid.NewGuid();
+        var matterB = Guid.NewGuid();
+        var contactId = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(enabled: true, threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[]
+            {
+                Match(MatterField, matterA, 0.90, RungKind.ExplicitReference),
+                Match(MatterField, matterB, 0.90, RungKind.ExplicitReference),
+                Match(PersonField, contactId, 0.65, RungKind.ThreadContinuity, entity: "contact"),
+                Match(PersonField, contactId, 0.70, RungKind.ParticipantCorrelation, entity: "contact"),
+                Match(PersonField, contactId, 0.68, RungKind.ContactNameMatch, entity: "contact"),
+            },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Ambiguous);
+        decision.AutoFiled.Should().BeFalse();
+        decision.RegardingWrites.Should().BeEmpty("matters conflict (withheld) and the contact is non-core (candidate only)");
+        decision.Provenance.Candidates.Should().Contain(c => c.Field == PersonField && !c.Written);
     }
 
     // ── RecordNameMatch (rung 3.5): deterministic-but-surface-only (email-r4 UAT 2026-07-17) ─────────────
@@ -161,15 +229,18 @@ public class AssociationStatusMapperTests
     [Fact]
     public void Decide_MidConfidence_LandsSuggested()
     {
+        var contactId = Guid.NewGuid();
         var mapper = AssociationTestSupport.Mapper();
 
         var decision = mapper.Decide(
-            new[] { Match(PersonField, Guid.NewGuid(), 0.70, RungKind.ParticipantCorrelation, entity: "contact") },
+            new[] { Match(PersonField, contactId, 0.70, RungKind.ParticipantCorrelation, entity: "contact") },
             CommunicationDirection.Incoming, tenantKey: null);
 
         decision.Status.Should().Be(AssociationStatusCodes.Suggested);
         decision.AutoFiled.Should().BeFalse();
-        decision.RegardingWrites.Should().ContainKey(PersonField);
+        // A contact is non-core (061 UAT round-3): surfaced as a candidate, not auto-written.
+        decision.RegardingWrites.Should().NotContainKey(PersonField);
+        decision.Provenance.Candidates.Should().Contain(c => c.Field == PersonField && c.TargetId == contactId.ToString("D") && !c.Written);
     }
 
     [Fact]
@@ -458,11 +529,11 @@ public class AssociationStatusMapperTests
     // ── Complementary fields ─────────────────────────────────────────────────────
 
     [Fact]
-    public void Decide_ComplementaryFields_WritesBothWhenResolved()
+    public void Decide_CoreFieldAutoFiles_NonCoreContactRemainsCandidate()
     {
-        // A rung-1 matter auto-files (Resolved) and its co-occurring rung-2 (ParticipantCorrelation) contact
-        // field is written alongside it — proving the deterministic WRITE set is the full rung 0–3 set,
-        // decoupled from the C-1 auto-file-STATUS narrowing (rung 0+1).
+        // A rung-1 matter auto-files (Resolved) and IS written; its co-occurring contact is NON-CORE, so it is
+        // surfaced as a candidate but NOT written (061 UAT round-3 — supersedes the earlier "write the full
+        // rung 0–3 set including contacts" behavior; the owner tightened non-core to candidate-only).
         var matterId = Guid.NewGuid();
         var personId = Guid.NewGuid();
         var mapper = AssociationTestSupport.Mapper(threshold: 0.85);
@@ -477,7 +548,8 @@ public class AssociationStatusMapperTests
 
         decision.Status.Should().Be(AssociationStatusCodes.Resolved);
         decision.RegardingWrites.Should().ContainKey(MatterField);
-        decision.RegardingWrites.Should().ContainKey(PersonField);
+        decision.RegardingWrites.Should().NotContainKey(PersonField); // non-core: candidate only
+        decision.Provenance.Candidates.Should().Contain(c => c.Field == PersonField && !c.Written);
     }
 
     // ── Per-tenant kill-switch ───────────────────────────────────────────────────
@@ -583,7 +655,7 @@ public class AssociationStatusMapperTests
         personCandidates.Should().HaveCount(2, "both named contacts must surface for review");
         personCandidates.Select(c => c.TargetId).Should()
             .BeEquivalentTo(new[] { eyalId.ToString("D"), saraId.ToString("D") });
-        personCandidates.Count(c => c.Written).Should().Be(1, "only the single-value lookup winner is written");
+        personCandidates.Count(c => c.Written).Should().Be(0, "contacts are non-core (061 UAT round-3): surfaced for review, never auto-written");
     }
 
     [Fact]
