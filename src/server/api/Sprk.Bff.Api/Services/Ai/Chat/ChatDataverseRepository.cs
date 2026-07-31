@@ -262,13 +262,28 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
         {
             // No sprk_aichatsummary anchor row (e.g. a session whose cold-tier create was skipped or
             // failed — CreateSessionAsync tolerates a Dataverse write failure and continues on Redis
-            // only). There is no row to bind; the caller's Redis/Cosmos HostContext update still
-            // proceeds (best-effort durable FK — same tolerant posture as ArchiveSessionAsync).
-            _logger.LogWarning(
-                "BindSessionToAnalysisAsync: no sprk_aichatsummary row for session {SessionId} (tenant={TenantId}) — " +
-                "sprk_analysis FK not bound. Redis/Cosmos HostContext update still proceeds (best-effort).",
-                sessionId, tenantId);
-            return false;
+            // only). UNLIKE the tolerant archive path, PROMOTE cannot no-op here: the durable
+            // sprk_analysis FK is promotion's ENTIRE deliverable — it is what makes the Analysis
+            // queryable via GetSessionsByAnalysisAsync / visible in the hub grid. A silent no-op left
+            // promote returning 201 with an orphaned Analysis (agreements-r1 Q2 / silent-FK gap,
+            // 2026-07-31). So we CREATE the anchor row now WITH the FK (minimal columns — message
+            // count / playbook backfill on the next cold write; the FK is the point). A real Dataverse
+            // write failure throws and propagates to the caller's compensation (Analysis delete).
+            var created = new Entity(SummaryEntityName)
+            {
+                ["sprk_sessionid"] = sessionId,
+                ["sprk_tenantid"] = tenantId,
+                ["sprk_messagecount"] = 0,
+                ["sprk_isarchived"] = false,
+                [AnalysisFkAttribute] = new EntityReference(AnalysisEntityName, analysisId),
+            };
+            var createdId = await _genericEntityService.CreateAsync(created, ct);
+
+            _logger.LogInformation(
+                "BindSessionToAnalysisAsync: no existing sprk_aichatsummary for session {SessionId} (tenant={TenantId}) — " +
+                "created anchor row {RecordId} WITH the sprk_analysis {AnalysisId} FK (promote durable-bind).",
+                sessionId, tenantId, createdId, analysisId);
+            return true;
         }
 
         await _genericEntityService.UpdateAsync(

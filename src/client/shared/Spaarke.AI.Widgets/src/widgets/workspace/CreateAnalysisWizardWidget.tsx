@@ -297,7 +297,13 @@ interface ContactLookupControlProps {
   placeholder?: string;
 }
 
-const ContactLookupControl: React.FC<ContactLookupControlProps> = ({ value, onPick, onClear, disabled, placeholder }) => (
+const ContactLookupControl: React.FC<ContactLookupControlProps> = ({
+  value,
+  onPick,
+  onClear,
+  disabled,
+  placeholder,
+}) => (
   <Input
     readOnly
     value={value?.name ?? ''}
@@ -802,8 +808,11 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           } catch {
             /* fall through to hardcoded nav-prop name below */
           }
+          // The lookup ATTRIBUTE on sprk_analysis is `sprk_agreementtype` (OData
+          // `_sprk_agreementtype_value`); `sprk_agreementtypeid` is the reference table's PK.
+          // discoverNavProps keys on the attribute logical name; fallback = PascalCase nav-prop.
           const atNavProp =
-            atNavProps.find(e => e.columnName === 'sprk_agreementtypeid')?.navPropName ?? 'sprk_AgreementType';
+            atNavProps.find(e => e.columnName === 'sprk_agreementtype')?.navPropName ?? 'sprk_AgreementType';
           payload[`${atNavProp}@odata.bind`] = `/sprk_agreementtypes(${agreementTypeId.replace(/[{}]/g, '')})`;
         }
 

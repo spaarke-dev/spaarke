@@ -376,7 +376,14 @@ export interface WorkspacePaneEvent {
     //    finish the wizard opens its result tab exactly as today. Additive
     //    discriminant (ADR-030); carries `analysisWorkType` + `analysisWorkTypeLabel`
     //    only (a Choice integer + display string — Tier-1 safe, ADR-015).
-    | 'open_create_analysis_wizard';
+    | 'open_create_analysis_wizard'
+    // ── Analysis grid row-click → open the analysis HEADLESS
+    //    (ai-advanced-capabilities-analysis-hub-r1) ── Workspace channel. The Analysis
+    //    hub grid asks the host to open the picked analysis as a HEADLESS SpaarkeAi
+    //    code-page modal (`openSpaarkeAi` target:2 — no OOB `sprk_analysis` form chrome)
+    //    instead of the OOB form. Carries `analysisId` only (a record GUID — Tier-1 safe,
+    //    ADR-015). Handled by WorkspacePane (owns `openSpaarkeAi`). Additive (ADR-030).
+    | 'open_analysis_headless';
 
   /** Identifies the widget kind (e.g. `"document-summary"`, `"clause-list"`). */
   widgetType?: string;
@@ -925,6 +932,12 @@ export interface WorkspacePaneEvent {
   // resolves it from the host `entityContext` it already holds (the record the
   // SpaarkeAi surface was launched in), so no user-content identity crosses the
   // bus.
+
+  /**
+   * Analysis record GUID for `type === 'open_analysis_headless'` — the analysis to open
+   * as a headless SpaarkeAi modal. A record identifier only (Tier-1 safe, ADR-015).
+   */
+  analysisId?: string;
 
   /**
    * `sprk_worktype` Choice integer for `type === 'open_create_analysis_wizard'`.

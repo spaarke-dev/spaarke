@@ -53,6 +53,7 @@ import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import { useOptionalDispatchPaneEvent } from '../../events/useDispatchPaneEvent';
+import { useOptionalPaneEventBus } from '../../events/PaneEventBusContext';
 import { DataverseEntityViewWidget } from './DataverseEntityViewWidget';
 
 // ---------------------------------------------------------------------------
@@ -121,6 +122,9 @@ export const AnalysisHubWidget: React.FC<WorkspaceWidgetProps<AnalysisHubWidgetD
   // Pattern D dual-use: read the PaneEventBus OPTIONALLY so `+ New` degrades to a
   // no-op in a bus-less host (LegalWorkspace section / MDA / dev) instead of throwing.
   const dispatch = useOptionalDispatchPaneEvent();
+  // The bus INSTANCE (not the no-op dispatch) tells us whether we're hosted in the
+  // SpaarkeAi shell — used to decide the row-click behavior below.
+  const bus = useOptionalPaneEventBus();
 
   const gridConfigId = data?.configId ?? ANALYSIS_HUB_GRID_CONFIG_ID;
 
@@ -132,10 +136,25 @@ export const AnalysisHubWidget: React.FC<WorkspaceWidgetProps<AnalysisHubWidgetD
     dispatch('conversation', { type: 'open_quick_start', quickStartTab: 'analysis' });
   }, [dispatch]);
 
+  // Row-click: when HOSTED in SpaarkeAi (bus present), open the picked analysis as a
+  // HEADLESS SpaarkeAi code-page modal — WorkspacePane routes this intent to
+  // `openSpaarkeAi({ analysisId }, 2)` (target:2, no OOB `sprk_analysis` form chrome).
+  // In a bus-less host (LegalWorkspace section / MDA / dev) leave `onRecordOpen`
+  // UNDEFINED so the DataGrid keeps its OOB-form default (openForm) — no dead click.
+  const onRecordOpen = React.useMemo(
+    () =>
+      bus
+        ? (recordId: string): void => {
+            dispatch('workspace', { type: 'open_analysis_headless', analysisId: recordId });
+          }
+        : undefined,
+    [bus, dispatch]
+  );
+
   return (
     <div className={mergeClasses(styles.root, className)} data-testid="analysis-hub-widget">
       <DataverseEntityViewWidget
-        data={{ configId: gridConfigId, onCreateNew: handleCreateNew }}
+        data={{ configId: gridConfigId, onCreateNew: handleCreateNew, onRecordOpen }}
         widgetType={ANALYSIS_HUB_GRID_WIDGET_TYPE}
       />
     </div>

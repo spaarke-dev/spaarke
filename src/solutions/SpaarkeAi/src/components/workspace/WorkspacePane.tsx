@@ -90,6 +90,9 @@ import {
   TELEMETRY_UI_ACTION_ACK_FAILURE,
 } from '../../telemetry/errorTelemetry';
 import { getPinnedWorkspaces, prunePinnedToKnown } from '../../services/pinnedWorkspaces';
+// ai-advanced-capabilities-analysis-hub-r1: headless analysis open (grid row-click →
+// openSpaarkeAi target:2). Owns the code-page modal primitive (ADR-039 code-routing).
+import { openSpaarkeAi } from '../../utils/launch-resolver';
 // Wave 2b (task 109): the cold-load default tab is now driven by
 // useWorkspaceLayouts().activeLayout (the BFF's discovered default — Daily
 // Briefing in dev) instead of a hard-coded Home tab. See the auto-install
@@ -1242,6 +1245,18 @@ export function WorkspacePane(): React.JSX.Element {
         workTypeValue: event.analysisWorkType,
         workTypeLabel: event.analysisWorkTypeLabel,
       });
+      return;
+    }
+
+    // ai-advanced-capabilities-analysis-hub-r1 (headless analysis open): the Analysis
+    // hub grid row-click opens the picked analysis as a HEADLESS SpaarkeAi code-page
+    // modal (`openSpaarkeAi` target:2 — no OOB `sprk_analysis` form chrome), instead of
+    // the OOB form. A fresh SpaarkeAi instance mounts on `analysisId` → the existing-
+    // analysis effect restores Compose + history (cross-browser durable recall).
+    if (event.type === 'open_analysis_headless') {
+      if (event.analysisId) {
+        openSpaarkeAi({ analysisId: event.analysisId }, 2);
+      }
       return;
     }
 

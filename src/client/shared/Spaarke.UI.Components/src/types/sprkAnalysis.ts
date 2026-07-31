@@ -166,8 +166,8 @@ export interface ISprkAnalysisRecord {
    * carried in the launch envelope as `subDomain` (= the row's `sprk_key`) so the
    * review machine opens oriented. See analysis-hub↔agreements coordination doc.
    */
-  _sprk_agreementtypeid_value?: string | null;
-  '_sprk_agreementtypeid_value@OData.Community.Display.V1.FormattedValue'?: string;
+  _sprk_agreementtype_value?: string | null;
+  '_sprk_agreementtype_value@OData.Community.Display.V1.FormattedValue'?: string;
 
   // ---- Regarding field-set (ADR-024 dual-field pattern) ----------------------
   // Entity-specific lookups — exactly one is populated per Analysis.
@@ -211,7 +211,7 @@ export const SPRK_ANALYSIS_SELECT = [
   'statuscode',
   '_sprk_playbook_value',
   '_sprk_outputfileid_value',
-  '_sprk_agreementtypeid_value',
+  '_sprk_agreementtype_value',
   // Regarding — entity-specific lookups
   '_sprk_regardingmatter_value',
   '_sprk_regardingproject_value',

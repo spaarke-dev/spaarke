@@ -75,6 +75,14 @@ export interface IMessageQuickViewProps {
   positioning?: 'above' | 'below' | 'before' | 'after';
   /** Whether to show the arrow. Default: true. */
   withArrow?: boolean;
+  /**
+   * Optional CONTROLLED open state (round-8.4). When provided, the parent owns open/close — used so a double-click that
+   * opens the full modal can force this preview closed (otherwise it lingers in front of the modal). Omit for the
+   * default self-controlled behavior.
+   */
+  open?: boolean;
+  /** Fired on open-state change when controlled. Pairs with {@link open}. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -216,19 +224,34 @@ export const MessageQuickView: React.FC<IMessageQuickViewProps> = ({
   onPin,
   positioning = 'after',
   withArrow = true,
+  open: controlledOpen,
+  onOpenChange,
 }) => {
   const styles = useStyles();
-  // Controlled so the "open→pin" action can dismiss the popover as it jumps.
-  const [open, setOpen] = useState(false);
+  // Self-controlled by default; a parent may CONTROL open via props (round-8.4) to force-dismiss on modal launch.
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
 
-  const handleOpenChange = useCallback((_ev: unknown, data: { open: boolean }) => {
-    setOpen(data.open);
-  }, []);
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (isControlled) onOpenChange?.(next);
+      else setInternalOpen(next);
+    },
+    [isControlled, onOpenChange]
+  );
+
+  const handleOpenChange = useCallback(
+    (_ev: unknown, data: { open: boolean }) => {
+      setOpen(data.open);
+    },
+    [setOpen]
+  );
 
   const handlePin = useCallback(() => {
     if (message && onPin) onPin(message.id);
     setOpen(false); // jump + close; focus returns to the trigger (Fluent Popover)
-  }, [message, onPin]);
+  }, [message, onPin, setOpen]);
 
   const isEmail = message?.channelType === 'email';
   const plainBody = message ? toPlainText(message) : '';

@@ -50,6 +50,14 @@ export interface ConversationViewProps {
   title?: string;
 
   /**
+   * Enables inline thread-name editing in the header title (round-8.4): a pencil affordance appears on hover and opens
+   * a small popup to rename the thread. ConversationView performs the rename itself (`renameThread` via the injected
+   * `authenticatedFetch`), updates its own header optimistically, and then calls this callback with the persisted name
+   * so the HOST can refresh its thread list (the left-pane row name). Omit it to hide the pencil (read-only title).
+   */
+  onThreadRenamed?: (newName: string) => void;
+
+  /**
    * The Dataverse record this thread is associated with (its "regarding"), if
    * any (task 025, FR-12). When present AND `onOpenRecord` is wired, the header
    * title renders as a link that opens this record; when absent (a record-less

@@ -230,13 +230,20 @@ const MessagePreviewRow: React.FC<{ message: TimelineMessage; onOpenThread?: () 
   const s = useStyles();
   const isEmail = message.channelType === 'email';
   const dateTimeLabel = formatDateTime(message.sentOn ?? message.createdOn);
+  // Control the preview popover so a double-click (which opens the full modal) can force it closed — otherwise the
+  // preview lingers in front of the modal (round-8.4 UAT: PCF item 1).
+  const [previewOpen, setPreviewOpen] = React.useState(false);
+  const handleDoubleClick = React.useCallback(() => {
+    setPreviewOpen(false);
+    onOpenThread?.();
+  }, [onOpenThread]);
   const trigger = (
     <Button
       appearance="subtle"
       className={s.messageRow}
       aria-label={`Preview message from ${senderLabel(message)}`}
       // Round-8.4 item 8: double-click the row opens the full modal ON this message's thread.
-      onDoubleClick={onOpenThread}
+      onDoubleClick={handleDoubleClick}
     >
       <span className={s.messageInner}>
         {/* Item 7 (UAT §A): channel pill on the left, text only, no icon. */}
@@ -272,6 +279,8 @@ const MessagePreviewRow: React.FC<{ message: TimelineMessage; onOpenThread?: () 
       to={message.to}
       subject={message.subject}
       positioning="before"
+      open={previewOpen}
+      onOpenChange={setPreviewOpen}
     />
   );
 };

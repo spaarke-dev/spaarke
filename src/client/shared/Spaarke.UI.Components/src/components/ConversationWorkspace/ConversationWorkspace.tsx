@@ -81,6 +81,12 @@ export interface IConversationWorkspaceRegarding {
 /** Props handed to the injected `renderConversation` seam for the currently-selected thread. */
 export interface IConversationRendererProps {
   threadId: string;
+  /**
+   * Display name of the selected thread, resolved from the shell's thread list (round-8.4 item 3b). Forward it to
+   * `<ConversationView title={…} />` so the message pane header shows the thread name. The shell already has the names
+   * loaded, so a renderer need not fetch them separately.
+   */
+  threadName?: string;
   authenticatedFetch: AuthenticatedFetchFn;
   bffBaseUrl?: string;
   /**
@@ -91,6 +97,11 @@ export interface IConversationRendererProps {
    * `<ConversationView onMarkThreadRead={…} />`.
    */
   onMarkThreadRead: () => void;
+  /**
+   * Called after the message pane renames the selected thread (round-8.4). The shell refreshes its thread list so the
+   * new name shows on the left-pane row too. Forward it to `<ConversationView onThreadRenamed={…} />`.
+   */
+  onThreadRenamed: (newName: string) => void;
 }
 
 export interface ConversationWorkspaceProps {
@@ -444,6 +455,14 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
     setUnreadCounts(prev => ({ ...prev, [threadId]: 0 }));
   }, []);
 
+  // — Thread rename (round-8.4): the message pane already persisted the new name; here we just reflect it in the list.
+  // Optimistic row update so the left-pane name changes instantly; reloadToken re-fetches to reconcile (server may
+  // truncate to 200 chars).
+  const handleThreadRenamed = React.useCallback((threadId: string, newName: string) => {
+    setAllRows(prev => prev.map(r => (r.threadId === threadId ? { ...r, name: newName } : r)));
+    setReloadToken(t => t + 1);
+  }, []);
+
   // — Pin/unpin (task 041, FR-24): optimistic local update + rollback on failure —
   const handleTogglePin = React.useCallback(
     (threadId: string, nextPinned: boolean) => {
@@ -505,11 +524,15 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
     renderConversation ? (
       renderConversation({
         threadId: selectedThreadId,
+        // Selected thread's display name for the message-pane header (round-8.4 item 3b).
+        threadName: allRows.find(r => r.threadId === selectedThreadId)?.name ?? undefined,
         authenticatedFetch,
         bffBaseUrl,
         // Relocated mark-as-read (item 5c): clear THIS thread's list badge when
         // the message-toolbar tool fires.
         onMarkThreadRead: () => handleMarkThreadRead(selectedThreadId),
+        // Reflect an in-pane rename on the left-pane row (round-8.4).
+        onThreadRenamed: (newName: string) => handleThreadRenamed(selectedThreadId, newName),
       })
     ) : (
       <DefaultConversationPane threadId={selectedThreadId} />

@@ -44,7 +44,6 @@ import {
   derivePrimaryReview,
   applyRegardingSelection,
   advanceAssociationStatus,
-  PRIMARY_CANDIDATE_SLOTS,
   type PrimaryCandidate,
 } from '../../logic/connections';
 import type { EmailConnectionsReviewProps } from './EmailAssociationsAndTracking.types';
@@ -62,6 +61,7 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
     associationProvenanceJson,
     regardingRecordName,
     regardingRecordNumber,
+    regardingRecordType,
     filedAssociations = [],
     writeContext,
     linkAnotherCatalog,
@@ -86,8 +86,16 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
       derivePrimaryReview(associationProvenanceJson, associationStatus, filedAssociations, {
         recordName: regardingRecordName,
         recordNumber: regardingRecordNumber,
+        recordTypeLabel: regardingRecordType,
       }),
-    [associationProvenanceJson, associationStatus, filedAssociations, regardingRecordName, regardingRecordNumber]
+    [
+      associationProvenanceJson,
+      associationStatus,
+      filedAssociations,
+      regardingRecordName,
+      regardingRecordNumber,
+      regardingRecordType,
+    ]
   );
 
   const catalog = linkAnotherCatalog ?? DEFAULT_LINK_CATALOG;
@@ -99,6 +107,9 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
   const greenKey = model.primary ? candidateKey(model.primary) : undefined;
   const confirmedKey = model.state === 'confirmed' && model.primary ? candidateKey(model.primary) : undefined;
   const activeSelectedKey = selectedKey ?? greenKey;
+  // Confirmed → the primary is the header chip, so the cards row shows ONLY the
+  // "Link another record" tile (owner UAT 2026-07-31).
+  const isConfirmed = model.state === 'confirmed';
 
   const confirmCandidate = React.useCallback(
     async (c: PrimaryCandidate): Promise<void> => {
@@ -167,31 +178,40 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
         </MessageBar>
       )}
 
-      {/* Candidate cards + the "Link another record" tile share ONE grid, so the
-          link tile sits directly AFTER the last card (owner UAT). Always render the
-          fixed candidate-slot count; a slot is blank below 70%. */}
+      {/* Candidate cards + the "Link another record" tile share ONE grid, so the link
+          tile sits directly AFTER the last card. Card set depends on state (owner UAT
+          2026-07-31):
+            • confirmed  → NO candidate cards (the confirmed record is the header chip);
+              only "Link another record" shows.
+            • has matches → only the actual candidate cards (no "No confident match"
+              filler slots).
+            • no matches → a single "No confident match" card.
+          The "Link another record" tile renders in every non-read-only state. */}
       <div className={s.cards}>
-        {Array.from({ length: PRIMARY_CANDIDATE_SLOTS }, (_, i) => {
-          const c = model.candidates[i];
-          if (!c) return <BlankCard key={`blank-${i}`} s={s} />;
-          const k = candidateKey(c);
-          const isGreen = k === greenKey;
-          const isSelected = k === activeSelectedKey;
-          return (
-            <CandidateCard
-              key={k}
-              candidate={c}
-              selected={isSelected || isGreen}
-              tone={isGreen ? 'primary' : 'select'}
-              showConfirm={isSelected && k !== confirmedKey}
-              busy={busy}
-              readOnly={readOnly}
-              onSelect={() => setSelectedKey(k)}
-              onConfirm={() => void confirmCandidate(c)}
-              s={s}
-            />
-          );
-        })}
+        {!isConfirmed &&
+          (model.candidates.length > 0 ? (
+            model.candidates.map(c => {
+              const k = candidateKey(c);
+              const isGreen = k === greenKey;
+              const isSelected = k === activeSelectedKey;
+              return (
+                <CandidateCard
+                  key={k}
+                  candidate={c}
+                  selected={isSelected || isGreen}
+                  tone={isGreen ? 'primary' : 'select'}
+                  showConfirm={isSelected && k !== confirmedKey}
+                  busy={busy}
+                  readOnly={readOnly}
+                  onSelect={() => setSelectedKey(k)}
+                  onConfirm={() => void confirmCandidate(c)}
+                  s={s}
+                />
+              );
+            })
+          ) : (
+            <BlankCard key="blank" s={s} />
+          ))}
 
         {/* Link another record — a tile that is a VISUAL SIBLING of the candidate
             cards (owner UAT #5). A SINGLE click opens the record-type dropdown

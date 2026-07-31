@@ -45,7 +45,7 @@
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
 import { Button, FluentProvider, webLightTheme, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { ArrowMaximizeRegular, ArrowMinimizeRegular, DismissRegular } from '@fluentui/react-icons';
+import { FullScreenMaximizeRegular, FullScreenMinimizeRegular, DismissRegular } from '@fluentui/react-icons';
 import {
   ConversationWorkspace,
   ConversationView,
@@ -205,7 +205,10 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
         authenticatedFetch={props.authenticatedFetch}
         bffBaseUrl={props.bffBaseUrl}
         currentUserSystemUserId={currentUserSystemUserId}
-        title={threadNames[props.threadId]}
+        // Prefer the shell's live thread name (updates after a rename); fall back to the record-read map (round-8.4).
+        title={props.threadName ?? threadNames[props.threadId]}
+        // Inline rename (round-8.4): pencil in the header renames the thread; shell refreshes the list.
+        onThreadRenamed={props.onThreadRenamed}
         regarding={{ entityType, id }}
         onOpenRecord={onOpenRecord}
         // An email is a sprk_communication row (TimelineMessage.id IS the
@@ -243,7 +246,8 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
           className={s.expandButton}
           aria-label={expanded ? 'Collapse conversations' : 'Expand conversations'}
           title={expanded ? 'Collapse' : 'Expand'}
-          icon={expanded ? <ArrowMinimizeRegular /> : <ArrowMaximizeRegular />}
+          // Standardized modal chrome (round-8.4): full-screen maximize/minimize pair, pinned left of the close X.
+          icon={expanded ? <FullScreenMinimizeRegular /> : <FullScreenMaximizeRegular />}
           onClick={() => setExpanded(v => !v)}
         />
         {/* §B1 (UAT): close "x" pinned to the surface's literal upper-right corner. */}
