@@ -1,23 +1,22 @@
 # Current Task State — Spaarke Compose R5
 
-> **Last Updated**: 2026-07-30 (by context-handoff — Phase 5 UAT COMPLETE + synced to master; NEXT = fix 4 master-inherited test failures)
-> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-compose-r5`. Working tree CLEAN, all pushed (tip `f99f790d7` = merge of origin/master).
+> **Last Updated**: 2026-07-31 (inherited test fails FIXED + worktree fully synced to master; NEXT = prong 1 (optional) → operator re-deploy → 090)
+> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-compose-r5`. Working tree CLEAN, all pushed. **Tip `1bd96454b` (merge of origin/master), 0 behind master.**
 >
-> **▶ NEXT ACTION (post-compaction):** 🔧 **FIX 4 MASTER-INHERITED TEST FAILURES**, then prong 1 → operator re-deploy → 090. All R5 UAT work (050–055) is DONE, green on R5's own surface, committed + pushed. The branch is synced to master (merge `f99f790d7`), which brought in 4 FAILING tests from OTHER projects (analysis-hub/ai-redesign + messaging-r3/email) — NOT R5 code, but the owner wants them GREEN before merge-to-master/deploy. Fix these next:
+> **▶ NEXT ACTION (post-compaction):** ⏸️ **HOLD for operator re-deploy** (BFF + `sprk_spaarkeai` together), OR optionally do 055 prong 1 first. All R5 UAT work (050–055) + the 5 master-inherited test failures are DONE and GREEN. Branch is fully synced to master (0 behind). Deploy-ready.
 >
-> **FAILURE GROUP A — `AnalysisEndpointsExecuteDispatchContractTests` (3 fails)** — `tests/**/Api/Ai/…` (analysis-hub-r1 / ai-redesign):
->   - `Post_NoDocumentProfileBindingRow_FallsThroughToEnginePath`, `Post_PlaybookIdMatchesDocumentProfileBinding_DispatchesLinearBranch`, `Post_PlaybookIdDoesNotMatchBinding_FallsThroughToEnginePath`.
->   - Error: `System.InvalidOperationException: Failure to infer one or more parameters … sessionManager | UNKNOWN`. The analysis EXECUTE/dispatch endpoint handler has a `sessionManager` parameter ASP.NET Minimal API cannot bind (not a registered service, not a body param). **Root cause = asymmetric DI registration** (endpoint mapped but `sessionManager`'s service not registered / not in the test fixture) — the RB-T028 / BFF §10 "endpoints mapped unconditionally must have unconditional service registration" class. Fix: register the missing service (or correct the handler signature). Grep the AnalysisEndpoints Execute/dispatch map + its `sessionManager` type; check `Program.cs`/the relevant `*Module.cs` DI.
+> **✅ DONE this session (2026-07-31):** Fixed all 5 master-merge-inherited BFF test failures (test-only; no prod code) — commit `43571f2c8`:
+>   - **Group A ×3 `AnalysisEndpointsExecuteDispatchContractTests`** — `MapAnalysisEndpoints` param-inference failed at map time because the Fork/Promote sibling handlers take the CONCRETE `ChatSessionManager` (+ `IChatDataverseRepository`) and the fixture didn't register them (unregistered complex params mis-infer as a 2nd body). Fix: registered both in the fixture (map-time-inference doubles; never resolved at request time). Asymmetric-registration class per BFF §10 / RB-T028.
+>   - **Group B `CommunicationWorkspaceReadSeamTests…AllFiveFacetsComposedTogether`** — NOT a bug: the shared read pipeline now ANDs the active-only soft-delete clause (`statecode eq 0`, messaging-r3 round-8) on top of the 5 facets → 5 ` and ` joins, not 4. Test was stale. Fix: updated expected count 4→5 + added `statecode eq 0` assertion to lock the composition.
+>   - **(5th, handoff hadn't recorded) `CommunicationArrivedProducerSeamTests` deep link** — bell `ActionUrl` now appends `&sprk_openconversation=1` (round-7 item 11 notification→modal, so the ConversationPanel PCF auto-opens). Test stale; updated expected URL.
+>   - Then **merged origin/master** (14 commits, ZERO file overlap → clean auto-merge, `1bd96454b`), rebuilt BFF (0 errors), re-ran full suite: **9578 passed / 0 failed / 101 skipped**; Compose byte-diff **25/25**. Pushed.
 >
-> **FAILURE GROUP B — `CommunicationWorkspaceReadSeamTests.QueryCommunicationsAsync_AllFiveFacetsComposedTogether_AndsThreadChannelDateRangeAndParticipant` (1 fail)** — `tests/integration/seam/Communication/…` (messaging-r3 / email-r5):
->   - Error: `Expected …Matches(messageQuery, " and ").Count to be 4 … but found 5`. The composed OData filter now has an EXTRA ` and ` (5 vs expected 4). A merge interaction (email-r5 + messaging-r3 both touched the Communication query builder) added a facet/AND. Fix: inspect the query composition vs the test — either the query has a spurious extra AND (fix the builder) OR a legitimately-added 6th facet means the test's expected count is stale (update to 5). Determine which by reading the query builder + the 5-facet test setup.
->
-> **After the 4 fixes are green** (re-run full BFF suite → expect 9648-ish / 0 failed / 101 skipped):
-> - (1) **Prong 1 (055 fast-follow, DEFERRED):** keep-edits recovery — on an anchor-refusal batch, best-effort apply resolvable ops + surface unresolvable (reuse `ReanchorStaleSaveAsync` AUTO/REVIEW/ORPHAN model). Safety net; prong 2 already fixed the root cause.
-> - (2) **Operator re-deploys BFF + `sprk_spaarkeai` client together** → re-UAT (esp. the 422 flow on a FRESH upload + Open-Document modal).
+> **Remaining:**
+> - (1) **Prong 1 (055 fast-follow, DEFERRED — optional safety net):** keep-edits recovery — on an anchor-refusal batch, best-effort apply resolvable ops + surface unresolvable (reuse `ReanchorStaleSaveAsync` AUTO/REVIEW/ORPHAN model). Prong 2 already fixed the root cause, so this is graceful degradation, not a blocker.
+> - (2) **Operator re-deploys BFF + `sprk_spaarkeai` client together** → re-UAT (esp. the 422 flow on a FRESH upload + Open-Document modal). **Do NOT deploy autonomously.**
 > - (3) **090 wrap-up** (/test-diet + /code-review + /adr-check + /merge-to-master).
 >
-> **Do NOT deploy autonomously.** Out-of-scope UAT items (#2,3,4,7,8) captured in `notes/uat-remediation-r5.md` (other projects; no issues filed per owner).
+> Out-of-scope UAT items (#2,3,4,7,8) captured in `notes/uat-remediation-r5.md` (other projects; no issues filed per owner).
 
 ---
 
