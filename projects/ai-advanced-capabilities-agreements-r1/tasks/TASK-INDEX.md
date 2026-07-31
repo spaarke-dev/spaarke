@@ -23,7 +23,7 @@
 | 030 | Disposition flip + findings materializer branch | 3 | 🔲 | 002,012 | FULL | opus | high | E |
 | 031 | DEF-09 session routing + apply-leg gating | 3 | 🔲 | 030 | FULL | sonnet | xhigh | F |
 | 032 | Summary-panel restore + 128KB caps + supersede | 3 | 🔲 | 031 | FULL | sonnet | xhigh | G |
-| 033 | Wizard auto-run bridge + silent-FK fix | 3 | 🔲 | 023,031 | FULL | opus | high | H |
+| 033 | Wizard auto-run bridge (FK fix = hub closeout; verify) | 3 | 🔲 | 023,031 | FULL | opus | high | H |
 | 040 | Bidirectional highlight | 4 | 🔲 | 011 | FULL | sonnet | high | E |
 | 041 | Multi-select batch AI action + progress | 4 | 🔲 | 021,031,040 | FULL | sonnet | xhigh | H |
 | 042 | Separated location-labelled confirmations | 4 | 🔲 | 041 | FULL | sonnet | medium | I |
@@ -75,8 +75,9 @@ Compose files; notification-spine flips the same DispositionRoutability surface)
 
 ## Cross-project coordination (live at planning time)
 
-- **hub-r1**: A1 picker + A3-core SHIPPED (1e1a6579b/bd64a69d4); 022 finishes/coordinates the two deferred envelope
-  legs; 033 checks Phase-1 UAT status first. Questions doc: `notes/COORDINATION-agreements-r1-ANSWERS-and-QUESTIONS-to-hub-r1.md`.
+- **hub-r1 — Q1–Q5 ANSWERED** (`notes/COORDINATION-hub-r1-ANSWERS-to-agreements-r1-Q1-Q5.md`): deep-threading slice
+  OURS (022 — notify, don't ask; never rebuild A1/A3-core); promote-FK fix HUB-side (033 verifies landed); seeds ours
+  (001); `sprk_key` alt-key = owner action (001); Phase-1 UAT open — 033 checks first (seam stable+additive).
 - **PR #690** (LFS Compose fixtures) merge before Compose seam/eval CI runs (060 pre-check).
 - **spaarkeai-compose-r5**: most active branch in the repo on OUR Compose files — rebase early, conflict-check often.
 
@@ -85,6 +86,6 @@ Compose files; notification-spine flips the same DispositionRoutability surface)
 | Task | Risk | Mitigation |
 |---|---|---|
 | 030/031/032 | Durable-recall semantics on the ledger spine (legal work product) | Verified seam map in HUB-R1-REVIEW §4; opus on 030; closed acceptance (zero-LLM assert, cap surfacing) |
-| 033 | Novel bridge, BFF fix, Phase-1 UAT churn | Escalation triggers (UAT status; new-endpoint gate); fork/promote contracts documented |
+| 033 | Novel bridge; Phase-1 UAT churn; hub FK-fix landing | Escalation triggers (UAT status; FK-fix-landed check; new-endpoint gate); fork/promote contracts documented |
 | 002 | Action rename blast radius | Step-0 consumer grep + escalation; migration documented |
 | 041 | Hot-file contention + rate limits | Wave ordering; strictly-sequential loop asserted in tests |

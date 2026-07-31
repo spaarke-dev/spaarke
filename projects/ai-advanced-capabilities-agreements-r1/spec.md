@@ -70,7 +70,7 @@ rename/WS-4 wiring).
   `materializeComposeDraftFromLedger` (findings branch) + `registerAiReviewComments`, `useNdaReviewAdvisoryCommentsBridge.ts`
   (retire or keep for live-turn UX), `NdaReviewSummaryPanel` feed (restore from re-materialized state).
 - **FR-17 seam files**: `CreateAnalysisWizardWidget.tsx` (finish hook), session file-context registration,
-  `AnalysisEndpoints.cs` fork/promote consumers (+ the promote bind-result fix in `ChatSessionManager.cs` if taken here).
+  `AnalysisEndpoints.cs` fork/promote consumers. *(Promote bind-result fix = HUB-side, their Q2 closeout — we verify.)*
 - Eval: `tests/integration/contract/Eval/**` (golden-utterance / output-schema coverage for the schema + prompt changes).
 
 ## Requirements
@@ -152,8 +152,9 @@ rename/WS-4 wiring).
     non-wizard-callable; promote requires a documentId), **auto-dispatches** the agreement review, and the advisory
     comments render in the already-open editable Compose. Acceptance: wizard-finish on an agreement yields a bound
     session + a completed review with comments visible, no manual re-upload; a promoted session is **durably** bound
-    (visible via `GET /api/ai/chat/sessions/by-analysis/{id}` — the promote silent-FK gap is fixed or designed around,
-    never shipped as-is).
+    (visible via `GET /api/ai/chat/sessions/by-analysis/{id}`). *The promote silent-FK gap is FIXED BY THE HUB (their
+    Q2 closeout — hub answer doc 2026-07-31); FR-17 verifies the fix landed + carries the durable-bind regression test;
+    do NOT re-implement.*
 
 ### Non-Functional Requirements
 - **NFR-01 — BFF publish ≤60 MB** compressed (per BFF-touching task; no new NuGet expected; report absolute + diff).
@@ -299,6 +300,7 @@ by `analysis-hub-r1`, see Coordination A2.)*
 | Schema split | Split `explanation` or parse client-side? | **Split once** at the Action layer (`flaggedClause`/`assessment`) | Foundational task; eval obligation |
 | Hub Part C.1 + Phase 2/3 | Accept the durable-review scope hub routed to us? | **Yes** ("proceed as recommended", 2026-07-31) | NEW FR-16 (durable recall) + FR-17 (auto-run bridge); agreements-r1 is the critical path of the owner's 3-phase must-have |
 | Registry substrate | Own the `sprk_agreementtype` behavior columns + code mirror? | **Yes** — values via `update_record`, mirror + remaining seeds authored here | FR-06 expanded; per-type threshold column already exists |
+| Hub Q1–Q5 answers | (hub answer doc 2026-07-31) | Q1: A1+A3-core hub-shipped, deep-threading slice OURS (022); Q2: promote FK fix = HUB closeout; Q3: we load the 7 seeds (001); Q4: `sprk_key` alt-key = owner action; Q5: Phase-1 UAT open, finish seam stable+additive (carries `subDomain`) | 033 de-scoped (verify not fix); 022 notify-not-ask; the naming bug our review caught was fixed hub-side |
 
 ## Assumptions
 
@@ -320,13 +322,13 @@ by `analysis-hub-r1`, see Coordination A2.)*
 - [ ] **Batch max-selection cap** (soft ~25 vs none) — Blocks: final #3 sub-toolbar behavior (assumption in place).
 - [ ] **`Standard:` reference depth** (citation vs full clause text) + whether grounding reliably supplies full text —
   Blocks: nothing (assumption in place); confirm during the RAG/export task.
-- [ ] **🚨 Picker landmine + A1 ownership** — all 3 `sprk_agreementtype` seed rows have **`sprk_isselectable=false`**
-  (incl. `nda`); the proposed picker filter renders EMPTY. Owner: fix seeds or invert semantics + decide who builds the
-  picker (hub is in wrap-up) — Blocks: the explicit-wizard sub-domain selection (FR-09 explicit path), not the classifier path.
-- [ ] **Promote silent-FK fix ownership** (hub-side or FR-17 here) — `ChatSessionManager.cs:527` ignores the bind
-  result; 201 without durable FK — Blocks: FR-17's durable-binding acceptance.
-- [ ] **`sprk_key` unique/alternate-key constraint** — unverified in env — Blocks: nothing yet; confirm before code
-  keys on `sprk_key` (FR-06).
+- [x] ~~Picker landmine + A1 ownership~~ — **RESOLVED 2026-07-31**: owner set all 3 seeds `sprk_isselectable=Yes`
+  (MCP-verified) AND the hub SHIPPED the picker (A1, `1e1a6579b`) + A3-core envelope (`bd64a69d4`) — do NOT rebuild;
+  only the deep-threading slice remains (ours, task 022, per hub Q1 answer).
+- [x] ~~Promote silent-FK fix ownership~~ — **RESOLVED: HUB fixes it** (their bug/AIPL-054 root cause; Q2 answer,
+  tracked hub closeout; commit to be flagged in their answer doc). FR-17/033 verifies + regression-tests only.
+- [ ] **`sprk_key` unique/alternate-key constraint** — **owner action in flight** (hub Q4: they asked the owner to
+  confirm/add; may fall to us WITH owner ok — coordinate-once). Task 001 verifies before code keys on `sprk_key`.
 - [ ] **Rename blast radius** — confirm no consumer outside Compose imports `ndaClauseLocation`/`NdaReviewSummaryPanel`
   by name (grep at task time) — Blocks: FR-02 (pure-rename risk only).
 

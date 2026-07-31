@@ -54,7 +54,7 @@ email) · **Testing**: ADR-038 (**full version only**: `docs/adr/ADR-038-testing
 - Action/Binding: `infra/dataverse/actions/` + `sprk_playbookconsumer-rows.json`; classifier contract:
   `Services/Ai/Insights/Playbooks/layer1-classification.node.json`
 - Dispatch: `Services/Ai/Chat/SessionDispatchOrchestrator.cs` (:483 HostEntityId; :689-769 file resolution)
-- Bind: `POST /api/ai/analysis/fork` (:58) / `promote` (:77; FK gap `ChatSessionManager.cs:527`); read
+- Bind: `POST /api/ai/analysis/fork` (:58) / `promote` (:77; FK gap `ChatSessionManager.cs:527` — HUB FIXING, their Q2 closeout; 033 verifies); read
   `GET /api/ai/chat/sessions/by-analysis/{id}`
 - Durable recall: `OutputRouter.cs` → `ChatEndpoints.ProjectComposeOutputs` (:1312, compose-only, skips truncation) →
   `ComposeWorkspace.materializeComposeDraftFromLedger` (:1385) + FR-04 effect (:1609); DEF-09 `sessionIdOverride`
@@ -70,14 +70,17 @@ email) · **Testing**: ADR-038 (**full version only**: `docs/adr/ADR-038-testing
 - **Phase 0** (001–003): registry mirror+seeds · Action generalization+schema split (opus) · knowledge packs.
 - **Phase 1** (010–012): rename · WS-4 anchoring · DEF-01 fix.
 - **Phase 2** (020–023): classifier (opus) · orientation+gate · subDomain envelope · explicit-path bind.
-- **Phase 3** (030–033): disposition flip+findings materializer (opus) · DEF-09 routing+gating · panel restore+caps · auto-run bridge (opus).
+- **Phase 3** (030–033): disposition flip+findings materializer (opus) · DEF-09 routing+gating · panel restore+caps · auto-run bridge (opus; FK fix = hub-side, verify only).
 - **Phase 4** (040–042): bidirectional highlight · multi-select batch · confirmations.
 - **Phase 5** (050–052): memo assembly+persistence · toolbar docx/email · Word-export mirror.
 - **Phase 6** (060/061/090): deploy · e2e (zero-LLM reopen assert) · wrap-up+test-diet+registration recipe.
 
 ## Cross-project (live)
-- **hub-r1**: A1+A3-core shipped; 022 finishes the deferred envelope legs (coordinate — their standing offer); 033
-  checks Phase-1 UAT first. Open Qs doc: `notes/COORDINATION-agreements-r1-ANSWERS-and-QUESTIONS-to-hub-r1.md`.
+- **hub-r1 — ALL Q1–Q5 ANSWERED** (`notes/COORDINATION-hub-r1-ANSWERS-to-agreements-r1-Q1-Q5.md`): Q1 deep-threading
+  slice = OURS (022; do NOT rebuild A1/A3-core); Q2 promote-FK fix = HUB closeout (033 verifies, never re-implements);
+  Q3 seeds = ours (001); Q4 `sprk_key` alt-key = owner action (001 coordinates-once); Q5 Phase-1 UAT open, finish seam
+  stable+additive (carries `subDomain`) — 033 still checks UAT before wiring. The naming bug our review caught
+  (`_sprk_agreementtypeid_value`) is FIXED hub-side.
 - **compose-r5**: most-active branch on OUR Compose files — rebase early. **notification-spine-r1**: same
   DispositionRoutability surface as 030. **PR #690** (LFS fixtures): merge before Compose seam/eval CI.
 

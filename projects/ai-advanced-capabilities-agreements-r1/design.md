@@ -243,7 +243,7 @@ from re-materialized state (today live-event-fed only). `DELETE /sessions` erase
 The wizard produces a **durable `sprk_document`** (SPE `sprk_graphitemid`/`driveid`) but creates **no chat session and
 runs no review**; dispatch consumes **session-uploaded fileIds only** (hard error otherwise). agreements-r1 wires:
 register the durable doc as session file context (bridge the impedance) → bind the session (fork/promote — both live,
-non-wizard-callable; note promote requires a documentId and has a **silent-FK gap** to fix or design around) →
+non-wizard-callable; promote requires a documentId; its **silent-FK gap is fixed hub-side** — their Q2 closeout, we verify) →
 auto-dispatch the review on wizard-finish → advisory comments render in Compose. This is the "Phase 2" leg of the
 owner's 3-phase must-have; (e) is the "Phase 3" leg.
 
@@ -298,9 +298,9 @@ RAG grounding are all shipped. r1 reuses them.
 **W-Durable-Review** (hub Phases 2/3 remainder, accepted 2026-07-31 — Lens 3e/3f):
 - The **compose-disposition re-route + findings materializer branch** (4-change set, Lens 3e) so reopen restores the
   review deterministically without re-dispatch · the **summary-panel restore** from re-materialized state · the
-  **wizard→session file-id bridge + auto-run dispatch on wizard-finish** (Lens 3f) · the **promote silent-FK fix** (or
-  designed-around) · the `sprk_agreementtype` **code mirror** (TS type + seed/infra JSON) + behavior-column values +
-  remaining seed rows.
+  **wizard→session file-id bridge + auto-run dispatch on wizard-finish** (Lens 3f; the promote **silent-FK fix is
+  hub-side** — their Q2 closeout, we verify + regression-test) · the `sprk_agreementtype` **code mirror** (TS type +
+  seed/infra JSON) + behavior-column values + remaining seed rows.
 
 **UX-depth** (Lens 2): the multi-select selection model + sub-toolbar (#3) · the summary↔note reverse-highlight link
 (#2) · the confirmation formatting (#4).
@@ -503,15 +503,13 @@ the schema split is data/prompt, not code. §11 satisfied: every gap is an exten
   **`subDomain` param does not exist yet** — adding it to `SpaarkeAiLaunchParams` + `buildLaunchUrl` + `main.tsx` parse
   is a small task (ours or hub's; coordinate). Note the `worktype` URL param is a boolean "new-mode" flag and the
   `regarding` URL param is dead (`void regarding`) — the live regarding channel is `entityLogicalName`/`entityId`.
-- [ ] **🚨 Picker landmine + A1 ownership** — all 3 `sprk_agreementtype` seed rows have `sprk_isselectable=false`
-  (incl. `nda`): the proposed wizard-picker filter would render EMPTY. Owner: fix seed values or invert semantics; and
-  decide **who builds the picker** (hub said "will build" but its remaining tasks are deploy/e2e/wrap-up only). Slot
-  options: wizard infoStep renderContent or the Quick-Start card layer.
-- [ ] **Promote silent-FK gap ownership** — `PromoteSessionToAnalysisAsync` ignores the bind result; a 201 can ship
-  with no durable FK (session invisible to `by-analysis`). Fix hub-side or here (small server change) — must not ship
-  as-is under the durable-recall guarantee (Lens 6).
-- [ ] **`sprk_key` uniqueness** — the claimed unique/alternate-key constraint on `sprk_agreementtype.sprk_key` is
-  unverified; confirm via env before code keys on it.
+- [x] ~~Picker landmine + A1 ownership~~ — **RESOLVED 2026-07-31**: owner fixed the seeds (all `sprk_isselectable=Yes`,
+  verified); hub SHIPPED the picker (`1e1a6579b`) + A3-core envelope (`bd64a69d4`); the deep-threading slice is ours
+  (task 022, hub Q1 answer — "do NOT rebuild A1 or A3-core").
+- [x] ~~Promote silent-FK gap ownership~~ — **RESOLVED: hub fixes** (their bug; Q2 answer, tracked closeout). We verify
+  + keep the durable-bind acceptance (Lens 6) — 033 does not re-implement.
+- [ ] **`sprk_key` uniqueness** — owner action in flight (hub Q4); task 001 verifies + coordinates-once before code
+  keys on it.
 
 ---
 

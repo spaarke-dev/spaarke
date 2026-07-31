@@ -34,7 +34,9 @@
       your reader, not a guess): the cold-load URL/ribbon deep-link threading (openSpaarkeAi URL param →
       App/ThreePaneShell → AnalysisLaunchContext) and the open-existing subDomain derivation (expand
       sprk_agreementtype.sprk_key from the persisted lookup on reopen). Tell us the moment you wire a reader and we
-      finish both." Our reader lands in 021 (orientation consumes subDomain). Pattern to follow: bd64a69d4 touched
+      finish both." Q1 RESOLVED (hub answer doc 2026-07-31): the deep-threading slice is OURS — "you take that slice (you've
+      scoped it) OR ping us... just not both. Do NOT rebuild A1 or A3-core." So: build BOTH legs here; NOTIFY hub at task
+      start (courtesy, prevents double-build), no ask/wait. Our reader lands in 021. Pattern to follow: bd64a69d4 touched
       CreateAnalysisWizardWidget + composeLaunchContext + main.tsx; the open-existing analysis-load path is
       WorkspacePane's by-analysis branch (master ~:968-1010) with the $expand on sprk_documentid — extend the $expand to
       sprk_agreementtype($select=sprk_key). NAMING: subDomain ≡ sprk_key; lookup attribute logical name sprk_agreementtype.
@@ -54,7 +56,7 @@
     <constraint source="ADR-044">GUIDs in deep-link params are bare-lowercase (existing brace-stripping convention in buildLaunchUrl); scope: param encoding.</constraint>
     <constraint source="ADR-030">Envelope→pane propagation follows the existing typed context/event paths (AnalysisLaunchContext / composeLaunchContext) — no new side channels; scope: threading.</constraint>
     <constraint source="project">ONE envelope contract: the same subDomain field name/semantics across all three doors; wizard-set value is authoritative (explicit path), classifier fills it only when absent.</constraint>
-    <constraint source="project">Coordinate-first: check with hub-r1 (they offered to finish both legs). If they take them, this task reduces to the consumer-side verification + contract test. Record the outcome.</constraint>
+    <constraint source="project">Q1 resolved: the deep-threading slice is OURS (hub answer doc). Do NOT rebuild A1 (picker/persist) or A3-core (ComposeLaunchContextValue field + wizard-finish carry) — extend only the cold-load + open-existing legs. Notify hub at task start.</constraint>
   </constraints>
 
   <knowledge>
@@ -72,15 +74,15 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="0">Declare rigor; notify/ask hub-r1 whether they take the two deferred legs (their standing offer); record the split.</step>
-    <step order="1">(Ours per split) Add subDomain to SpaarkeAiLaunchParams + buildLaunchUrl + main.tsx parse → AnalysisLaunchContext.</step>
-    <step order="2">(Ours per split) Open-existing: extend the by-analysis load $expand with sprk_agreementtype($select=sprk_key); write into the envelope before the compose widget_load.</step>
+    <step order="0">Declare rigor; NOTIFY hub-r1 we are building the two deferred legs now (Q1 resolution — prevents double-build); confirm no hub commit landed them since (grep subDomain in launch-resolver/main.tsx).</step>
+    <step order="1">Add subDomain to SpaarkeAiLaunchParams + buildLaunchUrl + main.tsx parse → AnalysisLaunchContext.</step>
+    <step order="2">Open-existing: extend the by-analysis load $expand with sprk_agreementtype($select=sprk_key); write into the envelope before the compose widget_load.</step>
     <step order="3">Contract test: all three doors deliver the same subDomain to the reader (021's consumption point).</step>
     <step order="4">Update TASK-INDEX.md: 022 ✅.</step>
   </steps>
 
   <escalation>
-    <trigger>If the hub takes the legs but their timeline slips past our 023/033 needs, STOP and re-split rather than double-building or waiting silently.</trigger>
+    <trigger>If step-0 grep shows the hub already landed either leg since their answer doc, STOP the overlapping leg and reduce it to verification — never double-build.</trigger>
   </escalation>
 
   <ui-tests>
@@ -101,6 +103,6 @@
     <criterion testable="true">Negative: absent subDomain + no lookup → envelope field absent (classifier path owns it); no fabricated default.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-09 explicit-path plumbing; hub Q1 answered by their A1/A3 ship — this is the residual. The hub relationship: notify at task start (their offer), then split.</notes>
+  <notes>Spec FR-09 explicit-path plumbing; hub Q1 RESOLVED (answer doc 2026-07-31): this residual slice is ours; A1 + A3-core are shipped hub work (naming bug fixed hub-side: _sprk_agreementtype_value). Notify at task start.</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

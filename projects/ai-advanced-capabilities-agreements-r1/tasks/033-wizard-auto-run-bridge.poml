@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="033" project="ai-advanced-capabilities-agreements-r1">
   <metadata>
-    <title>FR-17 — wizard→review auto-run bridge (fileId impedance + durable bind + silent-FK fix)</title>
+    <title>FR-17 — wizard→review auto-run bridge (fileId impedance + durable bind)</title>
     <phase>3 Durable Review</phase>
     <gate>blocked (deps 023,031)</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
-    <rigor-reason>Cross-surface bridge (wizard→session→dispatch) incl. a BFF fix (ChatSessionManager); the owner's Phase-2 must-have leg; auth+durability semantics.</rigor-reason>
+    <rigor-reason>Cross-surface bridge (wizard→session→dispatch); the owner's Phase-2 must-have leg; auth+durability semantics.</rigor-reason>
     <model-tier>opus</model-tier>
-    <model-tier-reason>The impedance bridge (durable sprk_document → session file context) has no precedent to copy — it is the one genuinely novel integration in the project, with server+client legs and failure-mode design.</model-tier-reason>
+    <model-tier-reason>The impedance bridge (durable sprk_document → session file context) has no precedent to copy — it is the one genuinely novel integration in the project, with failure-mode design.</model-tier-reason>
     <effort>high</effort>
     <parallel-group>H</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -20,8 +20,9 @@
   <prompt>
     On Create-Analysis wizard finish (agreement work-type): bridge the durable sprk_document into session file context,
     bind the session durably to the Analysis, auto-dispatch the agreement review, and render advisory comments in the
-    already-open editable Compose — no manual re-upload. Fix (or design around, with proof) the promote silent-FK gap:
-    a 201 that writes no durable Dataverse FK is unacceptable for legal work product.
+    already-open editable Compose — no manual re-upload. NOTE (hub answer Q2, 2026-07-31): the promote silent-FK gap is
+    FIXED BY THE HUB (their bug, their closeout item) — do NOT implement the fix here; VERIFY their fix landed before
+    relying on promote, and keep the durable-bind acceptance regardless.
   </prompt>
   <role>SPAARKE platform developer. Session dispatch file resolution, fork/promote contracts, wizard finish seam, BFF durability.</role>
   <goal>Wizard-finish yields: bound session (visible via by-analysis), review dispatched on the right pack, comments in Compose — one flow, durable.</goal>
@@ -38,15 +39,17 @@
       over re-uploading bytes. BIND: wizard-finish has no session yet → create session with HostContext sentinel
       (EntityType="sprk_analysisoutput", EntityId=analysisId — the FOOTGUN: EntityId is an sprk_analysis GUID; never
       query the output table with it) — via fork (mints bound session; requires documentId+name) or create-then-promote;
-      promote requires documentId and is one-time-bind. SILENT-FK FIX: PromoteSessionToAnalysisAsync ignores
-      BindSessionToAnalysisAsync's bool (ChatSessionManager.cs:527; repo tolerates missing summary row :261-272) —
-      propagate the failure (retry-create the summary row, else non-2xx/warning surfaced). Hub Q2 default: we fix it.
-      PHASE-1 UAT: the wizard-finish seam may change under owner UAT — check status first (escalation).
+      promote requires documentId and is one-time-bind. SILENT-FK GAP (ChatSessionManager.cs:527): HUB FIXES IT — per their
+      answer doc (COORDINATION-hub-r1-ANSWERS-to-agreements-r1-Q1-Q5.md Q2): promote will propagate the bind bool +
+      create the missing summary row (with FK) during promote, else non-2xx/warning; tracked as a hub closeout item
+      (commit to be flagged in that doc). VERIFY it landed (step 0) — do NOT re-implement here.
+      PHASE-1 UAT: still open per hub Q5; the wizard-finish seam is STABLE + ADDITIVE-ONLY (now also carries
+      subDomain in the compose seed; no field removed/renamed) — check UAT status first (escalation).
       SUBDOMAIN: the wizard envelope carries subDomain (A1/A3) — 023's explicit bind picks the pack; auto-dispatch uses it.
     </background>
     <relevant-files>
       <file role="modify">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateAnalysisWizardWidget.tsx (finish hook)</file>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs (silent-FK fix)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs (verify hub's promote FK fix landed — do not modify)</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs (fork :1136 / promote :1285 contracts)</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs (ResolveTargetFiles)</file>
     </relevant-files>
@@ -61,7 +64,7 @@
     <constraint source="ADR-013">Client→AI via existing endpoints/facade; any new BFF surface needs §10 Placement Justification + publish-size check; scope: server changes.</constraint>
     <constraint source="ADR-044">documentId/analysisId GUIDs canonical bare-lowercase across the fork/promote/OData calls; scope: all IDs.</constraint>
     <constraint source="project">Sentinel footgun: HostContext.EntityId under EntityType "sprk_analysisoutput" is an sprk_analysis GUID — reference an existing sentinel constant site, never re-type the literal; never query the output table with it. Scope: bind wiring.</constraint>
-    <constraint source="project">Durable-bind acceptance: after finish, GET /sessions/by-analysis/{analysisId} returns the session — the silent-FK gap must be closed on THIS path (fix promote, or use fork whose create-time FK write must equally be verified). Scope: bind + fix.</constraint>
+    <constraint source="project">Durable-bind acceptance: after finish, GET /sessions/by-analysis/{analysisId} returns the session — the durable FK must be proven on THIS path (hub's promote fix verified landed, or fork's create-time FK write equally verified). Scope: bind verification.</constraint>
     <constraint source="ADR-019">New failure paths (bridge failure, bind failure) return/surface ProblemDetails-consistent errors — the wizard shows a real error, not silent success. Scope: error handling.</constraint>
   </constraints>
 
@@ -83,25 +86,26 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="0">Declare rigor; check Phase-1 owner-UAT status (hub Q5) — if the finish seam is changing, escalate before building; audit the session file-registration seam (does an SPE-pointer registration path exist?).</step>
+    <step order="0">Declare rigor; check Phase-1 owner-UAT status (hub Q5) AND verify the hub's promote FK fix landed (their Q2 closeout — commit flagged in their answer doc); if either is outstanding, escalate before building; audit the session file-registration seam (does an SPE-pointer registration path exist?).</step>
     <step order="1">Design the bridge (pointer-registration preferred; document the §11 extension answers) + the bind choice (fork vs create-then-promote) for the no-session-yet finish case.</step>
-    <step order="2">Fix the silent-FK gap in ChatSessionManager/ChatDataverseRepository (propagate bind result; retry-create summary row; surface failure) + unit test.</step>
+    <step order="2">Verify the hub's promote FK fix empirically (promote a session with no pre-existing summary row -> durable FK exists or a non-2xx/warning surfaces); record the verification. Do NOT re-implement.</step>
     <step order="3">Implement the finish hook: bridge file → bind session → auto-dispatch (per 023's pack) → comments render via 030/031's durable path.</step>
     <step order="4">Failure modes: bridge/bind/dispatch failures surface distinctly in the wizard + Assistant; no silent partial success.</step>
-    <step order="5">Tests: unit (FK fix), integration (bind visible via by-analysis), e2e happy path; BFF publish-size check (server touched).</step>
+    <step order="5">Tests: integration (bind visible via by-analysis — regression against the FK gap), e2e happy path; BFF publish-size check IF any server file was touched.</step>
     <step order="6">Update TASK-INDEX.md: 033 ✅.</step>
   </steps>
 
   <escalation>
     <trigger>If no session file-registration seam exists and the bridge requires a NEW BFF endpoint or dispatch-contract change, STOP — present the §10/§11-justified minimal server delta before building.</trigger>
     <trigger>If Phase-1 owner UAT is still open on the wizard-finish seam, STOP and confirm the seam is stable (hub Q5) before wiring into it.</trigger>
+    <trigger>If the hub's promote FK fix has NOT landed at execution time, STOP and coordinate (their Q2 commitment) — do not implement it here (double-build) and do not build on the broken promote.</trigger>
   </escalation>
 
   <tools><tool name="dotnet">BFF build/tests + publish-size</tool><tool name="npm">widgets build/tests</tool></tools>
 
   <outputs>
-    <output type="code">CreateAnalysisWizardWidget.tsx finish hook + ChatSessionManager.cs FK fix + bridge wiring</output>
-    <output type="test">FK-fix unit test + bind-visibility integration test</output>
+    <output type="code">CreateAnalysisWizardWidget.tsx finish hook + bridge wiring (client-side; server only if the bridge escalation approves a delta)</output>
+    <output type="test">bind-visibility integration test (FK regression)</output>
   </outputs>
 
   <acceptance-criteria>
@@ -112,6 +116,6 @@
     <criterion testable="true">BFF publish ≤60 MB reported; no new HIGH CVE; build + tests green.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-17; hub Phase-2 leg + Part C.4; hub Q2 default (we fix the FK). With 030-032, completes the owner's 3-phase must-have.</notes>
+  <notes>Spec FR-17; hub Phase-2 leg + Part C.4; hub Q2 RESOLVED: hub fixes the FK (their closeout); we verify + regression-test. With 030-032, completes the owner's 3-phase must-have.</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
