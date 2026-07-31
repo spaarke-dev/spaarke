@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>Project wrap-up — test-diet gate, code-review/adr-check, repo-cleanup, docs + portfolio close</title>
+    <phase>4 Wrap-up</phase>
+    <gate>dep:042</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Project-close wrap-up task (090-*): CLAUDE.md §7 mandates the /test-diet gate + code-review/adr-check on all project code; TEST-MODIFYING (reconciles tests/**) → FULL gate unconditionally.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive close-out checklist driven by existing skills (/test-diet, /code-review, /adr-check, /repo-cleanup, /devops-project-sync); no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final close-out — depends on all prior tasks landing; reconciles the whole project's tests + docs; cannot run concurrently with impl.</parallel-reason>
+    <deps>042</deps>
+    <tags>docs, cleanup</tags>
+    <estimated-effort>S (≤1d)</estimated-effort>
+  </metadata>
+
+  <prompt>Run the mandatory R5 project wrap-up. Execute the /test-diet project-close gate (BINDING per CLAUDE.md §7), run /code-review + /adr-check on all project code and fix any Critical findings, run /repo-cleanup, update README/plan to Complete, append lessons-learned, and sync/archive the portfolio Issue. Do NOT skip the test-diet gate.</prompt>
+
+  <role>SPAARKE platform developer responsible for project close-out — test reconciliation (ADR-038 build-vs-maintain), documentation status updates, repo hygiene, and DevOps portfolio sync.</role>
+
+  <goal>R5 is formally closed: (1) /test-diet ran and reconciled all tests added/modified during R5 against the ADR-038 17-ban classifier, emitting projects/spaarkeai-compose-r5/notes/test-diet-report.md; (2) /code-review + /adr-check ran on all project code with any Critical findings fixed; (3) /repo-cleanup projects/spaarkeai-compose-r5 ran; (4) README.md updated to Status Complete / 100% with graduation criteria checked + changelog entry; (5) plan.md marked Complete; (6) notes/lessons-learned.md appended; (7) /devops-project-sync ran (and optional /devops-project-archive for Issue #695); (8) all tasks show ✅ in TASK-INDEX.md.</goal>
+
+  <context>
+    <background>Per task-create Step 3.7 (mandatory wrap-up) and CLAUDE.md §7 (project-close test-diet gate, BINDING): when the just-completed work is a 090-wrapup task, /test-diet runs BEFORE marking the project complete, reconciling MAINTAIN-class tests (keep at KEEP path) vs SCAFFOLDING-class (delete) per ADR-038 §7. R5 added seam slices + corpus fixtures (G12/G2/G4) and UI tests, so this reconciliation is substantive. The wrap-up also closes docs + the portfolio Issue #695 (Epic #421).</background>
+    <relevant-files>
+      <file>projects/spaarkeai-compose-r5/README.md</file>
+      <file>projects/spaarkeai-compose-r5/plan.md</file>
+      <file>projects/spaarkeai-compose-r5/tasks/TASK-INDEX.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/</file>
+      <file>tests/integration/seam/Compose/</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Compose/</file>
+    </relevant-files>
+    <dependencies>042 (deploy + operator UAT must pass before close-out).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §7">The /test-diet project-close gate is BINDING — run it BEFORE marking the project complete; skipping is a HARD WARNING and the wrap-up must cite the report (or document the skip rationale). It is read-only: it emits git rm / git mv commands for the reviewer; it does not auto-execute.</constraint>
+    <constraint source="ADR-038">test-diet reconciles against the 17-ban build-vs-maintain classifier (ADR-038 §7): MAINTAIN-class stays at KEEP path, SCAFFOLDING-class deleted, AMBIGUOUS needs reviewer judgment. Do NOT delete MAINTAIN-class seam slices proving R5 constructs round-trip.</constraint>
+    <constraint source="project">code-review/adr-check on all project code; fix any Critical finding before marking complete (do not defer Criticals).</constraint>
+    <constraint source="project">NFR-08/NFR-09: the R4 op-log-preservation safety net + downstream analysis-hub-r1 parity must remain intact at close — confirm no guard was removed without its replacing seam slice.</constraint>
+    <constraint source="CLAUDE.md §7">After completion: update task status, TASK-INDEX.md 🔲→✅, reset current-task.md, report completion.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/plan.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/hardening-report.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/uat-results.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="test-diet close gate" location=".claude/skills/test-diet/SKILL.md">Read-only reconciliation of project tests vs ADR-038 17-ban classifier; emits git rm/mv for the reviewer; output notes/test-diet-report.md.</pattern>
+      <pattern name="Portfolio sync" location=".claude/skills/devops-project-sync/SKILL.md">Idempotently update the GitHub Project Issue #695 fields from local state; optional /devops-project-archive.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Run /test-diet (BINDING project-close gate): reconcile all tests added/modified during R5 against the ADR-038 17-ban classifier. Output projects/spaarkeai-compose-r5/notes/test-diet-report.md. Review the emitted git rm/mv commands; keep MAINTAIN-class seam slices, delete SCAFFOLDING-class, escalate AMBIGUOUS. If a Critical surfaces, STOP and remediate before continuing.</step>
+    <step order="2">Run /code-review + /adr-check on all R5 project code. Fix any Critical findings before proceeding (do not mark the project complete with an open Critical).</step>
+    <step order="3">Run /repo-cleanup projects/spaarkeai-compose-r5 to validate structure compliance and remove ephemeral files.</step>
+    <step order="4">Update README.md → Status Complete, 100%; check off the §9 graduation criteria; add a changelog entry.</step>
+    <step order="5">Update plan.md → Status Complete.</step>
+    <step order="6">Append notes/lessons-learned.md with R5 close-out lessons (what worked, what to change, coordination outcomes with R4.5 / analysis-hub-r1).</step>
+    <step order="7">Run /devops-project-sync (and optionally /devops-project-archive for Issue #695) to update the portfolio Issue fields from local state.</step>
+    <step order="8">Verify all tasks show ✅ in projects/spaarkeai-compose-r5/tasks/TASK-INDEX.md; reset current-task.md to "none" (project complete).</step>
+    <step order="9">Run/verify: final build + full Compose seam/unit suites green after any test-diet deletions/moves.</step>
+    <step order="10">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="11">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If /test-diet or /code-review surfaces a Critical finding, STOP and remediate before marking the project complete. Do NOT skip the test-diet gate (HARD WARNING per CLAUDE.md §7) — the wrap-up PR MUST cite notes/test-diet-report.md or document the skip rationale.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Run the final build + seam/unit suites after test-diet reconciliation.</tool>
+    <tool name="terminal">Run /test-diet, /code-review, /adr-check, /repo-cleanup, /devops-project-sync.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-r5/notes/test-diet-report.md</output>
+    <output type="doc">projects/spaarkeai-compose-r5/notes/lessons-learned.md</output>
+    <output type="doc">projects/spaarkeai-compose-r5/README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the project is closing, when /test-diet runs, then notes/test-diet-report.md exists reconciling all R5-added/modified tests against the ADR-038 17-ban classifier, and MAINTAIN-class seam slices are kept at their KEEP path.</criterion>
+    <criterion testable="true">Given all R5 code, when /code-review + /adr-check run, then any Critical finding is fixed before the project is marked complete.</criterion>
+    <criterion testable="true">Given close-out, when README.md and plan.md are updated, then both read Status Complete (README 100% with graduation criteria checked + changelog entry) and lessons-learned.md is appended.</criterion>
+    <criterion testable="true">Given the portfolio, when /devops-project-sync runs, then Issue #695 fields reflect the completed local state (archive optional).</criterion>
+    <criterion testable="true">Given the task ledger, when close-out completes, then every task in TASK-INDEX.md shows ✅ and current-task.md is reset to none.</criterion>
+    <criterion testable="true">Negative: the project is NOT marked complete if the test-diet gate was skipped without a cited report/rationale, or if any Critical remains open.</criterion>
+  </acceptance-criteria>
+
+  <notes>Mandatory wrap-up per task-create Step 3.7 + CLAUDE.md §7 (test-diet project-close gate is BINDING). Prescriptive ordered close-out. Portfolio Issue #695 under Epic #421. Do not skip the test-diet gate.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

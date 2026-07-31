@@ -116,6 +116,10 @@ public sealed partial class ComposeDocumentRenderer
             var plan = new NumberingPlan();
             RenderBlocks(body, model.Blocks, plan);
 
+            // G5 (FR-05, task 033): swap each BuildRun href-sentinel for a real EXTERNAL hyperlink
+            // relationship on the main part (the part is in scope here; BuildRun was not). Before save.
+            ResolveHyperlinkRelationships(body, mainPart);
+
             // Word requires a trailing sectPr for a valid single-section document.
             body.AppendChild(new SectionProperties(
                 new PageSize { Width = 12240, Height = 15840 },
@@ -233,6 +237,10 @@ public sealed partial class ComposeDocumentRenderer
 
             var plan = new NumberingPlan();
             RenderBlocks(body, blocks, plan);
+
+            // G5 (FR-05, task 033): resolve any href-sentinels in the appended section too (parity with
+            // SynthesizeDocument; the Summary Page generator emits none today, so this is a no-op there).
+            ResolveHyperlinkRelationships(body, mainPart);
 
             // Defensive: only exercised if a future caller passes Heading/ListItem/Table blocks (the Summary
             // Page generator does not). Adds the required part ONLY when the target doesn't already carry
@@ -363,7 +371,13 @@ public sealed partial class ComposeDocumentRenderer
         return paragraph;
     }
 
-    private static Run BuildRun(ComposeInlineRun run)
+    // G5 (FR-05, task 033): sentinel prefix stashing a run's href on the temporary Hyperlink.Id during the
+    // static body build (which has no MainDocumentPart in hand). ResolveHyperlinkRelationships replaces
+    // each sentinel with a real EXTERNAL relationship id BEFORE the document is saved — the sentinel never
+    // persists. A prefix that can never collide with a real OOXML relationship id (rId…).
+    private const string HyperlinkPendingIdPrefix = "COMPOSE_PENDING_HREF:";
+
+    private static OpenXmlElement BuildRun(ComposeInlineRun run)
     {
         var element = new Run();
         if (run.Bold || run.Italic || run.Underline)
@@ -376,7 +390,58 @@ public sealed partial class ComposeDocumentRenderer
         }
 
         element.AppendChild(new Text(SanitizeText(run.Text)) { Space = SpaceProcessingModeValues.Preserve });
+
+        // G5: a run carrying an href renders as a clean w:hyperlink wrapping the run. The real external
+        // relationship id can only be minted once the MainDocumentPart is in scope, so stash the href on a
+        // sentinel Hyperlink.Id here; ResolveHyperlinkRelationships (called by both byte-authors after the
+        // body is built) swaps it for the true rId. Zero text-search — the wrap is by the model's own run.
+        if (!string.IsNullOrWhiteSpace(run.Href))
+        {
+            return new Hyperlink(element) { Id = HyperlinkPendingIdPrefix + run.Href!.Trim() };
+        }
+
         return element;
+    }
+
+    /// <summary>
+    /// G5 (FR-05, task 033): resolve every sentinel <see cref="HyperlinkPendingIdPrefix"/> id emitted by
+    /// <see cref="BuildRun"/> into a real EXTERNAL hyperlink relationship on <paramref name="mainPart"/>
+    /// (<c>TargetMode="External"</c>). Called by both authors (<see cref="SynthesizeDocument"/> +
+    /// <see cref="AppendSection"/>) after the body is built and BEFORE save, so no sentinel ever persists.
+    /// A malformed href that cannot form a Uri is unwrapped to its inner run (never a broken relationship,
+    /// never a silent drop of the run's text — the text survives, only the link is dropped).
+    /// </summary>
+    private static void ResolveHyperlinkRelationships(Body body, MainDocumentPart mainPart)
+    {
+        foreach (var hyperlink in body.Descendants<Hyperlink>().ToList())
+        {
+            var id = hyperlink.Id?.Value;
+            if (id is null || !id.StartsWith(HyperlinkPendingIdPrefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var href = id.Substring(HyperlinkPendingIdPrefix.Length);
+            if (Uri.TryCreate(href, UriKind.Absolute, out var uri))
+            {
+                hyperlink.Id = mainPart.AddHyperlinkRelationship(uri, isExternal: true).Id;
+            }
+            else
+            {
+                // Unrepresentable target (not an absolute Uri): keep the run's TEXT (no silent loss) by
+                // replacing the hyperlink wrapper with its inline children, and drop only the link.
+                var parent = hyperlink.Parent;
+                if (parent is not null)
+                {
+                    foreach (var child in hyperlink.ChildElements.ToList())
+                    {
+                        child.Remove();
+                        parent.InsertBefore(child, hyperlink);
+                    }
+                    hyperlink.Remove();
+                }
+            }
+        }
     }
 
     // ── tables ───────────────────────────────────────────────────────────────────────────────────

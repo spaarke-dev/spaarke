@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>G11 — Track-changes-off keeps imported/AI redlines visible (view-only)</title>
+    <phase>3 Concurrency + UX</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Client-only view-only decoration change in Spaarke.Compose.Components; no persistence change, no BFF, no op-catalog change. Modifies an existing extension + toolbar toggle on an existing component surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified decoration-flip fix (hide only the user's own overlay, keep first-class schema-mark redlines); no architectural decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>shared TrackChangesExtension.ts + the toolbar toggle in ComposeEditor.tsx — same decoration/toolbar surface other Phase-3 client tasks touch. Run /conflict-check before the shared-client PR (analysis-hub-r1 shares this surface, NFR-09).</parallel-reason>
+    <deps>none</deps>
+    <tags>frontend, react</tags>
+    <estimated-effort>S (≤1d)</estimated-effort>
+  </metadata>
+
+  <prompt>Toggling the user's own free-typed-edit overlay OFF must KEEP imported/AI redlines rendered (spec FR-10 / gap G11; UAT BUG-B, confirmed NOT data loss). Imported/AI redlines are first-class schema marks; only the user's own overlay should hide. Fix the TrackChangesExtension.ts decoration flip (:157-161) and the toolbar toggle (ComposeEditor.tsx ~:2375) so that toggling off hides only the user's own overlay while imported/AI marks stay visible; toggling on restores the overlay. VIEW-ONLY — NO persistence change, save output unchanged. If the only way to keep imported redlines visible would alter saved bytes, STOP.</prompt>
+
+  <role>SPAARKE platform developer with TipTap/ProseMirror decoration expertise and familiarity with the Spaarke.Compose.Components track-changes extension and toolbar.</role>
+
+  <goal>Toggling the user's free-typed-edit overlay OFF hides only that overlay while imported/AI redlines (first-class schema marks) remain rendered; toggling ON restores the overlay. The fix lives in TrackChangesExtension.ts decoration flip (:157-161) + the toolbar toggle (ComposeEditor.tsx ~:2375). It is strictly view-only: no persistence change, and the save output is byte-identical to before the toggle. Backed by ui-tests covering toggle-off, toggle-on, and dark mode.</goal>
+
+  <context>
+    <background>Per spec FR-10 (G11) and plan P3-3, UAT BUG-B confirmed that toggling the user's own edit overlay off currently also hides imported/AI redlines — a clarity bug, explicitly NOT data loss. Imported/AI redlines are first-class schema marks (not the user's overlay decorations), so only the overlay should respond to the toggle. This is a view-only decoration distinction; the save contract is untouched (NFR-08).</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/marks/TrackChangesExtension.ts</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</file>
+    </relevant-files>
+    <dependencies>None. Coordinate with other Phase-3 client tasks on the shared toolbar/decoration surface.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Client is view+controller; the toggle affects rendering (decorations) only and MUST NOT author bytes or alter the OOXML model. Imported/AI redlines are first-class marks preserved server-side.</constraint>
+    <constraint source="project">NFR-08: view-only — toggling MUST NOT introduce a user-triggerable error or silent-loss path; the save output is unchanged whether the toggle is on or off.</constraint>
+    <constraint source="project">NFR-09 (analysis-hub-r1): TrackChangesExtension.ts + ComposeEditor.tsx toolbar are shared surface; MUST NOT regress the downstream consumer's accept/reject-redline or reopen-restore parity. Run /conflict-check before the shared-client PR.</constraint>
+    <constraint source="project">NFR-03: MIT/permissive only; NO new runtime package. Use the existing TipTap/ProseMirror decoration primitives already in the extension.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Decoration flip" location="src/client/shared/Spaarke.Compose.Components/src/widgets/marks/TrackChangesExtension.ts">The overlay decoration flip at :157-161 — scope the hide to the user's own overlay decorations, not the imported/AI first-class marks.</pattern>
+      <pattern name="Track-changes toolbar toggle" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx">Toolbar toggle at ~:2375 — anchor the toggle UI to the existing toolbar styling; do not restyle.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read TrackChangesExtension.ts decoration flip (:157-161) and the toolbar toggle (ComposeEditor.tsx ~:2375). Identify which decorations belong to the user's own overlay vs which redlines are first-class schema marks (imported/AI).</step>
+    <step order="2">Scope the toggle-off behavior to hide ONLY the user's own overlay decorations; leave imported/AI first-class marks rendered regardless of toggle state.</step>
+    <step order="3">Verify toggle-on restores the user's overlay decorations. Keep the toggle UI anchored to the existing toolbar styling.</step>
+    <step order="4">Confirm view-only: no persistence path changes and the save output is byte-identical whether the toggle is on or off (do not touch the write path / OOXML model).</step>
+    <step order="5">Add the &lt;ui-tests&gt; below. Run /conflict-check before opening the shared-client PR (TrackChangesExtension.ts + toolbar overlap with other Phase-3 tasks and analysis-hub-r1).</step>
+    <step order="6">Run/verify: build (Spaarke.Compose.Components) + the ui-tests pass; confirm save output unchanged.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the only way to keep imported/AI redlines visible with the overlay off would alter the saved bytes (i.e., the fix cannot stay view-only), STOP and escalate — G11 is scoped strictly view-only with no persistence change.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build Spaarke.Compose.Components and run the client/ui tests.</tool>
+    <tool name="terminal">Run /conflict-check on the shared decoration/toolbar surface.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/marks/TrackChangesExtension.ts</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/ (ui-tests for the toggle)</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="toggle-off-keeps-imported-redlines">Given a document with imported/AI redlines and the user's own overlay edits, when the user toggles the overlay OFF, then imported/AI redlines remain visible and only the user's own overlay hides.</test>
+    <test name="toggle-on-restores-overlay">Given the overlay toggled off, when the user toggles it back ON, then the user's own overlay decorations are restored and imported/AI redlines are still visible.</test>
+    <test name="toggle-styling-anchored">Given the toolbar toggle, when it renders, then it uses the existing toolbar/toggle styling (ComposeEditor.tsx ~:2375) — not a new visual treatment.</test>
+    <test name="dark-mode">Given ADR-021 dark mode, when redlines and the toggle render in dark theme, then they use theme tokens (no hard-coded colors) and remain legible in both light and dark.</test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given imported/AI redlines and the user's own overlay, when the overlay toggle is OFF, then imported/AI first-class marks stay visible and only the user's overlay is hidden.</criterion>
+    <criterion testable="true">Given the toggle OFF, when the user toggles ON, then the overlay decorations are restored (round-trip).</criterion>
+    <criterion testable="true">Given any toggle state, when the document is saved, then the save output is byte-identical to before (view-only, no persistence change).</criterion>
+    <criterion testable="true">Given the fix, when the ui-tests run, then toggle-off, toggle-on, and dark-mode all pass with the toggle anchored to existing toolbar styling.</criterion>
+    <criterion testable="true">Negative / no-regression: no write-path/OOXML change; analysis-hub-r1 accept/reject-redline + reopen-restore parity not regressed (NFR-09); no new runtime package (NFR-03).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-10 / gap G11; plan P3-3; UAT BUG-B (confirmed NOT data loss). View-only, no persistence change. parallel-safe=false due to shared TrackChangesExtension.ts + toolbar. Escalate only if keeping imported redlines visible would alter saved bytes.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -81,7 +81,7 @@ function selectPhrase(editor: Editor, sub: string): void {
 /** A valid JSON-operations return payload referencing the target paraId. */
 function opsPayload(paraId = PARA_ID) {
   return {
-    schemaVersion: 'compose-ops-v1',
+    schemaVersion: 'compose-ops-v2',
     operations: [
       {
         type: 'replaceRange',
@@ -114,7 +114,7 @@ describe('extractComposeOperations (I-7 free-text refusal classifier)', () => {
   });
 
   it('an empty operations envelope is a valid no-op ([]), not a refusal', () => {
-    expect(extractComposeOperations({ schemaVersion: 'compose-ops-v1', operations: [] })).toEqual([]);
+    expect(extractComposeOperations({ schemaVersion: 'compose-ops-v2', operations: [] })).toEqual([]);
   });
 
   it('a mixed array (an op + free-text garbage) is refused → null', () => {

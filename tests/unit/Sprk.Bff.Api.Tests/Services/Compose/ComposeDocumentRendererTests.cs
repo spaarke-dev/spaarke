@@ -202,6 +202,70 @@ public sealed class ComposeDocumentRendererTests
     }
 
     [Fact]
+    public void SynthesizeDocument_RunWithHref_EmitsCleanHyperlinkWithExternalRelationship()
+    {
+        // G5 (FR-05, task 033): a run carrying an href renders as a clean w:hyperlink pointing at an
+        // EXTERNAL relationship — the authored (clean) path's hyperlink representation, zero tracked markup.
+        var model = new ComposeContentModel
+        {
+            Blocks = new[]
+            {
+                new ComposeBlock
+                {
+                    Kind = ComposeBlockKind.Paragraph,
+                    Runs = new[]
+                    {
+                        new ComposeInlineRun { Text = "Visit " },
+                        new ComposeInlineRun { Text = "our site", Href = "https://example.com/" },
+                    },
+                },
+            },
+        };
+
+        var bytes = Renderer().SynthesizeDocument(model, "author");
+
+        using var doc = Open(bytes);
+        var mainPart = doc.MainDocumentPart!;
+        var para = Paragraphs(doc).Single();
+
+        var hyperlink = para.Descendants<Hyperlink>().Single();
+        string.Concat(hyperlink.Descendants<Text>().Select(t => t.Text)).Should().Be("our site",
+            "only the href run is wrapped in the w:hyperlink");
+        para.Descendants<InsertedRun>().Should().BeEmpty("the authored path is CLEAN — no tracked insertions");
+        para.Descendants<DeletedRun>().Should().BeEmpty("the authored path is CLEAN — no tracked deletions");
+
+        var rel = mainPart.HyperlinkRelationships.Single(r => r.Id == hyperlink.Id!.Value);
+        rel.IsExternal.Should().BeTrue("a Compose hyperlink is an external target (TargetMode=External)");
+        rel.Uri.ToString().Should().Be("https://example.com/");
+    }
+
+    [Fact]
+    public void SynthesizeDocument_RunWithRelativeHref_KeepsTextDropsBrokenLink()
+    {
+        // A non-absolute href cannot form a valid external relationship — the renderer keeps the run TEXT
+        // (no silent loss of content) and drops only the link, never emitting a broken relationship.
+        var model = new ComposeContentModel
+        {
+            Blocks = new[]
+            {
+                new ComposeBlock
+                {
+                    Kind = ComposeBlockKind.Paragraph,
+                    Runs = new[] { new ComposeInlineRun { Text = "bad link", Href = "not-a-url" } },
+                },
+            },
+        };
+
+        var bytes = Renderer().SynthesizeDocument(model, "author");
+
+        using var doc = Open(bytes);
+        var para = Paragraphs(doc).Single();
+        para.Descendants<Hyperlink>().Should().BeEmpty("a non-absolute href yields no hyperlink");
+        string.Concat(para.Descendants<Text>().Select(t => t.Text)).Should().Be("bad link",
+            "the run text survives even when the link target is unrepresentable (no silent loss)");
+    }
+
+    [Fact]
     public void SynthesizeDocument_Table_RendersNativeTblWithCellParagraphs()
     {
         var model = new ComposeContentModel

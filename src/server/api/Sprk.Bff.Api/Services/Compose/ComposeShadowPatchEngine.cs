@@ -2,6 +2,7 @@ using System.Globalization;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Services.Compose.Operations;
 
 namespace Sprk.Bff.Api.Services.Compose;
@@ -90,6 +91,23 @@ public sealed class ComposeShadowPatchEngine
     private const string DefaultAuthor = "Spaarke Compose";
 
     /// <summary>
+    /// Optional diagnostic logger (task 055). When resolved by DI it lets an anchor/offset REFUSAL
+    /// (<see cref="ComposePatchErrorKind.RunIndexOutOfRange"/> / <see cref="ComposePatchErrorKind.OffsetOutOfRange"/>)
+    /// self-explain by logging the failing op's anchor + the target paragraph's per-run editor-length
+    /// breakdown. Optional/defaulted so the engine stays trivially <c>new</c>-able in seam tests (ADR-010
+    /// stateless singleton) — logging is a diagnostic side-channel, never a behavior change.
+    /// </summary>
+    private readonly ILogger? _logger;
+
+    /// <summary>DI ctor — the optional <paramref name="logger"/> is injected by the container
+    /// (<c>ILogger&lt;ComposeShadowPatchEngine&gt;</c> is always registered) and defaults to <c>null</c> for
+    /// a bare <c>new ComposeShadowPatchEngine()</c> in tests.</summary>
+    public ComposeShadowPatchEngine(ILogger<ComposeShadowPatchEngine>? logger = null)
+    {
+        _logger = logger;
+    }
+
+    /// <summary>
     /// Applies <paramref name="operationLog"/> (and any <paramref name="comments"/>) onto
     /// <paramref name="retainedBytes"/> and returns the patched <c>.docx</c> bytes. A no-op (empty log,
     /// no comments) returns <paramref name="retainedBytes"/> unchanged (byte-identical). Nothing is
@@ -108,12 +126,22 @@ public sealed class ComposeShadowPatchEngine
     /// <exception cref="ComposePatchException">The bytes are not a readable DOCX, the schema version is
     /// unsupported, a paraId/runIndex/offset does not resolve, an op targets an opaque atom or a
     /// pre-existing tracked change, or a structural op (task 031) was supplied.</exception>
+    /// <param name="trackChanges">G2 (FR-02, task 021 / R5-D2 Candidate A): when <c>true</c> (default) the
+    /// engine emits native tracked changes (<c>w:ins</c>/<c>w:del</c>/<c>w:pPrChange</c>/tracked para-marks) —
+    /// the shipped imported-doc path, unchanged. When <c>false</c> (the AUTHORED-origin save path, per the
+    /// durable <c>sprk_composeorigin</c> marker) the SAME resolve-by-<c>(paraId,runIndex,offset)</c> spine
+    /// applies edits as CLEAN OOXML: inserts are plain <c>w:r</c>, deletions physically remove the run/node,
+    /// block-attribute changes write the property with NO <c>w:pPrChange</c>. Nothing is re-derived — only
+    /// <c>document.xml</c> is re-serialized; every other package part + untouched paragraph subtree stays
+    /// byte-identical (I-4/NFR-01). The two byte-authors are NOT merged: this is a mode on the existing
+    /// delta-applier over retained bytes, not the from-scratch renderer.</param>
     public byte[] Apply(
         byte[] retainedBytes,
         ComposeOperationLog operationLog,
         IReadOnlyList<ComposeAnchoredComment>? comments = null,
         string? author = null,
-        DateTimeOffset? timestamp = null)
+        DateTimeOffset? timestamp = null,
+        bool trackChanges = true)
     {
         if (retainedBytes is null || retainedBytes.Length == 0)
         {
@@ -166,7 +194,7 @@ public sealed class ComposeShadowPatchEngine
             var body = mainPart.Document?.Body
                 ?? throw new ComposePatchException(ComposePatchErrorKind.MalformedDocument, "The .docx main document part has no body.");
 
-            var session = new PatchSession(mainPart, body, author ?? DefaultAuthor, (timestamp ?? DateTimeOffset.UtcNow).UtcDateTime);
+            var session = new PatchSession(mainPart, body, retainedBytes, author ?? DefaultAuthor, (timestamp ?? DateTimeOffset.UtcNow).UtcDateTime, trackChanges, _logger);
             session.Execute(ops, anchoredComments);
 
             mainPart.Document!.Save();
@@ -183,18 +211,37 @@ public sealed class ComposeShadowPatchEngine
     {
         private readonly MainDocumentPart _mainPart;
         private readonly Body _body;
+        private readonly byte[] _retainedBytes;
         private readonly string _author;
         private readonly DateTime _date;
+        // G2 (FR-02, task 021): false = clean-apply mode (authored-origin path) — plain runs, physical
+        // deletes, no w:pPrChange/tracked para-marks. Default true = the shipped tracked path (imported).
+        private readonly bool _trackChanges;
+        private readonly ILogger? _logger;
         private readonly Dictionary<string, Paragraph> _byParaId;
         private int _idCounter;
         private WordprocessingCommentsPart? _commentsPart;
 
-        public PatchSession(MainDocumentPart mainPart, Body body, string author, DateTime date)
+        // Lazy per-apply-session cache of R4.5's read-side numbering MODEL
+        // (ComposeDocxProjectionBuilder.BuildNumberingModel — referenced in place per task 005, R5-D4:
+        // reuse, never fork). See GetNumberingModel: the model is built from a throwaway read-only probe over
+        // the retained bytes so a list op that only REFERENCES existing numbering never materializes (and thus
+        // never re-serializes) the EDITABLE numbering/styles parts — they stay byte-identical (NFR-01 / I-4).
+        private ComposeDocxProjectionBuilder.NumberingModel? _numberingModel;
+
+        // Set once this session AUTHORS a new numbering definition into the editable numbering part; after that
+        // the model must be read from the (now-modified) editable part rather than the pristine retained bytes.
+        private bool _numberingAuthored;
+
+        public PatchSession(MainDocumentPart mainPart, Body body, byte[] retainedBytes, string author, DateTime date, bool trackChanges, ILogger? logger = null)
         {
             _mainPart = mainPart;
             _body = body;
+            _retainedBytes = retainedBytes;
             _author = author;
             _date = date;
+            _trackChanges = trackChanges;
+            _logger = logger;
             _byParaId = BuildParaIdIndex(body);
             _idCounter = SeedRevisionId(mainPart, body);
         }
@@ -231,27 +278,70 @@ public sealed class ComposeShadowPatchEngine
                         ApplyReplaceRange(rep);
                         break;
                     case SetMarkOperation setMark:
-                        ApplyMarkOverRange(setMark.ParaId, setMark.Range, setMark.Mark, on: true);
+                        // G5 (task 033): Link is a STRUCTURAL mark (w:hyperlink wrap), not an rPr toggle —
+                        // route it to its own applier; every other mark stays on the rPr path.
+                        if (setMark.Mark == ComposeMarkType.Link)
+                            ApplyLinkOverRange(setMark.ParaId, setMark.Range, setMark.Href, on: true);
+                        else
+                            ApplyMarkOverRange(setMark.ParaId, setMark.Range, setMark.Mark, on: true);
                         break;
                     case ClearMarkOperation clearMark:
-                        ApplyMarkOverRange(clearMark.ParaId, clearMark.Range, clearMark.Mark, on: false);
+                        if (clearMark.Mark == ComposeMarkType.Link)
+                            ApplyLinkOverRange(clearMark.ParaId, clearMark.Range, href: null, on: false);
+                        else
+                            ApplyMarkOverRange(clearMark.ParaId, clearMark.Range, clearMark.Mark, on: false);
                         break;
 
                     // Task 031 — the four structural paragraph ops are collected and applied LAST (below).
+                    // R5 task 014 (G4) — the table op is ALSO structural (it adds/removes rows/cells and mints
+                    // new cell paragraphs) so it runs in the SAME last pass, in log order: a table op never
+                    // shifts an inline op's run-local-offset anchor because table structure is addressed by
+                    // paraId-ancestry + (row,column), never by paragraph-run offsets.
                     case SplitParagraphOperation:
                     case MergeParagraphOperation:
                     case InsertParagraphOperation:
                     case DeleteParagraphOperation:
+                    case TableOperation:
                         structural.Add(op);
                         break;
 
                     // setBlockAttr (alignment/style/list block application) is outside task 031's four-op scope.
-                    case SetBlockAttrOperation:
+                    // R5 task 010 (G3) filled the Alignment case; R5 task 011 (G3 heading/list) fills Style +
+                    // ListOrdered/ListLevel — each a tracked w:pPrChange, reusing R4.5's numbering MODEL for the
+                    // list case (referenced in place per task 005; never a fork of the numbering algorithm).
+                    case SetBlockAttrOperation setAttr when setAttr.Attr == ComposeBlockAttr.Alignment:
+                        ApplySetBlockAttrAlignment(setAttr);
+                        break;
+
+                    case SetBlockAttrOperation setAttr when setAttr.Attr == ComposeBlockAttr.Style:
+                        ApplySetBlockAttrStyle(setAttr);
+                        break;
+
+                    case SetBlockAttrOperation setAttr when setAttr.Attr is ComposeBlockAttr.ListOrdered or ComposeBlockAttr.ListLevel:
+                        ApplySetBlockAttrList(setAttr);
+                        break;
+
+                    // R5 task 012 (G12 / FR-11) — reconcile a PRE-EXISTING imported tracked change by its native
+                    // w:id: accept-ins strips the w:ins wrapper keeping the run, accept-del removes the run;
+                    // reject is the inverse. This is exactly the case the task-030 escalation guard REFUSED with
+                    // TrackedChangeReconciliationUnsupported — a deterministic id-addressed accept/reject is
+                    // Word-valid (NFR-07) and never text-searches (I-7). Runs in the first pass (it mutates runs
+                    // WITHIN a paragraph, like the inline ops), before the structural paragraph pass.
+                    case AcceptRevisionOperation accept:
+                        ApplyRevisionReconciliation(accept.ParaId, accept.Scope, accept.RevisionId, acceptNotReject: true);
+                        break;
+
+                    case RejectRevisionOperation reject:
+                        ApplyRevisionReconciliation(reject.ParaId, reject.Scope, reject.RevisionId, acceptNotReject: false);
+                        break;
+
+                    case SetBlockAttrOperation setAttr:
+                        // Defensive: ComposeBlockAttr is a closed set (Alignment/Style/ListOrdered/ListLevel), all
+                        // handled above. A value here means the enum grew without an applier — refuse, never guess.
                         throw new ComposePatchException(
                             ComposePatchErrorKind.StructuralOpNotYetImplemented,
-                            $"Operation 'setBlockAttr' (paraId {op.ParaId}) — paragraph block-attribute application " +
-                            "(alignment/style/list) is outside task 031's four structural-paragraph-op scope; it routes " +
-                            "to its own later applier extension.");
+                            $"Operation 'setBlockAttr' (paraId {op.ParaId}, attr {setAttr.Attr}) — no applier is " +
+                            "registered for this block attribute.");
 
                     default:
                         throw new ComposePatchException(
@@ -276,6 +366,9 @@ public sealed class ComposeShadowPatchEngine
                         break;
                     case DeleteParagraphOperation dp:
                         ApplyDeleteParagraph(dp);
+                        break;
+                    case TableOperation tbl:
+                        ApplyTableOperation(tbl);
                         break;
                 }
             }
@@ -316,34 +409,51 @@ public sealed class ComposeShadowPatchEngine
             var para = Resolve(op.ParaId);
             var absOffset = ToAbsoluteOffset(para, op.ParaId, op.At);
 
-            // Split so a run boundary exists exactly at the insertion point, then anchor the <w:ins> there.
+            // Split so a run boundary exists exactly at the insertion point, then anchor the insertion there.
             SplitParagraphAtEditorOffset(para, absOffset, op.ParaId);
             var leftRun = LastRunEndingAt(para, absOffset);
 
-            var ins = NewInsertedRun();
-            ins.AppendChild(BuildRun(templateRunProperties: leftRun?.RunProperties, op.Text, op.Marks));
-            InsertInsAt(para, ins, leftRun);
+            // G2: tracked mode wraps the run in <w:ins>; clean mode inserts a bare <w:r> (no redline).
+            var element = BuildInsertElement(leftRun?.RunProperties, op.Text, op.Marks);
+            InsertInsAt(para, element, leftRun);
         }
 
-        /// <summary>Places <paramref name="ins"/> immediately after <paramref name="leftRun"/> (the run
-        /// ending at the insertion point). When <paramref name="leftRun"/> is null (offset 0) the tracked
-        /// insertion goes before the paragraph's first inline element, or is appended to an empty paragraph.</summary>
-        private static void InsertInsAt(Paragraph para, InsertedRun ins, Run? leftRun)
+        /// <summary>Builds the element an insert lands: a tracked <see cref="InsertedRun"/> wrapping the new run
+        /// (tracked mode) or a bare <see cref="Run"/> (G2 clean mode — no <c>w:ins</c>). Both carry identical run
+        /// content/properties; only the tracked-change wrapper differs.</summary>
+        private OpenXmlElement BuildInsertElement(RunProperties? templateRunProperties, string text, IReadOnlyList<ComposeMarkType> marks)
+        {
+            var run = BuildRun(templateRunProperties, text, marks);
+            if (!_trackChanges)
+            {
+                return run;
+            }
+
+            var ins = NewInsertedRun();
+            ins.AppendChild(run);
+            return ins;
+        }
+
+        /// <summary>Places <paramref name="newElement"/> immediately after <paramref name="leftRun"/> (the run
+        /// ending at the insertion point). When <paramref name="leftRun"/> is null (offset 0) the insertion
+        /// goes before the paragraph's first inline element, or is appended to an empty paragraph. The element
+        /// is a tracked <c>w:ins</c> (tracked mode) or a bare <c>w:r</c> (G2 clean mode).</summary>
+        private static void InsertInsAt(Paragraph para, OpenXmlElement newElement, Run? leftRun)
         {
             if (leftRun is not null)
             {
-                leftRun.InsertAfterSelf(ins);
+                leftRun.InsertAfterSelf(newElement);
                 return;
             }
 
             var firstInline = para.Elements().FirstOrDefault(IsInlineContainer);
             if (firstInline is not null)
             {
-                firstInline.InsertBeforeSelf(ins);
+                firstInline.InsertBeforeSelf(newElement);
             }
             else
             {
-                para.AppendChild(ins);
+                para.AppendChild(newElement);
             }
         }
 
@@ -365,12 +475,12 @@ public sealed class ComposeShadowPatchEngine
             var covered = IsolateRangeRuns(op.ParaId, op.Range);
             var first = covered.Count > 0 ? covered[0] : null;
 
-            // Insertion renders BEFORE the deletion (Word convention: <w:ins> new … <w:del> old).
+            // Insertion renders BEFORE the deletion (Word convention: <w:ins> new … <w:del> old). In G2 clean
+            // mode the insert is a bare <w:r> and the "deletion" below is a physical removal — no redline.
             var templateProps = first?.RunProperties;
             if (op.Text.Length > 0)
             {
-                var ins = NewInsertedRun();
-                ins.AppendChild(BuildRun(templateProps, op.Text, op.Marks));
+                var ins = BuildInsertElement(templateProps, op.Text, op.Marks);
                 if (first is not null)
                 {
                     first.InsertBeforeSelf(ins);
@@ -403,6 +513,84 @@ public sealed class ComposeShadowPatchEngine
             foreach (var run in covered)
             {
                 ApplyMarkToRun(run, mark, on);
+            }
+        }
+
+        // -- setMark(Link) / clearMark(Link) — G5 (FR-05, task 033) -----------------------------------
+        // A hyperlink is STRUCTURAL (a w:hyperlink wrapping runs + an EXTERNAL relationship on the main
+        // part), not an rPr toggle — so it has its own applier rather than riding ApplyMarkToRun. Surgical
+        // + (paraId,runIndex,offset)-anchored via IsolateRangeRuns (no text-search — I-7). Consistent with
+        // the v1 mark applier (see ApplyMarkOverRange note), the link is NOT additionally wrapped in a
+        // w:ins revision on the tracked path — tracking "a link was added" as a revision is the same
+        // documented later refinement as w:rPrChange for bold/italic. The wrapped runs stay addressable by
+        // (paraId,runIndex,offset) on the next edit because the engine's flatten already descends into
+        // w:hyperlink (CollectSlots), so an emitted link is never silently lost on a subsequent round-trip.
+        private void ApplyLinkOverRange(string paraId, ComposeRunRange range, string? href, bool on)
+        {
+            var covered = IsolateRangeRuns(paraId, range);
+            if (covered.Count == 0)
+            {
+                return;
+            }
+
+            // clearMark(Link) — unwrap any hyperlink parenting a covered run; nothing else to do.
+            if (!on)
+            {
+                UnwrapCoveredHyperlinks(covered);
+                return;
+            }
+
+            var trimmed = href?.Trim();
+            if (string.IsNullOrEmpty(trimmed) || !Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+            {
+                throw new ComposePatchException(
+                    ComposePatchErrorKind.InvalidHyperlinkTarget,
+                    "A setMark(Link) op requires an absolute href (e.g. https://…); a missing or relative target " +
+                    "is refused rather than written as a broken relationship (no silent-loss).");
+            }
+
+            // Re-link guard: if the covered runs already sit inside a hyperlink, unwrap it first so the new
+            // link cleanly replaces the old (never nests w:hyperlink inside w:hyperlink — invalid OOXML).
+            UnwrapCoveredHyperlinks(covered);
+
+            var first = covered[0];
+            var parent = first.Parent
+                ?? throw new ComposePatchException(
+                    ComposePatchErrorKind.OffsetUnsplittable,
+                    "The hyperlink target run has no parent element to wrap.");
+
+            var relId = _mainPart.AddHyperlinkRelationship(uri, isExternal: true).Id;
+            var hyperlink = new Hyperlink { Id = relId };
+            parent.InsertBefore(hyperlink, first);
+            foreach (var run in covered)
+            {
+                run.Remove();
+                hyperlink.AppendChild(run);
+            }
+        }
+
+        /// <summary>Unwrap any <c>w:hyperlink</c> that directly parents one of the <paramref name="covered"/>
+        /// runs, promoting its inline children back to the hyperlink's own parent — the clearMark(Link)
+        /// mechanic + the setMark(Link) re-link guard. Idempotent per hyperlink.</summary>
+        private static void UnwrapCoveredHyperlinks(IReadOnlyList<Run> covered)
+        {
+            var unwrapped = new HashSet<Hyperlink>();
+            foreach (var run in covered)
+            {
+                if (run.Parent is Hyperlink hyperlink && unwrapped.Add(hyperlink))
+                {
+                    var parent = hyperlink.Parent;
+                    if (parent is null)
+                    {
+                        continue;
+                    }
+                    foreach (var child in hyperlink.ChildElements.ToList())
+                    {
+                        child.Remove();
+                        parent.InsertBefore(child, hyperlink);
+                    }
+                    hyperlink.Remove();
+                }
             }
         }
 
@@ -494,6 +682,22 @@ public sealed class ComposeShadowPatchEngine
                 throw StructuralRefused(op.ParaId, $"target '{op.TargetParaId}' carries a section break (w:sectPr); deleting its paragraph mark would drop section properties");
             }
 
+            // G2 clean mode: physically merge — move the source paragraph's inline content onto the target (in
+            // order, after the target's existing inline children), then remove the source node. The target's
+            // paragraph properties survive (its mark is the boundary that disappears). No tracked para-mark.
+            if (!_trackChanges)
+            {
+                foreach (var child in para.Elements().Where(IsInlineContainer).ToList())
+                {
+                    child.Remove();
+                    target.AppendChild(child);
+                }
+
+                para.Remove();
+                _byParaId.Remove(op.ParaId);
+                return;
+            }
+
             // The boundary between target and para is the TARGET's paragraph mark. Deleting it (tracked) is the
             // paragraph-mark deletion the prior art flags as the hardest OOXML edge (finding #6 / §5.6(b)).
             MarkParagraphMark(target, inserted: false);
@@ -549,6 +753,16 @@ public sealed class ComposeShadowPatchEngine
                 throw StructuralRefused(op.ParaId, "the paragraph carries a section break (w:sectPr); striking it would drop section properties");
             }
 
+            // G2 clean mode: an authored doc's paragraph deletion is PHYSICAL — remove the whole node so it
+            // simply vanishes (no struck-through redline). The sectPr guard above already protects the one
+            // paragraph a physical remove would corrupt.
+            if (!_trackChanges)
+            {
+                para.Remove();
+                _byParaId.Remove(op.ParaId);
+                return;
+            }
+
             // Snapshot the flatten once, then strike each settled physical run. Atoms / already-tracked runs are
             // left in place (the para-mark deletion still removes the whole paragraph on accept).
             foreach (var slot in FlattenEditorRuns(para))
@@ -562,6 +776,1009 @@ public sealed class ComposeShadowPatchEngine
             MarkParagraphMark(para, inserted: false);
         }
 
+        // -- setBlockAttr: Alignment (R5 G3, task 010) -------------------------------------------------
+
+        /// <summary>
+        /// Applies a <c>setBlockAttr</c> <see cref="ComposeBlockAttr.Alignment"/> op: resolves the target
+        /// paragraph by <see cref="ComposeOperation.ParaId"/> ONLY (no run offset — paragraph-scoped, I-7
+        /// compliant) and records the change as a tracked <c>w:pPrChange</c> — the paragraph-property analogue
+        /// of <see cref="MarkParagraphMark"/>'s paragraph-MARK tracked change. The <c>w:pPrChange</c> snapshots
+        /// the PRIOR <c>w:jc</c> (or none, if the paragraph inherited alignment from its style) into a nested
+        /// <c>w:pPr</c> (modeled by <see cref="ParagraphPropertiesExtended"/> — the OpenXml SDK's
+        /// schema-contextual type for a <c>w:pPrChange</c> child, confirmed by round-tripping through
+        /// <c>WordprocessingDocument.Open</c> rather than assumed from the class name) BEFORE the new value is
+        /// written, so Word's "Reject Formatting Change" restores exactly what was there.
+        /// </summary>
+        /// <remarks>
+        /// This is the TRACKED path — the only path this engine has today (the imported/tracked path is the
+        /// engine's sole caller; G2's clean-apply branch, task 021, is additive and does not change this
+        /// method). A future <c>trackChanges:false</c> mode (R5-D2, notes/g2-clean-apply-decision.md) would add
+        /// a sibling branch that sets <c>w:jc</c> directly with NO <see cref="ParagraphPropertiesChange"/> — this
+        /// method is kept self-contained (its own resolve + its own mutation) precisely so that branch point is
+        /// easy to add later without touching this tracked path.
+        /// </remarks>
+        private void ApplySetBlockAttrAlignment(SetBlockAttrOperation op)
+        {
+            var para = Resolve(op.ParaId);
+
+            if (!TryParseAlignmentValue(op.Value, out var newJc))
+            {
+                throw new ComposePatchException(
+                    ComposePatchErrorKind.InvalidBlockAttrValue,
+                    $"setBlockAttr Alignment on paraId '{op.ParaId}' carries an unrecognized value '{op.Value}' " +
+                    "— expected one of Default/Left/Center/Right/Justify (null/'Default' clears to the style default).");
+            }
+
+            var pPr = para.ParagraphProperties ??= new ParagraphProperties();
+
+            // Snapshot the PRIOR alignment BEFORE mutating anything — this is what Word shows as the
+            // "changed from" state on Reject Formatting Change. No prior <w:jc> (style-inherited alignment)
+            // snapshots as an empty ParagraphPropertiesExtended, matching Word's own pPrChange shape.
+            var previousJc = pPr.GetFirstChild<Justification>();
+            var previousProps = new ParagraphPropertiesExtended();
+            if (previousJc is not null)
+            {
+                previousProps.AppendChild((Justification)previousJc.CloneNode(true));
+            }
+
+            // w:pPrChange never stacks (mirrors MarkParagraphMark's "never stack two revisions" rule) — an
+            // earlier change to THIS paragraph within the SAME Apply() call is superseded by recording the
+            // state immediately before the newest value, not the doc's original on-disk state.
+            pPr.RemoveAllChildren<ParagraphPropertiesChange>();
+
+            // Replace the live <w:jc> with the new value; null/Default clears it (inherit from style).
+            previousJc?.Remove();
+            if (newJc is { } jcValue)
+            {
+                InsertJustificationInOrder(pPr, new Justification { Val = jcValue });
+            }
+
+            // G2 clean mode: the direct w:jc IS the change — an authored doc records no "changed from"
+            // formatting revision, so emit NO w:pPrChange.
+            if (!_trackChanges)
+            {
+                return;
+            }
+
+            var pPrChange = new ParagraphPropertiesChange { Id = NextId(), Author = _author, Date = _date };
+            pPrChange.AppendChild(previousProps);
+            pPr.AppendChild(pPrChange); // w:pPrChange is always the LAST child of CT_PPr.
+        }
+
+        /// <summary>Maps a <see cref="SetBlockAttrOperation.Value"/> string (the <c>ComposeParagraphAlignment</c>
+        /// member name) to the OOXML <see cref="JustificationValues"/> to write, or <c>null</c> to clear the
+        /// paragraph's explicit alignment back to its style default. Mirrors
+        /// <see cref="ComposeDocumentRenderer"/>'s <c>ApplyAlignment</c> value vocabulary exactly (both byte-authors
+        /// agree on what each alignment name means). Returns <c>false</c> for a value outside the closed set.</summary>
+        private static bool TryParseAlignmentValue(string? value, out JustificationValues? justification)
+        {
+            switch (value)
+            {
+                case null:
+                case "Default":
+                    justification = null;
+                    return true;
+                case "Left":
+                    justification = JustificationValues.Left;
+                    return true;
+                case "Center":
+                    justification = JustificationValues.Center;
+                    return true;
+                case "Right":
+                    justification = JustificationValues.Right;
+                    return true;
+                case "Justify":
+                    justification = JustificationValues.Both;
+                    return true;
+                default:
+                    justification = null;
+                    return false;
+            }
+        }
+
+        /// <summary>Inserts <paramref name="justification"/> at its schema-correct CT_PPr position: immediately
+        /// before <see cref="ParagraphMarkRunProperties"/> / <see cref="SectionProperties"/> when either is
+        /// present (both sort AFTER <c>w:jc</c> in the CT_PPr sequence), otherwise appended at the end. Callers
+        /// remove any prior <see cref="ParagraphPropertiesChange"/> before calling this (that element sorts LAST
+        /// and is re-appended by the caller afterward, so it never becomes a stale insertion anchor here).</summary>
+        private static void InsertJustificationInOrder(ParagraphProperties pPr, Justification justification)
+        {
+            OpenXmlElement? anchor = pPr.GetFirstChild<ParagraphMarkRunProperties>();
+            anchor ??= pPr.GetFirstChild<SectionProperties>();
+
+            if (anchor is not null)
+            {
+                pPr.InsertBefore(justification, anchor);
+            }
+            else
+            {
+                pPr.AppendChild(justification);
+            }
+        }
+
+        // -- setBlockAttr: Style (heading level / list-paragraph style) (R5 G3, task 011) --------------
+
+        /// <summary>
+        /// Applies a <c>setBlockAttr</c> <see cref="ComposeBlockAttr.Style"/> op: resolves the target
+        /// paragraph by paraId ONLY (I-7 — no run offset, no text-search) and records the paragraph-style
+        /// change as a tracked <c>w:pPrChange</c> (the paragraph-property analogue of
+        /// <see cref="ApplySetBlockAttrAlignment"/>). <c>Normal</c>/<c>null</c> reverts to the default
+        /// paragraph style (drops <c>w:pStyle</c>); <c>Heading1..6</c> sets the heading style;
+        /// <c>ListParagraph</c> sets the list style. A move to a NON-list style (Normal/HeadingN) also drops
+        /// any DIRECT <c>w:numPr</c> — a heading numbers through its STYLE (never a direct numId, FR-27), and
+        /// Normal is plain body — so the paragraph cleanly leaves a list it was in.
+        /// </summary>
+        /// <remarks>Tracked path only (the engine's sole caller is the imported/tracked path). G2's
+        /// clean-apply branch (task 021, R5-D2) adds a sibling that sets <c>w:pStyle</c>/<c>w:numPr</c>
+        /// directly with NO <see cref="ParagraphPropertiesChange"/>; this method is self-contained (own
+        /// resolve + own mutation) precisely so that branch is easy to add later.</remarks>
+        private void ApplySetBlockAttrStyle(SetBlockAttrOperation op)
+        {
+            var para = Resolve(op.ParaId);
+
+            if (!TryParseStyleValue(op.Value, out var styleId, out var isListParagraph))
+            {
+                throw new ComposePatchException(
+                    ComposePatchErrorKind.InvalidBlockAttrValue,
+                    $"setBlockAttr Style on paraId '{op.ParaId}' carries an unrecognized value '{op.Value}' — " +
+                    "expected one of Normal/Heading1..Heading6/ListParagraph (null/'Normal' reverts to the default style).");
+            }
+
+            var pPr = para.ParagraphProperties ??= new ParagraphProperties();
+            var previousProps = SnapshotPriorPPr(pPr);
+
+            pPr.RemoveAllChildren<ParagraphStyleId>();
+            if (styleId is not null)
+            {
+                pPr.PrependChild(new ParagraphStyleId { Val = styleId }); // w:pStyle is the FIRST child of CT_PPr.
+            }
+
+            if (!isListParagraph)
+            {
+                // Leaving a list: a non-list paragraph carries no direct numbering.
+                pPr.RemoveAllChildren<NumberingProperties>();
+            }
+
+            RecordPPrChange(pPr, previousProps);
+        }
+
+        // -- setBlockAttr: ListOrdered / ListLevel (R5 G3, task 011) ------------------------------------
+
+        /// <summary>
+        /// Applies a <c>setBlockAttr</c> <see cref="ComposeBlockAttr.ListOrdered"/> or
+        /// <see cref="ComposeBlockAttr.ListLevel"/> op: resolves the paragraph by paraId ONLY (I-7) and sets
+        /// a DIRECT <c>w:numPr</c> (numId + ilvl) recorded as a tracked <c>w:pPrChange</c>. The numId is
+        /// resolved through R4.5's read-side numbering MODEL (<see cref="EnsureListNumbering"/>) so the
+        /// resulting numbering renders identically to what the read-side
+        /// <see cref="ComposeDocxProjectionBuilder.NumberingComputationEngine"/> computes — the numbering
+        /// algorithm is NEVER re-implemented here (R5-D4 / task 005). <c>ListOrdered</c> switches
+        /// numbered/bullet at the current depth; <c>ListLevel</c> re-nests to the requested depth keeping the
+        /// paragraph's existing list identity when it has one.
+        /// </summary>
+        private void ApplySetBlockAttrList(SetBlockAttrOperation op)
+        {
+            var para = Resolve(op.ParaId);
+            var pPr = para.ParagraphProperties ??= new ParagraphProperties();
+            var existingNumPr = pPr.GetFirstChild<NumberingProperties>();
+
+            int numId;
+            int ilvl;
+
+            if (op.Attr == ComposeBlockAttr.ListOrdered)
+            {
+                if (!TryParseBool(op.Value, out var ordered))
+                {
+                    throw new ComposePatchException(
+                        ComposePatchErrorKind.InvalidBlockAttrValue,
+                        $"setBlockAttr ListOrdered on paraId '{op.ParaId}' carries an unrecognized value '{op.Value}' — " +
+                        "expected 'true' (numbered) or 'false' (bullet).");
+                }
+
+                ilvl = existingNumPr?.NumberingLevelReference?.Val?.Value ?? 0;
+                numId = EnsureListNumbering(ordered);
+            }
+            else // ListLevel
+            {
+                if (!TryParseLevel(op.Value, out ilvl))
+                {
+                    throw new ComposePatchException(
+                        ComposePatchErrorKind.InvalidBlockAttrValue,
+                        $"setBlockAttr ListLevel on paraId '{op.ParaId}' carries an unrecognized value '{op.Value}' — " +
+                        "expected a 0-based integer string '0'..'8'.");
+                }
+
+                // Keep the paragraph's existing list identity when it already is a list item; otherwise start
+                // an ordered list at the requested depth (a bare level with no list is not representable —
+                // default to ordered rather than error, so removing the SDL-2 guard never traps the user).
+                numId = existingNumPr?.NumberingId?.Val?.Value ?? EnsureListNumbering(ordered: true);
+            }
+
+            var previousProps = SnapshotPriorPPr(pPr);
+
+            // A list item carries a DIRECT w:numPr (mirrors ComposeDocumentRenderer.BuildListItem). The typed
+            // setter replaces any prior numPr at the schema-correct CT_PPr position.
+            pPr.NumberingProperties = new NumberingProperties(
+                new NumberingLevelReference { Val = ilvl },
+                new NumberingId { Val = numId });
+
+            // Ensure the paragraph reads as a list paragraph — UNLESS it is a heading (a heading keeps its
+            // heading style; ListParagraph carries no style numbering, so the direct numPr is not double-numbering).
+            if (!IsHeadingStyle(pPr.GetFirstChild<ParagraphStyleId>()?.Val?.Value))
+            {
+                pPr.RemoveAllChildren<ParagraphStyleId>();
+                pPr.PrependChild(new ParagraphStyleId { Val = "ListParagraph" });
+            }
+
+            RecordPPrChange(pPr, previousProps);
+        }
+
+        /// <summary>Maps a <see cref="SetBlockAttrOperation.Value"/> to the OOXML <c>w:pStyle</c> id to write
+        /// (or <c>null</c> to revert to the default paragraph style). Closed set:
+        /// <c>null</c>/<c>Normal</c> → default; <c>Heading1..Heading6</c>; <c>ListParagraph</c>. Mirrors the
+        /// client <c>ComposeBlockAttr Style</c> vocabulary + <see cref="ComposeDocumentRenderer"/>'s style ids.
+        /// Returns <c>false</c> for a value outside the closed set.</summary>
+        private static bool TryParseStyleValue(string? value, out string? styleId, out bool isListParagraph)
+        {
+            styleId = null;
+            isListParagraph = false;
+            switch (value)
+            {
+                case null:
+                case "Normal":
+                    return true; // styleId null ⇒ drop w:pStyle ⇒ default paragraph style
+                case "ListParagraph":
+                    styleId = "ListParagraph";
+                    isListParagraph = true;
+                    return true;
+                case "Heading1":
+                case "Heading2":
+                case "Heading3":
+                case "Heading4":
+                case "Heading5":
+                case "Heading6":
+                    styleId = value;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool TryParseBool(string? value, out bool result)
+        {
+            if (string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)) { result = true; return true; }
+            if (string.Equals(value, "false", StringComparison.OrdinalIgnoreCase)) { result = false; return true; }
+            result = false;
+            return false;
+        }
+
+        private static bool TryParseLevel(string? value, out int level)
+        {
+            if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out level) && level is >= 0 and <= 8)
+            {
+                return true;
+            }
+
+            level = 0;
+            return false;
+        }
+
+        // Detects a heading paragraph-style id ("Heading1".."HeadingN", any case) WITHOUT a text-search API
+        // (Substring/AsSpan equality, not StartsWith — the write path bans content-locating string APIs, I-7).
+        private static bool IsHeadingStyle(string? styleId) =>
+            styleId is { Length: >= 7 } && string.Equals(styleId.AsSpan(0, 7).ToString(), "Heading", StringComparison.OrdinalIgnoreCase);
+
+        // -- list numbering resolution (reuse R4.5's read-side model; never fork the algorithm) --------
+
+        /// <summary>R4.5's read-side numbering MODEL for this document, built lazily + cached per apply session
+        /// (referenced in place per task 005 — zero change to ComposeDocxProjectionBuilder). BEFORE this session
+        /// authors any numbering it is built from a THROWAWAY read-only probe over the retained bytes, so a
+        /// reference-only list op never materializes the EDITABLE numbering/styles DOM (which the SDK would then
+        /// re-serialize on save, changing those parts' bytes) — they stay copied-verbatim byte-identical
+        /// (NFR-01 / I-4). AFTER this session authors a definition into the editable numbering part, the model
+        /// is read from that (now-modified) part so a subsequent list op sees the just-authored numId.</summary>
+        private ComposeDocxProjectionBuilder.NumberingModel GetNumberingModel()
+        {
+            if (_numberingModel is not null)
+            {
+                return _numberingModel;
+            }
+
+            if (_numberingAuthored)
+            {
+                _numberingModel = ComposeDocxProjectionBuilder.BuildNumberingModel(_mainPart);
+            }
+            else
+            {
+                using var probe = WordprocessingDocument.Open(new MemoryStream(_retainedBytes, writable: false), isEditable: false);
+                _numberingModel = ComposeDocxProjectionBuilder.BuildNumberingModel(probe.MainDocumentPart!);
+            }
+
+            return _numberingModel;
+        }
+
+        /// <summary>
+        /// Returns a numId whose numbering the read-side engine renders as the requested list kind (ordered =
+        /// a numeric <c>w:numFmt</c>; bullet = <c>w:numFmt="bullet"</c>). PREFERS an existing DIRECT-list numId
+        /// already in the document's numbering model (pure reference — <c>numbering.xml</c> stays byte-identical,
+        /// task 005), excluding style-linked (heading) numbering; only AUTHORS a fresh definition when the
+        /// document carries no suitable list numbering — so removing the SDL-2 guard never yields a
+        /// user-triggerable error or a silent no-op (NFR-08). The label a paragraph then shows is computed by
+        /// <see cref="ComposeDocxProjectionBuilder.NumberingComputationEngine"/> at read time — this method picks
+        /// / declares the numbering DATA that engine reads, it does NOT compute labels (R5-D4 no-fork).
+        /// </summary>
+        private int EnsureListNumbering(bool ordered)
+        {
+            var model = GetNumberingModel();
+
+            // Exclude style-linked numIds (e.g. the Heading1..6 numbering) — attaching a heading's numbering
+            // to a list paragraph would mis-number it. A list wants its own direct-list numbering.
+            var styleLinkedNumIds = model.StyleLinkedNumbering.Values.Select(r => r.NumId);
+
+            foreach (var numId in model.AbstractNumIdByNumId.Keys.Except(styleLinkedNumIds))
+            {
+                var fmt = model.ResolveLevel(numId, 0)?.NumFmt;
+                if (fmt is null)
+                {
+                    continue;
+                }
+
+                var isBullet = fmt == NumberFormatValues.Bullet;
+                if (ordered ? !isBullet : isBullet)
+                {
+                    return numId; // reference in place — no numbering.xml change
+                }
+            }
+
+            return AuthorListNumbering(ordered);
+        }
+
+        /// <summary>Appends a minimal ordered/bullet numbering definition (abstractNum + instance) to the
+        /// document's numbering part (creating the part if absent), using non-colliding ids, and returns the
+        /// new numId. Mirrors <see cref="ComposeDocumentRenderer"/>'s abstractNum vocabulary (decimal
+        /// <c>%N.</c> / Symbol bullet) so the read-side engine computes clean labels; it declares numbering
+        /// DATA only (no label computation — R5-D4). Invalidates the cached model.</summary>
+        private int AuthorListNumbering(bool ordered)
+        {
+            var numberingPart = _mainPart.NumberingDefinitionsPart;
+            if (numberingPart is null)
+            {
+                numberingPart = _mainPart.AddNewPart<NumberingDefinitionsPart>();
+                numberingPart.Numbering = new Numbering();
+            }
+
+            var numbering = numberingPart.Numbering ??= new Numbering();
+
+            var abstractNumId = NextAbstractNumId(numbering);
+            var numId = NextNumId(numbering);
+            var abstractNum = ordered ? BuildOrderedAbstractNum(abstractNumId) : BuildBulletAbstractNum(abstractNumId);
+
+            // Schema: every <w:abstractNum> precedes every <w:num>. Insert after the last existing abstractNum,
+            // else before the first num, else append into the (fresh) numbering root.
+            var lastAbstract = numbering.Elements<AbstractNum>().LastOrDefault();
+            if (lastAbstract is not null)
+            {
+                lastAbstract.InsertAfterSelf(abstractNum);
+            }
+            else if (numbering.Elements<NumberingInstance>().FirstOrDefault() is { } firstNum)
+            {
+                firstNum.InsertBeforeSelf(abstractNum);
+            }
+            else
+            {
+                numbering.AppendChild(abstractNum);
+            }
+
+            numbering.AppendChild(new NumberingInstance(new AbstractNumId { Val = abstractNumId }) { NumberID = numId });
+            numbering.Save();
+
+            // A later list op must see the definition just authored — invalidate the cache and read the model
+            // from the (now-modified) editable numbering part from here on.
+            _numberingAuthored = true;
+            _numberingModel = null;
+            return numId;
+        }
+
+        private static int NextAbstractNumId(Numbering numbering)
+        {
+            var max = -1;
+            foreach (var a in numbering.Elements<AbstractNum>())
+            {
+                if (a.AbstractNumberId?.Value is { } v && v > max) max = v;
+            }
+
+            return max + 1;
+        }
+
+        private static int NextNumId(Numbering numbering)
+        {
+            var max = 0;
+            foreach (var n in numbering.Elements<NumberingInstance>())
+            {
+                if (n.NumberID?.Value is { } v && v > max) max = v;
+            }
+
+            return max + 1;
+        }
+
+        private static AbstractNum BuildOrderedAbstractNum(int abstractNumId)
+        {
+            var abstractNum = new AbstractNum(new MultiLevelType { Val = MultiLevelValues.HybridMultilevel })
+            {
+                AbstractNumberId = abstractNumId,
+            };
+
+            for (var ilvl = 0; ilvl <= 8; ilvl++)
+            {
+                abstractNum.AppendChild(new Level(
+                    new StartNumberingValue { Val = 1 },
+                    new NumberingFormat { Val = NumberFormatValues.Decimal },
+                    new LevelText { Val = $"%{ilvl + 1}." },
+                    new LevelJustification { Val = LevelJustificationValues.Left })
+                {
+                    LevelIndex = ilvl,
+                });
+            }
+
+            return abstractNum;
+        }
+
+        private static AbstractNum BuildBulletAbstractNum(int abstractNumId)
+        {
+            var abstractNum = new AbstractNum(new MultiLevelType { Val = MultiLevelValues.HybridMultilevel })
+            {
+                AbstractNumberId = abstractNumId,
+            };
+
+            for (var ilvl = 0; ilvl <= 8; ilvl++)
+            {
+                abstractNum.AppendChild(new Level(
+                    new StartNumberingValue { Val = 1 },
+                    new NumberingFormat { Val = NumberFormatValues.Bullet },
+                    new LevelText { Val = "•" },
+                    new LevelJustification { Val = LevelJustificationValues.Left },
+                    new NumberingSymbolRunProperties(
+                        new RunFonts { Ascii = "Symbol", HighAnsi = "Symbol", Hint = FontTypeHintValues.Default }))
+                {
+                    LevelIndex = ilvl,
+                });
+            }
+
+            return abstractNum;
+        }
+
+        // -- tracked paragraph-property change (shared by Style + List appliers) -----------------------
+
+        /// <summary>Clones the paragraph's CURRENT direct properties (every child EXCEPT an existing
+        /// <c>w:pPrChange</c>) into a <see cref="ParagraphPropertiesExtended"/> — the "changed from" state a
+        /// tracked <c>w:pPrChange</c> records so Word's "Reject Formatting Change" restores exactly what was
+        /// there. <see cref="ParagraphPropertiesExtended"/> (NOT <c>PreviousParagraphProperties</c>) is the SDK's
+        /// schema-contextual type for a <c>w:pPrChange</c> child — confirmed by round-trip in task 010
+        /// (notes/task-010-deviations.md §1).</summary>
+        private static ParagraphPropertiesExtended SnapshotPriorPPr(ParagraphProperties pPr)
+        {
+            // The w:pPrChange nested <w:pPr> is CT_PPrBase — it holds the paragraph-property children
+            // (w:pStyle, w:numPr, w:jc, w:ind, …) but NOT w:rPr (the paragraph-mark run properties),
+            // w:sectPr, or a nested w:pPrChange. Cloning any of those in would be schema-invalid (Word rejects
+            // it even though the lenient SDK reader tolerates it). Snapshot only the CT_PPrBase-valid children.
+            var previous = new ParagraphPropertiesExtended();
+            foreach (var child in pPr.ChildElements)
+            {
+                if (child is ParagraphPropertiesChange or ParagraphMarkRunProperties or SectionProperties)
+                {
+                    continue;
+                }
+
+                previous.AppendChild(child.CloneNode(true));
+            }
+
+            return previous;
+        }
+
+        /// <summary>Records <paramref name="previousProps"/> as a tracked <c>w:pPrChange</c> on
+        /// <paramref name="pPr"/> — never stacking (an earlier change to THIS paragraph within the SAME
+        /// Apply() is superseded), always the LAST child of CT_PPr. Mirrors
+        /// <see cref="ApplySetBlockAttrAlignment"/>'s pPrChange discipline.</summary>
+        private void RecordPPrChange(ParagraphProperties pPr, ParagraphPropertiesExtended previousProps)
+        {
+            pPr.RemoveAllChildren<ParagraphPropertiesChange>();
+
+            // G2 clean mode: the caller already applied the direct pPr mutation (w:pStyle / w:numPr); an
+            // authored doc records no "changed from" formatting revision, so emit NO w:pPrChange.
+            if (!_trackChanges)
+            {
+                return;
+            }
+
+            var pPrChange = new ParagraphPropertiesChange { Id = NextId(), Author = _author, Date = _date };
+            pPrChange.AppendChild(previousProps);
+            pPr.AppendChild(pPrChange);
+        }
+
+        // =============================================================================================
+        // Table structural ops (R5 task 014 / G4 / FR-04) — FULL tracked table structure. Anchored by the base
+        // paraId = a w14:paraId of a paragraph INSIDE the target table; resolved O(1) then the OpenXml ancestry
+        // w:p -> w:tc -> w:tr -> w:tbl is walked to reach the w:tbl (NO table-id, NO text-search — I-7 / NFR-02).
+        // Every kind emits Word-valid TRACKED markup: an inserted row carries w:trPr/w:ins (+ inserted cell
+        // paragraph marks); a deleted row w:trPr/w:del (+ struck content, deleted marks); an inserted column a
+        // w:tcPr/w:cellIns per row (+ a w:gridCol + w:tblGridChange recording the prior grid); a deleted column
+        // w:tcPr/w:cellDel per row (+ struck content); a cell-content set is an in-cell w:del(old)+w:ins(new); a
+        // table-prop change a w:tblPrChange recording the prior props. Merged/spanned columns (w:gridSpan) that
+        // make cell-index != grid-column are REFUSED deterministically rather than mis-addressed (FR-05).
+        // Whole-table CREATE is intentionally out of scope (task-004 catalog) — a table op only edits an
+        // EXISTING table.
+        // =============================================================================================
+
+        private void ApplyTableOperation(TableOperation op)
+        {
+            // G2 clean mode (task 021): the table appliers below emit Word TRACKED table structure
+            // (w:trPr/w:ins, w:tcPr/w:cellIns, w:tblGridChange, w:tblPrChange, in-cell w:del/w:ins). A clean
+            // (authored-origin) apply has no clean equivalent yet, so REFUSE explicitly rather than emit
+            // tracked markup on an authored doc (decision note §2 sanctioned refusal; documented limitation —
+            // clean table structural editing is a follow-up). Text/mark/para-structural/block-attr authored
+            // edits ARE clean-supported; only table STRUCTURAL/content edits are out of clean scope for R5.
+            if (!_trackChanges)
+            {
+                throw TableRefused(op.ParaId, ComposePatchErrorKind.StructuralOperationRefused,
+                    "table edits are not yet supported on a clean (authored-origin) save — this is a bounded G2 " +
+                    "limitation (clean table structural apply is a follow-up); the edit is refused rather than " +
+                    "written as tracked-change markup on an authored document");
+            }
+
+            var para = Resolve(op.ParaId); // O(1) paraId lookup — no text-search (I-7).
+            var cell = para.Ancestors<TableCell>().FirstOrDefault()
+                ?? throw TableRefused(op.ParaId, ComposePatchErrorKind.TableNotFound,
+                    "the anchor paragraph is not inside a table cell (w:tc) — a table op's paraId must address a paragraph within the target table");
+            var table = cell.Ancestors<Table>().FirstOrDefault()
+                ?? throw TableRefused(op.ParaId, ComposePatchErrorKind.TableNotFound,
+                    "the anchor paragraph's cell has no table (w:tbl) ancestor");
+
+            switch (op.Kind)
+            {
+                case ComposeTableOpKind.InsertRow: ApplyTableInsertRow(op, table); break;
+                case ComposeTableOpKind.DeleteRow: ApplyTableDeleteRow(op, table); break;
+                case ComposeTableOpKind.InsertColumn: ApplyTableInsertColumn(op, table); break;
+                case ComposeTableOpKind.DeleteColumn: ApplyTableDeleteColumn(op, table); break;
+                case ComposeTableOpKind.SetCellContent: ApplyTableSetCellContent(op, table); break;
+                case ComposeTableOpKind.SetTableProps: ApplyTableSetProps(op, table); break;
+                default:
+                    throw TableRefused(op.ParaId, ComposePatchErrorKind.StructuralOperationRefused,
+                        $"unhandled table op kind '{op.Kind}'");
+            }
+        }
+
+        private static List<TableRow> TableRows(Table table) => table.Elements<TableRow>().ToList();
+
+        /// <summary>The direct-child cells (column slots) of a row. Refuses a row carrying a horizontal span
+        /// (<c>w:gridSpan</c> &gt; 1) so cell-index stays == grid-column (unspanned tables only; a spanned table
+        /// is refused, never mis-indexed).</summary>
+        private static List<TableCell> RowCells(string paraId, TableRow row)
+        {
+            var cells = row.Elements<TableCell>().ToList();
+            foreach (var c in cells)
+            {
+                if (c.TableCellProperties?.GetFirstChild<GridSpan>()?.Val?.Value is > 1)
+                {
+                    throw TableRefused(paraId, ComposePatchErrorKind.StructuralOperationRefused,
+                        "the table has horizontally-merged cells (w:gridSpan) — column addressing by cell index is ambiguous; refused rather than mis-placed");
+                }
+            }
+
+            return cells;
+        }
+
+        // -- InsertRow (w:trPr/w:ins + inserted cell paragraph marks) ---------------------------------
+
+        private void ApplyTableInsertRow(TableOperation op, Table table)
+        {
+            var rows = TableRows(table);
+            var rowIndex = RequireIndex(op.ParaId, op.Row, 0, rows.Count - 1, "row");
+            var position = op.Position
+                ?? throw TableRefused(op.ParaId, ComposePatchErrorKind.StructuralOperationRefused, "InsertRow requires a position (Before/After)");
+            var reference = rows[rowIndex];
+            var refCells = RowCells(op.ParaId, reference);
+            var columnCount = refCells.Count;
+
+            if (op.NewParaIds.Count != columnCount)
+            {
+                throw TableRefused(op.ParaId, ComposePatchErrorKind.TableIndexOutOfRange,
+                    $"InsertRow needs one newParaId per column ({columnCount}); got {op.NewParaIds.Count}");
+            }
+
+            RequireFreshParaIds(op.ParaId, op.NewParaIds);
+
+            var newRow = new TableRow();
+            var trPr = new TableRowProperties();
+            newRow.AppendChild(trPr);
+
+            for (var c = 0; c < columnCount; c++)
+            {
+                var newCell = new TableCell();
+                if (refCells[c].TableCellProperties is { } srcTcPr)
+                {
+                    var tcPr = (TableCellProperties)srcTcPr.CloneNode(true);
+                    tcPr.RemoveAllChildren<CellInsertion>();
+                    tcPr.RemoveAllChildren<CellDeletion>();
+                    newCell.AppendChild(tcPr);
+                }
+
+                var p = new Paragraph { ParagraphId = op.NewParaIds[c] };
+                MarkParagraphMark(p, inserted: true);
+                newCell.AppendChild(p);
+                newRow.AppendChild(newCell);
+                _byParaId[op.NewParaIds[c]] = p;
+            }
+
+            // Mark the whole row INSERTED — w:trPr/w:ins (CT_TrPr is an unordered choice, so position is free).
+            trPr.AppendChild(new Inserted { Id = NextId(), Author = _author, Date = _date });
+
+            if (position == ComposeParagraphPosition.Before)
+            {
+                reference.InsertBeforeSelf(newRow);
+            }
+            else
+            {
+                reference.InsertAfterSelf(newRow);
+            }
+        }
+
+        // -- DeleteRow (w:trPr/w:del + struck content, deleted marks) ---------------------------------
+
+        private void ApplyTableDeleteRow(TableOperation op, Table table)
+        {
+            var rows = TableRows(table);
+            var rowIndex = RequireIndex(op.ParaId, op.Row, 0, rows.Count - 1, "row");
+            var target = rows[rowIndex];
+
+            var trPr = target.TableRowProperties ??= new TableRowProperties();
+            if (trPr.GetFirstChild<Deleted>() is null && trPr.GetFirstChild<Inserted>() is null)
+            {
+                trPr.AppendChild(new Deleted { Id = NextId(), Author = _author, Date = _date });
+            }
+
+            foreach (var c in RowCells(op.ParaId, target))
+            {
+                StrikeCellContent(c);
+            }
+        }
+
+        // -- InsertColumn (w:tcPr/w:cellIns per row + w:gridCol + w:tblGridChange) ---------------------
+
+        private void ApplyTableInsertColumn(TableOperation op, Table table)
+        {
+            var rows = TableRows(table);
+            if (rows.Count == 0)
+            {
+                throw TableRefused(op.ParaId, ComposePatchErrorKind.TableIndexOutOfRange, "the table has no rows to add a column to");
+            }
+
+            var colCount = RowCells(op.ParaId, rows[0]).Count;
+            var colIndex = RequireIndex(op.ParaId, op.Column, 0, colCount - 1, "column");
+            var position = op.Position
+                ?? throw TableRefused(op.ParaId, ComposePatchErrorKind.StructuralOperationRefused, "InsertColumn requires a position (Before/After)");
+
+            if (op.NewParaIds.Count != rows.Count)
+            {
+                throw TableRefused(op.ParaId, ComposePatchErrorKind.TableIndexOutOfRange,
+                    $"InsertColumn needs one newParaId per row ({rows.Count}); got {op.NewParaIds.Count}");
+            }
+
+            RequireFreshParaIds(op.ParaId, op.NewParaIds);
+
+            for (var r = 0; r < rows.Count; r++)
+            {
+                var cells = RowCells(op.ParaId, rows[r]);
+                var refCell = cells[Math.Min(colIndex, cells.Count - 1)];
+                var newCell = new TableCell();
+                var tcPr = refCell.TableCellProperties is { } src ? (TableCellProperties)src.CloneNode(true) : new TableCellProperties();
+                tcPr.RemoveAllChildren<CellInsertion>();
+                tcPr.RemoveAllChildren<CellDeletion>();
+                tcPr.AppendChild(new CellInsertion { Id = NextId(), Author = _author, Date = _date });
+                newCell.AppendChild(tcPr);
+
+                var p = new Paragraph { ParagraphId = op.NewParaIds[r] };
+                MarkParagraphMark(p, inserted: true);
+                newCell.AppendChild(p);
+                _byParaId[op.NewParaIds[r]] = p;
+
+                if (position == ComposeParagraphPosition.Before)
+                {
+                    refCell.InsertBeforeSelf(newCell);
+                }
+                else
+                {
+                    refCell.InsertAfterSelf(newCell);
+                }
+            }
+
+            // Grid: add a w:gridCol at the column position + record w:tblGridChange with the PRIOR grid.
+            if (table.GetFirstChild<TableGrid>() is { } grid)
+            {
+                var priorCols = grid.Elements<GridColumn>().Select(c => (GridColumn)c.CloneNode(true)).ToList();
+                var cols = grid.Elements<GridColumn>().ToList();
+                if (cols.Count > 0)
+                {
+                    var anchorCol = cols[Math.Min(colIndex, cols.Count - 1)];
+                    var newCol = new GridColumn();
+                    if (anchorCol.Width is { } w)
+                    {
+                        newCol.Width = w;
+                    }
+
+                    if (position == ComposeParagraphPosition.Before)
+                    {
+                        anchorCol.InsertBeforeSelf(newCol);
+                    }
+                    else
+                    {
+                        anchorCol.InsertAfterSelf(newCol);
+                    }
+
+                    grid.RemoveAllChildren<TableGridChange>();
+                    var change = new TableGridChange { Id = NextId() };
+                    var prevGrid = new PreviousTableGrid();
+                    foreach (var col in priorCols)
+                    {
+                        prevGrid.AppendChild(col);
+                    }
+
+                    change.AppendChild(prevGrid);
+                    grid.AppendChild(change); // w:tblGridChange is the LAST child of CT_TblGrid.
+                }
+            }
+        }
+
+        // -- DeleteColumn (w:tcPr/w:cellDel per row + struck content) ----------------------------------
+
+        private void ApplyTableDeleteColumn(TableOperation op, Table table)
+        {
+            var rows = TableRows(table);
+            if (rows.Count == 0)
+            {
+                throw TableRefused(op.ParaId, ComposePatchErrorKind.TableIndexOutOfRange, "the table has no rows");
+            }
+
+            var colCount = RowCells(op.ParaId, rows[0]).Count;
+            var colIndex = RequireIndex(op.ParaId, op.Column, 0, colCount - 1, "column");
+
+            foreach (var row in rows)
+            {
+                var cells = RowCells(op.ParaId, row);
+                if (colIndex >= cells.Count)
+                {
+                    continue; // ragged row — no cell at this column slot
+                }
+
+                var cell = cells[colIndex];
+                var tcPr = cell.TableCellProperties ??= new TableCellProperties();
+                if (tcPr.GetFirstChild<CellDeletion>() is null && tcPr.GetFirstChild<CellInsertion>() is null)
+                {
+                    tcPr.AppendChild(new CellDeletion { Id = NextId(), Author = _author, Date = _date });
+                }
+
+                StrikeCellContent(cell);
+            }
+        }
+
+        // -- SetCellContent (in-cell w:del(old) + w:ins(new)) -----------------------------------------
+
+        private void ApplyTableSetCellContent(TableOperation op, Table table)
+        {
+            var rows = TableRows(table);
+            var rowIndex = RequireIndex(op.ParaId, op.Row, 0, rows.Count - 1, "row");
+            var cells = RowCells(op.ParaId, rows[rowIndex]);
+            var colIndex = RequireIndex(op.ParaId, op.Column, 0, cells.Count - 1, "column");
+
+            if (op.Text is null)
+            {
+                throw TableRefused(op.ParaId, ComposePatchErrorKind.StructuralOperationRefused, "SetCellContent requires a non-null text");
+            }
+
+            var cell = cells[colIndex];
+            var target = cell.Elements<Paragraph>().FirstOrDefault();
+            if (target is null)
+            {
+                target = new Paragraph();
+                cell.AppendChild(target);
+            }
+
+            RunProperties? template = null;
+            foreach (var slot in FlattenEditorRuns(target))
+            {
+                if (!slot.IsAtom && slot.TrackChange == RunTrackChange.None && slot.PhysicalRun is { } run)
+                {
+                    template ??= run.RunProperties;
+                    WrapRunAsDeleted(run);
+                }
+            }
+
+            if (op.Text.Length > 0)
+            {
+                var ins = NewInsertedRun();
+                ins.AppendChild(BuildRun(template, op.Text, op.Marks));
+                var firstInline = target.Elements().FirstOrDefault(IsInlineContainer);
+                if (firstInline is not null)
+                {
+                    firstInline.InsertBeforeSelf(ins);
+                }
+                else
+                {
+                    target.AppendChild(ins);
+                }
+            }
+        }
+
+        // -- SetTableProps (w:tblPrChange recording the prior props) ----------------------------------
+
+        private void ApplyTableSetProps(TableOperation op, Table table)
+        {
+            if (op.TableProp is not { } prop)
+            {
+                throw TableRefused(op.ParaId, ComposePatchErrorKind.StructuralOperationRefused, "SetTableProps requires a tableProp");
+            }
+
+            var tblPr = table.GetFirstChild<TableProperties>();
+            if (tblPr is null)
+            {
+                tblPr = new TableProperties();
+                table.PrependChild(tblPr); // w:tblPr is the FIRST child of w:tbl.
+            }
+
+            var previous = SnapshotPriorTblPr(tblPr);
+
+            switch (prop)
+            {
+                case ComposeTableProp.Alignment:
+                    tblPr.TableJustification = new TableJustification { Val = ParseTableAlignment(op) };
+                    break;
+                case ComposeTableProp.Width:
+                    tblPr.TableWidth = ParseTableWidth(op);
+                    break;
+                case ComposeTableProp.Borders:
+                    ApplyTableBorders(op, tblPr);
+                    break;
+            }
+
+            // w:tblPrChange never stacks; it is the LAST child of CT_TblPr.
+            tblPr.RemoveAllChildren<TablePropertiesChange>();
+            var change = new TablePropertiesChange { Id = NextId(), Author = _author, Date = _date };
+            change.AppendChild(previous);
+            tblPr.AppendChild(change);
+        }
+
+        /// <summary>Clones the table's CURRENT direct properties (every child EXCEPT an existing
+        /// <c>w:tblPrChange</c>) into a <see cref="PreviousTableProperties"/> — the "changed from" state a tracked
+        /// <c>w:tblPrChange</c> records so Word's "Reject" restores exactly what was there (the table analogue of
+        /// <see cref="SnapshotPriorPPr"/>).</summary>
+        private static PreviousTableProperties SnapshotPriorTblPr(TableProperties tblPr)
+        {
+            var previous = new PreviousTableProperties();
+            foreach (var child in tblPr.ChildElements)
+            {
+                if (child is TablePropertiesChange)
+                {
+                    continue;
+                }
+
+                previous.AppendChild(child.CloneNode(true));
+            }
+
+            return previous;
+        }
+
+        private static TableRowAlignmentValues ParseTableAlignment(TableOperation op) => op.Value switch
+        {
+            "Left" => TableRowAlignmentValues.Left,
+            "Center" => TableRowAlignmentValues.Center,
+            "Right" => TableRowAlignmentValues.Right,
+            _ => throw InvalidTablePropValue(op),
+        };
+
+        private static TableWidth ParseTableWidth(TableOperation op)
+        {
+            var value = op.Value;
+            if (string.Equals(value, "auto", StringComparison.OrdinalIgnoreCase))
+            {
+                return new TableWidth { Type = TableWidthUnitValues.Auto, Width = "0" };
+            }
+
+            // Format "unit:number" (pct:NN | dxa:NNNN) — parsed by Split + equality on the UNIT token, never a
+            // content-locating string API (I-7 write-path audit bans StartsWith/IndexOf/Contains/EndsWith).
+            var parts = value?.Split(':');
+            if (parts is { Length: 2 } && int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var number))
+            {
+                if (string.Equals(parts[0], "pct", StringComparison.Ordinal))
+                {
+                    // w:tblW pct is expressed in fiftieths of a percent (5000 == 100%).
+                    return new TableWidth { Type = TableWidthUnitValues.Pct, Width = (number * 50).ToString(CultureInfo.InvariantCulture) };
+                }
+
+                if (string.Equals(parts[0], "dxa", StringComparison.Ordinal))
+                {
+                    return new TableWidth { Type = TableWidthUnitValues.Dxa, Width = number.ToString(CultureInfo.InvariantCulture) };
+                }
+            }
+
+            throw InvalidTablePropValue(op);
+        }
+
+        private static void ApplyTableBorders(TableOperation op, TableProperties tblPr)
+        {
+            tblPr.RemoveAllChildren<TableBorders>();
+            switch (op.Value)
+            {
+                case "None":
+                    return; // borders cleared
+                case "Single":
+                    tblPr.TableBorders = BuildUniformBorders(BorderValues.Single);
+                    break;
+                case "Double":
+                    tblPr.TableBorders = BuildUniformBorders(BorderValues.Double);
+                    break;
+                default:
+                    throw InvalidTablePropValue(op);
+            }
+        }
+
+        private static TableBorders BuildUniformBorders(BorderValues style) => new(
+            new TopBorder { Val = style, Size = 4, Space = 0 },
+            new LeftBorder { Val = style, Size = 4, Space = 0 },
+            new BottomBorder { Val = style, Size = 4, Space = 0 },
+            new RightBorder { Val = style, Size = 4, Space = 0 },
+            new InsideHorizontalBorder { Val = style, Size = 4, Space = 0 },
+            new InsideVerticalBorder { Val = style, Size = 4, Space = 0 });
+
+        /// <summary>Strikes a cell's settled content: every settled (non-atom, non-tracked) run becomes a tracked
+        /// deletion and each of the cell's paragraph marks is marked deleted, so accept removes the cell content
+        /// with the row/column and reject restores it.</summary>
+        private void StrikeCellContent(TableCell cell)
+        {
+            foreach (var p in cell.Elements<Paragraph>())
+            {
+                foreach (var slot in FlattenEditorRuns(p))
+                {
+                    if (!slot.IsAtom && slot.TrackChange == RunTrackChange.None && slot.PhysicalRun is { } run)
+                    {
+                        WrapRunAsDeleted(run);
+                    }
+                }
+
+                MarkParagraphMark(p, inserted: false);
+            }
+        }
+
+        private static int RequireIndex(string paraId, int? value, int min, int max, string what)
+        {
+            if (value is not { } v || v < min || v > max)
+            {
+                throw TableRefused(paraId, ComposePatchErrorKind.TableIndexOutOfRange,
+                    $"{what} index {(value?.ToString(CultureInfo.InvariantCulture) ?? "null")} is out of range [{min},{max}] for the resolved table");
+            }
+
+            return v;
+        }
+
+        private void RequireFreshParaIds(string paraId, IReadOnlyList<string> ids)
+        {
+            foreach (var id in ids)
+            {
+                if (string.IsNullOrEmpty(id) || _byParaId.ContainsKey(id))
+                {
+                    throw TableRefused(paraId, ComposePatchErrorKind.StructuralOperationRefused,
+                        $"newParaId '{id}' is empty or already exists in the document (a table insert must mint fresh ids)");
+                }
+            }
+        }
+
+        private static ComposePatchException TableRefused(string paraId, ComposePatchErrorKind kind, string why) =>
+            new(kind,
+                $"Table op on paraId '{paraId}' refused: {why}. Targets are resolved by paraId ancestry + (row,column), " +
+                "never by text-search (I-7); an edit the engine cannot represent as valid tracked OOXML is refused rather " +
+                "than emitted as a package Word would repair (project ordering rule / FR-05).");
+
+        private static ComposePatchException InvalidTablePropValue(TableOperation op) =>
+            new(ComposePatchErrorKind.InvalidBlockAttrValue,
+                $"table SetTableProps {op.TableProp} on paraId '{op.ParaId}' carries an unrecognized value '{op.Value}'.");
+
         // -- structural helpers -----------------------------------------------------------------------
 
         /// <summary>
@@ -572,6 +1789,14 @@ public sealed class ComposeShadowPatchEngine
         /// </summary>
         private void MarkParagraphMark(Paragraph para, bool inserted)
         {
+            // G2 clean mode: a split/insert paragraph's node change is already applied physically; the tracked
+            // para-mark revision is what we SKIP so no redline appears. (Clean delete/merge do NOT reach here —
+            // they take their own physical-removal branch — so a skipped mark never leaves an undeleted node.)
+            if (!_trackChanges)
+            {
+                return;
+            }
+
             var pPr = para.ParagraphProperties ??= new ParagraphProperties();
             var markProps = pPr.ParagraphMarkRunProperties ??= new ParagraphMarkRunProperties();
 
@@ -839,6 +2064,19 @@ public sealed class ComposeShadowPatchEngine
         private int ToAbsoluteOffset(Paragraph para, string paraId, ComposeRunPoint point)
         {
             var slots = FlattenEditorRuns(para);
+
+            // ROBUST ANCHOR (task 055 — ADDITIVE). When the op carries the paragraph-relative char offset k,
+            // resolve the absolute editor offset by walking THIS paragraph's REAL OOXML editor-run flatten to
+            // k. The client measured k over its editor-visible run flatten, but TipTap MERGES same-format runs,
+            // so the client's runIndex can disagree with OOXML's fine-grained runs (the 74-run / offset-45
+            // 422 root cause). Walking to k realigns the anchor by numeric offset ONLY — never a text match
+            // (I-7). Only the run the offset lands in is later split (I-4). Falls back to (RunIndex, Offset)
+            // when ParaOffset is absent — byte-identical to the pre-fix behavior.
+            if (point.ParaOffset is int k)
+            {
+                return ResolveAbsoluteFromParaOffset(slots, k);
+            }
+
             if (point.RunIndex < 0 || point.RunIndex >= slots.Count)
             {
                 // A point.RunIndex == slots.Count with offset 0 could address the paragraph end; support
@@ -848,6 +2086,7 @@ public sealed class ComposeShadowPatchEngine
                     return slots[^1].StartOffset + slots[^1].Length;
                 }
 
+                LogAnchorRefusal(paraId, point, slots);
                 throw new ComposePatchException(
                     ComposePatchErrorKind.RunIndexOutOfRange,
                     $"runIndex {point.RunIndex} is out of range for paraId '{paraId}' (paragraph has {slots.Count} editor-visible runs).");
@@ -856,6 +2095,7 @@ public sealed class ComposeShadowPatchEngine
             var slot = slots[point.RunIndex];
             if (point.Offset < 0 || point.Offset > slot.Length)
             {
+                LogAnchorRefusal(paraId, point, slots);
                 throw new ComposePatchException(
                     ComposePatchErrorKind.OffsetOutOfRange,
                     $"run-local offset {point.Offset} is out of range for runIndex {point.RunIndex} on paraId '{paraId}' " +
@@ -863,6 +2103,73 @@ public sealed class ComposeShadowPatchEngine
             }
 
             return slot.StartOffset + point.Offset;
+        }
+
+        /// <summary>
+        /// Resolve a PARAGRAPH-RELATIVE char offset <paramref name="k"/> to an absolute paragraph editor
+        /// offset by walking <paramref name="slots"/> in document order, accumulating each slot's
+        /// editor-visible length and picking the FIRST slot whose cumulative end covers <paramref name="k"/>
+        /// (<c>k &lt;= acc + len</c>) — mirroring the client's boundary convention
+        /// (<c>stepOperationInterceptor.runLocalPoint</c>: an offset on a run boundary resolves to the
+        /// trailing edge of the earlier run). <paramref name="k"/> beyond the paragraph's content clamps to
+        /// the trailing edge of the last slot (an at-end insert). Purely numeric (I-7). Since slots are
+        /// contiguous (<c>slot.StartOffset == running cumulative</c>), the returned absolute offset equals
+        /// <paramref name="k"/> clamped to <c>[0, total editor length]</c>; the walk is retained so the
+        /// clamp + boundary semantics are explicit and match the client exactly.
+        /// </summary>
+        private static int ResolveAbsoluteFromParaOffset(IReadOnlyList<EditorRunSlot> slots, int k)
+        {
+            if (slots.Count == 0)
+            {
+                return 0;
+            }
+
+            if (k < 0)
+            {
+                k = 0;
+            }
+
+            var acc = 0;
+            foreach (var slot in slots)
+            {
+                var len = slot.Length;
+                if (k <= acc + len)
+                {
+                    return slot.StartOffset + (k - acc);
+                }
+
+                acc += len;
+            }
+
+            // k beyond the paragraph's content — clamp to the trailing edge of the last slot (at-end insert).
+            var last = slots[^1];
+            return last.StartOffset + last.Length;
+        }
+
+        /// <summary>
+        /// Diagnostic (task 055) — logs the failing op's anchor (runIndex/offset/paraOffset) + the target
+        /// paragraph's per-run editor-length breakdown so a subsequent
+        /// <see cref="ComposePatchException"/> anchor/offset refusal self-explains. Log-only; no behavior
+        /// change. No document content is logged (Tier-1 anchor metadata only).
+        /// </summary>
+        private void LogAnchorRefusal(string paraId, ComposeRunPoint point, IReadOnlyList<EditorRunSlot> slots)
+        {
+            if (_logger is null || !_logger.IsEnabled(LogLevel.Warning))
+            {
+                return;
+            }
+
+            var breakdown = string.Join(", ", slots.Select((s, i) => $"run[{i}]={s.Length}"));
+            _logger.LogWarning(
+                "Compose anchor refusal on paraId {ParaId}: runIndex={RunIndex}, offset={Offset}, paraOffset={ParaOffset}; " +
+                "paragraph has {RunCount} editor-visible runs [{RunBreakdown}]. A paraOffset-bearing op resolves robustly; " +
+                "a (runIndex,offset)-only op can refuse when TipTap-merged run indices disagree with the OOXML run flatten.",
+                paraId,
+                point.RunIndex,
+                point.Offset,
+                point.ParaOffset,
+                slots.Count,
+                breakdown);
         }
 
         // -- run surgery ------------------------------------------------------------------------------
@@ -939,8 +2246,222 @@ public sealed class ComposeShadowPatchEngine
             }
         }
 
+        // -- acceptRevision / rejectRevision (G12 / FR-11 — reconcile imported tracked changes by w:id) ----
+
+        /// <summary>
+        /// Reconcile a PRE-EXISTING imported tracked change (native <c>w:ins</c>/<c>w:del</c>) addressed by its
+        /// native OOXML <c>w:id</c> within paragraph <paramref name="paraId"/> — resolved O(1) by paraId then by
+        /// id, NEVER by text/content match (invariant I-7 / NFR-02). <paramref name="acceptNotReject"/> selects
+        /// accept vs its inverse. <see cref="ComposeRevisionScope.All"/> (batch — task 013) delegates to
+        /// <see cref="ApplyRevisionReconciliationAll"/>; both scopes compose the SAME per-wrapper primitives
+        /// (<see cref="ReconcileInsertion"/> / <see cref="ReconcileDeletion"/>) so batch never re-derives
+        /// per-revision semantics (task-004 op-schema design §3.4; POML "reuse 012's primitives").
+        /// </summary>
+        private void ApplyRevisionReconciliation(string paraId, ComposeRevisionScope scope, string? revisionId, bool acceptNotReject)
+        {
+            // G2 clean mode: accept/reject reconciles PRE-EXISTING imported tracked changes — a construct an
+            // authored (clean-origin) document does not contain by definition. It cannot legitimately appear on
+            // a clean save; refuse defensively rather than silently manipulate redlines that shouldn't exist.
+            if (!_trackChanges)
+            {
+                throw new ComposePatchException(
+                    ComposePatchErrorKind.StructuralOperationRefused,
+                    "accept/reject-revision is not valid on a clean (authored-origin) save — an authored document " +
+                    "carries no imported tracked changes to reconcile.");
+            }
+
+            if (scope == ComposeRevisionScope.All)
+            {
+                // accept-all / reject-all: reconcile EVERY revision in the document in deterministic order.
+                // A non-null revisionId with All scope is a contradiction (design §3.5.3) — refuse, never guess.
+                if (!string.IsNullOrEmpty(revisionId))
+                {
+                    throw new ComposePatchException(
+                        ComposePatchErrorKind.RevisionNotFound,
+                        "An 'All'-scope acceptRevision/rejectRevision op (accept-all/reject-all) MUST carry a null " +
+                        $"revisionId; paraId '{paraId}' carried revisionId '{revisionId}'. Batch reconciles every " +
+                        "revision by document order, not one by id.");
+                }
+
+                ApplyRevisionReconciliationAll(acceptNotReject);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(revisionId))
+            {
+                throw new ComposePatchException(
+                    ComposePatchErrorKind.RevisionNotFound,
+                    "A 'Single'-scope acceptRevision/rejectRevision op requires a non-empty revisionId (the native " +
+                    $"w:ins/w:del w:id). paraId '{paraId}' carried a null/empty revisionId.");
+            }
+
+            var para = Resolve(paraId); // O(1) paraId lookup — no text-search (I-7).
+
+            // Locate the native run-level revision(s) by w:id WITHIN the resolved paragraph. Descendants covers
+            // a w:ins/w:del nested inside a w:hyperlink. Each element carries its own w:id (SeedRevisionId proves
+            // ids are unique integers), so this is normally a single match; we handle every match for safety.
+            var insertions = para.Descendants<InsertedRun>()
+                .Where(i => string.Equals(i.Id?.Value, revisionId, StringComparison.Ordinal)).ToList();
+            var deletions = para.Descendants<DeletedRun>()
+                .Where(d => string.Equals(d.Id?.Value, revisionId, StringComparison.Ordinal)).ToList();
+
+            if (insertions.Count == 0 && deletions.Count == 0)
+            {
+                throw new ComposePatchException(
+                    ComposePatchErrorKind.RevisionNotFound,
+                    $"No imported tracked revision (w:ins/w:del) with w:id '{revisionId}' exists in paragraph " +
+                    $"'{paraId}'. Revisions are resolved by native id only (I-7) — never by a text/content match.");
+            }
+
+            foreach (var ins in insertions)
+            {
+                ReconcileInsertion(ins, acceptNotReject);
+            }
+
+            foreach (var del in deletions)
+            {
+                ReconcileDeletion(del, acceptNotReject);
+            }
+        }
+
+        /// <summary>
+        /// accept-all / reject-all (G12 batch, <see cref="ComposeRevisionScope.All"/> — spec FR-11 / task 013).
+        /// Reconciles EVERY run-level imported tracked change (<c>w:ins</c>/<c>w:del</c>) in the document by
+        /// composing the SAME per-wrapper primitives the single-by-id path uses — it does NOT re-derive
+        /// per-revision semantics.
+        /// <para>
+        /// <b>Deterministic ordering (the load-bearing deliverable / graded criterion).</b> Revisions are
+        /// reconciled in <b>document preorder</b> — the order <see cref="OpenXmlElement.Descendants()"/> yields
+        /// (a single depth-first, document-order traversal of <c>document.xml</c>), snapshotted ONCE into a list
+        /// before any mutation. The order is a pure function of the input bytes and independent of client input
+        /// order, so accept-all/reject-all on the SAME input produces <b>byte-identical output across repeated
+        /// runs</b> (accept/reject mint no ids and stamp no timestamp, so there is no run-varying state). This is
+        /// the task-004 op-schema design §3.4 rule made concrete.
+        /// </para>
+        /// <para>
+        /// <b>Nested revisions.</b> A revision nested inside another (e.g. a <c>w:ins</c> inside a <c>w:del</c>)
+        /// appears AFTER its ancestor in document preorder. Reconciling the ancestor first may detach the nested
+        /// wrapper from the live tree (e.g. accept-del removes the whole subtree); the live-tree guard
+        /// (<see cref="IsInLiveTree"/>) then skips the already-subsumed descendant rather than mutating a detached
+        /// node — keeping the result Word-valid and the traversal deterministic.
+        /// </para>
+        /// <para>Zero revisions ⇒ idempotent no-op success (design §3.5.3): the loop simply finds nothing. I-7:
+        /// revisions are located structurally (element type), never by text/content match.</para>
+        /// </summary>
+        private void ApplyRevisionReconciliationAll(bool acceptNotReject)
+        {
+            // Snapshot every run-level tracked revision in DOCUMENT PREORDER before mutating (a single
+            // Descendants() walk is document-order + deterministic; materialize so mutation can't disturb it).
+            var revisions = _body.Descendants()
+                .Where(static e => e is InsertedRun or DeletedRun)
+                .ToList();
+
+            foreach (var revision in revisions)
+            {
+                // A nested revision whose ancestor revision was already reconciled away is detached — its
+                // reconciliation was subsumed by the ancestor's. Skip it (never mutate a detached node).
+                if (!IsInLiveTree(revision))
+                {
+                    continue;
+                }
+
+                switch (revision)
+                {
+                    case InsertedRun ins:
+                        ReconcileInsertion(ins, acceptNotReject);
+                        break;
+                    case DeletedRun del:
+                        ReconcileDeletion(del, acceptNotReject);
+                        break;
+                }
+            }
+        }
+
+        /// <summary>Reconcile ONE native <c>w:ins</c> wrapper (the single-by-id AND batch primitive). accept →
+        /// strip the wrapper keeping the inserted run(s) as normal content; reject → remove the inserted run(s)
+        /// entirely.</summary>
+        private static void ReconcileInsertion(InsertedRun ins, bool acceptNotReject)
+        {
+            if (acceptNotReject)
+            {
+                UnwrapKeepingChildren(ins);
+            }
+            else
+            {
+                ins.Remove();
+            }
+        }
+
+        /// <summary>Reconcile ONE native <c>w:del</c> wrapper (the single-by-id AND batch primitive). accept →
+        /// the deletion stands: remove the run(s); reject → restore the deleted run(s) as normal content (every
+        /// <c>w:delText</c> → <c>w:t</c> at ANY nesting depth, e.g. <c>w:del &gt; w:hyperlink &gt; w:r/w:delText</c>),
+        /// then strip the <c>w:del</c> wrapper.</summary>
+        private static void ReconcileDeletion(DeletedRun del, bool acceptNotReject)
+        {
+            if (acceptNotReject)
+            {
+                del.Remove();
+            }
+            else
+            {
+                foreach (var dt in del.Descendants<DeletedText>().ToList())
+                {
+                    dt.Parent!.ReplaceChild(new Text(dt.Text) { Space = SpaceProcessingModeValues.Preserve }, dt);
+                }
+
+                UnwrapKeepingChildren(del);
+            }
+        }
+
+        /// <summary>True when <paramref name="element"/> is still connected to this session's document body
+        /// (an ancestor chain reaching <see cref="_body"/>) — false when a prior batch reconciliation detached
+        /// it as part of removing an enclosing revision. Guards the batch loop from mutating a subsumed node.</summary>
+        private bool IsInLiveTree(OpenXmlElement element)
+        {
+            for (var cur = element; cur is not null; cur = cur.Parent)
+            {
+                if (ReferenceEquals(cur, _body))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>Promote every child of <paramref name="wrapper"/> into its parent, in order and in the
+        /// wrapper's original position, then remove the (now-empty) wrapper. Used to strip a <c>w:ins</c>/<c>w:del</c>
+        /// tracked-change wrapper while keeping its inner runs as settled content.</summary>
+        private static void UnwrapKeepingChildren(OpenXmlElement wrapper)
+        {
+            if (wrapper.Parent is null)
+            {
+                wrapper.Remove();
+                return;
+            }
+
+            OpenXmlElement anchor = wrapper;
+            foreach (var child in wrapper.Elements().ToList())
+            {
+                child.Remove();
+                anchor.InsertAfterSelf(child);
+                anchor = child;
+            }
+
+            wrapper.Remove();
+        }
+
         private void WrapRunAsDeleted(Run run)
         {
+            // G2 clean mode: an authored doc's own deletion is PHYSICAL — remove the run outright, no
+            // <w:del>/<w:delText> redline. (Resolution still happened by (paraId,runIndex,offset) upstream;
+            // clean mode changes only how the delete is represented, never how the target is found — I-7.)
+            if (!_trackChanges)
+            {
+                run.Remove();
+                return;
+            }
+
             // A run may carry text (w:t), deleted text (already inside a tracked change — guarded upstream
             // so it will be TrackChange.None here), or glyphs. Convert every w:t to w:delText (EDGE-4).
             var inner = new Run();
@@ -1436,6 +2957,28 @@ public enum ComposePatchErrorKind
     /// <summary>A block-attr op (<c>setBlockAttr</c>) was supplied — outside task 031's four structural-paragraph
     /// ops; routes to its own later applier extension → 501/422.</summary>
     StructuralOpNotYetImplemented,
+
+    /// <summary>A <c>setBlockAttr</c> op's <c>Value</c> is not a recognized member of the attribute's closed
+    /// value set (e.g. an Alignment value outside Default/Left/Center/Right/Justify) → 422.</summary>
+    InvalidBlockAttrValue,
+
+    /// <summary>G5 (task 033): a <c>setMark</c> with mark <c>Link</c> supplied no <c>Href</c>, or an href that
+    /// is not an absolute URI — refused rather than emitting a broken/relative relationship (no silent-loss)
+    /// → 422.</summary>
+    InvalidHyperlinkTarget,
+
+    /// <summary>An <c>acceptRevision</c>/<c>rejectRevision</c> op's <c>revisionId</c> resolves to no native
+    /// <c>w:ins</c>/<c>w:del</c> with that <c>w:id</c> in the target paragraph (no text-search fallback — G12/I-7)
+    /// → 422.</summary>
+    RevisionNotFound,
+
+    /// <summary>A <c>table</c> op's <c>paraId</c> resolves to a paragraph that is NOT inside a table cell/table
+    /// (no text-search fallback — G4/I-7) → 422.</summary>
+    TableNotFound,
+
+    /// <summary>A <c>table</c> op's <c>row</c>/<c>column</c> index (or <c>newParaIds</c> count) is out of range for
+    /// the resolved table's dimensions → 422.</summary>
+    TableIndexOutOfRange,
 }
 
 /// <summary>

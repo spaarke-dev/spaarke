@@ -54,7 +54,7 @@ public class IncomingAssociationResolverTests
     // =========================================================================
 
     [Fact]
-    public async Task ResolveAsync_ThreadMatch_CopiesParentAssociations()
+    public async Task ResolveAsync_ThreadMatch_CopiesParentCoreAssociation_OrgIsCandidateOnly()
     {
         // Arrange: envelope carries an In-Reply-To parent id; parent has matter + organization.
         var parentMatterId = Guid.NewGuid();
@@ -78,15 +78,17 @@ public class IncomingAssociationResolverTests
         // Act
         await _resolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
 
-        // Assert: verify update was called with parent's associations and Resolved status
+        // Assert: the CORE matter is inherited + auto-filed (Resolved); the inherited organization is NON-CORE
+        // (061 UAT round-3), so it is NOT auto-written — it is surfaced as a review candidate in provenance.
         _dataverseServiceMock.Verify(d => d.UpdateAsync(
             "sprk_communication",
             TestCommunicationId,
             It.Is<Dictionary<string, object>>(fields =>
                 fields.ContainsKey("sprk_regardingmatter") &&
-                fields.ContainsKey("sprk_regardingorganization") &&
+                !fields.ContainsKey("sprk_regardingorganization") &&      // non-core: candidate only, not written
                 fields.ContainsKey("sprk_associationstatus") &&
-                ((OptionSetValue)fields["sprk_associationstatus"]).Value == 100000000), // Resolved
+                ((OptionSetValue)fields["sprk_associationstatus"]).Value == 100000000 && // Resolved (on the core matter)
+                ((string)fields["sprk_associationprovenance"]).Contains("sprk_regardingorganization")), // still surfaced
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -95,12 +97,12 @@ public class IncomingAssociationResolverTests
     // =========================================================================
 
     [Fact]
-    public async Task ResolveAsync_SenderMatch_LinksToContact_AsSuggested()
+    public async Task ResolveAsync_SenderMatch_SurfacesContactAsSuggested_NeverAutoWritten()
     {
-        // R-7 evolution (task 015 / FR-11): the sender→contact regarding WRITE is preserved (the person
-        // lookup is still set), but the STATUS is now Suggested (100000003), not Resolved. A lone
-        // participant-correlation contact match carries confidence 0.70 (< the 0.85 auto-file threshold),
-        // so the confidence→status ladder correctly surfaces it for confirmation rather than auto-filing.
+        // 061 UAT round-3 (owner, 2026-07-31): a contact is NON-CORE — the sender→contact match is surfaced
+        // as a Suggested candidate (in provenance) but the sprk_regardingperson lookup is NO LONGER
+        // auto-written. This tightens the earlier "write the contact, status Suggested" behavior to
+        // "don't auto-associate the contact at all — the user confirms it via r5."
         var contactId = Guid.NewGuid();
         var contactEntity = new DataverseEntity("contact") { Id = contactId };
         contactEntity["fullname"] = "Jane Doe";
@@ -122,13 +124,13 @@ public class IncomingAssociationResolverTests
         // Act
         await _resolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
 
-        // Assert: contact should be set as regarding person
+        // Assert: the contact is NOT auto-written; it is surfaced in provenance as a suggestion; status Suggested.
         _dataverseServiceMock.Verify(d => d.UpdateAsync(
             "sprk_communication",
             TestCommunicationId,
             It.Is<Dictionary<string, object>>(fields =>
-                fields.ContainsKey("sprk_regardingperson") &&
-                ((EntityReference)fields["sprk_regardingperson"]).Id == contactId &&
+                !fields.ContainsKey("sprk_regardingperson") &&           // non-core: never auto-written
+                ((string)fields["sprk_associationprovenance"]).Contains("sprk_regardingperson") && // surfaced for review
                 ((OptionSetValue)fields["sprk_associationstatus"]).Value == 100000003), // Suggested (FR-11 ladder)
             It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -297,13 +299,13 @@ public class IncomingAssociationResolverTests
     // =========================================================================
 
     [Fact]
-    public async Task ResolveAsync_SenderDomainMatch_WritesOrganizationAndAccountToSeparateLookups()
+    public async Task ResolveAsync_SenderDomainMatch_OrgAndAccountAreCandidates_CorrectlyTyped_NeverAutoWritten()
     {
-        // Regression (task 004 / DEC-3): a sender-domain match MUST write
-        // sprk_regardingorganization -> sprk_organization AND sprk_regardingaccount -> account,
-        // each to its OWN lookup. The prior bug wrote an account reference into the
-        // sprk_regardingorganization lookup (which targets sprk_organization). sprk_organization
-        // is the legal entity; account is a vendor/payment account — distinct, never mixed.
+        // Regression (task 004 / DEC-3) re-cast for 061 UAT round-3: organization + account are NON-CORE, so a
+        // sender-domain match NO LONGER auto-writes either lookup — both are surfaced as review candidates the
+        // user confirms. The task-004 "no cross-stuffing" guarantee is preserved at the CANDIDATE level: the
+        // provenance carries sprk_regardingorganization → sprk_organization AND sprk_regardingaccount → account,
+        // each correctly typed (an account ref is never stuffed into the org lookup).
         var orgId = Guid.NewGuid();
         var accountId = Guid.NewGuid();
 
@@ -325,17 +327,18 @@ public class IncomingAssociationResolverTests
         // Act
         await _resolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
 
-        // Assert: org -> sprk_organization lookup, account -> account lookup, correct types, no cross-stuffing
+        // Assert: neither non-core lookup is auto-written; both are surfaced in provenance, each correctly
+        // typed (org→sprk_organization, account→account) — the no-cross-stuffing guarantee at candidate level.
         _dataverseServiceMock.Verify(d => d.UpdateAsync(
             "sprk_communication",
             TestCommunicationId,
             It.Is<Dictionary<string, object>>(fields =>
-                fields.ContainsKey("sprk_regardingorganization") &&
-                ((EntityReference)fields["sprk_regardingorganization"]).LogicalName == "sprk_organization" &&
-                ((EntityReference)fields["sprk_regardingorganization"]).Id == orgId &&
-                fields.ContainsKey("sprk_regardingaccount") &&
-                ((EntityReference)fields["sprk_regardingaccount"]).LogicalName == "account" &&
-                ((EntityReference)fields["sprk_regardingaccount"]).Id == accountId),
+                !fields.ContainsKey("sprk_regardingorganization") &&   // non-core: candidate only
+                !fields.ContainsKey("sprk_regardingaccount") &&        // non-core: candidate only
+                ((string)fields["sprk_associationprovenance"]).Contains("\"sprk_regardingorganization\"") &&
+                ((string)fields["sprk_associationprovenance"]).Contains("\"sprk_organization\"") &&
+                ((string)fields["sprk_associationprovenance"]).Contains("\"sprk_regardingaccount\"") &&
+                ((string)fields["sprk_associationprovenance"]).Contains("\"account\"")),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -477,11 +480,11 @@ public class IncomingAssociationResolverTests
     [Fact]
     public async Task P2_FallbackContactOnly_DoesNotPopulateDenormalizedPrimaryRegarding()
     {
-        // A fallback identity match (contact/org/account) must NOT become the denormalized headline
+        // A non-core identity match (contact/org/account) must NOT become the denormalized headline
         // "Regarding record". Before P2, a contact-only match populated sprk_regardingrecordtype/id/name with
         // the contact — and, when the substantive matters went Ambiguous, a spurious sub-threshold invoice
-        // (the UAT misfile). The typed sprk_regardingperson lookup is still written (the review surface uses
-        // it); only the misleading denormalized PRIMARY is withheld.
+        // (the UAT misfile). Under 061 UAT round-3 the contact is NON-CORE, so the typed sprk_regardingperson
+        // lookup is ALSO no longer auto-written (it is a candidate); the denormalized PRIMARY stays withheld.
         var contactId = Guid.NewGuid();
         var contactEntity = new DataverseEntity("contact") { Id = contactId };
         _dataverseServiceMock
@@ -502,8 +505,9 @@ public class IncomingAssociationResolverTests
             "sprk_communication",
             TestCommunicationId,
             It.Is<Dictionary<string, object>>(fields =>
-                fields.ContainsKey("sprk_regardingperson") &&        // typed lookup still written
-                !fields.ContainsKey("sprk_regardingrecordtype") &&   // but NO denormalized headline
+                !fields.ContainsKey("sprk_regardingperson") &&       // non-core: candidate only, not auto-written
+                ((string)fields["sprk_associationprovenance"]).Contains("sprk_regardingperson") && // surfaced for review
+                !fields.ContainsKey("sprk_regardingrecordtype") &&   // and NO denormalized headline
                 !fields.ContainsKey("sprk_regardingrecordid") &&
                 !fields.ContainsKey("sprk_regardingrecordname")),
             It.IsAny<CancellationToken>()), Times.Once);
@@ -559,10 +563,11 @@ public class IncomingAssociationResolverTests
     [Fact]
     public async Task P2b_AmbiguousMattersWithLeftoverInvoice_DoesNotPopulateDenormalizedHeadline()
     {
-        // The UAT misfile: two matters CONFLICT (Ambiguous → not written) while an incidental invoice is
-        // written non-conflicting. The denormalized "primary Regarding" headline (record type/id/name) must
-        // NOT be crowned with that leftover invoice — Ambiguous means "the reviewer decides", so no headline.
-        // The typed sprk_regardinginvoice lookup is still written for the review surface.
+        // The UAT misfile: two matters CONFLICT (Ambiguous → not written) while an incidental invoice matched
+        // non-conflicting. The denormalized "primary Regarding" headline (record type/id/name) must NOT be
+        // crowned with that leftover invoice — Ambiguous means "the reviewer decides", so no headline. Under
+        // 061 UAT round-3 the invoice is ALSO non-core, so the typed sprk_regardinginvoice lookup is not even
+        // auto-written — it is surfaced in provenance as a candidate. Both guards now hold: no write, no headline.
         var matterA = Guid.NewGuid();
         var matterB = Guid.NewGuid();
         var invoiceId = Guid.NewGuid();
@@ -588,8 +593,9 @@ public class IncomingAssociationResolverTests
             TestCommunicationId,
             It.Is<Dictionary<string, object>>(fields =>
                 ((OptionSetValue)fields["sprk_associationstatus"]).Value == 100000004 && // Ambiguous
-                fields.ContainsKey("sprk_regardinginvoice") &&        // typed lookup still written
-                !fields.ContainsKey("sprk_regardingrecordtype") &&    // but NO denormalized headline
+                !fields.ContainsKey("sprk_regardinginvoice") &&       // non-core invoice: candidate only, not written
+                ((string)fields["sprk_associationprovenance"]).Contains("sprk_regardinginvoice") && // surfaced for review
+                !fields.ContainsKey("sprk_regardingrecordtype") &&    // and NO denormalized headline
                 !fields.ContainsKey("sprk_regardingrecordid") &&
                 !fields.ContainsKey("sprk_regardingrecordname")),
             It.IsAny<CancellationToken>()), Times.Once);

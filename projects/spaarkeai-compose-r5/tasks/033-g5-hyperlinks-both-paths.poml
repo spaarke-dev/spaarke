@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>G5 — Hyperlink support on both paths (authored w:hyperlink render + edit hyperlink op)</title>
+    <phase>3 Concurrency + UX</phase>
+    <gate>dep:004</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches the BFF byte-authors (ComposeDocumentRenderer clean path + ComposeShadowPatchEngine tracked path), extends the closed op catalog with a new hyperlink op + `link` ComposeMarkType, and re-enables a guarded control. High blast radius across renderer + op catalog + engine; a silent-loss round-trip is a data-loss path (NFR-08). Code-review + adr-check run at Step 9.5.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Extends the frozen/closed ComposeOperation catalog (ADR-039) and both byte-authors with a new op + mark + engine applier; architectural / high-blast-radius work with OOXML representability judgment (w:hyperlink relationship handling).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>shared renderer (ComposeDocumentRenderer.cs) + op catalog (ComposeOperation.cs ↔ compose-operations.ts) + engine (ComposeShadowPatchEngine.cs) + toolbar (ComposeFormatToolbar.tsx). Overlaps other op-catalog/engine tasks. Run /conflict-check before every BFF PR (overlaps compose-r1/r2/r3 + ai-architecture-redesign-r2 + analysis-hub-r1 shared client).</parallel-reason>
+    <deps>004</deps>
+    <tags>bff-api, compose, frontend</tags>
+    <estimated-effort>M-L (3-6d)</estimated-effort>
+  </metadata>
+
+  <prompt>Implement hyperlink support on BOTH Compose paths (spec FR-05 / gap G5 / SDL-4/5). AUTHORED path: add `href` to ComposeInlineRun and emit `w:hyperlink` in ComposeDocumentRenderer.BuildRun (:366) / AssembleParagraph (:346). EDIT path: add a hyperlink op to the closed catalog + `link` to ComposeMarkType + an engine applier in ComposeShadowPatchEngine. Re-enable the hyperlink control (ComposeFormatToolbar.tsx :635, disabled in BOTH modes today). Add seam slices on BOTH paths (authored → clean w:hyperlink; imported → tracked). Extend the closed catalog — never fork (ADR-039). If a hyperlink round-trips as unrepresentable / silent-loss, STOP.</prompt>
+
+  <role>SPAARKE platform developer with OOXML/DocumentFormat.OpenXml expertise (w:hyperlink + relationship handling), Compose Shadow Document engine familiarity (ADR-049), and React/Fluent v9 toolbar experience.</role>
+
+  <goal>A hyperlink survives BOTH paths: (1) AUTHORED — `href` on ComposeInlineRun renders as a clean `w:hyperlink` via ComposeDocumentRenderer.BuildRun/AssembleParagraph (zero tracked markup); (2) EDIT — a new hyperlink op in the closed ComposeOperation catalog (mirrored in compose-operations.ts) + `link` in ComposeMarkType + a ComposeShadowPatchEngine applier that emits a tracked hyperlink on imported docs; (3) the hyperlink control (ComposeFormatToolbar.tsx :635) is re-enabled in both modes; (4) seam slices prove both paths round-trip with untouched subtrees byte-identical and no unrepresentable/silent-loss path. SDL-4/5 guards removed.</goal>
+
+  <context>
+    <background>Per spec FR-05 (G5 / SDL-4/5) and plan P3-4, R4 guarded hyperlinks: the control is disabled in BOTH modes (ComposeFormatToolbar.tsx :635) and hyperlinks are unrepresentable, so they were silently lost. R5 removes the guard by building the feature: the authored renderer emits clean `w:hyperlink`, and the edit path adds a hyperlink op + `link` mark + engine applier for tracked hyperlinks on imported docs. Each gap's exit criterion is removing its R4 guard with a seam slice proving the construct round-trips and the no-error / no-silent-loss invariant holds.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx</file>
+      <file>tests/integration/seam/Compose/</file>
+    </relevant-files>
+    <dependencies>Task 004 (op-schema extension design — the shape the closed catalog extends with). Extend, never fork.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Honor I-1…I-7 + D1–D5. Engine is byte[]-in/byte[]-out; the edit applier is a surgical op anchored by (paraId, runIndex, run-local-offset); untouched OOXML subtrees stay byte-identical after save. Preserve the two-byte-author split (renderer clean / engine tracked) — do not merge the authors.</constraint>
+    <constraint source="ADR-049">I-7 / NFR-02: NO text-search anywhere in the write path — resolve the hyperlink target run by (paraId, runIndex, offset), never content match.</constraint>
+    <constraint source="ADR-039">Closed op catalog: the new hyperlink op EXTENDS the catalog under version control (server ComposeOperation.cs `[JsonDerivedType]` :148-157 ↔ client compose-operations.ts :54-64) — never fork, no side channel, no new AI dispatch endpoint. AI redline path stays envelope-only.</constraint>
+    <constraint source="ADR-013">No AI internals in Services/Compose/ (Tier-1 NetArchTest). No IOpenAiClient/executor/routing types in the renderer or engine.</constraint>
+    <constraint source="ADR-010">Patch engine = stateless concrete singleton; the new hyperlink applier carries no per-request state.</constraint>
+    <constraint source="ADR-007">No Microsoft.Graph above SpeFileStore; hyperlink relationship handling stays in the OOXML byte-authors, not a Graph call.</constraint>
+    <constraint source="ADR-038">Seam DoD: BOTH paths carry through-the-wire WebApplicationFactory seam slices in tests/integration/seam/Compose/ (authored clean w:hyperlink; imported tracked). NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="project">NFR-01: corpus byte-diff harness (24/24) MUST NOT regress. NFR-08: removing the SDL-4/5 guard MUST NOT reintroduce a user-triggerable error or silent-loss path; the R4 op-log-preservation net stays until this feature is seam-proven.</constraint>
+    <constraint source="project">NFR-03/04: MIT/permissive only; NO new runtime package (DocumentFormat.OpenXml already present). Report absolute BFF publish size + delta vs ~46.11 MB baseline; ≤60 MB compressed ceiling.</constraint>
+    <constraint source="project">NFR-09 (analysis-hub-r1): shared Spaarke.Compose.Components surface + save/redline contract MUST NOT regress the downstream consumer's reopen-restore parity. Run /conflict-check before the BFF + shared-client PR.</constraint>
+    <constraint source="CLAUDE.md §10">BFF task — state Placement Justification in the PR (cite .claude/constraints/bff-extensions.md). All new hyperlink surface lands in Services/Compose/ (renderer + engine); no new service, library, or endpoint family.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Clean byte-author (authored path)" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs">BuildRun:366 / AssembleParagraph:346 — the clean-authoring path (zero text-search, the cited I-5 exception). Emit w:hyperlink here for the authored href.</pattern>
+      <pattern name="Tracked appliers" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs">ApplyInsertText:314 / WrapRunAsDeleted:942 — model the tracked hyperlink applier alongside these; surgical, (paraId,runIndex,offset)-anchored.</pattern>
+      <pattern name="Closed op catalog (mirror)" location="src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs">[JsonDerivedType] :148-157 (10 ops), ComposeMarkType:101 — extend with the hyperlink op + `link` mark; mirror in client compose-operations.ts :54-64.</pattern>
+      <pattern name="R4 guard site (re-enable)" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx">Hyperlink control disabled at :635 (both modes) — re-enable once both paths represent hyperlinks.</pattern>
+      <pattern name="Client step classifier" location="src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts">classifyStep:442 — emit the hyperlink op (today unrepresentable/defer).</pattern>
+      <pattern name="Seam-test suite" location="tests/integration/seam/Compose/">Canonical byte-diff + save seam slices to model both hyperlink path slices on.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>Closest neighbors: ComposeMarkType enum (ComposeOperation.cs:101) for marks; ComposeDocumentRenderer.BuildRun:366 for run authoring; the closed op catalog `[JsonDerivedType]` set (ComposeOperation.cs:148-157). Grep confirms no existing hyperlink op and no `link`/`href` in ComposeMarkType or ComposeInlineRun today (the control at ComposeFormatToolbar.tsx:635 is disabled precisely because hyperlinks are unrepresentable).</existing>
+    <extension>Yes — EXTEND, not fork. `link` is added to the existing ComposeMarkType enum; `href` is added to the existing ComposeInlineRun; the hyperlink op is added to the existing closed ComposeOperation catalog under version control (ADR-039 R5-D3). The applier is a new branch alongside ApplyInsertText/WrapRunAsDeleted, not a new engine. No new service, class family, or endpoint.</extension>
+    <cost-of-doing-nothing>Concrete failure: a user who inserts a hyperlink today has it silently dropped (unrepresentable) and the hyperlink control stays disabled in both modes — authored docs cannot carry a link, and imported-doc hyperlink edits are lost with no error. FR-05 / SDL-4/5 acceptance cannot be met.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="1">Read the op-schema extension design from task 004 and confirm the hyperlink op shape. Read ComposeMarkType (:101), ComposeInlineRun, ComposeDocumentRenderer.BuildRun (:366)/AssembleParagraph (:346), and the tracked appliers (ApplyInsertText:314 / WrapRunAsDeleted:942).</step>
+    <step order="2">AUTHORED path: add `href` to ComposeInlineRun; emit clean `w:hyperlink` in ComposeDocumentRenderer.BuildRun/AssembleParagraph (handle the OOXML hyperlink relationship correctly; zero text-search — the cited I-5 clean-author exception). Untouched subtrees stay byte-identical.</step>
+    <step order="3">EDIT path: extend the closed catalog with the hyperlink op (ComposeOperation.cs :148-157) + `link` in ComposeMarkType (:101); mirror both in client compose-operations.ts (:54-64). Emit the hyperlink op from classifyStep (stepOperationInterceptor.ts :442, today unrepresentable/defer). Add a ComposeShadowPatchEngine applier that emits a tracked hyperlink on imported docs, surgical and (paraId,runIndex,offset)-anchored — never content match (NFR-02).</step>
+    <step order="4">Re-enable the hyperlink control in ComposeFormatToolbar.tsx (:635) for BOTH modes. Anchor the control's UI to the existing toolbar styling.</step>
+    <step order="5">Add seam slices in tests/integration/seam/Compose/ for BOTH paths: authored → clean w:hyperlink (no tracked markup); imported → tracked hyperlink; both prove untouched subtrees byte-identical and no unrepresentable/silent-loss. Add the &lt;ui-tests&gt; below.</step>
+    <step order="6">Run /conflict-check before opening the BFF + shared-client PR (renderer/engine/op-catalog overlap with compose-r1/r2/r3 + ai-architecture-redesign-r2; toolbar overlap with analysis-hub-r1). State Placement Justification and report publish-size delta vs ~46.11 MB in the PR.</step>
+    <step order="7">Run/verify: build (BFF + Spaarke.Compose.Components) + both seam slices + ui-tests + corpus byte-diff (24/24) + Tier-1 NetArchTest pass.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a hyperlink round-trips as unrepresentable or silent-loss on either path (i.e., the authored w:hyperlink or the tracked edit applier cannot faithfully preserve the link target/text through save+reload), STOP and escalate — this is a data-loss path (NFR-08). Do not re-enable the control while a silent-loss path remains.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build the BFF, run both seam slices + Tier-1 NetArchTest, run dotnet publish for the size delta.</tool>
+    <tool name="npm">Build Spaarke.Compose.Components and run the client/ui tests.</tool>
+    <tool name="terminal">Run /conflict-check on the BFF + shared-client surface.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="insert-hyperlink-authored">Given an authored (born-in-editor) doc, when the user inserts a hyperlink and saves, then the link renders and the saved OOXML carries a clean w:hyperlink (no tracked markup).</test>
+    <test name="insert-hyperlink-imported">Given an imported doc, when the user inserts a hyperlink, then the edit is captured as the hyperlink op and applies as a tracked hyperlink.</test>
+    <test name="control-enabled-both-modes">Given the toolbar, when a doc is loaded in either mode, then the hyperlink control (ComposeFormatToolbar.tsx :635) is re-enabled (no longer disabled), anchored to existing toolbar styling.</test>
+    <test name="dark-mode">Given ADR-021 dark mode, when the hyperlink control and rendered links display in dark theme, then they use theme tokens (no hard-coded colors) and remain legible in both light and dark.</test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an authored doc with an href on a ComposeInlineRun, when it saves, then ComposeDocumentRenderer emits a clean w:hyperlink and the corpus byte-diff shows untouched subtrees byte-identical (SDL-4 guard removed).</criterion>
+    <criterion testable="true">Given an imported doc, when the user inserts a hyperlink, then the new hyperlink op (extended into the closed catalog, mirrored client+server) applies as a tracked hyperlink via ComposeShadowPatchEngine, anchored by (paraId,runIndex,offset) with no text-search (SDL-5 guard removed).</criterion>
+    <criterion testable="true">Given both paths, when the seam slices run through the WebApplicationFactory, then authored (clean) and imported (tracked) hyperlinks round-trip with no unrepresentable/silent-loss and no banned mock/DI/ctor test shapes.</criterion>
+    <criterion testable="true">Given the toolbar, when a doc is loaded, then the hyperlink control is enabled in both modes.</criterion>
+    <criterion testable="true">Negative / no-regression: op catalog is EXTENDED not forked (ADR-039); Tier-1 NetArchTest passes (no AI internals); corpus byte-diff stays 24/24; BFF publish ≤60 MB (delta vs ~46.11 MB reported); no new runtime package; the two-byte-author split is preserved; analysis-hub-r1 reopen-restore parity not regressed (NFR-09).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-05 / gap G5 / SDL-4/5; plan P3-4. Both paths (authored render + edit op). NEW hyperlink op + `link` mark → justification emitted. Deps 004 (op-schema design). parallel-safe=false due to shared renderer + op catalog + engine + toolbar. Escalate on any unrepresentable/silent-loss round-trip (NFR-08).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

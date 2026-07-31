@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>G12 accept/reject revision (single-by-id) — closed-catalog ops + engine revision-id resolution + imported-deletion re-anchor fix</title>
+    <phase>1 Edit-path ops</phase>
+    <gate>dep:004</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New ops on the closed catalog (server + client, in sync), native OOXML revision resolution in the shared engine, and an imported-revision re-anchor fix; high-blast-radius with a downstream-consumer coupling (NFR-09). Save/apply change requires ADR-038 seam DoD.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Tracked-change reconciliation is brownfield root-cause work: accept-ins/accept-del/reject inverse semantics on real revision markup, the end-of-paragraph re-anchor bug, and the ET-2 422 elimination all demand careful OOXML reasoning across engine + op-schema + client.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies ComposeShadowPatchEngine.cs AND the closed op catalog (ComposeOperation.cs ↔ compose-operations.ts) — both shared across every Phase-1 op-schema task. Serialize against 010/011/013/014; 013 (batch) depends on this task's single-by-id primitives.</parallel-reason>
+    <deps>004</deps>
+    <tags>bff-api, compose, engine, op-schema</tags>
+    <estimated-effort>3-5 days (M-L)</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add acceptRevision and rejectRevision ops (single, addressed by revision id) to the closed catalog — server
+    ComposeOperation.cs and client compose-operations.ts kept in exact sync, per task 004's op-shape design. The
+    engine resolves BY REVISION ID: accept-ins strips the w:ins wrapper keeping the run; accept-del removes the run;
+    reject is the inverse of each. Also fix the imported-deletion end-of-paragraph re-anchor in
+    importedRevisions.ts (applyImportedRevisions :272). The client stepOperationInterceptor emits the revision ops.
+    Prove with an ET-2 seam slice on the CIPO corpus doc with pre-existing revisions: accept-then-save must NOT 422.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in OOXML tracked-change markup (w:ins/w:del, revision ids), native
+    accept/reject reconciliation semantics, the closed ComposeOperation catalog, and the client importedRevisions
+    projection. Honor ADR-049 + ADR-039 + CLAUDE.md §10.
+  </role>
+
+  <goal>
+    The closed catalog gains acceptRevision/rejectRevision (single) ops addressed by revision id, mirrored server↔client.
+    ComposeShadowPatchEngine resolves each op natively by revision id (accept-ins strips w:ins keeping the run;
+    accept-del removes the run; reject = inverse) with zero text-search. The imported-deletion end-of-paragraph
+    re-anchor bug in importedRevisions.ts is fixed. The client emits the revision ops. An ET-2 seam slice on the
+    CIPO corpus doc with pre-existing revisions proves accept/reject-then-save succeeds (no
+    TrackedChangeReconciliationUnsupported 422) with Word-valid revision state; corpus byte-diff (24/24) does not
+    regress.
+  </goal>
+
+  <context>
+    <background>
+      Spec FR-11 (G12) single-by-id + R4 ET-2 reconciliation gap. Today, accepting a pre-existing imported tracked
+      change and saving fails with a TrackedChangeReconciliationUnsupported 422. Task 004 designs the op shapes for
+      the closed catalog; this task implements the single-by-id primitives (013 adds accept-all/reject-all batch on
+      top). The imported-deletion end-of-paragraph re-anchor in importedRevisions.ts (applyImportedRevisions :272)
+      is a known projection bug that must be fixed as part of correct reconciliation. NFR-09: analysis-hub-r1's
+      retirement parity depends on stable accept/reject behavior — this task hardens it, MUST NOT regress it.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/importedRevisions.ts</file>
+      <file>tests/integration/seam/Compose/</file>
+    </relevant-files>
+    <dependencies>004 (op-schema extension design for acceptRevision/rejectRevision — supplies the op shapes for the closed catalog).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">New ops (acceptRevision/rejectRevision) EXTEND the closed ComposeOperation catalog under version control — never fork, no side channel, no new AI dispatch endpoint. Server ComposeOperation.cs ([JsonDerivedType] :148-157) and client compose-operations.ts (:54-64) stay in exact sync.</constraint>
+    <constraint source="ADR-049">Surgical ops; untouched OOXML subtrees byte-identical after reconciliation. Resolve every revision BY REVISION ID — NO text/content search anywhere in the write path (I-7 / NFR-02).</constraint>
+    <constraint source="ADR-010">Patch engine = stateless concrete singleton; the revision-resolution appliers carry no per-request state.</constraint>
+    <constraint source="ADR-013">No AI internals in Services/Compose/ (Tier-1 NetArchTest) — the AI-redline path stays envelope-only.</constraint>
+    <constraint source="ADR-038">Add the ET-2 through-the-wire WebApplicationFactory seam slice in tests/integration/seam/Compose/ on the CIPO corpus fixture with pre-existing revisions. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="project">NFR-01 corpus byte-diff (24/24) MUST NOT regress. NFR-07 output must be Word-valid revision state. NFR-09 — MUST NOT regress analysis-hub-r1's reopen-restore / clean-retirement parity (this hardens the accept/reject contract it depends on).</constraint>
+    <constraint source="CLAUDE.md-10">BFF task — Placement Justification in the PR; engine stays in Services/Compose/. Publish ≤60 MB; report absolute + delta vs ~46.11 MB. Run /conflict-check (overlaps analysis-hub-r1 shared surface). Zero new runtime package (NFR-03). Never delete docxBridge.ts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+    </files>
+    <patterns>
+      <pattern name="Closed-catalog op addition (mirror)" location="src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs">
+        Add acceptRevision/rejectRevision to [JsonDerivedType] :148-157 and mirror in client compose-operations.ts COMPOSE_OPERATION_TYPES :54-64 — one schema both ends implement, per 004's design. Extend, never fork.
+      </pattern>
+      <pattern name="Native revision resolution" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs">
+        Follow the surgical-op shape of ApplyInsertText:314 / WrapRunAsDeleted:942, but key off revision id: accept-ins strips w:ins keeping the run; accept-del removes the run; reject = inverse.
+      </pattern>
+      <pattern name="Imported-revision re-anchor" location="src/client/shared/Spaarke.Compose.Components/src/widgets/importedRevisions.ts">
+        applyImportedRevisions:272 — fix the imported-deletion end-of-paragraph re-anchor so a deletion spanning a paragraph boundary re-anchors correctly.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>Closest neighbors: the 10 ops in ComposeOperation.cs [JsonDerivedType] :148-157 (insertText/deleteRange/setBlockAttr/etc.) and the imported-revision projection in importedRevisions.ts:272. Grep of the catalog shows no accept/reject revision op exists (verified against COMPOSE_OPERATION_TYPES :54-64).</existing>
+    <extension>Yes — EXTEND the closed catalog with two id-addressed revision ops (ADR-039 R5-D3: extend, never fork). Not a new class hierarchy, not a new endpoint; the engine gains a revision-resolution branch alongside the existing appliers.</extension>
+    <cost-of-doing-nothing>Accepting or rejecting a pre-existing imported tracked change and then saving fails with a TrackedChangeReconciliationUnsupported 422 — the ET-2 reconciliation gap. The R4 guard cannot be removed and analysis-hub-r1's retirement parity (which assumes working accept/reject) stays blocked.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="1">Confirm task 004's op-shape design for acceptRevision/rejectRevision (single-by-id) is available; add both to ComposeOperation.cs [JsonDerivedType] :148-157 and mirror in client compose-operations.ts :54-64 — exact sync.</step>
+    <step order="2">Implement the engine resolution keyed by revision id: accept-ins strips the w:ins wrapper keeping the run; accept-del removes the run; reject is the inverse of each. No text-search — locate the revision by its id attribute.</step>
+    <step order="3">Fix the imported-deletion end-of-paragraph re-anchor in importedRevisions.ts (applyImportedRevisions :272) so paragraph-boundary-spanning deletions re-anchor correctly.</step>
+    <step order="4">Update client stepOperationInterceptor.ts to emit the acceptRevision/rejectRevision ops.</step>
+    <step order="5">Add the ET-2 seam slice on the CIPO corpus doc with pre-existing revisions: accept a revision, save through the wire, assert no 422 and Word-valid revision state; repeat for reject and for accept-del/reject-ins cases. Assert untouched subtrees byte-identical.</step>
+    <step order="6">Run the corpus byte-diff harness (confirm 24/24) and dotnet publish -c Release; report absolute size + delta vs ~46.11 MB. Run /conflict-check; state Placement Justification.</step>
+    <step order="7">Run/verify: build + this task's seam/unit tests pass.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If native revision resolution would require content-matching (comparing run text) instead of resolving by revision id, STOP and escalate — this is an I-7 / NFR-02 violation; do NOT substitute a text-search reconciliation.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish the BFF; run the byte-diff harness.</tool>
+    <tool name="npm">Build the Spaarke.Compose.Components client for op-mirror + interceptor + re-anchor changes.</tool>
+    <tool name="terminal">Run /conflict-check before the PR.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs (acceptRevision/rejectRevision ops)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs (revision-id resolution)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts + widgets/stepOperationInterceptor.ts + widgets/importedRevisions.ts</output>
+    <output type="test">tests/integration/seam/Compose/ (ET-2 accept/reject-then-save seam slice on CIPO corpus)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the CIPO corpus doc with pre-existing revisions, when a single revision is accepted by id and saved, then the save succeeds with no TrackedChangeReconciliationUnsupported 422 and the output is Word-valid revision state.</criterion>
+    <criterion testable="true">Given an accept-ins op, then the w:ins wrapper is stripped keeping the run; given accept-del, the run is removed; given reject, the inverse is applied — each resolved by revision id.</criterion>
+    <criterion testable="true">Given any accept/reject op, then the revision is located by its id attribute — no text/content search occurs in the write path.</criterion>
+    <criterion testable="true">Given an imported deletion spanning a paragraph boundary, when reconciled, then it re-anchors correctly (the importedRevisions.ts :272 end-of-paragraph bug is fixed).</criterion>
+    <criterion testable="true">Given the closed catalog, then acceptRevision/rejectRevision exist in both ComposeOperation.cs and compose-operations.ts in exact sync; no side channel or new AI dispatch endpoint was added (ADR-039).</criterion>
+    <criterion testable="true">Given the seam slice runs, then untouched subtrees are byte-identical, corpus byte-diff stays 24/24, analysis-hub-r1's accept/reject-dependent parity is not regressed (NFR-09), and dotnet publish -c Release is ≤60 MB with delta reported vs ~46.11 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    NEW ops → &lt;justification&gt; emitted above. Single-by-id primitives only; 013 adds accept-all/reject-all batch on
+    top and depends on this task. The imported-deletion re-anchor fix is part of correct reconciliation, not optional.
+    Spec §FR-11; ET-2 doc = CIPO patent with pre-existing revisions. Run /conflict-check — shared Spaarke.Compose
+    surface with analysis-hub-r1.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files first. Follow task-execute pre-execution checklist incl. Step 9.5 gates (code-review + adr-check, FULL/BFF). Enforce §10 publish-size gate and /conflict-check.</protocol>
+  </execution>
+</task>

@@ -269,8 +269,9 @@ public sealed class CommunicationArrivedProducerSeamTests
         n.RegardingType.Should().Be("sprk_communicationthread");
         n.ToastType.Should().Be(200_000_000, "Timed toast emits the clickable Open action (Hidden would suppress it)");
         n.ActionUrl.Should().Be(
-            $"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={h.MatterId:D}",
-            "the bell deep-links to the regarding record (resolved from the TYPED lookup), which hosts the conversation panel");
+            $"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={h.MatterId:D}&sprk_openconversation=1",
+            "the bell deep-links to the regarding record (resolved from the TYPED lookup) and appends " +
+            "sprk_openconversation=1 so the CommunicationConversationPanel PCF auto-opens (messaging-r3 round-7 item 11)");
         n.CorrelationId.Should().Be(h.CommunicationId.ToString());
         n.Title.Should().Be("New email", "signal-only channel label — never an address or content (NFR-02/03)");
     }

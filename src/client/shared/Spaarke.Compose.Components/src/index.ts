@@ -342,6 +342,7 @@ export {
   runsOfBlock,
   runLocalPoint,
   classifyStep,
+  buildBatchRevisionOp,
 } from './widgets/stepOperationInterceptor';
 export type {
   StepOperationInterceptorOptions,

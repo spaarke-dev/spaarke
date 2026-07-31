@@ -54,7 +54,15 @@ import {
 } from '@tiptap/pm/transform';
 
 import { PARAID_NODE_TYPES } from './paraIdExtension';
-import type { ComposeOperation, ComposeRunPoint, ComposeMarkType, ComposeBlockAttr } from '../types/compose-operations';
+import type {
+  ComposeOperation,
+  ComposeRunPoint,
+  ComposeMarkType,
+  ComposeBlockAttr,
+  ComposeRevisionScope,
+  ComposeTableOpKind,
+  ComposeParagraphPosition,
+} from '../types/compose-operations';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -121,6 +129,9 @@ const TIPTAP_MARK_TO_COMPOSE: Readonly<Record<string, ComposeMarkType>> = {
   bold: 'Bold',
   italic: 'Italic',
   underline: 'Underline',
+  // G5 (FR-05, task 033): the @tiptap/extension-link mark → the value-carrying `Link` ComposeMarkType.
+  // Its `href` is captured from step.mark.attrs.href in classifyMarkStep (unlike the boolean marks).
+  link: 'Link',
 };
 
 /** TextAlign attr value → the `Alignment` {@link ComposeBlockAttr} value (mirrors the server `ComposeAlignment`). */
@@ -130,6 +141,165 @@ const TEXTALIGN_TO_COMPOSE: Readonly<Record<string, string>> = {
   right: 'Right',
   justify: 'Justify',
 };
+
+// ---------------------------------------------------------------------------
+// Imported-revision reconciliation (R5 task 012 — G12 acceptRevision/rejectRevision)
+// ---------------------------------------------------------------------------
+//
+// An IMPORTED Word tracked change is rendered by `importedRevisions.ts` as an `insertion`/`deletion` mark
+// whose `ledgerRef` is `imported:<native w:id>` (the `imported:` prefix distinguishes it from an AI-suggested
+// redline keyed `{bindingId}@t{n}`). Accepting/rejecting one flows through `usePendingRedline.accept/reject`,
+// which either DROPS the mark (keep the text) via a RemoveMarkStep, or DELETES the text via a ReplaceStep.
+// This maps each such step to the closed-catalog acceptRevision/rejectRevision op addressed by the native
+// revision id — so a save reconciles the pre-existing tracked change (no TrackedChangeReconciliationUnsupported
+// 422; G12/FR-11) instead of the interceptor mis-emitting a deleteRange or refusing the mark step.
+//
+//   insertion + drop-mark  → ACCEPT  (the insertion stands as normal text)
+//   insertion + delete     → REJECT  (the inserted text is removed)
+//   deletion  + drop-mark  → REJECT  (the struck text is restored to normal)
+//   deletion  + delete     → ACCEPT  (the deletion stands — the text is removed)
+
+const IMPORTED_REVISION_LEDGER_PREFIX = 'imported:';
+const INSERTION_MARK_NAME = 'insertion';
+const DELETION_MARK_NAME = 'deletion';
+
+/**
+ * Extract the native OOXML revision id from an `imported:<id>` ledgerRef, or null when it is not a clean
+ * imported-revision key carrying a REAL native id. A synthetic `imported:<paraId>#<i>` fallback (an imported
+ * revision the reader could not attach a `w:id` to) has no id the engine can reconcile by — we never emit a
+ * revision op the server could only `RevisionNotFound`; such a step falls through to existing behavior.
+ */
+function importedRevisionId(ledgerRef: unknown): string | null {
+  if (typeof ledgerRef !== 'string' || !ledgerRef.startsWith(IMPORTED_REVISION_LEDGER_PREFIX)) return null;
+  const id = ledgerRef.slice(IMPORTED_REVISION_LEDGER_PREFIX.length);
+  if (id.length === 0 || id.includes('#')) return null;
+  return id;
+}
+
+/** Build a `Single`-scope acceptRevision/rejectRevision op addressed by native revision id (never by offset). */
+function revisionOp(
+  type: 'acceptRevision' | 'rejectRevision',
+  paraId: string,
+  revisionId: string
+): ComposeOperation {
+  return { type, paraId, scope: 'Single' as ComposeRevisionScope, revisionId };
+}
+
+/**
+ * R5 task 013 (G12 batch) — build an `All`-scope acceptRevision/rejectRevision op (accept-all / reject-all).
+ * Unlike the `Single` gesture ops the step interceptor emits, accept-all/reject-all is a document-level toolbar
+ * command, so this is an exported builder a toolbar handler calls once. `revisionId` is `null` (the server
+ * reconciles EVERY tracked revision in deterministic document order, not one by id — task-004 §3.4); `paraId`
+ * is the presence-anchor: the `w14:paraId` of the first paragraph (document order) that holds an imported
+ * revision. That id keeps the base-contract invariant "`paraId` is always a real 8-hex id" intact and doubles
+ * as a client-side precondition (there is ≥1 revision to reconcile). Never a text-search / offset (I-7 / NFR-02).
+ */
+export function buildBatchRevisionOp(
+  type: 'acceptRevision' | 'rejectRevision',
+  presenceAnchorParaId: string
+): ComposeOperation {
+  return { type, paraId: presenceAnchorParaId, scope: 'All' as ComposeRevisionScope, revisionId: null };
+}
+
+/** The imported insertion/deletion revision a text node carries (first such mark), or null. */
+function importedRevisionOfNode(node: PMNode): { markName: string; revisionId: string } | null {
+  for (const m of node.marks) {
+    if (m.type.name === INSERTION_MARK_NAME || m.type.name === DELETION_MARK_NAME) {
+      const id = importedRevisionId((m.attrs as { ledgerRef?: unknown }).ledgerRef);
+      if (id) return { markName: m.type.name, revisionId: id };
+    }
+  }
+  return null;
+}
+
+/**
+ * The single imported revision that covers the ENTIRE text of `[from, to)`, or null. A delete is diverted to
+ * accept/reject-revision ONLY when every text node in the range carries the SAME imported revision id — i.e.
+ * it is the accept/reject-UI action (usePendingRedline deletes exactly the marked span). A range that MIXES an
+ * imported revision with plain text or a second revision is NOT diverted: it falls through to normal
+ * classification so no content is silently dropped (the delete-onto-a-tracked-change ET-2 case is the engine's
+ * pre-existing TrackedChangeReconciliationUnsupported guard, out of this task's accept/reject-then-save scope).
+ */
+function wholeRangeImportedRevision(
+  doc: PMNode,
+  from: number,
+  to: number
+): { markName: string; revisionId: string } | null {
+  let found: { markName: string; revisionId: string } | null = null;
+  let uniform = true;
+  let sawText = false;
+  doc.nodesBetween(from, to, node => {
+    if (!uniform) return false;
+    if (!node.isText) return true;
+    sawText = true;
+    const rev = importedRevisionOfNode(node);
+    if (!rev) {
+      uniform = false; // a plain-text (or non-imported) span inside the range → not a pure reconciliation
+      return false;
+    }
+    if (!found) {
+      found = rev;
+    } else if (found.revisionId !== rev.revisionId || found.markName !== rev.markName) {
+      uniform = false; // two distinct imported revisions in one delete → not a single reconciliation
+      return false;
+    }
+    return true;
+  });
+  return sawText && uniform ? found : null;
+}
+
+/**
+ * Recognize an accept/reject of an IMPORTED tracked change and synthesize its closed-catalog
+ * acceptRevision/rejectRevision op (see the section header for the four cases). Returns null when the step is
+ * not an imported-revision reconciliation — only `imported:`-prefixed marks with a real native id divert here;
+ * AI-suggested redlines and id-less imported revisions fall through to existing classification untouched.
+ */
+function classifyImportedRevisionStep(step: Step, docBefore: PMNode): StepClassification | null {
+  // RemoveMarkStep — the mark is dropped, the text kept.
+  if (step instanceof RemoveMarkStep) {
+    const markName = step.mark.type.name;
+    if (markName !== INSERTION_MARK_NAME && markName !== DELETION_MARK_NAME) return null;
+    const revisionId = importedRevisionId((step.mark.attrs as { ledgerRef?: unknown }).ledgerRef);
+    if (!revisionId) return null;
+    const anchor = resolveRunAnchor(docBefore, step.from);
+    if (!anchor) return null;
+    const type = markName === INSERTION_MARK_NAME ? 'acceptRevision' : 'rejectRevision';
+    return { kind: 'ops', ops: [revisionOp(type, anchor.paraId, revisionId)] };
+  }
+
+  // ReplaceStep pure delete — the text (carrying the imported mark) is removed. Divert ONLY when the whole
+  // deleted range is one uniform imported revision (a mixed range falls through — never drop non-revision content).
+  if (step instanceof ReplaceStep && step.to > step.from && step.slice.content.size === 0) {
+    const found = wholeRangeImportedRevision(docBefore, step.from, step.to);
+    if (!found) return null;
+    const anchor = resolveRunAnchor(docBefore, step.from);
+    if (!anchor) return null;
+    const type = found.markName === DELETION_MARK_NAME ? 'acceptRevision' : 'rejectRevision';
+    return { kind: 'ops', ops: [revisionOp(type, anchor.paraId, found.revisionId)] };
+  }
+
+  return null;
+}
+
+/**
+ * Dedupe accept/reject-revision ops by (type, revisionId): one imported revision = one native w:id, but its
+ * rendered mark span can split across adjacent text nodes → several delete/drop-mark steps in ONE accept/reject
+ * transaction, each yielding the same op. Emitting the duplicate would make the SECOND server apply
+ * `RevisionNotFound` (the first already reconciled it). Non-revision ops pass through untouched, order preserved.
+ */
+function dedupeRevisionOps(ops: readonly ComposeOperation[]): ComposeOperation[] {
+  const seen = new Set<string>();
+  const out: ComposeOperation[] = [];
+  for (const op of ops) {
+    if (op.type === 'acceptRevision' || op.type === 'rejectRevision') {
+      const key = `${op.type}:${op.revisionId ?? ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    out.push(op);
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // Anchor resolution (D2 — the run-local fine anchor)
@@ -191,19 +361,24 @@ export function runsOfBlock(block: PMNode): RunSpan[] {
  * Boundary convention (deterministic + documented): an offset that falls exactly on a
  * run boundary resolves to the TRAILING edge of the EARLIER run (`offset === run length`)
  * — the first run whose cumulative end is `>= k`. An empty paragraph yields `(0, 0)`.
+ *
+ * ROBUST ANCHOR (task 055): the produced point ALSO carries `paraOffset: k` — the raw
+ * paragraph-relative offset the walk consumed. This is the additive, run-merge-stable
+ * anchor the server prefers (it re-resolves the real OOXML run from `k`); the legacy
+ * `(runIndex, offset)` stays as the backward-compatible fallback.
  */
 export function runLocalPoint(block: PMNode, k: number): ComposeRunPoint {
   const runs = runsOfBlock(block);
-  if (runs.length === 0) return { runIndex: 0, offset: 0 };
+  if (runs.length === 0) return { runIndex: 0, offset: 0, paraOffset: k };
   let acc = 0;
   for (let i = 0; i < runs.length; i++) {
     const len = runs[i].length;
-    if (k <= acc + len) return { runIndex: i, offset: k - acc };
+    if (k <= acc + len) return { runIndex: i, offset: k - acc, paraOffset: k };
     acc += len;
   }
   // k beyond the paragraph's content (defensive) — clamp to the trailing edge of the last run.
   const last = runs.length - 1;
-  return { runIndex: last, offset: runs[last].length };
+  return { runIndex: last, offset: runs[last].length, paraOffset: k };
 }
 
 /**
@@ -221,7 +396,8 @@ export function resolveRunAnchor(doc: PMNode, pos: number): ComposeAnchor | null
   // parentOffset is the char offset within the textblock's inline content — exactly the
   // paragraph-local `k` the run walk expects (NOT an absolute position).
   const point = runLocalPoint(parent, $pos.parentOffset);
-  return { paraId, runIndex: point.runIndex, offset: point.offset };
+  // task 055: thread the robust `paraOffset` (= k) onto the anchor alongside the legacy (runIndex, offset).
+  return { paraId, runIndex: point.runIndex, offset: point.offset, paraOffset: point.paraOffset };
 }
 
 // ---------------------------------------------------------------------------
@@ -271,12 +447,17 @@ function firstInlineMarks(fragment: Fragment): readonly Mark[] {
   return marks;
 }
 
-/** Map a ProseMirror mark-set to the closed {@link ComposeMarkType} set (drops non-char-format marks, e.g. link). */
+/**
+ * Map a ProseMirror mark-set to the closed {@link ComposeMarkType} set for an insertText op's `marks[]`
+ * (character-format marks only). G5 (task 033): `Link` is EXCLUDED here — the insertText `marks[]` array
+ * carries no href slot, so a link can only be represented via the value-carrying `setMark(Link, href)` op
+ * (classifyMarkStep), never as a bare insertText mark. Other non-char-format marks are likewise dropped.
+ */
 function marksToComposeMarks(marks: readonly Mark[]): ComposeMarkType[] {
   const out: ComposeMarkType[] = [];
   for (const m of marks) {
     const mapped = TIPTAP_MARK_TO_COMPOSE[m.type.name];
-    if (mapped && !out.includes(mapped)) out.push(mapped);
+    if (mapped && mapped !== 'Link' && !out.includes(mapped)) out.push(mapped);
   }
   return out;
 }
@@ -431,6 +612,326 @@ function classifyStructuralStep(step: Step, docBefore: PMNode, reason: string): 
 }
 
 // ---------------------------------------------------------------------------
+// Block-attribute step → setBlockAttr synthesis (R5 task 011 — G3 heading/list)
+// ---------------------------------------------------------------------------
+//
+// A heading toggle (setBlockType → ReplaceAroundStep) or a list wrap/unwrap/re-nest
+// (wrapInList / liftListItem / sinkListItem → ReplaceStep/ReplaceAroundStep) preserves the paraId-bearing
+// block COUNT + every block's TEXT, but changes a block's STYLE (heading level) or LIST context
+// (ordered/bullet + nesting depth). Before task 011 these fell through to `classifyStructuralStep` and were
+// DEFERRED (`defer-structural`) — the R4 SDL-1/2 guard. Task 011 EMITS the corresponding closed-set
+// `setBlockAttr` op (Style / ListOrdered / ListLevel), mirroring the server op schema exactly. paraId is
+// read from the PRE-STEP block (durable, server-known) so a type-change that re-mints the post-step id
+// never mis-addresses the op.
+
+/** A paraId block's style + list context in a doc snapshot (the diff basis for a block-attr change). */
+interface BlockAttrSignature {
+  paraId: string | null;
+  text: string;
+  /** 'Normal' | 'Heading1'..'Heading6' | 'ListParagraph' — mirrors the server `ComposeBlockAttr Style` set. */
+  style: string;
+  /** true = ordered list, false = bullet list, null = not in a list. */
+  listOrdered: boolean | null;
+  /** 0-based list nesting depth, or null when not in a list. */
+  listLevel: number | null;
+}
+
+/** Ordered signatures of every paraId-bearing textblock, tracking list-ancestor context (ordered-ness + depth). */
+function blockAttrSignatures(doc: PMNode): BlockAttrSignature[] {
+  const out: BlockAttrSignature[] = [];
+  const walk = (node: PMNode, listStack: boolean[]): void => {
+    node.forEach(child => {
+      const name = child.type.name;
+      if (name === 'orderedList' || name === 'bulletList') {
+        walk(child, [...listStack, name === 'orderedList']);
+      } else if ((PARAID_NODE_TYPES as readonly string[]).includes(name) && child.isTextblock) {
+        const pid = (child.attrs as { paraId?: unknown }).paraId;
+        const level = (child.attrs as { level?: unknown }).level;
+        out.push({
+          paraId: typeof pid === 'string' && pid.length > 0 ? pid : null,
+          text: child.textContent,
+          style:
+            name === 'heading'
+              ? `Heading${typeof level === 'number' ? level : 1}`
+              : listStack.length > 0
+                ? 'ListParagraph'
+                : 'Normal',
+          listOrdered: listStack.length > 0 ? listStack[listStack.length - 1] : null,
+          listLevel: listStack.length > 0 ? listStack.length - 1 : null,
+        });
+      } else {
+        // listItem / tableCell / blockquote wrapper — recurse, preserving the list stack.
+        walk(child, listStack);
+      }
+    });
+  };
+  walk(doc, []);
+  return out;
+}
+
+/** True when two signatures differ in any block-attribute (style / list ordered-ness / list depth). */
+function signatureChanged(a: BlockAttrSignature, b: BlockAttrSignature): boolean {
+  return a.style !== b.style || a.listOrdered !== b.listOrdered || a.listLevel !== b.listLevel;
+}
+
+/**
+ * Synthesize the single closed-set `setBlockAttr` op a block-attribute change performs, given the block's
+ * BEFORE + AFTER signature. Returns null for a transition the closed op set cannot carry cleanly (deferred).
+ *
+ *   - enter a list (wrap)                  → ListOrdered ('true'/'false')  [server sets ListParagraph + numPr]
+ *   - leave a list (unwrap)                → Style (the new Normal/HeadingN) [server clears the direct numPr]
+ *   - ordered-ness flipped within a list   → ListOrdered
+ *   - nesting depth changed within a list  → ListLevel
+ *   - heading level / paragraph↔heading    → Style
+ */
+function blockAttrOpForChange(paraId: string, before: BlockAttrSignature, after: BlockAttrSignature): ComposeOperation | null {
+  const wasList = before.listOrdered !== null;
+  const isList = after.listOrdered !== null;
+
+  if (!wasList && isList) {
+    return { type: 'setBlockAttr', paraId, attr: 'ListOrdered' as ComposeBlockAttr, value: String(after.listOrdered) };
+  }
+  if (wasList && !isList) {
+    return { type: 'setBlockAttr', paraId, attr: 'Style' as ComposeBlockAttr, value: after.style };
+  }
+  if (wasList && isList && before.listOrdered !== after.listOrdered) {
+    return { type: 'setBlockAttr', paraId, attr: 'ListOrdered' as ComposeBlockAttr, value: String(after.listOrdered) };
+  }
+  if (wasList && isList && before.listLevel !== after.listLevel) {
+    return { type: 'setBlockAttr', paraId, attr: 'ListLevel' as ComposeBlockAttr, value: String(after.listLevel) };
+  }
+  if (before.style !== after.style) {
+    return { type: 'setBlockAttr', paraId, attr: 'Style' as ComposeBlockAttr, value: after.style };
+  }
+  return null;
+}
+
+/**
+ * Classify a block-boundary step as a heading/list block-attribute change (R5 task 011). Returns an `ops`
+ * classification when the step preserves the paraId-block COUNT + every block's TEXT and changes ONLY block
+ * attributes (style / list membership / list depth); returns null otherwise (a genuine structural add/remove
+ * or an unrepresentable transition — the caller falls through to `classifyStructuralStep`). paraId is taken
+ * from the PRE-STEP block so a re-minted post-step id never mis-addresses the op (I-7 durable anchor).
+ */
+function classifyBlockAttrStep(step: Step, docBefore: PMNode): StepClassification | null {
+  const applied = step.apply(docBefore);
+  if (applied.failed || !applied.doc) return null;
+
+  const before = blockAttrSignatures(docBefore);
+  const after = blockAttrSignatures(applied.doc);
+  if (before.length !== after.length) return null; // block add/remove → structural, not a block-attr change
+
+  for (let i = 0; i < before.length; i++) {
+    if (before[i].text !== after[i].text) return null; // text changed → not a pure block-attr change
+  }
+
+  const ops: ComposeOperation[] = [];
+  for (let i = 0; i < before.length; i++) {
+    if (!signatureChanged(before[i], after[i])) continue;
+    const paraId = before[i].paraId;
+    if (!paraId) return null; // no durable id to anchor → defer rather than mis-address
+    const op = blockAttrOpForChange(paraId, before[i], after[i]);
+    if (!op) return null; // transition the closed op set cannot carry → defer to structural
+    ops.push(op);
+  }
+
+  return ops.length > 0 ? { kind: 'ops', ops } : null;
+}
+
+// ---------------------------------------------------------------------------
+// Table structural step → table op synthesis (R5 task 014 — G4/FR-04)
+// ---------------------------------------------------------------------------
+//
+// A table row/column add/delete (addRowAfter / deleteRow / addColumnAfter / deleteColumn / deleteTable) arrives
+// as a ReplaceStep/ReplaceAroundStep that changes the TABLE structure (row or column count) rather than a
+// paragraph's inline text. Before task 014 these fell through to `classifyStructuralStep` and were DEFERRED
+// (`defer-structural` — the R4 SDL-3 silent-loss path). Task 014 diffs the table's cell-paraId grid BEFORE vs
+// AFTER the step and emits the closed-catalog `table` op (kind + row/column + newParaIds), anchored by an
+// EXISTING cell's durable `w14:paraId` so the server locates the table by paraId-ancestry, never text-search
+// (I-7). Cell-content edits inside an existing cell are NOT table ops — they are ordinary inline
+// insertText/deleteRange on the cell paragraph's paraId (they reach the inline path above, not here).
+// Whole-table CREATE (insertTable) is out of the closed catalog's structural-edit scope and stays gated in the
+// toolbar; it is never emitted here (returns null → the caller surfaces it, never silently drops it).
+
+const TABLE_NODE = 'table';
+const TABLE_ROW_NODE = 'tableRow';
+const TABLE_CELL_NODES = ['tableCell', 'tableHeader'];
+
+/** A table's cell-paraId grid + an existing (durable) cell paraId to anchor the server-side table lookup. */
+interface TableSnapshot {
+  /** Row-major grid of each cell's first paraId-block paraId (null for a cell with no stamped paraId — e.g. a
+   *  brand-new cell created by the very step being classified). */
+  grid: (string | null)[][];
+  /** Any EXISTING (non-null) cell paraId in the table — the durable anchor that locates the table server-side. */
+  anchor: string | null;
+}
+
+/** The first paraId-bearing block's paraId anywhere inside a table cell (descends through nested wrappers). */
+function firstCellParaId(cell: PMNode): string | null {
+  let found: string | null = null;
+  cell.descendants(node => {
+    if (found) return false;
+    if ((PARAID_NODE_TYPES as readonly string[]).includes(node.type.name)) {
+      const pid = (node.attrs as { paraId?: unknown }).paraId;
+      if (typeof pid === 'string' && pid.length > 0) {
+        found = pid;
+        return false;
+      }
+    }
+    return true;
+  });
+  return found;
+}
+
+/** Snapshot every table's cell-paraId grid in document order (positional identity across a single step). */
+function tableSnapshots(doc: PMNode): TableSnapshot[] {
+  const tables: TableSnapshot[] = [];
+  doc.descendants(node => {
+    if (node.type.name !== TABLE_NODE) return true;
+    const grid: (string | null)[][] = [];
+    let anchor: string | null = null;
+    node.forEach(row => {
+      if (row.type.name !== TABLE_ROW_NODE) return;
+      const cells: (string | null)[] = [];
+      row.forEach(cell => {
+        if (!TABLE_CELL_NODES.includes(cell.type.name)) return;
+        const pid = firstCellParaId(cell);
+        if (pid && !anchor) anchor = pid;
+        cells.push(pid);
+      });
+      grid.push(cells);
+    });
+    tables.push({ grid, anchor });
+    return false; // a nested table is a rare edge — treat the outer table only (defer if it doesn't diff cleanly)
+  });
+  return tables;
+}
+
+/** Two cell-paraId rows are equal iff same length and same paraId at every position (identity match). */
+function rowsEqual(a: (string | null)[], b: (string | null)[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/** First row index where `longer` (one extra row) stops matching `shorter` positionally — the inserted/removed row. */
+function firstDifferingRow(shorter: (string | null)[][], longer: (string | null)[][]): number {
+  for (let i = 0; i < shorter.length; i++) if (!rowsEqual(shorter[i], longer[i])) return i;
+  return shorter.length; // diverges only at the tail — the extra row is last
+}
+
+/** First column index where `narrower` (one fewer column) stops matching `wider` on row 0 — the inserted/removed col. */
+function firstDifferingCol(narrower: (string | null)[][], wider: (string | null)[][]): number {
+  const n = narrower[0] ?? [];
+  const w = wider[0] ?? [];
+  for (let c = 0; c < n.length; c++) if (n[c] !== w[c]) return c;
+  return n.length; // diverges only at the tail — the extra column is last
+}
+
+/** Mint fresh ids for any null (brand-new) cell paraId; keep a client-assigned id so client/server ids align. */
+function newCellParaIds(cells: (string | null)[]): string[] {
+  return cells.map(pid => pid ?? mintParaId());
+}
+
+/** Build a closed-catalog `table` op (row/column/newParaIds carried in the properties slot; anchored by paraId). */
+function tableOp(
+  kind: ComposeTableOpKind,
+  paraId: string,
+  props: {
+    row?: number;
+    column?: number;
+    position?: ComposeParagraphPosition;
+    newParaIds?: string[];
+  }
+): ComposeOperation {
+  return { type: 'table', paraId, kind, ...props };
+}
+
+/** Diff a single table's grid BEFORE vs AFTER → the one row/column op it performed, or null if not a clean single edit. */
+function diffTableGrids(before: TableSnapshot, after: TableSnapshot): ComposeOperation | null {
+  const anchor = before.anchor;
+  if (!anchor) return null; // no durable existing cell to locate the table → defer rather than mis-address
+  const bRows = before.grid.length;
+  const aRows = after.grid.length;
+  const bCols = bRows > 0 ? before.grid[0].length : 0;
+  const aCols = aRows > 0 ? after.grid[0].length : 0;
+
+  // Row inserted (same column count, one more row).
+  if (aRows === bRows + 1 && aCols === bCols) {
+    const i = firstDifferingRow(before.grid, after.grid);
+    const row = i === 0 ? 0 : i - 1;
+    const position: ComposeParagraphPosition = i === 0 ? 'Before' : 'After';
+    return tableOp('InsertRow', anchor, { row, position, newParaIds: newCellParaIds(after.grid[i]) });
+  }
+
+  // Row deleted (same column count, one fewer row).
+  if (aRows === bRows - 1 && aCols === bCols) {
+    const j = firstDifferingRow(after.grid, before.grid);
+    return tableOp('DeleteRow', anchor, { row: j });
+  }
+
+  // Column inserted (same row count, one more column per row).
+  if (aRows === bRows && aCols === bCols + 1 && bRows > 0) {
+    const c = firstDifferingCol(before.grid, after.grid);
+    const column = c === 0 ? 0 : c - 1;
+    const position: ComposeParagraphPosition = c === 0 ? 'Before' : 'After';
+    const newParaIds = after.grid.map(rowCells => rowCells[c] ?? mintParaId());
+    return tableOp('InsertColumn', anchor, { column, position, newParaIds });
+  }
+
+  // Column deleted (same row count, one fewer column per row).
+  if (aRows === bRows && aCols === bCols - 1 && bRows > 0) {
+    const c = firstDifferingCol(after.grid, before.grid);
+    return tableOp('DeleteColumn', anchor, { column: c });
+  }
+
+  return null;
+}
+
+/**
+ * Classify a table structural step (R5 task 014). Returns an `ops` classification for a clean single row/column
+ * add/delete or a whole-table delete (→ one DeleteRow per row); returns null for anything that is NOT a clean
+ * table-structure edit (a table insert, a multi-table change, a cell-content edit, or a non-table step), so the
+ * caller falls through to the existing classifiers. Anchored by an EXISTING cell paraId — never text-search (I-7).
+ */
+function classifyTableStep(step: Step, docBefore: PMNode): StepClassification | null {
+  const applied = step.apply(docBefore);
+  if (applied.failed || !applied.doc) return null;
+
+  const before = tableSnapshots(docBefore);
+  const after = tableSnapshots(applied.doc);
+
+  // Whole-table delete → the table count dropped by one. Emit one DeleteRow per row of the removed table (the
+  // engine marks each w:trPr as deleted without shifting indices, so the original 0..N-1 indices all apply).
+  if (after.length === before.length - 1) {
+    const removed = before.find((b, i) => !after[i] || !rowsEqual(b.grid[0] ?? [], after[i]?.grid[0] ?? []))
+      ?? before[before.length - 1];
+    if (!removed?.anchor || removed.grid.length === 0) return null;
+    const ops: ComposeOperation[] = removed.grid.map((_, rowIndex) =>
+      tableOp('DeleteRow', removed.anchor as string, { row: rowIndex }));
+    return { kind: 'ops', ops };
+  }
+
+  // A table was ADDED (insertTable) or the table count changed by more than one → not a structural EDIT of an
+  // existing table. Return null so the caller surfaces it (defer-structural) rather than this path guessing.
+  if (after.length !== before.length) return null;
+
+  // Same table count — find the one table whose grid changed and map it to a single row/column op.
+  for (let t = 0; t < before.length; t++) {
+    const b = before[t];
+    const a = after[t];
+    const changed = b.grid.length !== a.grid.length
+      || (b.grid[0]?.length ?? 0) !== (a.grid[0]?.length ?? 0)
+      || !b.grid.every((row, r) => rowsEqual(row, a.grid[r] ?? []));
+    if (!changed) continue;
+    const op = diffTableGrids(b, a); // may be null (not a clean single edit) → caller surfaces it
+    return op ? { kind: 'ops', ops: [op] } : null;
+  }
+
+  return null; // no table changed here — not a table step
+}
+
+// ---------------------------------------------------------------------------
 // Step → operation classification
 // ---------------------------------------------------------------------------
 
@@ -456,6 +957,12 @@ export function classifyStep(
     if (rangeContainsOpaqueAtom(docBefore, from, to, isOpaqueAtom)) {
       return { kind: 'refused-atom', step };
     }
+
+    // R5 task 012 (G12): a delete of IMPORTED-revision-marked text is an accept/reject of a pre-existing
+    // tracked change (acceptRevision/rejectRevision by native id), NOT a new deleteRange. Divert BEFORE the
+    // inline classification below would emit a deleteRange.
+    const importedRevision = classifyImportedRevisionStep(step, docBefore);
+    if (importedRevision) return importedRevision;
 
     const $from = docBefore.resolve(from);
     const $to = docBefore.resolve(to);
@@ -510,6 +1017,17 @@ export function classifyStep(
       return { kind: 'ops', ops: [] };
     }
 
+    // A block-attribute change (heading level / list wrap-unwrap-renest) preserves the block count + text
+    // and only changes style/list context → emit setBlockAttr (R5 task 011). Tried BEFORE the structural
+    // classifier, which would otherwise defer these as `defer-structural` (the R4 SDL-1/2 guard).
+    const blockAttr = classifyBlockAttrStep(step, docBefore);
+    if (blockAttr) return blockAttr;
+
+    // A table structural edit (row/column add/delete, whole-table delete) → emit the table op (R5 task 014,
+    // removes the SDL-3 silent-loss path). Tried BEFORE the structural classifier, which would otherwise defer.
+    const tableStep = classifyTableStep(step, docBefore);
+    if (tableStep) return tableStep;
+
     // Cross-paragraph or block-boundary ReplaceStep (split/merge/para insert/delete) → synthesize the
     // structural op (task 031). Whole-paragraph delete/merge is captured here (closes task 023's gap).
     return classifyStructuralStep(step, docBefore, 'replace-step-structural');
@@ -520,8 +1038,12 @@ export function classifyStep(
     return classifyMarkStep(step, docBefore, 'setMark');
   }
 
-  // --- RemoveMarkStep → clearMark --------------------------------------------------
+  // --- RemoveMarkStep → acceptRevision/rejectRevision (imported track-change) or clearMark ----------
   if (step instanceof RemoveMarkStep) {
+    // R5 task 012 (G12): dropping an IMPORTED insertion/deletion mark (keeping the text) is an accept/reject
+    // of a pre-existing tracked change by native id — not a clearMark of a char-format run property.
+    const importedRevision = classifyImportedRevisionStep(step, docBefore);
+    if (importedRevision) return importedRevision;
     return classifyMarkStep(step, docBefore, 'clearMark');
   }
 
@@ -544,8 +1066,14 @@ export function classifyStep(
     return { kind: 'defer-structural', step, reason: `attr-step:${step.attr}` };
   }
 
-  // --- ReplaceAroundStep (list wrap/unwrap, blockquote, para split/merge) → structural (task 031) ----
+  // --- ReplaceAroundStep (list wrap/unwrap, blockquote, para split/merge) → block-attr or structural ----
   if (step instanceof ReplaceAroundStep) {
+    // Heading toggle (setBlockType) + list wrap/unwrap/re-nest arrive here → setBlockAttr (R5 task 011).
+    const blockAttr = classifyBlockAttrStep(step, docBefore);
+    if (blockAttr) return blockAttr;
+    // A table row/column edit can also arrive as a ReplaceAroundStep → table op (R5 task 014).
+    const tableStep = classifyTableStep(step, docBefore);
+    if (tableStep) return tableStep;
     return classifyStructuralStep(step, docBefore, 'replace-around-step');
   }
 
@@ -554,9 +1082,14 @@ export function classifyStep(
   return { kind: 'defer-structural', step, reason: `unhandled-step:${step.constructor?.name ?? 'unknown'}` };
 }
 
-/** Narrow a {@link ComposeAnchor} to its {@link ComposeRunPoint} (drops the paraId, which lives on the op base). */
+/** Narrow a {@link ComposeAnchor} to its {@link ComposeRunPoint} (drops the paraId, which lives on the op base).
+ * task 055: preserves the robust `paraOffset` so every emitted op's `at`/`range` point carries it. */
 function pointOf(anchor: ComposeAnchor): ComposeRunPoint {
-  return { runIndex: anchor.runIndex, offset: anchor.offset };
+  return {
+    runIndex: anchor.runIndex,
+    offset: anchor.offset,
+    ...(anchor.paraOffset !== undefined ? { paraOffset: anchor.paraOffset } : {}),
+  };
 }
 
 /** Shared classifier for Add/Remove mark steps → setMark / clearMark. */
@@ -582,12 +1115,18 @@ function classifyMarkStep(
   if (!anchorFrom || !anchorTo || anchorFrom.paraId !== anchorTo.paraId) {
     return { kind: 'defer-structural', step, reason: 'mark-step-anchor-unresolved' };
   }
-  const op: ComposeOperation = {
+  // G5 (FR-05, task 033): a Link setMark carries its target href (from the @tiptap/extension-link mark's
+  // attrs) alongside the mark; clearMark(Link) and the boolean marks carry none. Cast is needed because
+  // `type` is a runtime value, so TS can't narrow the union to SetMarkOperation for the excess `href` key.
+  const op = {
     type,
     paraId: anchorFrom.paraId,
     range: { start: pointOf(anchorFrom), end: pointOf(anchorTo) },
     mark: composeMark,
-  };
+    ...(composeMark === 'Link' && type === 'setMark'
+      ? { href: (step.mark.attrs as { href?: string }).href }
+      : {}),
+  } as ComposeOperation;
   return { kind: 'ops', ops: [op] };
 }
 
@@ -642,8 +1181,9 @@ export function createStepInterceptorPlugin(options: StepOperationInterceptorOpt
               break;
           }
         }
-        if (collected.length > 0) {
-          options.onOperations?.(collected, { transaction: tr });
+        const deduped = dedupeRevisionOps(collected);
+        if (deduped.length > 0) {
+          options.onOperations?.(deduped, { transaction: tr });
         }
       }
       // Read-only interceptor — never append a transaction.
@@ -818,6 +1358,16 @@ function buildAnchor(op: ComposeOperation, step: Step, mapping: Mapping, stepInd
     assoc,
   });
 
+  // setBlockAttr is paragraph-scoped (no run offset). Alignment arrives as an AttrStep (task 020); heading/
+  // list (task 011) arrive as a ReplaceStep/ReplaceAroundStep block-boundary edit. Anchor at the block
+  // position so the rebasing pass still flags the op if a later edit deletes it (never-silently-drop). Its
+  // durable payload paraId is captured from the pre-step doc at classify time.
+  if (op.type === 'setBlockAttr') {
+    if (step instanceof AttrStep) return { kind: 'block', point: toFinal(step.pos, -1) };
+    if (step instanceof ReplaceStep || step instanceof ReplaceAroundStep) return { kind: 'block', point: toFinal(step.from, -1) };
+    return null;
+  }
+
   if (
     op.type === 'splitParagraph' ||
     op.type === 'mergeParagraph' ||
@@ -827,6 +1377,28 @@ function buildAnchor(op: ComposeOperation, step: Step, mapping: Mapping, stepInd
     // A structural op is paragraph-scoped (no run offset) — anchor it at the step's block-boundary position so
     // the rebasing pass still flags it if a later edit deletes that position (never-silently-drop). Its durable
     // payload paraIds (paraId / targetParaId / newParaId) are Word-native and carried as-captured.
+    if (step instanceof ReplaceStep || step instanceof ReplaceAroundStep) {
+      return { kind: 'block', point: toFinal(step.from, -1) };
+    }
+    return null;
+  }
+
+  if (op.type === 'acceptRevision' || op.type === 'rejectRevision') {
+    // R5 task 012 (G12): an accept/reject-revision op is paragraph-scoped (its durable payload = paraId +
+    // native revisionId, captured at classify time). Anchor at the step's start position so the rebasing pass
+    // still flags it if a later edit deletes that position (never-silently-drop) — matches the setBlockAttr /
+    // structural handling above. Both a RemoveMarkStep (drop-mark) and a ReplaceStep (delete) carry `from`.
+    if (step instanceof RemoveMarkStep || step instanceof ReplaceStep) {
+      return { kind: 'block', point: toFinal(step.from, -1) };
+    }
+    return null;
+  }
+
+  if (op.type === 'table') {
+    // R5 task 014 (G4): a table op is table-scoped (its durable payload = an existing cell paraId + row/column +
+    // minted newParaIds, captured at classify time). Anchor at the step's block-boundary position so the rebasing
+    // pass still flags it if a later edit deletes that position (never-silently-drop) — matches setBlockAttr /
+    // structural handling above. Table edits arrive as a ReplaceStep or ReplaceAroundStep (both carry `from`).
     if (step instanceof ReplaceStep || step instanceof ReplaceAroundStep) {
       return { kind: 'block', point: toFinal(step.from, -1) };
     }
@@ -849,11 +1421,6 @@ function buildAnchor(op: ComposeOperation, step: Step, mapping: Mapping, stepInd
     (op.type === 'setMark' || op.type === 'clearMark')
   ) {
     return { kind: 'range', start: toFinal(step.from, -1), end: toFinal(step.to, 1) };
-  }
-  if (step instanceof AttrStep && op.type === 'setBlockAttr') {
-    // A NODE position (the paragraph itself), not a text offset — assoc -1 keeps it anchored to
-    // the node's own start rather than drifting past it.
-    return { kind: 'block', point: toFinal(step.pos, -1) };
   }
   return null;
 }
@@ -884,12 +1451,12 @@ function deriveOperation(op: ComposeOperation, anchor: ComposeOpAnchor, doc: PMN
       if (!s || !e || s.paraId !== e.paraId) return null;
       return { ...op, paraId: s.paraId, range: { start: pointOf(s), end: pointOf(e) } } as ComposeOperation;
     }
-    case 'setBlockAttr': {
-      if (anchor.kind !== 'block') return null;
-      const node = doc.nodeAt(anchor.point.pos);
-      if (!isParaIdBlock(node)) return null;
-      return { ...op, paraId: (node.attrs as { paraId: string }).paraId };
-    }
+    case 'setBlockAttr':
+      // setBlockAttr's paraId is DURABLE — captured from the pre-step block at classify time (for a heading/
+      // list type-change the LIVE block may carry a re-minted id, so re-deriving from the current position
+      // could mis-address the op). Return it as-captured; the rebasing `deletedContentFlag` still guards it
+      // (never-silently-drop), same as the structural ops below.
+      return op;
     case 'splitParagraph':
     case 'mergeParagraph':
     case 'insertParagraph':
@@ -897,6 +1464,17 @@ function deriveOperation(op: ComposeOperation, anchor: ComposeOpAnchor, doc: PMN
       // Structural ops carry durable `w14:paraId`s in their payload (paraId / targetParaId / newParaId),
       // captured from the pre-step doc — Word-native ids, NOT re-derivable from a live document position. Return
       // the op as-captured; the rebasing `deletedContentFlag` still guards it (never-silently-drop).
+      return op;
+    case 'acceptRevision':
+    case 'rejectRevision':
+      // R5 task 012 (G12): accept/reject-revision carry a durable paraId + native revisionId in their payload,
+      // captured from the pre-step doc — the revision is addressed by its native OOXML id, NOT by a live
+      // document position. Return as-captured; the rebasing `deletedContentFlag` still guards it.
+      return op;
+    case 'table':
+      // R5 task 014 (G4): a table op carries a durable existing-cell paraId + (row,column) + minted newParaIds in
+      // its payload, captured from the pre-step doc — the table is located by paraId-ancestry server-side, NOT by
+      // a live document position. Return as-captured; the rebasing `deletedContentFlag` still guards it.
       return op;
     default:
       return null;
@@ -1003,6 +1581,7 @@ export class RebasedOperationLog {
 
     // (2) Classify + append this transaction's own steps.
     const appended: ComposeOperation[] = [];
+    const revisionOpsThisTxn = new Set<string>(); // R5 task 012 (G12) accept/reject-revision dedup (see below)
     const steps = tr.steps;
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
@@ -1011,6 +1590,14 @@ export class RebasedOperationLog {
       switch (cls.kind) {
         case 'ops':
           for (const op of cls.ops) {
+            // R5 task 012 (G12): dedupe accept/reject-revision by (type, revisionId) across this transaction's
+            // steps — one imported revision = one native w:id, but its rendered span can split into several
+            // delete/drop-mark steps in ONE accept/reject; the duplicate op would `RevisionNotFound` server-side.
+            if (op.type === 'acceptRevision' || op.type === 'rejectRevision') {
+              const key = `${op.type}:${op.revisionId ?? ''}`;
+              if (revisionOpsThisTxn.has(key)) continue;
+              revisionOpsThisTxn.add(key);
+            }
             const anchor = buildAnchor(op, step, tr.mapping, i);
             if (!anchor) continue; // defensive — every op type classifyStep emits has an anchor shape above
             this.entries.push({ seq: this.seqCounter++, anchor, op, deletedContentFlag: false });
@@ -1039,14 +1626,27 @@ export class RebasedOperationLog {
    * `orderedOps`.
    */
   serialize(doc: PMNode): ComposeOperationLogSnapshot {
-    const rows = this.entries.map(entry => {
-      const derived = deriveOperation(entry.op, entry.anchor, doc);
-      const loggedOp: ComposeLoggedOperation = {
-        operation: derived ?? entry.op,
-        deletedContentFlag: entry.deletedContentFlag || derived === null,
-      };
-      return { seq: entry.seq, primaryPos: primaryPositionOf(entry.anchor), loggedOp };
-    });
+    // R5 task 012 (G12): dedupe accept/reject-revision by (type, revisionId) across the WHOLE log — the
+    // per-transaction dedup covers a single accept split into several steps; this also covers a re-accept of the
+    // same revision across transactions (undo+redo), whose second server apply would RevisionNotFound (the first
+    // already reconciled it). First occurrence wins; non-revision ops are never dropped.
+    const seenRevisions = new Set<string>();
+    const rows = this.entries
+      .filter(entry => {
+        if (entry.op.type !== 'acceptRevision' && entry.op.type !== 'rejectRevision') return true;
+        const key = `${entry.op.type}:${entry.op.revisionId ?? ''}`;
+        if (seenRevisions.has(key)) return false;
+        seenRevisions.add(key);
+        return true;
+      })
+      .map(entry => {
+        const derived = deriveOperation(entry.op, entry.anchor, doc);
+        const loggedOp: ComposeLoggedOperation = {
+          operation: derived ?? entry.op,
+          deletedContentFlag: entry.deletedContentFlag || derived === null,
+        };
+        return { seq: entry.seq, primaryPos: primaryPositionOf(entry.anchor), loggedOp };
+      });
 
     rows.sort((a, b) => a.primaryPos - b.primaryPos || a.seq - b.seq);
 
