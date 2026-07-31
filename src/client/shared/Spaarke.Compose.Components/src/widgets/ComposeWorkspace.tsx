@@ -68,6 +68,7 @@ import {
   type ComposeEditorHandle,
   type ComposeEditorDocumentRef,
   type ComposeDraftPayload,
+  type AdvisoryCommentInput,
 } from './ComposeEditor';
 import type { ComposeActionEnqueue } from './ComposeAiToolbar';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
@@ -300,6 +301,99 @@ export interface ComposeLedgerOutput {
   disposition: string;
   /** The Compose-owned structured-edit payload. */
   payload: ComposeDraftPayload;
+}
+
+/**
+ * FR-16 (ai-advanced-capabilities-agreements-r1 task 030) — one flagged clause in a DURABLE
+ * agreement-review payload. Two schema vintages coexist (structural mirror of SpaarkeAi's live-path
+ * `NdaReviewFlaggedSection` in `useNdaReviewAdvisoryCommentsBridge.ts`): the pre-split shape carried
+ * `explanation`; the task-002 schema split replaced it with discrete `flaggedClause` (grounded fact)
+ * + `assessment` (reasoned judgment). Both re-materialize identically via
+ * {@link projectLedgerFindingsToAdvisoryComments}. Every field is loose/optional — a durable ledger
+ * replay may be a legacy row OR a partial/malformed LLM shape, so nothing here is trusted structurally.
+ */
+export interface ComposeReviewFlaggedSection {
+  /** Verbatim quoted clause excerpt — the placement anchor (→ AdvisoryCommentInput.targetText). Tier-3. */
+  quotedText?: string;
+  /** Pre-split advisory explanation (legacy vintage). Tier-3. */
+  explanation?: string;
+  /** task-002 grounded-fact field (post-split vintage). Tier-3. */
+  flaggedClause?: string;
+  /** task-002 reasoned-judgment field (post-split vintage). Tier-3. */
+  assessment?: string;
+  /** Clause reference from the review output (e.g. "3.2"). */
+  sectionRef?: string;
+  /** Coarse qualitative risk signal (never a numeric score, per ADR-039). */
+  riskLevel?: string;
+  /** Firm-standard / playbook reference the flag cites. */
+  standardRef?: string;
+}
+
+/**
+ * FR-16 (task 030) — the durable agreement-review superset of {@link ComposeDraftPayload}. The general
+ * `agreement-review` Action emits `{ overallRisk, flaggedSections[] }`; its Binding now declares the
+ * `compose` disposition (Informational→Compose flip, task 030) so the review's SessionOutput is stored
+ * (ADR-040) and re-materialized on reopen as advisory comment threads — NEVER a redline. Kept LOCAL to
+ * ComposeWorkspace (the payload's only consumer) rather than widening the shared
+ * ComposeDraftPayload/edit vocabulary: a review result is not an edit.
+ */
+interface ComposeReviewPayload extends ComposeDraftPayload {
+  /** Server-asserted overall risk rating — carried for the summary panel (restore is task 032). */
+  overallRisk?: string;
+  /** Per-clause advisory findings (the durable-review payload). */
+  flaggedSections?: ComposeReviewFlaggedSection[];
+}
+
+/**
+ * Projects a durable agreement-review payload's `flaggedSections[]` into {@link AdvisoryCommentInput}s
+ * for re-materialization on document reopen (FR-16, task 030) — the metadata-preserving path
+ * (riskLevel/sectionRef/standardRef + BOTH vintages) so the restored gutter Review Notes render
+ * identically to the live review. NOT routed via `registerAiReviewComments` (which drops that
+ * metadata — spec FR-16 / CLAUDE.md §11).
+ *
+ * §11 decision (documented): this is the structural mirror of SpaarkeAi's live-path
+ * `projectFlaggedSectionsToAdvisoryComments` (`useNdaReviewAdvisoryCommentsBridge.ts`), deliberately
+ * NOT hoisted into a shared module. That helper is SpaarkeAi-side and produces a PaneEventBus event
+ * shape; this reads the raw ledger payload and produces the ComposeEditor input directly. A ~15-line
+ * pure map local to each package is cheaper than a new SpaarkeAi→Compose.Components coupling, and the
+ * two copies share one authored convention (both handle both vintages the same way, cross-referenced
+ * in each JSDoc). Exported for direct unit testing.
+ *
+ * Defensive against a malformed/partial ledger replay: an entry that is not an object, is missing a
+ * usable `quotedText`, or carries NONE of `explanation`/`flaggedClause`/`assessment`, is skipped
+ * (never thrown) — the caller sees fewer items, never a crash, never a partial mid-loop placement.
+ */
+export function projectLedgerFindingsToAdvisoryComments(
+  flaggedSections: readonly unknown[]
+): AdvisoryCommentInput[] {
+  const asNonEmptyString = (value: unknown): string | undefined =>
+    typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+  const items: AdvisoryCommentInput[] = [];
+  for (const raw of flaggedSections) {
+    if (raw === null || typeof raw !== 'object') continue;
+    const section = raw as Record<string, unknown>;
+    const targetText = asNonEmptyString(section.quotedText);
+    if (!targetText) continue;
+    const legacyExplanation = asNonEmptyString(section.explanation);
+    const flaggedClause = asNonEmptyString(section.flaggedClause);
+    const assessment = asNonEmptyString(section.assessment);
+    // Legacy vintage: use `explanation` verbatim. Post-split vintage (no `explanation`): compose the
+    // thread text / legacy-degrade source from the discrete fields (mirrors the bridge), AND carry the
+    // discrete fields through so gutter/export render the structured form with no string-parsing (task 052).
+    const explanation =
+      legacyExplanation ?? [flaggedClause, assessment].filter(Boolean).join('\n\n');
+    if (!explanation) continue;
+    items.push({
+      targetText,
+      explanation,
+      sectionRef: asNonEmptyString(section.sectionRef),
+      riskLevel: asNonEmptyString(section.riskLevel),
+      standardRef: asNonEmptyString(section.standardRef),
+      flaggedClause,
+      assessment,
+    });
+  }
+  return items;
 }
 
 // The render-follows-store signal ComposeWorkspace consumes is Flow 5
@@ -1647,6 +1741,53 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           bindingId: target.bindingId,
           turn: target.turn,
         };
+        // FR-16 (ai-advanced-capabilities-agreements-r1 task 030) — DURABLE AGREEMENT-REVIEW findings
+        // branch. A compose-disposition output carrying `flaggedSections[]` is an agreement-review
+        // result (the review Binding's Informational→Compose flip, task 030), NOT an edit/comment
+        // payload. Re-materialize each flagged clause as a PERSISTENT advisory comment thread via
+        // ComposeEditorHandle.placeAdvisoryComments — the SAME metadata-preserving path the LIVE review
+        // dispatch uses (the onAdvisoryComments receiver below) — so reopening a reviewed document
+        // restores the gutter Review Notes deterministically, with riskLevel/sectionRef/standardRef/
+        // flaggedClause/assessment intact and ZERO LLM re-run (the stored SessionOutput is READ, never
+        // re-dispatched). Routed here, NOT via registerAiReviewComments (which DROPS that metadata —
+        // spec FR-16 / CLAUDE.md §11). Detected structurally by `flaggedSections[]` (mirrors
+        // useNdaReviewAdvisoryCommentsBridge's live-path shape guard); handled + idempotency-marked HERE
+        // so a findings payload never falls through to the edit/single-edit redline branches below.
+        // (Summary-panel restore + payload caps = task 032; session routing / apply-leg gating = task 031
+        // — clean seams left, not implemented here.)
+        const reviewPayload = target.payload as ComposeReviewPayload;
+        const flaggedSections = Array.isArray(reviewPayload.flaggedSections)
+          ? reviewPayload.flaggedSections
+          : null;
+        if (flaggedSections) {
+          const advisoryItems = projectLedgerFindingsToAdvisoryComments(flaggedSections);
+          if (advisoryItems.length > 0) {
+            const result = editor.placeAdvisoryComments(advisoryItems);
+            if (result.failed.length > 0) {
+              // Surface unresolved anchors the SAME way the live onAdvisoryComments path does
+              // (FR-19 "do not guess" — reported, never silently placed). Tier-3 targetText is not
+              // logged beyond this placement-failure report.
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[ComposeWorkspace] ${result.failed.length} of ${advisoryItems.length} re-materialized advisory ` +
+                  'comment(s) could not be anchored (strict resolution failed):',
+                result.failed
+              );
+            }
+          } else {
+            // A findings-shaped payload that yields NO usable items (empty/malformed flaggedSections):
+            // log + skip gracefully — never crash, never partial-place, never fall through to a redline.
+            // eslint-disable-next-line no-console
+            console.warn(
+              '[ComposeWorkspace] compose findings payload carried no usable flagged sections — nothing re-materialized:',
+              target.key
+            );
+          }
+          // Idempotent (FR-04): mark handled so a refresh / duplicate Flow-5 signal never re-places.
+          setLastMaterializedKey(target.key);
+          setComposeDraftError(null);
+          return;
+        }
         // DEF-11: a whole-document revision (`compose-revise-document`) carries a CHANGE LIST
         // (`edits[]`) and/or REVIEW FLAGS (`comments[]`). A single-edit draft (compose-draft-alternative /
         // compose-draft-document) has neither — it keeps the shipped single-materialize path.

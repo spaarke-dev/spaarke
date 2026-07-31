@@ -84,7 +84,7 @@ import {
 } from '@fluentui/react-components';
 import { ChevronDoubleDown16Regular, MoreVertical20Regular, SparkleRegular } from '@fluentui/react-icons';
 import { findCommentAnchorRange, type ComposeCommentThreadModel } from './ComposeCommentThread.types';
-import { riskBadgeColor, formatClauseLocation } from './AgreementReviewSummaryPanel';
+import { riskBadgeColor, formatClauseLocation, type NdaReviewFindingSummary } from './AgreementReviewSummaryPanel';
 import { deriveClauseLocationLabel } from './clauseLocation';
 // task 052 (FR-15, Word-comment export mirror): the label map + parse/compose logic moved to this
 // shared module so the export mapping (`ComposeCommentThread.types.ts`) consumes the SAME source —
@@ -487,6 +487,43 @@ export function layoutCommentGutterCards(
     cursor = placed + height + CARD_GAP_PX;
   }
   return result;
+}
+
+/**
+ * Task 040 (bidirectional highlight, spec FR-10) — resolve the gutter Review Note thread that
+ * corresponds to a Review Summary finding, so selecting a summary row can locate + highlight the SAME
+ * note (the reverse of the shipped row→document highlight). Pure + editor/DOM-free (mirrors {@link
+ * layoutCommentGutterCards}'s testability), so the actual scroll/highlight/select side effects stay in
+ * the caller (`ComposeEditor.tsx`'s `handleReviewNavigate` — the one place both the findings AND the
+ * threads are jointly in scope: `ComposeWorkspace` only holds the findings, this gutter only holds the
+ * threads).
+ *
+ * The join is DETERMINISTIC, not a re-derived guess: a finding and its thread are built from the SAME
+ * source item in `ComposeWorkspace`'s `onAdvisoryComments` handler — `item.sectionRef` becomes BOTH
+ * `finding.sectionRef` and `thread.sectionRef` verbatim (`placeAdvisoryComments` → `createThread`'s
+ * metadata), and `item.explanation` becomes BOTH `finding.explanation` and the thread's root `text`
+ * verbatim. Matching on the WS-4/task-011 `sectionRef` citation first is usually sufficient and unique;
+ * when it's absent, unmatched, or ambiguous (two findings citing the same clause), the finding's full
+ * `explanation` — effectively unique prose per finding — disambiguates. Returns `undefined` — never a
+ * guess — when zero or more than one candidate remains after both signals (mirrors the DEF-01
+ * "ambiguous → report, never place" discipline task 012 established for anchor resolution): the caller
+ * degrades to a doc-only highlight. A finding whose comment failed to place (or was later removed) has
+ * no thread to find, so this naturally returns `undefined` for it too — the graceful-degrade path.
+ */
+export function resolveMatchingThreadId(
+  finding: Pick<NdaReviewFindingSummary, 'sectionRef' | 'explanation'>,
+  threads: readonly Pick<ComposeCommentThreadModel, 'id' | 'sectionRef' | 'text'>[]
+): string | undefined {
+  const sectionRef = finding.sectionRef?.trim();
+  const bySectionRef = sectionRef ? threads.filter(t => t.sectionRef?.trim() === sectionRef) : [];
+  if (bySectionRef.length === 1) return bySectionRef[0].id;
+
+  // Absent, unmatched, or ambiguous by sectionRef alone — narrow (or resolve outright) on the full
+  // explanation text.
+  const candidates = bySectionRef.length > 1 ? bySectionRef : threads;
+  const explanation = finding.explanation?.trim();
+  const byExplanation = explanation ? candidates.filter(t => t.text.trim() === explanation) : [];
+  return byExplanation.length === 1 ? byExplanation[0].id : undefined;
 }
 
 export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JSX.Element | null {

@@ -128,7 +128,12 @@ import {
   findCommentAnchorRange,
   type ComposeCommentThreadModel,
 } from './ComposeCommentThread.types';
-import { ComposeCommentGutter, COMMENT_GUTTER_WIDTH_PX, MAX_COMMENT_GUTTER_WIDTH_PX } from './ComposeCommentGutter';
+import {
+  ComposeCommentGutter,
+  COMMENT_GUTTER_WIDTH_PX,
+  MAX_COMMENT_GUTTER_WIDTH_PX,
+  resolveMatchingThreadId,
+} from './ComposeCommentGutter';
 import { authenticatedFetch } from '@spaarke/auth';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
@@ -2337,9 +2342,15 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // Gutter-card click → TOGGLE selection (re-clicking the selected card deselects; clicking another
     // switches). On SELECT, scroll the document to the clause so the linked yellow anchor is in view —
     // reusing the coordsAtPos ancestor-scroll technique useDocQaHighlight/the gutter already use.
+    //
+    // `forceSelect` (task 040, bidirectional highlight) — additive param, default false (unchanged
+    // toggle behavior for the gutter-card click site below, which always calls with one arg). Summary-
+    // row navigation (`handleReviewNavigate`) passes `true` so re-clicking the SAME row always
+    // re-selects + re-scrolls rather than toggling the note off — "navigate here" semantics, not
+    // "toggle this note", since a row click's affordance never suggested a deselect action.
     const selectThread = React.useCallback(
-      (threadId: string): void => {
-        const willSelect = selectedThreadIdRef.current !== threadId;
+      (threadId: string, forceSelect = false): void => {
+        const willSelect = forceSelect || selectedThreadIdRef.current !== threadId;
         setSelectedThreadId(willSelect ? threadId : null);
         if (!willSelect || !editor) return;
         const span = findCommentAnchorRange(editor.state.doc, threadId);
@@ -2386,11 +2397,35 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
 
     // Summary-row navigation: reuse the editor's own cited-span primitive (strict resolve + ephemeral
     // highlight + scrollIntoView), the SAME anchoring the gutter comment uses — no host round-trip.
+    //
+    // Task 040 (bidirectional highlight, spec FR-10) — SEAM DECISION: this component is the ONE place
+    // both the Review Summary findings (`enrichedReviewFindings`) AND the gutter's advisory threads
+    // (`advisoryComments.threads`) are jointly in scope — `ComposeWorkspace` only holds the findings,
+    // `ComposeCommentGutter` only holds the threads. The reverse link therefore wires HERE, at the call
+    // site, rather than inside `AgreementReviewSummaryPanel.tsx`/`ComposeCommentGutter.tsx` (both stay
+    // presentational; the only new LOGIC — `resolveMatchingThreadId`, the deterministic join — lives in
+    // the gutter module as a pure, directly-unit-tested export). When the finding's shared anchor
+    // resolves to a live thread, drive BOTH the document highlight and the gutter card highlight through
+    // the SAME `selectThread` mechanism the gutter's own card-click already uses (UAT round-4 #8) — ONE
+    // coordinated action: `selectThread` never touches ProseMirror selection/focus (only a decoration +
+    // a manual `scrollTo`), so this never steals editor focus, and it is the ONLY highlight/scroll call
+    // on this path (qaHighlight is explicitly cleared, never also invoked) — no double scroll.
+    // `forceSelect=true` so re-clicking the SAME row always re-navigates. Falls back to the pre-existing
+    // doc-only ephemeral highlight when no note matches (placement failed, or a later edit removed the
+    // anchor) — degrades gracefully, never errors — and clears any stale note selection so rapid
+    // row-switching (matched → unmatched or vice versa) never leaves more than one highlighted pair.
     const handleReviewNavigate = React.useCallback(
       (finding: NdaReviewFindingSummary): void => {
+        const matchedThreadId = resolveMatchingThreadId(finding, advisoryComments.threads);
+        if (matchedThreadId) {
+          qaHighlight.clear();
+          selectThread(matchedThreadId, true);
+          return;
+        }
+        setSelectedThreadId(null);
         if (finding.quotedText) qaHighlight.highlight(finding.quotedText, finding.sectionRef);
       },
-      [qaHighlight]
+      [advisoryComments.threads, selectThread, qaHighlight]
     );
 
     // ----- UAT round-8 #3/#4/#5 — per-Review-Note AI edit tools (the gutter ⋮ menu) --------------

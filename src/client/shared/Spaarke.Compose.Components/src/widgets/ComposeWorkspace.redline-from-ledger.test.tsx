@@ -190,7 +190,7 @@ jest.mock('./useComposeReanchor', () => ({
 
 // Import AFTER mocks.
 // eslint-disable-next-line import/first
-import { ComposeWorkspace } from './ComposeWorkspace';
+import { ComposeWorkspace, projectLedgerFindingsToAdvisoryComments } from './ComposeWorkspace';
 
 function renderWorkspace(bus: PaneEventBus) {
   return render(
@@ -452,5 +452,215 @@ describe('DEF-11: ComposeWorkspace materializes a flag-risks comments[] payload 
     await waitFor(() => {
       expect(workspaceRoot.getAttribute('data-compose-anchored-annotation-count')).toBe('2');
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR-16 (agreements-r1 task 030) — DURABLE AGREEMENT-REVIEW findings.
+// A compose-disposition output carrying `flaggedSections[]` re-materializes as PERSISTENT advisory
+// comment threads (placeAdvisoryComments — metadata-preserving), NOT a redline, deterministically,
+// with ZERO LLM re-run on reopen.
+// ---------------------------------------------------------------------------
+const REVIEW_BINDING = 'binding-agreement-review-guid';
+const REVIEW_LEDGER_REF = `${REVIEW_BINDING}@t1`;
+
+// The pure projection is the ONLY place a durable-review payload's per-clause metadata could be
+// dropped on the reopen path, so it carries the authoritative metadata + both-vintages proof
+// (the integration tests below then prove the branch WIRES it to placeAdvisoryComments on reopen).
+describe('FR-16 task 030: projectLedgerFindingsToAdvisoryComments — flaggedSections[] → AdvisoryCommentInput (both vintages, metadata intact)', () => {
+  it('LEGACY vintage (explanation) — carries explanation verbatim + sectionRef/riskLevel/standardRef', () => {
+    const items = projectLedgerFindingsToAdvisoryComments([
+      {
+        quotedText: 'The receiving party shall retain information indefinitely.',
+        explanation: 'Indefinite retention deviates from the standard 3-year term.',
+        sectionRef: '3.2',
+        riskLevel: 'High',
+        standardRef: 'B5 - Retention',
+      },
+    ]);
+    expect(items).toEqual([
+      {
+        targetText: 'The receiving party shall retain information indefinitely.',
+        explanation: 'Indefinite retention deviates from the standard 3-year term.',
+        sectionRef: '3.2',
+        riskLevel: 'High',
+        standardRef: 'B5 - Retention',
+        flaggedClause: undefined,
+        assessment: undefined,
+      },
+    ]);
+  });
+
+  it('POST-SPLIT vintage (flaggedClause + assessment, no explanation) — composes explanation AND carries the discrete fields through', () => {
+    const items = projectLedgerFindingsToAdvisoryComments([
+      {
+        quotedText: 'Either party may terminate on 5 days notice.',
+        flaggedClause: 'The termination notice period is 5 days.',
+        assessment: 'The firm standard requires at least 30 days; 5 days is materially short.',
+        sectionRef: '7.1',
+        riskLevel: 'Medium',
+        standardRef: 'B9 - Termination',
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    // Discrete fields carried through unchanged (task 052 structured render/export — no string-parsing).
+    expect(items[0].flaggedClause).toBe('The termination notice period is 5 days.');
+    expect(items[0].assessment).toBe('The firm standard requires at least 30 days; 5 days is materially short.');
+    // Composed explanation (thread text / legacy-degrade source) = the two discrete fields joined.
+    expect(items[0].explanation).toBe(
+      'The termination notice period is 5 days.\n\nThe firm standard requires at least 30 days; 5 days is materially short.'
+    );
+    expect(items[0].sectionRef).toBe('7.1');
+    expect(items[0].riskLevel).toBe('Medium');
+    expect(items[0].standardRef).toBe('B9 - Termination');
+  });
+
+  it('legacy explanation WINS as the text source when both vintages coexist (deterministic precedence); discrete fields still carried', () => {
+    const items = projectLedgerFindingsToAdvisoryComments([
+      {
+        quotedText: 'Clause X.',
+        explanation: 'LEGACY EXPLANATION',
+        flaggedClause: 'discrete clause',
+        assessment: 'discrete assessment',
+      },
+    ]);
+    expect(items[0].explanation).toBe('LEGACY EXPLANATION');
+    expect(items[0].flaggedClause).toBe('discrete clause');
+    expect(items[0].assessment).toBe('discrete assessment');
+  });
+
+  it('skips malformed entries (missing quotedText, blank anchor, no body, non-object, null) without throwing — never a partial crash', () => {
+    const items = projectLedgerFindingsToAdvisoryComments([
+      { explanation: 'no quotedText — skipped' },
+      { quotedText: '   ', explanation: 'blank anchor — skipped' },
+      { quotedText: 'has anchor but no body — skipped' },
+      'not-an-object',
+      null,
+      { quotedText: 'Valid clause survives.', assessment: 'Only-assessment vintage still yields a body.' },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0].targetText).toBe('Valid clause survives.');
+    expect(items[0].explanation).toBe('Only-assessment vintage still yields a body.');
+  });
+
+  it('empty input → empty output (no throw)', () => {
+    expect(projectLedgerFindingsToAdvisoryComments([])).toEqual([]);
+  });
+});
+
+describe('FR-16 task 030: ComposeWorkspace re-materializes a durable review flaggedSections[] payload as advisory comments (NOT a redline), idempotently, with zero dispatch', () => {
+  it('reopening a reviewed document restores the advisory comment anchor from the ledger — right clause, no redline mark, no re-dispatch, idempotent', async () => {
+    composeOutputsBySession[DOC_SESSION] = [
+      {
+        key: REVIEW_LEDGER_REF,
+        bindingId: REVIEW_BINDING,
+        turn: 1,
+        disposition: 'compose',
+        // POST-split vintage (flaggedClause + assessment, no explanation). `quotedText` equals the
+        // loaded document's only paragraph text, so strict resolution anchors it deterministically.
+        payload: {
+          overallRisk: 'High',
+          flaggedSections: [
+            {
+              quotedText: 'Sample document body.',
+              flaggedClause: 'The body imposes an unqualified obligation.',
+              assessment: 'This deviates from the firm standard, which requires a materiality qualifier.',
+              sectionRef: '1.1',
+              riskLevel: 'High',
+              standardRef: 'B5 - Obligations',
+            },
+          ],
+        },
+      },
+    ];
+
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+
+    // The FR-04 refresh-durability effect re-materializes the CURRENT stored compose output on load.
+    // The findings branch resolves the flagged clause and places a PERSISTENT advisory comment thread —
+    // observable as a `span[data-comment-id]` mark carrying the quoted clause (the same signal the
+    // ComposeEditor.advisoryComments unit test asserts).
+    const anchor = await waitFor(
+      () => {
+        const spans = document.querySelectorAll<HTMLElement>('span[data-comment-id]');
+        if (spans.length !== 1) throw new Error(`expected exactly 1 advisory anchor, found ${spans.length}`);
+        return spans[0];
+      },
+      { timeout: 5000 }
+    );
+    expect(anchor.textContent).toBe('Sample document body.'); // anchored to the RIGHT clause
+
+    // A findings payload is NOT an edit — it must NOT fall into the edits / single-edit redline branch.
+    // (The placed comment anchor is `data-compose-mark="comment-anchor"`; a REDLINE is insertion/deletion.)
+    expect(
+      document.querySelectorAll('[data-compose-mark="insertion"], [data-compose-mark="deletion"]').length
+    ).toBe(0);
+
+    // ZERO dispatch / ZERO LLM re-run: reopening only READ the stored ledger (compose-outputs) + the
+    // document Load. Every network call is a GET — there is NO POST/dispatch of any kind (the point of FR-16).
+    expect(composeOutputsReadUrls.some(u => u.includes(`/sessions/${DOC_SESSION}/compose-outputs`))).toBe(true);
+    const nonReadCalls = authenticatedFetchMock.mock.calls.filter(
+      ([, init]) => ((init?.method ?? 'GET') as string).toUpperCase() !== 'GET'
+    );
+    expect(nonReadCalls).toEqual([]);
+
+    // Idempotency: a duplicate Flow-5 signal for the SAME stored output (exactly what ConversationPane
+    // emits after a dispatch) must NOT place a second thread — the lastMaterializedKey guard.
+    act(() => {
+      bus.dispatch('workspace', {
+        type: 'compose_assistant_insert',
+        documentRef: { speDriveItemId: SPE_ID },
+        sourceNodeId: REVIEW_BINDING,
+        sourcePlaybookId: '',
+        contentHtml: '',
+        format: 'html',
+        insertMode: 'insert-at-cursor',
+        requireUserConfirm: false,
+        ledgerRef: REVIEW_LEDGER_REF,
+        sessionId: DOC_SESSION,
+        timestamp: '2026-07-31T00:00:00.000Z',
+      });
+    });
+    await waitFor(() => {
+      expect(document.querySelectorAll('span[data-comment-id]').length).toBe(1);
+    });
+  });
+
+  it('negative: a malformed findings payload (no usable flagged sections) logs + skips gracefully — no crash, no placement, no redline', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      composeOutputsBySession[DOC_SESSION] = [
+        {
+          key: REVIEW_LEDGER_REF,
+          bindingId: REVIEW_BINDING,
+          turn: 1,
+          disposition: 'compose',
+          // A findings-SHAPED payload (flaggedSections present) whose entries are all unusable:
+          // missing quotedText, blank anchor, wrong type. The projection yields [].
+          payload: {
+            overallRisk: 'Low',
+            flaggedSections: [{ explanation: 'no quotedText' }, { quotedText: '   ' }, 'junk'],
+          },
+        },
+      ];
+
+      const bus = new PaneEventBus();
+      renderWorkspace(bus);
+      // The editor still mounts (no crash); the FR-04 effect logs + skips.
+      await screen.findByRole('textbox', undefined, { timeout: 5000 });
+      await waitFor(() =>
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('no usable flagged sections'),
+          REVIEW_LEDGER_REF
+        )
+      );
+      // Nothing placed, no redline — a malformed payload is a graceful skip, not a partial placement.
+      expect(document.querySelectorAll('span[data-comment-id]').length).toBe(0);
+      expect(document.querySelectorAll('[data-compose-mark]').length).toBe(0);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

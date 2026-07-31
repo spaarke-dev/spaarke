@@ -4,7 +4,7 @@
     <title>#2 Bidirectional highlight — summary row → document section AND gutter Review Note</title>
     <phase>4 Review-Depth UX</phase>
     <gate>blocked (deps 011)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Compose shared-lib .tsx changes (auto-FULL); cross-pane interaction correctness.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -80,6 +80,26 @@
     <criterion testable="true">Negative: rapid row-switching leaves exactly one highlighted pair (no stacking).</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-10; design Lens 2 #2.</notes>
+  <notes>Spec FR-10; design Lens 2 #2.
+
+  COMPLETED (sonnet @ high, directional). Traced the actual host: `ComposeEditor.tsx` (not
+  `ComposeWorkspace.tsx`) mounts both `AgreementReviewSummaryPanel` and `ComposeCommentGutter` and already
+  owns the `selectedThreadId`/`selectThread` shared-highlight mechanism (UAT round-4 #8). Added
+  `resolveMatchingThreadId(finding, threads)` as a pure, unit-tested export in `ComposeCommentGutter.tsx` —
+  the deterministic join on `sectionRef` (tie-broken by `explanation`), never a guess on ambiguity (mirrors
+  DEF-01 discipline). Wired a ~25-line additive call-site change in `ComposeEditor.tsx`'s
+  `handleReviewNavigate`: on a match, calls the existing `selectThread` (now with an additive
+  `forceSelect` param) instead of the doc-only `qaHighlight` — ONE coordinated action, no double scroll,
+  no focus steal, same yellow "selected" visual language the gutter-card click already uses. Falls back to
+  the pre-existing doc-only ephemeral highlight when unmatched (placement failure / removed note) —
+  graceful degrade. Tests: 6 new pure-function cases in `ComposeCommentGutter.test.tsx` + new
+  `ComposeEditor.bidirectionalHighlight.test.tsx` (3 integration tests via DOM decoration classes, since
+  gutter-card positioning needs `coordsAtPos` which isn't reliably reachable in jsdom without spying on the
+  internal editor). Build clean; full package suite 795/810 passed (15 pre-existing failures, exact
+  named set, zero new regressions); all 14 `ComposeEditor.*` suites (63 tests) green including the
+  untouched DEF-01 `advisoryComments` suite. One disclosed deviation: touched `ComposeEditor.tsx` (not in
+  the forbidden list, not task-030-owned this wave) because it is the only file holding both the findings
+  and the threads — see `notes/040-execution-notes.md` for the full seam-decision writeup.
+  </notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

@@ -18,7 +18,12 @@ import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
 import { findCommentAnchorRange, type ComposeCommentThreadModel } from './ComposeCommentThread.types';
-import { ComposeCommentGutter, layoutCommentGutterCards, parseAdvisoryNote } from './ComposeCommentGutter';
+import {
+  ComposeCommentGutter,
+  layoutCommentGutterCards,
+  parseAdvisoryNote,
+  resolveMatchingThreadId,
+} from './ComposeCommentGutter';
 
 // ---------------------------------------------------------------------------
 // 1. layoutCommentGutterCards — pure collision/stacking
@@ -123,6 +128,65 @@ describe('parseAdvisoryNote', () => {
 
   it('returns an empty array for empty input', () => {
     expect(parseAdvisoryNote('')).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1c. resolveMatchingThreadId — task 040 deterministic finding↔thread join (no editor/DOM dependency)
+// ---------------------------------------------------------------------------
+
+describe('resolveMatchingThreadId', () => {
+  it('matches a finding to its thread by sectionRef when it is unique', () => {
+    const threadId = resolveMatchingThreadId(
+      { sectionRef: 'Section 4.2', explanation: 'Indemnification scope is broader than the standard.' },
+      [
+        { id: 'thread-a', sectionRef: 'Section 4.2', text: 'Indemnification scope is broader than the standard.' },
+        { id: 'thread-b', sectionRef: 'Section 6.1', text: 'A different finding entirely.' },
+      ]
+    );
+    expect(threadId).toBe('thread-a');
+  });
+
+  it('disambiguates via explanation when two threads share the same sectionRef', () => {
+    const threadId = resolveMatchingThreadId(
+      { sectionRef: 'Section 4.2', explanation: 'The cap is below the standard benchmark.' },
+      [
+        { id: 'thread-a', sectionRef: 'Section 4.2', text: 'A different issue in the same clause.' },
+        { id: 'thread-b', sectionRef: 'Section 4.2', text: 'The cap is below the standard benchmark.' },
+      ]
+    );
+    expect(threadId).toBe('thread-b');
+  });
+
+  it('degrades gracefully (undefined, never a guess) when no thread matches — a finding whose note failed to place or was later removed', () => {
+    const threadId = resolveMatchingThreadId(
+      { sectionRef: 'Section 9.9', explanation: 'This finding never got anchored.' },
+      [{ id: 'thread-a', sectionRef: 'Section 4.2', text: 'Indemnification scope is broader than the standard.' }]
+    );
+    expect(threadId).toBeUndefined();
+  });
+
+  it('degrades gracefully when the same sectionRef AND explanation are genuinely ambiguous (never guesses)', () => {
+    const threadId = resolveMatchingThreadId(
+      { sectionRef: 'Section 4.2', explanation: 'Identical explanation text.' },
+      [
+        { id: 'thread-a', sectionRef: 'Section 4.2', text: 'Identical explanation text.' },
+        { id: 'thread-b', sectionRef: 'Section 4.2', text: 'Identical explanation text.' },
+      ]
+    );
+    expect(threadId).toBeUndefined();
+  });
+
+  it('degrades gracefully when the finding has no sectionRef and no threads', () => {
+    expect(resolveMatchingThreadId({ sectionRef: undefined, explanation: 'x' }, [])).toBeUndefined();
+  });
+
+  it('is whitespace-tolerant on both sectionRef and explanation', () => {
+    const threadId = resolveMatchingThreadId(
+      { sectionRef: '  Section 4.2  ', explanation: '  Trimmed explanation.  ' },
+      [{ id: 'thread-a', sectionRef: 'Section 4.2', text: 'Trimmed explanation.' }]
+    );
+    expect(threadId).toBe('thread-a');
   });
 });
 

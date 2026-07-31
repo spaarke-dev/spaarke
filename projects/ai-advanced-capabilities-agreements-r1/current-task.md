@@ -4,7 +4,9 @@
 
 ## Active task
 
-- **Task**: WAVE 3 ✅ — 012 + 021 done; committing, then Wave 4 (030 ∥ 040)
+- **Task**: WAVE 4 — 030 (opus) ∥ 040 dispatched (Waves 0-3 ✅; last commit 98bf344d1, pushed).
+  Conflict check: NO unmerged branch touches DispositionRoutability/OutputRouter/playbookconsumer/Wave-4 files.
+- **Wave 3 summary (kept for recovery)**:
 - **012**: premise CORRECTED — test never weakened; SOURCE regressed via S1-fallback commit 6a414bbac
   (first-occurrence-on-recurrence + kind collapse). Fixed: discriminated union, multiplicity→ambiguous always,
   unique-fuzzy verbatim-prefix kept; 011's deterministic path untouched. 7/7 advisory; suite 779/15 (exact flip).

@@ -4,7 +4,7 @@
     <title>FR-16(a,b) — Binding disposition → compose + findings branch in the ledger materializer</title>
     <phase>3 Durable Review</phase>
     <gate>blocked (deps 002,012)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Core durable-recall change on the dispatch/ledger spine (ADR-040/043) + ComposeWorkspace hot file; legal work product durability.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -106,6 +106,8 @@
     <criterion testable="true">Negative: a malformed findings payload logs + skips gracefully — no crash, no partial placement.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-16(a,b); hub Part C.1 accepted. 031 = session routing + apply-leg gating; 032 = summary-panel restore + caps. Server expected UNCHANGED — that's the design's elegance; escalate if not true.</notes>
+  <notes>Spec FR-16(a,b); hub Part C.1 accepted. 031 = session routing + apply-leg gating; 032 = summary-panel restore + caps. Server expected UNCHANGED — that's the design's elegance; escalate if not true.
+
+  COMPLETED 2026-07-31 (notes/030-execution-notes.md). (a) Binding flip: mirror nda-review disposition 100000000→100000006 + surgical env deploy on 683051bd-2989-f111-8077-7ced8ddc4a05 (MCP, NOT full Seed — the worktree mirror is behind live on 16 unrelated rows; full Seed would clobber them). -DiffOnly evidence: 17→16 drifts, nda-review disposition drift GONE (env==mirror==Compose); remaining 16 are pre-existing mirror-staleness (NOT mine). ADR-043 escalation did NOT fire — Compose already Routable=true in DispositionRoutability (zero registry change, zero server change). (b) Findings branch in ComposeWorkspace.materializeComposeDraftFromLedger: flaggedSections[] → projectLedgerFindingsToAdvisoryComments (both vintages: legacy explanation + post-split flaggedClause/assessment) → placeAdvisoryComments (metadata intact: riskLevel/sectionRef/standardRef/flaggedClause/assessment; NOT registerAiReviewComments), idempotent via lastMaterializedKey, graceful malformed skip. §11: helper kept local (not hoisted across SpaarkeAi→shared-lib). Tests: redline-from-ledger 10/10 (3 existing + 5 unit + 2 integration incl. zero-dispatch/idempotency/malformed); advisoryComments 7/7; tsc + build clean; 15 pre-existing failures unchanged (the named compose-editor-stub mock suites). Summary-panel restore=032, session routing/apply-leg=031 — clean seams left. Optional ComposeSummaryPageGenerator.cs comment cleanup LEFT for wrap-up (avoids §10 server-file overhead). Manual reload UAT deferred to 060/061.</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

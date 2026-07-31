@@ -20,11 +20,11 @@
 | 021 | Interactive orientation + confirmation gate | 2 | ✅ | 020,003 | FULL | sonnet | xhigh | D |
 | 022 | subDomain envelope (cold-load + open-existing legs) | 2 | 🔲 | 001 | FULL | sonnet | high | F |
 | 023 | Explicit-path bind + sanity-check + lookup write | 2 | 🔲 | 020,022 | FULL | sonnet | high | G |
-| 030 | Disposition flip + findings materializer branch | 3 | 🔲 | 002,012 | FULL | opus | high | E |
+| 030 | Disposition flip + findings materializer branch | 3 | ✅ | 002,012 | FULL | opus | high | E |
 | 031 | DEF-09 session routing + apply-leg gating | 3 | 🔲 | 030 | FULL | sonnet | xhigh | F |
 | 032 | Summary-panel restore + 128KB caps + supersede | 3 | 🔲 | 031 | FULL | sonnet | xhigh | G |
 | 033 | Wizard auto-run bridge (FK fix = hub closeout; verify) | 3 | 🔲 | 023,031 | FULL | opus | high | H |
-| 040 | Bidirectional highlight | 4 | 🔲 | 011 | FULL | sonnet | high | E |
+| 040 | Bidirectional highlight | 4 | ✅ | 011 | FULL | sonnet | high | E |
 | 041 | Multi-select batch AI action + progress | 4 | 🔲 | 021,031,040 | FULL | sonnet | xhigh | H |
 | 042 | Separated location-labelled confirmations | 4 | 🔲 | 041 | FULL | sonnet | medium | I |
 | 050 | Memo assembly + persistence (sprk_analysisoutput) | 5 | ✅ | 002 | FULL | sonnet | xhigh | C |
