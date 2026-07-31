@@ -703,6 +703,14 @@ export interface ComposeEditorProps {
     findings: readonly NdaReviewFindingSummary[];
     /** Count of advisory comments that couldn't be anchored (passed through to the panel's notice). */
     placementFailureCount?: number;
+    /**
+     * ai-advanced-capabilities-agreements-r1 task 032 (FR-16 gap #1) — the server-asserted overall
+     * risk, combined across all restored/live findings by the host. Forwarded verbatim to
+     * `AgreementReviewSummaryPanel`'s existing (currently inert per UAT round-5 #2 — the dedicated
+     * banner was deliberately removed) `overallRisk` prop, completing the data path without
+     * reintroducing that removed UI.
+     */
+    overallRisk?: string;
   };
   /**
    * Contextual AI Tool Library — the ACTIVE work type (the product surface the user chose):
@@ -2893,6 +2901,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             onClose={reviewSummary.onToggle}
             findings={enrichedReviewFindings}
             placementFailureCount={reviewSummary.placementFailureCount}
+            // Task 032 gap #1 — forwarded to the panel's existing (currently inert, UAT round-5 #2)
+            // `overallRisk` prop; completes the data path without reintroducing removed UI.
+            overallRisk={reviewSummary.overallRisk}
             onNavigate={handleReviewNavigate}
           />
         ) : null}

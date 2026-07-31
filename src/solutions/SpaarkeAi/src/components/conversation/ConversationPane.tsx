@@ -479,6 +479,13 @@ export function ConversationPane(): React.JSX.Element {
   // "a source doc just became ready" signal, not revise-specific) — the effect below fires the
   // gate once the file is available.
   const [pendingAgreementReview, setPendingAgreementReview] = React.useState<boolean>(false);
+  // task 023 (FR-09 explicit door) — the SAME race-safe buffer, for a "review this document" that
+  // arrives when the session was launched ALREADY oriented (`explicitComposeLaunch?.subDomain`).
+  // Carries the bound subDomainKey (captured at detection time, not re-read later) so the buffered
+  // effect below calls `agreementReviewGate.runExplicit` directly — no classification gate, ever.
+  const [pendingExplicitAgreementReview, setPendingExplicitAgreementReview] = React.useState<{
+    subDomainKey: string;
+  } | null>(null);
 
   // ── Behaviour hooks (see module map in the header) ────────────────────────
   const injection = useInjectionQueue();
@@ -706,6 +713,24 @@ export function ConversationPane(): React.JSX.Element {
     // dispatch(es) can target it via sessionIdOverride — see documentSessionWaiter.ts header.
     awaitDocumentSessionId: awaitDocumentSessionIdFor,
   });
+
+  // task 023 (classifier-path lookup-write seam) — resolves the CLASSIFIER-determined subDomain for
+  // a session being promoted (`HistoryOverlay`'s "Promote to Analysis…"), so the promote flow can
+  // write the resolved `sprk_agreementtype` lookup onto the new Analysis (persistence-matches-
+  // routing; see `agreementTypeLookupWrite.ts`). Only the CURRENT session's classifier resolution is
+  // knowable client-side (`agreementReviewGate` is session-scoped, reset in `handleSessionCreated`)
+  // — promoting a DIFFERENT/older session from the History list deliberately returns `null` rather
+  // than guessing (never a fabricated lookup value). An EXPLICIT-door bind is NOT surfaced here — it
+  // already has a persisted lookup from its own door (wizard/deep-link/open-existing), so it needs
+  // no NEW write (see `getLastResolvedSubDomainKey`'s own doc comment).
+  const getLastResolvedSubDomainKey = agreementReviewGate.getLastResolvedSubDomainKey;
+  const resolveClassifiedSubDomainForSession = React.useCallback(
+    (sessionId: string): string | null => {
+      if (sessionId !== chatSessionIdRef.current) return null;
+      return getLastResolvedSubDomainKey();
+    },
+    [getLastResolvedSubDomainKey]
+  );
 
   // UAT round-5 #9 — when a dispatch settles WITHOUT an NDA result having completed the run, mark it
   // failed. `fail` no-ops unless the run is still `running` (a successful `complete` already won, since
@@ -1743,28 +1768,37 @@ export function ConversationPane(): React.JSX.Element {
 
       // task 021 (FR-07/08/09 interactive orientation + confirmation gate) — CHECKED FIRST, before
       // the generic revise detector below: "review this document" (a review/assessment verb, no
-      // revise-specific verb/keyword) routes to the agreement-classify confirmation gate instead of
-      // the whole-document revise flow (compose-revise-document) — design Lens 3d's canonical trigger
-      // phrase. Skipped entirely when the session was launched ALREADY oriented
-      // (`explicitComposeLaunch?.subDomain` — the wizard/hub explicit path, task 023's territory) per
-      // FR-09 "skip classification when subDomain is already present". Negative criterion (project
-      // constraint): a bare "review" with no document reference, or with NO active/uploading
-      // document, falls through unchanged to the normal agent turn — the gate never fires on text
-      // alone.
-      if (!explicitComposeLaunch?.subDomain && detectAgreementReviewIntent(messageText)) {
+      // revise-specific verb/keyword) routes here instead of the whole-document revise flow
+      // (compose-revise-document) — design Lens 3d's canonical trigger phrase. task 023 (FR-09 the
+      // ONE routing decision point for both doors, per project instruction "not two"): when the
+      // session was launched ALREADY oriented (`explicitComposeLaunch?.subDomain` — the wizard /
+      // deep-link / open-existing envelope, task 022 delivers it on all three doors), the classifier
+      // NEVER gates the run — `runExplicit` binds the pack DETERMINISTICALLY (no confirm chips, no
+      // re-route); the classifier still runs, but only as a NON-BLOCKING, warn-only sanity check
+      // (ADR-041 — see agreementReviewGate.runExplicit / resolveAgreementReviewSanityMismatch). With
+      // no explicit subDomain, the classifier confirmation gate (`runGate`) runs as before. Negative
+      // criterion (project constraint, BOTH branches): a bare "review" with no document reference,
+      // or with NO active/uploading document, falls through unchanged to the normal agent turn —
+      // neither door ever fires on text alone.
+      if (detectAgreementReviewIntent(messageText)) {
+        const explicitSubDomain = explicitComposeLaunch?.subDomain;
         if (hasActiveSourceDoc || attachments.uploadedFileCount > 0) {
-          // ALWAYS buffer through the same effect (never dispatch inline here) — mirrors the
-          // revise/draft-document race-safe pattern: `classifyBindingId` is resolved by a DEFERRED
+          // ALWAYS buffer through an effect (never dispatch inline here) — mirrors the
+          // revise/draft-document race-safe pattern: the review bindingId is resolved by a DEFERRED
           // capability-discovery fetch enabled by `agreementReviewGateNeeded` just below, so it is
           // virtually never ready on THIS same synchronous call (the very first trigger in a
-          // session). The buffered-gate effect fires once BOTH the source file is registered AND
-          // `classifyBindingId` has resolved.
+          // session). The buffered effect(s) below fire once BOTH the source file is registered AND
+          // the needed bindingId has resolved.
           setAgreementReviewGateNeeded(true);
-          setPendingAgreementReview(true);
-          return null; // suppress the agent turn — the gate orchestrates classify -> confirm -> dispatch
+          if (explicitSubDomain) {
+            setPendingExplicitAgreementReview({ subDomainKey: explicitSubDomain });
+          } else {
+            setPendingAgreementReview(true);
+          }
+          return null; // suppress the agent turn — the explicit bind or the classify->confirm->dispatch gate orchestrates
         }
         // No attached/target document — the negative criterion: fall through to the normal agent
-        // turn below (never fire the gate on text alone).
+        // turn below (never fire either door on text alone).
       }
 
       const detection = detectReviseThisDocumentIntent(messageText);
@@ -1930,6 +1964,24 @@ export function ConversationPane(): React.JSX.Element {
     void runAgreementReviewGate(active.sessionFileId, active.fileName);
   }, [sourceDocReadyToken, pendingAgreementReview, runAgreementReviewGate, classifyBindingId]);
 
+  // task 023 (FR-09 explicit door) — the race-safe buffer for a "review this document" arriving on
+  // an ALREADY-oriented session. Gates on `ndaReviewBindingId` (the review dispatch target) rather
+  // than `classifyBindingId` — the explicit door dispatches deterministically and does not need the
+  // classifier ready to proceed (the sanity check inside `runExplicit` degrades gracefully via
+  // `runClassify`'s own null-safe contract if it resolves later or never). Both bindingIds come from
+  // the SAME shared capability-discovery fetch (`agreementReviewGateNeeded` enables it above), so in
+  // practice they resolve together.
+  const runExplicitAgreementReview = agreementReviewGate.runExplicit;
+  React.useEffect(() => {
+    if (!pendingExplicitAgreementReview) return;
+    const active = activeSourceDocRef.current;
+    if (active?.sessionFileId == null || chatSessionIdRef.current == null) return;
+    if (!ndaReviewBindingId) return;
+    const { subDomainKey } = pendingExplicitAgreementReview;
+    setPendingExplicitAgreementReview(null);
+    void runExplicitAgreementReview(active.sessionFileId, active.fileName, subDomainKey);
+  }, [sourceDocReadyToken, pendingExplicitAgreementReview, runExplicitAgreementReview, ndaReviewBindingId]);
+
   // R4-4 (UAT 2026-07-19) — the FIX #7 AUTO-LOAD-on-attach effect was REMOVED. Owner reversed the
   // earlier decision: attaching files should NOT auto-open Compose (uploading 2 files spawned 2 Compose
   // tabs, which was jarring). Opening a file in Compose is now an ON-DEMAND action — the "Revise in
@@ -1989,6 +2041,8 @@ export function ConversationPane(): React.JSX.Element {
       // cache (a new session has no already-oriented files) and any buffered race-safe gate intent.
       agreementReviewGate.resetForSession();
       setPendingAgreementReview(false);
+      // task 023: a fresh session also drops any buffered EXPLICIT-door review intent.
+      setPendingExplicitAgreementReview(null);
       // task 031: a fresh session drops any known/pending document-session routing state — a prior
       // session's file ids/session ids must never leak into a new session's resolution.
       documentSessionWaiterRef.current.reset();
@@ -2175,6 +2229,8 @@ export function ConversationPane(): React.JSX.Element {
               onSelectSession={handleSelectHistorySession}
               bffBaseUrl={bffBaseUrl}
               authenticatedFetch={authenticatedFetch}
+              resolveClassifiedSubDomain={resolveClassifiedSubDomainForSession}
+              dataService={emailLookupDataService}
             />
             {/* R4-5: New session — clears the persisted session id and remounts
                 SprkChat to mint a fresh session. PaneHeader's rightSlot already

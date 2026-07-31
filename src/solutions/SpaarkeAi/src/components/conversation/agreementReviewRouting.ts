@@ -194,6 +194,74 @@ export function resolveAgreementReviewGateDecision(
 }
 
 // ---------------------------------------------------------------------------
+// Explicit-door sanity check (task 023, spec FR-09; ADR-041 D-F1 "warn-only" —
+// NO gate state, NO ask, NEVER blocks, NEVER re-routes)
+// ---------------------------------------------------------------------------
+
+/**
+ * A warn-only mismatch between the caller's EXPLICIT subDomain bind (wizard / deep-link /
+ * open-existing envelope, task 022) and the classifier's independently-run, non-blocking sanity
+ * check (task 023). Presence of this value is the ONLY trigger for the informational notice —
+ * the explicit choice has ALREADY been dispatched by the time this is computed and is never
+ * revisited.
+ */
+export interface AgreementReviewSanityMismatch {
+  readonly explicitKey: string;
+  readonly explicitDisplayName: string;
+  readonly topKey: string;
+  readonly topDisplayName: string;
+  readonly topConfidence: number;
+}
+
+/**
+ * Warn-only sanity check for the EXPLICIT door (task 023, design Lens 3d "hint authoritative").
+ * The explicit subDomain ALWAYS wins and has already bound the pack deterministically by the time
+ * this runs — this function only decides whether an INFORMATIONAL notice is warranted, never a
+ * gate, never a re-route (ADR-041: no gate-ledger state, no confirmation ask).
+ *
+ * Returns a mismatch payload ONLY when ALL of:
+ *   - the classifier successfully returned a result (`classifyResult` non-null) that reads as an
+ *     agreement with at least one candidate — a `null` result (classifier unavailable/errored,
+ *     see {@link useAgreementReviewGate}'s `runClassify`, which never throws) silently produces
+ *     NO notice, per the negative acceptance criterion "sanity-check failure never blocks the
+ *     explicit run";
+ *   - the top candidate (by confidence) differs from the explicit key;
+ *   - the top candidate's confidence clears its OWN resolved threshold (the SAME per-type
+ *     threshold {@link resolveAgreementReviewGateDecision} uses — "high confidence" is not a
+ *     second, bespoke heuristic).
+ * Returns `null` (no notice) for every other case.
+ */
+export function resolveAgreementReviewSanityMismatch(
+  explicitKey: string,
+  classifyResult: AgreementClassifyResult | null,
+  registry: readonly AgreementTypeRegistryEntry[]
+): AgreementReviewSanityMismatch | null {
+  if (!classifyResult || !classifyResult.isAgreement || classifyResult.candidates.length === 0) {
+    return null;
+  }
+  const top = [...classifyResult.candidates].sort((a, b) => b.confidence - a.confidence)[0];
+  if (top.subDomainKey === explicitKey) return null;
+  const threshold = resolveConfidenceThreshold(top.subDomainKey, registry);
+  if (top.confidence < threshold) return null;
+  return {
+    explicitKey,
+    explicitDisplayName: displayNameFor(explicitKey, registry),
+    topKey: top.subDomainKey,
+    topDisplayName: displayNameFor(top.subDomainKey, registry),
+    topConfidence: top.confidence,
+  };
+}
+
+/** Informational-only copy (ADR-041: no question, no chip, no gate — the review already ran under `explicitDisplayName`). */
+export function buildAgreementReviewSanityMismatchMessage(mismatch: AgreementReviewSanityMismatch): string {
+  return (
+    `Note: this document reads more like a **${mismatch.topDisplayName}** ` +
+    `(${formatConfidencePercent(mismatch.topConfidence)}% confidence) than the **${mismatch.explicitDisplayName}** ` +
+    `type this review used. The results above are grounded in the **${mismatch.explicitDisplayName}** review pack.`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Chat messages (deterministic copy — exported for tests + the host)
 // ---------------------------------------------------------------------------
 

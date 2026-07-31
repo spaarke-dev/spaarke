@@ -62,7 +62,10 @@ import { ComposeBannerStack } from './ComposeBannerStack';
 // ai-advanced-capabilities-nda-r1 task 030 — review-summary docked panel (FR-07). Mirrors the
 // ComposeCommentThread/ComposeFindReplace docked-panel convention; mounted below alongside the
 // SAME `compose_advisory_comments` data task 031's onAdvisoryComments handler already receives.
-import { type NdaReviewFindingSummary } from './AgreementReviewSummaryPanel';
+// task 032 (FR-16 summary-panel restore) — `deriveOverallRisk` reused verbatim (§11 reuse-first) to
+// combine multiple findings outputs' `overallRisk` into ONE worst-severity value on reopen, the SAME
+// severity rule the panel/gutter already use for per-finding badge coloring.
+import { type NdaReviewFindingSummary, deriveOverallRisk } from './AgreementReviewSummaryPanel';
 import {
   ComposeEditor,
   type ComposeEditorHandle,
@@ -131,6 +134,7 @@ import {
   anchoredAnnotationsToPriorAnchors,
 } from './useComposeWordShuttle';
 import { composeWorkspaceReducer, INITIAL_STATE } from './ComposeWorkspace.types';
+import type { ComposeReviewFindingsDegraded } from './ComposeWorkspace.types';
 import { useComposeBroadcastChannel, useComposeCheckoutLifecycle, useComposeHeartbeatGate } from './hooks';
 import type {
   ComposeDocumentRef,
@@ -394,6 +398,71 @@ export function projectLedgerFindingsToAdvisoryComments(
     });
   }
   return items;
+}
+
+/**
+ * Task 032 — structural shape guard for a STORED compose output, mirroring the inline check task 030
+ * introduced inline (detected by `flaggedSections[]`, never a disposition/bindingId allowlist — see
+ * task 030's §11 rationale). Used by the untargeted (reopen / refresh-durability) materialize pass to
+ * partition ALL of a session's stored compose outputs into findings vs. edit/comment/redline BEFORE
+ * selecting what to replay (the FR-16 coexistence fix — findings are never evicted by a later edit).
+ */
+function isFindingsShapedComposeOutput(output: ComposeLedgerOutput): boolean {
+  const payload = output.payload as ComposeReviewPayload | undefined;
+  return Array.isArray(payload?.flaggedSections);
+}
+
+/**
+ * Task 032 (031-residual dedupe guard — see notes/031-execution-notes.md "Residual risk"). A stable,
+ * order-independent content signature for a set of advisory placements. The LIVE
+ * `compose_advisory_comments` event carries no `ledgerRef` today (verified:
+ * `useNdaReviewAdvisoryCommentsBridge.ts` never sets it, though the wire type has room for one), so
+ * exact-key idempotency (`lastMaterializedKey`) is unavailable for the live→ledger race 031 escalated
+ * (a same-mount `externalChange` re-trigger re-running the ledger materializer WHILE the live path's
+ * placement already exists in the SAME editor instance — `placeAdvisoryComments` has no idempotency
+ * of its own). This content signature is the fallback: the SAME set of quoted clauses, materialized
+ * via either path, dedupes to the SAME token; a genuinely DIFFERENT review (different clauses) gets a
+ * different signature and is NOT suppressed.
+ */
+function computeAdvisorySignature(items: readonly { targetText: string }[]): string {
+  return items
+    .map(item => item.targetText.trim().toLowerCase())
+    .sort()
+    .join('␟');
+}
+
+/**
+ * Task 032 (FR-16 128KB budget, Leg B — visible notice, not chunking; see
+ * `ComposeReviewFindingsDegraded`'s JSDoc in `ComposeWorkspace.types.ts` for the full rationale).
+ * Best-effort sessionStorage read/write — never throws (private-browsing / quota / SSR-safe), mirrors
+ * `ComposeBannerStack.tsx`'s `readImportWarningsDismissed`/`writeImportWarningsDismissed` convention.
+ * Scope is honest and narrow: tab-lifetime only (a brand-new tab/device has no marker to compare
+ * against — closing that gap needs a server-side truncation-marker passthrough, out of this task's
+ * read-only `src/server/**` boundary).
+ */
+const REVIEW_FINDINGS_MARKER_PREFIX = 'spaarke.compose.reviewFindingsMarker:';
+
+function readReviewFindingsMarker(sessionId: string): { count: number } | null {
+  if (typeof window === 'undefined' || !window.sessionStorage || !sessionId) return null;
+  try {
+    const raw = window.sessionStorage.getItem(REVIEW_FINDINGS_MARKER_PREFIX + sessionId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { count?: unknown };
+    const count = typeof parsed.count === 'number' && Number.isFinite(parsed.count) ? parsed.count : 0;
+    return { count };
+  } catch {
+    return null;
+  }
+}
+
+function writeReviewFindingsMarker(sessionId: string, count: number): void {
+  if (typeof window === 'undefined' || !window.sessionStorage || !sessionId) return;
+  try {
+    window.sessionStorage.setItem(REVIEW_FINDINGS_MARKER_PREFIX + sessionId, JSON.stringify({ count }));
+  } catch {
+    // Best-effort — a failed persist just means the degraded-restore detector has nothing to compare
+    // against next time; it never blocks the (successful) restore that triggered this write.
+  }
 }
 
 // The render-follows-store signal ComposeWorkspace consumes is Flow 5
@@ -1693,6 +1762,196 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     []
   );
 
+  // -------------------------------------------------------------------------
+  // ai-advanced-capabilities-nda-r1 task 030 / agreements-r1 task 032 — review-summary docked panel
+  // state (FR-07/FR-16). Moved ABOVE `materializeComposeDraftFromLedger` (was declared after it) so
+  // the ledger-restore path below can populate it too — reopen restores rows + badges + overallRisk,
+  // not just the gutter (task 032 gap #1). Captures the SAME `advisoryComments` projection the LIVE
+  // `onAdvisoryComments` receiver further down also writes to (ADR-040 — one ledgered NDA-REVIEW
+  // result, two renderings, never a second server read).
+  const [reviewSummaryFindings, setReviewSummaryFindings] = React.useState<readonly NdaReviewFindingSummary[]>([]);
+  const [reviewSummaryOpen, setReviewSummaryOpen] = React.useState<boolean>(false);
+  const [reviewSummaryFailedCount, setReviewSummaryFailedCount] = React.useState<number>(0);
+  // Task 032 — server-asserted overall risk (the event/payload field task 030 planted but nothing
+  // consumed yet — see `ComposeReviewPayload.overallRisk`'s JSDoc: "carried for the summary panel
+  // (restore is task 032)"). Combined across MULTIPLE findings outputs via `deriveOverallRisk`
+  // (worst-of). Threaded to `AgreementReviewSummaryPanel`'s existing (currently inert per UAT
+  // round-5 #2) `overallRisk` prop — NOT re-introducing the removed banner, just completing the data
+  // path so it is available/correct rather than silently dropped.
+  const [reviewSummaryOverallRisk, setReviewSummaryOverallRisk] = React.useState<string | undefined>(undefined);
+  // Task 032 (128KB budget, Leg B) — see `ComposeReviewFindingsDegraded` JSDoc for the full rationale.
+  const [reviewFindingsDegraded, setReviewFindingsDegraded] = React.useState<ComposeReviewFindingsDegraded | null>(
+    null
+  );
+  // Which session `reviewSummaryFindings` currently reflects — reset the accumulator when the
+  // untargeted (reopen) pass starts materializing a DIFFERENT session's outputs, so a document switch
+  // never leaves a PRIOR document's stale findings visible. The LIVE `onAdvisoryComments` handler
+  // (wholesale-replace semantics, unchanged) also updates this ref so the two paths never fight.
+  const reviewSummarySessionRef = React.useRef<string | null>(null);
+  // Task 032 — exact-key idempotency for findings outputs materialized via the LEDGER path (`key:`
+  // tokens, scoped by session — ledger turn numbers are session-local so a bare key could collide
+  // across two different sessions) PLUS content-signature bookkeeping for the 031-residual dedupe
+  // guard (`sig:` tokens — see `computeAdvisorySignature`'s JSDoc).
+  const materializedFindingsKeysRef = React.useRef<Set<string>>(new Set());
+
+  // DEF-11: a whole-document revision (`compose-revise-document`) carries a CHANGE LIST (`edits[]`)
+  // and/or REVIEW FLAGS (`comments[]`). A single-edit draft (compose-draft-alternative /
+  // compose-draft-document) has neither — it keeps the shipped single-materialize path. Extracted
+  // (task 032) so the untargeted (reopen) pass can select + materialize the latest EDIT-shaped output
+  // independently of the findings loop below (the coexistence fix — a later edit no longer evicts an
+  // earlier review's findings durability).
+  const materializeEditOutput = React.useCallback(
+    (editor: ComposeEditorHandle, target: ComposeLedgerOutput): void => {
+      const provenance = {
+        ledgerRef: target.key, // {bindingId}@t{n} provenance
+        bindingId: target.bindingId,
+        turn: target.turn,
+      };
+      const editList = Array.isArray(target.payload?.edits) ? target.payload.edits : null;
+      const commentList = Array.isArray(target.payload?.comments) ? target.payload.comments : null;
+      if (editList && editList.length > 0) {
+        editor.materializeComposeEdits(editList, provenance); // multi-change redline
+      } else {
+        editor.materializeComposeDraft(target.payload, provenance); // single-edit redline (unchanged)
+      }
+      setLastMaterializedKey(target.key);
+      setComposeDraftError(null);
+
+      // DEF-13 — register the AI edit's REASON as an anchored COMMENT annotation on the change,
+      // persisted via the FR-29 session-annotations endpoint (gap-4.3 effect) — see the task-040
+      // NOTE on `registerAiReviewComments` above: this rationale does NOT currently export as a
+      // native `w:comment` on Save (that PushAnnotations/DocxAnnotationWriter path is retired/never
+      // wired to Save); tracked as a follow-on, out of task 040's scope. Anchored to the edit's
+      // `target_text` (the redline range); skipped for an insertion-style draft with no target (no
+      // span to anchor a comment to) or an empty rationale. Deduped by the ledger key so a
+      // refresh/duplicate materialize never appends a second copy.
+      // DEF-11: a whole-document revision's REVIEW FLAGS become anchored comments (flag-risks intent).
+      // A single-edit draft instead contributes its rationale as ONE anchored comment (DEF-13).
+      if (commentList && commentList.length > 0) {
+        registerAiReviewComments(commentList, provenance);
+      } else {
+        registerAiEditReasonComment(target.payload, {
+          ledgerRef: target.key,
+          bindingId: target.bindingId,
+        });
+      }
+    },
+    [registerAiEditReasonComment, registerAiReviewComments]
+  );
+
+  // FR-16 (task 030, extended task 032) — DURABLE AGREEMENT-REVIEW findings materialization. A
+  // compose-disposition output carrying `flaggedSections[]` is an agreement-review result (the review
+  // Binding's Informational→Compose flip, task 030), NOT an edit/comment payload. Re-materializes each
+  // flagged clause as a PERSISTENT advisory comment thread via ComposeEditorHandle.placeAdvisoryComments
+  // — the SAME metadata-preserving path the LIVE review dispatch uses (the onAdvisoryComments receiver
+  // below) — so reopening a reviewed document restores the gutter Review Notes AND the summary panel
+  // (task 032 gap #1) deterministically, with riskLevel/sectionRef/standardRef/flaggedClause/assessment
+  // intact and ZERO LLM re-run (the stored SessionOutput is READ, never re-dispatched). Routed here, NOT
+  // via registerAiReviewComments (which DROPS that metadata — spec FR-16 / CLAUDE.md §11).
+  const materializeFindingsOutput = React.useCallback(
+    (
+      editor: ComposeEditorHandle,
+      output: ComposeLedgerOutput,
+      reviewPayload: ComposeReviewPayload,
+      flaggedSections: readonly unknown[]
+    ): void => {
+      const sessionScope = state.sessionId;
+      const keyToken = `${sessionScope}::key:${output.key}`;
+      if (materializedFindingsKeysRef.current.has(keyToken)) return; // exact-key idempotency (ledger reentry)
+
+      const advisoryItems = projectLedgerFindingsToAdvisoryComments(flaggedSections);
+      if (advisoryItems.length === 0) {
+        // A findings-shaped payload that yields NO usable items (empty/malformed flaggedSections):
+        // log + skip gracefully — never crash, never partial-place, never fall through to a redline.
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[ComposeWorkspace] compose findings payload carried no usable flagged sections — nothing re-materialized:',
+          output.key
+        );
+        materializedFindingsKeysRef.current.add(keyToken);
+        // Task 032 (128KB budget, Leg B, acceptance criterion 5): the entry EXISTS but nothing usable
+        // is inside it — a corrupted/partial payload. Surface a visible degraded-restore notice rather
+        // than a silent no-op (never silent absence).
+        setReviewFindingsDegraded(prev => prev ?? { expectedCount: 0, reason: 'malformed' });
+        return;
+      }
+
+      // Task 032 (031-residual dedupe guard): the LIVE onAdvisoryComments path may already have
+      // placed this EXACT set of clauses in this mount (e.g. a same-mount `externalChange` re-trigger
+      // racing the live placement — notes/031-execution-notes.md "Residual risk"). placeAdvisoryComments
+      // has no idempotency of its own, so check the content signature BEFORE placing.
+      const signatureToken = `${sessionScope}::sig:${computeAdvisorySignature(advisoryItems)}`;
+      if (materializedFindingsKeysRef.current.has(signatureToken)) {
+        materializedFindingsKeysRef.current.add(keyToken); // cover this ledger key too — no re-check needed
+        return;
+      }
+
+      const result = editor.placeAdvisoryComments(advisoryItems);
+      if (result.failed.length > 0) {
+        // Surface unresolved anchors the SAME way the live onAdvisoryComments path does
+        // (FR-19 "do not guess" — reported, never silently placed). Tier-3 targetText is not
+        // logged beyond this placement-failure report.
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[ComposeWorkspace] ${result.failed.length} of ${advisoryItems.length} re-materialized advisory ` +
+            'comment(s) could not be anchored (strict resolution failed):',
+          result.failed
+        );
+      }
+
+      materializedFindingsKeysRef.current.add(keyToken);
+      materializedFindingsKeysRef.current.add(signatureToken);
+
+      // Task 032 gap #1 — summary-panel restore: mirror the live onAdvisoryComments capture so reopen
+      // repopulates rows + risk badges, not just the gutter. AGGREGATED across MULTIPLE findings
+      // outputs (task 032 gap #3 coexistence) — never wholesale-replaced, unlike the live path (which
+      // only ever has ONE result per turn).
+      setReviewSummaryFindings(prev => [
+        ...prev,
+        ...advisoryItems.map(item => ({
+          sectionRef: item.sectionRef,
+          quotedText: item.targetText,
+          riskLevel: item.riskLevel,
+          explanation: item.explanation,
+          standardRef: item.standardRef,
+        })),
+      ]);
+      setReviewSummaryFailedCount(prev => prev + result.failed.length);
+      if (reviewPayload.overallRisk) {
+        setReviewSummaryOverallRisk(prev => {
+          const combined = deriveOverallRisk([{ riskLevel: prev }, { riskLevel: reviewPayload.overallRisk }]);
+          return combined ?? prev; // an unrecognized severity string never erases a KNOWN prior value
+        });
+      }
+      // A successful restore supersedes any earlier degraded notice for this session.
+      setReviewFindingsDegraded(null);
+
+      // Task 032 (128KB budget, Leg B) — refresh the durability marker with the latest known-good
+      // count so a LATER reopen (same tab) can detect a truncated/skipped entry.
+      writeReviewFindingsMarker(sessionScope, advisoryItems.length);
+    },
+    [state.sessionId]
+  );
+
+  // Dispatches a single resolved ledger output to the findings or edit/comment/redline branch — the
+  // TARGETED materialize path (a specific known `{bindingId}@t{n}` from a Flow-5 signal or the FR-16
+  // idempotent-duplicate-signal test). The UNTARGETED (reopen) path below does NOT use this — it
+  // processes ALL findings outputs + the latest edit output directly (task 032 gap #3 coexistence).
+  const materializeSingleOutput = React.useCallback(
+    (editor: ComposeEditorHandle, target: ComposeLedgerOutput): void => {
+      const reviewPayload = target.payload as ComposeReviewPayload;
+      const flaggedSections = Array.isArray(reviewPayload.flaggedSections) ? reviewPayload.flaggedSections : null;
+      if (flaggedSections) {
+        materializeFindingsOutput(editor, target, reviewPayload, flaggedSections);
+        return;
+      }
+      // Idempotent — never double-apply the same stored draft (refresh / duplicate signal).
+      if (target.key === lastMaterializedKey) return;
+      materializeEditOutput(editor, target);
+    },
+    [materializeFindingsOutput, materializeEditOutput, lastMaterializedKey]
+  );
+
   const materializeComposeDraftFromLedger = React.useCallback(
     async (targetLedgerRef?: string): Promise<void> => {
       if (state.status !== 'loaded') return;
@@ -1726,98 +1985,64 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         const composeOutputs = Array.isArray(outputs)
           ? outputs.filter(o => o.disposition === 'compose' && o.payload)
           : [];
-        if (composeOutputs.length === 0) return;
 
-        const target = targetLedgerRef
-          ? composeOutputs.find(o => o.key === targetLedgerRef)
-          : composeOutputs.reduce((a, b) => (b.turn > a.turn ? b : a));
-        if (!target) return;
-
-        // Idempotent — never double-apply the same stored draft (refresh / duplicate signal).
-        if (target.key === lastMaterializedKey) return;
-
-        const provenance = {
-          ledgerRef: target.key, // {bindingId}@t{n} provenance
-          bindingId: target.bindingId,
-          turn: target.turn,
-        };
-        // FR-16 (ai-advanced-capabilities-agreements-r1 task 030) — DURABLE AGREEMENT-REVIEW findings
-        // branch. A compose-disposition output carrying `flaggedSections[]` is an agreement-review
-        // result (the review Binding's Informational→Compose flip, task 030), NOT an edit/comment
-        // payload. Re-materialize each flagged clause as a PERSISTENT advisory comment thread via
-        // ComposeEditorHandle.placeAdvisoryComments — the SAME metadata-preserving path the LIVE review
-        // dispatch uses (the onAdvisoryComments receiver below) — so reopening a reviewed document
-        // restores the gutter Review Notes deterministically, with riskLevel/sectionRef/standardRef/
-        // flaggedClause/assessment intact and ZERO LLM re-run (the stored SessionOutput is READ, never
-        // re-dispatched). Routed here, NOT via registerAiReviewComments (which DROPS that metadata —
-        // spec FR-16 / CLAUDE.md §11). Detected structurally by `flaggedSections[]` (mirrors
-        // useNdaReviewAdvisoryCommentsBridge's live-path shape guard); handled + idempotency-marked HERE
-        // so a findings payload never falls through to the edit/single-edit redline branches below.
-        // (Summary-panel restore + payload caps = task 032; session routing / apply-leg gating = task 031
-        // — clean seams left, not implemented here.)
-        const reviewPayload = target.payload as ComposeReviewPayload;
-        const flaggedSections = Array.isArray(reviewPayload.flaggedSections)
-          ? reviewPayload.flaggedSections
-          : null;
-        if (flaggedSections) {
-          const advisoryItems = projectLedgerFindingsToAdvisoryComments(flaggedSections);
-          if (advisoryItems.length > 0) {
-            const result = editor.placeAdvisoryComments(advisoryItems);
-            if (result.failed.length > 0) {
-              // Surface unresolved anchors the SAME way the live onAdvisoryComments path does
-              // (FR-19 "do not guess" — reported, never silently placed). Tier-3 targetText is not
-              // logged beyond this placement-failure report.
-              // eslint-disable-next-line no-console
-              console.warn(
-                `[ComposeWorkspace] ${result.failed.length} of ${advisoryItems.length} re-materialized advisory ` +
-                  'comment(s) could not be anchored (strict resolution failed):',
-                result.failed
-              );
-            }
-          } else {
-            // A findings-shaped payload that yields NO usable items (empty/malformed flaggedSections):
-            // log + skip gracefully — never crash, never partial-place, never fall through to a redline.
-            // eslint-disable-next-line no-console
-            console.warn(
-              '[ComposeWorkspace] compose findings payload carried no usable flagged sections — nothing re-materialized:',
-              target.key
-            );
-          }
-          // Idempotent (FR-04): mark handled so a refresh / duplicate Flow-5 signal never re-places.
-          setLastMaterializedKey(target.key);
-          setComposeDraftError(null);
+        if (targetLedgerRef) {
+          // TARGETED — a specific known stored output (Flow-5 signal, or a duplicate-signal test).
+          // Empty-list bail is scoped to THIS branch only: nothing to look up.
+          if (composeOutputs.length === 0) return;
+          const target = composeOutputs.find(o => o.key === targetLedgerRef);
+          if (!target) return;
+          materializeSingleOutput(editor, target);
           return;
         }
-        // DEF-11: a whole-document revision (`compose-revise-document`) carries a CHANGE LIST
-        // (`edits[]`) and/or REVIEW FLAGS (`comments[]`). A single-edit draft (compose-draft-alternative /
-        // compose-draft-document) has neither — it keeps the shipped single-materialize path.
-        const editList = Array.isArray(target.payload?.edits) ? target.payload.edits : null;
-        const commentList = Array.isArray(target.payload?.comments) ? target.payload.comments : null;
-        if (editList && editList.length > 0) {
-          editor.materializeComposeEdits(editList, provenance); // multi-change redline
-        } else {
-          editor.materializeComposeDraft(target.payload, provenance); // single-edit redline (unchanged)
-        }
-        setLastMaterializedKey(target.key);
-        setComposeDraftError(null);
 
-        // DEF-13 — register the AI edit's REASON as an anchored COMMENT annotation on the change,
-        // persisted via the FR-29 session-annotations endpoint (gap-4.3 effect) — see the task-040
-        // NOTE on `registerAiReviewComments` above: this rationale does NOT currently export as a
-        // native `w:comment` on Save (that PushAnnotations/DocxAnnotationWriter path is retired/never
-        // wired to Save); tracked as a follow-on, out of task 040's scope. Anchored to the edit's
-        // `target_text` (the redline range); skipped for an insertion-style draft with no target (no
-        // span to anchor a comment to) or an empty rationale. Deduped by the ledger key so a
-        // refresh/duplicate materialize never appends a second copy.
-        // DEF-11: a whole-document revision's REVIEW FLAGS become anchored comments (flag-risks intent).
-        // A single-edit draft instead contributes its rationale as ONE anchored comment (DEF-13).
-        if (commentList && commentList.length > 0) {
-          registerAiReviewComments(commentList, provenance);
-        } else {
-          registerAiEditReasonComment(target.payload, {
-            ledgerRef: target.key,
-            bindingId: target.bindingId,
-          });
+        // UNTARGETED must NOT bail on an empty list (task 032 128KB budget, Leg B): an over-cap
+        // findings payload is truncated at the LEDGER WRITE seam and the read projection
+        // (`ChatEndpoints.ProjectComposeOutputs`) SKIPS the truncation-marker entry entirely — so a
+        // truncated review can leave `composeOutputs` COMPLETELY EMPTY. The degraded-restore check
+        // below (comparing against the sessionStorage marker) needs to run in exactly that case, so
+        // it cannot sit behind an early return on emptiness.
+
+        // UNTARGETED (reopen / refresh-durability, task 032 gap #3 coexistence): replay ALL findings
+        // outputs (never evicted by a later edit — the ORIGINAL bug: `composeOutputs.reduce(...)` over
+        // the WHOLE set picked only the single globally-highest-turn output, silently dropping an
+        // earlier review's findings once ANY later edit output existed) PLUS the latest edit-shaped
+        // output (unchanged highest-turn-among-edits semantics — undo/redo still works the same way).
+        if (reviewSummarySessionRef.current !== state.sessionId) {
+          // A genuinely different session's findings are about to materialize — reset the accumulator
+          // so a document switch never leaves a PRIOR document's stale rows visible.
+          setReviewSummaryFindings([]);
+          setReviewSummaryFailedCount(0);
+          setReviewSummaryOverallRisk(undefined);
+          setReviewFindingsDegraded(null);
+          reviewSummarySessionRef.current = state.sessionId;
+        }
+
+        const findingsOutputs = composeOutputs.filter(isFindingsShapedComposeOutput);
+        const editOutputs = composeOutputs.filter(o => !isFindingsShapedComposeOutput(o));
+
+        for (const output of findingsOutputs) {
+          const reviewPayload = output.payload as ComposeReviewPayload;
+          materializeFindingsOutput(editor, output, reviewPayload, reviewPayload.flaggedSections ?? []);
+        }
+
+        if (editOutputs.length > 0) {
+          const latestEdit = editOutputs.reduce((a, b) => (b.turn > a.turn ? b : a));
+          if (latestEdit.key !== lastMaterializedKey) {
+            materializeEditOutput(editor, latestEdit);
+          }
+        }
+
+        // Task 032 (128KB budget, Leg B) — degraded-restore detection: the read-projection shows ZERO
+        // findings-shaped outputs for this session. If a same-tab marker says a prior review placed
+        // N>0 findings, the entry clearly existed once and is now silently gone (the ADR-040
+        // truncation-marker skip, `ChatEndpoints.ProjectComposeOutputs`) — surface a visible notice
+        // rather than a silent empty panel.
+        if (findingsOutputs.length === 0) {
+          const marker = readReviewFindingsMarker(state.sessionId);
+          if (marker && marker.count > 0) {
+            setReviewFindingsDegraded({ expectedCount: marker.count, reason: 'skipped' });
+          }
         }
       } catch (err) {
         // A 404 means the session has no compose outputs yet — a fresh document/upload mount
@@ -1836,8 +2061,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       state.sessionId,
       bffBaseUrl,
       lastMaterializedKey,
-      registerAiEditReasonComment,
-      registerAiReviewComments,
+      materializeSingleOutput,
+      materializeFindingsOutput,
+      materializeEditOutput,
     ]
   );
 
@@ -1855,14 +2081,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // `useComposeWorkspaceReceivers` hook (zero `as any`; discriminants enumerated
   // on the shared-lib bus union).
   // -------------------------------------------------------------------------
-  // ai-advanced-capabilities-nda-r1 task 030 — review-summary docked panel state (FR-07). Captures
-  // the SAME `advisoryComments` projection 031's onAdvisoryComments handler below already receives,
-  // for the docked AgreementReviewSummaryPanel (ADR-040 — one ledgered NDA-REVIEW result, two renderings,
-  // never a second server read). Additive to 031's existing handler — see the capture lines inside
-  // it further down; no existing line there is altered.
-  const [reviewSummaryFindings, setReviewSummaryFindings] = React.useState<readonly NdaReviewFindingSummary[]>([]);
-  const [reviewSummaryOpen, setReviewSummaryOpen] = React.useState<boolean>(false);
-  const [reviewSummaryFailedCount, setReviewSummaryFailedCount] = React.useState<number>(0);
   // UAT round-5 #2 — the "Overall risk" banner was removed from the summary, so the host no longer
   // tracks `overallRisk` (the event still carries it; we simply don't render it anymore).
 
@@ -1947,6 +2165,26 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         }))
       );
       setReviewSummaryFailedCount(result?.failed.length ?? 0);
+      // Task 032 — thread the event's `overallRisk` (typed on the wire, previously dropped — see
+      // AgreementReviewSummaryPanel.tsx's file header "OVERALL RISK") into the SAME state the ledger-
+      // restore path populates, so live vs. reopen carry parity.
+      setReviewSummaryOverallRisk(event.overallRisk);
+      // A fresh LIVE review supersedes any earlier degraded-restore notice for this session.
+      setReviewFindingsDegraded(null);
+      // Task 032 (031-residual dedupe guard) — record WHICH session this live placement belongs to
+      // (so the untargeted ledger-restore pass below never wrongly resets it as "a different
+      // session's data") AND the content signature (so a same-mount ledger re-run — e.g. an
+      // `externalChange` status-cycle racing this live placement — recognizes the SAME clause set and
+      // skips re-placing it; `placeAdvisoryComments` has no idempotency of its own — see
+      // notes/031-execution-notes.md "Residual risk").
+      const liveSessionScope = event.sessionId ?? state.sessionId;
+      reviewSummarySessionRef.current = liveSessionScope;
+      materializedFindingsKeysRef.current.add(
+        `${liveSessionScope}::sig:${computeAdvisorySignature(items.map(item => ({ targetText: item.targetText })))}`
+      );
+      // Task 032 (128KB budget, Leg B) — record the durability marker so a LATER reopen (same tab)
+      // can detect a truncated/skipped ledger entry for this review.
+      writeReviewFindingsMarker(liveSessionScope, items.length);
       // UAT round-7 #4 — the Review Summary now DEFAULTS COLLAPSED; a completed review no longer
       // auto-opens it. The reviewer opens it on demand via the toolbar's Review Summary toggle. (The
       // right-gutter Review Notes still show by default — ComposeEditor's `reviewNotesVisible`.)
@@ -2863,6 +3101,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             // persistent affordance now lives in the Assistant chat (a "Saved to the DMS" message
             // with "Open preview", posted via the save-completed conduit). The banner keeps its
             // success signal (saveSuccessToken) but no longer carries the preview link.
+            // Task 032 (FR-16 128KB budget, Leg B) — an honest notice when a prior review's findings
+            // could not be fully restored on reopen (never silent absence).
+            reviewFindingsDegraded={reviewFindingsDegraded}
           />
 
           {/* ai-advanced-capabilities-nda-r1 UAT round-5 #1 — the Review Summary panel MOVED from here
@@ -2969,6 +3210,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 // UAT round-5 #1 — the editor now renders the panel; feed it the data + failure count.
                 findings: reviewSummaryFindings,
                 placementFailureCount: reviewSummaryFailedCount,
+                // Task 032 gap #1 — complete the overallRisk data path (live event → state → panel)
+                // that task 030 planted but nothing consumed. NOT re-introducing the round-5 #2
+                // removed banner — AgreementReviewSummaryPanel's `overallRisk` prop stays deprecated
+                // (ignored) by that standing UAT decision; this just stops the value from being
+                // silently discarded.
+                overallRisk: reviewSummaryOverallRisk,
               }}
             />
           </div>

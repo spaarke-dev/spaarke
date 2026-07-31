@@ -419,3 +419,236 @@ describe("useAgreementReviewGate — classify unavailable", () => {
     expect(deps.inject).toHaveBeenCalled();
   });
 });
+
+describe("useAgreementReviewGate — task 023 runExplicit (FR-09 explicit door, deterministic bind)", () => {
+  it("binds the explicit subDomain DETERMINISTICALLY — no chips, no gate, mounts + dispatches immediately", async () => {
+    // The classifier is never awaited before dispatch — resolve it after a tick so we can assert
+    // dispatch already happened.
+    let resolveClassify!: (v: DispatchConsumerResult) => void;
+    classifyDispatcherMock.mockReturnValue(
+      new Promise<DispatchConsumerResult>((resolve) => {
+        resolveClassify = resolve;
+      })
+    );
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.runExplicit("file-e1", "acme.pdf", "employment");
+    });
+
+    expect(deps.mountFileInCompose).toHaveBeenCalledWith("file-e1", "acme.pdf", "agreement-analysis");
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledTimes(1);
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledWith("review-binding-1", {
+      slots: { fileIds: ["file-e1"], subDomain: "employment" },
+      resultLabel: "Employment",
+    });
+    // NO chips, NO gate message — deterministic bind, never a classification question.
+    expect(deps.acceptChips).not.toHaveBeenCalled();
+    expect(deps.enqueueAssistantMessage).not.toHaveBeenCalled();
+
+    // Let the still-pending classifier settle so the test doesn't leave a dangling promise.
+    await act(async () => {
+      resolveClassify(classifyResult({ isAgreement: true, composite: false, candidates: [{ subDomainKey: "employment", confidence: 0.9 }] }));
+      await Promise.resolve();
+    });
+  });
+
+  it("mismatch-warns: a high-confidence differing top candidate surfaces an informational notice, WITHOUT re-routing the dispatch", async () => {
+    classifyDispatcherMock.mockResolvedValue(
+      classifyResult({ isAgreement: true, composite: false, candidates: [{ subDomainKey: "nda", confidence: 0.95 }] })
+    );
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.runExplicit("file-e2", "acme.pdf", "employment");
+      // let the non-blocking sanity check's .then() settle
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // The dispatch was still bound to the EXPLICIT choice (employment), never re-routed to "nda".
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledWith("review-binding-1", {
+      slots: { fileIds: ["file-e2"], subDomain: "employment" },
+      resultLabel: "Employment",
+    });
+    expect(deps.enqueueAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("NDA") })
+    );
+    // No chips were ever rendered for the sanity notice (ADR-041: informational only).
+    expect(deps.acceptChips).not.toHaveBeenCalled();
+  });
+
+  it("no notice when the classifier agrees with the explicit choice", async () => {
+    classifyDispatcherMock.mockResolvedValue(
+      classifyResult({ isAgreement: true, composite: false, candidates: [{ subDomainKey: "employment", confidence: 0.95 }] })
+    );
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.runExplicit("file-e3", "acme.pdf", "employment");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(deps.enqueueAssistantMessage).not.toHaveBeenCalled();
+  });
+
+  it("classifier-error-never-blocks: a rejected classify dispatch never blocks/surfaces on the explicit run", async () => {
+    classifyDispatcherMock.mockRejectedValue(new Error("boom"));
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.runExplicit("file-e4", "acme.pdf", "employment");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledTimes(1);
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledWith("review-binding-1", {
+      slots: { fileIds: ["file-e4"], subDomain: "employment" },
+      resultLabel: "Employment",
+    });
+    expect(deps.enqueueAssistantMessage).not.toHaveBeenCalled();
+    expect(deps.inject).not.toHaveBeenCalled();
+  });
+
+  it("classifier-unavailable-never-blocks: no classifyBindingId still dispatches the explicit review", async () => {
+    const deps = makeDeps({ classifyBindingId: null });
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.runExplicit("file-e5", "acme.pdf", "nda");
+    });
+
+    expect(classifyDispatcherMock).not.toHaveBeenCalled();
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledWith("review-binding-1", {
+      slots: { fileIds: ["file-e5"], subDomain: "nda" },
+      resultLabel: "NDA",
+    });
+  });
+
+  it("no-double-ask: a repeat runExplicit call for the SAME file re-dispatches directly without re-running the sanity check", async () => {
+    classifyDispatcherMock.mockResolvedValue(
+      classifyResult({ isAgreement: true, composite: false, candidates: [{ subDomainKey: "employment", confidence: 0.95 }] })
+    );
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.runExplicit("file-e6", "acme.pdf", "employment");
+      await Promise.resolve();
+    });
+    expect(classifyDispatcherMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await result.current.runExplicit("file-e6", "acme.pdf", "employment");
+    });
+    // Classifier NOT re-invoked on the repeat call; review dispatched again directly.
+    expect(classifyDispatcherMock).toHaveBeenCalledTimes(1);
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT update getLastResolvedSubDomainKey (an explicit bind already has a persisted lookup from its own door)", async () => {
+    classifyDispatcherMock.mockResolvedValue(
+      classifyResult({ isAgreement: true, composite: false, candidates: [{ subDomainKey: "employment", confidence: 0.95 }] })
+    );
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.runExplicit("file-e7", "acme.pdf", "employment");
+      await Promise.resolve();
+    });
+
+    expect(result.current.getLastResolvedSubDomainKey()).toBeNull();
+  });
+});
+
+describe("useAgreementReviewGate — task 023 getLastResolvedSubDomainKey (classifier-path lookup-write seam)", () => {
+  it("is null before any classifier resolution", () => {
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+    expect(result.current.getLastResolvedSubDomainKey()).toBeNull();
+  });
+
+  it("tracks the auto-proceed classifier resolution", async () => {
+    classifyDispatcherMock.mockResolvedValue(
+      classifyResult({ isAgreement: true, composite: false, candidates: [{ subDomainKey: "nda", confidence: 0.92 }] })
+    );
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.runGate("file-k1", "acme.pdf");
+    });
+
+    expect(result.current.getLastResolvedSubDomainKey()).toBe("nda");
+  });
+
+  it("tracks a confirm-chip acceptance", async () => {
+    classifyDispatcherMock.mockResolvedValue(
+      classifyResult({ isAgreement: true, composite: false, candidates: [{ subDomainKey: "nda", confidence: 0.5 }] })
+    );
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.runGate("file-k2", "acme.pdf");
+    });
+    act(() => {
+      result.current.handleGateChipAction(LOCAL_CHIP.agreementReviewConfirm);
+    });
+    await waitFor(() => expect(deps.dispatchReviewBinding).toHaveBeenCalledTimes(1));
+
+    expect(result.current.getLastResolvedSubDomainKey()).toBe("nda");
+  });
+
+  it("does NOT track 'both' (ambiguous for a single-valued lookup)", async () => {
+    classifyDispatcherMock.mockResolvedValue(
+      classifyResult({
+        isAgreement: true,
+        composite: true,
+        candidates: [
+          { subDomainKey: "employment", confidence: 0.6 },
+          { subDomainKey: "nda", confidence: 0.55 },
+        ],
+      })
+    );
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.runGate("file-k3", "hybrid.pdf");
+    });
+    await act(async () => {
+      result.current.handleGateChipAction(LOCAL_CHIP.agreementReviewBoth);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(result.current.getLastResolvedSubDomainKey()).toBeNull();
+  });
+
+  it("resetForSession clears the tracked classifier resolution", async () => {
+    classifyDispatcherMock.mockResolvedValue(
+      classifyResult({ isAgreement: true, composite: false, candidates: [{ subDomainKey: "nda", confidence: 0.92 }] })
+    );
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.runGate("file-k4", "acme.pdf");
+    });
+    expect(result.current.getLastResolvedSubDomainKey()).toBe("nda");
+
+    act(() => {
+      result.current.resetForSession();
+    });
+    expect(result.current.getLastResolvedSubDomainKey()).toBeNull();
+  });
+});

@@ -43,6 +43,7 @@ import type {
   ComposeCheckoutLockedByInfo,
   ComposeCheckoutStatus,
   ComposePartialApplyInfo,
+  ComposeReviewFindingsDegraded,
 } from './ComposeWorkspace.types';
 import type { ComposeAssistantToWorkspaceFlow } from '../types/compose-contracts';
 
@@ -79,6 +80,15 @@ export interface ComposeBannerStackProps {
    * anchored; please redo them" — INSTEAD of the plain "Saved ✓" success bar. Null/omitted on a clean save.
    */
   partialApply?: ComposePartialApplyInfo | null;
+  /**
+   * ai-advanced-capabilities-agreements-r1 task 032 (FR-16 128KB budget, Leg B) — populated when a
+   * prior agreement-review's findings could not be fully restored on reopen (the 128KB inline-payload
+   * cap silently dropped the ledger entry server-side, or a present-but-corrupted findings payload
+   * yielded zero usable items). Renders an honest "couldn't be fully restored" notice — the closed
+   * guarantee's Leg B ("the truncated case shows an explicit notice — never silent absence"). Null on
+   * a clean restore (the normal case).
+   */
+  reviewFindingsDegraded?: ComposeReviewFindingsDegraded | null;
 }
 
 /** How long the transient "Saved ✓" confirmation stays up before auto-dismissing. */
@@ -153,6 +163,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     pendingAssistantInsert,
     saveSuccessToken = 0,
     partialApply = null,
+    reviewFindingsDegraded = null,
   } = props;
 
   // FR-21 (DEF-15, R3 UAT round-3 carry-in): the "Document opened with N
@@ -204,12 +215,23 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
   // "Saved ✓" bar in favor of the honest partial-apply warning so the two never stack redundantly.
   const showSaveSuccessBanner = showSaveSuccess && !errorMessage && !showPartialApplyBanner;
 
+  // Task 032 — same dismiss-and-reshow-on-a-new-instance pattern as `partialApply` above: dismissable,
+  // re-shows if a NEW degraded-restore object arrives (a different session/count), stays dismissed for
+  // the SAME object reference otherwise.
+  const showReviewFindingsDegraded = !!reviewFindingsDegraded;
+  const [reviewFindingsDegradedDismissed, setReviewFindingsDegradedDismissed] = React.useState(false);
+  React.useEffect(() => {
+    setReviewFindingsDegradedDismissed(false);
+  }, [reviewFindingsDegraded]);
+  const showReviewFindingsDegradedBanner = showReviewFindingsDegraded && !reviewFindingsDegradedDismissed;
+
   const showStack =
     showImportWarnings ||
     !!errorMessage ||
     !!pendingAssistantInsert ||
     showSaveSuccessBanner ||
     showPartialApplyBanner ||
+    showReviewFindingsDegradedBanner ||
     checkoutStatus === 'conflict' ||
     checkoutStatus === 'failed' ||
     checkoutStatus === 'cancelled';
@@ -258,6 +280,32 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
                 icon={<Dismiss16Regular />}
                 data-testid="compose-workspace-partial-apply-dismiss"
                 onClick={() => setPartialApplyDismissed(true)}
+              />
+            }
+          />
+        </MessageBar>
+      ) : null}
+
+      {showReviewFindingsDegradedBanner && reviewFindingsDegraded ? (
+        // Task 032 (FR-16 128KB budget, Leg B) — an honest "couldn't be fully restored" notice.
+        // 'skipped': the ledger read shows no findings at all but a same-tab marker recorded a prior
+        // review's results (the 128KB inline-payload cap likely dropped the entry server-side).
+        // 'malformed': a findings-shaped entry IS present but every item failed the projection guard.
+        <MessageBar intent="warning" data-testid="compose-workspace-review-findings-degraded-banner" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Review results couldn&apos;t be fully restored</MessageBarTitle>
+            {reviewFindingsDegraded.reason === 'skipped'
+              ? `A prior review of this document (about ${reviewFindingsDegraded.expectedCount} finding${reviewFindingsDegraded.expectedCount === 1 ? '' : 's'}) could not be restored — the results may have exceeded the storage limit for this session. Re-run the review to refresh the findings.`
+              : "A prior review's stored results were incomplete and couldn't be restored. Re-run the review to refresh the findings."}
+          </MessageBarBody>
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-review-findings-degraded-dismiss"
+                onClick={() => setReviewFindingsDegradedDismissed(true)}
               />
             }
           />

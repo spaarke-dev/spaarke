@@ -4,7 +4,7 @@
     <title>Explicit-path deterministic bind + classifier-path lookup write + mismatch sanity-check</title>
     <phase>2 Classifier + Routing</phase>
     <gate>blocked (deps 020,022)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Routing correctness on both entry paths + Dataverse write on the classifier path; .tsx changes in workspace/conversation surfaces.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -98,6 +98,27 @@
     <criterion testable="true">Negative: sanity-check failure (classifier error) never blocks the explicit run.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-09; design Lens 3(d) two-mode model. 033 consumes this for wizard auto-run.</notes>
+  <notes>Spec FR-09; design Lens 3(d) two-mode model. 033 consumes this for wizard auto-run.
+
+Completed 2026-07-31. ONE routing decision point (ConversationPane.handleDecorateOutboundBodyWithRevise's
+review-intent `if` block, ~:1768) branches explicit vs classifier — never two ifs. Explicit door:
+`useAgreementReviewGate.runExplicit(fileId, fileName, subDomainKey)` — deterministic dispatch (reuses the
+SAME `dispatchReview` `runGate` already uses), zero classifier gate, zero chips; the classifier still runs
+NON-BLOCKING via `runClassify` for a warn-only sanity check (`resolveAgreementReviewSanityMismatch` — new
+pure fn in agreementReviewRouting.ts, mirrors resolveAgreementReviewGateDecision's threshold logic) —
+mismatch surfaces one informational chat message (`makeLocalAssistantMessage`, no chip/gate); classifier
+error/unavailable silently produces no notice, never blocks. Classifier door: new
+`agreementTypeLookupWrite.ts` module (discoverNavProps + PascalCase fallback `sprk_AgreementType`, mirrors
+hub A1's mechanism per `git show 1e1a6579b` but corrects A1's still-unfixed stale `sprk_agreementtypeid`
+columnName search — task 022 empirically confirmed the live column is `sprk_agreementtype`); wired into
+`HistoryOverlay.tsx`'s existing "Promote to Analysis…" flow (the only client-reachable session->Analysis
+bind today) via two additive optional props (`resolveClassifiedSubDomain`, `dataService`) — zero behavior
+change when omitted. New `useAgreementReviewGate.getLastResolvedSubDomainKey()` tracks the classifier's
+last single-type resolution (not "both" — ambiguous for a single-valued lookup; not `runExplicit` — already
+persisted by its own door). 33 new tests (agreementReviewRouting +8, useAgreementReviewGate +21 across two
+new describe blocks, agreementTypeLookupWrite +11 new file, ConversationPane explicit-door e2e +2 new file);
+package suite 89 suites/826 tests all green (baseline 87/792); typecheck 0 surface-owned errors; `npm run
+build` green. See notes/023-execution-notes.md for full detail incl. one dropped test file (Fluent v9 Menu
++ jsdom RTL-timing flakiness, unrelated to production correctness — decision documented).</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

@@ -3,8 +3,8 @@
   <metadata>
     <title>FR-16 completion — summary-panel restore + 128KB payload budget + supersede/highest-turn protection</title>
     <phase>3 Durable Review</phase>
-    <gate>blocked (deps 031)</gate>
-    <status>not-started</status>
+    <gate>open (deps 031 satisfied)</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Completes the durable-recall guarantee; edge-case correctness (caps, coexisting outputs) for legal work product; ComposeWorkspace/panel .tsx changes.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -101,6 +101,32 @@
     <criterion testable="true">Negative: a corrupted/partial chunk set surfaces a visible degraded-restore notice, not a crash.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-16 completion; HUB-R1-REVIEW §4 risks. With this task, "reopen restores the review deterministically" is fully true — the owner's Phase-3 leg.</notes>
+  <notes>Spec FR-16 completion; HUB-R1-REVIEW §4 risks. With this task, "reopen restores the review deterministically" is fully true — the owner's Phase-3 leg.
+
+COMPLETION SUMMARY (2026-07-31): All 3 gaps closed client-side, no server changes, no escalation fired.
+(1) Summary-panel restore: `materializeFindingsOutput` (new, extracted from the old inline branch) now
+populates `reviewSummaryFindings`/`reviewSummaryFailedCount`/`reviewSummaryOverallRisk` on the ledger-restore
+path, mirroring the live `onAdvisoryComments` capture — mirrors moved earlier in ComposeWorkspace.tsx so the
+restore path can see them. (2) 128KB budget: chosen Leg B (explicit visible notice, not chunking — chunking
+needs a server write-seam split, out of the read-only src/server/** boundary, exactly as the POML pre-empted).
+Two detection legs: (a) a findings-shaped-but-empty-after-projection output → immediate degraded notice
+(reason 'malformed'); (b) a same-tab sessionStorage marker (`spaarke.compose.reviewFindingsMarker:{sessionId}`)
+recording the last known-good finding count, compared against a fully-empty read-projection → degraded notice
+(reason 'skipped'). Rendered via a new `ComposeBannerStack` row (`reviewFindingsDegraded` prop), mirroring the
+existing `partialApply` dismiss/reshow pattern verbatim. (3) Coexistence: chosen "multi-select materialization"
+(replay ALL findings outputs + the latest edit-shaped output separately) over the FR-29 layer — simplest fit,
+since FR-29 `anchoredAnnotations` is a structurally different store (DEF-11/DEF-13 comment annotations, not the
+TipTap-native advisory-comment threads `placeAdvisoryComments` creates) and extending its type union for a
+marker would touch a wider blast radius (any consumer that iterates all annotations). Server's own supersede
+(`ChatEndpoints.SupersedeComposeOutput`) is verified BindingId-scoped (`ComposeDisposition.ResolveCurrent`), so
+findings (a different Binding) are structurally unreachable by an edit-binding's supersede — proven by a
+same-file client test. 031-residual dedupe guard: content-signature-based (no `ledgerRef` on the live wire
+shape today — verified `useNdaReviewAdvisoryCommentsBridge.ts` never sets it), tracked in a new
+`materializedFindingsKeysRef` Set alongside exact ledger-key idempotency; empirically verified load-bearing
+(temporarily disabled → the dedupe test's assertion flipped from 1 to 2 anchors, confirmed, then restored).
+6 new integration tests + 6 new ComposeBannerStack unit tests, all green; 0 regressions (16/16
+redline-from-ledger, 18/18 ComposeBannerStack, 0 tsc errors, `npm run build` clean). Pre-existing 15/5-suite
+failure set (bornInEditorSave/imports/saveOpLogPreservation/search + stepOperationInterceptor) untouched,
+unaffected. Full detail: projects/ai-advanced-capabilities-agreements-r1/notes/032-execution-notes.md.</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

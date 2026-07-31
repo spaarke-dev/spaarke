@@ -45,9 +45,11 @@ import {
   buildAgreementReviewConfirmChips,
   buildAgreementReviewConfirmMessage,
   buildAgreementReviewNonAgreementChips,
+  buildAgreementReviewSanityMismatchMessage,
   displayNameFor,
   isAgreementClassifyResult,
   resolveAgreementReviewGateDecision,
+  resolveAgreementReviewSanityMismatch,
   resolveFallbackKey,
   toConsumerChipWire,
   type AgreementClassifyCandidate,
@@ -105,10 +107,27 @@ export interface AgreementReviewGateDeps {
 export interface AgreementReviewGateController {
   /** Entry point: a review-intent text message + an available session file. */
   runGate: (fileId: string, fileName: string | undefined) => Promise<void>;
+  /**
+   * task 023 (FR-09 explicit door, design Lens 3d "hint authoritative"): binds `subDomainKey`
+   * DETERMINISTICALLY — no classification gate, no confirm chips, no re-route. The classifier
+   * still runs, but only as a NON-BLOCKING, warn-only sanity check (see module doc + the
+   * `resolveAgreementReviewSanityMismatch` pure decision). Callable directly (bypassing the
+   * text-detection path entirely) — the seam task 033's wizard auto-run bridge consumes.
+   */
+  runExplicit: (fileId: string, fileName: string | undefined, subDomainKey: string) => Promise<void>;
   /** Routes a `local:agreement-review-*` chip click back to the pending gate decision. */
   handleGateChipAction: (actionId: string) => void;
   /** True while classification is in flight (optional "Working…" affordance). */
   classifying: boolean;
+  /**
+   * task 023 (classifier-path lookup write seam): the LAST subDomain key the CLASSIFIER (not the
+   * explicit door) resolved for this session, if any — `null` when the session never went through
+   * a classifier resolution, or only ever resolved via `runExplicit` (an explicit bind is already
+   * persisted by its own door; it needs no NEW lookup write). Consumed by the promote/fork ->
+   * Analysis binding flow to write the resolved `sprk_agreementtype` lookup so persistence matches
+   * routing (see `agreementTypeLookupWrite.ts`).
+   */
+  getLastResolvedSubDomainKey: () => string | null;
   /** Clears per-session gate state (call on new-session, mirrors the other refs' session resets). */
   resetForSession: () => void;
 }
@@ -150,6 +169,11 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
   const registryRef = React.useRef<readonly AgreementTypeRegistryEntry[] | null>(null);
   // Per-fileId resolved decisions — "no double-ask" (ADR-041).
   const resolvedRef = React.useRef<Map<string, ResolvedGateEntry>>(new Map());
+  // task 023 (classifier-path lookup write seam): the LAST subDomain the CLASSIFIER resolved this
+  // session (auto-proceed / confirm-accept / a single composite-lens pick — NOT `runExplicit`,
+  // which already has a persisted lookup from its own door, and NOT "both", which is ambiguous for
+  // a single-valued lookup). `null` until a classifier resolution happens; reset per session.
+  const lastResolvedSubDomainKeyRef = React.useRef<string | null>(null);
   // The single unanswered gate awaiting a chip click (single dispatch decision per turn, mirrors
   // useConsumerChips' chip-consumption invariant).
   const pendingRef = React.useRef<PendingGate | null>(null);
@@ -333,6 +357,9 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
             // NEVER silent-wrong-grounding: still an explicit orientation + dispatch, just no chat question.
             const displayName = displayNameFor(decision.subDomainKey, registry);
             resolvedRef.current.set(fileId, { subDomainKey: decision.subDomainKey, displayName });
+            // task 023: this is a CLASSIFIER resolution (unlike runExplicit, which already has a
+            // persisted lookup from its own door) — track it for the promote/fork lookup-write seam.
+            lastResolvedSubDomainKeyRef.current = decision.subDomainKey;
             pendingRef.current = null;
             await dispatchReview(fileId, fileName, decision.subDomainKey, displayName);
             return;
@@ -370,6 +397,7 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
         pendingRef.current = null;
         const displayName = displayNameFor(decision.subDomainKey, registry);
         resolvedRef.current.set(fileId, { subDomainKey: decision.subDomainKey, displayName });
+        lastResolvedSubDomainKeyRef.current = decision.subDomainKey; // task 023: classifier resolution
         void dispatchReview(fileId, fileName, decision.subDomainKey, displayName);
         return;
       }
@@ -379,12 +407,16 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
         const fallbackKey = resolveFallbackKey(registry);
         const displayName = displayNameFor(fallbackKey, registry);
         resolvedRef.current.set(fileId, { subDomainKey: fallbackKey, displayName });
+        lastResolvedSubDomainKeyRef.current = fallbackKey; // task 023: classifier-flow resolution
         void dispatchReview(fileId, fileName, fallbackKey, displayName);
         return;
       }
 
       if (actionId === LOCAL_CHIP.agreementReviewBoth && decision.kind === "composite") {
         pendingRef.current = null;
+        // "Both" is ambiguous for a SINGLE-valued sprk_agreementtype lookup — deliberately does NOT
+        // update lastResolvedSubDomainKeyRef (task 023 seam), leaving any prior single-type
+        // resolution (if any) as the last-known value rather than guessing between the two packs.
         void dispatchBothSequentially(fileId, fileName, decision.candidates, registry);
         return;
       }
@@ -394,22 +426,84 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
         pendingRef.current = null;
         const displayName = displayNameFor(lensKey, registry);
         resolvedRef.current.set(fileId, { subDomainKey: lensKey, displayName });
+        lastResolvedSubDomainKeyRef.current = lensKey; // task 023: classifier-flow resolution
         void dispatchReview(fileId, fileName, lensKey, displayName);
       }
     },
     [dispatchReview, dispatchBothSequentially]
   );
 
+  // task 023 (FR-09 explicit door): binds `subDomainKey` DETERMINISTICALLY — no classification
+  // gate, no confirm chips, no re-route. Callable directly (the seam task 033's wizard auto-run
+  // bridge consumes) or via ConversationPane's text-detection path when the session was launched
+  // already-oriented (`explicitComposeLaunch?.subDomain`).
+  const runExplicit = React.useCallback(
+    async (fileId: string, fileName: string | undefined, subDomainKey: string): Promise<void> => {
+      if (!fileId) return;
+
+      // ADR-041 "no double-ask": a file whose bind already resolved (via either door — a fileId's
+      // gate takes exactly one path per session) re-dispatches directly, no re-classify/re-notice.
+      const resolved = resolvedRef.current.get(fileId);
+      if (resolved && resolved.subDomainKey !== "both") {
+        await dispatchReview(fileId, fileName, resolved.subDomainKey, resolved.displayName);
+        return;
+      }
+
+      if (inFlightRef.current.has(fileId)) return;
+      inFlightRef.current.add(fileId);
+
+      try {
+        const registry = await loadRegistry();
+        const displayName = displayNameFor(subDomainKey, registry);
+        resolvedRef.current.set(fileId, { subDomainKey, displayName });
+        // Deterministic dispatch — bound to the explicit pack immediately, no gate to clear.
+        const dispatchPromise = dispatchReview(fileId, fileName, subDomainKey, displayName);
+        // Warn-only sanity check (ADR-041): run the classifier NON-BLOCKING alongside the explicit
+        // dispatch. `runClassify` never throws (returns null on any failure/unavailability) and this
+        // `.then()`/`.catch()` pair NEVER surfaces an error or blocks/re-routes the explicit run —
+        // resolveAgreementReviewSanityMismatch's own null-safe contract means a classifier error
+        // silently produces no notice, per the negative acceptance criterion.
+        void runClassify(fileId)
+          .then((classifyResult) => {
+            const mismatch = resolveAgreementReviewSanityMismatch(subDomainKey, classifyResult, registry);
+            if (mismatch) {
+              enqueueAssistantMessage(makeLocalAssistantMessage(buildAgreementReviewSanityMismatchMessage(mismatch)));
+            }
+          })
+          .catch(() => {
+            // Never surfaced — see doc comment above.
+          });
+        await dispatchPromise;
+      } finally {
+        inFlightRef.current.delete(fileId);
+      }
+    },
+    [loadRegistry, dispatchReview, runClassify, enqueueAssistantMessage]
+  );
+
   const resetForSession = React.useCallback((): void => {
     resolvedRef.current = new Map();
     pendingRef.current = null;
     inFlightRef.current = new Set();
+    lastResolvedSubDomainKeyRef.current = null;
     // registryRef is intentionally NOT cleared — the sprk_agreementtype registry is tenant-wide
     // reference data, not session-scoped; re-reading it per session would be wasted round-trips.
   }, []);
 
+  const getLastResolvedSubDomainKey = React.useCallback(
+    (): string | null => lastResolvedSubDomainKeyRef.current,
+    []
+  );
+
   return React.useMemo(
-    () => ({ runGate, handleGateChipAction, classifying, resetForSession }),
-    [runGate, handleGateChipAction, classifying, resetForSession]
+    () => ({
+      runGate,
+      runExplicit,
+      handleGateChipAction,
+      classifying,
+      getLastResolvedSubDomainKey,
+      resetForSession,
+    }),
+    [runGate, runExplicit, handleGateChipAction, classifying, getLastResolvedSubDomainKey, resetForSession]
   );
 }

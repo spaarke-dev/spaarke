@@ -157,6 +157,22 @@ const authenticatedFetchMock = jest.fn(async (url: string, _init?: RequestInit):
     const session = sessionFromUrl(url);
     return { ok: true, status: 200, json: async () => composeOutputsBySession[session] ?? [] } as unknown as Response;
   }
+  // Task 032 (dedupe-guard test) — a minimal Save response so `triggerSave` completes the
+  // 'loaded'→'saving'→'loaded' status cycle without unmounting ComposeEditor (`showEditor` covers
+  // BOTH statuses), the SAME-editor-instance re-materialize race notes/031-execution-notes.md
+  // escalated.
+  if (url.includes('/api/compose/documents/') && url.includes('/save')) {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        documentSpeId: SPE_ID,
+        documentRecordId: 'sprk-doc-1',
+        size: 1024,
+        wasPromotedThisSave: false,
+      }),
+    } as unknown as Response;
+  }
   return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
 });
 
@@ -243,6 +259,10 @@ beforeEach(() => {
   composeOutputsReadUrls.length = 0;
   composeOutputsBySession[DOC_SESSION] = defaultComposeOutputs();
   bridgeRef.current = null;
+  // Task 032 — the 128KB-budget degraded-restore marker rides `window.sessionStorage`, keyed by
+  // session id. DOC_SESSION is a shared constant across this whole file's tests, so clear it every
+  // test to prevent cross-test leakage of a marker one test wrote.
+  window.sessionStorage.clear();
 });
 
 describe('DEF-09/DEF-12: ComposeWorkspace materializes the redline mark + per-change on-click from the DOCUMENT session ledger', () => {
@@ -662,5 +682,288 @@ describe('FR-16 task 030: ComposeWorkspace re-materializes a durable review flag
     } finally {
       warnSpy.mockRestore();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 032 — FR-16 completion: summary-panel restore, 128KB payload budget (Leg B — visible
+// notice), findings/edit coexistence + supersede protection, 031-residual dedupe guard.
+// ---------------------------------------------------------------------------
+
+describe('FR-16 task 032: summary-panel restore (gutter + panel, zero dispatch)', () => {
+  it('reopening a reviewed document restores gutter notes AND the summary-panel row (with risk data) — zero LLM calls', async () => {
+    composeOutputsBySession[DOC_SESSION] = [
+      {
+        key: REVIEW_LEDGER_REF,
+        bindingId: REVIEW_BINDING,
+        turn: 1,
+        disposition: 'compose',
+        payload: {
+          overallRisk: 'High',
+          flaggedSections: [
+            {
+              quotedText: 'Sample document body.',
+              flaggedClause: 'The body imposes an unqualified obligation.',
+              assessment: 'This deviates from the firm standard, which requires a materiality qualifier.',
+              sectionRef: '1.1',
+              riskLevel: 'High',
+              standardRef: 'B5 - Obligations',
+            },
+          ],
+        },
+      },
+    ];
+
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+
+    // (1) Gutter restore — the pre-existing task 030 guarantee, re-proven here alongside the panel
+    // for the FULL closed-guarantee assertion (acceptance criterion 1).
+    await waitFor(() => {
+      expect(document.querySelectorAll('span[data-comment-id]').length).toBe(1);
+    });
+
+    // (2) Summary-panel restore (task 032 gap #1 — the NEW behavior). The panel defaults collapsed
+    // (UAT round-7 #4); open it via the toolbar toggle, then assert the row carries the RIGHT
+    // content + risk data — previously this stayed EMPTY on reopen (only a LIVE review populated it).
+    const toggle = await screen.findByTestId('compose-format-review-summary-toggle', undefined, { timeout: 5000 });
+    act(() => {
+      fireEvent.click(toggle);
+    });
+    const row = await screen.findByTestId('nda-review-summary-finding-0', undefined, { timeout: 5000 });
+    // deriveTakeaway strips the trailing period off the first sentence — assert without it.
+    expect(row.textContent).toContain('The body imposes an unqualified obligation');
+    expect(row.textContent).toContain('High'); // the per-finding risk badge
+
+    // (3) Zero LLM calls / zero dispatch — every network call is a GET (the point of FR-16).
+    const nonReadCalls = authenticatedFetchMock.mock.calls.filter(
+      ([, init]) => ((init?.method ?? 'GET') as string).toUpperCase() !== 'GET'
+    );
+    expect(nonReadCalls).toEqual([]);
+  });
+});
+
+describe('FR-16 task 032: 128KB payload budget (Leg B — explicit degraded-restore notice, never silent absence)', () => {
+  it('a findings-shaped output present but yielding ZERO usable items (corrupted/partial) surfaces a visible notice, not a crash', async () => {
+    composeOutputsBySession[DOC_SESSION] = [
+      {
+        key: REVIEW_LEDGER_REF,
+        bindingId: REVIEW_BINDING,
+        turn: 1,
+        disposition: 'compose',
+        payload: { overallRisk: 'Low', flaggedSections: [{ explanation: 'no quotedText' }, { quotedText: '   ' }] },
+      },
+    ];
+
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+
+    const banner = await screen.findByTestId('compose-workspace-review-findings-degraded-banner', undefined, {
+      timeout: 5000,
+    });
+    expect(banner.textContent).toMatch(/couldn.t be fully restored/i);
+    // Negative half of acceptance criterion 5: no crash, no placement, no redline.
+    expect(document.querySelectorAll('span[data-comment-id]').length).toBe(0);
+    expect(document.querySelectorAll('[data-compose-mark]').length).toBe(0);
+  });
+
+  it('a truncated/skipped findings entry (server-side ADR-040 cap, invisible to the client GET) surfaces a visible notice via the same-tab durability marker — never silent absence', async () => {
+    // First mount: a normal review restores cleanly and (as a side effect of the successful
+    // restore) records the same-tab durability marker (task 032, Leg B).
+    composeOutputsBySession[DOC_SESSION] = [
+      {
+        key: REVIEW_LEDGER_REF,
+        bindingId: REVIEW_BINDING,
+        turn: 1,
+        disposition: 'compose',
+        payload: {
+          overallRisk: 'Medium',
+          flaggedSections: [{ quotedText: 'Sample document body.', explanation: 'A finding.', sectionRef: '1.1', riskLevel: 'Medium' }],
+        },
+      },
+    ];
+    const bus1 = new PaneEventBus();
+    const { unmount } = renderWorkspace(bus1);
+    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await waitFor(() => {
+      expect(document.querySelectorAll('span[data-comment-id]').length).toBe(1);
+    });
+    unmount();
+
+    // Simulate the ADR-040 128KB cap having since truncated this entry — `ChatEndpoints.
+    // ProjectComposeOutputs` SKIPS a truncation-marker entry entirely, so a LATER read shows
+    // COMPLETELY EMPTY compose-outputs for this session — indistinguishable from "no review ran"
+    // on the response alone. The sessionStorage marker from the first mount survives (same tab).
+    composeOutputsBySession[DOC_SESSION] = [];
+
+    const bus2 = new PaneEventBus();
+    renderWorkspace(bus2);
+    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+
+    const banner = await screen.findByTestId('compose-workspace-review-findings-degraded-banner', undefined, {
+      timeout: 5000,
+    });
+    expect(banner.textContent).toMatch(/couldn.t be fully restored/i);
+    expect(banner.textContent).toContain('1'); // the marker's expectedCount
+    // Honestly nothing placed this time — the entry is genuinely gone from the read-projection.
+    expect(document.querySelectorAll('span[data-comment-id]').length).toBe(0);
+  });
+});
+
+describe('FR-16 task 032: findings + edit coexistence — a later edit no longer evicts an earlier review\'s durability', () => {
+  it('a findings output (turn 1) and a LATER edit output (turn 2, higher turn) BOTH restore on reopen', async () => {
+    composeOutputsBySession[DOC_SESSION] = [
+      {
+        key: REVIEW_LEDGER_REF,
+        bindingId: REVIEW_BINDING,
+        turn: 1,
+        disposition: 'compose',
+        payload: {
+          overallRisk: 'High',
+          flaggedSections: [{ quotedText: 'Sample document body.', explanation: 'A finding.', sectionRef: '1.1', riskLevel: 'High' }],
+        },
+      },
+      {
+        // A LATER draft-alternative — strictly HIGHER turn than the review. Pre-032, the untargeted
+        // `composeOutputs.reduce((a,b) => b.turn>a.turn?b:a)` picked ONLY this one, silently
+        // dropping the review's findings durability (the exact bug this task closes).
+        key: LEDGER_REF,
+        bindingId: DRAFT_BINDING,
+        turn: 2,
+        disposition: 'compose',
+        payload: { new_text: NEW_TEXT },
+      },
+    ];
+
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+
+    // BOTH restore — the findings anchor AND the edit redline mark, simultaneously, with zero dispatch.
+    await waitFor(() => {
+      expect(document.querySelectorAll('span[data-comment-id]').length).toBe(1);
+    });
+    await waitFor(() => {
+      expect(
+        document.querySelector(`[data-compose-mark="insertion"][data-ledger-ref="${LEDGER_REF}"]`)
+      ).not.toBeNull();
+    });
+
+    const nonReadCalls = authenticatedFetchMock.mock.calls.filter(
+      ([, init]) => ((init?.method ?? 'GET') as string).toUpperCase() !== 'GET'
+    );
+    expect(nonReadCalls).toEqual([]);
+  });
+});
+
+describe('FR-16 task 032: supersede protection — an edit bindingId\'s own turn progression never retracts a findings output', () => {
+  it('an edit output that has been superseded (a later same-bindingId turn) leaves a DIFFERENT-bindingId findings output fully intact', async () => {
+    // Server-side supersede (ChatEndpoints.SupersedeComposeOutput) is scoped to ONE bindingId
+    // (`ComposeDisposition.ResolveCurrent(outputs, prior.BindingId)` — verified by reading the
+    // implementation) and appends a NEW higher-turn entry for that SAME bindingId. The findings
+    // output below carries a DIFFERENT bindingId (the review Binding is never the edit Binding —
+    // task 031's own finding), so it is structurally UNREACHABLE by any edit-binding's supersede
+    // call. This proves the CLIENT half of that guarantee: regardless of how many turns the edit
+    // bindingId accumulates (a "Try another" / supersede cycle), the findings output restores.
+    composeOutputsBySession[DOC_SESSION] = [
+      {
+        key: REVIEW_LEDGER_REF,
+        bindingId: REVIEW_BINDING,
+        turn: 1,
+        disposition: 'compose',
+        payload: {
+          overallRisk: 'Medium',
+          flaggedSections: [{ quotedText: 'Sample document body.', explanation: 'A finding.', sectionRef: '1.1', riskLevel: 'Medium' }],
+        },
+      },
+      // v1 of the edit (the ORIGINAL suggestion) — now superseded.
+      { key: `${DRAFT_BINDING}@t2`, bindingId: DRAFT_BINDING, turn: 2, disposition: 'compose', payload: { new_text: 'draft v1 — superseded' } },
+      // v2 (the CURRENT head after "Try another" / supersede) — the SAME bindingId, a later turn.
+      { key: `${DRAFT_BINDING}@t3`, bindingId: DRAFT_BINDING, turn: 3, disposition: 'compose', payload: { new_text: 'draft v2 — current' } },
+    ];
+
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+
+    // Findings unaffected — the gutter anchor restores.
+    await waitFor(() => {
+      expect(document.querySelectorAll('span[data-comment-id]').length).toBe(1);
+    });
+    // Only the CURRENT (highest-turn) edit materializes — the superseded v1 text never renders.
+    await waitFor(() => {
+      expect(
+        document.querySelector(`[data-compose-mark="insertion"][data-ledger-ref="${DRAFT_BINDING}@t3"]`)
+      ).not.toBeNull();
+    });
+    expect(document.body.textContent).not.toContain('draft v1 — superseded');
+    expect(document.body.textContent).toContain('draft v2 — current');
+  });
+});
+
+describe('FR-16 task 032: 031-residual dedupe guard — a same-mount status-cycle never double-places a live-materialized review', () => {
+  it('a live review placement survives a Save status-cycle (loaded→saving→loaded, SAME editor instance) without duplicating the advisory comment', async () => {
+    // No findings in the ledger at MOUNT time — the review happens LIVE, in-session (the realistic
+    // production sequence: dispatch → live `compose_advisory_comments` event → THEN the write lands
+    // in the ledger, per ADR-040 store-before-render).
+    composeOutputsBySession[DOC_SESSION] = [];
+
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+
+    // LIVE placement (mirrors useNdaReviewAdvisoryCommentsBridge's emitFromResult — no `ledgerRef`
+    // on the wire today, verified by reading the bridge).
+    act(() => {
+      bus.dispatch('workspace', {
+        type: 'compose_advisory_comments',
+        advisoryComments: [
+          { targetText: 'Sample document body.', explanation: 'A finding.', sectionRef: '1.1', riskLevel: 'Medium' },
+        ],
+        overallRisk: 'Medium',
+        sessionId: DOC_SESSION,
+        timestamp: '2026-07-31T00:00:00.000Z',
+      });
+    });
+    await waitFor(() => {
+      expect(document.querySelectorAll('span[data-comment-id]').length).toBe(1);
+    });
+
+    // The write has since landed in the ledger (same clause, same session) — exactly what a
+    // subsequent GET would now return.
+    composeOutputsBySession[DOC_SESSION] = [
+      {
+        key: REVIEW_LEDGER_REF,
+        bindingId: REVIEW_BINDING,
+        turn: 1,
+        disposition: 'compose',
+        payload: {
+          overallRisk: 'Medium',
+          flaggedSections: [{ quotedText: 'Sample document body.', explanation: 'A finding.', sectionRef: '1.1', riskLevel: 'Medium' }],
+        },
+      },
+    ];
+
+    // Trigger a Save — `status` cycles 'loaded'→'saving'→'loaded' WITHOUT `sessionId` changing and
+    // WITHOUT unmounting ComposeEditor (`showEditor` covers both statuses) — the SAME residual
+    // notes/031-execution-notes.md escalated. The FR-04 effect's `[state.status, state.sessionId]`
+    // deps re-fire on BOTH transitions, re-running the untargeted materialize pass in the SAME
+    // (still-alive) editor instance that already holds the live-placed comment.
+    // `data-testid="compose-format-save"` is on the SplitButton's OUTER wrapper (Fluent v9); the
+    // clickable primary-action element is the nested `<button>` — click THAT, not the wrapper div.
+    const saveWrapper = await screen.findByTestId('compose-format-save', undefined, { timeout: 5000 });
+    const saveButton = saveWrapper.querySelector('button');
+    if (!saveButton) throw new Error('Save split-button primary action <button> not found inside the wrapper');
+    act(() => {
+      fireEvent.click(saveButton);
+    });
+    await screen.findByTestId('compose-workspace-save-success-banner', undefined, { timeout: 5000 });
+
+    // The dedupe guard: still exactly ONE advisory anchor — the content-signature check recognized
+    // the SAME clause set the live path already placed and skipped the ledger-driven re-placement
+    // (`placeAdvisoryComments` has no idempotency of its own).
+    expect(document.querySelectorAll('span[data-comment-id]').length).toBe(1);
   });
 });

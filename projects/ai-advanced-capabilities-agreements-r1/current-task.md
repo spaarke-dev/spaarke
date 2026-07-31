@@ -4,7 +4,10 @@
 
 ## Active task
 
-- **Task**: WAVE 5 — 022 ∥ 031 dispatched (Waves 0-4 ✅; last commit 5c6e13e59, pushed)
+- **Task**: WAVE 6 — 023 ∥ 032 dispatched (Waves 0-5 ✅; last commit bf921a23a, pushed)
+- **Wave 5**: 022 ✅ (both envelope legs; NOTIFY doc for hub relay incl. stale-columnName flag) · 031 ✅
+  (documentSessionWaiter threads sessionIdOverride across all 4 review dispatch sites; gating verified
+  already-correct; bridge KEPT; same-mount externalChange dedupe residual → folded into 032's brief).
 - **Wave 4**: 030 ✅ (flip deployed surgically — mirror 16 fields behind live, wrap-up item; findings branch both
   vintages, idempotent, zero server change) · 040 ✅ (selectThread reuse in ComposeEditor common-ancestor;
   sectionRef join never-guess). 022 must NOTIFY hub (deep-threading legs building now — notify doc for owner relay).

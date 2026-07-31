@@ -14,6 +14,8 @@
 import {
   detectAgreementReviewIntent,
   resolveAgreementReviewGateDecision,
+  resolveAgreementReviewSanityMismatch,
+  buildAgreementReviewSanityMismatchMessage,
   resolveConfidenceThreshold,
   resolveFallbackKey,
   displayNameFor,
@@ -243,5 +245,83 @@ describe('chip builders — max 2-3 chips (ASSISTANT-UI-ELEMENT-CRITERIA throwaw
       chipLabel: expect.stringContaining('NDA'),
       requiresAttachments: true,
     });
+  });
+});
+
+describe('resolveAgreementReviewSanityMismatch — task 023 explicit-door warn-only sanity check', () => {
+  it('returns a mismatch when the classifier top candidate differs from the explicit choice at high confidence', () => {
+    const result: AgreementClassifyResult = {
+      isAgreement: true,
+      composite: false,
+      candidates: [{ subDomainKey: 'employment', confidence: 0.93 }],
+    };
+    const mismatch = resolveAgreementReviewSanityMismatch('nda', result, REGISTRY);
+    expect(mismatch).toEqual({
+      explicitKey: 'nda',
+      explicitDisplayName: 'NDA',
+      topKey: 'employment',
+      topDisplayName: 'Employment',
+      topConfidence: 0.93,
+    });
+  });
+
+  it('returns null when the top candidate matches the explicit choice (no mismatch)', () => {
+    const result: AgreementClassifyResult = {
+      isAgreement: true,
+      composite: false,
+      candidates: [{ subDomainKey: 'nda', confidence: 0.93 }],
+    };
+    expect(resolveAgreementReviewSanityMismatch('nda', result, REGISTRY)).toBeNull();
+  });
+
+  it('returns null when the top candidate is below its OWN resolved threshold (not "high confidence")', () => {
+    // employment's registry row overrides its threshold to 0.7 — 0.6 is below it.
+    const result: AgreementClassifyResult = {
+      isAgreement: true,
+      composite: false,
+      candidates: [{ subDomainKey: 'employment', confidence: 0.6 }],
+    };
+    expect(resolveAgreementReviewSanityMismatch('nda', result, REGISTRY)).toBeNull();
+  });
+
+  it('returns null when isAgreement is false (never a mismatch notice on a non-agreement classification)', () => {
+    const result: AgreementClassifyResult = { isAgreement: false, composite: false, candidates: [] };
+    expect(resolveAgreementReviewSanityMismatch('nda', result, REGISTRY)).toBeNull();
+  });
+
+  it('returns null when there are no candidates', () => {
+    const result: AgreementClassifyResult = { isAgreement: true, composite: false, candidates: [] };
+    expect(resolveAgreementReviewSanityMismatch('nda', result, REGISTRY)).toBeNull();
+  });
+
+  it('negative criterion: a null classifyResult (classifier error/unavailable) NEVER produces a notice', () => {
+    expect(resolveAgreementReviewSanityMismatch('nda', null, REGISTRY)).toBeNull();
+  });
+
+  it('picks the HIGHEST-confidence candidate when multiple are present', () => {
+    const result: AgreementClassifyResult = {
+      isAgreement: true,
+      composite: false,
+      candidates: [
+        { subDomainKey: 'general', confidence: 0.5 },
+        { subDomainKey: 'employment', confidence: 0.91 },
+      ],
+    };
+    const mismatch = resolveAgreementReviewSanityMismatch('nda', result, REGISTRY);
+    expect(mismatch?.topKey).toBe('employment');
+  });
+
+  it('buildAgreementReviewSanityMismatchMessage is informational-only (no question, references both names)', () => {
+    const message = buildAgreementReviewSanityMismatchMessage({
+      explicitKey: 'nda',
+      explicitDisplayName: 'NDA',
+      topKey: 'employment',
+      topDisplayName: 'Employment',
+      topConfidence: 0.93,
+    });
+    expect(message).toContain('Employment');
+    expect(message).toContain('NDA');
+    expect(message).toContain('93%');
+    expect(message).not.toContain('?');
   });
 });

@@ -78,10 +78,16 @@
  * other, but is NEVER auto-associated with an `sprk_analysis` record. Each row carries a small
  * "Promote…" affordance that opens an inline Fluent v9 Dialog to name + bind the session to a NEW
  * Analysis via `POST /api/ai/analysis/promote` (a bind on the session's EXISTING Dataverse row —
- * no new session is minted, contrast with the fork endpoint, task 021). Kept entirely local to this
- * file per the task's merge-order note (`spaarke-ai-architecture-redesign-r1` is decomposing
- * `ConversationPane` in parallel) — zero new props on `HistoryMenuProps`, zero `ConversationPane.tsx`
- * edit; `bffBaseUrl` + `authenticatedFetch` (already passed in) are all promotion needs.
+ * no new session is minted, contrast with the fork endpoint, task 021). Originally kept entirely
+ * local to this file (zero `HistoryMenuProps`/`ConversationPane.tsx` changes) — that held until
+ * `ai-advanced-capabilities-agreements-r1` task 023 (spec FR-09 classifier door) needed to write the
+ * resolved `sprk_agreementtype` lookup onto a JUST-PROMOTED Analysis when the promoted session went
+ * through the classifier gate. Two ADDITIVE, OPTIONAL props were introduced for exactly that:
+ * `resolveClassifiedSubDomain` + `dataService` (see their own doc comments) — omitting both preserves
+ * promote's byte-identical pre-023 behavior.
+ *
+ * @see agreementTypeLookupWrite.ts — the task 023 write helper this component's promote success
+ *      handler invokes (fire-and-forget; never blocks/fails the promote UX that already succeeded).
  */
 
 import * as React from "react";
@@ -108,10 +114,12 @@ import {
 } from "@fluentui/react-components";
 import { HistoryRegular, ArrowUpRegular } from "@fluentui/react-icons";
 import { buildBffApiUrl, type AuthenticatedFetchFn } from "@spaarke/auth";
+import type { IDataService } from "@spaarke/ui-components";
 import {
   logTelemetryError,
   TELEMETRY_HISTORY_LOAD_FAILURE,
 } from "../../telemetry/errorTelemetry";
+import { applyAgreementTypeToAnalysis } from "./agreementTypeLookupWrite";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -141,6 +149,19 @@ export interface HistoryMenuProps {
   bffBaseUrl: string;
   /** Per-request authenticated fetch from useAiSession(). No token snapshot. */
   authenticatedFetch: AuthenticatedFetchFn;
+  /**
+   * task 023 (agreements-r1, classifier-path lookup write) — optional resolver returning the
+   * agreement sub-domain key (`sprk_agreementtype.sprk_key`) the classifier gate resolved for the
+   * given `sessionId`, if known. The caller (ConversationPane) only knows this for its OWN current
+   * session — a promote of a different/older listed session returns `null`/`undefined`. When a
+   * promote succeeds AND this resolves a key AND `dataService` is supplied, the newly-bound
+   * Analysis's `sprk_agreementtype` lookup is written so persistence matches routing (see
+   * `agreementTypeLookupWrite.ts`). Omitted (undefined) preserves promote's EXACT pre-023 behavior —
+   * additive, optional, no fabricated default.
+   */
+  resolveClassifiedSubDomain?: (sessionId: string) => string | null | undefined;
+  /** Xrm.WebApi data service for the task 023 lookup write. Required only alongside `resolveClassifiedSubDomain`. */
+  dataService?: IDataService;
 }
 
 /**
@@ -298,6 +319,8 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
   onSelectSession,
   bffBaseUrl,
   authenticatedFetch,
+  resolveClassifiedSubDomain,
+  dataService,
 }) => {
   const styles = useStyles();
 
@@ -480,6 +503,30 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
         setPromoting(false);
         return;
       }
+
+      // task 023 (classifier-path lookup write, spec FR-09): if the promoted session's classifier
+      // resolution is known (only true for the CURRENT session — see the prop doc comment) AND a
+      // dataService is supplied, write the resolved sprk_agreementtype lookup onto the newly-bound
+      // Analysis so persistence matches routing. Fire-and-forget: NEVER blocks or fails the promote
+      // UX that already succeeded — a write failure only logs (mirrors
+      // agreementTypeLookupWrite.ts's own graceful-degrade contract).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let promoteBody: any = null;
+      try {
+        promoteBody = await response.json();
+      } catch {
+        // Non-JSON success body (unexpected, but non-fatal — the promote itself already succeeded).
+      }
+      const analysisId = typeof promoteBody?.analysisId === "string" ? promoteBody.analysisId : null;
+      const subDomainKey = resolveClassifiedSubDomain?.(promoteTarget.sessionId);
+      if (analysisId && subDomainKey && dataService) {
+        void applyAgreementTypeToAnalysis(dataService, analysisId, subDomainKey).then((result) => {
+          if (!result.success) {
+            console.warn("[HistoryMenu] task 023 lookup write did not complete:", result.warning);
+          }
+        });
+      }
+
       setPromoting(false);
       setPromoteTarget(null);
       // Refresh the list so the promoted session's row reflects its (now Analysis-owned) state
@@ -490,7 +537,7 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
       setPromoteError(message || "Couldn't promote this conversation. Try again.");
       setPromoting(false);
     }
-  }, [promoteTarget, promoteName, bffBaseUrl, authenticatedFetch]);
+  }, [promoteTarget, promoteName, bffBaseUrl, authenticatedFetch, resolveClassifiedSubDomain, dataService]);
 
   // ── Render ───────────────────────────────────────────────────────────────
   // Fragment wraps the Menu + the promote Dialog as SIBLINGS — Fluent v9 `<Menu>` only expects a
