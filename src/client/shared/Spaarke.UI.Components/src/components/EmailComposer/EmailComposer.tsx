@@ -243,7 +243,10 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
+    // Title on the left, window-controls cluster pushed to the upper-RIGHT
+    // (owner UAT 2026-07-30 R2 item 8 — corrected 2026-07-31: the maximize
+    // button belongs in the upper-right corner, Outlook-style, not the left).
+    justifyContent: 'space-between',
     gap: tokens.spacingHorizontalS,
   },
   headerActions: {
@@ -1314,22 +1317,6 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     >
       {isChromed && (
         <div className={styles.header}>
-          {/* Window controls cluster on the upper-LEFT: maximize/restore only. The close 'X'
-              button was REMOVED (owner UAT 2026-07-30 R2 item 8) — the modal is closed via the
-              Cancel/Close button in ComposerActionBar (wired to the same `props.onCancel`).
-              Maximize renders only when the host wires `onToggleMaximize` (e.g. SendEmailDialog,
-              which owns the surface sizing). */}
-          {props.onToggleMaximize && (
-            <div className={styles.headerActions}>
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={props.isMaximized ? <ArrowMinimize20Regular /> : <ArrowMaximize20Regular />}
-                aria-label={props.isMaximized ? 'Restore dialog size' : 'Maximize dialog'}
-                onClick={() => props.onToggleMaximize?.()}
-              />
-            </div>
-          )}
           <Text as="h2" weight="semibold" className={styles.headerTitle}>
             {props.titleOverride ??
               (state.mode === 'view'
@@ -1342,6 +1329,22 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
                       ? 'Edit Draft'
                       : 'New Email')}
           </Text>
+          {/* Window controls cluster on the upper-RIGHT: maximize/restore only (owner UAT
+              2026-07-30 R2 item 8 — corrected to upper-right 2026-07-31). The close 'X' button
+              was REMOVED — the modal is closed via the Cancel/Close button in ComposerActionBar
+              (wired to the same `props.onCancel`). Maximize renders only when the host wires
+              `onToggleMaximize` (e.g. SendEmailDialog, which owns the surface sizing). */}
+          {props.onToggleMaximize && (
+            <div className={styles.headerActions}>
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={props.isMaximized ? <ArrowMinimize20Regular /> : <ArrowMaximize20Regular />}
+                aria-label={props.isMaximized ? 'Restore dialog size' : 'Maximize dialog'}
+                onClick={() => props.onToggleMaximize?.()}
+              />
+            </div>
+          )}
         </div>
       )}
 

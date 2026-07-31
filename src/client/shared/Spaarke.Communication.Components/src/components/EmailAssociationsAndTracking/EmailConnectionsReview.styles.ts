@@ -27,23 +27,21 @@ export const useConnectionsReviewStyles = makeStyles({
   // Right-hand column holding the "Link another record" affordance / picker.
   linkCol: { flexShrink: 0, alignSelf: 'flex-start', display: 'flex', alignItems: 'center', maxWidth: '100%' },
   // "Link another record" — a VISUAL SIBLING of the candidate cards (owner UAT
-  // #5): identical box (border / radius / padding / neutral surface), content
-  // TOP-aligned, the label at the same size + weight as a card's primary line,
-  // and the search icon CENTERED (not pushed to a corner). Clicking it opens the
-  // record-type dropdown directly (owner UAT #6).
-  // owner UAT 2026-07-30 R2 item 7 — a VISUAL SIBLING of the candidate `card`
-  // below: identical border / radius / padding / neutral surface / hover and the
-  // same inter-line `gap` (spacingVerticalXXS), so the "Link another record" tile
-  // matches the reference cards exactly. No explicit `fontFamily` anywhere in these
-  // cards — they inherit Fluent's default Segoe UI (there is no Arial to remove).
+  // #5; corrected 2026-07-31 R2 item "match the other cards"): identical box
+  // (border / radius / padding / neutral surface / hover) AND the same footprint
+  // as a sibling card — a SINGLE left-aligned row (search icon + label), vertically
+  // centered, at the same `minHeight` (64px) as the blank slots so all four cards
+  // line up on one row instead of the link tile standing taller. No explicit
+  // `fontFamily` — inherits Fluent's default Segoe UI (there is no Arial to remove).
   linkCard: {
     boxSizing: 'border-box',
     width: '100%',
     minWidth: 0,
+    minHeight: '64px',
     display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'stretch',
-    gap: tokens.spacingVerticalXXS,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
     textAlign: 'left',
     paddingBlock: tokens.spacingVerticalS,
     paddingInline: tokens.spacingHorizontalM,
@@ -55,6 +53,7 @@ export const useConnectionsReviewStyles = makeStyles({
   },
   linkCardLabel: {
     minWidth: 0,
+    flex: '1 1 auto',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -63,9 +62,9 @@ export const useConnectionsReviewStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
-  // Search icon centered within the card body (owner UAT #5).
-  linkCardIconRow: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' },
-  linkCardIcon: { flexShrink: 0, color: tokens.colorNeutralForeground3, fontSize: '20px' },
+  // Search icon inline before the label (left-aligned row) — brand-toned to read as
+  // the one actionable "add" affordance among the muted candidate cards.
+  linkCardIcon: { flexShrink: 0, color: tokens.colorBrandForeground1, fontSize: '20px' },
   // One grid cell — the card itself plus its own Confirm slot directly beneath it.
   cardCell: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS, minWidth: 0 },
 
