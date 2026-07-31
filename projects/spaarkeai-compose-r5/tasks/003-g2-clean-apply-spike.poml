@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>G2 clean-apply spike — decide R5-D2 (engine clean branch vs re-author-from-model)</title>
+    <phase>0 Gate</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Engine-heavy spike on the byte-authoring spine (ADR-049); the decision governs G2 implementation and must preserve byte-diff integrity. Touches the highest-blast-radius Compose surface.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architectural decision with byte-level OOXML consequences on the frozen engine; requires evaluating two approaches and defending a byte-diff-green choice — Opus-class judgment.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Spike produces a decision note only (no committed engine change beyond throwaway spike scaffolding); no source-file contention with other Phase-0 tasks.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, compose, engine, spike</tags>
+    <estimated-effort>M (2–4d)</estimated-effort>
+  </metadata>
+
+  <prompt>Decide R5-D2: implement clean (non-tracked) apply as an engine clean-apply BRANCH (emit plain runs, no `w:ins`/`w:del`) versus re-authoring authored docs from the content model on each save. Evaluate BOTH on a born-in-editor corpus doc; the winner keeps the corpus byte-diff harness green and produces ZERO tracked-change markup for an authored doc's own edits. Output a decision note with byte-diff evidence. This BLOCKS task 021.</prompt>
+
+  <role>SPAARKE platform developer with deep OOXML / DocumentFormat.OpenXml expertise and command of the ComposeShadowPatchEngine (tracked appliers) + ComposeDocumentRenderer (clean byte-author) split.</role>
+
+  <goal>A decision note `projects/spaarkeai-compose-r5/notes/g2-clean-apply-decision.md` exists that: (1) describes both R5-D2 options, (2) shows byte-diff evidence from a born-in-editor corpus doc for the chosen approach proving zero tracked-change markup for authored edits and byte-identical untouched subtrees, and (3) states the selected approach with the reason. A born-in-editor corpus fixture is identified/added for the spike + later G2 seam slice.</goal>
+
+  <context>
+    <background>Per spec FR-02 (G2) + Owner Clarifications (R5-D2 stays a Phase-0 spike) + design R5-D2. The authored-doc save path must apply edits WITHOUT `w:ins`/`w:del`. Two candidate mechanisms are held open by the spec; this spike picks one on real bytes and documents the reason. FR-02 acceptance is invariant to which is chosen. Two byte-authors per path is the shipped R4 decision (036/037) — the spike must NOT merge the byte-authors, only decide how the authored path applies edits cleanly.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts</file>
+      <file>tests/integration/seam/Compose/ComposeShadowPatchEngineByteDiffSeamTests.cs</file>
+      <file>tests/integration/seam/Compose/ComposeCorpusFixtureLocator.cs</file>
+    </relevant-files>
+    <dependencies>None (Phase-0). Blocks task 021 (G2 clean-apply implementation).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Engine is byte[]-in/byte[]-out; edits are surgical ops anchored by (paraId, runIndex, run-local-offset); untouched OOXML subtrees MUST remain byte-identical after save (I-4). Honor I-1…I-7 + D1–D5.</constraint>
+    <constraint source="ADR-049">I-7 / NFR-02: NO text-search in the write path — resolve by (paraId, runIndex, offset), never content match, in either candidate.</constraint>
+    <constraint source="project">MUST preserve the two-byte-author split (renderer clean / engine tracked) — MUST NOT merge the byte-authors or force authored origination through the op log.</constraint>
+    <constraint source="project">NFR-01: the corpus byte-diff harness (R4's 24/24) MUST NOT regress; the chosen approach must keep it green.</constraint>
+    <constraint source="ADR-010">Any engine clean-apply branch stays stateless (concrete singleton), no per-request state.</constraint>
+    <constraint source="ADR-013">No AI internals in Services/Compose/ (Tier-1 NetArchTest).</constraint>
+    <constraint source="project">COORDINATION: G2 depends on docxBridge write helpers (`buildContentModel`/`stampParaIds`/paraId helpers) — never delete `docxBridge.ts`. Rebase onto post-R4.5 ComposeService.cs.</constraint>
+    <constraint source="CLAUDE.md §10">BFF spike — state Placement Justification in the decision note; engine/save orchestration stays in Services/Compose/. Report publish-size delta only if committed engine code is added.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+    </files>
+    <patterns>
+      <pattern name="Clean byte-author" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs">BuildRun:366 / AssembleParagraph:346 — clean-authoring, zero text-search (the cited I-5 exception); reference for the re-author-from-model candidate.</pattern>
+      <pattern name="Tracked appliers" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs">ApplyInsertText:314 / WrapRunAsDeleted:942 — tracked path; reference for the engine clean-apply-branch candidate.</pattern>
+      <pattern name="Byte-diff seam" location="tests/integration/seam/Compose/ComposeShadowPatchEngineByteDiffSeamTests.cs">Harness to run for byte-diff evidence on the born-in-editor corpus doc.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Identify or add a born-in-editor corpus fixture (a doc authored in the editor, not imported) via `ComposeCorpusFixtureLocator`; note it for the later G2 seam slice.</step>
+    <step order="2">Prototype candidate A (engine clean-apply BRANCH): a mode/branch on ComposeShadowPatchEngine that emits plain runs (no `w:ins`/`w:del`) for authored edits, resolving by (paraId, runIndex, offset). Measure byte-diff on a born-in-editor round-trip.</step>
+    <step order="3">Prototype candidate B (re-author-from-content-model): re-synthesize the authored doc bytes from the content model each save via the renderer path (reusing docxBridge `buildContentModel`). Measure byte-diff on the same round-trip.</step>
+    <step order="4">Compare: does each produce ZERO tracked-change markup for authored edits AND keep untouched subtrees byte-identical (NFR-01 harness green)? Capture the byte-diff output for both.</step>
+    <step order="5">Select the winner and write `projects/spaarkeai-compose-r5/notes/g2-clean-apply-decision.md` (both options described, byte-diff evidence, chosen approach + reason, Placement Justification, whether it stays engine-branch or renderer-path).</step>
+    <step order="6">Run/verify: build + confirm the corpus byte-diff harness is green under the chosen approach (spike-level). Remove throwaway spike scaffolding not intended for commit.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If NEITHER approach keeps the byte-diff harness green for authored round-trips (i.e., both introduce byte drift or residual tracked-change markup for an authored doc's own edits), STOP and escalate — do not ship a lossy clean path. Surface the tension per root §6.5 (the two-author split may need an ADR-049 exception/amendment discussion) rather than silently picking the least-bad lossy option.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Run the byte-diff seam harness for both candidates.</tool>
+    <tool name="terminal">Inspect OOXML output for tracked-change markup.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-r5/notes/g2-clean-apply-decision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a born-in-editor corpus doc, when the chosen approach applies an authored edit and saves, then the output contains ZERO `w:ins`/`w:del` markup (opens in Word with no redlines).</criterion>
+    <criterion testable="true">Given the chosen approach, when the corpus byte-diff harness runs, then untouched subtrees are byte-identical and the harness stays green (NFR-01, 24/24 baseline preserved).</criterion>
+    <criterion testable="true">Given the decision note, when reviewed, then it describes BOTH R5-D2 options, shows byte-diff evidence, and states the selected approach with a defensible reason.</criterion>
+    <criterion testable="true">Negative: neither candidate uses text-search to resolve edits — both anchor by (paraId, runIndex, offset) (I-7 / NFR-02).</criterion>
+    <criterion testable="true">Negative: `docxBridge.ts` is not deleted and the two-byte-author split is not merged.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-02, Owner Clarifications (R5-D2 Phase-0 spike), design R5-D2. Blocks task 021. FR-02 acceptance is invariant to the chosen mechanism — the spike must justify the choice, not change the acceptance bar.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

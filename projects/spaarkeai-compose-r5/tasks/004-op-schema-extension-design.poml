@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>Op-schema extension design — table / acceptRevision / rejectRevision (closed catalog)</title>
+    <phase>0 Gate</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Designs the contract for three new op types on the closed catalog (ADR-039) with a server↔client mirror that must stay byte-exact; a design error here propagates to G4/G12 implementation across BFF + client.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Schema/contract design over a frozen closed catalog with cross-language mirroring and revision-id addressing semantics — high-blast-radius architectural design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Produces a design note only; no committed catalog change yet, so no source-file contention with other Phase-0 tasks.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, api, schema, compose, op-schema</tags>
+    <estimated-effort>M (2–4d)</estimated-effort>
+  </metadata>
+
+  <prompt>Design the shapes for THREE new closed-catalog op types — `table`, `acceptRevision`, `rejectRevision` — as a paired addition to server `Services/Compose/Operations/ComposeOperation.cs` (`[JsonDerivedType]` :148-157) and client `types/compose-operations.ts` (`COMPOSE_OPERATION_TYPES` :54-64), keeping the two mirrors in EXACT sync. `acceptRevision`/`rejectRevision` are addressed by revision ID (not offset). Output a design note defining each op's fields, JSON discriminator, and validation. This is a dependency for tasks 012, 013, 014, 033.</prompt>
+
+  <role>SPAARKE platform developer with expertise in the ComposeOperation closed-catalog contract, System.Text.Json polymorphic discriminators, and the server↔client op-schema mirror.</role>
+
+  <goal>A design note `projects/spaarkeai-compose-r5/notes/op-schema-extension-design.md` exists defining, for each of the three ops (`table`, `acceptRevision`, `rejectRevision`): the JSON discriminator string, the exact field set (with types), addressing semantics (revision ID for accept/reject; anchor for table), validation rules, and the paired server `[JsonDerivedType]` + client `COMPOSE_OPERATION_TYPES` entries that keep the two mirrors exactly in sync. No catalog code is committed in this task — it is the design that tasks 012/013/014/033 implement.</goal>
+
+  <context>
+    <background>Per spec FR-04 (G4 table) + FR-11 (G12 accept/reject-revision) + R5-D3 (extend the closed catalog, never fork) + plan P0-4. The closed `ComposeOperation` catalog currently has 10 ops in exact server↔client sync. G4 needs a `table` op (full tracked structure); G12 needs `acceptRevision`/`rejectRevision` ops addressed by revision id, plus accept-all/reject-all batch variants. This design defines the shapes so the implementation tasks add them consistently on both ends.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/importedRevisions.ts</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Compose/</file>
+    </relevant-files>
+    <dependencies>None (Phase-0). Dependency for tasks 012, 013, 014 (G12/G4 catalog + applier) and 033.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Closed op catalog. New ops (table/acceptRevision/rejectRevision) EXTEND the catalog under version control — never fork, no side channel, no new AI dispatch endpoint. AI redline path stays envelope-only.</constraint>
+    <constraint source="ADR-049">I-7 / NFR-02: NO text-search — `acceptRevision`/`rejectRevision` resolve by revision id; `table` resolves by (paraId, runIndex, offset) anchor. Design must specify id/anchor fields, never content match.</constraint>
+    <constraint source="project">Server `[JsonDerivedType]` (:148-157) and client `COMPOSE_OPERATION_TYPES` (:54-64) are one schema both ends implement — the design MUST keep them byte-exact mirrors (same discriminator strings, same field names).</constraint>
+    <constraint source="project">G12 (per owner) is single-by-id AND accept-all/reject-all batch — the accept/reject op shapes MUST accommodate both a single revision id and a batch/all variant with deterministic ordering.</constraint>
+    <constraint source="ADR-013">No AI internals in the op types; pure OOXML-operation contract.</constraint>
+    <constraint source="CLAUDE.md §11">NEW op types — justification required (see &lt;justification&gt;). Extend the closed catalog; do not fork.</constraint>
+    <constraint source="CLAUDE.md §10">BFF contract change — state Placement Justification in the design note; op types stay in Services/Compose/Operations/.</constraint>
+  </constraints>
+
+  <justification>
+    <existing>Closed `ComposeOperation` catalog — `Services/Compose/Operations/ComposeOperation.cs:148-157` (10 `[JsonDerivedType]` ops) mirrored at `types/compose-operations.ts:54-64`. No existing op expresses table structure or tracked-revision accept/reject.</existing>
+    <extension>Yes — EXTEND the closed catalog with three op types under version control (ADR-039), never fork. The catalog is explicitly designed to be extended this way; a side channel or new dispatch endpoint would violate ADR-039.</extension>
+    <cost-of-doing-nothing>Without a `table` op, table structural edits are silently dropped and the table control stays disabled (SDL-3). Without `acceptRevision`/`rejectRevision` ops, accepting an imported tracked change + saving fails with a `TrackedChangeReconciliationUnsupported` 422 (G12/ET-2).</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+    </files>
+    <patterns>
+      <pattern name="Op-schema mirror" location="src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs">[JsonDerivedType] :148-157 ↔ client COMPOSE_OPERATION_TYPES :54-64 — one schema both ends implement; model the new ops on the existing 10.</pattern>
+      <pattern name="Revision addressing" location="src/client/shared/Spaarke.Compose.Components/src/widgets/importedRevisions.ts">applyImportedRevisions:272 — where revision ids originate on the client; design the accept/reject op to carry that id.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the existing 10-op catalog on both ends; document the discriminator convention, field-naming convention, and how a new `[JsonDerivedType]` pairs with a client `COMPOSE_OPERATION_TYPES` entry.</step>
+    <step order="2">Design the `table` op: discriminator, fields for add/remove row/column + cell-content edit, anchor by (paraId, runIndex, offset), validation. Note it emits full tracked table structure downstream (G4) — design is shape-only here.</step>
+    <step order="3">Design `acceptRevision`/`rejectRevision`: discriminator each, a `revisionId` field (single) + a batch/all variant field (accept-all/reject-all) with a deterministic ordering rule, validation. NO offset/content addressing.</step>
+    <step order="4">Specify the paired server + client entries for each op so the two mirrors stay exactly in sync (same strings, same field names), and note the unit test (`ComposeOperationSchemaTests`) that will assert the mirror.</step>
+    <step order="5">Write `projects/spaarkeai-compose-r5/notes/op-schema-extension-design.md` (per-op: discriminator, fields, addressing, validation, paired entries, Placement Justification, dependency map to tasks 012/013/014/033).</step>
+    <step order="6">Run/verify: no code committed — validate the design by hand-checking that each proposed op maps to an existing applier surface (engine) without needing a new endpoint or side channel; confirm build unaffected.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of the three ops cannot be expressed without a NEW AI-dispatch endpoint or a side channel (i.e., it does not fit the closed-catalog envelope-only model), STOP — that is an ADR-039 violation. Escalate per root §6.5 (surface as a path A exception / path B amendment / path C pivot) rather than designing a fork or side channel.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Inspect the existing catalog on both ends.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-r5/notes/op-schema-extension-design.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the design note, when reviewed, then each of the three ops (`table`, `acceptRevision`, `rejectRevision`) has a defined discriminator, field set with types, addressing semantics, and validation rules.</criterion>
+    <criterion testable="true">Given the accept/reject op design, when reviewed, then it addresses revisions by revision ID (single) and supports an accept-all/reject-all batch variant with a deterministic ordering rule — and never resolves by offset or content match.</criterion>
+    <criterion testable="true">Given the design, when the paired entries are specified, then server `[JsonDerivedType]` and client `COMPOSE_OPERATION_TYPES` additions are byte-exact mirrors (same discriminator strings + field names).</criterion>
+    <criterion testable="true">Negative: no op requires a new AI-dispatch endpoint or side channel; all extend the closed catalog (ADR-039).</criterion>
+    <criterion testable="true">Negative: no catalog code is committed in this task — it is design only, feeding tasks 012/013/014/033.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-04, FR-11, R5-D3, plan P0-4. Dependency for tasks 012, 013, 014, 033. The design defines the contract; implementation adds it on both ends with a mirror unit test.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

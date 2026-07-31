@@ -33,6 +33,16 @@ export interface SectionPanelProps {
    * The `title` string is still used for the collapsible button's aria-label.
    */
   titleContent?: React.ReactNode;
+  /**
+   * When true, suppress the section title bar entirely (round-8.2 per operator).
+   * Used by grid-backed sections (Documents, Matters, Projects, Invoices, Work
+   * Assignments) that carry the DataGrid's OWN elevated header — the SectionPanel
+   * title would be a redundant second header. The `title` string is still used for
+   * the collapsible aria-label if `collapsible` is set. When there is nothing else
+   * to show in the bar (no toolbar/badge/collapse control), the whole title bar is
+   * omitted so no empty header strip remains above the grid.
+   */
+  hideTitle?: boolean;
   /** Optional badge count shown beside the title. Renders only when > 0. */
   badgeCount?: number;
   /**
@@ -116,16 +126,14 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
-  // Section-header title typography (round-8 update 1). Matches the DataGrid-owned
-  // headers (Documents/Matters) so every workspace section header reads the same:
-  // 20px (fontSizeBase500) · 800 weight · #242424 (colorNeutralForeground1 in
-  // light; semantic token adapts in dark — ADR-021). Segoe UI is the default
-  // fontFamilyBase (no override needed). fontWeight 800 has no Fluent token, so the
-  // numeric literal is intentional (a weight, not a color).
+  // Section-header title typography (round-8.2 per operator). 16px
+  // (fontSizeBase400) · semibold (600) · #242424 (colorNeutralForeground1 in light;
+  // semantic token adapts in dark — ADR-021). Grid-backed sections suppress this
+  // title entirely (they carry the DataGrid's own elevated header) via `hideTitle`.
   titleText: {
-    fontSize: tokens.fontSizeBase500,
-    fontWeight: 800,
-    lineHeight: tokens.lineHeightBase500,
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightSemibold,
+    lineHeight: tokens.lineHeightBase400,
     color: tokens.colorNeutralForeground1,
   },
   toolbarRow: {
@@ -188,6 +196,7 @@ const useStyles = makeStyles({
 export const SectionPanel: React.FC<SectionPanelProps> = ({
   title,
   titleContent,
+  hideTitle = false,
   badgeCount,
   toolbar,
   children,
@@ -215,29 +224,33 @@ export const SectionPanel: React.FC<SectionPanelProps> = ({
 
   return (
     <div className={mergeClasses(styles.card, className)} style={style}>
-      {/* Title bar */}
-      <div className={styles.titleBar}>
-        <div className={styles.titleArea}>
-          {titleContent ?? <Text className={styles.titleText}>{title}</Text>}
-          {showBadge && (
-            <Badge appearance="filled" color="brand" size="small">
-              {badgeCount}
-            </Badge>
+      {/* Title bar. Suppressed entirely on grid-backed sections (hideTitle) unless a
+          badge or collapse control still needs it — so no empty header strip sits
+          above the grid's own elevated header (round-8.2). */}
+      {(!hideTitle || showBadge || collapsible) && (
+        <div className={styles.titleBar}>
+          <div className={styles.titleArea}>
+            {!hideTitle && (titleContent ?? <Text className={styles.titleText}>{title}</Text>)}
+            {showBadge && (
+              <Badge appearance="filled" color="brand" size="small">
+                {badgeCount}
+              </Badge>
+            )}
+          </div>
+
+          {/* Collapse/expand toggle */}
+          {collapsible && (
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={isOpen ? <ChevronUpRegular /> : <ChevronDownRegular />}
+              onClick={handleToggle}
+              aria-label={isOpen ? `Collapse ${title}` : `Expand ${title}`}
+              aria-expanded={isOpen}
+            />
           )}
         </div>
-
-        {/* Collapse/expand toggle */}
-        {collapsible && (
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={isOpen ? <ChevronUpRegular /> : <ChevronDownRegular />}
-            onClick={handleToggle}
-            aria-label={isOpen ? `Collapse ${title}` : `Expand ${title}`}
-            aria-expanded={isOpen}
-          />
-        )}
-      </div>
+      )}
 
       {/* Toolbar row (rendered only when toolbar prop is provided) */}
       {toolbar && isOpen && (

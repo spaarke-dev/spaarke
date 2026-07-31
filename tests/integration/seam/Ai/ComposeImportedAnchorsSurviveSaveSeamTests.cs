@@ -199,7 +199,7 @@ public sealed class ComposeImportedAnchorsSurviveSaveSeamTests : IClassFixture<C
             content = original,
             operationLog = new
             {
-                schemaVersion = "compose-ops-v1",
+                schemaVersion = "compose-ops-v2",
                 operations = new object[]
                 {
                     new

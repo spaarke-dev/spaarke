@@ -187,6 +187,8 @@ import type {
   ImportedComment,
   // Task 040 (comment-export wiring fix)
   ComposeAnchoredComment,
+  // G7 (task 022): the Save split-button choice, threaded through to the toolbar.
+  ComposeSaveMode,
 } from '../types/compose-contracts';
 // Redline → Word save fidelity (UAT-R7 #2/#3/#4): the redline→annotation bridge + its wire type.
 import { redlineMarksToDocxAnnotations, type DocxAnnotationInput } from './useComposeWordShuttle';
@@ -620,12 +622,31 @@ export interface ComposeEditorProps {
   onOpenInWordDesktop?: () => void;
   /** Disables the two Open-in-Word items (no persisted document, or an action in flight). */
   wordActionsDisabled?: boolean;
-  /** Save handler (create-on-save first Save, or update). Renders the Save button when set. */
-  onSave?: () => void;
+  /** Save handler (create-on-save first Save, or update). Renders the Save split-button when set.
+   *  G7 (task 022): receives the split-button choice — `'version'` (default, replace/dedup) or `'new'`
+   *  (fork a new document). A bare call (Ctrl+S / cross-pane bridge) defaults to `'version'`. */
+  onSave?: (mode?: ComposeSaveMode) => void;
   /** True when Save should be enabled (unsaved edit OR unpersisted transient draft). */
   canSave?: boolean;
   /** True while a save is in flight. */
   isSaving?: boolean;
+  /** G10 (FR-09, task 040): manual "Refresh Profile" handler. Renders the toolbar button when set
+   *  (the host wires it only for a promoted doc — one that has a sprk_document record to re-profile). */
+  onRefreshProfile?: () => void;
+
+  /** UAT #5 (task 053): "Reload from source" handler. Renders the toolbar button when set (the host wires
+   *  it only for a doc with an SPE source). Pulls the latest SPE bytes on demand — e.g. after an external
+   *  Word-web edit. The host honors the dirty-guard before discarding unsaved edits. */
+  onReloadFromSource?: () => void;
+
+  /** "Open Document" handler. Renders the toolbar button when set (the host wires it only for a doc with a
+   *  preview source — a promoted sprk_document). Opens the source Dataverse Document in the shared preview
+   *  modal (RichFilePreviewDialog + BFF preview-url). Pure forwarder — the host owns the modal. */
+  onOpenDocument?: () => void;
+
+  /** UAT #9 (task 054): true while a manual profile re-run is in flight — the toolbar shows a spinner on the
+   *  Refresh-Profile button so the click gives visible feedback (the re-run is otherwise a silent 202). */
+  isRefreshingProfile?: boolean;
 
   /**
    * FR-23 (task 044) — display name attributed to comment threads/replies the CURRENT user creates
@@ -1610,6 +1631,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       onSave,
       canSave,
       isSaving,
+      onRefreshProfile,
+      onReloadFromSource,
+      onOpenDocument,
+      isRefreshingProfile,
       commentAuthor = 'You',
       reviewSummary,
       activeWorkType = '*',
@@ -2640,6 +2665,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onSave={onSave}
           canSave={canSave}
           isSaving={isSaving}
+          onRefreshProfile={onRefreshProfile}
+          onReloadFromSource={onReloadFromSource}
+          onOpenDocument={onOpenDocument}
+          isRefreshingProfile={isRefreshingProfile}
           trackChangesEnabled={trackChangesEnabled}
           onToggleTrackChanges={toggleTrackChanges}
           // UAT round-2 items #1/#2 — the "Review" dropdown. Shown only when an NDA advisory review is
@@ -2717,6 +2746,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onThreadCreated={() => setPendingCommentRange(null)}
           onThreadsChanged={handleCommentThreadsChanged}
           initialThreads={initialCommentThreads}
+          // G9 (FR-08, task 031): the editor scroll container so the pane scroll-tracks the document
+          // (doc→pane) — the pane highlights + scrolls to the comment whose anchor is at the viewport top.
+          scrollContainerRef={editorScrollRef}
         />
         {/* UAT round-4: the FR-22 styles pane mount was REMOVED per user request (the "Show styles"
             toggle above it is gone too). Component + hook retained, unmounted. */}

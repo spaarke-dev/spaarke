@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>G1 — Cross-session authored-vs-imported origin routing (persist + return marker; client clean-path routing)</title>
+    <phase>2 Authored-doc lifecycle</phase>
+    <gate>dep:002</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF save/load orchestration (`ComposeService.cs`) plus client save routing (`ComposeWorkspace.tsx`), tags include bff-api/frontend, and changes the load/save contract. Touches R4.5-owned contended files. FULL per CLAUDE.md §8 (code implementation + `.cs`/`.tsx` change + contract change).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified persist+return marker + client branch onto an existing region; reuses the field from task 002 and an existing `isTransientCreate` seam. No novel algorithm or high-blast-radius architectural decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the two R4.5-owned-FIRST contended files shared across the R5 Phase-2 tasks (`ComposeService.cs` LoadAsync/SaveAsync + `ComposeWorkspace.tsx` isTransientCreate region). 021 and 022 touch the same engine/service/toolbar surface — must be serialized to avoid rebase collisions.</parallel-reason>
+    <deps>002</deps>
+    <tags>bff-api, compose, frontend</tags>
+    <estimated-effort>M (2–4d)</estimated-effort>
+  </metadata>
+
+  <prompt>Make Compose route a reopened AUTHORED document onto the clean payload instead of the op-log, using a durable origin marker. In `ComposeService.LoadAsync` (:227) and `SaveAsync` (:570), persist and return the `sprk_composeorigin` marker (the Dataverse field created by task 002); in `ComposeWorkspace.tsx` (`isTransientCreate` region, :975) branch a reopened AUTHORED doc onto the clean payload. Rebase every edit onto the post-R4.5 versions of both files first.</prompt>
+
+  <role>SPAARKE platform developer with .NET 8 BFF Compose-service expertise (ADR-049 save/load orchestration) and React/TypeScript familiarity with the `Spaarke.Compose.Components` widget save routing.</role>
+
+  <goal>`ComposeService.LoadAsync` returns the persisted `sprk_composeorigin` value and `SaveAsync` persists it (set at create-on-save); `ComposeWorkspace.tsx` routes a reopened `origin=Authored` document onto the clean payload path (bypassing the op-log/tracked path) while `origin=Imported` continues onto the tracked path. Two seam slices exist in `tests/integration/seam/Compose/` proving both origins round-trip through the wire (authored loads clean-path, imported stays tracked). Corpus byte-diff and publish size are unregressed and reported.</goal>
+
+  <context>
+    <background>Per spec FR-01 (gap G1 / REQ-1): today the only discriminator between an authored and an imported document is "has an SPE id", which flips reopened born-in-editor docs onto the tracked path and produces spurious redlines on a doc the user authored. R5-D1 makes origin a durable, persisted marker (not inferred). Task 002 creates the `sprk_document.sprk_composeorigin` choice field (`Authored`/`Imported`); this task wires persist+return in the service and clean-path routing in the client.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts</file>
+      <file>tests/integration/seam/Compose/ComposePatchEngineSaveSeamTests.cs</file>
+      <file>tests/integration/seam/Compose/ComposeCorpusFixtureLocator.cs</file>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+    </relevant-files>
+    <dependencies>Task 002 (creates the `sprk_document.sprk_composeorigin` Dataverse field). BLOCKED until that field exists — see escalation.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Honor I-1…I-7 + D1–D5. The engine stays byte[]-in/byte[]-out; edits are surgical ops anchored by (paraId, runIndex, run-local-offset); untouched OOXML subtrees byte-identical after save. Origin routing is a service/client concern — it does NOT change the engine's byte contract.</constraint>
+    <constraint source="ADR-049">I-7 / NFR-02: NO text-search anywhere in the write path — origin is resolved from the persisted marker, never inferred from content or SPE-id presence.</constraint>
+    <constraint source="ADR-049" reference="R4 036/037 C-revised">Preserve the two-byte-author split (renderer clean / engine tracked). "Authored stays clean" is served by routing to the renderer/clean path — MUST NOT force authored origination through the op log, MUST NOT merge the two byte-authors.</constraint>
+    <constraint source="ADR-038">Seam DoD: the load/save change carries a through-the-wire WebApplicationFactory seam slice in `tests/integration/seam/Compose/` for BOTH origins. NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="ADR-013">No AI internals in `Services/Compose/` (Tier-1 NetArchTest) — no `IOpenAiClient`/executor/routing types introduced by the origin wiring.</constraint>
+    <constraint source="ADR-007">No `Microsoft.Graph` above `SpeFileStore` — the SPE hop stays in the endpoint/facade layer.</constraint>
+    <constraint source="project">NFR-01: the corpus byte-diff harness (R4's 24/24) MUST NOT regress. NFR-04: report BFF publish size absolute + delta vs ~46.11 MB baseline; ≤60 MB ceiling.</constraint>
+    <constraint source="project">NFR-08: routing reopened authored docs onto the clean path MUST NOT reintroduce a user-triggerable error or silent-loss path; R4's op-log-preservation safety net stays until this feature is seam-proven for both origins.</constraint>
+    <constraint source="project">NFR-09: this changes the save/load contract over shared `sprk_document`/SPE — MUST NOT regress `ai-advanced-capabilities-analysis-hub-r1`'s reopen-restore / clean-retirement parity. Shared surface: `Spaarke.Compose.Components` + `ConversationPane` routing/e2e.</constraint>
+    <constraint source="project">COORDINATION: REBASE all edits onto the post-R4.5 versions of `ComposeService.cs` (LoadAsync/SaveAsync) and `ComposeWorkspace.tsx` before changing them. NEVER delete `docxBridge.ts` or "remove the mammoth module" — `buildContentModel`/`stampParaIds`/paraId helpers are load-bearing here. Run `/conflict-check` before the BFF PR (overlaps compose-r1/r2/r3 + ai-architecture-redesign-r2).</constraint>
+    <constraint source="CLAUDE.md §10">BFF task — state Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`). Save/load orchestration stays in `Services/Compose/`; no new service, library, or endpoint family.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-039-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Save/load orchestration" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs">LoadAsync:227, SaveAsync:570, create-on-save ~:789 — the persist+return points for the origin marker.</pattern>
+      <pattern name="Client transient/save routing" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx">isTransientCreate:975, triggerSave:968 — where a reopened doc's payload is routed; branch on origin here.</pattern>
+      <pattern name="Save seam slice" location="tests/integration/seam/Compose/ComposePatchEngineSaveSeamTests.cs">Canonical through-the-wire save seam to extend for both origins.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">REBASE onto master-with-R4.5: confirm the local `ComposeService.cs` (LoadAsync/SaveAsync) and `ComposeWorkspace.tsx` are the post-R4.5 versions before editing. Confirm task 002's `sprk_composeorigin` field exists (else STOP — see escalation).</step>
+    <step order="2">In `ComposeService.SaveAsync` (:570) / create-on-save (~:789): persist the `sprk_composeorigin` marker — set `Authored` for docs born in the editor at create-on-save, `Imported` for docs that arrive with SPE bytes. Resolve origin from the marker/creation path only — no content or SPE-id inference.</step>
+    <step order="3">In `ComposeService.LoadAsync` (:227): read and return the persisted `sprk_composeorigin` value on the load contract so the client can route on it.</step>
+    <step order="4">In `ComposeWorkspace.tsx` (`isTransientCreate` region, :975): branch a reopened `origin=Authored` doc onto the CLEAN payload (renderer/clean path via `docxBridge` write helpers) instead of the op-log/tracked path; leave `origin=Imported` on the tracked path unchanged.</step>
+    <step order="5">Add two seam slices in `tests/integration/seam/Compose/`: (a) an authored doc loads with `origin=Authored` and its subsequent edits take the clean path (zero tracked-change markup added by routing); (b) an imported doc loads with `origin=Imported` and stays tracked. Use the corpus fixture locator; NO banned test shapes.</step>
+    <step order="6">Run `/conflict-check` before opening the BFF PR; run `dotnet publish -c Release` and report publish size absolute + delta vs ~46.11 MB.</step>
+    <step order="7">Run/verify: build + the task's seam/unit tests pass and the corpus byte-diff harness is still 24/24.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If task 002's `sprk_document.sprk_composeorigin` field is NOT yet created, this task is BLOCKED — STOP and escalate to the operator. Do NOT infer origin from SPE-id presence or any content heuristic: that is the exact defect G1 exists to fix, and inferring it would silently re-introduce the wart.</trigger>
+    <trigger>If routing reopened authored docs onto the clean path would drop or hide any user edit (silent-loss, NFR-08) or regress analysis-hub reopen-restore (NFR-09), STOP and escalate per CLAUDE.md §6/§6.5.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Run seam/unit tests, the corpus byte-diff harness, and `dotnet publish` for the size delta.</tool>
+    <tool name="npm">Build `Spaarke.Compose.Components` after the client routing change.</tool>
+    <tool name="terminal">Run `/conflict-check`; grep/inspect the tree for the post-R4.5 file state and the `sprk_composeorigin` field.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="test">tests/integration/seam/Compose/ (two origin seam slices)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a doc born in the editor and saved, when it is reopened, then `LoadAsync` returns `origin=Authored` and `ComposeWorkspace` routes its subsequent edits onto the clean payload (not the op-log/tracked path).</criterion>
+    <criterion testable="true">Given a doc imported with SPE bytes, when it is reopened, then `LoadAsync` returns `origin=Imported` and it stays on the tracked path.</criterion>
+    <criterion testable="true">Given both origins, when the through-the-wire seam slices run, then both round-trip and pass (authored→clean, imported→tracked) with no banned test shapes.</criterion>
+    <criterion testable="true">Negative (NFR-02): origin is resolved only from the persisted `sprk_composeorigin` marker — no text-search / content match / SPE-id inference anywhere in the write path.</criterion>
+    <criterion testable="true">No-regression (NFR-01): the corpus byte-diff harness is still 24/24; publish size reported absolute + delta vs ~46.11 MB and ≤60 MB.</criterion>
+    <criterion testable="true">No-regression (NFR-08/NFR-09): no new user-triggerable error or silent-loss path is introduced; analysis-hub reopen-restore / clean-retirement parity over shared `sprk_document`/SPE is not regressed; `docxBridge.ts` is not deleted.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-01 (G1 / REQ-1); plan P2-1. Contended files are R4.5-owned-FIRST — rebase first. The clean-path routing must go through the renderer/`docxBridge` write helpers, NOT a merged byte-author. Origin default assumption: `Imported` for docs arriving with SPE bytes, `Authored` set at create-on-save for born-in-editor docs.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

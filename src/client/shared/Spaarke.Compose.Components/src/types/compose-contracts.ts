@@ -379,6 +379,33 @@ export interface ImportedComment {
 }
 
 // ---------------------------------------------------------------------------
+// G1 (FR-01, task 020) — the durable cross-session authored-vs-imported origin marker
+// ---------------------------------------------------------------------------
+//
+// Client mirror of the server `ComposeOrigin` enum (`Sprk.Bff.Api.Services.Compose`), wire-serialized
+// via `CamelCaseStringEnumConverter` as `"authored"` | `"imported"`. Persisted on `sprk_document.
+// sprk_composeorigin` at create-on-save; returned by both Load (`LoadComposeDocumentResponse.origin`,
+// Path A only) and Save (`SaveComposeDocumentResponse.origin`, every save). Routes a REOPENED authored
+// document onto the clean renderer/contentModel save path instead of the op-log/tracked path — the
+// discriminator this replaces (SPE-id presence) was the exact defect G1 exists to fix; NEVER re-derive
+// origin from SPE-id or document content client-side either.
+//
+// BINDING null-handling contract (mirrors the server `ComposeOrigin` remarks): `origin` is `null`/
+// `undefined` for a Path B continuation (no `sprk_document` record yet) OR a legacy pre-existing record
+// that predates this field (no backfill). Every consumer MUST treat a missing value as `'imported'` —
+// NEVER `state.origin === 'authored'` as the ONLY branch; always compare the positive case.
+export type ComposeDocumentOrigin = 'authored' | 'imported';
+
+/**
+ * G7 (FR-06, task 022): the Save split-button choice.
+ *   - `'version'` (default / primary) — **Save Version**: replace the existing `sprk_document` + SPE item in
+ *     place (a transient draft dedups to ONE record via its {@link ComposeDocumentRef.transientKey}).
+ *   - `'new'` — **Save New Document**: a deliberate FORK; mint a fresh transient key + force create-on-save so
+ *     a brand-new `sprk_document` record is created (the server skips transient-key dedup for this call).
+ */
+export type ComposeSaveMode = 'version' | 'new';
+
+// ---------------------------------------------------------------------------
 // R3 FR-01a — the client content-model save contract (task 027)
 // ---------------------------------------------------------------------------
 //
@@ -497,6 +524,16 @@ export interface ComposeDocumentRef {
    * born-in-editor doc resolves its baseline (UAT 2026-07-19 P2).
    */
   driveId?: string;
+  /**
+   * G7 (FR-06, task 022): the client-minted stable transient-draft key (`crypto.randomUUID()`,
+   * {@link mintTransientKey}). Set ONCE when a TRANSIENT draft is mounted (Browse / assistant-upload /
+   * AI-draft seed / blank / template — every `mountTransient` / `mountDraftHtml` door) and sent on every
+   * create-on-save so repeated calls dedup to ONE `sprk_document` record via the server
+   * `sprk_composetransientkey_uk` alt-key instead of minting duplicates (the 8-duplicate defect).
+   * Undefined for a loaded/promoted document (it already has a real `speDriveItemId`) and for older
+   * mounts that predate G7 (server then skips dedup — unchanged behavior).
+   */
+  transientKey?: string;
 }
 
 /**

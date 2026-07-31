@@ -17,7 +17,7 @@
  */
 
 import * as React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import type { Editor } from '@tiptap/react';
@@ -213,34 +213,35 @@ describe('ComposeFormatToolbar — Font dropdown (relocated character formatting
 //    so the control is present-but-disabled and fires neither the prompt nor a command.
 // ---------------------------------------------------------------------------
 
-describe('ComposeFormatToolbar — Link disabled in both modes (task 038)', () => {
+describe('ComposeFormatToolbar — Link ENABLED both modes (G5 task 033)', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
 
-  it('the link button is present but DISABLED and does NOT open the URL prompt when clicked', async () => {
+  it('the link button is ENABLED and opens the URL prompt + fires setLink when clicked', async () => {
     const user = userEvent.setup();
     const promptSpy = jest.spyOn(window, 'prompt').mockReturnValue('https://example.test');
     const { controls } = renderFormatToolbar();
     await user.click(screen.getByTestId('compose-format-font-menu'));
 
     const link = screen.getByTestId('compose-format-link');
-    expect(link).toBeDisabled();
-    // Clicking a disabled control fires no prompt and no TipTap command.
+    expect(link).not.toBeDisabled();
     await user.click(link);
-    expect(promptSpy).not.toHaveBeenCalled();
-    expect(controls.commands).toHaveLength(0);
+    expect(promptSpy).toHaveBeenCalled();
+    expect(controls.commands).toContain('setLink');
   });
 
-  it('the link button stays DISABLED even when a link mark is active (no "Remove link" command)', async () => {
+  it('when a link mark is active, clicking removes it (unsetLink, no prompt)', async () => {
     const user = userEvent.setup();
+    const promptSpy = jest.spyOn(window, 'prompt');
     const { controls } = renderFormatToolbar({ active: new Set(['link']), linkHref: 'https://old.test' });
     await user.click(screen.getByTestId('compose-format-font-menu'));
 
     const link = screen.getByTestId('compose-format-link');
-    expect(link).toBeDisabled();
+    expect(link).not.toBeDisabled();
     await user.click(link);
-    expect(controls.commands).toHaveLength(0);
+    expect(promptSpy).not.toHaveBeenCalled(); // an active link removes directly, no URL prompt
+    expect(controls.commands).toContain('unsetLink');
   });
 });
 
@@ -338,38 +339,30 @@ describe('ComposeFormatToolbar — Table insert INVERTED to born-in-editor-only 
 });
 
 // ---------------------------------------------------------------------------
-// 5c. Deferred edit-path controls (task 038 zero-error guardrails) — alignment /
-//     heading / list disabled on a LOADED doc, enabled born-in-editor; hyperlink
-//     disabled in BOTH modes. Maps to failure modes ET-1 (alignment), SDL-1/2
-//     (heading/list), SDL-4/5 (hyperlink).
+// 5c. Deferred edit-path controls (task 038 zero-error guardrails) — heading /
+//     list disabled on a LOADED doc, enabled born-in-editor; hyperlink disabled
+//     in BOTH modes. Maps to failure modes SDL-1/2 (heading/list), SDL-4/5
+//     (hyperlink). ET-1 (alignment) was RE-ENABLED on loaded docs by R5 task 010
+//     (G3 alignment applier — ComposeShadowPatchEngine now emits a tracked
+//     w:pPrChange) — see the alignment-specific describe block below.
 // ---------------------------------------------------------------------------
 
-describe('ComposeFormatToolbar — deferred edit-path controls gated on a LOADED doc (task 038)', () => {
-  it('on a LOADED doc, the heading dropdown is DISABLED (SDL-1)', () => {
+describe('ComposeFormatToolbar — edit-path controls on a LOADED doc (task 038; heading/list re-enabled by R5 task 011)', () => {
+  it('on a LOADED doc, the heading dropdown is ENABLED (R5 task 011 — SDL-1 guard removed)', () => {
     renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
-    // Rendered as a disabled, tooltip-bearing button (no openable menu) on a loaded doc.
-    expect(screen.getByTestId('compose-format-heading-menu')).toBeDisabled();
+    // The engine now applies a setBlockAttr Style op as a tracked w:pPrChange — the menu is openable.
+    expect(screen.getByTestId('compose-format-heading-menu')).not.toBeDisabled();
   });
 
-  it('on a LOADED doc, the bullet + numbered list buttons are DISABLED (SDL-2)', async () => {
-    const user = userEvent.setup();
-    renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
-    // The Paragraph trigger stays enabled (blockquote is still reachable) — open it, then assert.
-    await user.click(screen.getByTestId('compose-format-paragraph-menu'));
-    expect(screen.getByTestId('compose-format-bullet-list')).toBeDisabled();
-    expect(screen.getByTestId('compose-format-ordered-list')).toBeDisabled();
-  });
-
-  it('on a LOADED doc, the alignment buttons are DISABLED (ET-1)', async () => {
+  it('on a LOADED doc, the bullet + numbered list buttons are ENABLED (R5 task 011 — SDL-2 guard removed)', async () => {
     const user = userEvent.setup();
     renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
     await user.click(screen.getByTestId('compose-format-paragraph-menu'));
-    expect(screen.getByTestId('compose-format-align-left')).toBeDisabled();
-    expect(screen.getByTestId('compose-format-align-center')).toBeDisabled();
-    expect(screen.getByTestId('compose-format-align-right')).toBeDisabled();
+    expect(screen.getByTestId('compose-format-bullet-list')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-ordered-list')).not.toBeDisabled();
   });
 
-  it('on a BORN-IN-EDITOR doc, heading / list / alignment are all ENABLED', async () => {
+  it('on a BORN-IN-EDITOR doc, heading / list are ENABLED', async () => {
     const user = userEvent.setup();
     renderFormatToolbar({}, { props: { hasLoadedBaseline: false } });
     // Heading renders as an openable menu trigger (not the disabled loaded-doc button).
@@ -382,18 +375,18 @@ describe('ComposeFormatToolbar — deferred edit-path controls gated on a LOADED
     expect(screen.getByTestId('compose-format-align-right')).not.toBeDisabled();
   });
 
-  it('the hyperlink button is DISABLED in BOTH modes (SDL-4/5 — links not representable in R4)', async () => {
+  it('the hyperlink button is ENABLED in BOTH modes (G5 task 033 — SDL-4/5 guard removed)', async () => {
     const user = userEvent.setup();
-    // Born-in-editor.
+    // Born-in-editor (authored clean w:hyperlink path).
     const { unmount } = renderFormatToolbar({}, { props: { hasLoadedBaseline: false } });
     await user.click(screen.getByTestId('compose-format-font-menu'));
-    expect(screen.getByTestId('compose-format-link')).toBeDisabled();
+    expect(screen.getByTestId('compose-format-link')).not.toBeDisabled();
     unmount();
 
-    // Loaded.
+    // Loaded (tracked w:hyperlink edit path).
     renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
     await user.click(screen.getByTestId('compose-format-font-menu'));
-    expect(screen.getByTestId('compose-format-link')).toBeDisabled();
+    expect(screen.getByTestId('compose-format-link')).not.toBeDisabled();
   });
 
   it('blockquote stays ENABLED on a loaded doc (not in the deferred set — the paste banner is its safety net)', async () => {
@@ -405,28 +398,202 @@ describe('ComposeFormatToolbar — deferred edit-path controls gated on a LOADED
 });
 
 // ---------------------------------------------------------------------------
-// 6. Save button — right-aligned icon button honoring canSave / isSaving
+// 5d. Alignment re-enabled on a LOADED doc (R5 task 010 — G3 alignment applier,
+//     removes the R4 ET-1 guard). ComposeShadowPatchEngine now applies a
+//     setBlockAttr Alignment op as a tracked w:pPrChange, so the alignment
+//     buttons are gated ONLY by the read-only `disabled` prop, independent of
+//     `hasLoadedBaseline`. Heading/list joined this set in R5 task 011; only
+//     table-insert stays deferred (to R5 task 014).
 // ---------------------------------------------------------------------------
 
-describe('ComposeFormatToolbar — Save button', () => {
-  it('is enabled and fires onSave when canSave is true', async () => {
+describe('ComposeFormatToolbar — alignment controls (R5 task 010, ET-1 guard removed)', () => {
+  it('on a LOADED doc, the alignment buttons are ENABLED', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
+    await user.click(screen.getByTestId('compose-format-paragraph-menu'));
+    expect(screen.getByTestId('compose-format-align-left')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-center')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-right')).not.toBeDisabled();
+    // Heading/list are ALSO re-enabled on the SAME loaded doc (R5 task 011); only table stays deferred (task 014).
+    expect(screen.getByTestId('compose-format-bullet-list')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-ordered-list')).not.toBeDisabled();
+  });
+
+  it('on a BORN-IN-EDITOR doc, the alignment buttons are ENABLED (unchanged)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: false } });
+    await user.click(screen.getByTestId('compose-format-paragraph-menu'));
+    expect(screen.getByTestId('compose-format-align-left')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-center')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-right')).not.toBeDisabled();
+  });
+
+  it('the alignment buttons are unreachable when the toolbar is read-only (Paragraph trigger itself disabled), on either doc mode', () => {
+    const { unmount } = renderFormatToolbar({}, { props: { hasLoadedBaseline: true, disabled: true } });
+    expect(screen.getByTestId('compose-format-paragraph-menu')).toBeDisabled();
+    unmount();
+
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: false, disabled: true } });
+    expect(screen.getByTestId('compose-format-paragraph-menu')).toBeDisabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. Save split-button (G7 task 022) — "Save Version" primary + "Save New Document" menu item
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Save split-button (G7 task 022)', () => {
+  // The SplitButton root carries the testid; its first inner <button> is the primary action.
+  const getPrimary = () => within(screen.getByTestId('compose-format-save')).getAllByRole('button')[0];
+
+  it('renders "Save Version" as the primary action and "Save New Document" in the caret menu', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true } });
+
+    // Primary action = Save Version (the default / replace-in-place choice).
+    expect(screen.getByRole('button', { name: /save version/i })).toBeInTheDocument();
+    // The caret menu opens the deliberate-fork item.
+    await user.click(screen.getByRole('button', { name: /save options/i }));
+    expect(await screen.findByTestId('compose-format-save-new')).toBeInTheDocument();
+  });
+
+  it('the primary action fires onSave("version")', async () => {
     const user = userEvent.setup();
     const onSave = jest.fn();
     renderFormatToolbar({}, { props: { onSave, canSave: true } });
 
-    const save = screen.getByTestId('compose-format-save');
-    expect(save).not.toBeDisabled();
-    await user.click(save);
-    expect(onSave).toHaveBeenCalledTimes(1);
+    await user.click(getPrimary());
+    expect(onSave).toHaveBeenCalledWith('version');
   });
 
-  it('is disabled when canSave is false or a save is in flight', () => {
+  it('the caret-menu "Save New Document" fires onSave("new")', async () => {
+    const user = userEvent.setup();
+    const onSave = jest.fn();
+    renderFormatToolbar({}, { props: { onSave, canSave: true } });
+
+    await user.click(screen.getByRole('button', { name: /save options/i }));
+    await user.click(await screen.findByTestId('compose-format-save-new'));
+    expect(onSave).toHaveBeenCalledWith('new');
+  });
+
+  it('the primary action is disabled when canSave is false or a save is in flight', () => {
     const { unmount } = renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: false } });
-    expect(screen.getByTestId('compose-format-save')).toBeDisabled();
+    expect(getPrimary()).toBeDisabled();
     unmount();
 
     renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true, isSaving: true } });
-    expect(screen.getByTestId('compose-format-save')).toBeDisabled();
+    expect(getPrimary()).toBeDisabled();
+  });
+
+  it('ADR-021: renders the split-button under a dark theme (theme tokens, no crash)', () => {
+    renderFormatToolbar({}, { theme: webDarkTheme, props: { onSave: jest.fn(), canSave: true } });
+    expect(screen.getByRole('button', { name: /save version/i })).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6a. Refresh Profile button (G10 task 040)
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Refresh Profile button (G10 task 040)', () => {
+  it('is not rendered when no onRefreshProfile handler is wired (unpromoted doc)', () => {
+    renderFormatToolbar();
+    expect(screen.queryByTestId('compose-format-refresh-profile')).not.toBeInTheDocument();
+  });
+
+  it('renders and fires onRefreshProfile when clicked (promoted doc)', async () => {
+    const user = userEvent.setup();
+    const onRefreshProfile = jest.fn();
+    renderFormatToolbar({}, { props: { onRefreshProfile } });
+
+    const btn = screen.getByTestId('compose-format-refresh-profile');
+    expect(btn).toBeInTheDocument();
+    await user.click(btn);
+    expect(onRefreshProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it('ADR-021: renders under a dark theme', () => {
+    renderFormatToolbar({}, { theme: webDarkTheme, props: { onRefreshProfile: jest.fn() } });
+    expect(screen.getByTestId('compose-format-refresh-profile')).toBeInTheDocument();
+  });
+
+  it('UAT #9 (task 054): disables the button and shows a spinner while a refresh is in flight', () => {
+    renderFormatToolbar({}, { props: { onRefreshProfile: jest.fn(), isRefreshingProfile: true } });
+    const btn = screen.getByTestId('compose-format-refresh-profile');
+    expect(btn).toBeInTheDocument();
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute('aria-label', 'Refreshing document profile');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// UAT #5 (task 053) — "Reload from source" button. Distinct from Refresh Profile:
+// it reloads the latest SPE bytes on demand; the host wires it only for a doc with an SPE source.
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Reload from source button (UAT #5 task 053)', () => {
+  it('is not rendered when no onReloadFromSource handler is wired (born-in-editor / no SPE source)', () => {
+    renderFormatToolbar();
+    expect(screen.queryByTestId('compose-format-reload-from-source')).not.toBeInTheDocument();
+  });
+
+  it('renders and fires onReloadFromSource when clicked (doc with an SPE source)', async () => {
+    const user = userEvent.setup();
+    const onReloadFromSource = jest.fn();
+    renderFormatToolbar({}, { props: { onReloadFromSource } });
+
+    const btn = screen.getByTestId('compose-format-reload-from-source');
+    expect(btn).toBeInTheDocument();
+    await user.click(btn);
+    expect(onReloadFromSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('is distinct from the Refresh-Profile button (both can render together)', () => {
+    renderFormatToolbar({}, { props: { onReloadFromSource: jest.fn(), onRefreshProfile: jest.fn() } });
+    expect(screen.getByTestId('compose-format-reload-from-source')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-refresh-profile')).toBeInTheDocument();
+  });
+
+  it('ADR-021: renders under a dark theme', () => {
+    renderFormatToolbar({}, { theme: webDarkTheme, props: { onReloadFromSource: jest.fn() } });
+    expect(screen.getByTestId('compose-format-reload-from-source')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6c. Open Document button — opens the source Dataverse Document in the shared
+//     preview modal (RichFilePreviewDialog + BFF preview-url), wired by the host.
+//     Gated by `onOpenDocument`: rendered only when the host wires a handler
+//     (a doc with a preview source is loaded); hidden otherwise. Mirrors the
+//     onRefreshProfile / onReloadFromSource gating pattern.
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Open Document button', () => {
+  it('is not rendered when no onOpenDocument handler is wired (no previewable document)', () => {
+    renderFormatToolbar();
+    expect(screen.queryByTestId('compose-format-open-document')).not.toBeInTheDocument();
+  });
+
+  it('renders and fires onOpenDocument when clicked (doc with a preview source)', async () => {
+    const user = userEvent.setup();
+    const onOpenDocument = jest.fn();
+    renderFormatToolbar({}, { props: { onOpenDocument } });
+
+    const btn = screen.getByTestId('compose-format-open-document');
+    expect(btn).toBeInTheDocument();
+    expect(btn).toHaveAttribute('aria-label', 'Open document');
+    await user.click(btn);
+    expect(onOpenDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it('is disabled when the toolbar is read-only (disabled prop)', () => {
+    renderFormatToolbar({}, { props: { onOpenDocument: jest.fn(), disabled: true } });
+    expect(screen.getByTestId('compose-format-open-document')).toBeDisabled();
+  });
+
+  it('ADR-021: renders under a dark theme', () => {
+    renderFormatToolbar({}, { theme: webDarkTheme, props: { onOpenDocument: jest.fn() } });
+    expect(screen.getByTestId('compose-format-open-document')).toBeInTheDocument();
   });
 });
 

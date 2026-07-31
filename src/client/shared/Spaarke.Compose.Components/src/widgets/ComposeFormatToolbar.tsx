@@ -57,6 +57,7 @@ import {
   Toolbar,
   ToolbarButton,
   Button,
+  SplitButton,
   Tooltip,
   makeStyles,
   tokens,
@@ -69,7 +70,11 @@ import {
   PopoverTrigger,
   PopoverSurface,
   Text,
+  Spinner,
+  type MenuButtonProps,
 } from '@fluentui/react-components';
+// G7 (task 022): the Save split-button choice ('version' | 'new').
+import type { ComposeSaveMode } from '../types/compose-contracts';
 import {
   TextBold24Regular,
   TextItalic24Regular,
@@ -99,6 +104,9 @@ import {
   TableDeleteColumn24Regular,
   TableDismiss24Regular,
   ClipboardTaskListLtr24Regular,
+  DocumentSync24Regular,
+  ArrowClockwise24Regular,
+  DocumentText24Regular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -211,13 +219,28 @@ export interface ComposeFormatToolbarProps {
    */
   hasLoadedBaseline?: boolean;
 
-  // ---- Save (FIX #5) — icon button, right-aligned; rendered only when `onSave` set ----
-  /** Save handler (create-on-save first Save, or update). */
-  onSave?: () => void;
+  // ---- Save (FIX #5 / G7 task 022) — split-button, right-aligned; rendered only when `onSave` set ----
+  /** Save handler. G7 (task 022): receives the split-button choice — `'version'` (default, replace/dedup)
+   *  or `'new'` (fork a new document). */
+  onSave?: (mode?: ComposeSaveMode) => void;
   /** True when Save should be enabled (unsaved edit OR unpersisted transient draft). */
   canSave?: boolean;
   /** True while a save is in flight. */
   isSaving?: boolean;
+  /** G10 (FR-09, task 040): manual "Refresh Profile" handler. Renders the button when set (the host
+   *  wires it only for a promoted doc — one with a sprk_document record to re-profile). */
+  onRefreshProfile?: () => void;
+  /** UAT #5 (task 053): "Reload from source" handler. Renders the button when set (the host wires it only
+   *  for a doc with an SPE source). Pulls the latest SPE bytes on demand — e.g. after an external Word-web
+   *  edit the change-check missed. Distinct from Refresh Profile (which re-profiles, not reloads bytes). */
+  onReloadFromSource?: () => void;
+  /** "Open Document" handler. Renders the button when set (the host wires it only for a doc with a preview
+   *  source — a promoted sprk_document). Opens the source Dataverse Document in the shared preview modal.
+   *  Undefined → the button hides (mirrors the onRefreshProfile gating pattern). */
+  onOpenDocument?: () => void;
+  /** UAT #9 (task 054): true while a manual profile re-run is in flight — shows a spinner on the
+   *  Refresh-Profile button so the (otherwise silent 202) click gives visible feedback. */
+  isRefreshingProfile?: boolean;
 
   // ---- Review (ai-advanced-capabilities-nda-r1 UAT round-2 items #1/#2) — icon-only dropdown,
   //      right-aligned, rendered ONLY when an NDA advisory review is present. Two independent
@@ -347,6 +370,10 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     onSave,
     canSave,
     isSaving,
+    onRefreshProfile,
+    onReloadFromSource,
+    onOpenDocument,
+    isRefreshingProfile,
     trackChangesEnabled,
     onToggleTrackChanges,
     hasReview,
@@ -449,27 +476,44 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
   const openInWordDisabled = controlDisabled || wordActionsDisabled === true;
   const saveDisabled = controlDisabled || canSave !== true || isSaving === true;
 
-  // ---- task 038 (spaarkeai-compose-r4 zero-error guardrail pass) --------------------------------
-  // The tracked-edit path (loaded/imported docs) has NO representation for alignment (the engine throws
-  // StructuralOpNotYetImplemented → 422) nor for heading/list/table structural edits (silently deferred).
-  // On a LOADED doc (`hasLoadedBaseline === true`) DISABLE those controls; a BORN-IN-EDITOR draft
-  // (blank / AI-draft, `hasLoadedBaseline` falsy) keeps them (the ComposeDocumentRenderer authors them
-  // cleanly). This SUPERSEDES + INVERTS task 037's table gating: the renderer authors born-in-editor
-  // tables cleanly, but the engine has no table op and would silently drop a loaded-doc table — so
-  // table-insert is ENABLED born-in-editor and DISABLED loaded (the exact opposite of what 037 shipped).
-  // Hyperlinks are unrepresentable in BOTH modes in R4 (no mark op, no content-model href). Every
-  // deferred feature is documented in projects/spaarkeai-compose-r5 (G3 alignment/heading/list, G4
-  // tables, G5 hyperlinks). The read-only gate (`controlDisabled`) is OR'd in — preserved, not replaced.
+  // ---- task 038 guardrails, progressively lifted by R5 (spaarkeai-compose-r5 G3/G4) ----------------
+  // The tracked-edit path (loaded/imported docs) originally had NO representation for alignment/heading/
+  // list/table, so those controls were DISABLED on a LOADED doc and kept only for a BORN-IN-EDITOR draft
+  // (the ComposeDocumentRenderer authors them cleanly). R5 lifts the guards one construct at a time as the
+  // ComposeShadowPatchEngine gains each applier:
+  //   - R5 task 010 (G3 alignment): alignment RE-ENABLED on loaded docs (tracked w:pPrChange).
+  //   - R5 task 011 (G3 heading/list): heading + bullet/ordered list RE-ENABLED on loaded docs (tracked
+  //     w:pPrChange for Style/ListOrdered/ListLevel; list numbering reuses R4.5's numbering engine).
+  //   - R5 task 014 (G4 table op): STRUCTURAL EDITS of an existing table — add/delete row, add/delete column,
+  //     delete table, and cell-content edits — now RE-ENABLED + round-tripping on loaded docs (the client
+  //     captures them as the closed-catalog `table` op; the engine emits full tracked table structure —
+  //     w:trPr/w:ins+del, w:tcPr/w:cellIns+cellDel, w:tblGridChange, w:tblPrChange). These edit buttons are
+  //     already gated only by the read-only `controlDisabled` + `editor.can()` (in-a-table) checks — no
+  //     isLoadedBaseline gate — so on a loaded doc they were reachable-but-silently-dropped before task 014;
+  //     they now round-trip.
+  //   - Insert-table (a BRAND-NEW table) stays loaded-gated: whole-table CREATE is a whole-block author, NOT a
+  //     structural edit of an existing table, and is deliberately OUTSIDE the task-004 closed table-op catalog
+  //     (which covers InsertRow/DeleteRow/InsertColumn/DeleteColumn/SetCellContent/SetTableProps). Enabling it
+  //     on a loaded doc would reintroduce the exact silent-loss NFR-08 forbids, so it remains disabled (honest
+  //     "future release" tooltip). Born-in-editor tables stay enabled — the renderer authors them cleanly.
+  //   - Hyperlinks remain unrepresentable in BOTH modes until R5 G5 (no mark op, no content-model href).
   const isLoadedBaseline = hasLoadedBaseline === true;
   /** Hover tooltip on a control disabled because its feature is deferred to a future release. */
   const FUTURE_RELEASE_TOOLTIP = 'Available in a future release';
   const deferredIfLoaded = isLoadedBaseline ? FUTURE_RELEASE_TOOLTIP : undefined;
-  // Alignment + heading + bullet/ordered list — deferred on loaded docs.
-  const structuralEditDisabled = controlDisabled || isLoadedBaseline;
-  // INVERTED from task 037: enabled born-in-editor, disabled loaded.
+  // Heading + bullet/ordered list — RE-ENABLED on loaded docs (R5 task 011); read-only gate still applies.
+  const headingListEditDisabled = controlDisabled;
+  // Alignment — re-enabled on loaded docs (R5 task 010); read-only gate still applies.
+  const alignmentEditDisabled = controlDisabled;
+  // Insert-table (whole-table CREATE) — still loaded-gated (out of the R5 task-014 closed table-op catalog:
+  // that op covers structural EDITS of an existing table, not authoring a new one). Enabled born-in-editor
+  // (renderer), disabled loaded. Row/column/delete-table EDIT commands are NOT gated here — they round-trip
+  // via the table op (G4).
   const tableInsertDisabled = controlDisabled || isLoadedBaseline;
-  // Hyperlinks are not representable in EITHER mode in R4 (R5 G5).
-  const hyperlinkDisabled = true;
+  // G5 (FR-05, task 033): hyperlinks are now representable on BOTH paths — authored (clean w:hyperlink via
+  // ComposeDocumentRenderer) and edit (the `Link` mark op → ComposeShadowPatchEngine tracked w:hyperlink).
+  // The SDL-4/5 R4 guard is removed; the control follows the same read-only gate as Bold/Italic.
+  const hyperlinkDisabled = controlDisabled;
 
   return (
     <Toolbar
@@ -479,49 +523,31 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
       data-testid="compose-format-toolbar"
     >
       {/* ---- Body (block/heading style) ---- */}
-      {/* task 038: heading changes are deferred on a LOADED doc (the engine has no setBlockAttr applier
-          — R5 G3), so render a disabled, tooltip'd button instead of an openable menu. A born-in-editor
-          draft keeps the full heading menu. testId is stable across both branches. */}
-      {isLoadedBaseline ? (
-        <Tooltip content={FUTURE_RELEASE_TOOLTIP} relationship="description" withArrow>
+      {/* R5 task 011 (G3 heading/list): the heading menu is RE-ENABLED on loaded docs — the engine now applies
+          a setBlockAttr Style op as a tracked w:pPrChange. Gated only by the read-only `controlDisabled`. */}
+      <Menu positioning="below-start">
+        <MenuTrigger disableButtonEnhancement>
           <Button
             appearance="subtle"
             size="small"
-            disabled
+            disabled={headingListEditDisabled}
             className={styles.menuButton}
             icon={<ChevronDown16Regular />}
             iconPosition="after"
-            aria-label={`${currentBlockLabel(editor)} — block style`}
             data-testid="compose-format-heading-menu"
           >
             {currentBlockLabel(editor)}
           </Button>
-        </Tooltip>
-      ) : (
-        <Menu positioning="below-start">
-          <MenuTrigger disableButtonEnhancement>
-            <Button
-              appearance="subtle"
-              size="small"
-              disabled={controlDisabled}
-              className={styles.menuButton}
-              icon={<ChevronDown16Regular />}
-              iconPosition="after"
-              data-testid="compose-format-heading-menu"
-            >
-              {currentBlockLabel(editor)}
-            </Button>
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList>
-              <MenuItem onClick={() => setHeading(null)}>Body</MenuItem>
-              <MenuItem onClick={() => setHeading(1)}>Heading 1</MenuItem>
-              <MenuItem onClick={() => setHeading(2)}>Heading 2</MenuItem>
-              <MenuItem onClick={() => setHeading(3)}>Heading 3</MenuItem>
-            </MenuList>
-          </MenuPopover>
-        </Menu>
-      )}
+        </MenuTrigger>
+        <MenuPopover>
+          <MenuList>
+            <MenuItem onClick={() => setHeading(null)}>Body</MenuItem>
+            <MenuItem onClick={() => setHeading(1)}>Heading 1</MenuItem>
+            <MenuItem onClick={() => setHeading(2)}>Heading 2</MenuItem>
+            <MenuItem onClick={() => setHeading(3)}>Heading 3</MenuItem>
+          </MenuList>
+        </MenuPopover>
+      </Menu>
 
       {/* ---- Paragraph (lists / blockquote / alignment) ---- */}
       <Menu positioning="below-start">
@@ -534,8 +560,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextBulletListLtr24Regular />}
               label="Bullet list"
               active={editor.isActive('bulletList')}
-              disabled={structuralEditDisabled}
-              deferredReason={deferredIfLoaded}
+              disabled={headingListEditDisabled}
               onClick={() => editor.chain().focus().toggleBulletList().run()}
               testId="compose-format-bullet-list"
             />
@@ -543,8 +568,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextNumberListLtr24Regular />}
               label="Numbered list"
               active={editor.isActive('orderedList')}
-              disabled={structuralEditDisabled}
-              deferredReason={deferredIfLoaded}
+              disabled={headingListEditDisabled}
               onClick={() => editor.chain().focus().toggleOrderedList().run()}
               testId="compose-format-ordered-list"
             />
@@ -560,8 +584,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextAlignLeft24Regular />}
               label="Align left"
               active={editor.isActive({ textAlign: 'left' })}
-              disabled={structuralEditDisabled}
-              deferredReason={deferredIfLoaded}
+              disabled={alignmentEditDisabled}
               onClick={() => editor.chain().focus().setTextAlign('left').run()}
               testId="compose-format-align-left"
             />
@@ -569,8 +592,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextAlignCenter24Regular />}
               label="Align center"
               active={editor.isActive({ textAlign: 'center' })}
-              disabled={structuralEditDisabled}
-              deferredReason={deferredIfLoaded}
+              disabled={alignmentEditDisabled}
               onClick={() => editor.chain().focus().setTextAlign('center').run()}
               testId="compose-format-align-center"
             />
@@ -578,8 +600,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextAlignRight24Regular />}
               label="Align right"
               active={editor.isActive({ textAlign: 'right' })}
-              disabled={structuralEditDisabled}
-              deferredReason={deferredIfLoaded}
+              disabled={alignmentEditDisabled}
               onClick={() => editor.chain().focus().setTextAlign('right').run()}
               testId="compose-format-align-right"
             />
@@ -630,10 +651,9 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={editor.isActive('link') ? <LinkDismiss24Regular /> : <Link24Regular />}
               label={editor.isActive('link') ? 'Remove link' : 'Add link'}
               active={editor.isActive('link')}
-              // task 038: hyperlinks are not representable in R4 in EITHER mode (no mark op, no
-              // content-model href — R5 G5). Disabled everywhere; controlDisabled is subsumed.
-              disabled={controlDisabled || hyperlinkDisabled}
-              deferredReason={FUTURE_RELEASE_TOOLTIP}
+              // G5 (FR-05, task 033): hyperlinks now round-trip on both paths — the control follows the
+              // read-only gate only (hyperlinkDisabled === controlDisabled), no longer deferred.
+              disabled={hyperlinkDisabled}
               onClick={toggleLink}
               testId="compose-format-link"
             />
@@ -710,19 +730,34 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               {/* UX-1 (UAT 2026-07-19): a deliberate DUPLICATE of the right-aligned Save
                   button — users instinctively look in the Word menu to save. Same handler
                   (`onSave`) + same enable predicate (`saveDisabled`); rendered only when
-                  the host wires Save. */}
+                  the host wires Save. G7 (task 022): the Word-menu "Save" is the Save-Version
+                  (replace/dedup) instinct; the fork lives on the main split-button's "Save New
+                  Document" item + is mirrored here for parity. */}
               {onSave ? (
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  className={styles.wordMenuItem}
-                  icon={<SaveRegular />}
-                  disabled={saveDisabled}
-                  onClick={onSave}
-                  data-testid="compose-format-word-save"
-                >
-                  {isSaving ? 'Saving…' : 'Save'}
-                </Button>
+                <>
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    className={styles.wordMenuItem}
+                    icon={<SaveRegular />}
+                    disabled={saveDisabled}
+                    onClick={() => onSave('version')}
+                    data-testid="compose-format-word-save"
+                  >
+                    {isSaving ? 'Saving…' : 'Save Version'}
+                  </Button>
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    className={styles.wordMenuItem}
+                    icon={<SaveRegular />}
+                    disabled={saveDisabled}
+                    onClick={() => onSave('new')}
+                    data-testid="compose-format-word-save-new"
+                  >
+                    Save New Document
+                  </Button>
+                </>
               ) : null}
               {onOpenInWord ? (
                 <Button
@@ -821,18 +856,93 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         </Tooltip>
       ) : null}
 
-      {/* ---- Save (icon-only, right-aligned) ---- */}
-      {onSave ? (
-        <Tooltip content={isSaving ? 'Saving…' : 'Save changes'} relationship="label" withArrow>
+      {/* ---- Open Document — right-aligned; only for a doc with a preview source (a promoted
+              sprk_document). Opens the source Dataverse Document in the shared preview modal
+              (RichFilePreviewDialog + BFF preview-url), wired by the host. Hidden when no handler. ---- */}
+      {onOpenDocument ? (
+        <Tooltip content="Open document" relationship="label" withArrow>
           <ToolbarButton
             appearance="subtle"
-            icon={<SaveRegular />}
-            aria-label={isSaving ? 'Saving' : 'Save changes'}
-            disabled={saveDisabled}
-            onClick={onSave}
-            data-testid="compose-format-save"
+            icon={<DocumentText24Regular />}
+            aria-label="Open document"
+            disabled={controlDisabled}
+            onClick={onOpenDocument}
+            data-testid="compose-format-open-document"
           />
         </Tooltip>
+      ) : null}
+
+      {/* ---- Reload from source (UAT #5, task 053) — right-aligned; only for a doc with an SPE source.
+              Pulls the latest SPE bytes on demand (e.g. after an external Word-web edit). Distinct icon +
+              action from Refresh Profile (which re-profiles rather than reloading bytes). ---- */}
+      {onReloadFromSource ? (
+        <Tooltip content="Reload from source" relationship="label" withArrow>
+          <ToolbarButton
+            appearance="subtle"
+            icon={<ArrowClockwise24Regular />}
+            aria-label="Reload from source"
+            disabled={controlDisabled}
+            onClick={onReloadFromSource}
+            data-testid="compose-format-reload-from-source"
+          />
+        </Tooltip>
+      ) : null}
+
+      {/* ---- Refresh Profile (G10 task 040) — right-aligned; only for a promoted doc. UAT #9 (task 054):
+              a brief spinner while the re-run is in flight gives the otherwise-silent 202 visible feedback. ---- */}
+      {onRefreshProfile ? (
+        <Tooltip
+          content={isRefreshingProfile ? 'Refreshing document profile…' : 'Refresh document profile'}
+          relationship="label"
+          withArrow
+        >
+          <ToolbarButton
+            appearance="subtle"
+            icon={isRefreshingProfile ? <Spinner size="tiny" /> : <DocumentSync24Regular />}
+            aria-label={isRefreshingProfile ? 'Refreshing document profile' : 'Refresh document profile'}
+            disabled={controlDisabled || isRefreshingProfile}
+            onClick={onRefreshProfile}
+            data-testid="compose-format-refresh-profile"
+          />
+        </Tooltip>
+      ) : null}
+
+      {/* ---- Save split-button (G7 task 022) — right-aligned ---- */}
+      {/* Primary action = "Save Version" (replace in place / transient-key dedup); the caret menu
+          carries "Save New Document" (a deliberate fork). Fluent v9 SplitButton, theme tokens only
+          (ADR-021 dark-mode). Mirrors the blessed ComposerActionBar Send split-button pattern. */}
+      {onSave ? (
+        <Menu positioning="below-end">
+          <MenuTrigger disableButtonEnhancement>
+            {(triggerProps: MenuButtonProps) => (
+              <SplitButton
+                appearance="subtle"
+                data-testid="compose-format-save"
+                menuButton={{ ...triggerProps, 'aria-label': 'Save options' }}
+                primaryActionButton={{
+                  onClick: () => onSave('version'),
+                  disabled: saveDisabled,
+                  icon: <SaveRegular />,
+                  'aria-label': isSaving ? 'Saving' : 'Save version',
+                }}
+              >
+                {isSaving ? 'Saving…' : 'Save Version'}
+              </SplitButton>
+            )}
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              <MenuItem
+                icon={<SaveRegular />}
+                disabled={saveDisabled}
+                onClick={() => onSave('new')}
+                data-testid="compose-format-save-new"
+              >
+                Save New Document
+              </MenuItem>
+            </MenuList>
+          </MenuPopover>
+        </Menu>
       ) : null}
 
       {/* ---- Undo / Redo (icon-only, right-aligned) ---- */}

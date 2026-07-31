@@ -286,7 +286,9 @@ public class CommunicationByRegardingReadTests
         if (inReplyTo is not null) row["sprk_inreplyto"] = El(inReplyTo);
         if (direction is not null) row["sprk_direction"] = El(direction.Value);
         if (sentBy is not null) row["_sprk_sentby_value"] = El(sentBy.Value.ToString());
-        if (sentByName is not null) row["sprk_sentbyname"] = El(sentByName);
+        // Sender name rides the _sprk_sentby_value FormattedValue annotation (not the broken
+        // sprk_sentbyname column) — the service reads SentByName from THIS key (messaging-r3 2026-07-22).
+        if (sentByName is not null) row["_sprk_sentby_value@OData.Community.Display.V1.FormattedValue"] = El(sentByName);
         return row;
     }
 

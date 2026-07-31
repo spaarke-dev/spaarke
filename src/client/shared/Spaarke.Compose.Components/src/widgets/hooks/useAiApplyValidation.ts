@@ -186,6 +186,10 @@ const COMPOSE_MARK_TO_TIPTAP: Readonly<Record<ComposeMarkType, string>> = {
   Bold: 'bold',
   Italic: 'italic',
   Underline: 'underline',
+  // G5 (FR-05, task 033): the value-carrying Link mark. NOTE the setMark/clearMark applier below
+  // special-cases Link (setLink(href)/unsetLink) — this entry is only for the mark-name mapping
+  // completeness (e.g. tiptapMarksFor); a boolean toggleMark('link') would drop the href.
+  Link: 'link',
 };
 
 /** Resolve a structurally-VALIDATED `(paraId, runIndex, offset)` point to an absolute ProseMirror position. */
@@ -261,9 +265,19 @@ export function applyValidatedComposeOperation(editor: Editor, op: ComposeOperat
       const from = resolvePointPosition(doc, op.paraId, op.range.start);
       const to = resolvePointPosition(doc, op.paraId, op.range.end);
       if (from === null || to === null || to <= from) return false;
+      const chain = editor.chain().setTextSelection({ from, to });
+      // G5 (FR-05, task 033): Link is a value-carrying mark — apply via setLink(href)/unsetLink
+      // (@tiptap/extension-link), never a boolean toggleMark (which would drop the href).
+      if (op.mark === 'Link') {
+        if (op.type === 'setMark') {
+          const href = op.href;
+          if (!href) return false; // a Link setMark with no target is not applicable (mirrors server refusal)
+          return chain.extendMarkRange('link').setLink({ href }).run();
+        }
+        return chain.extendMarkRange('link').unsetLink().run();
+      }
       const tiptapMark = COMPOSE_MARK_TO_TIPTAP[op.mark];
       if (!tiptapMark) return false;
-      const chain = editor.chain().setTextSelection({ from, to });
       return (op.type === 'setMark' ? chain.setMark(tiptapMark) : chain.unsetMark(tiptapMark)).run();
     }
     default:
