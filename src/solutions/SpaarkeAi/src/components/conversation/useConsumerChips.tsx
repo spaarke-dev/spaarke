@@ -163,10 +163,18 @@ export interface ConsumerChipsController {
    * completion message (see `runBindingDispatch`) so a per-pack outcome can be
    * labelled ("...under the **Employment** lens...") instead of the generic
    * "the NDA" phrasing; omitted preserves the exact original message.
+   *
+   * agreements-r1 task 031 (DEF-09 routing): `opts.sessionIdOverride`, when supplied,
+   * is threaded verbatim to `dispatchConsumer`'s own `sessionIdOverride` (the SAME
+   * additive per-dispatch session-target the Compose EDIT toolbar path already uses —
+   * `ConversationPane.dispatchComposeAction`) so THIS dispatch's `compose`-disposition
+   * SessionOutput writes into a caller-chosen session (e.g. the agreement-review's
+   * DOCUMENT session) instead of the bound chat session. Omitted preserves the exact
+   * original (chat-session) behavior for every pre-031 caller.
    */
   dispatchBinding: (
     bindingId: string,
-    args?: { slots?: Record<string, unknown>; resultLabel?: string }
+    args?: { slots?: Record<string, unknown>; resultLabel?: string; sessionIdOverride?: string }
   ) => Promise<void>;
   /** Chips are session-scoped — clear on session change. */
   resetForSession: () => void;
@@ -231,6 +239,12 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
          * message (every pre-021 caller).
          */
         resultLabel?: string;
+        /**
+         * task 031 (DEF-09 routing): per-dispatch session-id override, threaded verbatim
+         * to `dispatchConsumer`'s own `sessionIdOverride`. Omitted preserves the exact
+         * original chat-session-bound behavior (every pre-031 caller).
+         */
+        sessionIdOverride?: string;
       }
     ): Promise<void> => {
       // Single dispatch decision per turn: consume the chip set on click.
@@ -249,6 +263,9 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
         slots: opts?.slots,
         requiresAttachments: opts?.requiresAttachments,
         attachmentCount: sessionAttachmentCount,
+        // task 031 (DEF-09 routing): threads a caller-chosen session (e.g. the agreement-review's
+        // DOCUMENT session) instead of the bound chat session. Undefined for every existing caller.
+        sessionIdOverride: opts?.sessionIdOverride,
       })
         .then((dispatched) => {
           // nda-r1 follow-up: hand the terminal result to the host's advisory-comments bridge so the
@@ -441,8 +458,13 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
   const dispatchBinding = React.useCallback(
     (
       bindingId: string,
-      args?: { slots?: Record<string, unknown>; resultLabel?: string }
-    ): Promise<void> => runBindingDispatch(bindingId, { slots: args?.slots, resultLabel: args?.resultLabel }),
+      args?: { slots?: Record<string, unknown>; resultLabel?: string; sessionIdOverride?: string }
+    ): Promise<void> =>
+      runBindingDispatch(bindingId, {
+        slots: args?.slots,
+        resultLabel: args?.resultLabel,
+        sessionIdOverride: args?.sessionIdOverride,
+      }),
     [runBindingDispatch]
   );
 

@@ -56,6 +56,18 @@
  *                        `entityId` channel. The canonical regarding pre-set is driven by
  *                        `entityLogicalName`/`entityId` (already listed above) — `regarding` is
  *                        additive and read for completeness by `main.tsx`. Braces stripped.
+ *   subDomain          — ai-advanced-capabilities-agreements-r1 task 022 (spec FR-09; hub A3
+ *                        deferred deep-threading leg): the level-2 agreement sub-domain
+ *                        (`sprk_agreementtype.sprk_key`, e.g. `"nda"`) for a cold-load/deep-link
+ *                        open of the Analysis entry matrix. Threaded through `main.tsx` → `App` →
+ *                        `ThreePaneShell` → `AnalysisLaunchContext`, read by `WorkspacePane`'s
+ *                        analysis-entry effect and carried into the Compose launch envelope
+ *                        alongside `activeWorkType` (mirrors the shipped wizard-finish carry,
+ *                        `bd64a69d4`) — ONE envelope contract, same field name/semantics on every
+ *                        door. Not a GUID — no brace-stripping. Explicit (this param, or the
+ *                        wizard picker) is authoritative; the open-existing derivation (read from
+ *                        the persisted lookup) fills it only when absent; the classifier (task
+ *                        021) fills it later still, only when both are absent.
  *
  * @see ADR-006 — Ribbon scripts are invocation-only; business logic lives here
  * @see docs/guides/spaarkeai-launch-points.md — Full URL format documentation
@@ -106,6 +118,18 @@ export interface SpaarkeAiLaunchParams {
    * stripped like `entityId`.
    */
   regarding?: string;
+
+  /**
+   * ai-advanced-capabilities-agreements-r1 task 022 (spec FR-09) — the level-2 agreement
+   * sub-domain (`sprk_agreementtype.sprk_key`, e.g. `"nda"`, `"employment"`) for a cold-load/
+   * deep-link open of the Analysis entry matrix (entry case 2c/2d existing, or 2a/2b new with a
+   * launch-time hint). Read by `main.tsx` and forwarded through `App` → `ThreePaneShell` →
+   * `AnalysisLaunchContext`, the same envelope field the wizard-finish door (`bd64a69d4`) and the
+   * open-existing derivation (task 022) populate — ONE contract, same name/semantics everywhere.
+   * A plain slug, not a GUID — no brace-stripping. Optional; omitting it preserves every existing
+   * non-agreement launch byte-for-byte.
+   */
+  subDomain?: string;
 }
 
 /**
@@ -225,6 +249,11 @@ export function buildLaunchUrl(
   }
   if (params.regarding) {
     record["regarding"] = params.regarding.replace(/^\{|\}$/g, "");
+  }
+  // ai-advanced-capabilities-agreements-r1 task 022 (FR-09): agreement sub-domain hint for the
+  // cold-load/deep-link door. Not a GUID — no brace-stripping (mirrors `worktype`'s handling).
+  if (params.subDomain) {
+    record["subDomain"] = params.subDomain;
   }
 
   // Compose-specific params (spaarkeai-compose-r1 task 046). When `composeMode`

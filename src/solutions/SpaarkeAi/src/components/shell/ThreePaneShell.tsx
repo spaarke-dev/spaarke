@@ -262,6 +262,15 @@ export interface ThreePaneShellProps {
   analysisId?: string;
   /** `sprk_worktype` Choice value for a new analysis (analysisMode='new'). */
   worktype?: string;
+  /**
+   * ai-advanced-capabilities-agreements-r1 task 022 (spec FR-09; hub A3 deferred deep-threading
+   * leg — cold-load/deep-link door): the level-2 agreement sub-domain (`sprk_agreementtype.sprk_key`,
+   * e.g. "nda") for a cold-load open of the Analysis entry matrix. Published on
+   * `AnalysisLaunchContextValue` alongside `mode`/`analysisId`/`worktype`; WorkspacePane's
+   * analysis-entry effect treats it as EXPLICIT/authoritative over its own open-existing
+   * derivation (task 022) — same envelope contract as the wizard-finish door (`bd64a69d4`).
+   */
+  subDomain?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -288,6 +297,15 @@ export interface AnalysisLaunchContextValue {
   analysisId?: string;
   /** `sprk_worktype` Choice value (mode='new'). */
   worktype?: string;
+  /**
+   * ai-advanced-capabilities-agreements-r1 task 022 (spec FR-09; hub A3 deferred deep-threading
+   * leg): the level-2 agreement sub-domain (`sprk_agreementtype.sprk_key`, e.g. "nda") when the
+   * cold-load/deep-link URL carried an explicit `subDomain` param. EXPLICIT/authoritative —
+   * WorkspacePane's `mode='existing'` effect prefers this over its own DB-derived value (read
+   * from the persisted `sprk_agreementtype` lookup on reopen); absent when the launch carried no
+   * hint, in which case the derivation (or, later, the classifier) fills the envelope instead.
+   */
+  subDomain?: string;
 }
 
 export const AnalysisLaunchContext =
@@ -693,21 +711,27 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
     analysisMode,
     analysisId,
     worktype,
+    subDomain,
   } = props;
 
   // task 050 (spec §12 / FR-14): assemble the analysis entry-matrix launch value
   // so WorkspacePane can route to the correct host (hub for new; existing by id).
   // Null unless the app was launched into an analysis entry mode — every
   // non-analysis launch keeps the default cold-load.
+  //
+  // task 022 (spec FR-09; hub A3 deferred deep-threading leg): `subDomain` rides alongside —
+  // additive on both branches. Omitted (undefined) when the cold-load URL carried no hint,
+  // which WorkspacePane's `mode='existing'` effect treats as "explicit path silent" (falls
+  // through to its own DB-derived value, never a fabricated default).
   const analysisLaunch = React.useMemo<AnalysisLaunchContextValue | null>(() => {
     if (analysisMode === "existing" && analysisId) {
-      return { mode: "existing", analysisId };
+      return { mode: "existing", analysisId, ...(subDomain ? { subDomain } : {}) };
     }
     if (analysisMode === "new") {
-      return { mode: "new", worktype };
+      return { mode: "new", worktype, ...(subDomain ? { subDomain } : {}) };
     }
     return null;
-  }, [analysisMode, analysisId, worktype]);
+  }, [analysisMode, analysisId, worktype, subDomain]);
 
   // spaarkeai-compose-r1 task 092: assemble the Compose launch context so
   // downstream panes can respond to modal-launch mode. `null` when the app is

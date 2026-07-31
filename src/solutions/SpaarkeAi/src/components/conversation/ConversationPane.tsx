@@ -112,6 +112,10 @@ import { useCapabilityDiscovery } from "./useCapabilityDiscovery";
 // never modifies (Spaarke.Compose.Components is off-limits this wave — task 012 owns it).
 import { detectAgreementReviewIntent } from "./agreementReviewRouting";
 import { useAgreementReviewGate } from "./useAgreementReviewGate";
+// task 031 (DEF-09 routing): the pure waiter/timeout seam that resolves the reviewed file's
+// REAL document session (backfilled by registerComposeActiveDocument), so the review dispatch's
+// `sessionIdOverride` can target the SAME session ComposeWorkspace reads compose-outputs from.
+import { createDocumentSessionWaiter } from "./documentSessionWaiter";
 import { useComposeLaunch } from "@spaarke/compose-components/context/composeLaunchContext";
 import {
   AuthLoadingState,
@@ -226,6 +230,17 @@ export function ConversationPane(): React.JSX.Element {
     documentSessionId?: string;
     fileName?: string;
   } | null>(null);
+
+  // task 031 (DEF-09 routing) — the pure waiter/timeout seam (documentSessionWaiter.ts) that resolves
+  // a REVIEWED file's REAL document session, keyed by that file's session-file id (never a different
+  // file's stale value), backfilled by `registerComposeActiveDocument` below (the SAME reactive
+  // conduit the "revise this document" flow's `activeComposeDocSessionId` already uses). One instance
+  // per pane mount; reset on a fresh chat session (`handleSessionCreated`).
+  const documentSessionWaiterRef = React.useRef(createDocumentSessionWaiter());
+  const awaitDocumentSessionIdFor = React.useCallback(
+    (fileId: string): Promise<string | null> => documentSessionWaiterRef.current.awaitDocumentSessionId(fileId),
+    []
+  );
 
   // #2 double-classify fix (UAT 2026-07-18) — CROSS-PATH dedup registry keyed by filename. A chat file
   // upload promotes via useAttachments' auto-promote (`POST /documents` → classify #1). FIX #7 then
@@ -687,6 +702,9 @@ export function ConversationPane(): React.JSX.Element {
     acceptChips: chips.acceptChips,
     enqueueAssistantMessage: injection.enqueue,
     inject: injection.inject,
+    // task 031 (DEF-09 routing): resolves the reviewed file's REAL document session so the gate's
+    // dispatch(es) can target it via sessionIdOverride — see documentSessionWaiter.ts header.
+    awaitDocumentSessionId: awaitDocumentSessionIdFor,
   });
 
   // UAT round-5 #9 — when a dispatch settles WITHOUT an NDA result having completed the run, mark it
@@ -1203,7 +1221,18 @@ export function ConversationPane(): React.JSX.Element {
     const { fileId, fileName, cardLabel } = ndaReviewFile;
     mountFileInCompose(fileId, fileName);
     if (ndaReviewBindingId) {
-      chips.dispatchBinding(ndaReviewBindingId, { slots: { fileIds: [fileId] } });
+      // task 031 (DEF-09 routing): await the mounted file's REAL document session (may already be
+      // known — an already-open/ingested document — or back-fill shortly after the mount above) and
+      // thread it as `sessionIdOverride` so this review's compose-disposition SessionOutput lands
+      // where ComposeWorkspace reads compose-outputs. Gracefully proceeds on the bound chat session
+      // (undefined override) if the document session never establishes (no open document / mount
+      // failure) — never blocks, never drops the review.
+      void awaitDocumentSessionIdFor(fileId).then((documentSessionId) => {
+        chips.dispatchBinding(ndaReviewBindingId, {
+          slots: { fileIds: [fileId] },
+          sessionIdOverride: documentSessionId ?? undefined,
+        });
+      });
     } else {
       // Capability discovery hasn't resolved yet (or the catalog is unreachable) — the file still
       // opens in Compose above; tell the user the review itself didn't start (never a silent drop).
@@ -1214,7 +1243,7 @@ export function ConversationPane(): React.JSX.Element {
       );
     }
     setNdaReviewFile(null);
-  }, [ndaReviewFile, ndaReviewBindingId, mountFileInCompose, chips, injection]);
+  }, [ndaReviewFile, ndaReviewBindingId, mountFileInCompose, chips, injection, awaitDocumentSessionIdFor]);
 
   const handleDocAction = React.useCallback(
     (action: ComposeDocAction): void => {
@@ -1585,6 +1614,12 @@ export function ConversationPane(): React.JSX.Element {
         // Set BEFORE the active-document POST so a POST failure (chat-visibility loss) does NOT leave
         // this pointing at a STALE prior file — the bytes are already uploaded (sessionFileId is real).
         activeSourceDocRef.current = { sessionFileId, documentSessionId, fileName: name };
+        // task 031 (DEF-09 routing): back-fill the document-session waiter keyed by THIS file's
+        // session-file id — resolves any in-flight `awaitDocumentSessionIdFor(sessionFileId)` call
+        // (the agreement-review dispatch's routing wait) and remembers the value for a repeat review
+        // of an already-registered document. No-op when `documentSessionId` is undefined (a
+        // pointer-only registration with no session yet).
+        documentSessionWaiterRef.current.notify(sessionFileId, documentSessionId);
         // Wave 3 Part 2 (DEF-11 TEXT-path close): thread the tab's `documentSessionId` so the server
         // sets ChatSession.ActiveDocument.DocumentSessionId → BindingCapabilityTool routes a typed
         // revise/draft into THIS document session (redline in the open doc), not the chat session.
@@ -1954,6 +1989,9 @@ export function ConversationPane(): React.JSX.Element {
       // cache (a new session has no already-oriented files) and any buffered race-safe gate intent.
       agreementReviewGate.resetForSession();
       setPendingAgreementReview(false);
+      // task 031: a fresh session drops any known/pending document-session routing state — a prior
+      // session's file ids/session ids must never leak into a new session's resolution.
+      documentSessionWaiterRef.current.reset();
     },
     [
       setChatSessionId,

@@ -640,6 +640,18 @@ async function bootstrap(): Promise<void> {
     undefined;
   void regarding;
 
+  // ai-advanced-capabilities-agreements-r1 task 022 (spec FR-09; hub A3 deferred deep-threading
+  // leg — cold-load/deep-link door): the level-2 agreement sub-domain (`sprk_agreementtype.sprk_key`,
+  // e.g. "nda") for a cold-load open of the Analysis entry matrix. Forwarded to App → ThreePaneShell
+  // → AnalysisLaunchContext (mirrors the analysisId/worktype/regarding read above byte-for-byte).
+  // Explicit (this param) is authoritative over the open-existing DB derivation (WorkspacePane task
+  // 022) and the classifier (task 021) — both of which fill it only when this is absent. Omitted for
+  // every non-agreement launch; existing launches are unaffected.
+  const subDomainParam =
+    searchParams.get("subDomain") ??
+    dataParams.get("subDomain") ??
+    undefined;
+
   // task 041 (FR-13) live dispatch site (task 050 thread 3): map the Agreement
   // Review work-type Choice value (100000000 — SprkAnalysisWorkType.AgreementAnalysis,
   // src/types/sprkAnalysis.ts) to the `agreement-analysis` activeWorkType string so
@@ -685,6 +697,7 @@ async function bootstrap(): Promise<void> {
           analysisMode={analysisMode}
           analysisId={analysisId}
           worktype={worktype}
+          subDomain={subDomainParam}
         />
       </AppErrorBoundary>
     </React.StrictMode>

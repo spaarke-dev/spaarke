@@ -64,6 +64,11 @@ function makeDeps(overrides?: Partial<AgreementReviewGateDeps>): AgreementReview
     acceptChips: jest.fn(),
     enqueueAssistantMessage: jest.fn<void, [IChatMessage]>(),
     inject: jest.fn<void, [IChatMessage]>(),
+    // task 031 (DEF-09 routing): defaults to "no document session" (undefined override) — every
+    // pre-031 assertion below expects the EXACT pre-031 dispatchReviewBinding call shape; Jest's
+    // toHaveBeenCalledWith ignores `undefined`-valued keys, so `sessionIdOverride: undefined` still
+    // matches those. Dedicated routing tests override this to a resolved session id.
+    awaitDocumentSessionId: jest.fn<Promise<string | null>, [string]>().mockResolvedValue(null),
     ...overrides,
   };
 }
@@ -302,6 +307,101 @@ describe("useAgreementReviewGate — concurrent double-invocation (in-flight gua
     // dispatch resulted (not a double-spend).
     expect(classifyDispatcherMock).toHaveBeenCalledTimes(1);
     expect(deps.dispatchReviewBinding).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("useAgreementReviewGate — task 031 DEF-09 session routing", () => {
+  it("auto-proceed threads the resolved document session as sessionIdOverride", async () => {
+    classifyDispatcherMock.mockResolvedValue(
+      classifyResult({ isAgreement: true, composite: false, candidates: [{ subDomainKey: "nda", confidence: 0.92 }] })
+    );
+    const awaitDocumentSessionId = jest.fn<Promise<string | null>, [string]>().mockResolvedValue("doc-session-A");
+    const deps = makeDeps({ awaitDocumentSessionId });
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.runGate("file-r1", "acme-nda.pdf");
+    });
+
+    expect(awaitDocumentSessionId).toHaveBeenCalledWith("file-r1");
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledWith("review-binding-1", {
+      slots: { fileIds: ["file-r1"], subDomain: "nda" },
+      resultLabel: "NDA",
+      sessionIdOverride: "doc-session-A",
+    });
+  });
+
+  it("the confirm-chip dispatch also threads the resolved document session", async () => {
+    classifyDispatcherMock.mockResolvedValue(
+      classifyResult({ isAgreement: true, composite: false, candidates: [{ subDomainKey: "nda", confidence: 0.5 }] })
+    );
+    const awaitDocumentSessionId = jest.fn<Promise<string | null>, [string]>().mockResolvedValue("doc-session-B");
+    const deps = makeDeps({ awaitDocumentSessionId });
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.runGate("file-r2", "unknown.pdf");
+    });
+    act(() => {
+      result.current.handleGateChipAction(LOCAL_CHIP.agreementReviewConfirm);
+    });
+    await waitFor(() => expect(deps.dispatchReviewBinding).toHaveBeenCalledTimes(1));
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledWith("review-binding-1", {
+      slots: { fileIds: ["file-r2"], subDomain: "nda" },
+      resultLabel: "NDA",
+      sessionIdOverride: "doc-session-B",
+    });
+  });
+
+  it("'Both' resolves the document session ONCE and threads it to EVERY sequential pack", async () => {
+    classifyDispatcherMock.mockResolvedValue(
+      classifyResult({
+        isAgreement: true,
+        composite: true,
+        candidates: [
+          { subDomainKey: "employment", confidence: 0.6 },
+          { subDomainKey: "nda", confidence: 0.55 },
+        ],
+      })
+    );
+    const awaitDocumentSessionId = jest.fn<Promise<string | null>, [string]>().mockResolvedValue("doc-session-C");
+    const deps = makeDeps({ awaitDocumentSessionId });
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.runGate("file-r3", "hybrid.pdf");
+    });
+    await act(async () => {
+      result.current.handleGateChipAction(LOCAL_CHIP.agreementReviewBoth);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(awaitDocumentSessionId).toHaveBeenCalledTimes(1);
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledTimes(2);
+    const calls = (deps.dispatchReviewBinding as jest.Mock).mock.calls;
+    expect(calls[0][1]).toMatchObject({ sessionIdOverride: "doc-session-C" });
+    expect(calls[1][1]).toMatchObject({ sessionIdOverride: "doc-session-C" });
+  });
+
+  it("degrades gracefully (undefined sessionIdOverride) when the document session never establishes", async () => {
+    classifyDispatcherMock.mockResolvedValue(
+      classifyResult({ isAgreement: true, composite: false, candidates: [{ subDomainKey: "nda", confidence: 0.92 }] })
+    );
+    const awaitDocumentSessionId = jest.fn<Promise<string | null>, [string]>().mockResolvedValue(null);
+    const deps = makeDeps({ awaitDocumentSessionId });
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.runGate("file-r4", "acme-nda.pdf");
+    });
+
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledWith("review-binding-1", {
+      slots: { fileIds: ["file-r4"], subDomain: "nda" },
+      resultLabel: "NDA",
+      sessionIdOverride: undefined,
+    });
   });
 });
 

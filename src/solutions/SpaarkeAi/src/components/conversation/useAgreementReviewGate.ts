@@ -85,12 +85,21 @@ export interface AgreementReviewGateDeps {
    */
   dispatchReviewBinding: (
     bindingId: string,
-    args?: { slots?: Record<string, unknown>; resultLabel?: string }
+    args?: { slots?: Record<string, unknown>; resultLabel?: string; sessionIdOverride?: string }
   ) => Promise<void>;
   /** Renders the gate's chip strip through the SAME wire-parse every carrier uses (acceptChips). */
   acceptChips: (raw: unknown) => void;
   enqueueAssistantMessage: (message: IChatMessage) => void;
   inject: (message: IChatMessage) => void;
+  /**
+   * task 031 (DEF-09 routing): resolves the mounted file's REAL document session (backfilled by
+   * `registerComposeActiveDocument` — see `documentSessionWaiter.ts`), so the review dispatch(es)
+   * below can target it via `sessionIdOverride` — the WRITE (review's compose-disposition
+   * SessionOutput) and the redline-materialize READ (`ComposeWorkspace`'s compose-outputs read)
+   * must coincide. Resolves `null` (never rejects) when the document session never establishes —
+   * the dispatch then proceeds on the bound chat session (pre-031 behavior), never blocking.
+   */
+  awaitDocumentSessionId: (fileId: string) => Promise<string | null>;
 }
 
 export interface AgreementReviewGateController {
@@ -132,6 +141,7 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
     acceptChips,
     enqueueAssistantMessage,
     inject,
+    awaitDocumentSessionId,
   } = deps;
 
   const [classifying, setClassifying] = React.useState(false);
@@ -220,12 +230,18 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
         );
         return;
       }
+      // task 031 (DEF-09 routing): await the mounted file's REAL document session (see
+      // documentSessionWaiter.ts) so the review's compose-disposition SessionOutput lands where
+      // ComposeWorkspace reads compose-outputs. Degrades to the bound chat session (undefined
+      // override) if it never establishes — never blocks, never drops the review.
+      const documentSessionId = await awaitDocumentSessionId(fileId);
       await dispatchReviewBinding(reviewBindingId, {
         slots: { fileIds: [fileId], subDomain: subDomainKey },
         resultLabel: displayName,
+        sessionIdOverride: documentSessionId ?? undefined,
       });
     },
-    [mountFileInCompose, reviewBindingId, dispatchReviewBinding, inject]
+    [mountFileInCompose, reviewBindingId, dispatchReviewBinding, inject, awaitDocumentSessionId]
   );
 
   /** "Both" — sequential dispatch, one pack at a time (ADR-016; never concurrent). */
@@ -237,6 +253,9 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
       registry: readonly AgreementTypeRegistryEntry[]
     ): Promise<void> => {
       mountFileInCompose(fileId, fileName, AGREEMENT_ANALYSIS_WORK_TYPE);
+      // task 031 (DEF-09 routing): resolved ONCE for the file (not per-candidate) — every sequential
+      // pack in "both" targets the SAME document session.
+      const documentSessionId = await awaitDocumentSessionId(fileId);
       for (const candidate of candidates) {
         const displayName = displayNameFor(candidate.subDomainKey, registry);
         if (!reviewBindingId) {
@@ -251,11 +270,12 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
         await dispatchReviewBinding(reviewBindingId, {
           slots: { fileIds: [fileId], subDomain: candidate.subDomainKey },
           resultLabel: displayName,
+          sessionIdOverride: documentSessionId ?? undefined,
         });
       }
       resolvedRef.current.set(fileId, { subDomainKey: "both", displayName: "both" });
     },
-    [mountFileInCompose, reviewBindingId, dispatchReviewBinding, inject]
+    [mountFileInCompose, reviewBindingId, dispatchReviewBinding, inject, awaitDocumentSessionId]
   );
 
   const runGate = React.useCallback(

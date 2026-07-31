@@ -199,3 +199,85 @@ describe('useConsumerChips local-action chips (UAT R4-6 / R4-11)', () => {
     expect(dispatchConsumerMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('useConsumerChips — task 031 DEF-09 sessionIdOverride threading', () => {
+  it('dispatchBinding threads args.sessionIdOverride verbatim to dispatchConsumer', async () => {
+    dispatchConsumerMock.mockResolvedValue({
+      streamId: 's',
+      status: 'complete',
+      disposition: 'compose',
+      result: { overallRisk: 'low', flaggedSections: [] },
+    });
+
+    const { result } = renderHook(() => useConsumerChips(makeDeps()));
+    await act(async () => {
+      result.current.dispatchBinding('review-binding-1', {
+        slots: { fileIds: ['file-1'] },
+        sessionIdOverride: 'doc-session-Z',
+      });
+    });
+    await flush();
+
+    expect(dispatchConsumerMock).toHaveBeenCalledWith(
+      'review-binding-1',
+      expect.objectContaining({ sessionIdOverride: 'doc-session-Z' })
+    );
+  });
+
+  it('omitting sessionIdOverride keeps the exact pre-031 call shape (undefined, bound-session behavior)', async () => {
+    dispatchConsumerMock.mockResolvedValue({
+      streamId: 's',
+      status: 'complete',
+      disposition: 'informational',
+      result: { tldr: 'summary' },
+    });
+
+    const { result } = renderHook(() => useConsumerChips(makeDeps()));
+    await act(async () => {
+      result.current.dispatchBinding('binding-1');
+    });
+    await flush();
+
+    expect(dispatchConsumerMock).toHaveBeenCalledWith(
+      'binding-1',
+      expect.objectContaining({ sessionIdOverride: undefined })
+    );
+  });
+});
+
+describe('useConsumerChips — task 031(d) gating: NDA-REVIEW findings never attach edit controls', () => {
+  it('an NDA-REVIEW-shaped result renders a PLAIN confirmation message (no composeEdit metadata, no raw JSON)', async () => {
+    dispatchConsumerMock.mockResolvedValue({
+      streamId: 's',
+      status: 'complete',
+      disposition: 'compose', // task 030's disposition flip — still dispatched via chips.dispatchBinding
+      result: {
+        overallRisk: 'medium',
+        flaggedSections: [{ quotedText: 'Section 4.2', explanation: 'Broad indemnity.' }],
+      },
+    });
+
+    const enqueueAssistantMessage = jest.fn<void, [IChatMessage]>();
+    const { result } = renderHook(() =>
+      useConsumerChips(makeDeps({ enqueueAssistantMessage }))
+    );
+    await act(async () => {
+      result.current.dispatchBinding('review-binding-1', {
+        slots: { fileIds: ['file-1'] },
+        resultLabel: 'NDA',
+      });
+    });
+    await flush();
+
+    expect(enqueueAssistantMessage).toHaveBeenCalledTimes(1);
+    const message = enqueueAssistantMessage.mock.calls[0][0];
+    // The per-section Assistant outcome summary (ADR-041 — outcome reporting is kept).
+    expect(message.content).toContain('finished reviewing');
+    expect(message.content).toContain('NDA');
+    // Gating (d): NEVER the edit-controls shape (Accept/Reject/Try-another) and NEVER the raw
+    // flaggedSections JSON dumped into the transcript.
+    expect(message.metadata?.composeEdit).toBeUndefined();
+    expect(message.content).not.toContain('flaggedSections');
+    expect(message.content).not.toContain('Section 4.2');
+  });
+});

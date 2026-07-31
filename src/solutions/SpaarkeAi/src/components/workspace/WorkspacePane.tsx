@@ -988,11 +988,17 @@ export function WorkspacePane(): React.JSX.Element {
           managerRef.current?.getSnapshot().tabs.some((t) => t.widgetType === "compose") ?? false;
         if (hasComposeTab) return;
         try {
+          // task 022 (spec FR-09; hub A3 deferred deep-threading leg — open-existing door):
+          // $expand the persisted `sprk_agreementtype` lookup (attribute logical name confirmed
+          // via Dataverse MCP describe against `sprk_analysis`, 2026-07-31 — NOT
+          // `sprk_agreementtypeid`, which is the reference table's own PK) so a reopened
+          // Analysis's sub-domain rides into the Compose envelope alongside `activeWorkType`.
           const rec = (await analysisWizardDataService.retrieveRecord(
             "sprk_analysis",
             analysisId,
-            "?$select=sprk_name,sprk_worktype,_sprk_documentid_value" +
-              "&$expand=sprk_documentid($select=sprk_filename,sprk_graphitemid,sprk_graphdriveid)",
+            "?$select=sprk_name,sprk_worktype,_sprk_documentid_value,_sprk_agreementtype_value" +
+              "&$expand=sprk_documentid($select=sprk_filename,sprk_graphitemid,sprk_graphdriveid)," +
+              "sprk_agreementtype($select=sprk_key)",
           )) as Record<string, unknown>;
           if (cancelled) return;
           const doc = (rec["sprk_documentid"] ?? {}) as Record<string, unknown>;
@@ -1003,6 +1009,14 @@ export function WorkspacePane(): React.JSX.Element {
             (doc["sprk_filename"] as string | undefined) ?? (rec["sprk_name"] as string | undefined) ?? "Document";
           // Agreement/NDA work-type (100000000) scopes the Compose AI toolbar tools.
           const activeWorkType = rec["sprk_worktype"] === 100000000 ? "agreement-analysis" : undefined;
+          // task 022: ONE envelope contract — an EXPLICIT subDomain from the cold-load deep-link
+          // door (`analysisLaunch.subDomain`, task 022's other leg) is authoritative; the
+          // open-existing derivation (the expanded lookup's `sprk_key`) fills it only when the
+          // explicit value is absent. Neither present → field stays absent (no fabricated
+          // default; the classifier, task 021, owns filling it later during the review dispatch).
+          const agreementType = (rec["sprk_agreementtype"] ?? {}) as Record<string, unknown>;
+          const derivedSubDomain = agreementType["sprk_key"] as string | undefined;
+          const subDomain = analysisLaunch.subDomain ?? derivedSubDomain;
 
           if (speDriveItemId && speDriveId) {
             dispatch("workspace", {
@@ -1015,6 +1029,7 @@ export function WorkspacePane(): React.JSX.Element {
                   ...(documentId ? { sprkDocumentId: documentId } : {}),
                   fileName,
                   ...(activeWorkType ? { activeWorkType } : {}),
+                  ...(subDomain ? { subDomain } : {}),
                 },
               },
               displayName: fileName,

@@ -1,28 +1,33 @@
 /**
- * ConversationPane.agreement-review-gate.e2e.test.tsx — task 021 (spec FR-07/FR-08/FR-09
- * interactive orientation + confirmation gate).
+ * ConversationPane — task 031 (spec FR-16(c), DEF-09) agreement-review DOCUMENT-session routing
+ * forcing test.
  *
- * Drives the REAL ConversationPane over a real PaneEventBus with the network mocked at the
- * wire boundary (createConsumerDispatcher is NOT mocked — the /dispatch URL is real), mirroring
- * ./ConversationPane.revise-this-document.e2e.test.tsx's harness. Proves the TEXT-path
- * interception + end-to-end wiring (the pure branch logic itself is covered in isolation by
- * agreementReviewRouting.test.ts + useAgreementReviewGate.test.ts):
- *   (a) An uploaded, unclassified document + "review this document" CANCELS the agent turn
- *       (onDecorateOutboundBody returns null), dispatches the classifier, then auto-proceeds
- *       into the review dispatch (near-certain confidence) — asserting the review dispatch's
- *       wire body carries the classified `subDomain` slot (pack-binding proof).
- *   (b) Negative criterion: "review this" with NO uploaded/active document does NOT cancel the
- *       agent turn (falls through unchanged) and posts NO dispatch at all.
+ * THE DEFECT (HUB-R1-REVIEW §4 change 3, re-verified post-021): task 030 flipped the agreement-review
+ * Binding's `sprk_disposition` Informational -> Compose, so its output is now a `compose`-disposition
+ * SessionOutput that `ComposeWorkspace`'s FR-04 refresh-durability effect re-materializes from
+ * `GET .../compose-outputs` on its OWN document session (`state.sessionId`). But the review dispatches
+ * via `chips.dispatchBinding` (bound to the CHAT session) — the WRITE and the redline-materialize READ
+ * must coincide, mirroring the shipped Compose-EDIT-toolbar DEF-09 precedent
+ * (`ConversationPane.compose-draft-alternative-session-routing.e2e.test.tsx`).
  *
- * task 031 update (DEF-09 routing): the review dispatch now AWAITS the mounted file's REAL
- * document session (documentSessionWaiter.ts) before calling `chips.dispatchBinding`, so this
- * harness mounts a `ComposeRegistrationCapture` stub that simulates `ComposeWorkspace` calling back
- * into `registerComposeActiveDocument` the moment the review's `widget_load{widgetType:'compose'}`
- * seed is observed — exactly the production topology (WorkspacePane is always mounted alongside
- * ConversationPane). Without it, `awaitDocumentSessionId` would degrade to `null` only after its
- * (real, 8s) timeout — outside this test's microtask-flush window. See
- * ./ConversationPane.agreement-review-session-routing.e2e.test.tsx for the dedicated DEF-09
- * two-session forcing test this update is a lighter-weight sibling of.
+ * THE FIX (documentSessionWaiter.ts + useConsumerChips/useAgreementReviewGate threading): the gate's
+ * `dispatchReview` awaits the mounted file's REAL document session — backfilled by
+ * `registerComposeActiveDocument` (the SAME reactive conduit "revise this document" already uses) — and
+ * threads it as `args.sessionIdOverride` on the review's `chips.dispatchBinding` call, so the
+ * `/dispatch` POST targets the DOCUMENT session, not the chat session.
+ *
+ * TWO DISTINCT session ids are used (same forcing-function discipline as the draft-alternative test):
+ * a CHAT session (`ConversationPane`'s `chatSessionId`) and a DISTINCT DOCUMENT session, simulated via a
+ * `useComposeActiveDocumentRegistration()` stub that calls back into `ConversationPane` (exactly what a
+ * REAL `ComposeWorkspace` mount would do) the moment the review's `widget_load{widgetType:'compose'}`
+ * seed is observed on the PaneEventBus. The REAL dispatch runs (`createConsumerDispatcher` is NOT
+ * mocked); the network is mocked at the wire boundary and backed by ONE in-memory ledger KEYED BY
+ * SESSION — a session-routing regression shows up as the DOCUMENT session's ledger being empty.
+ *
+ * @see ../ConversationPane.tsx (dispatchComposeAction / useAgreementReviewGate wiring)
+ * @see ../documentSessionWaiter.ts (the pure waiter/timeout seam this test exercises end-to-end)
+ * @see ./ConversationPane.compose-draft-alternative-session-routing.e2e.test.tsx (the sibling EDIT-path forcing test)
+ * @see ./ConversationPane.agreement-review-gate.e2e.test.tsx (the task 021 gate wiring this test extends)
  */
 import '@testing-library/jest-dom';
 import { TextEncoder as NodeTextEncoder, TextDecoder as NodeTextDecoder } from 'util';
@@ -43,19 +48,36 @@ import {
   type ComposeActiveDocumentRegistration,
 } from '@spaarke/compose-components/context/composeActionBridge';
 
+// ---------------------------------------------------------------------------
+// Two DISTINCT session ids — the whole point of the forcing function.
+// ---------------------------------------------------------------------------
 const CHAT_SESSION = '00000000-0000-0000-0000-00000000c8a7';
-// task 031: a DISTINCT document session the ComposeRegistrationCapture stub back-fills — not
-// asserted here (see the dedicated DEF-09 routing test), just enough so awaitDocumentSessionId
-// resolves promptly instead of degrading via its (real) timeout.
 const DOC_SESSION = '00000000-0000-0000-0000-0000000d0c07';
-const SESSION_FILE_ID = 'session-file-agreement-123';
+const SESSION_FILE_ID = 'session-file-agreement-routing-1';
 const CLASSIFY_BINDING = 'binding-agreement-classify-guid';
 const REVIEW_BINDING = 'binding-nda-review-guid';
 const BFF = 'https://test-bff.example.com';
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const FILE_NAME = 'acme-nda.pdf';
+
+// ---------------------------------------------------------------------------
+// ONE in-memory ledger, KEYED BY SESSION — mirrors the draft-alternative forcing test.
+// ---------------------------------------------------------------------------
+interface LedgerOutput {
+  key: string;
+  bindingId: string;
+  turn: number;
+  disposition: string;
+  payload: Record<string, unknown>;
+}
+const ledger = new Map<string, LedgerOutput[]>();
 
 const dispatchPostUrls: string[] = [];
 const dispatchPostBodies: Array<Record<string, unknown>> = [];
+
+function sessionFromUrl(url: string): string {
+  return decodeURIComponent(url.match(/\/sessions\/([^/]+)\//)?.[1] ?? '');
+}
 
 function sseCompleteResponse(result: Record<string, unknown>): Response {
   const line = `data: ${JSON.stringify({ type: 'complete', done: true, result })}\n\n`;
@@ -78,18 +100,32 @@ beforeAll(() => {
     const url = String(input);
     if (url.includes('/dispatch')) {
       dispatchPostUrls.push(url);
+      const session = sessionFromUrl(url);
       const parsedBody = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
       dispatchPostBodies.push(parsedBody);
       const bindingId = parsedBody.bindingId as string | undefined;
+
       if (bindingId === CLASSIFY_BINDING) {
         return sseCompleteResponse({
           isAgreement: true,
           composite: false,
           candidates: [{ subDomainKey: 'nda', confidence: 0.95 }],
-          reasoning: 'Mutual confidentiality obligations throughout.',
         });
       }
-      return sseCompleteResponse({ overallRisk: 'low', flaggedSections: [] });
+      // The review (task 030's flip — disposition:'compose' in the durable ledger).
+      const payload = {
+        overallRisk: 'medium',
+        flaggedSections: [{ sectionRef: '4.2', quotedText: 'Broad indemnity clause', explanation: 'Uncapped liability.' }],
+      };
+      const entry: LedgerOutput = {
+        key: `${REVIEW_BINDING}@t1`,
+        bindingId: REVIEW_BINDING,
+        turn: 1,
+        disposition: 'compose',
+        payload,
+      };
+      ledger.set(session, [...(ledger.get(session) ?? []), entry]);
+      return sseCompleteResponse(payload);
     }
     return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
   }) as unknown as typeof fetch;
@@ -132,7 +168,8 @@ const authenticatedFetchMock = jest.fn(async (url: string) => {
     return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
   }
   if (url.includes('/compose-outputs')) {
-    return { ok: true, status: 200, json: async () => [] } as unknown as Response;
+    const session = sessionFromUrl(url);
+    return { ok: true, status: 200, json: async () => ledger.get(session) ?? [] } as unknown as Response;
   }
   return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
 });
@@ -183,8 +220,6 @@ jest.mock('../../shell/ThreePaneShell', () => ({
   usePaneCollapseContext: () => null,
 }));
 
-// task 021 — no Xrm.WebApi host context in this jsdom test; the registry read degrades to []
-// (the gate's own graceful-degrade path: global 0.85 threshold + key-derived display names).
 jest.mock('@spaarke/ui-components', () => {
   const actual = jest.requireActual('@spaarke/ui-components');
   const ReactActual = jest.requireActual('react') as typeof import('react');
@@ -227,27 +262,29 @@ jest.mock('@spaarke/ui-components', () => {
 import { ConversationPane } from '../ConversationPane';
 
 const workspaceEvents: WorkspacePaneEvent[] = [];
-let bus: PaneEventBus;
-
-// task 031 (DEF-09 routing) — stub standing in for a REAL ComposeWorkspace mount: reads the
-// bridge's active-document registration delegate so this harness can simulate "the Compose tab
-// finished loading and registered its document session" the moment the review's compose widget_load
-// seed is observed (mirrors ConversationPane.agreement-review-session-routing.e2e.test.tsx).
 const registerActiveDocumentRef: { current: ComposeActiveDocumentRegistration | null } = { current: null };
+
+/**
+ * Stub standing in for a REAL `ComposeWorkspace` mount: reads the bridge's active-document
+ * registration delegate so the test harness can simulate "the Compose tab finished loading and
+ * registered its document session" — the SAME conduit `ComposeWorkspace.tsx` calls in production.
+ */
 function ComposeRegistrationCapture(): null {
   registerActiveDocumentRef.current = useComposeActiveDocumentRegistration();
   return null;
 }
 
-function renderPane() {
-  bus = new PaneEventBus();
+function renderPane(): void {
+  const bus = new PaneEventBus();
   bus.subscribe('workspace', (e) => {
     workspaceEvents.push(e as WorkspacePaneEvent);
     const evt = e as WorkspacePaneEvent & { widgetType?: string };
+    // Simulate ComposeWorkspace mounting THIS file with the DISTINCT document session — exactly
+    // what registerComposeActiveDocument's caller (ComposeWorkspace) does after loading bytes.
     if (evt.type === 'widget_load' && evt.widgetType === 'compose') {
       void registerActiveDocumentRef.current?.({
         docxBytes: new ArrayBuffer(0),
-        fileName: 'acme-nda.pdf',
+        fileName: FILE_NAME,
         documentSessionId: DOC_SESSION,
       });
     }
@@ -284,6 +321,7 @@ beforeEach(() => {
   dispatchPostUrls.length = 0;
   dispatchPostBodies.length = 0;
   injectedMessages.length = 0;
+  ledger.clear();
   authenticatedFetchMock.mockClear();
   (global.fetch as jest.Mock).mockClear();
   captured.onDecorateOutboundBody = undefined;
@@ -292,61 +330,40 @@ beforeEach(() => {
   registerActiveDocumentRef.current = null;
 });
 
-describe('task 021: "review this document" — untyped upload + interactive classify + auto-proceed gate', () => {
-  it('cancels the agent turn, classifies, then auto-proceeds the review bound to the classified pack', async () => {
+describe('task 031 DEF-09: agreement-review dispatches to the DOCUMENT session (two-session forcing test)', () => {
+  it('routes the review /dispatch to the DOCUMENT session — write and redline-materialize read coincide', async () => {
     renderPane();
-    await driveChatUpload('acme-nda.pdf');
+    await driveChatUpload(FILE_NAME);
 
     let decorateResult: unknown;
     await act(async () => {
       decorateResult = await captured.onDecorateOutboundBody!({ message: 'review this document' });
-      // Two REAL sequential SSE round-trips (classify, then the review) each need several
-      // microtask hops (readSseStream -> parseSseEvent -> the runGate/dispatchReview await chain)
-      // — loop generously rather than guess a tight bound.
       for (let i = 0; i < 60; i++) await Promise.resolve();
     });
 
-    // The agent turn is CANCELLED (return null) — the gate orchestrates classify -> auto-proceed.
     expect(decorateResult).toBeNull();
 
-    // Two /dispatch calls: the classifier, then the review — both real network POSTs.
-    const bindingIdsDispatched = dispatchPostBodies.map((b) => b.bindingId);
-    expect(bindingIdsDispatched).toContain(CLASSIFY_BINDING);
-    expect(bindingIdsDispatched).toContain(REVIEW_BINDING);
+    // The classifier still targets the CHAT session (unaffected — it is not the compose-disposition
+    // action; DEF-09 routing applies only to the review's own dispatch).
+    const classifyUrl = dispatchPostUrls.find((u) => dispatchPostBodies[dispatchPostUrls.indexOf(u)]?.bindingId === CLASSIFY_BINDING);
+    expect(classifyUrl).toContain(`/sessions/${CHAT_SESSION}/dispatch`);
 
-    // Pack-binding proof: the review dispatch's wire body carries the classified subDomain slot.
-    const reviewBody = dispatchPostBodies.find((b) => b.bindingId === REVIEW_BINDING)!;
-    const args = reviewBody.args as Record<string, unknown> | undefined;
-    expect(args?.subDomain).toBe('nda');
-    expect(args?.fileIds).toEqual([SESSION_FILE_ID]);
+    // (1) THE FIX: the review's /dispatch POST targeted the DOCUMENT session, NOT the chat session.
+    const reviewDispatchIndex = dispatchPostBodies.findIndex((b) => b.bindingId === REVIEW_BINDING);
+    expect(reviewDispatchIndex).toBeGreaterThanOrEqual(0);
+    const reviewUrl = dispatchPostUrls[reviewDispatchIndex];
+    expect(reviewUrl).toContain(`/sessions/${DOC_SESSION}/dispatch`);
+    expect(reviewUrl).not.toContain(`/sessions/${CHAT_SESSION}/dispatch`);
 
-    // Orientation proof (FR-07): the Compose mount seed carries activeWorkType='agreement-analysis'
-    // — the SAME ComposeWidgetSeed field task 041 (hub) already wired end-to-end into
-    // getToolsForSurface (ComposeWorkspace.activeWorkType.test.tsx / ComposeEditor.activeWorkType.
-    // test.tsx cover that downstream half; this proves THIS gate correctly sets the seed).
-    const composeOpen = [...workspaceEvents]
-      .reverse()
-      .find((e) => e.type === 'widget_load' && (e as WorkspacePaneEvent & { widgetType?: string }).widgetType === 'compose');
-    expect(composeOpen).toBeDefined();
-    const seed = (composeOpen as WorkspacePaneEvent & { widgetData?: { compose?: Record<string, unknown> } })
-      .widgetData?.compose;
-    expect(seed?.activeWorkType).toBe('agreement-analysis');
-  });
-});
+    // Pack-binding proof still holds alongside the routing fix.
+    const reviewArgs = dispatchPostBodies[reviewDispatchIndex].args as Record<string, unknown> | undefined;
+    expect(reviewArgs?.subDomain).toBe('nda');
+    expect(reviewArgs?.fileIds).toEqual([SESSION_FILE_ID]);
 
-describe('task 021 negative criterion: a bare "review" with NO attached/target doc never fires the gate', () => {
-  it('falls through unchanged to the normal agent turn — no classify dispatch, no cancellation', async () => {
-    renderPane();
-    // No upload driven this time.
-
-    let decorateResult: unknown;
-    await act(async () => {
-      decorateResult = await captured.onDecorateOutboundBody!({ message: 'can you review that for me' });
-      for (let i = 0; i < 6; i++) await Promise.resolve();
-    });
-
-    // Falls through to handleDecorateOutboundBody, which returns the body unchanged (non-null).
-    expect(decorateResult).not.toBeNull();
-    expect(dispatchPostBodies).toHaveLength(0);
+    // (2) Acceptance criterion 1 (spec FR-16(c), literal): GET compose-outputs on the DOCUMENT
+    // session contains the findings output; the CHAT session's ledger has NONE.
+    expect(ledger.get(DOC_SESSION)).toHaveLength(1);
+    expect(ledger.get(DOC_SESSION)![0].disposition).toBe('compose');
+    expect(ledger.get(CHAT_SESSION) ?? []).toHaveLength(0);
   });
 });

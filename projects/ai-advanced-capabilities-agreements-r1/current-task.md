@@ -4,8 +4,10 @@
 
 ## Active task
 
-- **Task**: WAVE 4 — 030 (opus) ∥ 040 dispatched (Waves 0-3 ✅; last commit 98bf344d1, pushed).
-  Conflict check: NO unmerged branch touches DispositionRoutability/OutputRouter/playbookconsumer/Wave-4 files.
+- **Task**: WAVE 5 — 022 ∥ 031 dispatched (Waves 0-4 ✅; last commit 5c6e13e59, pushed)
+- **Wave 4**: 030 ✅ (flip deployed surgically — mirror 16 fields behind live, wrap-up item; findings branch both
+  vintages, idempotent, zero server change) · 040 ✅ (selectThread reuse in ComposeEditor common-ancestor;
+  sectionRef join never-guess). 022 must NOTIFY hub (deep-threading legs building now — notify doc for owner relay).
 - **Wave 3 summary (kept for recovery)**:
 - **012**: premise CORRECTED — test never weakened; SOURCE regressed via S1-fallback commit 6a414bbac
   (first-occurrence-on-recurrence + kind collapse). Fixed: discriminated union, multiplicity→ambiguous always,

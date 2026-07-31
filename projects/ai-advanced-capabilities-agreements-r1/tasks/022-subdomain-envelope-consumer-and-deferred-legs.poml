@@ -4,7 +4,7 @@
     <title>subDomain envelope — cold-load/deep-link threading + open-existing derivation (hub A3 deferred legs)</title>
     <phase>2 Classifier + Routing</phase>
     <gate>blocked (deps 001)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Launch-envelope plumbing across main.tsx/ThreePaneShell/WorkspacePane (.tsx hot files); cross-project seam with hub-r1.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -103,6 +103,17 @@
     <criterion testable="true">Negative: absent subDomain + no lookup → envelope field absent (classifier path owns it); no fabricated default.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-09 explicit-path plumbing; hub Q1 RESOLVED (answer doc 2026-07-31): this residual slice is ours; A1 + A3-core are shipped hub work (naming bug fixed hub-side: _sprk_agreementtype_value). Notify at task start.</notes>
+  <notes>Spec FR-09 explicit-path plumbing; hub Q1 RESOLVED (answer doc 2026-07-31): this residual slice is ours; A1 + A3-core are shipped hub work (naming bug fixed hub-side: _sprk_agreementtype_value). Notify at task start.
+
+Completed 2026-07-31. Both deferred legs built: (a) cold-load — subDomain added to SpaarkeAiLaunchParams
++ buildLaunchUrl (launch-resolver.ts), URL parse in main.tsx, threaded through App.tsx →
+ThreePaneShellProps → AnalysisLaunchContextValue (ThreePaneShell.tsx); (b) open-existing — WorkspacePane's
+by-analysis $expand extended with sprk_agreementtype($select=sprk_key) (attribute name confirmed via
+Dataverse MCP describe against sprk_analysis — NOT sprk_agreementtypeid), explicit (analysisLaunch.subDomain)
+wins over derived, both-absent leaves the field absent. Contract proven in
+WorkspacePane.subdomain-envelope.test.tsx (4 tests: derivation, explicit-override, negative-absent,
+explicit-only) + launch-resolver.test.ts (4 new tests). Wizard-finish door (bd64a69d4) untouched — zero
+diff to CreateAnalysisWizardWidget.tsx/composeLaunchContext.ts; regression-proven by full green
+conversation (479/479) + workspace (120/120) + shell (9/9) suites. See notes/022-execution-notes.md.
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

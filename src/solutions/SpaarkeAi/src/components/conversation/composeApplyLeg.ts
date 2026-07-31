@@ -55,12 +55,27 @@ export interface ComposeLedgerOutputLite {
  * Resolve the CURRENT (highest-turn) `compose`-disposition ledger key for a
  * binding, or `null` when the binding wrote no compose output.
  *
- * Gating on `bindingId` is what makes this precise: only
- * `compose-draft-alternative` declares the `compose` disposition, so an
- * informational action (explain / compare / summarize-changes / defined-terms)
- * has no matching compose output → returns `null` → no apply leg is emitted.
- * Tolerant of a non-array / malformed input (returns `null`), never throws —
- * the apply leg must never break the dispatch it follows.
+ * Gating on `bindingId` is what makes this precise: an informational action
+ * (explain / compare / summarize-changes / defined-terms) has no matching
+ * compose output → returns `null` → no apply leg is emitted. Tolerant of a
+ * non-array / malformed input (returns `null`), never throws — the apply leg
+ * must never break the dispatch it follows.
+ *
+ * agreements-r1 task 031(d) gating note (FR-16(d)): as of ai-advanced-capabilities-agreements-r1
+ * task 030, the agreement-review Binding's `sprk_disposition` is ALSO `compose` (flipped from
+ * Informational) — this function's own bindingId gate no longer disambiguates "compose disposition"
+ * from "a redline-shaped edit" (that stale claim predates the flip). What DOES keep a review's
+ * findings out of this apply leg is a SEPARATE, structural invariant, not a payload-shape check
+ * here: the review dispatches via `useConsumerChips.dispatchBinding` (chat-chip Click path), never
+ * via `ConversationPane.dispatchComposeAction` (the compose-EDITOR-toolbar path this module's
+ * `emitComposeApplyLeg` caller is exclusively wired to). This function is therefore never invoked
+ * with the review's bindingId in practice — verified by trace (`ConversationPane.dispatchComposeAction`
+ * has exactly two callers, both compose-editor-toolbar actions: `dispatchReviseDocument` and the
+ * inline AI toolbar's draft-alternative/explain/compare/etc.) and by regression test
+ * (`useConsumerChips.surface-launch.test.tsx` "task 031(d) gating" describe block — an NDA-REVIEW-shaped
+ * result renders a plain confirmation, never `metadata.composeEdit`). A payload-shape check could not
+ * be added HERE even if desired: this function only receives `ComposeLedgerOutputLite`
+ * (key/bindingId/turn/disposition) — the actual payload (flaggedSections vs. edits) never reaches it.
  */
 export function resolveCurrentComposeLedgerRef(outputs: unknown, bindingId: string): string | null {
   if (!Array.isArray(outputs) || !bindingId) return null;

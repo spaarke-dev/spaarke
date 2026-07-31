@@ -4,7 +4,7 @@
     <title>FR-16(c,d) — DEF-09 document-session dispatch routing + apply-leg gating for findings</title>
     <phase>3 Durable Review</phase>
     <gate>blocked (deps 030)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Dispatch routing correctness (write/read session coincidence) + edit-machinery gating in ConversationPane hot file.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -100,6 +100,29 @@
     <criterion testable="true">Negative: a findings output arriving on a session with no open document logs gracefully (no crash, no orphan placement).</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-16(c,d). The doc's "disposition problem" framing was incomplete — this task is why (HUB-R1-REVIEW §4 changes 3+4).</notes>
+  <notes>Spec FR-16(c,d). The doc's "disposition problem" framing was incomplete — this task is why (HUB-R1-REVIEW §4 changes 3+4).
+
+COMPLETION SUMMARY (see projects/ai-advanced-capabilities-agreements-r1/notes/031-execution-notes.md for full detail):
+(c) ROUTING — FIXED. Re-located ALL FOUR agreement-review dispatch call sites post-021 reshape
+(ConversationPane.handleReviewNda; useAgreementReviewGate.dispatchReview [auto-proceed + confirm-chip
++ lens-click]; .dispatchBothSequentially). All funnel through useConsumerChips.dispatchBinding, which
+did NOT thread sessionIdOverride. Fix: new pure documentSessionWaiter.ts module (per-file-keyed,
+promise-based, bounded-timeout backfill wait) + sessionIdOverride threaded through
+useConsumerChips/useAgreementReviewGate/ConversationPane. Proven end-to-end by
+ConversationPane.agreement-review-session-routing.e2e.test.tsx (two-session forcing test).
+(d) GATING — VERIFIED NON-ISSUE (documented, not defensively coded). Traced: the review dispatches via
+chips.dispatchBinding, never via dispatchComposeAction (the ONLY caller of emitComposeApplyLeg /
+the apply-leg machinery). Structurally unreachable today, even post-030's disposition flip. Fixed a
+stale doc comment in composeApplyLeg.ts (predated the flip) and added a regression test proving no
+composeEdit metadata attaches to a review's confirmation message. Draft-alternative's apply-leg
+regression is covered by the EXISTING (unmodified) ConversationPane.compose-draft-alternative-session-routing.e2e.test.tsx.
+BRIDGE DECISION — KEEP useNdaReviewAdvisoryCommentsBridge (live-turn immediacy). Dedupe: the PRIMARY
+"live turn + reload" scenario is safe by construction (a fresh ComposeWorkspace mount has no prior
+live-placed DOM state; 030's own test already proves the ledger-materializer's OWN idempotency
+against re-invocation). ESCALATED (not silently dropped): a narrow same-mount residual (state.status
+cycling via ComposeWorkspace's externalChange/requestLoad broadcast-channel path, ALREADY live-placed
+comments in the SAME editor instance) genuinely requires a Compose.Components change
+(onAdvisoryComments has no lastMaterializedKey-equivalent guard) — out of this wave's boundary; flagged
+for a follow-on task.</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
