@@ -407,18 +407,38 @@ public class ChatDataverseRepositoryTests
     }
 
     [Fact]
-    public async Task BindSessionToAnalysisAsync_WhenNoSummaryRow_ReturnsFalseAndDoesNotThrow()
+    public async Task BindSessionToAnalysisAsync_WhenNoSummaryRow_CreatesAnchorRowWithFkAndReturnsTrue()
     {
-        // Arrange — no cold-tier anchor row (mirrors ArchiveSessionAsync's tolerant behavior).
+        // Arrange — no cold-tier anchor row. UNLIKE the tolerant archive path, PROMOTE cannot no-op:
+        // the durable sprk_analysis FK is promotion's entire deliverable (what makes the Analysis
+        // queryable via GetSessionsByAnalysisAsync / visible in the hub grid). A silent no-op left
+        // promote returning 201 with an orphaned Analysis — the agreements-r1 Q2 silent-FK gap
+        // (2026-07-31). So bind must CREATE the anchor row WITH the FK.
+        var sessionId = Guid.NewGuid().ToString("N");
+        var analysisId = Guid.NewGuid();
         _entityServiceMock
             .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection(new List<Entity>()));
 
-        // Act
-        var bound = await _sut.BindSessionToAnalysisAsync(TenantId, Guid.NewGuid().ToString("N"), Guid.NewGuid());
+        Entity? createdEntity = null;
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => createdEntity = e)
+            .ReturnsAsync(Guid.NewGuid());
 
-        // Assert
-        bound.Should().BeFalse();
+        // Act
+        var bound = await _sut.BindSessionToAnalysisAsync(TenantId, sessionId, analysisId);
+
+        // Assert — durable FK guaranteed: a NEW anchor row was created carrying the FK; returns true.
+        bound.Should().BeTrue();
+        createdEntity.Should().NotBeNull();
+        createdEntity!.LogicalName.Should().Be("sprk_aichatsummary");
+        createdEntity["sprk_sessionid"].Should().Be(sessionId);
+        createdEntity["sprk_tenantid"].Should().Be(TenantId);
+        var fk = (EntityReference)createdEntity["sprk_analysis"];
+        fk.LogicalName.Should().Be("sprk_analysis");
+        fk.Id.Should().Be(analysisId);
+        // No UPDATE — there was no existing row to update; the FK rides on the freshly-created row.
         _entityServiceMock.Verify(
             s => s.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(),
                 It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
