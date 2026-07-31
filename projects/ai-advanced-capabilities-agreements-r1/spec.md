@@ -327,8 +327,10 @@ by `analysis-hub-r1`, see Coordination A2.)*
   only the deep-threading slice remains (ours, task 022, per hub Q1 answer).
 - [x] ~~Promote silent-FK fix ownership~~ — **RESOLVED: HUB fixes it** (their bug/AIPL-054 root cause; Q2 answer,
   tracked hub closeout; commit to be flagged in their answer doc). FR-17/033 verifies + regression-tests only.
-- [ ] **`sprk_key` unique/alternate-key constraint** — **owner action in flight** (hub Q4: they asked the owner to
-  confirm/add; may fall to us WITH owner ok — coordinate-once). Task 001 verifies before code keys on `sprk_key`.
+- [x] ~~`sprk_key` unique/alternate-key constraint~~ — **RESOLVED 2026-07-31: owner CREATED the alt-key** (chat
+  confirmation). Task 001 sanity-verifies (describe/dup-test) before code keys on `sprk_key`. *(Same session: owner
+  also confirmed the Q2 promote-FK fix as done — no commit visible in git yet, so 033's empirical verify stays — and
+  Phase-1 UAT as OK.)*
 - [ ] **Rename blast radius** — confirm no consumer outside Compose imports `ndaClauseLocation`/`NdaReviewSummaryPanel`
   by name (grep at task time) — Blocks: FR-02 (pure-rename risk only).
 

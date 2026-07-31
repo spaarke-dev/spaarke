@@ -9,13 +9,16 @@
 - **Next action**: execute **task 001** (`sprk_agreementtype` code mirror + seeds) via `task-execute`.
   Wave 0 runs 001 ∥ 002 ∥ 010 (see `tasks/TASK-INDEX.md`).
 
-## Coordination state (Q1–Q5 ANSWERED 2026-07-31 — does not block Wave 0)
+## Coordination state (ALL CLOSED — owner confirmations 2026-07-31)
 
 - Hub answers: [notes/COORDINATION-hub-r1-ANSWERS-to-agreements-r1-Q1-Q5.md](notes/COORDINATION-hub-r1-ANSWERS-to-agreements-r1-Q1-Q5.md).
-  Q1: deep-threading slice OURS (022; A1/A3-core hub-shipped — never rebuild). Q2: promote-FK fix = HUB closeout
-  (033 verifies landed; watch their doc for the commit flag). Q3: we load the 7 seeds (001). Q4: `sprk_key` alt-key =
-  owner action in flight (001 coordinates-once). Q5: Phase-1 UAT open; wizard-finish seam stable + additive (carries
-  `subDomain`) — 033 checks UAT before wiring.
+  Q1: deep-threading slice OURS (022; A1/A3-core hub-shipped — never rebuild). Q3: we load the 7 seeds (001).
+- **Owner confirmations (2026-07-31, chat)**: ✅ **Q4 `sprk_key` alt-key CREATED** (001 still sanity-verifies via
+  describe/dup-test before keying on it). ✅ **Q2 promote-FK fix FIXED** — ⚠️ caveat: no fix commit visible on
+  origin/master or the hub branch as of the last fetch; 033 step-0 MUST still verify empirically (promote a
+  summary-row-less session → durable FK or non-2xx) before building on promote. ✅ **Q5 Phase-1 UAT OK** — the
+  wizard-finish seam (stable + additive, carries `subDomain`) is approved to build on; 033's UAT escalation
+  downgrades to a quick seam re-check.
 
 ## Steps completed this task
 
