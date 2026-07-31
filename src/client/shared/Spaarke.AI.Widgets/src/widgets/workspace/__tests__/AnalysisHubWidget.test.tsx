@@ -9,8 +9,10 @@
  *
  *   1. The Analysis grid is composed via `<DataverseEntityViewWidget>` (the
  *      canonical `<DataGrid configId=… />` wrapper) — NOT a bespoke table —
- *      with the seeded configId threaded through, and NO `onRecordOpen` override
- *      (row-click uses the DataGrid default).
+ *      with the seeded configId threaded through. Row-click is Pattern-D dual-use:
+ *      BUS-LESS (MDA/dev) → NO `onRecordOpen` (DataGrid OOB-form default); HOSTED
+ *      (SpaarkeAi bus present) → `onRecordOpen` dispatches `open_analysis_headless`
+ *      (WorkspacePane → `openSpaarkeAi` target:2 headless code-page modal).
  *   2. A caller-supplied `configId` override is honored.
  *   3. `+ New` (the DataGrid `onCreateNew` override) dispatches the
  *      `conversation.open_quick_start` intent with `quickStartTab: 'analysis'`.
@@ -26,6 +28,8 @@ import '@testing-library/jest-dom';
 import * as React from 'react';
 import { render, screen } from '@testing-library/react';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
+import { PaneEventBus } from '../../../events/PaneEventBus';
+import { PaneEventBusProvider } from '../../../events/PaneEventBusContext';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -89,17 +93,42 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('AnalysisHubWidget', () => {
-  it('composes the Analysis grid via <DataverseEntityViewWidget> with the seeded configId and NO row-open override', () => {
+  it('BUS-LESS host: composes the grid with the seeded configId and NO row-open override (OOB-form default)', () => {
+    // renderHub() mounts WITHOUT a PaneEventBusProvider → useOptionalPaneEventBus() is
+    // null → onRecordOpen is undefined → the DataGrid keeps its OOB-form default.
     renderHub();
 
     const mockGrid = screen.getByTestId('mock-dataverse-entity-view-widget');
     expect(mockGrid).toBeInTheDocument();
     expect(mockGrid).toHaveAttribute('data-widget-type', 'analysis-hub-grid');
     expect(mockGrid).toHaveAttribute('data-config-id', SEEDED_CONFIG_ID);
-    // Row-click uses the DataGrid DEFAULT (OOB form) — no custom onRecordOpen.
+    // No bus → row-click uses the DataGrid DEFAULT (OOB form) — no custom onRecordOpen.
     expect(mockGrid).toHaveAttribute('data-has-record-open', 'no');
     // No create-analysis cards on this surface any more.
     expect(screen.queryByTestId('analysis-hub-card-agreement-review')).not.toBeInTheDocument();
+  });
+
+  it('HOSTED (bus present): passes onRecordOpen that dispatches open_analysis_headless (headless modal)', () => {
+    const bus = new PaneEventBus();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <PaneEventBusProvider bus={bus}>
+          <AnalysisHubWidget data={{}} widgetType="analysis-hub" />
+        </PaneEventBusProvider>
+      </FluentProvider>
+    );
+
+    const mockGrid = screen.getByTestId('mock-dataverse-entity-view-widget');
+    // Bus present → the hub overrides row-click to open the analysis HEADLESS.
+    expect(mockGrid).toHaveAttribute('data-has-record-open', 'yes');
+
+    // Invoke the override as the DataGrid would on row-click → dispatches the intent.
+    expect(lastGridProps?.data?.onRecordOpen).toBeDefined();
+    (lastGridProps!.data!.onRecordOpen as (recordId: string) => void)('analysis-guid-9');
+    expect(mockDispatch).toHaveBeenCalledWith('workspace', {
+      type: 'open_analysis_headless',
+      analysisId: 'analysis-guid-9',
+    });
   });
 
   it('honors a caller-supplied configId override for the Analysis grid', () => {
