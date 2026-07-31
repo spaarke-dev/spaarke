@@ -69,6 +69,9 @@ export const documentsRegistration: SectionRegistration = {
       id: "documents",
       type: "content",
       title: "Documents",
+      // Grid-backed section: the DataGrid renders its own elevated header, so
+      // suppress the redundant SectionPanel title (round-8.2 per operator).
+      hideTitle: true,
       style: { overflow: "hidden" },
       renderContent: () =>
         React.createElement(DataverseEntityViewWidget, {

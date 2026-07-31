@@ -77,6 +77,7 @@ const SectionPanelWrapper: React.FC<SectionPanelWrapperProps> = ({ section, padd
     <SectionPanel
       title={section.title}
       titleContent={section.titleContent}
+      hideTitle={section.hideTitle}
       badgeCount={section.badgeCount}
       toolbar={section.toolbar}
       className={section.className}
