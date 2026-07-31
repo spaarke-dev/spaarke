@@ -276,6 +276,9 @@ async function bootstrap(): Promise<void> {
           // task 041 (FR-13): active work type — scopes the Compose AI toolbar via
           // getToolsForSurface. Cross-cutting; applies regardless of door shape.
           activeWorkType?: string;
+          // agreements-r1 contract A3: level-2 agreement sub-domain (sprk_agreementtype.sprk_key)
+          // carried alongside activeWorkType so the review machine opens oriented.
+          subDomain?: string;
         }
       | undefined;
     if (!seed) {
@@ -302,6 +305,7 @@ async function bootstrap(): Promise<void> {
           fileName: seed.draft.fileName ?? undefined,
         },
         activeWorkType: seed.activeWorkType,
+        subDomain: seed.subDomain,
       };
       return <ComposeLaunchContext.Provider value={composeDraftLaunch}>{app}</ComposeLaunchContext.Provider>;
     }
@@ -326,6 +330,7 @@ async function bootstrap(): Promise<void> {
           fileName: seed.upload.fileName ?? undefined,
         },
         activeWorkType: seed.activeWorkType,
+        subDomain: seed.subDomain,
       };
       return <ComposeLaunchContext.Provider value={composeUploadLaunch}>{app}</ComposeLaunchContext.Provider>;
     }
@@ -343,6 +348,7 @@ async function bootstrap(): Promise<void> {
       },
       driveId: seed.speDriveId ?? "",
       activeWorkType: seed.activeWorkType,
+      subDomain: seed.subDomain,
     };
     return <ComposeLaunchContext.Provider value={composeLaunch}>{app}</ComposeLaunchContext.Provider>;
   };

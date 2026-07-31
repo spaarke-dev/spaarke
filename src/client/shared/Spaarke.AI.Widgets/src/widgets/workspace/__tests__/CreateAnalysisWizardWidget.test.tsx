@@ -216,6 +216,50 @@ describe('CreateAnalysisWizardWidget', () => {
     );
   });
 
+  it('on finish, binds the selected agreement type (sprk_agreementtype lookup) into the create payload', async () => {
+    const dispatchMock = jest.fn();
+    (useDispatchPaneEvent as jest.Mock).mockReturnValue(dispatchMock);
+
+    const dataService = buildDataService();
+    // The registry load returns one selectable row; `defaultSubDomain='nda'` auto-selects it.
+    (dataService.retrieveMultipleRecords as jest.Mock).mockImplementation(async (entityName: string) =>
+      entityName === 'sprk_agreementtype'
+        ? {
+            entities: [
+              { sprk_agreementtypeid: 'nda-type-id', sprk_key: 'nda', sprk_name: 'NDA / Confidentiality', sprk_isfallback: false },
+            ],
+          }
+        : { entities: [] }
+    );
+    const navigationService = buildNavigationService([
+      { id: 'existing-doc-id', name: 'MSA Draft', entityType: 'sprk_document' },
+    ]);
+    const data = buildData({ dataService, navigationService, defaultSubDomain: 'nda' });
+
+    renderWidget(data);
+
+    skipAssociateTo();
+    await selectExistingDocument();
+    clickPrimary('Next');
+    fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'NDA Review' } });
+    clickPrimary('Next');
+    await act(async () => {
+      clickPrimary('Finish');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(dataService.createRecord).toHaveBeenCalled());
+    const [, payload] = (dataService.createRecord as jest.Mock).mock.calls[0];
+    // The lookup is bound via the discovered nav-prop, or the PascalCase fallback
+    // (`sprk_AgreementType`) when metadata discovery is unavailable in jsdom. Assert on
+    // the target set/id so the test is robust to which nav-prop name resolves.
+    const bindValues = Object.entries(payload)
+      .filter(([k]) => k.endsWith('@odata.bind'))
+      .map(([, v]) => v);
+    expect(bindValues).toContain('/sprk_agreementtypes(nda-type-id)');
+  });
+
   it('is Field-Mapping-driven for associate-to: applyFieldMappings runs parent -> sprk_analysis when a regarding record is picked in step 1', async () => {
     const dataService = buildDataService();
     // Two openLookup calls: first the step-1 AssociateToStep (matter), then the
