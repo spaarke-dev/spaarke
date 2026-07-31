@@ -1,29 +1,7 @@
 # Current Task State — messaging-communication-app-r3
 
-> **Last Updated**: 2026-07-29 (by context-handoff)
+> **Last Updated**: 2026-07-31 (by context-handoff)
 > **Recovery**: Read "Quick Recovery" first. This file is self-contained — resume from it alone.
-
----
-
-## Round 8 UAT — in progress (2026-07-30)
-
-**11 UAT items** being implemented in one pass. Code COMPLETE for 10/11; item 1 deferred (needs pointer). Deploy pending.
-
-Decisions (operator): soft-delete = **deactivate** (statecode/statuscode Inactive, reversible); item 11 = **full** (new PCF v1.9.0 auto-opens modal from deep-link param); **all 11 one pass**.
-
-Done + verified (shared-lib tsc 0 errors, BFF build 0 errors, ConversationView 66/67 — 1 pre-existing forward-attachment fail):
-- **2** thread card +2px pad · **3** dot↔name space · **4** pin show-on-select · **5** no mouse-focus dark border (keyboard `:focus-visible` only) · **6** row dividers (Email-style) · **7** delete-thread trash+confirm · in `ThreadList.tsx` + shell wiring `ConversationWorkspace.tsx`
-- **8** delete-message (non-email) hover + confirm · **9** thread name in tools row · in `ConversationView.tsx` (self-owned deactivate)
-- **10** modal expand-to-container toggle · `ConversationModal.tsx` (PCF)
-- **11** notif deep-link `&sprk_openconversation=1` (`CommunicationArrivedProducer.BuildRecordDeepLink`) + PCF auto-open (`CommunicationConversationPanelApp.tsx shouldAutoOpenConversation`)
-- **BFF delete backend**: `DELETE /api/communications/threads/{id}` + `DELETE /api/communications/{id}` (soft-delete); `IThreadResolver.DeactivateThread/MessageAsync`; `CanCallerSeeMessageAsync` gate. Client: `deactivateThread` (communicationThreadListApi), `deactivateMessage` (communicationTimelineApi).
-- **PCF v1.8.0→1.9.0** bumped (manifest, index.ts, pack.ps1, solution.xml).
-
-**Item 1 (widget "Messages ⌄" header elevation/font)** — DEFERRED: could not conclusively locate the shared tab-header component; changing blind risks regressing every workspace tab. Needs operator pointer to the exact component.
-
-**Remaining deploy steps**: rebuild shared lib (done pre-titleLink-fix; REBUILD needed) → BFF publish+deploy → SpaarkeAi build+deploy → conversation code page build+deploy → PCF prod build + pack v1.9.0 zip (hand to operator).
-
-**§10 test obligation**: BFF Services/ modified → add delete-endpoint seam test before PR (deferred to post-UAT commit).
 
 ---
 
@@ -31,14 +9,28 @@ Done + verified (shared-lib tsc 0 errors, BFF build 0 errors, ConversationView 6
 
 | Field | Value |
 |-------|-------|
-| **Active work** | UAT iteration on the Communications conversation UI (workspace widget + PCF record-form modal + conversation code page) + BFF thread/notification fixes. Direct UAT loop, NOT a POML task. |
-| **Status** | ✅ **Rounds 5–7 + Q2 all merged to master (PR #700) and deployed to dev.** Awaiting the operator's round-7 UAT feedback. |
-| **Branch / HEAD** | `work/messaging-communication-app-r3` @ **`e61d9eaeb`** = origin/master (0 ahead, 0 behind, clean). |
-| **Next Action** | **Await operator round-7 UAT feedback.** Everything for rounds 5–7 + Q2 is live on dev. When feedback arrives, fix → deploy the affected surface → (later) fold to master via PR. |
-| **Deploy** | BFF + code pages: I deploy directly. **PCF: I build + hand the zip; operator uploads.** |
+| **Active work** | Direct UAT loop on the Communications conversation UI (SpaarkeAi workspace widget + PCF record-form modal + conversation code page) + BFF thread/notification fixes. NOT a POML task. |
+| **Status** | ✅ **Rounds 5–8 + 8.1 merged to master & live on dev.** Round **8.2** (section-header restyle) committed + pushed + deployed to dev, **NOT yet merged** (awaiting operator UAT of the header look). |
+| **Branch / HEAD** | `work/messaging-communication-app-r3` @ **`e71d73226`** = origin/master + round-8.2. Clean tree, 0 behind master, **1 ahead** (the unmerged 8.2 commit). |
+| **Next Action** | **Await operator UAT of round-8.2 header** (grid sections show only the DataGrid elevated header; Messages/Daily-Briefing/Calendar keep a 16px-semibold title). Then `/merge-to-master`. |
+| **Deploy** | BFF + code pages + SpaarkeAi: I deploy directly. **PCF: I build + pack the zip → operator imports.** Operator has imported **PCF v1.10.0**. |
 
-### Critical Context (5 sentences)
-The conversation UI is shared (`@spaarke/ui-components` `ConversationView`/`ConversationWorkspace`) mounted by THREE surfaces: the SpaarkeAi **workspace widget**, the **PCF** record-form modal (`CommunicationConversationPanel`), and the **`sprk_communicationconversationpage`** code page — a shared-lib fix must be redeployed to all three. The BFF thread engine anchors threads/messages via the **typed ADR-024 regarding lookups** (`RegardingFieldMap`), NEVER the non-existent/`lookup` `sprk_regardingrecordtype` field (root cause of the 500 + auto-threading + membership bugs). **Q2** adds a clickable Dataverse **`appnotification`** (the MDA bell) per fan-out recipient on every arrival, deep-linked to the regarding record, via the `IActionSeam` facade inside `CommunicationArrivedProducer` (ADR-047-compliant mirror). The workspace **tab label** lives in a Dataverse `sprk_workspacelayout` record (data), not code — renamed to "Messages" in dev; **prod still needs that one-row rename**. Everything is on master as of PR #700 (`e61d9eaeb`).
+### Critical Context
+The conversation UI is shared (`@spaarke/ui-components` `ConversationView` / `ConversationWorkspace`) mounted by THREE surfaces — SpaarkeAi **workspace widget**, **PCF** record-form modal (`CommunicationConversationPanel`), and the **`sprk_communicationconversationpage`** code page; a shared-lib fix redeploys to all three. **SpaarkeAi aliases the shared lib + LegalWorkspace to SOURCE** (no lib rebuild needed); the **code page + PCF consume the lib `dist/`** (must `npm run build` the lib first). **Soft-delete = deactivate** (`statecode=1`/`statuscode=2`); the round-8.1 fix added `statecode eq 0` to ALL Communication read queries in `CommunicationThreadReadService.cs` (thread list, message read, unread-count, by-regarding) so deactivated rows actually drop out — that was the "delete didn't work" root cause. BFF thread engine anchors via **typed ADR-024 lookups** (`RegardingFieldMap`), never `sprk_regardingrecordtype`. Branch protection on master is **OFF** (CI advisory) → merge via `gh pr create` + `gh pr merge {N} --merge`.
+
+### Round-8.2 (this session — NOT merged)
+Operator spec: keep the `SectionPanel` title but **16px / semibold** (was my wrong 20px/800), and **suppress it on dataset-grid sections** (they have the DataGrid's own elevated header). Impl: added `hideTitle` to `SectionConfig` → `SectionPanel` (drops the whole title bar when nothing else needs it); set `hideTitle:true` in the 5 grid registrations (`documents/matters/projects/invoices/workAssignments.registration.ts`); `communications` (conversation widget) intentionally keeps its title. Files: `SectionPanel.tsx`, `WorkspaceShell.tsx`, `types.ts` + 5 registrations. SpaarkeAi-only (code page/PCF don't use SectionPanel). Deployed to dev. Commit `e71d73226`.
+
+### Open follow-ups (not blocking)
+- **Merge round-8.2** to master once operator OKs the header.
+- **§10 test obligation**: BFF `Services/Communication/` gained 2 soft-delete endpoints (round-8.0) + read-filter change (8.1) — still owe a seam test under `tests/integration/seam/Communication/`.
+- **2 pre-existing non-messaging test failures** flagged, deliberately NOT force-passed: `buildDynamicWorkspaceConfig` rowHeight (`480px`→`100vh`) and `ConversationView.forward` `contract.pdf` attachment. Both in non-messaging code; need real investigation, not an assertion change. (The stale `sectionMetadataCatalog` "exactly 7" test WAS fixed → robust relative-order check.)
+- **PROD cutover** (when the whole feature ships): BFF · SpaarkeAi · conversation code page · PCF v1.10.0 · the one-row `sprk_workspacelayout` "Communications"→"Messages" rename (dev record `b117d6e5-b575-f111-ab0e-7ced8ddc4a05`) · confirm target MDA app has **in-app notifications enabled** (for Q2 bell).
+
+### Merged rounds (history)
+- **Rounds 5–7 + Q2** clickable app-notifications → PR #700/#691.
+- **Round 8** (11 UAT items: thread-list polish, delete-thread/message soft-delete, notification→PCF-modal auto-open, modal expand) → PR #701.
+- **Round 8.1** (delete read-filter fix, section header, message-icon alignment, pack.ps1 CWD fix, stale-test fix) → PR #703. PCF bumped **1.8.0 → 1.9.0 → 1.10.0**.
 
 ---
 
