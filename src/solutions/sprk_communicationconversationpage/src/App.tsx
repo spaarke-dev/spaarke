@@ -60,6 +60,7 @@ export const App: React.FC = () => {
         navigationService={navigationService}
         renderConversation={({
           threadId,
+          threadName,
           authenticatedFetch: threadFetch,
           bffBaseUrl: threadBffBaseUrl,
           onMarkThreadRead,
@@ -70,6 +71,8 @@ export const App: React.FC = () => {
             bffBaseUrl={threadBffBaseUrl}
             currentUserSystemUserId={currentUserSystemUserId}
             onMarkThreadRead={onMarkThreadRead}
+            // Thread name in the message-pane header (round-8.4 item 3b).
+            title={threadName}
           />
         )}
       />

@@ -81,6 +81,12 @@ export interface IConversationWorkspaceRegarding {
 /** Props handed to the injected `renderConversation` seam for the currently-selected thread. */
 export interface IConversationRendererProps {
   threadId: string;
+  /**
+   * Display name of the selected thread, resolved from the shell's thread list (round-8.4 item 3b). Forward it to
+   * `<ConversationView title={…} />` so the message pane header shows the thread name. The shell already has the names
+   * loaded, so a renderer need not fetch them separately.
+   */
+  threadName?: string;
   authenticatedFetch: AuthenticatedFetchFn;
   bffBaseUrl?: string;
   /**
@@ -505,6 +511,8 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
     renderConversation ? (
       renderConversation({
         threadId: selectedThreadId,
+        // Selected thread's display name for the message-pane header (round-8.4 item 3b).
+        threadName: allRows.find(r => r.threadId === selectedThreadId)?.name ?? undefined,
         authenticatedFetch,
         bffBaseUrl,
         // Relocated mark-as-read (item 5c): clear THIS thread's list badge when
