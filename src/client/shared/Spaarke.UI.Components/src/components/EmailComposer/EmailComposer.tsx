@@ -65,7 +65,6 @@ import type { CommunicationSendMode } from '../../services/communicationApi';
 import { ModalWindowControls } from '../ModalWindowControls';
 
 import { sendCommunication, SendCommunicationError } from '../../services/communicationApi';
-import type { ICommunicationAssociation } from '../../services/communicationApi';
 
 import {
   emailComposerReducer,
@@ -190,16 +189,6 @@ function isSafeHref(url: string): boolean {
 /** Escape a plain string for safe interpolation into HTML (record-link label/href). */
 function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-/**
- * Humanizes a Dataverse logical entity name for display (e.g. `sprk_matter` → `Matter`) — used
- * as the replace-confirm's fallback when the current primary association has no `entityName`.
- * Mirrors the same helper in `AssociationChips.tsx`.
- */
-function humanizeEntityType(entityType: string): string {
-  const stripped = entityType.startsWith('sprk_') ? entityType.slice(5) : entityType;
-  return stripped.charAt(0).toUpperCase() + stripped.slice(1);
 }
 
 // ---------------------------------------------------------------------------
@@ -459,7 +448,6 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // Single-primary "Related to" model (owner UAT 2026-07-30, item 8): a freshly-picked record is
   // NOT appended silently — it is held here pending a "set as primary regarding?" confirmation.
   // Non-null → the replace-confirm Dialog is open. Confirming promotes it to associations[0].
-  const [pendingPrimary, setPendingPrimary] = React.useState<ICommunicationAssociation | null>(null);
 
   // Compose template picker (Wave E, owner UAT 2026-07-30). Templates load lazily when the
   // menu opens; picking one whose apply would overwrite existing subject/body prompts a confirm.
@@ -542,12 +530,12 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     [state.attachments.length]
   );
 
-  // "Link another record" → pick a record via the host polymorphic picker, then CONFIRM it as the
-  // primary regarding (owner UAT 2026-07-30, item 8). The pick is NOT appended silently: it is
-  // staged in `pendingPrimary`, which opens a "set as primary regarding?" replace-confirm Dialog.
-  // On confirm the record becomes associations[0] (the BFF maps associations[0] as the primary
-  // regarding at send time — CLIENT-ONLY ordering, no new send field). On cancel the pick is
-  // discarded (nothing added).
+  // "Link another record" → pick a record via the host polymorphic picker and APPEND it to the
+  // in-memory "Related to" list (owner UAT 2026-07-31). No record exists yet in compose/reply/
+  // forward, so associations are held in reducer state and ride the send payload; the user can add
+  // SEVERAL and remove any (the chip ×). `ADD_ASSOCIATION` dedups on entityType+entityId. The BFF
+  // maps associations[0] as the primary regarding at send time (CLIENT-ONLY ordering). No
+  // replace-confirm — adding is additive, not a single-primary swap.
   const onAddRelationship = props.onAddRelationship;
   const handleAddRelationship = React.useCallback(() => {
     if (!onAddRelationship) return;
@@ -555,22 +543,18 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     void onAddRelationship()
       .then(picked => {
         if (!picked) return;
-        setPendingPrimary({
-          entityType: picked.entityType,
-          entityId: picked.id,
-          entityName: picked.name,
-          entityUrl: picked.url,
+        dispatch({
+          type: 'ADD_ASSOCIATION',
+          association: {
+            entityType: picked.entityType,
+            entityId: picked.id,
+            entityName: picked.name,
+            entityUrl: picked.url,
+          },
         });
       })
       .catch(err => console.warn('[EmailComposer] add relationship failed:', err));
   }, [onAddRelationship]);
-
-  const confirmPrimary = React.useCallback(() => {
-    if (pendingPrimary) dispatch({ type: 'SET_PRIMARY_ASSOCIATION', association: pendingPrimary });
-    setPendingPrimary(null);
-  }, [pendingPrimary]);
-
-  const cancelPrimary = React.useCallback(() => setPendingPrimary(null), []);
 
   // ── Attach-on-compose: local-file → Document resolution (task 042 / FR-20) ──
   // A picked local file (already passed the CHAT-ATTACHMENT-POLICY 25 MB + MIME
@@ -1132,13 +1116,13 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         />
       </div>
 
-      {/* Related to — what this email is associated to (owner UAT 2026-07-24). Single-primary
-          model (owner UAT 2026-07-30, item 8): the label, the chips (index 0 is the GREEN
-          PRIMARY regarding), and the "Link another record" affordance flow on ONE wrapping row.
-          "Link another record" opens a replace-confirm before promoting a pick to primary.
-          Owner UAT 2026-07-30 R2 items 10 + 11: the "Link another record" tile renders INLINE with
-          the chips, and the section shows whenever the host can add a relationship (`canLinkRecord`)
-          — even in compose/New mode with ZERO associations, so the user can add the first regarding. */}
+      {/* Related to — what this email is associated to. In compose/reply/forward NO record exists
+          yet, so associations are held IN MEMORY (reducer state) and ride the send payload (owner
+          UAT 2026-07-31). The user can ADD several via "Link another record" (each pick is appended,
+          deduped) and REMOVE any via the chip ×. Index 0 is the GREEN primary regarding (the BFF
+          maps associations[0] onto sprk_regardingrecord* at send). The label, chips, and the "Link
+          another record" tile flow on ONE wrapping row; the tile renders whenever the host can add a
+          relationship (`canLinkRecord`) — even with ZERO associations, so the first can be added. */}
       {(showAssociations || canLinkRecord) && (
         <div className={styles.section} role="region" aria-label="Related to">
           <div className={styles.relatedRow}>
@@ -1190,39 +1174,6 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           </div>
         </div>
       )}
-
-      {/* Replace-confirm for the single-primary regarding (owner UAT 2026-07-30, item 8). Opens
-          when a record is picked via "Link another record". The second line renders ONLY when a
-          primary already exists (state.associations.length > 0) — the empty state has nothing to
-          replace. Confirm → promote to associations[0]; Cancel → discard the pick. */}
-      <Dialog
-        open={pendingPrimary !== null}
-        onOpenChange={(_e, data) => {
-          if (!data.open) cancelPrimary();
-        }}
-      >
-        <DialogSurface>
-          <DialogBody>
-            <DialogTitle>Set as primary regarding record</DialogTitle>
-            <DialogContent>
-              {state.associations.length > 0 && (
-                <Text>
-                  Will replace the currently selected record:{' '}
-                  {state.associations[0].entityName ?? humanizeEntityType(state.associations[0].entityType)}
-                </Text>
-              )}
-            </DialogContent>
-            <DialogActions>
-              <Button appearance="primary" onClick={confirmPrimary}>
-                Set as primary
-              </Button>
-              <Button appearance="secondary" onClick={cancelPrimary}>
-                Cancel
-              </Button>
-            </DialogActions>
-          </DialogBody>
-        </DialogSurface>
-      </Dialog>
 
       {/* Template overwrite confirm (Wave E) — only shown when applying would replace
           existing subject/body. modalType="alert" disables light-dismiss so a stray click
