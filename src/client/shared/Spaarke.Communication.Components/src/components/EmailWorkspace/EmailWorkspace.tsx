@@ -71,18 +71,22 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     flexShrink: 0,
-    // Widget-style header: border + subtle elevation to match the other workspace
-    // widgets' title rows (owner UAT). NOTE: in the deployed app the widget host
-    // frames this further; this is the component-side approximation.
+    // owner UAT 2026-07-30 R2 item 2 — the view dropdown ("All Incoming Email ⌄")
+    // IS the widget's header/title; there is no separate "Email" label. Give it the
+    // elevated Fluent card look the other workspace widget headers use ("Active
+    // Documents ⌄"): a `colorNeutralBackground1` surface + `shadow4` + rounded
+    // corners, so the view name + chevron reads as the widget title. A small bottom
+    // margin lets the rounded elevation read above the reading pane. NOTE: in the
+    // deployed app the widget host frames this further; this is the component-side
+    // approximation. Semantic tokens only (ADR-021).
     position: 'relative',
     zIndex: 1,
     paddingInline: tokens.spacingHorizontalL,
-    paddingBlock: tokens.spacingVerticalS,
+    paddingBlock: tokens.spacingVerticalM,
+    marginBottom: tokens.spacingVerticalXS,
     backgroundColor: tokens.colorNeutralBackground1,
-    borderBottomWidth: tokens.strokeWidthThin,
-    borderBottomStyle: 'solid',
-    borderBottomColor: tokens.colorNeutralStroke2,
-    boxShadow: tokens.shadow2,
+    borderRadius: tokens.borderRadiusMedium,
+    boxShadow: tokens.shadow4,
   },
   body: {
     display: 'flex',
@@ -151,6 +155,26 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
   // Mirrors the shell's internally-owned `selectedId` so this component can drive
   // the ONE shared per-selection Dataverse read below.
   const [selectedId, setSelectedId] = React.useState<string | undefined>(initialSelectedId);
+
+  // owner UAT 2026-07-30 R2 item 3 — auto-select the FIRST email once the rows
+  // load, so the reading pane opens on an email instead of the empty "Select an
+  // email" placeholder. Fires ONCE (a ref guards re-selection on later renders),
+  // only when no id is pre-selected and not in single-record `hideList` mode — it
+  // never fights a user's manual selection. The resolved first id is fed to the
+  // shell as its `initialSelectedId`; the shell adopts it (see its item-3 effect)
+  // and notifies back through `onSelectedIdChange`, keeping this mirror in sync.
+  const autoSelectedRef = React.useRef(false);
+  const [autoFirstId, setAutoFirstId] = React.useState<string | undefined>(undefined);
+  React.useEffect(() => {
+    if (autoSelectedRef.current || hideListPane || initialSelectedId) return;
+    const firstId = cardItems[0]?.id;
+    if (firstId) {
+      autoSelectedRef.current = true;
+      setAutoFirstId(firstId);
+    }
+  }, [cardItems, hideListPane, initialSelectedId]);
+
+  const effectiveInitialSelectedId = initialSelectedId ?? autoFirstId;
 
   const record = useEmailWorkspaceRecord(dataService, selectedId);
 
@@ -292,7 +316,7 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
         <EmailReadingPaneShell
           items={cardItems}
           isLoading={isLoading}
-          initialSelectedId={initialSelectedId}
+          initialSelectedId={effectiveInitialSelectedId}
           hideList={hideListPane}
           onSelectedIdChange={setSelectedId}
           actions={toolbarActions}
