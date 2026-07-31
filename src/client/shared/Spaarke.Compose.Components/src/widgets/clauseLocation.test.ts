@@ -1,5 +1,5 @@
 /**
- * ndaClauseLocation.test.ts — doc-derived clause location label (UAT round-5 #1/#3/#6).
+ * clauseLocation.test.ts — doc-derived clause location label (UAT round-5 #1/#3/#6).
  *
  * Drives `findGoverningHeading` + `deriveClauseLocationLabel` against a REAL headless TipTap editor
  * with heading nodes (the same substrate ComposeEditor mounts), proving the label carries the section
@@ -7,7 +7,7 @@
  */
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
-import { findGoverningHeading, deriveClauseLocationLabel } from './ndaClauseLocation';
+import { findGoverningHeading, deriveClauseLocationLabel } from './clauseLocation';
 import { ComposeNumberAtomExtension } from './composeNumberAtomExtension';
 
 function makeEditor(content: string): Editor {
@@ -97,7 +97,7 @@ describe('deriveClauseLocationLabel', () => {
     editor.destroy();
   });
 
-  // WS-3/WS-4 (spaarkeai-compose-fidelity-r4.5) — the NDA's sections are NUMBERED PARAGRAPHS, not
+  // WS-3/WS-4 (spaarkeai-compose-fidelity-r4.5) — the agreement's sections are NUMBERED PARAGRAPHS, not
   // headings, so `findGoverningHeading` sees nothing. Before this, the label dropped to "Para 3"; now it
   // cites the clause's own computed legal number ("Sec 2"). Reproduces the 2026-07-28 dev-UAT gap.
   it('cites a numbered-paragraph clause by its computed legal number (no heading present)', () => {

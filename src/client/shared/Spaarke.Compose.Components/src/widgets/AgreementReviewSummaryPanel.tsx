@@ -1,6 +1,7 @@
 /**
- * NdaReviewSummaryPanel.tsx — review-summary docked panel (ai-advanced-capabilities-nda-r1 task 030,
- * FR-07).
+ * AgreementReviewSummaryPanel.tsx — review-summary docked panel (ai-advanced-capabilities-nda-r1 task
+ * 030, FR-07; renamed off the NDA-specific filename by ai-advanced-capabilities-agreements-r1 task 010
+ * — a pure rename, the component was already document-agnostic).
  *
  * Renders the fuller advisory review inside Compose — overall risk + the flagged-section list, each
  * with its citation (sectionRef + quotedText + standardRef) — directly in the Compose column.
@@ -379,7 +380,7 @@ export interface NdaReviewFindingSummary {
    * Disclose Confidential Information") the HOST computes from the LIVE editor document (section
    * heading + ordinal, which the model's `sectionRef` lacks). When present the row renders it verbatim;
    * when absent the panel falls back to {@link formatClauseLocation} on `sectionRef`. See
-   * {@link ../widgets/ndaClauseLocation.ts}.
+   * {@link ../widgets/clauseLocation.ts}.
    */
   locationLabel?: string;
   /**
@@ -436,7 +437,7 @@ export function deriveOverallRisk(
   return worst;
 }
 
-export interface NdaReviewSummaryPanelProps {
+export interface AgreementReviewSummaryPanelProps {
   /** Whether the panel is mounted/visible. When false, this component renders nothing. */
   open: boolean;
   /** Called when the user dismisses the panel (close button). */
@@ -465,7 +466,7 @@ export interface NdaReviewSummaryPanelProps {
   onNavigate?: (finding: NdaReviewFindingSummary) => void;
 }
 
-export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.JSX.Element | null {
+export function AgreementReviewSummaryPanel(props: AgreementReviewSummaryPanelProps): React.JSX.Element | null {
   const { open, onClose, findings, placementFailureCount, onNavigate } = props;
   const styles = useStyles();
   // UAT round-4 #4 — DEFAULT to document order (section/paragraph/sentence), not risk. The model emits
@@ -669,6 +670,21 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
   );
 }
 
-NdaReviewSummaryPanel.displayName = 'NdaReviewSummaryPanel';
+AgreementReviewSummaryPanel.displayName = 'AgreementReviewSummaryPanel';
 
-export default NdaReviewSummaryPanel;
+export default AgreementReviewSummaryPanel;
+
+/**
+ * @deprecated Use {@link AgreementReviewSummaryPanel} instead. Retained as a re-export alias so any
+ * existing import of the old NDA-specific name keeps resolving (ADR-012 export-stability rule;
+ * ai-advanced-capabilities-agreements-r1 task 010 pure rename — this component was already
+ * document-agnostic, only the name was NDA-specific).
+ */
+export const NdaReviewSummaryPanel = AgreementReviewSummaryPanel;
+
+/**
+ * @deprecated Use {@link AgreementReviewSummaryPanelProps} instead. Retained as a type alias so any
+ * existing import of the old NDA-specific name keeps resolving (ADR-012 export-stability rule;
+ * ai-advanced-capabilities-agreements-r1 task 010 pure rename).
+ */
+export type NdaReviewSummaryPanelProps = AgreementReviewSummaryPanelProps;

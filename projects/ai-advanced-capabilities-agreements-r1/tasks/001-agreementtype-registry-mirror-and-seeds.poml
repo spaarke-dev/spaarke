@@ -4,7 +4,7 @@
     <title>sprk_agreementtype registry — code mirror, remaining seeds, behavior values</title>
     <phase>0 Foundation</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New file creation (type + seed mirror) + Dataverse data ops; no product logic changes. TS type extension is additive/mechanical.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -105,6 +105,28 @@
     <criterion testable="true">Negative: no schema columns were added/modified on sprk_agreementtype (except the alt key if missing); tsc build green.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-06 substrate. Hub Q3 CONFIRMED (we load the 7 seeds); Q4 = owner action in flight (we verify + coordinate-once). The 7 new-row GUIDs must be appended to the seed JSON after creation.</notes>
+  <notes>Spec FR-06 substrate. Hub Q3 CONFIRMED (we load the 7 seeds); Q4 = owner action in flight (we verify + coordinate-once). The 7 new-row GUIDs must be appended to the seed JSON after creation.
+
+  COMPLETION SUMMARY (2026-07-31, FULL rigor — overridden up from authored STANDARD because this task modifies a .ts
+  file): all 10 sprk_agreementtype rows now exist in spaarkedev1 (7 new: lease caa461f3-fb8c-f111-8076-3833c5deff74,
+  asset-purchase cca461f3-fb8c-f111-8076-3833c5deff74, services dea461f3-fb8c-f111-8076-3833c5deff74, licensing
+  e6a461f3-fb8c-f111-8076-3833c5deff74, vendor f0a461f3-fb8c-f111-8076-3833c5deff74, partnership
+  f9a461f3-fb8c-f111-8076-3833c5deff74, loan fba461f3-fb8c-f111-8076-3833c5deff74), all sprk_isselectable=Yes,
+  exactly one sprk_isfallback=Yes (general). nda + general behavior columns filled (sprk_knowledgepackref=KNW-011 /
+  KNW-012-forward-ref, sprk_classificationcue authored, sprk_confidencethreshold left null = global baseline).
+  sprk_key alt-key EMPIRICALLY VERIFIED (duplicate-create attempt rejected with "Entity Key Key violated" — no test
+  row created, nothing to clean up); escalation trigger did not fire. Authored infra/dataverse/sprk_agreementtype-rows.json
+  (all 10 rows + naming-footgun/alt-key/sortorder/KNW-convention/load-procedure header notes) and extended
+  src/client/shared/Spaarke.UI.Components/src/types/sprkAnalysis.ts (ISprkAgreementTypeRecord, SprkAgreementTypeKey
+  union, SPRK_AGREEMENT_TYPE_KEYS, SPRK_AGREEMENT_TYPE_FALLBACK_KEY, SPRK_AGREEMENT_TYPE_SELECT — additive only, did
+  NOT restate hub's 1e1a6579b fields). IMPORTANT DISCOVERY for the main session: this worktree's sprkAnalysis.ts
+  still carries the WRONG OData field name (_sprk_agreementtypeid_value, should be _sprk_agreementtype_value) on the
+  pre-existing ISprkAnalysisRecord/SPRK_ANALYSIS_SELECT — the fix (commit 7e022e7dd) exists on the
+  work/ai-advanced-capabilities-analysis-hub-r1 branch but is NOT YET an ancestor of this branch's HEAD or of
+  origin/master; deliberately not duplicated here (out of this task's "extend, don't restate" scope) to avoid merge
+  drift — will self-correct on the next master merge. tsc build is clean for all lines this task touched (2
+  pre-existing, unrelated errors remain: missing type declarations for @spaarke/sdap-client / @spaarke/auth, sibling
+  packages never built in this fresh worktree checkout). Full detail + quality-gate self-review in
+  projects/ai-advanced-capabilities-agreements-r1/notes/001-execution-notes.md. All 5 acceptance criteria PASS.</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

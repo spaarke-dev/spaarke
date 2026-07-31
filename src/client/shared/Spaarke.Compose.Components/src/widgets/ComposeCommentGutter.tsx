@@ -54,12 +54,12 @@
  *     than reinventing them.
  *   - Cost-of-doing-nothing: without it, NDA-REVIEW advisory comments have no vertically-aligned,
  *     at-a-glance right-rail presentation — only an in-document underline + the top-of-column
- *     `NdaReviewSummaryPanel` list (spec FR-16 unmet).
+ *     `AgreementReviewSummaryPanel` list (spec FR-16 unmet).
  *
  * @see ./ComposeCommentThread.types.ts — `findCommentAnchorRange` (live position), `ComposeCommentThreadModel`
  * @see ./marks/TrackChangesExtension.ts — the coordsAtPos/widget-decoration precedent this reuses
  * @see ./ComposeEditor.tsx — mount point (inside `editorScrollWrap`) + `advisoryComments.threads` source
- * @see ./NdaReviewSummaryPanel.tsx — `riskBadgeColor` (reused for the per-card risk badge)
+ * @see ./AgreementReviewSummaryPanel.tsx — `riskBadgeColor` (reused for the per-card risk badge)
  * @see projects/ai-advanced-capabilities-nda-r1/spec.md FR-16
  */
 import * as React from 'react';
@@ -84,8 +84,8 @@ import {
 } from '@fluentui/react-components';
 import { ChevronDoubleDown16Regular, MoreVertical20Regular, SparkleRegular } from '@fluentui/react-icons';
 import { findCommentAnchorRange, type ComposeCommentThreadModel } from './ComposeCommentThread.types';
-import { riskBadgeColor, formatClauseLocation } from './NdaReviewSummaryPanel';
-import { deriveClauseLocationLabel } from './ndaClauseLocation';
+import { riskBadgeColor, formatClauseLocation } from './AgreementReviewSummaryPanel';
+import { deriveClauseLocationLabel } from './clauseLocation';
 
 /** Right-rail column DEFAULT width — cards clear of the document's own right margin. */
 export const COMMENT_GUTTER_WIDTH_PX = 220;
@@ -318,7 +318,7 @@ const useStyles = makeStyles({
   },
 });
 
-/** Truncated, log-safe-length label (mirrors ComposeCommentThread's / NdaReviewSummaryPanel's helper). */
+/** Truncated, log-safe-length label (mirrors ComposeCommentThread's / AgreementReviewSummaryPanel's helper). */
 function truncate(text: string, max: number): string {
   const trimmed = text.trim();
   return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;

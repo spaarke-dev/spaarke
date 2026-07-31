@@ -10,10 +10,10 @@
 
 | ID | Title | Phase | Status | Deps | Rigor | Tier | Effort | Parallel |
 |----|-------|-------|--------|------|-------|------|--------|----------|
-| 001 | sprk_agreementtype mirror + seeds + behavior values | 0 | 🔲 | none | STANDARD | sonnet | high | A |
-| 002 | agreement-review Action generalization + schema split + evals | 0 | 🔲 | none | FULL | opus | high | A |
+| 001 | sprk_agreementtype mirror + seeds + behavior values | 0 | ✅ | none | FULL* | sonnet | high | A |
+| 002 | agreement-review Action generalization + schema split + evals | 0 | ✅ | none | FULL | opus | high | A |
 | 003 | Knowledge packs (NDA taxonomy home + general fallback) | 0 | 🔲 | 001,002 | STANDARD | sonnet | high | B |
-| 010 | Rename clauseLocation + panel naming (pure rename) | 1 | 🔲 | none | FULL | sonnet | medium | A |
+| 010 | Rename clauseLocation + panel naming (pure rename) | 1 | ✅ | none | FULL | sonnet | medium | A |
 | 011 | WS-4 anchoring (ComputedNumber/CitationResolver) | 1 | 🔲 | 010 | FULL | sonnet | xhigh | C |
 | 012 | DEF-01 placement fix + restore original assertion | 1 | 🔲 | 011 | FULL | sonnet | xhigh | D |
 | 020 | Classifier Action (Reasoning tier, registry-driven) | 2 | 🔲 | 001 | FULL | opus | high | B |

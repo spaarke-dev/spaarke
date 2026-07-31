@@ -4,10 +4,16 @@
 
 ## Active task
 
-- **Task**: none (project initialized; execution not started)
-- **Status**: not-started
-- **Next action**: execute **task 001** (`sprk_agreementtype` code mirror + seeds) via `task-execute`.
-  Wave 0 runs 001 ∥ 002 ∥ 010 (see `tasks/TASK-INDEX.md`).
+- **Task**: WAVE 0 — 001 ∥ 002 ∥ 010 (parallel, task-execute Step 0.3 parallel mode)
+- **Status**: in-progress — 001 ✅ (7 rows seeded w/ GUIDs; alt-key dup-test PASS; KNW-012 forward ref for 003;
+  footgun fix 7e022e7dd still hub-branch-only). 002 ✅ (generalize-IN-PLACE on GUID row 34c9ecf2…; actionCode→
+  agreement-review, consumerType "nda-review" RETAINED by design — FR-01 territory for 020-023; 71 dotnet tests pass;
+  live LLM eval env-blocked; B1–B16 taxonomy hand-off in notes/002-execution-notes.md for 003; deferred:
+  ComposeSummaryPageGenerator.cs stale doc-comments → 030). 010 running.
+- **Orchestration**: agents do NOT write .claude/, current-task.md, TASK-INDEX.md, or git commits —
+  main session aggregates, runs wave-end build verification (npm builds for UI.Components +
+  Compose.Components; dotnet build if 002 touched .cs eval tests), then single wave commit.
+- **Next action**: on agent completion — verify acceptance, update TASK-INDEX (🔲→✅), build-verify, commit, start Wave 1 (003 ∥ 020 ∥ 052).
 
 ## Coordination state (ALL CLOSED — owner confirmations 2026-07-31)
 

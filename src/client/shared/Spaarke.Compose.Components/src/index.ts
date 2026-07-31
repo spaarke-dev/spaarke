@@ -155,14 +155,24 @@ export type { ComposeCommentGutterProps } from './widgets/ComposeCommentGutter';
 // Review-summary docked panel (ai-advanced-capabilities-nda-r1 task 030, FR-07) — the fuller
 // advisory digest (overallRisk + cited flagged-section findings) rendered inside Compose. Single
 // surface: no separate Analysis widget consumes this — mounted directly by ComposeWorkspace.
+// Renamed NdaReviewSummaryPanel -> AgreementReviewSummaryPanel (ai-advanced-capabilities-agreements-r1
+// task 010, pure rename); the old name is re-exported below as a deprecated alias (ADR-012 export
+// stability) so any existing consumer import keeps resolving.
 // -------------------------------------------------------------------------
 export {
-  NdaReviewSummaryPanel,
+  AgreementReviewSummaryPanel,
   deriveOverallRisk,
   riskBadgeColor,
   NDA_REVIEW_DISCLAIMER_TEXT,
-} from './widgets/NdaReviewSummaryPanel';
-export type { NdaReviewSummaryPanelProps, NdaReviewFindingSummary } from './widgets/NdaReviewSummaryPanel';
+  /** @deprecated Use `AgreementReviewSummaryPanel` instead. */
+  NdaReviewSummaryPanel,
+} from './widgets/AgreementReviewSummaryPanel';
+export type {
+  AgreementReviewSummaryPanelProps,
+  NdaReviewFindingSummary,
+} from './widgets/AgreementReviewSummaryPanel';
+/** @deprecated Use `AgreementReviewSummaryPanelProps` instead. */
+export type { NdaReviewSummaryPanelProps } from './widgets/AgreementReviewSummaryPanel';
 
 // -------------------------------------------------------------------------
 // Return-from-Word re-anchoring (FR-27 / task 054)

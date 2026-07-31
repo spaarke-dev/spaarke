@@ -4,7 +4,7 @@
     <title>agreement-review Action — generalize nda-review + FR-05 schema split + eval update</title>
     <phase>0 Foundation</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Core JPS/prompt artifact every downstream consumer depends on; Action output-schema change carries the ADR-039 eval obligation; TEST-MODIFYING (eval suites).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -110,6 +110,13 @@
     <criterion testable="true">Every nda-review consumer found in step 0 is migrated or explicitly aliased — zero dangling references (grep clean).</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-01/FR-05/FR-06 core. Design Lens 3(c)/(d). The findings-materializer branch (task 030) consumes exactly these discrete fields — coordinate the shape (already spec'd in FR-16).</notes>
+  <notes>Spec FR-01/FR-05/FR-06 core. Design Lens 3(c)/(d). The findings-materializer branch (task 030) consumes exactly these discrete fields — coordinate the shape (already spec'd in FR-16).
+
+COMPLETED 2026-07-31 (opus/high, FULL rigor). Full execution record: notes/002-execution-notes.md.
+DECISION: generalize-in-place — actionCode renamed nda-review -> agreement-review by UPDATING the existing sprk_analysisaction row 34c9ecf2-cb10-f111-8342-7ced8d1dc988 IN PLACE (GUID preserved, Binding sprk_action lookup unbroken, no orphan). consumerType STAYS 'nda-review' (client dispatch key; its rename is FR-01/010/020, off-limits client+surface files). Escalation NOT triggered (no server-side consumerType/actionCode branch; grep src/**/*.cs = doc comments only).
+DELIVERED: infra/dataverse/actions/agreement-review.action.json (generalized prompt, B1-B16 de-embedded, flaggedClause/assessment split explicit + marker-free) + outputschemas/agreement-review.schema.json (mirror-verbatim) + inputschemas/agreement-review.input.schema.json; old nda-review.* deleted; Binding actionCode migrated; eval suite updated (split fixture + FR-05 offline assertion + 2 new cases neg-04-invoice/agr-01-employment + config retarget) + NEW C# contract test AgreementReviewOutputSchemaContractTests.
+DEPLOYED to spaarkedev1 (in-place row update) + verified (Verify-OutputSchemaField PASS; MCP readback PASS; Binding lookup intact).
+TESTS: dotnet 71 passed/0 failed/0 skipped (new contract test + dispatch-eval + schema-contract regressions); offline Python eval + config validator GREEN. Live output-quality grading env-blocked (no Reasoning-tier Azure OpenAI, task 013).
+TASK-003 HAND-OFF: the B1-B16 NDA clause taxonomy (names) de-embedded from the prompt is recorded verbatim in notes/002-execution-notes.md for the NDA knowledge pack.
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

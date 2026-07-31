@@ -1,8 +1,9 @@
 /**
- * ndaClauseLocation.ts — derive a clear clause LOCATION LABEL from the live editor document
- * (ai-advanced-capabilities-nda-r1, UAT round-5 #1/#3/#6).
+ * clauseLocation.ts — derive a clear clause LOCATION LABEL from the live editor document
+ * (ai-advanced-capabilities-nda-r1, UAT round-5 #1/#3/#6; generalized off the NDA-specific filename by
+ * ai-advanced-capabilities-agreements-r1 task 010 — the logic here is, and always was, document-agnostic).
  *
- * The NDA-REVIEW model's `sectionRef` is free text that carries, at best, a page + paragraph (e.g.
+ * The advisory-review model's `sectionRef` is free text that carries, at best, a page + paragraph (e.g.
  * "Paragraph 5 (p. 1)") — it does NOT carry the section HEADING ("Agreement Not To Disclose
  * Confidential Information") or a section ordinal. Those live in the document, so once the Review
  * Summary is hosted INSIDE the editor (round-5 #1), we can walk the doc to the heading that governs a
@@ -15,12 +16,12 @@
  * anchor that couldn't be resolved), it falls back to {@link formatClauseLocation} on the model's
  * `sectionRef` — so the label is never blank and never worse than round-5 batch A.
  *
- * @see ./NdaReviewSummaryPanel.tsx — `formatClauseLocation` (the model-only fallback formatter)
+ * @see ./AgreementReviewSummaryPanel.tsx — `formatClauseLocation` (the model-only fallback formatter)
  * @see ./hooks/useComposeDocumentStyles.ts — the `pStyle` heading attribute
  * @see ./ComposeCommentGutter.tsx / ./ComposeEditor.tsx — callers (gutter note + summary row)
  */
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { formatClauseLocation } from './NdaReviewSummaryPanel';
+import { formatClauseLocation } from './AgreementReviewSummaryPanel';
 
 /** True when `node` is a document heading — a `heading` node OR a paragraph styled `Heading1..6`. */
 function isHeadingNode(node: PMNode): boolean {

@@ -1,0 +1,139 @@
+{
+  "$comment": "Projection of the LIVE sprk_agreementtype reference table (spaarkedev1) — the single sub-domain registry for Agreement Analysis (design Lens 3d). Table created env-only by analysis-hub-r1 (Part D of COORDINATION-hub-r1-TO-agreements-r1.md); this file is the FIRST code/infra mirror (task 001, agreements-r1). Ownership split (Part D, confirmed both sides): hub owns identity columns (sprk_key/sprk_name/sprk_isselectable/sprk_isfallback/sprk_sortorder) as a category, but the 7 rows below (lease..loan) were loaded BY agreements-r1 task 001 per hub's Q3 answer ('you own the registry data + the seed-JSON/code-mirror task, so you loading them is the right home'); agreements-r1 owns the VALUES of the three behavior columns (sprk_knowledgepackref, sprk_classificationcue, sprk_confidencethreshold) on every row. Direction of truth: mirror-first per ADR-027 — this file + the seed procedure below is the authored source; the live table is the load target. Do NOT hand-edit the live table without updating this file to match (ADR-027 mirror-first + idempotent seed pattern, not ad-hoc console edits).",
+
+  "$naming-footgun": "BINDING — do not get this wrong twice. `sprk_agreementtypeid` is this table's OWN PRIMARY KEY (see sprk_agreementtypeid on every row below). It is NOT the lookup attribute on sprk_analysis. The lookup FROM sprk_analysis TO this table is a DIFFERENT attribute: `sprk_agreementtype` (logical name), whose OData read annotation is `_sprk_agreementtype_value` — verified via `mcp__dataverse__describe('tables/sprk_analysis')` 2026-07-31 (`sprk_agreementtype LOOKUP (GUID) (Related table: sprk_agreementtype)`). A prior commit (1e1a6579b, hub A1 wizard picker) shipped the wrong OData field name `_sprk_agreementtypeid_value` in src/client/shared/Spaarke.UI.Components/src/types/sprkAnalysis.ts; the fix is authored on commit 7e022e7dd (hub-r1 branch: work/ai-advanced-capabilities-analysis-hub-r1) but is NOT YET merged into master or this agreements-r1 branch as of this task run (verified via `git merge-base --is-ancestor`). Task 001 did NOT duplicate that fix in sprkAnalysis.ts (out of this task's 'extend, don't restate' step scope; the fix will arrive via the next master merge) — flagged here + in execution notes for the main session's visibility before it commits/merges.",
+
+  "$alt-key-verification": "OWNER-CONFIRMED (2026-07-31) the sprk_key alternate key exists on sprk_agreementtype. Empirically re-verified 2026-07-31 by task 001: `mcp__dataverse__create_record('sprk_agreementtype', {sprk_key:'general', sprk_name:'ZZTEST-DuplicateKeyProbe-001-DELETE-ME', ...})` was REJECTED with 'Entity Key Key violated. A record with the same value for Key already exists.' No test row was created (rejected at the API boundary) — nothing to clean up. sprk_key uniqueness is enforced; routing/classifier code may key on it safely.",
+
+  "$sortorder-decision": "All 3 pre-existing rows (general/nda/employment) had sprk_sortorder = NULL when this task started (verified via read_query) — there was no existing sequence to 'continue' as originally assumed. Per COORDINATION-hub-r1-TO-agreements-r1.md Part D, sprk_sortorder is a hub-owned identity column; task 001 did NOT modify it on the 3 pre-existing rows (left null, hub's to backfill if desired). For the 7 NEW rows task 001 created, sprk_sortorder was assigned in Part D's listed order continuing from an implied general=10/nda=20/employment=30 baseline: lease=40, asset-purchase=50, services=60, licensing=70, vendor=80, partnership=90, loan=100 (10-step increments leave room for hub to backfill the first 3 without collision).",
+
+  "$knowledgepackref-convention": "sprk_knowledgepackref values are `spaarke-rag-references` knowledgeSourceId strings (the KNW-NNN convention; see KNW-001..KNW-011 in scripts/seed-data/knowledge.json + scripts/ai-search/*.ps1). nda = KNW-011 (Spaarke NDA Standard, already indexed by nda-r1 task 012 — 8 chunks, tenantId=system). general = KNW-012 is a FORWARD REFERENCE: no KNW-012 document is indexed yet as of this task; task 003 (knowledge-packs-nda-and-general-fallback) owns authoring + indexing the general fallback pack and MUST either index it under KNW-012 (confirming this file needs no change) or update both the live sprk_agreementtype.general row AND this file's general row to whatever id it actually indexes under (ADR-027 mirror-must-match-env). KNW-012 was verified free (zero repo hits) at the time this file was authored (2026-07-31).",
+
+  "$load-procedure": "This table has no dedicated deploy script yet (closest precedent: scripts/seed-data/Deploy-TypeLookups.ps1, which targets a different entity set map — sprk_analysisactiontype/sprk_aiskilltype/sprk_aitooltype — and would need a `sprk_agreementtype -> sprk_agreementtypes` entry added to its $entitySets hashtable plus a $JsonPath repoint to this file's `rows` shape to be reused directly). The 10 rows in this file were loaded via direct `mcp__dataverse__create_record` / `update_record` MCP calls against spaarkedev1 (ADR-027 permits MCP-driven load from an authored mirror as the load vehicle — the JSON is the source of truth, MCP was the mechanism, not ad-hoc console edits). A future task adding a second environment should either extend Deploy-TypeLookups.ps1 as noted above or add a small dedicated Deploy-AgreementTypes.ps1 that reads this file's `rows` array 1:1 (sprk_agreementtypeid omitted on insert — Dataverse mints it; recorded here post-creation for GUID-stability across environments/re-reads only).",
+
+  "$exported": "2026-07-31T00:00:00-04:00",
+  "$source": "https://spaarkedev1.crm.dynamics.com",
+
+  "rows": [
+    {
+      "sprk_agreementtypeid": "433e1688-908c-f111-8077-7ced8ddc4cc6",
+      "sprk_key": "general",
+      "sprk_name": "General",
+      "sprk_isselectable": true,
+      "sprk_isfallback": true,
+      "sprk_sortorder": null,
+      "sprk_knowledgepackref": "KNW-012",
+      "sprk_classificationcue": "Fallback classification for any agreement that is clearly a contract between parties creating enforceable obligations, but whose primary subject matter does not clearly match one of the specific registered sub-domains (nda, employment, lease, asset-purchase, services, licensing, vendor, partnership, loan). Use for settlement agreements, novel or hybrid arrangements, multi-subject documents with no single dominant type, or any agreement type not yet given its own registry row. This is the deliberately lower-value, broad-guidance fallback -- never prefer it over a specific sub-domain whose distinguishing characteristics are actually present in the document.",
+      "sprk_confidencethreshold": null,
+      "$comment": "Pre-existing row (hub-seeded). The ONE sprk_isfallback=Yes row — classifier routes unmatched/low-confidence docs here. sprk_knowledgepackref is a FORWARD REFERENCE to a pack task 003 has not yet indexed (see $knowledgepackref-convention). sprk_confidencethreshold null = global 0.85 baseline applies (no per-type override)."
+    },
+    {
+      "sprk_agreementtypeid": "d557c894-908c-f111-8077-7ced8ddc4cc6",
+      "sprk_key": "nda",
+      "sprk_name": "NDA Confidentiality",
+      "sprk_isselectable": true,
+      "sprk_isfallback": false,
+      "sprk_sortorder": null,
+      "sprk_knowledgepackref": "KNW-011",
+      "sprk_classificationcue": "Agreement whose PRIMARY subject is confidentiality / non-disclosure obligations protecting confidential information exchanged during discussions, due diligence, or a business relationship. Distinguishing signals: a defined 'Confidential Information' term, disclosure/use restrictions, standard exclusions (already known, public, independently developed, rightfully received from a third party), a stated term/survival period, and NO substantive license, sale, service, or employment obligations beyond the mutual promise to protect information. Classify as nda ONLY when confidentiality protection is the document's principal purpose -- not when it is a single clause embedded in a broader deal (e.g. an employment or services agreement that happens to include a confidentiality clause); those route to their own sub-domain instead.",
+      "sprk_confidencethreshold": null,
+      "$comment": "Pre-existing row (hub-seeded). sprk_knowledgepackref = the already-indexed Spaarke NDA Standard (KNW-011, nda-r1 task 012; 8 chunks, tenantId=system). sprk_confidencethreshold null = global 0.85 baseline applies (no per-type override)."
+    },
+    {
+      "sprk_agreementtypeid": "92b3c59a-908c-f111-8077-7ced8ddc4cc6",
+      "sprk_key": "employment",
+      "sprk_name": "Employment",
+      "sprk_isselectable": true,
+      "sprk_isfallback": false,
+      "sprk_sortorder": null,
+      "sprk_knowledgepackref": null,
+      "sprk_classificationcue": null,
+      "sprk_confidencethreshold": null,
+      "$comment": "Pre-existing row (hub-seeded). Behavior columns intentionally left null -- an employment-agreement knowledge pack is OUT of scope for agreements-r1 (per-type packs beyond nda/general are sibling-project work, design Lens 3d). Identity-only row; still isselectable=Yes so it is choosable/classifiable even without a dedicated pack (falls through to general-quality review depth until a pack is authored)."
+    },
+    {
+      "sprk_agreementtypeid": "caa461f3-fb8c-f111-8076-3833c5deff74",
+      "sprk_key": "lease",
+      "sprk_name": "Lease / Real Property",
+      "sprk_isselectable": true,
+      "sprk_isfallback": false,
+      "sprk_sortorder": 40,
+      "sprk_knowledgepackref": null,
+      "sprk_classificationcue": null,
+      "sprk_confidencethreshold": null,
+      "$comment": "NEW row created by task 001 (2026-07-31). Identity-only per hub Part D contract list; behavior columns (pack/cue/threshold) are OUT of scope -- a sibling project registers values with zero code when a lease-specific pack is authored."
+    },
+    {
+      "sprk_agreementtypeid": "cca461f3-fb8c-f111-8076-3833c5deff74",
+      "sprk_key": "asset-purchase",
+      "sprk_name": "Asset Purchase",
+      "sprk_isselectable": true,
+      "sprk_isfallback": false,
+      "sprk_sortorder": 50,
+      "sprk_knowledgepackref": null,
+      "sprk_classificationcue": null,
+      "sprk_confidencethreshold": null,
+      "$comment": "NEW row created by task 001 (2026-07-31). Identity-only per hub Part D contract list."
+    },
+    {
+      "sprk_agreementtypeid": "dea461f3-fb8c-f111-8076-3833c5deff74",
+      "sprk_key": "services",
+      "sprk_name": "Services / MSA",
+      "sprk_isselectable": true,
+      "sprk_isfallback": false,
+      "sprk_sortorder": 60,
+      "sprk_knowledgepackref": null,
+      "sprk_classificationcue": null,
+      "sprk_confidencethreshold": null,
+      "$comment": "NEW row created by task 001 (2026-07-31). Identity-only per hub Part D contract list."
+    },
+    {
+      "sprk_agreementtypeid": "e6a461f3-fb8c-f111-8076-3833c5deff74",
+      "sprk_key": "licensing",
+      "sprk_name": "Licensing / IP",
+      "sprk_isselectable": true,
+      "sprk_isfallback": false,
+      "sprk_sortorder": 70,
+      "sprk_knowledgepackref": null,
+      "sprk_classificationcue": null,
+      "sprk_confidencethreshold": null,
+      "$comment": "NEW row created by task 001 (2026-07-31). Identity-only per hub Part D contract list."
+    },
+    {
+      "sprk_agreementtypeid": "f0a461f3-fb8c-f111-8076-3833c5deff74",
+      "sprk_key": "vendor",
+      "sprk_name": "Vendor / Procurement",
+      "sprk_isselectable": true,
+      "sprk_isfallback": false,
+      "sprk_sortorder": 80,
+      "sprk_knowledgepackref": null,
+      "sprk_classificationcue": null,
+      "sprk_confidencethreshold": null,
+      "$comment": "NEW row created by task 001 (2026-07-31). Identity-only per hub Part D contract list."
+    },
+    {
+      "sprk_agreementtypeid": "f9a461f3-fb8c-f111-8076-3833c5deff74",
+      "sprk_key": "partnership",
+      "sprk_name": "Partnership / JV",
+      "sprk_isselectable": true,
+      "sprk_isfallback": false,
+      "sprk_sortorder": 90,
+      "sprk_knowledgepackref": null,
+      "sprk_classificationcue": null,
+      "sprk_confidencethreshold": null,
+      "$comment": "NEW row created by task 001 (2026-07-31). Identity-only per hub Part D contract list."
+    },
+    {
+      "sprk_agreementtypeid": "fba461f3-fb8c-f111-8076-3833c5deff74",
+      "sprk_key": "loan",
+      "sprk_name": "Loan / Financing",
+      "sprk_isselectable": true,
+      "sprk_isfallback": false,
+      "sprk_sortorder": 100,
+      "sprk_knowledgepackref": null,
+      "sprk_classificationcue": null,
+      "sprk_confidencethreshold": null,
+      "$comment": "NEW row created by task 001 (2026-07-31). Identity-only per hub Part D contract list."
+    }
+  ]
+}

@@ -2,7 +2,7 @@
  * ComposeCommentGutter.test.tsx — right-gutter comment layout (ai-advanced-capabilities-nda-r1 task
  * 032).
  *
- * Two layers, mirroring `NdaReviewSummaryPanel.test.tsx`'s convention:
+ * Two layers, mirroring `AgreementReviewSummaryPanel.test.tsx`'s convention:
  *  1. `layoutCommentGutterCards` — pure collision/stacking function (no editor/DOM dependency).
  *  2. UI — `ComposeCommentGutter` rendered over a REAL headless TipTap editor (same harness as
  *     `ComposeCommentThread.test.tsx`): live-position resolution via the mark's CURRENT span (never

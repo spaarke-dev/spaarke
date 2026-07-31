@@ -1,8 +1,11 @@
-# NDA-REVIEW Advisory Eval Harness
+# AGREEMENT-REVIEW Advisory Eval Harness
 
-> **Origin**: `ai-advanced-capabilities-nda-r1` task 050 (spec NFR-01)
-> **Grades**: task 020's NDA-REVIEW Action (`infra/dataverse/actions/nda-review.action.json`)
-> **Standard measured against**: [`projects/ai-advanced-capabilities-nda-r1/notes/spaarke-nda-standard-baseline.md`](../../projects/ai-advanced-capabilities-nda-r1/notes/spaarke-nda-standard-baseline.md) (B1-B16)
+> **Origin**: `ai-advanced-capabilities-nda-r1` task 050 (spec NFR-01); GENERALIZED by
+> `ai-advanced-capabilities-agreements-r1` task 002 (nda-review Action → type-agnostic agreement-review
+> Action + FR-05 flaggedClause/assessment split + 2 generalization cases).
+> **Grades**: the AGREEMENT-REVIEW Action (`infra/dataverse/actions/agreement-review.action.json`)
+> **Standard measured against**: the 6-NDA closed set is the shipped exemplar, measured against the NDA
+> standard [`projects/ai-advanced-capabilities-nda-r1/notes/spaarke-nda-standard-baseline.md`](../../projects/ai-advanced-capabilities-nda-r1/notes/spaarke-nda-standard-baseline.md) (B1-B16, now supplied by the NDA knowledge pack / KNW-011, not the prompt)
 > **ADR-038**: this is an OBSERVATION harness (reports scores). It is NOT part of the .NET
 > unit/seam pyramid and does not use the 7 KEEP-path mechanism — it is the project's own
 > graduation instrument for proving and guarding the north star (advisory output quality
@@ -36,9 +39,11 @@ tests/eval/
 │   ├── nda-04-short-term-broad-residuals.md  # closed-set NDA #4 — short confidentiality period (B8) + broad residuals incl. trade secrets (B10)
 │   ├── nda-05-drafting-errors.md             # closed-set NDA #5 — drafting-integrity errors (B16) + missing backup carve-out (B9)
 │   ├── nda-06-critical-landmine.md           # closed-set NDA #6 — strict liability (B5) + automatic injunction/indemnity (B13) + asymmetric forum (B15) + hidden non-compete (B11)
-│   ├── neg-01-non-nda-lease.md               # negative case — non-NDA document (residential lease)
+│   ├── neg-01-non-nda-lease.md               # negative case — a lease (an agreement, but no lease pack → declines for no-standard-retrieved)
 │   ├── neg-02-unreadable-input.txt           # negative case — garbled/OCR-failure input
-│   └── neg-03-unauthorized-user.md           # authorization case — scenario descriptor (no documentText)
+│   ├── neg-03-unauthorized-user.md           # authorization case — scenario descriptor (no documentText)
+│   ├── neg-04-non-agreement-invoice.md       # [task 002] non-agreement (invoice) → agreement-scope-guard decline (FR-06)
+│   └── agr-01-employment-non-nda-generalization.md # [task 002] non-NDA employment agreement → NOT declined on scope grounds (FR-01)
 ├── metrics/
 │   ├── citation_accuracy.py        # the citation-accuracy metric (promptflow custom-metric convention)
 │   └── load_eval_config.py         # parses + structurally validates legal-eval-config.yaml
@@ -86,18 +91,18 @@ reproducible proxy for "at least as good as a strong general LLM," standing in f
 side-by-side run until Azure OpenAI access is available (see below). The same `cases:` list is
 reusable verbatim for that future head-to-head comparison run.
 
-## Known limitation (surfaced, not silently patched)
+## Known limitation — RESOLVED by generalization (agreements-r1 task 002)
 
-NEG-01 exposes a real gap: `nda-review.action.json`'s systemPrompt has no explicit "this is not an
-NDA — decline" instruction; it only forbids *ungrounded* findings. A model applying the B1-B16
-rubric literally to a non-NDA document could, in principle, flag many "missing clause" findings
-that are technically grounded (the clauses really are absent) but conceptually wrong (the document
-was never an NDA). The rubric's `hallucination_guard` dimension is the mechanical backstop that
-would catch the worst form of this (any High/Critical finding on NEG-01 fails the rubric outright),
-but a full fix — an explicit document-type gate in the Action's systemPrompt or a pre-flight
-classifier — is an improvement to task 020's Action, not to this eval harness, and is out of scope
-here (this task owns eval assets only, per its HARD RULES). Recommend a follow-on task if the live
-run (below) shows NEG-01 producing spurious findings.
+The nda-r1 harness surfaced a real gap: `nda-review.action.json`'s systemPrompt had no explicit
+document-type gate; it only forbade *ungrounded* findings. The generalized
+`agreement-review.action.json` (task 002) closes it with an explicit **agreement-scope guard**: a
+genuine non-agreement (e.g. an invoice — see NEG-04) returns an empty flaggedSections array with Low
+overallRisk, and an agreement whose type-standard was NOT retrieved (e.g. the NEG-01 lease, since r1
+registers no lease pack) declines the standard-measured findings rather than fabricate a standard.
+NEG-01's rationale therefore shifts from "wrong document type" to "no applicable standard retrieved"
+(a lease IS an agreement). The `hallucination_guard` dimension remains the mechanical backstop (any
+High/Critical finding on NEG-01/NEG-04 fails the rubric outright). Live verification of the guard is
+env-blocked (no Azure OpenAI); the offline citation metric + config validator run today.
 
 ## Running the offline citation-accuracy proof (works today, no Azure OpenAI needed)
 
@@ -119,18 +124,18 @@ when the SDK isn't present — see the module docstring).
 
 ## Running the LIVE eval (ENV-BLOCKED in this repo — no Azure OpenAI credentials)
 
-The live run calls the NDA-REVIEW Action once per case (via the BFF's generic Action-execution
-endpoint, `/api/ai/analysis/execute`, actionCode `nda-review`, `documentText` = the case file
+The live run calls the AGREEMENT-REVIEW Action once per case (via the BFF's generic Action-execution
+endpoint, `/api/ai/analysis/execute`, actionCode `agreement-review`, `documentText` = the case file
 contents) against the Reasoning-tier Azure OpenAI deployment (task 013), captures the
 `{overallRisk, flaggedSections[]}` output per case, then scores it against this config:
 
 ```bash
-# 1. Execute NDA-REVIEW once per NDA case (6 calls) against a live, authenticated BFF instance:
+# 1. Execute AGREEMENT-REVIEW once per NDA case (6 calls) against a live, authenticated BFF instance:
 for case in nda-01-clean-mutual nda-02-narrow-ci-oneway nda-03-hidden-restrictive-covenant \
             nda-04-short-term-broad-residuals nda-05-drafting-errors nda-06-critical-landmine; do
   curl -s -X POST "$BFF_BASE_URL/api/ai/analysis/execute" \
     -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-    -d "{\"actionCode\": \"nda-review\", \"documentText\": $(python -c "import json,sys;print(json.dumps(open('tests/eval/cases/${case}.md',encoding='utf-8').read()))")}" \
+    -d "{\"actionCode\": \"agreement-review\", \"documentText\": $(python -c "import json,sys;print(json.dumps(open('tests/eval/cases/${case}.md',encoding='utf-8').read()))")}" \
     -o "tests/eval/fixtures/live-${case}-output.json"
 done
 

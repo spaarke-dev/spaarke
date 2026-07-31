@@ -1,6 +1,9 @@
-# NDA-REVIEW Advisory-Quality + Citation-Accuracy Evaluation Configuration
-# Grades task 020's NDA-REVIEW Action (infra/dataverse/actions/nda-review.action.json) against the
-# closed set authored in tests/eval/cases/, per project ai-advanced-capabilities-nda-r1 task 050.
+# AGREEMENT-REVIEW Advisory-Quality + Citation-Accuracy Evaluation Configuration
+# Grades the generalized AGREEMENT-REVIEW Action (infra/dataverse/actions/agreement-review.action.json,
+# renamed from nda-review by agreements-r1 task 002) against the closed set authored in tests/eval/cases/.
+# The 6-NDA closed set is the SHIPPED EXEMPLAR of the type-agnostic Action (NDA pack = KNW-011); two
+# generalization cases were added by task 002 (NEG-04 non-agreement invoice -> scope-guard decline;
+# AGR-01 non-NDA employment agreement -> the Action does NOT decline a non-NDA agreement on scope grounds).
 #
 # Follows the repo's existing promptflow eval-config convention
 # (infrastructure/ai-foundry/evaluation/legal-eval-config.yaml -- a DIFFERENT, general-purpose
@@ -28,8 +31,8 @@ description: >
 # The action under test (for traceability -- this eval is NOT wired to invoke it automatically;
 # see "Running the live eval" in README.md for the exact env-blocked run command).
 target_action:
-  actionCode: nda-review
-  source: infra/dataverse/actions/nda-review.action.json
+  actionCode: agreement-review
+  source: infra/dataverse/actions/agreement-review.action.json
   modelTier: Reasoning
   outputDeterminism: advisory
 
@@ -134,7 +137,7 @@ cases:
   - caseId: NEG-01-non-nda
     type: negative-non-nda
     documentPath: cases/neg-01-non-nda-lease.md
-    description: "A residential lease agreement -- not an NDA at all. No B-clause has anything to attach to."
+    description: "A residential lease -- an AGREEMENT, but not an NDA. Under generalization the decline rationale shifts from wrong-type to no-lease-standard-retrieved."
     plantedIssues: []
     expected:
       overallRiskBand: Low
@@ -142,15 +145,17 @@ cases:
       minHighOrCriticalFindings: 0
       decline: true
       note: >
-        ASPIRATIONAL / known-gap case: nda-review.action.json's systemPrompt has no explicit
-        "this is not an NDA -- decline" instruction (it only says decline UNGROUNDED findings).
-        A capable model applying the B1-B16 rubric literally to a non-NDA document could flag
-        many "missing clause" findings (no CI definition, no carve-outs, etc.) that are technically
-        grounded (the clauses really are absent) but conceptually wrong (this was never meant to be
-        an NDA). The rubric's hallucination_guard dimension (below) is the mechanical backstop:
-        any High/Critical finding on this case is a hard rubric FAIL, forcing this gap to surface
-        rather than silently pass. See README.md "Known limitation" for the recommended follow-on
-        (an explicit document-type gate), out of scope for this eval-authoring task.
+        GENERALIZATION UPDATE (agreements-r1 task 002): the nda-r1 "known gap" (no explicit
+        not-an-NDA decline; only ungrounded-finding decline) is now closed two ways in the
+        generalized agreement-review systemPrompt. (a) A genuine NON-agreement (NEG-04 invoice)
+        hits the explicit agreement-scope guard and declines. (b) A lease IS an agreement, so the
+        scope guard does NOT decline it on type grounds; instead, because r1 registers no LEASE
+        knowledge pack, NO applicable standard is retrieved, and the prompt's explicit
+        "if no applicable firm standard was retrieved ... decline the standard-measured findings"
+        instruction yields the empty/Low result. The hallucination_guard dimension (below) remains
+        the mechanical backstop: any High/Critical finding on this case is a hard rubric FAIL.
+        Live grading is env-blocked (no Azure OpenAI); a lease-pack sibling project would make this
+        a positive review case.
 
   - caseId: NEG-02-unreadable
     type: negative-unreadable
@@ -177,6 +182,41 @@ cases:
         this case). Declared here for closed-set completeness per the task's exhaustiveness
         constraint; a live assertion belongs in tests/integration/auth/** (ADR-038 KEEP path),
         out of scope for this eval-authoring task.
+
+  # --- Generalization cases (agreements-r1 task 002 -- FR-01/FR-06; live grading env-blocked) ---
+
+  - caseId: NEG-04-non-agreement
+    type: negative-non-agreement
+    documentPath: cases/neg-04-non-agreement-invoice.md
+    description: "A commercial invoice -- not an agreement or contract at all. Exercises the generalized agreement-scope guard ('is this an agreement?')."
+    plantedIssues: []
+    expected:
+      overallRiskBand: Low
+      maxFindings: 0
+      minHighOrCriticalFindings: 0
+      decline: true
+      note: >
+        Non-agreement negative for the generalized Action (FR-06). The agreement-scope guard must
+        return an empty flaggedSections array with Low overallRisk -- there is no agreement to review.
+        The hallucination_guard dimension applies verbatim (any High/Critical finding here is a hard
+        rubric FAIL). Live grading env-blocked (no Azure OpenAI).
+
+  - caseId: AGR-01-employment-generalization
+    type: generalization-non-nda
+    documentPath: cases/agr-01-employment-non-nda-generalization.md
+    description: "A non-NDA employment agreement. Proves the Action does NOT decline a non-NDA agreement on scope grounds (FR-01) when its type standard is retrieved."
+    plantedIssues: []   # employment taxonomy is NOT B1-B16; standardRef is not B-graded for this case (see note)
+    expected:
+      decline: false
+      minFindingsWithStandard: 1   # with an employment/general standard retrieved, >=1 finding (e.g. the 3-year worldwide non-compete)
+      note: >
+        GENERALIZATION positive case (FR-01/FR-06): with an employment/general firm standard retrieved
+        by the grounding layer, the review produces findings against THAT standard's clause taxonomy
+        (not B1-B16) -- e.g. the overbroad 3-year worldwide non-compete (Section 6) and the
+        no-carve-out IP assignment (Section 5). standardRef is graded on quote_verbatim + findings-present
+        only (the employment taxonomy is out of the NDA B1-B16 grader's scope). Live grading is
+        env-blocked AND requires an employment standard registered for the resolved subDomain (a separate
+        per-type sibling project, spec Out-of-Scope). r1's testable claim: NO NDA-specific scope decline fires.
 
 # Evaluation metrics to compute (promptflow custom-metric convention, matches
 # infrastructure/ai-foundry/evaluation/legal-eval-config.yaml's citation_accuracy entry).

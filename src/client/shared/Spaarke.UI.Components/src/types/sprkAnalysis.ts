@@ -225,3 +225,115 @@ export const SPRK_ANALYSIS_SELECT = [
   'sprk_regardingrecordname',
   'sprk_regardingrecordnumber',
 ].join(',');
+
+// ---------------------------------------------------------------------------
+// sprk_agreementtype — the agreement sub-domain registry (agreements-r1 task 001)
+// ---------------------------------------------------------------------------
+
+/**
+ * A `sprk_agreementtype` reference-table row as returned by Web API
+ * `retrieveRecord` / `retrieveMultipleRecords`. This is the ONE source of
+ * truth for the agreement sub-domain axis (design Lens 3d) — a new type is
+ * added as a row (zero code), never as a parallel TS constant list.
+ *
+ * NAMING FOOTGUN — read before touching this table or the `sprk_analysis`
+ * lookup that points at it: `sprk_agreementtypeid` below is THIS table's own
+ * primary key. It is NOT the attribute on `sprk_analysis` that references a
+ * row here — that lookup's logical name is `sprk_agreementtype`
+ * (OData `_sprk_agreementtype_value`), verified via Dataverse MCP `describe`
+ * against `sprk_analysis` 2026-07-31. See `ISprkAnalysisRecord` above and
+ * `infra/dataverse/sprk_agreementtype-rows.json` (`$naming-footgun` header)
+ * for the full note, including the in-flight fix to this file's own
+ * `_sprk_agreementtypeid_value` field (not yet merged as of this addition —
+ * do not assume it is corrected without checking history).
+ *
+ * Ownership split (COORDINATION-hub-r1-TO-agreements-r1.md Part D): identity
+ * columns (`sprk_key`/`sprk_name`/`sprk_isselectable`/`sprk_isfallback`/
+ * `sprk_sortorder`) are the registry's identity; behavior columns
+ * (`sprk_knowledgepackref`/`sprk_classificationcue`/`sprk_confidencethreshold`)
+ * are agreements-r1-owned VALUES filled as knowledge packs are authored
+ * (task 003+). `sprk_key` carries a Dataverse alternate key (verified 2026-07-31
+ * by task 001 — a duplicate-key create attempt was rejected) — safe to use as
+ * a stable routing/classifier key.
+ */
+export interface ISprkAgreementTypeRecord {
+  sprk_agreementtypeid: string;
+  sprk_key: string;
+  sprk_name: string;
+
+  /** Whether the row is offered in the wizard picker (`sprk_isselectable eq true` filter). */
+  sprk_isselectable: boolean;
+  /** Exactly one row carries `true` — the classifier/picker fallback (currently `general`). */
+  sprk_isfallback: boolean;
+  sprk_sortorder?: number | null;
+  sprk_description?: string | null;
+
+  /**
+   * Grounding pack reference (a `spaarke-rag-references` `knowledgeSourceId`,
+   * e.g. `"KNW-011"`) — the retrieval source the Action's knowledge pack binds
+   * to for this sub-domain. Null until a pack is authored for the type.
+   */
+  sprk_knowledgepackref?: string | null;
+  /** Free-text cue consumed by the classifier prompt to distinguish this sub-domain. */
+  sprk_classificationcue?: string | null;
+  /** Per-type override of the global confidence gate (task 021, default 0.85); null = global baseline applies. */
+  sprk_confidencethreshold?: number | null;
+
+  statecode?: number | null;
+  statuscode?: number | null;
+}
+
+/**
+ * The 10 seeded `sprk_key` values (agreements-r1 task 001 seed —
+ * `infra/dataverse/sprk_agreementtype-rows.json`), as a closed literal union.
+ * Mirrors the row identities only — NOT a parallel business-logic list; the
+ * live table remains the source of truth for anything beyond the key string
+ * (display name, selectability, pack ref, etc. — read those from the row).
+ */
+export type SprkAgreementTypeKey =
+  | 'general'
+  | 'nda'
+  | 'employment'
+  | 'lease'
+  | 'asset-purchase'
+  | 'services'
+  | 'licensing'
+  | 'vendor'
+  | 'partnership'
+  | 'loan';
+
+/** All seeded `sprk_key` values, in the Part D contract order. */
+export const SPRK_AGREEMENT_TYPE_KEYS: readonly SprkAgreementTypeKey[] = [
+  'general',
+  'nda',
+  'employment',
+  'lease',
+  'asset-purchase',
+  'services',
+  'licensing',
+  'vendor',
+  'partnership',
+  'loan',
+] as const;
+
+/** The one `sprk_key` seeded with `sprk_isfallback = true` — the classifier/picker fallback. */
+export const SPRK_AGREEMENT_TYPE_FALLBACK_KEY: SprkAgreementTypeKey = 'general';
+
+/**
+ * OData `$select` fields for a `sprk_agreementtype` retrieve (e.g. the wizard
+ * picker's `sprk_isselectable eq true` query).
+ */
+export const SPRK_AGREEMENT_TYPE_SELECT = [
+  'sprk_agreementtypeid',
+  'sprk_key',
+  'sprk_name',
+  'sprk_isselectable',
+  'sprk_isfallback',
+  'sprk_sortorder',
+  'sprk_description',
+  'sprk_knowledgepackref',
+  'sprk_classificationcue',
+  'sprk_confidencethreshold',
+  'statecode',
+  'statuscode',
+].join(',');

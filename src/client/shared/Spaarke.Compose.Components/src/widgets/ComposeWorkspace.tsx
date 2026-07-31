@@ -62,7 +62,7 @@ import { ComposeBannerStack } from './ComposeBannerStack';
 // ai-advanced-capabilities-nda-r1 task 030 — review-summary docked panel (FR-07). Mirrors the
 // ComposeCommentThread/ComposeFindReplace docked-panel convention; mounted below alongside the
 // SAME `compose_advisory_comments` data task 031's onAdvisoryComments handler already receives.
-import { type NdaReviewFindingSummary } from './NdaReviewSummaryPanel';
+import { type NdaReviewFindingSummary } from './AgreementReviewSummaryPanel';
 import {
   ComposeEditor,
   type ComposeEditorHandle,
@@ -1716,7 +1716,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // -------------------------------------------------------------------------
   // ai-advanced-capabilities-nda-r1 task 030 — review-summary docked panel state (FR-07). Captures
   // the SAME `advisoryComments` projection 031's onAdvisoryComments handler below already receives,
-  // for the docked NdaReviewSummaryPanel (ADR-040 — one ledgered NDA-REVIEW result, two renderings,
+  // for the docked AgreementReviewSummaryPanel (ADR-040 — one ledgered NDA-REVIEW result, two renderings,
   // never a second server read). Additive to 031's existing handler — see the capture lines inside
   // it further down; no existing line there is altered.
   const [reviewSummaryFindings, setReviewSummaryFindings] = React.useState<readonly NdaReviewFindingSummary[]>([]);
@@ -1790,7 +1790,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // panel (does not alter the placement logic above). Field rename: the event's `targetText`
       // (031's own field, matching ComposeEditorHandle.placeAdvisoryComments' input shape) becomes
       // the panel's `quotedText` (matching the NDA-REVIEW schema's own field name — see
-      // NdaReviewSummaryPanel.tsx's file header for why the panel keeps the schema's vocabulary).
+      // AgreementReviewSummaryPanel.tsx's file header for why the panel keeps the schema's vocabulary).
       setReviewSummaryFindings(
         items.map(item => ({
           sectionRef: item.sectionRef,

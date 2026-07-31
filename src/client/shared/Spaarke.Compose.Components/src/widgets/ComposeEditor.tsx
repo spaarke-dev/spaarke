@@ -118,11 +118,11 @@ import {
 import { ComposeFindReplace } from './ComposeFindReplace';
 import { ComposeCommentThread, type ComposeCommentPendingRange } from './ComposeCommentThread';
 import {
-  NdaReviewSummaryPanel,
+  AgreementReviewSummaryPanel,
   NDA_REVIEW_DISCLAIMER_TEXT,
   type NdaReviewFindingSummary,
-} from './NdaReviewSummaryPanel';
-import { deriveClauseLocationLabel } from './ndaClauseLocation';
+} from './AgreementReviewSummaryPanel';
+import { deriveClauseLocationLabel } from './clauseLocation';
 import {
   composeSessionCommentThreadsToAnchoredComments,
   findCommentAnchorRange,
@@ -659,7 +659,7 @@ export interface ComposeEditorProps {
    * ai-advanced-capabilities-nda-r1 (UAT round-2 items #1/#2) — the review-summary panel's
    * visibility state, threaded from the host (`ComposeWorkspace`) so the editor's own "Review"
    * toolbar dropdown can toggle it alongside the right-gutter "Review Notes". The host owns the
-   * panel (it renders `NdaReviewSummaryPanel`); the editor owns the gutter. Omitted for a mount with
+   * panel (it renders `AgreementReviewSummaryPanel`); the editor owns the gutter. Omitted for a mount with
    * no NDA advisory review — the "Review" control then never appears.
    */
   reviewSummary?: {
@@ -673,7 +673,7 @@ export interface ComposeEditorProps {
      * UAT round-5 #1 — the flagged-section findings, so the editor can render the Review Summary panel
      * INSIDE its own top region (below the toolbar), replacing the former host-rendered docked panel.
      * The editor enriches each finding with a doc-derived `locationLabel` (section heading + ordinal —
-     * {@link ../widgets/ndaClauseLocation.ts}) before rendering.
+     * {@link ../widgets/clauseLocation.ts}) before rendering.
      */
     findings: readonly NdaReviewFindingSummary[];
     /** Count of advisory comments that couldn't be anchored (passed through to the panel's notice). */
@@ -2247,7 +2247,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
 
     // ----- UAT round-5 #1 — Review Summary hosted INSIDE the editor -----------------------------
     // Enrich each finding with a doc-derived location label (section heading + ordinal, which the
-    // model's sectionRef lacks — ndaClauseLocation.ts) by strict-resolving its quotedText to a document
+    // model's sectionRef lacks — clauseLocation.ts) by strict-resolving its quotedText to a document
     // position, then walking to the governing heading. Recomputed only when the finding set changes
     // (a snapshot at review time — a later edit that shifts headings does not re-label, which is fine
     // for an advisory digest). Falls back to the model-only label when a quote can't be resolved.
@@ -2711,9 +2711,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             toolbar), replacing the former host-rendered docked panel. Toggling "Review Summary" in the
             toolbar's Review dropdown expands/collapses this in-flow area. The editor owns navigation
             (its own highlightCitedSpan primitive) and enriches each finding's location with the section
-            heading/ordinal from the live document (ndaClauseLocation.ts). */}
+            heading/ordinal from the live document (clauseLocation.ts). */}
         {reviewSummary ? (
-          <NdaReviewSummaryPanel
+          <AgreementReviewSummaryPanel
             open={reviewSummary.open}
             onClose={reviewSummary.onToggle}
             findings={enrichedReviewFindings}
