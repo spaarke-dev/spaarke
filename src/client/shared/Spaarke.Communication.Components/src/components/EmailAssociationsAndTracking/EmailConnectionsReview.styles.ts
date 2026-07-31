@@ -31,6 +31,11 @@ export const useConnectionsReviewStyles = makeStyles({
   // TOP-aligned, the label at the same size + weight as a card's primary line,
   // and the search icon CENTERED (not pushed to a corner). Clicking it opens the
   // record-type dropdown directly (owner UAT #6).
+  // owner UAT 2026-07-30 R2 item 7 — a VISUAL SIBLING of the candidate `card`
+  // below: identical border / radius / padding / neutral surface / hover and the
+  // same inter-line `gap` (spacingVerticalXXS), so the "Link another record" tile
+  // matches the reference cards exactly. No explicit `fontFamily` anywhere in these
+  // cards — they inherit Fluent's default Segoe UI (there is no Arial to remove).
   linkCard: {
     boxSizing: 'border-box',
     width: '100%',
@@ -38,7 +43,7 @@ export const useConnectionsReviewStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'stretch',
-    gap: tokens.spacingVerticalXS,
+    gap: tokens.spacingVerticalXXS,
     textAlign: 'left',
     paddingBlock: tokens.spacingVerticalS,
     paddingInline: tokens.spacingHorizontalM,

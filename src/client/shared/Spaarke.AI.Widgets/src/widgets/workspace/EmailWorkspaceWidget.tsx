@@ -123,6 +123,7 @@ export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
       onLookupRecord={composeHandlers.onLookupRecord}
       onAddRelationship={composeHandlers.onAddRelationship}
       onUploadLocalAttachment={composeHandlers.onUploadLocalAttachment}
+      onResolveShareLink={composeHandlers.onResolveShareLink}
       onListEmailTemplates={composeHandlers.onListEmailTemplates}
       onRenderEmailTemplate={composeHandlers.onRenderEmailTemplate}
       onDraftWithAi={composeHandlers.onDraftWithAi}

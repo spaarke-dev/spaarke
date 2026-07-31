@@ -38,9 +38,21 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalM,
   },
+  // owner UAT 2026-07-30 R2 item 6 — the "From" label is PLAIN text ("From:"), not
+  // a boxed field, matching the composer's own From treatment (the compose agent is
+  // applying the same on the compose side; keep them visually consistent). Segoe UI
+  // 14px semibold via semantic tokens (Segoe UI is Fluent's default family, so no
+  // explicit `fontFamily`); the address value follows on the same line.
+  fromLabel: {
+    flexShrink: 0,
+    color: tokens.colorNeutralForeground1,
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightSemibold,
+  },
   // Boxed field label — copied VERBATIM from the compose composer's `RecipientField`
   // `labelBox` (owner UAT: "must match the Compose form"): same min-width, padding,
-  // border stroke, radius, background, foreground, and font size.
+  // border stroke, radius, background, foreground, and font size. Used by To/Cc/Bcc;
+  // From uses the plain `fromLabel` above (item 6).
   label: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -84,7 +96,7 @@ export const EmailRecipients: React.FC<EmailRecipientsProps> = ({ from, to, cc, 
   return (
     <div className={s.root} data-testid="email-recipients">
       <div className={s.row}>
-        <Text className={s.label}>From</Text>
+        <Text className={s.fromLabel}>From:</Text>
         <Text className={s.value}>{from || ''}</Text>
       </div>
       <div className={s.row}>

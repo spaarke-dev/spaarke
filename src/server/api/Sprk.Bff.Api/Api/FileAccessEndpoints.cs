@@ -75,6 +75,20 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status409Conflict)
             .Produces(StatusCodes.Status500InternalServerError);
 
+        // Recipient-openable SPE sharing link for a document (email-communication-solution-r5 R2 item
+        // 12). OBO — the caller's own SPE access authorizes the createLink. Used by the email composer's
+        // "Link" attachments so an emailed link opens the actual file (incl. for external recipients).
+        docs.MapPost("/{documentId}/share-link", CreateShareLink)
+            .WithName("CreateDocumentShareLink")
+            .WithTags("File Access")
+            .WithDescription("Create a recipient-openable SPE sharing link (Graph createLink, view/anonymous) for a document.")
+            .Produces<ShareLinkResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status409Conflict)
+            .Produces(StatusCodes.Status502BadGateway);
+
         docs.MapGet("/{documentId}/view-url", GetViewUrl)
             .WithName("GetDocumentViewUrl")
             .WithTags("File Access")
@@ -580,6 +594,74 @@ public static class FileAccessEndpoints
                 MimeType: mimeType,
                 FileName: fileName
             ));
+        }
+
+        /// <summary>
+        /// POST /api/documents/{documentId}/share-link
+        /// Creates a recipient-openable SPE sharing link (Graph createLink, view/anonymous) for the
+        /// document, so an emailed "Link" opens the actual file — including for external recipients
+        /// (email-communication-solution-r5 R2 item 12). OBO: the caller's own SPE access authorizes it.
+        /// </summary>
+        static async Task<IResult> CreateShareLink(
+            string documentId,
+            IDocumentDataverseService dataverseService,
+            SpeFileStore speFileStore,
+            ILogger<Program> logger,
+            HttpContext context,
+            CancellationToken ct)
+        {
+            logger.LogInformation("CreateShareLink called | DocumentId: {DocumentId} | TraceId: {TraceId}",
+                documentId, context.TraceIdentifier);
+
+            if (!Guid.TryParse(documentId, out _))
+            {
+                throw new SdapProblemException(
+                    "invalid_id", "Invalid Document ID",
+                    $"Document ID '{documentId}' is not a valid GUID format", 400);
+            }
+
+            var document = await dataverseService.GetDocumentAsync(documentId, ct);
+            if (document == null)
+            {
+                throw new SdapProblemException(
+                    "document_not_found", "Document Not Found",
+                    $"Document with ID '{documentId}' does not exist", 404);
+            }
+
+            // Reuses the same SPE-pointer validation as open-links (404/409 on missing/malformed pointers).
+            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
+
+            try
+            {
+                // view + anonymous: opens the file, works for external recipients (owner-approved scope,
+                // R2 item 12). Non-expiring for now. Requires the tenant SPE/SharePoint external-sharing
+                // policy to allow "Anyone" links; if disabled Graph throws → mapped to 502 below and the
+                // caller (composer) falls back to the prior link (best-effort, never blocks the send).
+                var url = await speFileStore.CreateSharingLinkAsUserAsync(
+                    context, document.GraphDriveId!, document.GraphItemId!,
+                    linkType: "view", scope: "anonymous", expiration: null, ct: ct);
+
+                if (string.IsNullOrWhiteSpace(url))
+                {
+                    throw new SdapProblemException(
+                        "share_link_unavailable", "Share Link Unavailable",
+                        $"Graph returned no sharing link for document {documentId}", 502);
+                }
+
+                logger.LogInformation("CreateShareLink succeeded | DocumentId: {DocumentId} | TraceId: {TraceId}",
+                    documentId, context.TraceIdentifier);
+                return TypedResults.Ok(new ShareLinkResponse(url));
+            }
+            catch (Microsoft.Graph.Models.ODataErrors.ODataError ex)
+            {
+                // Most commonly: tenant policy forbids anonymous links. Surface a clean 502 (not a 500).
+                logger.LogWarning(ex,
+                    "CreateShareLink Graph error | DocumentId: {DocumentId} | Code: {Code} | TraceId: {TraceId}",
+                    documentId, ex.Error?.Code, context.TraceIdentifier);
+                throw new SdapProblemException(
+                    "share_link_failed", "Share Link Failed",
+                    $"Could not create a sharing link (Graph): {ex.Error?.Message ?? ex.Message}", 502);
+            }
         }
 
         /// <summary>

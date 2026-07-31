@@ -31,6 +31,7 @@
  */
 import * as React from 'react';
 import {
+  Button,
   SearchBox,
   Skeleton,
   SkeletonItem,
@@ -41,6 +42,7 @@ import {
   type InputOnChangeData,
   type SearchBoxChangeEvent,
 } from '@fluentui/react-components';
+import { Search20Regular } from '@fluentui/react-icons';
 import {
   EMAIL_COMMUNICATION_TYPE,
   type EmailCardItem,
@@ -154,13 +156,16 @@ const useStyles = makeStyles({
     minWidth: 0,
     backgroundColor: tokens.colorNeutralBackground1,
   },
-  // Slim list toolbar. Currently holds only the search box; additional toolbar
-  // actions (sort / filter / refresh) are a future owner-specified addition.
+  // Slim list toolbar. owner UAT 2026-07-30 R2 item 4 — collapsed by default to a
+  // right-aligned search ICON; clicking it reveals the full-width search field.
+  // `justifyContent: flex-end` keeps the collapsed icon on the right; when the
+  // field is open it grows (`flex: 1`) and fills the row.
   toolbar: {
     flexShrink: 0,
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
@@ -173,6 +178,10 @@ const useStyles = makeStyles({
   searchBox: {
     flex: '1 1 auto',
     minWidth: 0,
+  },
+  // Collapsed-state trigger — a right-aligned magnifier that expands the field.
+  searchToggle: {
+    flexShrink: 0,
   },
   list: {
     display: 'flex',
@@ -320,6 +329,18 @@ export const EmailCardList: React.FC<EmailCardListProps> = ({
   const [focusedId, setFocusedId] = React.useState<string | undefined>(undefined);
   // Toolbar search state is intentionally internal (no parent wiring needed).
   const [search, setSearch] = React.useState('');
+  // owner UAT 2026-07-30 R2 item 4 — the search field is collapsed to an icon by
+  // default and revealed on click; it collapses back on blur only when empty (a
+  // non-empty query stays visible so the active filter — and its clear button —
+  // remain reachable).
+  const [searchOpen, setSearchOpen] = React.useState(false);
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
+  const handleSearchBlur = React.useCallback(() => {
+    if (search.trim() === '') setSearchOpen(false);
+  }, [search]);
 
   // FR-03 non-Email exclusion invariant: skip any row that is not Email, even
   // if the host passes an unfiltered array. Never trust the caller alone.
@@ -459,17 +480,32 @@ export const EmailCardList: React.FC<EmailCardListProps> = ({
   return (
     <div className={styles.root}>
       {/*
-       * List toolbar. Search box is the only control for now; sort / filter /
-       * refresh actions are a future owner-specified addition and would sit here.
+       * List toolbar (owner UAT 2026-07-30 R2 item 4). Collapsed to a right-aligned
+       * search ICON by default; clicking it reveals the field (auto-focused) and
+       * blurring an empty field collapses it back. Filter behavior is unchanged —
+       * sender OR subject, case-insensitive substring.
        */}
       <div className={styles.toolbar}>
-        <SearchBox
-          className={styles.searchBox}
-          value={search}
-          onChange={handleSearchChange}
-          placeholder="Search mail"
-          aria-label="Search mail"
-        />
+        {searchOpen ? (
+          <SearchBox
+            ref={searchInputRef}
+            className={styles.searchBox}
+            value={search}
+            onChange={handleSearchChange}
+            onBlur={handleSearchBlur}
+            placeholder="Search mail"
+            aria-label="Search mail"
+          />
+        ) : (
+          <Button
+            className={styles.searchToggle}
+            appearance="subtle"
+            icon={<Search20Regular />}
+            aria-label="Search mail"
+            title="Search mail"
+            onClick={() => setSearchOpen(true)}
+          />
+        )}
       </div>
       {buckets.length === 0 ? (
         <div className={styles.centeredState}>
