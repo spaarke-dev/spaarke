@@ -4,7 +4,16 @@
 
 ## Active task
 
-- **Task**: WAVE 2 ✅ COMPLETE — 011 + 050 done; committing, then Wave 3 (012 ∥ 021)
+- **Task**: WAVE 3 ✅ — 012 + 021 done; committing, then Wave 4 (030 ∥ 040)
+- **012**: premise CORRECTED — test never weakened; SOURCE regressed via S1-fallback commit 6a414bbac
+  (first-occurrence-on-recurrence + kind collapse). Fixed: discriminated union, multiplicity→ambiguous always,
+  unique-fuzzy verbatim-prefix kept; 011's deterministic path untouched. 7/7 advisory; suite 779/15 (exact flip).
+- **021**: agreement-classify Binding row (Informational, click-path); "review" vs revise-regex conflict resolved
+  (new detector first + exclusions); pack binding = registry→SessionDispatchOrchestrator→KnowledgeSourceIds→
+  ActionRunner (closes 003 crowding finding, seam-tested); gate 4 branches via ConsumerChips; race fixed.
+  ⚠️ §6.5 PATH A EXCEPTION (cite in PR): session-scoped gate state vs ADR-041 gate-ledger formalism —
+  documented in notes/021-execution-notes.md. BFF 9628/0; publish ~47 MB; no new CVE.
+- **Wave 2 summary (kept for recovery)**:
 - **011**: client-side CitationResolver mirror (composeCitationResolver.ts, §11-justified); deterministic
   sectionRef→paraId ahead of text fallback in placeAdvisoryComments; projection already carried
   computedNumber/listPath (typed compose-contracts.ts); 37/37 new tests; zero regressions (stash A/B).

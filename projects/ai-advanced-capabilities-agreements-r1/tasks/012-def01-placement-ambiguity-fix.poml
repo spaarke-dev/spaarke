@@ -3,8 +3,8 @@
   <metadata>
     <title>DEF-01 — advisory-comment placement precision + restore original assertion</title>
     <phase>1 Fidelity</phase>
-    <gate>blocked (deps 011)</gate>
-    <status>not-started</status>
+    <gate>unblocked (deps 011 complete)</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING (restores a weakened assertion) — unconditional code-review + adr-check per root CLAUDE.md §8; correctness-critical placement logic.</rigor-reason>
     <model-tier>sonnet</model-tier>

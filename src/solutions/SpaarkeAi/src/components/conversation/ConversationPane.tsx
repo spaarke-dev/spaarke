@@ -103,6 +103,16 @@ import {
 } from "./composeReviseRouting";
 import { ComposeDocActionChips } from "./ReviseIntentChips";
 import { useCapabilityDiscovery } from "./useCapabilityDiscovery";
+// task 021 (FR-07/08/09 interactive orientation + confirmation gate): the review-intent text
+// detector (checked BEFORE detectReviseThisDocumentIntent — see the decorate hook below) and the
+// stateful gate controller. Deep-import useComposeLaunch from the shared context module (NOT the
+// `@spaarke/compose-components` barrel) — mirrors this file's existing composeActionBridge
+// deep-import rationale (avoids transitively pulling the TipTap editor widgets into the Assistant
+// pane bundle); composeLaunchContext.ts is a READ-ONLY canonical reference this task consumes,
+// never modifies (Spaarke.Compose.Components is off-limits this wave — task 012 owns it).
+import { detectAgreementReviewIntent } from "./agreementReviewRouting";
+import { useAgreementReviewGate } from "./useAgreementReviewGate";
+import { useComposeLaunch } from "@spaarke/compose-components/context/composeLaunchContext";
 import {
   AuthLoadingState,
   PlaybookHeaderStrip,
@@ -198,6 +208,12 @@ export function ConversationPane(): React.JSX.Element {
   const restoreCtx = useRestoreContext();
   const paneCollapse = usePaneCollapseContext();
   const dispatch = useDispatchPaneEvent();
+  // task 021 (FR-09 "skip when subDomain already present — explicit path owns it, 023"): a non-null
+  // `subDomain` here means the app was launched already-oriented (composeMode='editor' ribbon launch,
+  // or a server-seeded `workspace_open_tab` — main.tsx's SpaarkeAiWorkspaceRenderer). The interactive
+  // gate (below) skips classification entirely when this is set — read-only consumption of the
+  // shared launch context (composeLaunchContext.ts), never written here.
+  const explicitComposeLaunch = useComposeLaunch();
 
   // Wave 3 Part 1 (UAT-R3 Test #1) — the client-side "active source document" pointer. When a chat
   // upload / browse-direct-upload / opened host document has been registered as the session's active
@@ -263,13 +279,23 @@ export function ConversationPane(): React.JSX.Element {
   // seed shape is consumed verbatim by ComposeDirectWidget.buildLaunchFromSeed). WorkspacePane reuses
   // the single Compose tab per distinct file. Returns true when a mount was dispatched.
   const mountFileInCompose = React.useCallback(
-    (sessionFileId: string, fileName?: string): boolean => {
+    (sessionFileId: string, fileName?: string, activeWorkType?: string): boolean => {
       const sessionId = chatSessionIdRef.current;
       if (!sessionFileId || !sessionId) return false;
       dispatch("workspace", {
         type: "widget_load",
         widgetType: "compose",
-        widgetData: { compose: { upload: { sessionId, sessionFileId, fileName } } },
+        widgetData: {
+          compose: {
+            upload: { sessionId, sessionFileId, fileName },
+            // task 021 (FR-07 orientation writes): threaded through the SAME
+            // `ComposeWidgetSeed.activeWorkType` field task 041 (hub) already wired end-to-end
+            // (`buildLaunchFromSeed` -> `<ComposeWorkspace activeWorkType>` -> `getToolsForSurface`).
+            // Omitted (every pre-021 caller) preserves the exact prior wire shape — ComposeEditor's
+            // own `'*'` unscoped default applies.
+            ...(activeWorkType ? { activeWorkType } : {}),
+          },
+        },
         displayName: "Compose",
       } as WorkspacePaneEvent);
       return true;
@@ -340,10 +366,15 @@ export function ConversationPane(): React.JSX.Element {
   // be wired in later via a one-line registry addition, not a code fork). Declared here (before
   // the `ndaReviewBindingId` memo below) so the memo can depend on it.
   const [ndaReviewConsumerType, setNdaReviewConsumerType] = React.useState<string>("nda-review");
+  // task 021 — the SAME deferred capability-discovery seam resolves the `agreement-classify`
+  // bindingId, enabled the moment the review-intent text detector first fires (see the decorate
+  // hook below) — well before classification actually needs to dispatch.
+  const [agreementReviewGateNeeded, setAgreementReviewGateNeeded] = React.useState<boolean>(false);
   const { capabilities: launchableCapabilities } = useCapabilityDiscovery({
     bffBaseUrl,
     authenticatedFetch,
-    enabled: reviseCapabilityNeeded || draftCapabilityNeeded || ndaReviewCapabilityNeeded,
+    enabled:
+      reviseCapabilityNeeded || draftCapabilityNeeded || ndaReviewCapabilityNeeded || agreementReviewGateNeeded,
   });
   const reviseBindingId = React.useMemo<string | null>(
     () =>
@@ -383,6 +414,16 @@ export function ConversationPane(): React.JSX.Element {
     [launchableCapabilities, ndaReviewConsumerType]
   );
 
+  // task 021 (FR-07/08/09 interactive orientation + confirmation gate) — the `agreement-classify`
+  // Binding id, resolved from the SAME closed capability catalog (ADR-039: bindingId only from
+  // discovery, never invented/hardcoded — portable across environments exactly like the bindingIds
+  // above). Enables the SAME deferred capability-discovery fetch the moment review-intent is first
+  // detected (see `agreementReviewGateNeeded` below), so it is resolved by the time the gate needs it.
+  const classifyBindingId = React.useMemo<string | null>(
+    () => launchableCapabilities.find((c) => c.consumerType === "agreement-classify")?.bindingId ?? null,
+    [launchableCapabilities]
+  );
+
   // Wave 4 — the natural-language revise flow's client state:
   //  - `reviseChipsPending`: after auto-mount + the mount-then-ask message, show the four intent chips.
   //  - `pendingNamedRevise`: the user NAMED an intent in the original message ("flag risks in this
@@ -417,6 +458,12 @@ export function ConversationPane(): React.JSX.Element {
     namedIntent: RevisionIntent | null;
   } | null>(null);
   const [sourceDocReadyToken, setSourceDocReadyToken] = React.useState(0);
+  // task 021 — the SAME race-safe buffer, for a natural-language "review this document" (agreement
+  // review-intent) that arrives BEFORE the upload's registration has back-filled
+  // `activeSourceDocRef.sessionFileId`. Reuses the SAME `sourceDocReadyToken` bump (a generic
+  // "a source doc just became ready" signal, not revise-specific) — the effect below fires the
+  // gate once the file is available.
+  const [pendingAgreementReview, setPendingAgreementReview] = React.useState<boolean>(false);
 
   // ── Behaviour hooks (see module map in the header) ────────────────────────
   const injection = useInjectionQueue();
@@ -621,6 +668,26 @@ export function ConversationPane(): React.JSX.Element {
     }, []),
   });
   acceptChipsRef.current = chips.acceptChips;
+
+  // task 021 (FR-07/08/09 interactive orientation + confirmation gate) — the stateful gate
+  // controller. Declared AFTER `chips` (needs `chips.dispatchBinding`/`chips.acceptChips`) and
+  // AFTER `classifyBindingId`/`ndaReviewBindingId` (both resolved above via the SAME
+  // capability-discovery seam). `dataService` reuses the SAME Xrm.WebApi adapter instance the
+  // email-recipient lookup already created (§11 — one instance, two read-only consumers).
+  const agreementReviewGate = useAgreementReviewGate({
+    bffBaseUrl,
+    getAccessToken,
+    getSessionId,
+    dispatch,
+    dataService: emailLookupDataService,
+    classifyBindingId,
+    reviewBindingId: ndaReviewBindingId,
+    mountFileInCompose,
+    dispatchReviewBinding: chips.dispatchBinding,
+    acceptChips: chips.acceptChips,
+    enqueueAssistantMessage: injection.enqueue,
+    inject: injection.inject,
+  });
 
   // UAT round-5 #9 — when a dispatch settles WITHOUT an NDA result having completed the run, mark it
   // failed. `fail` no-ops unless the run is still `running` (a successful `complete` already won, since
@@ -1250,11 +1317,25 @@ export function ConversationPane(): React.JSX.Element {
           // SAME mount-in-Compose + dispatch-nda-review flow the old top-of-pane card used.
           handleReviewNda();
           return;
+        case LOCAL_CHIP.agreementReviewConfirm:
+        case LOCAL_CHIP.agreementReviewGeneral:
+        case LOCAL_CHIP.agreementReviewBoth:
+          // task 021 — the confirmation-gate chips (below-threshold confirm / pick-another / non-
+          // agreement general-review escape hatch / composite "Both") all route back to the gate
+          // controller, which resolves the pending decision and dispatches the review.
+          agreementReviewGate.handleGateChipAction(actionId);
+          return;
         default:
+          // task 021 — the composite choice-of-lens chips carry a dynamic per-candidate id
+          // (`local:agreement-review-lens:{subDomainKey}`) that cannot be a fixed `case` label; the
+          // gate controller itself no-ops on any id it doesn't recognize (defensive, never throws).
+          if (actionId.startsWith("local:agreement-review-lens:")) {
+            agreementReviewGate.handleGateChipAction(actionId);
+          }
           return;
       }
     },
-    [handleDocAction, injection, handleReviseInCompose, handleReviewNda]
+    [handleDocAction, injection, handleReviseInCompose, handleReviewNda, agreementReviewGate]
   );
   localChipActionRef.current = handleLocalChipAction;
 
@@ -1622,9 +1703,36 @@ export function ConversationPane(): React.JSX.Element {
       }
 
       const messageText = typeof body.message === "string" ? body.message : "";
-      const detection = detectReviseThisDocumentIntent(messageText);
       const hasActiveSourceDoc =
         activeSourceDocRef.current?.sessionFileId != null && chatSessionIdRef.current != null;
+
+      // task 021 (FR-07/08/09 interactive orientation + confirmation gate) — CHECKED FIRST, before
+      // the generic revise detector below: "review this document" (a review/assessment verb, no
+      // revise-specific verb/keyword) routes to the agreement-classify confirmation gate instead of
+      // the whole-document revise flow (compose-revise-document) — design Lens 3d's canonical trigger
+      // phrase. Skipped entirely when the session was launched ALREADY oriented
+      // (`explicitComposeLaunch?.subDomain` — the wizard/hub explicit path, task 023's territory) per
+      // FR-09 "skip classification when subDomain is already present". Negative criterion (project
+      // constraint): a bare "review" with no document reference, or with NO active/uploading
+      // document, falls through unchanged to the normal agent turn — the gate never fires on text
+      // alone.
+      if (!explicitComposeLaunch?.subDomain && detectAgreementReviewIntent(messageText)) {
+        if (hasActiveSourceDoc || attachments.uploadedFileCount > 0) {
+          // ALWAYS buffer through the same effect (never dispatch inline here) — mirrors the
+          // revise/draft-document race-safe pattern: `classifyBindingId` is resolved by a DEFERRED
+          // capability-discovery fetch enabled by `agreementReviewGateNeeded` just below, so it is
+          // virtually never ready on THIS same synchronous call (the very first trigger in a
+          // session). The buffered-gate effect fires once BOTH the source file is registered AND
+          // `classifyBindingId` has resolved.
+          setAgreementReviewGateNeeded(true);
+          setPendingAgreementReview(true);
+          return null; // suppress the agent turn — the gate orchestrates classify -> confirm -> dispatch
+        }
+        // No attached/target document — the negative criterion: fall through to the normal agent
+        // turn below (never fire the gate on text alone).
+      }
+
+      const detection = detectReviseThisDocumentIntent(messageText);
 
       // R6-6 (UAT 2026-07-21): the document is ALREADY open in Compose (a live document session).
       // A revise/rewrite instruction should update the OPEN document, not answer in the chat pane.
@@ -1715,6 +1823,7 @@ export function ConversationPane(): React.JSX.Element {
       draftBindingId,
       chips,
       modelTierOverride,
+      explicitComposeLaunch,
     ]
   );
 
@@ -1766,6 +1875,25 @@ export function ConversationPane(): React.JSX.Element {
       setReviseChipsPending(true);
     }
   }, [sourceDocReadyToken, pendingReviseThisDocument, mountActiveSourceDocInCompose, injection]);
+
+  // task 021 — the race-safe buffer for a natural-language "review this document" (agreement
+  // review-intent). Fires the classify+gate only once BOTH preconditions are met: (1) the source
+  // file is registered (`sourceDocReadyToken` — the same generic upload-readiness signal the
+  // revise buffer above consumes; already true immediately when `hasActiveSourceDoc` was true at
+  // detection time) AND (2) the deferred capability-discovery fetch has resolved
+  // `classifyBindingId` (mirrors the `pendingDraftDocument`/`draftBindingId` wait above) — every
+  // decorate-hook trigger buffers through here UNCONDITIONALLY (never dispatches inline) precisely
+  // because `classifyBindingId` is virtually never resolved on the same synchronous call that
+  // first flips `agreementReviewGateNeeded`.
+  const runAgreementReviewGate = agreementReviewGate.runGate;
+  React.useEffect(() => {
+    if (!pendingAgreementReview) return;
+    const active = activeSourceDocRef.current;
+    if (active?.sessionFileId == null || chatSessionIdRef.current == null) return;
+    if (!classifyBindingId) return;
+    setPendingAgreementReview(false);
+    void runAgreementReviewGate(active.sessionFileId, active.fileName);
+  }, [sourceDocReadyToken, pendingAgreementReview, runAgreementReviewGate, classifyBindingId]);
 
   // R4-4 (UAT 2026-07-19) — the FIX #7 AUTO-LOAD-on-attach effect was REMOVED. Owner reversed the
   // earlier decision: attaching files should NOT auto-open Compose (uploading 2 files spawned 2 Compose
@@ -1822,8 +1950,19 @@ export function ConversationPane(): React.JSX.Element {
       // task 064: reset the resolved consumerType to the default alongside the file — keeps the
       // two pieces of state consistent even though only `ndaReviewFile` gates behavior.
       setNdaReviewConsumerType("nda-review");
+      // task 021: a fresh session drops any pending confirmation-gate decision + per-file resolved
+      // cache (a new session has no already-oriented files) and any buffered race-safe gate intent.
+      agreementReviewGate.resetForSession();
+      setPendingAgreementReview(false);
     },
-    [setChatSessionId, clearRefinementPrompts, resetAttachments, resetChips, resetEventBatch]
+    [
+      setChatSessionId,
+      clearRefinementPrompts,
+      resetAttachments,
+      resetChips,
+      resetEventBatch,
+      agreementReviewGate,
+    ]
   );
 
   const handleHeaderCollapse = React.useCallback(() => {

@@ -4,7 +4,7 @@
     <title>Interactive orientation — classify on chat-upload, orient the session, confirmation gate</title>
     <phase>2 Classifier + Routing</phase>
     <gate>blocked (deps 020,003)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Client-heavy conversation-surface change (ConversationPane hot file) wiring a new AI capability into the session flow; UX judgment + ADR-041 confirmation semantics.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -122,6 +122,19 @@
     <criterion testable="true">Negative: a text message merely CONTAINING "review" without an attached/target doc does not fire the gate.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-07/FR-08 + FR-09 interactive half; design Lens 3(d). This task is the "wire a reader" moment for the hub's A3 — after it lands, notify hub to finish the cold-load threading + open-existing derivation (or 022 does them).</notes>
+  <notes>Spec FR-07/FR-08 + FR-09 interactive half; design Lens 3(d). This task is the "wire a reader" moment for the hub's A3 — after it lands, notify hub to finish the cold-load threading + open-existing derivation (or 022 does them).
+
+COMPLETION (2026-07-31): all 6 acceptance criteria PASS (full detail: notes/021-execution-notes.md). Trigger surface
+= additive `agreement-classify` Binding row (§10 justified, no new endpoint). Gate implemented as a new hook
+(useAgreementReviewGate.ts) + pure module (agreementReviewRouting.ts), wired into ConversationPane's existing
+decorate-hook interception BEFORE detectReviseThisDocumentIntent. Pack-binding threaded additively:
+LinearRunContext.KnowledgeSourceIds -> ActionRunner.RetrieveReferenceGroundingAsync (fixes the task-003 whole-corpus
+finding) via a new subDomain->registry lookup in SessionDispatchOrchestrator. "Both" dispatches sequentially
+(ADR-016). No escalation fired. Tests: BFF 9628/0/101 (was 9625/0/101); SpaarkeAi conversation suite 49/445 (was
+46/405); new dedicated seam test (AgreementReviewKnowledgeScopeSeamTests, 3 cases) proves the server-side threading
+through the real WebApplicationFactory app. Self-review (code-review + adr-check) surfaced and fixed one real race
+condition (concurrent double-invocation of the same file's gate) and flagged one judgment call (ADR-041 Gate-ledger
+formalism vs this gate's lighter session-scoped state — Path A, documented in notes). UI-tests (live browser,
+dark-mode) deferred to 060/061 per assignment; covered at unit/e2e-wire level here.</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

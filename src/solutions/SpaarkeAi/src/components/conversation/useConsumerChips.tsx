@@ -153,8 +153,21 @@ export interface ConsumerChipsController {
    * next-step chips (`INextStepChip.targetBindingId`) wired by ConversationPane's
    * `onNextStep` (F-4, e2e-completion-audit 2026-07-10). Not a new dispatch
    * path — it is the existing one, hoisted so the host reuses it.
+   *
+   * task 021 (FR-08 "both" composite dispatch): returns the settled Promise so a
+   * caller that must run MULTIPLE dispatches SEQUENTIALLY (ADR-016 — one pack's
+   * review at a time, never concurrent) can `await` completion before firing the
+   * next one. Every EXISTING caller (chip clicks, effects) calls this as a bare
+   * statement and ignores the return value — this widening is purely additive.
+   * `opts.resultLabel`, when supplied, is threaded into the NDA-REVIEW-shaped
+   * completion message (see `runBindingDispatch`) so a per-pack outcome can be
+   * labelled ("...under the **Employment** lens...") instead of the generic
+   * "the NDA" phrasing; omitted preserves the exact original message.
    */
-  dispatchBinding: (bindingId: string, args?: { slots?: Record<string, unknown> }) => void;
+  dispatchBinding: (
+    bindingId: string,
+    args?: { slots?: Record<string, unknown>; resultLabel?: string }
+  ) => Promise<void>;
   /** Chips are session-scoped — clear on session change. */
   resetForSession: () => void;
 }
@@ -207,8 +220,19 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
   const runBindingDispatch = React.useCallback(
     (
       bindingId: string,
-      opts?: { slots?: Record<string, unknown>; requiresAttachments?: boolean }
-    ): void => {
+      opts?: {
+        slots?: Record<string, unknown>;
+        requiresAttachments?: boolean;
+        /**
+         * task 021 (FR-08 "both" composite dispatch): an optional per-pack label
+         * ("Employment", "NDA") threaded into the NDA-REVIEW-shaped completion message
+         * below, so a sequential multi-pack run reads as distinct per-pack outcomes
+         * instead of N identical "the NDA" lines. Omitted preserves the exact original
+         * message (every pre-021 caller).
+         */
+        resultLabel?: string;
+      }
+    ): Promise<void> => {
       // Single dispatch decision per turn: consume the chip set on click.
       setConsumerChips([]);
       // R4-10 (UAT 2026-07-19): surface a "Working…" spinner while the capability runs (the
@@ -221,7 +245,7 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
       // ADR-015: structural signal only — never the label/binding values.
       console.log("[ConversationPane] consumer chip dispatched");
 
-      void dispatchConsumer(bindingId, {
+      return dispatchConsumer(bindingId, {
         slots: opts?.slots,
         requiresAttachments: opts?.requiresAttachments,
         attachmentCount: sessionAttachmentCount,
@@ -287,9 +311,14 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
           } else if (isNdaReview) {
             // R7-7: never render the raw analysis JSON — the findings live in the Compose Review
             // Notes + Review Summary. Just confirm completion in the transcript.
+            // task 021 (FR-08 "both" composite dispatch): `opts.resultLabel`, when supplied, names
+            // the pack this run was measured against so a sequential multi-pack "both" run reads as
+            // distinct per-pack outcomes; omitted preserves the exact original generic wording.
             enqueueAssistantMessage(
               makeLocalAssistantMessage(
-                "I've finished reviewing the NDA. Open the **Review Summary** and the in-document **Review Notes** in the Compose tab to see the flagged clauses and assessments."
+                opts?.resultLabel
+                  ? `I've finished reviewing under the **${opts.resultLabel}** lens. Open the **Review Summary** and the in-document **Review Notes** in the Compose tab to see the flagged clauses and assessments.`
+                  : "I've finished reviewing the NDA. Open the **Review Summary** and the in-document **Review Notes** in the Compose tab to see the flagged clauses and assessments."
               )
             );
           } else if (!isSurfaceLaunch && dispatched.result !== undefined && dispatched.result !== null) {
@@ -410,9 +439,10 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
    * same core. Next-step chips carry no attachment precondition.
    */
   const dispatchBinding = React.useCallback(
-    (bindingId: string, args?: { slots?: Record<string, unknown> }): void => {
-      runBindingDispatch(bindingId, { slots: args?.slots });
-    },
+    (
+      bindingId: string,
+      args?: { slots?: Record<string, unknown>; resultLabel?: string }
+    ): Promise<void> => runBindingDispatch(bindingId, { slots: args?.slots, resultLabel: args?.resultLabel }),
     [runBindingDispatch]
   );
 

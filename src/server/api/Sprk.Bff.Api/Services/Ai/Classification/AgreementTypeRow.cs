@@ -44,9 +44,19 @@ namespace Sprk.Bff.Api.Services.Ai.Classification;
 /// <c>sprk_confidencethreshold</c> — the per-type override of the global 0.85 auto-proceed baseline
 /// (null = use the global baseline). Consumed by the task-021 gate, not the classifier.
 /// </param>
+/// <param name="KnowledgePackRef">
+/// <c>sprk_knowledgepackref</c> — the type's knowledge-source id (e.g. <c>KNW-011</c>) in the
+/// <c>spaarke-rag-references</c> corpus. Added by task 021 (FR-08 pack binding): read here so the
+/// interactive orientation gate can thread it into the review dispatch's <see cref="Sprk.Bff.Api.Services.Ai.LinearConsumers.LinearRunContext.KnowledgeSourceIds"/>
+/// (scoping <c>ActionRunner.RetrieveReferenceGroundingAsync</c> to the classified type's own pack
+/// instead of the whole corpus). Defaulted (trailing optional positional param) so every task-020
+/// call site (assembler, tests, eval fixtures) compiles unchanged — 020 did not need this column;
+/// 021 is its first consumer. Null when the row has no pack registered yet.
+/// </param>
 public sealed record AgreementTypeRow(
     string Key,
     string? Name,
     string? ClassificationCue,
     bool IsFallback,
-    decimal? ConfidenceThreshold);
+    decimal? ConfidenceThreshold,
+    string? KnowledgePackRef = null);

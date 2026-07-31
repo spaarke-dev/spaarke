@@ -15,9 +15,9 @@
 | 003 | Knowledge packs (NDA taxonomy home + general fallback) | 0 | ✅ | 001,002 | STANDARD | sonnet | high | B |
 | 010 | Rename clauseLocation + panel naming (pure rename) | 1 | ✅ | none | FULL | sonnet | medium | A |
 | 011 | WS-4 anchoring (ComputedNumber/CitationResolver) | 1 | ✅ | 010 | FULL | sonnet | xhigh | C |
-| 012 | DEF-01 placement fix + restore original assertion | 1 | 🔲 | 011 | FULL | sonnet | xhigh | D |
+| 012 | DEF-01 placement fix + restore original assertion | 1 | ✅ | 011 | FULL | sonnet | xhigh | D |
 | 020 | Classifier Action (Reasoning tier, registry-driven) | 2 | ✅ | 001 | FULL | opus | high | B |
-| 021 | Interactive orientation + confirmation gate | 2 | 🔲 | 020,003 | FULL | sonnet | xhigh | D |
+| 021 | Interactive orientation + confirmation gate | 2 | ✅ | 020,003 | FULL | sonnet | xhigh | D |
 | 022 | subDomain envelope (cold-load + open-existing legs) | 2 | 🔲 | 001 | FULL | sonnet | high | F |
 | 023 | Explicit-path bind + sanity-check + lookup write | 2 | 🔲 | 020,022 | FULL | sonnet | high | G |
 | 030 | Disposition flip + findings materializer branch | 3 | 🔲 | 002,012 | FULL | opus | high | E |

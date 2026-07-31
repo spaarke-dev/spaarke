@@ -949,11 +949,14 @@ export interface ComposeEditorHandle {
    * live span — no text-search (ADR-049). (2) LEGACY TEXT — ONLY when step 1 is skipped (no
    * `sectionRef`) or returns no match (unparseable citation, zero resolved paragraphs, or a resolved
    * paraId no longer present in the document): `targetText` resolves against the current document via
-   * `resolveTargetSpans('strict')` + UAT round-3 S1's graceful fallbacks (`resolveAdvisoryAnchorSpan`)
-   * — the SAME anchoring primitive {@link highlightCitedSpan} uses. A `sectionRef` that resolves
-   * deterministically is NEVER overridden by a fuzzy text guess. An item whose `sectionRef` AND
-   * `targetText` both fail to resolve reports `not_found` — no comment is placed (feeds task 012's
-   * DEF-01 "never silently place an ambiguous/unresolvable target" contract).
+   * `resolveTargetSpans('strict')` + a UNIQUE-match-only prefix retry (`resolveAdvisoryAnchorSpan`,
+   * precision-fixed by task 012 / DEF-01) — the SAME anchoring primitive {@link highlightCitedSpan} uses.
+   * A `sectionRef` that resolves deterministically is NEVER overridden by a fuzzy text guess. An item
+   * whose `sectionRef` AND `targetText` both fail to resolve reports `not_found` (zero matches) or
+   * `ambiguous` (the text — or its distinctive prefix — recurs at more than one location); either way NO
+   * comment is placed, and which of the two is reported is preserved end-to-end (feeds task 012's DEF-01
+   * "never silently place an ambiguous/unresolvable target" contract — `ambiguous` is never silently
+   * downgraded to a first-occurrence placement or to an undifferentiated `not_found`).
    */
   placeAdvisoryComments(items: readonly AdvisoryCommentInput[]): AdvisoryCommentPlacementResult;
 
@@ -1605,37 +1608,55 @@ function distinctiveAnchorPrefix(text: string): string {
   return lastSpace >= 24 ? cap.slice(0, lastSpace) : cap;
 }
 
+/** Outcome of {@link resolveAdvisoryAnchorSpan} — a resolved span, or a REPORTED failure kind. Never a
+ *  silent placement of a should-be-ambiguous target (task 012, DEF-01). */
+type AdvisoryAnchorResolution =
+  | { span: { from: number; to: number }; kind?: undefined }
+  | { span: null; kind: 'not_found' | 'ambiguous' };
+
 /**
- * UAT round-3 S1 — resolve an advisory comment's anchor with graceful fallbacks so a flagged clause is
- * still highlighted/commented when its verbatim `targetText` doesn't STRICTLY resolve (the model lightly
- * paraphrased or truncated it, it spans a paragraph boundary, or it recurs in the document). Unlike a
- * redline EDIT — which MUST stay strict, since a wrong anchor corrupts the document — an advisory COMMENT
- * only needs to sit on the flagged text, so anchoring to a verbatim PREFIX or the FIRST occurrence is a
- * safe, useful fallback, NOT a blind guess (the prefix / first match is real document text that actually
- * appears). Returns null only when even a distinctive prefix cannot be located — the finding then stays
- * in the Review Summary, unanchored (surfaced via the placement-failure count), never silently forced
- * onto the wrong text.
+ * UAT round-3 S1 (task 012 DEF-01 precision fix, ai-advanced-capabilities-agreements-r1) — resolve an
+ * advisory comment's anchor against the live document text. A flagged clause still highlights/comments
+ * when its verbatim `targetText` doesn't STRICTLY resolve because the model lightly paraphrased,
+ * truncated, or split it across a paragraph boundary: retrying with a distinctive verbatim PREFIX
+ * anchors the comment at the flagged clause's start — real document text, not a guess — and this leg
+ * stays because it only ever fires when the retry itself is UNIQUE.
+ *
+ * What this does NOT do (post-012): silently anchor to the FIRST occurrence of a target that recurs
+ * verbatim in the document. The original S1 relaxation added exactly that fallback for the `ambiguous`
+ * case (and again for an ambiguous prefix retry) — but "recurs verbatim" means MULTIPLE real locations
+ * are equally plausible, which is precisely the case the project's binding contract requires to be
+ * REPORTED ambiguous, never silently placed on one of them (a wrong-clause anchor is a legal-correctness
+ * defect, not a cosmetic one). Multiplicity — not light divergence — is the correctness hazard; a UNIQUE
+ * fuzzy (prefix) match is not ambiguous, so that fallback is preserved. `sectionRef`-bearing findings
+ * bypass this text path entirely via {@link resolveDeterministicAnchorSpan} (task 011), which is why the
+ * ambiguity class this closes is now scoped to text-only advisory targets.
+ *
+ * Returns `{ span: null, kind: 'ambiguous' }` when `targetText` (or its distinctive prefix) matches more
+ * than one location, `{ span: null, kind: 'not_found' }` when it matches zero, and the resolved span
+ * otherwise — the finding stays in the Review Summary, unanchored (surfaced via the placement-failure
+ * list, distinguishing which of the two it was), never silently forced onto the wrong text.
  */
-function resolveAdvisoryAnchorSpan(editor: Editor, targetText: string): { from: number; to: number } | null {
+function resolveAdvisoryAnchorSpan(editor: Editor, targetText: string): AdvisoryAnchorResolution {
   const strict = resolveTargetSpans(editor, targetText, 'strict');
-  if (strict.ok) return strict.spans[0];
-  // Recurs verbatim (ambiguous) → anchor the FIRST occurrence of the flagged clause.
+  if (strict.ok) return { span: strict.spans[0] };
   if (strict.kind === 'ambiguous') {
-    const first = resolveTargetSpans(editor, targetText, 'first');
-    if (first.ok) return first.spans[0];
+    // Recurs verbatim at >1 location — REPORT ambiguous. Do NOT guess via first-occurrence (task 012).
+    return { span: null, kind: 'ambiguous' };
   }
   // Paraphrased / truncated / cross-paragraph (not_found) → retry with a distinctive verbatim PREFIX,
-  // which anchors the comment at the flagged clause's start.
+  // which anchors the comment at the flagged clause's start — kept ONLY for a UNIQUE prefix match.
   const prefix = distinctiveAnchorPrefix(targetText);
   if (prefix && prefix !== targetText) {
     const p = resolveTargetSpans(editor, prefix, 'strict');
-    if (p.ok) return p.spans[0];
+    if (p.ok) return { span: p.spans[0] };
     if (p.kind === 'ambiguous') {
-      const pf = resolveTargetSpans(editor, prefix, 'first');
-      if (pf.ok) return pf.spans[0];
+      // The prefix ALSO recurs at >1 location — still a multiplicity hazard, still reported ambiguous,
+      // never resolved via first-occurrence (the same rule as the exact-text case above).
+      return { span: null, kind: 'ambiguous' };
     }
   }
-  return null;
+  return { span: null, kind: 'not_found' };
 }
 
 /**
@@ -2632,16 +2653,23 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           const blocks = collectBlocks(editor);
           for (const item of items) {
             // (1) DETERMINISTIC — task 011: sectionRef → paraId via the WS-4 CitationResolver mirror.
-            // (2) LEGACY TEXT — UAT round-3 S1: strict-first, then graceful fallbacks (first-occurrence /
-            // verbatim prefix) so a finding whose excerpt lightly diverges or recurs still highlights
-            // instead of being dropped — see resolveAdvisoryAnchorSpan. A comment mis-anchor is
-            // non-destructive (unlike a redline edit), so this is a safe relaxation of strict placement,
-            // scoped to advisory comments.
-            const span =
-              resolveDeterministicAnchorSpan(blocks, item.sectionRef, paraIdMap) ??
-              resolveAdvisoryAnchorSpan(editor, item.targetText);
+            // (2) LEGACY TEXT — UAT round-3 S1, precision-fixed by task 012 (DEF-01): strict-first, then
+            // a verbatim-PREFIX retry so a finding whose excerpt lightly diverges (paraphrase/truncation)
+            // still highlights instead of being dropped — see resolveAdvisoryAnchorSpan. A target that
+            // recurs at >1 location (exact OR prefix) is REPORTED ambiguous, never guessed via
+            // first-occurrence — a wrong-clause anchor is a correctness defect, not a cosmetic one.
+            const deterministicSpan = resolveDeterministicAnchorSpan(blocks, item.sectionRef, paraIdMap);
+            let span: { from: number; to: number } | null;
+            let failureKind: AdvisoryCommentFailure['kind'] = 'not_found';
+            if (deterministicSpan) {
+              span = deterministicSpan;
+            } else {
+              const resolution = resolveAdvisoryAnchorSpan(editor, item.targetText);
+              span = resolution.span;
+              if (resolution.kind) failureKind = resolution.kind;
+            }
             if (!span) {
-              failed.push({ targetText: item.targetText, kind: 'not_found' });
+              failed.push({ targetText: item.targetText, kind: failureKind });
               continue;
             }
             const threadId = advisoryComments.createThread(item.explanation, span, {

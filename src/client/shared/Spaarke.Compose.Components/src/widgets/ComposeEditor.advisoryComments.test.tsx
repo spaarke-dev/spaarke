@@ -164,10 +164,10 @@ describe('ComposeEditor.placeAdvisoryComments — NDA-REVIEW advisory comments (
  * (ai-advanced-capabilities-agreements-r1 task 011, spec FR-03).
  *
  * Every item below sets `targetText` to text that DOES NOT appear anywhere in the mounted document —
- * `resolveAdvisoryAnchorSpan` (strict / first-occurrence / verbatim-prefix) is therefore guaranteed to
- * return `null` for it. If the finding STILL places a correctly-anchored comment, that anchoring came
- * from the deterministic `sectionRef` path, not a text search — the empirical proof for acceptance
- * criterion #1 ("assert no text-search used").
+ * `resolveAdvisoryAnchorSpan` (strict / unique-prefix-only, task 012 precision fix) is therefore
+ * guaranteed to return a `not_found` resolution for it. If the finding STILL places a correctly-anchored
+ * comment, that anchoring came from the deterministic `sectionRef` path, not a text search — the
+ * empirical proof for acceptance criterion #1 ("assert no text-search used").
  */
 
 /** Escapes regex metacharacters — some fixture clause text below contains literal `(`/`)` (e.g. the

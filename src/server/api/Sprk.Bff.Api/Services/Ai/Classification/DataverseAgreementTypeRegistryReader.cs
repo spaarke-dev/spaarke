@@ -51,8 +51,11 @@ public sealed class DataverseAgreementTypeRegistryReader : IAgreementTypeRegistr
         await EnsureAuthenticatedAsync(cancellationToken);
 
         // Active rows only; select exactly the columns the classifier + gate need.
+        // task 021 (FR-08 pack binding): sprk_knowledgepackref added so the interactive orientation
+        // gate can resolve the classified type's knowledge-source id for the review dispatch
+        // (LinearRunContext.KnowledgeSourceIds) without a second registry read.
         const string url = EntitySet
-            + "?$select=sprk_key,sprk_name,sprk_classificationcue,sprk_isfallback,sprk_confidencethreshold"
+            + "?$select=sprk_key,sprk_name,sprk_classificationcue,sprk_isfallback,sprk_confidencethreshold,sprk_knowledgepackref"
             + "&$filter=statecode eq 0";
 
         try
@@ -93,7 +96,8 @@ public sealed class DataverseAgreementTypeRegistryReader : IAgreementTypeRegistr
                     Name: GetString(item, "sprk_name"),
                     ClassificationCue: GetString(item, "sprk_classificationcue"),
                     IsFallback: GetBool(item, "sprk_isfallback"),
-                    ConfidenceThreshold: GetDecimal(item, "sprk_confidencethreshold")));
+                    ConfidenceThreshold: GetDecimal(item, "sprk_confidencethreshold"),
+                    KnowledgePackRef: GetString(item, "sprk_knowledgepackref")));
             }
 
             _logger.LogInformation(
