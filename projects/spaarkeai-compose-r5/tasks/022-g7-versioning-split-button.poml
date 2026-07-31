@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>G7 — Save-Version vs Save-New-Document split-button + create-vs-replace routing (transient/upload path)</title>
+    <phase>2 Authored-doc lifecycle</phase>
+    <gate>dep:020</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF save routing (`ComposeService.cs` create-vs-replace) plus a client toolbar control on a contended file (`ComposeWorkspace.tsx`), tags include bff-api/frontend/fluent-ui, changes the save contract, and fixes a UAT duplicate-record defect. FULL per CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified split-button + create-vs-replace routing reusing R4.5 WS-1 transient-mount projection identity (reuse, not rebuild). No novel algorithm; a Fluent v9 toolbar control on an existing toolbar plus a service routing branch.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the R4.5-owned-FIRST contended files `ComposeService.cs` (create-vs-replace) and `ComposeWorkspace.tsx` (toolbar) shared with tasks 020 and 021 across the R5 Phase-2 wave. Depends on 020's origin wiring in the same files — must be serialized.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, compose, frontend, fluent-ui</tags>
+    <estimated-effort>M (2–4d)</estimated-effort>
+  </metadata>
+
+  <prompt>Add a toolbar Save split-button to Compose — "Save Version" (update the existing `sprk_document` + SPE item; the default) vs "Save New Document" (a deliberate fork). Wire `ComposeService` create-vs-replace routing so the transient/upload path REUSES R4.5 WS-1's transient-mount projection identity (do not rebuild it), fixing the 8-duplicate UAT scenario where transient/upload saves mint duplicate records.</prompt>
+
+  <role>SPAARKE platform developer with Fluent UI v9 React expertise (`Spaarke.Compose.Components` toolbar) and .NET 8 BFF Compose-service knowledge (create-on-save / SPE item routing).</role>
+
+  <goal>A Fluent v9 Save split-button exists on the Compose toolbar: "Save Version" (default — replaces the existing `sprk_document` + SPE item in place) and "Save New Document" (forks a new record). `ComposeService` create-vs-replace routing covers the transient/upload path by reusing R4.5 WS-1's transient-mount projection identity, so transient/upload saves no longer mint duplicate records (the 8-duplicate UAT scenario is fixed). A seam slice proves create-vs-replace routing, UI tests cover the split-button, and the UAT duplicate scenario passes.</goal>
+
+  <context>
+    <background>Per spec FR-06 (gap G7): the current save path can mint duplicate `sprk_document` records on transient/upload saves (the 8-duplicate UAT scenario) because create-vs-replace is undifferentiated and transient docs lack a stable identity. R4.5 WS-1 already established a transient-mount projection identity; G7 reuses it. The UX gap is a deliberate Save-Version (replace in place) vs Save-New (fork) choice on the toolbar, backed by create-vs-replace routing in `ComposeService`.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts</file>
+      <file>tests/integration/seam/Compose/ComposePatchEngineSaveSeamTests.cs</file>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+    </relevant-files>
+    <dependencies>Task 020 (G1 origin routing — establishes the persisted origin marker + client save routing in the same contended files). Reuses R4.5 WS-1 transient-mount projection identity.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Honor I-1…I-7 + D1–D5. Engine stays byte[]-in/byte[]-out; save routing is a service/client concern and does NOT change the engine byte contract; untouched subtrees byte-identical.</constraint>
+    <constraint source="ADR-049">I-7 / NFR-02: NO text-search in the write path — create-vs-replace resolves by the transient-mount projection identity / record id, never content match.</constraint>
+    <constraint source="ADR-007">No `Microsoft.Graph` above `SpeFileStore` — the SPE item create/replace hop stays in the endpoint/facade layer.</constraint>
+    <constraint source="ADR-013">No AI internals in `Services/Compose/` (Tier-1 NetArchTest).</constraint>
+    <constraint source="ADR-038">Seam DoD: the create-vs-replace save change carries a through-the-wire WebApplicationFactory seam slice in `tests/integration/seam/Compose/`. NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="ADR-021">Fluent v9 split-button MUST support dark mode (theme tokens; render correctly in light + dark).</constraint>
+    <constraint source="project">NFR-01: corpus byte-diff harness (24/24) MUST NOT regress. NFR-04: report BFF publish size absolute + delta vs ~46.11 MB; ≤60 MB ceiling. NFR-03: no new runtime package (Fluent v9 already present; MIT-only, no `@tiptap-pro/*`).</constraint>
+    <constraint source="project">NFR-08: create-vs-replace MUST NOT reintroduce a user-triggerable error or silent-loss path; R4's op-log-preservation safety net stays until seam-proven.</constraint>
+    <constraint source="project">NFR-09: the versioning/save contract change MUST NOT regress `ai-advanced-capabilities-analysis-hub-r1`'s reopen-restore / clean-retirement parity over shared `sprk_document`/SPE driveItem. Its FR-09/FR-11 reopen-restore assumes a stable Compose save/version contract.</constraint>
+    <constraint source="project">COORDINATION: REUSE R4.5 WS-1 transient-mount projection identity — DO NOT rebuild it. REBASE onto post-R4.5 `ComposeService.cs` / `ComposeWorkspace.tsx` (and after task 020's edits) before changing them. NEVER delete `docxBridge.ts` / "remove the mammoth module" — its write helpers are load-bearing. Run `/conflict-check` before the BFF PR (overlaps compose-r1/r2/r3 + ai-architecture-redesign-r2).</constraint>
+    <constraint source="CLAUDE.md §10">BFF task — state Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`). Create-vs-replace routing stays in `Services/Compose/`; no new service, library, or endpoint family.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Create-vs-replace save orchestration" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs">SaveAsync:570, create-on-save ~:789 — the routing point for replace-in-place vs fork; covers the transient/upload path via R4.5 WS-1 identity.</pattern>
+      <pattern name="Client transient/save routing" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx">isTransientCreate:975, triggerSave:968 — where the split-button dispatches Save-Version vs Save-New.</pattern>
+      <pattern name="Compose toolbar (anchor styling)" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx">Existing Compose toolbar styling — anchor the split-button visual direction here; extend the existing Save button, not a new toolbar.</pattern>
+      <pattern name="Save seam slice" location="tests/integration/seam/Compose/ComposePatchEngineSaveSeamTests.cs">Canonical through-the-wire save seam to extend for create-vs-replace + the 8-duplicate scenario.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>Existing single Save button on the Compose toolbar (`ComposeFormatToolbar.tsx` / `ComposeWorkspace.tsx` triggerSave:968). No existing split-button; grep of the Compose toolbar shows one undifferentiated save action.</existing>
+    <extension>Yes — EXTEND the existing Save button into a Fluent v9 split-button (Save Version default + Save New menu item) on the SAME toolbar. Not a new toolbar and not a new component family; the primary action stays "save".</extension>
+    <cost-of-doing-nothing>Without the Save-Version vs Save-New distinction + create-vs-replace routing, transient/upload saves mint duplicate `sprk_document` records (the concrete 8-duplicate UAT scenario) and users have no deliberate fork control — a data-integrity defect, not a "flexibility" nicety.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <ui-test name="split-button-render">The Save split-button renders on the Compose toolbar with "Save Version" as the default/primary action and "Save New Document" in the menu, anchored to the existing Compose toolbar styling.</ui-test>
+    <ui-test name="dark-mode">Per ADR-021, the split-button renders correctly in both light and dark themes using Fluent v9 theme tokens (no hard-coded colors).</ui-test>
+    <ui-test name="save-version-vs-save-new-interaction">Clicking "Save Version" dispatches the replace-in-place path (default); selecting "Save New Document" from the menu dispatches the fork path — the two invoke distinct create-vs-replace routes.</ui-test>
+  </ui-tests>
+
+  <steps mode="directional">
+    <step order="1">REBASE onto master-with-R4.5 AND task 020's edits: confirm `ComposeService.cs` (SaveAsync/create-on-save) and `ComposeWorkspace.tsx` (toolbar / isTransientCreate) are current before editing. Confirm R4.5 WS-1 transient-mount projection identity is available (else STOP — see escalation).</step>
+    <step order="2">In `ComposeWorkspace.tsx` + `ComposeFormatToolbar.tsx`: extend the existing Save button into a Fluent v9 split-button — primary "Save Version" (replace in place) + menu "Save New Document" (fork). Anchor styling to the existing Compose toolbar; dark-mode via theme tokens (ADR-021).</step>
+    <step order="3">In `ComposeService.cs` (SaveAsync:570 / create-on-save ~:789): add create-vs-replace routing — Save-Version updates the existing `sprk_document` + SPE item; Save-New forks a new record. For the transient/upload path, resolve identity from R4.5 WS-1's transient-mount projection identity so repeated transient saves target the same record (no duplicate mint).</step>
+    <step order="4">Add a seam slice in `tests/integration/seam/Compose/` proving: (a) Save-Version replaces in place (one record, updated SPE item), (b) Save-New forks a new record, and (c) the 8-duplicate scenario — repeated transient/upload saves target ONE record and do not mint duplicates. NO banned test shapes.</step>
+    <step order="5">Add the `ui-tests` above for the split-button (render, dark-mode, Save-Version vs Save-New interaction). Run `/conflict-check` before the BFF PR; run `dotnet publish -c Release` and report size absolute + delta vs ~46.11 MB.</step>
+    <step order="6">Run/verify: build + the task's seam/unit tests + UI tests pass and the corpus byte-diff harness is still 24/24.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If R4.5 WS-1's transient-mount projection identity is unavailable (not on the branch, or not exposing a stable identity for transient/upload docs), STOP and escalate — do NOT rebuild a parallel transient identity (that would fork R4.5's mechanism and risk re-introducing the duplicate-mint defect).</trigger>
+    <trigger>If create-vs-replace routing would regress analysis-hub reopen-restore parity (NFR-09) or introduce a silent-loss / duplicate path (NFR-08), STOP and escalate per CLAUDE.md §6/§6.5.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Run seam/unit tests, the corpus byte-diff harness, and `dotnet publish` for the size delta.</tool>
+    <tool name="npm">Build `Spaarke.Compose.Components` and run the split-button UI tests.</tool>
+    <tool name="terminal">Run `/conflict-check`; grep/inspect the toolbar + save routing and the R4.5 WS-1 transient identity.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx (+ ComposeFormatToolbar.tsx split-button)</output>
+    <output type="test">tests/integration/seam/Compose/ (create-vs-replace + 8-duplicate seam slice)</output>
+    <output type="test">Spaarke.Compose.Components split-button UI tests (render / dark-mode / interaction)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the Compose toolbar, when it renders, then a Fluent v9 Save split-button shows "Save Version" (default) + "Save New Document" (menu), styled per the existing toolbar and correct in light + dark themes (ADR-021).</criterion>
+    <criterion testable="true">Given an existing `sprk_document`, when the user picks "Save Version", then the existing record + SPE item are replaced in place (no new record); when the user picks "Save New Document", then a new record is forked.</criterion>
+    <criterion testable="true">Given the 8-duplicate UAT scenario, when transient/upload saves repeat, then they target ONE record via R4.5 WS-1 transient-mount identity and mint no duplicate records.</criterion>
+    <criterion testable="true">Given the create-vs-replace change, when the through-the-wire seam slice runs, then Save-Version, Save-New, and the no-duplicate transient case all pass with no banned test shapes.</criterion>
+    <criterion testable="true">Negative (NFR-02): create-vs-replace resolves by transient-mount projection identity / record id — no text-search / content match in the write path.</criterion>
+    <criterion testable="true">No-regression (NFR-01/NFR-03/NFR-04): corpus byte-diff still 24/24; no new runtime package; publish size reported absolute + delta vs ~46.11 MB and ≤60 MB. (NFR-08/NFR-09): no new user-triggerable error / silent-loss path; analysis-hub reopen-restore parity intact; `docxBridge.ts` not deleted.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-06 (G7); plan P2-3. Depends on task 020 (shared contended files + origin wiring) and reuses R4.5 WS-1 transient-mount identity (reuse, not rebuild). The split-button EXTENDS the existing Save button — not a new toolbar. Fixes the concrete 8-duplicate UAT scenario.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

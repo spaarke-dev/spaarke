@@ -49,11 +49,13 @@ import type { ActionCardProps } from '@spaarke/ui-components';
 // ---------------------------------------------------------------------------
 
 /**
- * The three Analysis work-type card identifiers. Only `'agreement-review'` is
- * LIVE this project; the other two render disabled ("coming soon"). Exported so
- * the host can switch on these values exhaustively.
+ * The three Analysis card identifiers. Only `'nda-analysis'` is LIVE this project
+ * (a SPECIFIC review path — it binds the NDA/agreement review capability directly,
+ * per owner UAT: cards point at a specific analysis path rather than a generic one);
+ * the other two render disabled ("coming soon"). Exported so the host can switch on
+ * these values exhaustively.
  */
-export type AnalysisCardId = 'agreement-review' | 'legal-research' | 'patent-application';
+export type AnalysisCardId = 'nda-analysis' | 'legal-research' | 'patent-application';
 
 export interface AnalysisCardsWidgetProps {
   /**
@@ -85,9 +87,9 @@ interface AnalysisCardDefinition {
  */
 const ANALYSIS_CARDS: readonly AnalysisCardDefinition[] = Object.freeze([
   {
-    id: 'agreement-review',
-    label: 'Agreement Review',
-    description: 'Analyze a contract or agreement document.',
+    id: 'nda-analysis',
+    label: 'NDA Analysis',
+    description: 'Analyze an NDA / confidentiality agreement.',
     icon: DocumentAddRegular,
     comingSoon: false,
   },
@@ -158,7 +160,7 @@ export const AnalysisCardsWidget: React.FC<AnalysisCardsWidgetProps> = ({ onCard
   // already ignore onClick, but omitting it keeps the intent explicit.
   const cardHandlers = useMemo<Partial<Record<AnalysisCardId, () => void>>>(
     () => ({
-      'agreement-review': () => onCardClick?.('agreement-review'),
+      'nda-analysis': () => onCardClick?.('nda-analysis'),
     }),
     [onCardClick]
   );

@@ -105,6 +105,11 @@ const useStyles = makeStyles({
     // bottom of the tab (app header + tab bar + section header ≈ 200px chrome).
     // `height:100%` still wins when the host DOES constrain height (bounded tile).
     minHeight: 'calc(100vh - 200px)',
+    // Round-8.4 items 5/6: the parent tab is content-driven, so height:100% collapses to auto and the widget grows to
+    // fit ALL content — the inner message list's `overflowY:auto` never engages and the whole page scrolls the two
+    // panes together (and the composer scrolls out of view). A matching height CAP bounds the widget so each pane
+    // scrolls INTERNALLY and the composer stays pinned. Together with minHeight this pins the widget to a definite box.
+    maxHeight: 'calc(100vh - 200px)',
     overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
   },

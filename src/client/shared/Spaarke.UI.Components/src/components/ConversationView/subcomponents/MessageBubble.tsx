@@ -55,6 +55,12 @@ export interface IMessageBubbleProps {
    * `<RichFilePreviewDialog />`. Omit it and attachments render as passive chips.
    */
   onOpenAttachment?: (attachment: TimelineAttachment, message: TimelineMessage) => void;
+  /**
+   * Optional trailing action(s) rendered inline at the end of the meta header row (right of the sender/time), NOT in a
+   * separate row below the bubble (round-8.4 UAT items 3a/9). Revealed on row hover/focus via the anchor's
+   * `[data-message-actions]` rule in ConversationView. Used for the per-message Forward + Delete controls.
+   */
+  headerAction?: React.ReactNode;
 }
 
 const useStyles = makeStyles({
@@ -95,6 +101,20 @@ const useStyles = makeStyles({
   headerTimestamp: {
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground3,
+  },
+  // Trailing action slot in the header row (round-8.4 items 3a/9). Opacity-only reveal (keeps layout box + tab order);
+  // the anchor's `:hover [data-message-actions]` rule flips it to 1, and its own `:focus-within` covers keyboard users.
+  headerActionSlot: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    marginInlineStart: tokens.spacingHorizontalXS,
+    opacity: 0,
+    transitionProperty: 'opacity',
+    transitionDuration: tokens.durationFaster,
+    transitionTimingFunction: tokens.curveEasyEase,
+    ':focus-within': {
+      opacity: 1,
+    },
   },
   bubble: {
     display: 'flex',
@@ -171,7 +191,7 @@ function statusLabel(status: MessageBubbleStatus): string {
   }
 }
 
-export const MessageBubble: React.FC<IMessageBubbleProps> = ({ message, isOwn, status, onOpenAttachment }) => {
+export const MessageBubble: React.FC<IMessageBubbleProps> = ({ message, isOwn, status, onOpenAttachment, headerAction }) => {
   const styles = useStyles();
 
   const sanitizedHtml = React.useMemo(() => {
@@ -199,6 +219,11 @@ export const MessageBubble: React.FC<IMessageBubbleProps> = ({ message, isOwn, s
         />
         {!isOwn && <Text className={styles.senderLabel}>{displayName}</Text>}
         {timestampLabel && <Text className={styles.headerTimestamp}>{timestampLabel}</Text>}
+        {headerAction && (
+          <span className={styles.headerActionSlot} data-message-actions>
+            {headerAction}
+          </span>
+        )}
       </div>
 
       <div

@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>(Optional courtesy) Author reciprocal R4.5 coordination note</title>
+    <phase>0 Gate</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation-only courtesy note mirroring an existing hazard analysis into a sibling project's notes folder; no code, no schema, no test surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Straightforward mirroring of an existing note's §2/§3 content; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Writes one new doc into a different project's notes folder; no source-file contention.</parallel-reason>
+    <deps>none</deps>
+    <tags>docs, coordination</tags>
+    <estimated-effort>S (≤1d)</estimated-effort>
+  </metadata>
+
+  <prompt>Author the reciprocal coordination note into `projects/spaarkeai-compose-fidelity-r4.5/notes/COORDINATION-with-r5.md`, mirroring the docxBridge hazard (§3) and the two contended files (`ComposeService.cs`, `ComposeWorkspace.tsx`, §2) from `projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md`, so R4.5's executor sees the hazard. This is an OPTIONAL courtesy per spec Q6; it is low-risk because R4.5 is code-complete. No code surface is touched.</prompt>
+
+  <role>SPAARKE platform developer authoring a cross-project coordination note.</role>
+
+  <goal>A reciprocal note `projects/spaarkeai-compose-fidelity-r4.5/notes/COORDINATION-with-r5.md` exists that mirrors, from R5's own coordination note: (1) the docxBridge hazard (§3 — WS-1 must delete ONLY `docxToTipTapHtml`, never `docxBridge.ts` or its `buildContentModel`/`stampParaIds`/paraId write helpers that G1/G2/G7 depend on), and (2) the two contended files (§2 — `ComposeService.cs`, `ComposeWorkspace.tsx`, R4.5-owned-FIRST). The note points back to R5's canonical note as source.</goal>
+
+  <context>
+    <background>Per spec §Cross-Project Coordination ("Reciprocal-note gap: the mirror note in `projects/spaarkeai-compose-fidelity-r4.5/notes/` was never created — low-risk (R4.5 code-complete); optional Phase-0 courtesy task") + the source note §6 ("a reciprocal note should be dropped in `projects/spaarkeai-compose-fidelity-r4.5/notes/`"). R4.5 runs in a separate session/worktree; mirroring §2/§3 there ensures WS-1's executor sees the docxBridge hazard before deleting anything.</background>
+    <relevant-files>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/notes/</file>
+    </relevant-files>
+    <dependencies>None (Phase-0). Optional courtesy.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">COORDINATION: the note MUST reproduce the docxBridge hazard accurately — never delete `docxBridge.ts` / "remove the mammoth module"; only `docxToTipTapHtml` is gone; `buildContentModel`/`stampParaIds`/paraId helpers are load-bearing for G1/G2/G7.</constraint>
+    <constraint source="project">Mirror §2 (two contended files, R4.5-owned-FIRST) and §3 (docxBridge hazard) from the R5 canonical note; cite the R5 note as the source of truth.</constraint>
+    <constraint source="project">Low-risk / no-code: this task writes only into the sibling project's notes folder; do not touch any R4.5 or R5 source file.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Source coordination note" location="projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md">§2 (file contention), §3 (docxBridge hazard), §6 (propagation) — mirror §2/§3 into the reciprocal note.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the R5 canonical note (`COORDINATION-with-r4.5.md`) §2 and §3; confirm the sibling folder `projects/spaarkeai-compose-fidelity-r4.5/notes/` exists (create if absent).</step>
+    <step order="2">Write `projects/spaarkeai-compose-fidelity-r4.5/notes/COORDINATION-with-r5.md`: a short header (reciprocal note for R4.5's executor), the docxBridge hazard (delete ONLY `docxToTipTapHtml`, never the file or its write helpers), and the two contended files (`ComposeService.cs`, `ComposeWorkspace.tsx`, R4.5-owned-FIRST), pointing back to the R5 note as canonical source.</step>
+    <step order="3">Verify the note is accurate against the source §2/§3 and contains no code changes.</step>
+    <step order="4">Run/verify: confirm the new note file exists and reads correctly; no source file was modified (doc-only task — no build/test to run).</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="6">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Create the sibling notes folder if needed.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-fidelity-r4.5/notes/COORDINATION-with-r5.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the reciprocal note, when reviewed, then it states the docxBridge hazard accurately (delete ONLY `docxToTipTapHtml`; never delete `docxBridge.ts` or its `buildContentModel`/`stampParaIds`/paraId write helpers that G1/G2/G7 depend on).</criterion>
+    <criterion testable="true">Given the reciprocal note, when reviewed, then it lists the two contended files (`ComposeService.cs`, `ComposeWorkspace.tsx`) as R4.5-owned-FIRST and cites the R5 canonical note as source.</criterion>
+    <criterion testable="true">Negative: no R4.5 or R5 source file is modified — the task writes only the one new note.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec §Cross-Project Coordination (reciprocal-note gap) + Owner Clarifications Q6 + source note §6. Optional courtesy; low-risk since R4.5 is code-complete. No escalation needed.
+
+  **Completion (2026-07-29)**: Wrote `projects/spaarkeai-compose-fidelity-r4.5/notes/COORDINATION-with-r5.md` mirroring source §2 (two contended files: `ComposeService.cs`, `ComposeWorkspace.tsx`, R4.5-owned-FIRST) and §3 (docxBridge hazard — confirmed already satisfied since R4.5 is merged; framed as confirmation not action item) plus §5 deploy coordination and a "what R5 reuses" section. No R4.5 or R5 source file touched. TASK-INDEX.md left untouched per explicit instruction from the invoking session (other Wave 0 tasks running in parallel).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

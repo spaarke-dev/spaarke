@@ -53,7 +53,6 @@ import {
   mergeClasses,
 } from '@fluentui/react-components';
 import {
-  Dismiss20Regular,
   Attach20Regular,
   SearchRegular,
   Search20Regular,
@@ -132,6 +131,35 @@ const DEFAULT_AI_DRAFT_ACTIONS: IEmailAiDraftAction[] = [
   { intent: 'friendly', label: 'Friendly tone' },
   { intent: 'grammar', label: 'Fix grammar & tone' },
 ];
+
+/**
+ * Resolve recipient-openable SPE sharing links for the attachments the author toggled **Link** on
+ * (owner UAT 2026-07-30 R2 item 12). Runs at SEND: for each `linkSelected` attachment that has a
+ * `documentId`, calls the host `onResolveShareLink(documentId)` and overrides `linkUrl` with the
+ * returned sharing URL so the body-link block points at the actual file (not the internal
+ * Dataverse/SPE-storage URL). Best-effort + non-blocking: a null/throw keeps the prior `linkUrl`, so
+ * a share-link hiccup never fails the send. No handler → attachments returned unchanged. Exported for
+ * unit tests. This lives here (not the pure reducer) because it performs host I/O.
+ */
+export async function resolveAttachmentShareLinks(
+  attachments: readonly IAttachmentItem[],
+  onResolveShareLink: ((documentId: string) => Promise<string | null>) | undefined
+): Promise<IAttachmentItem[]> {
+  if (!onResolveShareLink) return attachments.slice();
+  return Promise.all(
+    attachments.map(async a => {
+      if (a.linkSelected === true && a.documentId) {
+        try {
+          const url = await onResolveShareLink(a.documentId);
+          if (url) return { ...a, linkUrl: url };
+        } catch {
+          /* best-effort — keep the prior linkUrl; never block the send */
+        }
+      }
+      return a;
+    })
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Attachment source defaults
@@ -264,6 +292,15 @@ const useStyles = makeStyles({
   fromStaticText: {
     color: tokens.colorNeutralForeground1,
     fontSize: tokens.fontSizeBase300,
+  },
+  // "From:" label — plain inline text (NOT a boxed button), Segoe UI 14px semibold, to match the
+  // reading-pane "From:" line (owner UAT 2026-07-30 R2 item 9). Token-only so both themes resolve
+  // (ADR-021). No `fontFamily` — Segoe UI is Fluent's default family.
+  fromLabel: {
+    flexShrink: 0,
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
   },
   bccToggleRow: {
     display: 'flex',
@@ -872,7 +909,13 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
 
     dispatch({ type: 'BEGIN_SEND' });
     try {
-      const request = mapStateToSendRequest(stateRef.current, props.threadId);
+      // R2 item 12: swap linked document attachments' internal URL for a recipient-openable SPE
+      // sharing link (best-effort; a failure keeps the prior URL and never blocks the send).
+      const resolvedAttachments = await resolveAttachmentShareLinks(
+        stateRef.current.attachments,
+        props.onResolveShareLink
+      );
+      const request = mapStateToSendRequest({ ...stateRef.current, attachments: resolvedAttachments }, props.threadId);
       const response = await sendCommunication(request, {
         authenticatedFetch: props.authenticatedFetch,
         bffBaseUrl: props.bffBaseUrl,
@@ -967,8 +1010,10 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           selector reads). Hidden in read-only (view) mode — there is nothing to send. */}
       {!state.readOnly && (
         <div className={styles.fromRow} role="group" aria-label="From">
-          <span className={styles.labelBox} aria-hidden="true">
-            From
+          {/* "From:" as plain semibold text, not a boxed label (owner UAT 2026-07-30 R2 item 9);
+              the mailbox value beside it stays a subtle switcher (user ↔ Spaarke shared mailbox). */}
+          <span className={styles.fromLabel} aria-hidden="true">
+            From:
           </span>
           <div className={styles.fromValue}>
             {showSenderChoice ? (
@@ -1088,8 +1133,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
       {/* Related to — what this email is associated to (owner UAT 2026-07-24). Single-primary
           model (owner UAT 2026-07-30, item 8): the label, the chips (index 0 is the GREEN
           PRIMARY regarding), and the "Link another record" affordance flow on ONE wrapping row.
-          "Link another record" opens a replace-confirm before promoting a pick to primary. */}
-      {showAssociations && (
+          "Link another record" opens a replace-confirm before promoting a pick to primary.
+          Owner UAT 2026-07-30 R2 items 10 + 11: the "Link another record" tile renders INLINE with
+          the chips, and the section shows whenever the host can add a relationship (`canLinkRecord`)
+          — even in compose/New mode with ZERO associations, so the user can add the first regarding. */}
+      {(showAssociations || canLinkRecord) && (
         <div className={styles.section} role="region" aria-label="Related to">
           <div className={styles.relatedRow}>
             <div
@@ -1266,29 +1314,20 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     >
       {isChromed && (
         <div className={styles.header}>
-          {/* Window controls cluster on the upper-LEFT: maximize/restore next to the X close
-              (owner UAT 2026-07-30, item 11). Maximize renders only when the host wires
-              `onToggleMaximize` (e.g. SendEmailDialog, which owns the surface sizing). */}
-          {(props.onToggleMaximize || props.onCancel) && (
+          {/* Window controls cluster on the upper-LEFT: maximize/restore only. The close 'X'
+              button was REMOVED (owner UAT 2026-07-30 R2 item 8) — the modal is closed via the
+              Cancel/Close button in ComposerActionBar (wired to the same `props.onCancel`).
+              Maximize renders only when the host wires `onToggleMaximize` (e.g. SendEmailDialog,
+              which owns the surface sizing). */}
+          {props.onToggleMaximize && (
             <div className={styles.headerActions}>
-              {props.onToggleMaximize && (
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={props.isMaximized ? <ArrowMinimize20Regular /> : <ArrowMaximize20Regular />}
-                  aria-label={props.isMaximized ? 'Restore dialog size' : 'Maximize dialog'}
-                  onClick={() => props.onToggleMaximize?.()}
-                />
-              )}
-              {props.onCancel && (
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<Dismiss20Regular />}
-                  aria-label="Close dialog"
-                  onClick={() => props.onCancel?.()}
-                />
-              )}
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={props.isMaximized ? <ArrowMinimize20Regular /> : <ArrowMaximize20Regular />}
+                aria-label={props.isMaximized ? 'Restore dialog size' : 'Maximize dialog'}
+                onClick={() => props.onToggleMaximize?.()}
+              />
             </div>
           )}
           <Text as="h2" weight="semibold" className={styles.headerTitle}>

@@ -361,8 +361,19 @@ public sealed class ThreadResolver : IThreadResolver
         return pinned;
     }
 
-    // Dataverse state fields for soft-delete (round 7 items 7/8). statecode=1 (Inactive) + statuscode=2 (the default
-    // "Inactive" reason on the OOB two-option state) deactivate a row without physically deleting it.
+    // Dataverse state fields for soft-delete (round 7 items 7/8). statecode=1 (Inactive) + statuscode=2 deactivate a
+    // row without physically deleting it; the read filter keys off `statecode eq 0`, so this hides the row.
+    //
+    // Two hard-won constraints (round-8.3 fix — empirically verified against dev on 2026-07-31):
+    //  1. statecode/statuscode are STATE/STATUS option-set attributes — they MUST be written to the ServiceClient SDK
+    //     Entity as OptionSetValue, NOT raw int. The generic IGenericEntityService.UpdateAsync (DataverseServiceClientImpl)
+    //     copies dictionary values straight onto the Entity, and the SDK rejects a raw int for a State/Status attribute
+    //     (the original round-8 code passed raw ints → every update threw a 500 → no row was EVER deactivated). See
+    //     CommunicationService/MessagingIngestor, which likewise wrap statecode/statuscode in OptionSetValue.
+    //  2. statuscode 2 is the valid Inactive-state reason on BOTH entities (confirmed by deactivating a live record of
+    //     each: sprk_communicationthread → "Inactive" (2); sprk_communication → "Deleted" (2)). We set BOTH state + its
+    //     reason explicitly so the write is unambiguous — setting statuscode alone can be rejected as "not valid for the
+    //     record's current state", and setting statecode alone leaves the reason to the platform default.
     private const string StateCodeField = "statecode";
     private const string StatusCodeField = "statuscode";
     private const int StateInactive = 1;
@@ -375,7 +386,7 @@ public sealed class ThreadResolver : IThreadResolver
         await _entityService.UpdateAsync(
             "sprk_communicationthread",
             threadId,
-            new Dictionary<string, object> { [StateCodeField] = StateInactive, [StatusCodeField] = StatusInactive },
+            new Dictionary<string, object> { [StateCodeField] = new OptionSetValue(StateInactive), [StatusCodeField] = new OptionSetValue(StatusInactive) },
             ct);
 
         _logger.LogInformation("Deactivated (soft-deleted) thread {ThreadId}", threadId);
@@ -388,7 +399,7 @@ public sealed class ThreadResolver : IThreadResolver
         await _entityService.UpdateAsync(
             "sprk_communication",
             communicationId,
-            new Dictionary<string, object> { [StateCodeField] = StateInactive, [StatusCodeField] = StatusInactive },
+            new Dictionary<string, object> { [StateCodeField] = new OptionSetValue(StateInactive), [StatusCodeField] = new OptionSetValue(StatusInactive) },
             ct);
 
         _logger.LogInformation("Deactivated (soft-deleted) communication {CommunicationId}", communicationId);

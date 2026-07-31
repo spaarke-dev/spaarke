@@ -48,7 +48,7 @@
  * backward-incompatible change to the op set / anchor / property shape; both ends
  * validate the version they receive against the one they compile against.
  */
-export const COMPOSE_OPERATION_SCHEMA_VERSION = 'compose-ops-v1' as const;
+export const COMPOSE_OPERATION_SCHEMA_VERSION = 'compose-ops-v2' as const;
 
 /** The exact, CLOSED set of op-type discriminators (FR-11). Order is not significant. */
 export const COMPOSE_OPERATION_TYPES = [
@@ -62,6 +62,11 @@ export const COMPOSE_OPERATION_TYPES = [
   'insertParagraph',
   'deleteParagraph',
   'setBlockAttr',
+  // R5 task 012 (G12 / FR-11) — imported-revision reconciliation (accept/reject by native w:id).
+  'acceptRevision',
+  'rejectRevision',
+  // R5 task 014 (G4 / FR-04) — structural table edit (row/column add/remove, cell content, table props).
+  'table',
 ] as const;
 
 /** The op-type discriminator union (the `type` field of every {@link ComposeOperation}). */
@@ -77,6 +82,17 @@ export interface ComposeRunPoint {
   runIndex: number;
   /** Run-local character offset within that run (0-based). */
   offset: number;
+  /**
+   * ROBUST ANCHOR (task 055 — ADDITIVE, backward-compatible). The PARAGRAPH-RELATIVE character offset
+   * (0-based) measured over the editor-visible run flatten (the `k` input to
+   * `stepOperationInterceptor.runLocalPoint`). Mirrors the server `ComposeRunPoint.ParaOffset`. Every op the
+   * interceptor emits now carries BOTH the legacy `(runIndex, offset)` AND this `paraOffset`; the server, when
+   * `paraOffset` is present, resolves the real OOXML `(run, run-local-offset)` by walking the paragraph's runs
+   * to `paraOffset` — stable across the TipTap↔OOXML run-merge boundary (TipTap merges same-format runs, so
+   * `runIndex` can disagree with OOXML's fine-grained runs). Omitted ⇒ server falls back to `(runIndex, offset)`
+   * exactly as before. Still a pure numeric offset — never a text/content match (I-7).
+   */
+  paraOffset?: number;
 }
 
 /**
@@ -97,7 +113,7 @@ export interface ComposeRunRange {
  * `ComposeMarkType` enum + the existing `ComposeInlineRun` mark surface). PascalCase
  * literals match the server's `JsonStringEnumConverter` member-name serialization.
  */
-export type ComposeMarkType = 'Bold' | 'Italic' | 'Underline';
+export type ComposeMarkType = 'Bold' | 'Italic' | 'Underline' | 'Link';
 
 /**
  * The closed set of paragraph-level (block) attributes a {@link SetBlockAttrOperation}
@@ -112,6 +128,37 @@ export type ComposeBlockAttr = 'Alignment' | 'Style' | 'ListOrdered' | 'ListLeve
 
 /** Where {@link InsertParagraphOperation} places the new paragraph relative to its reference. */
 export type ComposeParagraphPosition = 'Before' | 'After';
+
+/**
+ * The scope of an {@link AcceptRevisionOperation} / {@link RejectRevisionOperation} (mirrors the server
+ * `ComposeRevisionScope` enum): reconcile a `Single` imported revision (by its native OOXML `w:id`) or `All`
+ * tracked revisions in the document (batch, document order). PascalCase literals match the server's
+ * member-name serialization. R5 task 012 emits `Single`; `All` (batch) is task 013.
+ */
+export type ComposeRevisionScope = 'Single' | 'All';
+
+/**
+ * The closed set of STRUCTURAL table edits a {@link TableOperation} may express (mirrors the server
+ * `ComposeTableOpKind` enum; G4 / FR-04, R5 task 014). PascalCase literals match the server member-name
+ * serialization. Whole-table CREATE is intentionally NOT a kind — a brand-new table on a tracked baseline is a
+ * whole-block author, out of this catalog's structural-edit scope (task-004 design §2).
+ */
+export type ComposeTableOpKind =
+  | 'InsertRow'
+  | 'DeleteRow'
+  | 'InsertColumn'
+  | 'DeleteColumn'
+  | 'SetCellContent'
+  | 'SetTableProps';
+
+/**
+ * The closed set of table-level properties a `SetTableProps` {@link TableOperation} may change (mirrors the
+ * server `ComposeTableProp` enum). The op `value` is interpreted per member:
+ *  - `Alignment` → `Left`/`Center`/`Right`
+ *  - `Width`     → `"auto"` | `"pct:NN"` | `"dxa:NNNN"`
+ *  - `Borders`   → `None`/`Single`/`Double`
+ */
+export type ComposeTableProp = 'Alignment' | 'Width' | 'Borders';
 
 /** Fields common to every operation. Every op carries the durable `w14:paraId` coarse anchor. */
 interface ComposeOperationBase {
@@ -155,6 +202,13 @@ export interface SetMarkOperation extends ComposeOperationBase {
   range: ComposeRunRange;
   /** The mark to apply. */
   mark: ComposeMarkType;
+  /**
+   * G5 (FR-05, task 033) — the hyperlink target URL, REQUIRED when `mark === 'Link'` and ignored for
+   * every other mark. Mirrors the server `SetMarkOperation.Href`. The engine wraps the anchored run range
+   * in a `w:hyperlink` pointing at an external relationship with this target. Optional (backward-compatible
+   * — a Bold/Italic/Underline setMark omits it).
+   */
+  href?: string;
 }
 
 /** `clearMark` — remove the inline `mark` over the intra-paragraph run-local `range`. */
@@ -224,7 +278,63 @@ export interface SetBlockAttrOperation extends ComposeOperationBase {
 }
 
 /**
- * The CLOSED discriminated union of exactly ten operations (FR-11). Narrow on `type`
+ * `acceptRevision` — ACCEPT a pre-existing imported Word tracked change (native `w:ins`/`w:del`), reconciling
+ * it into settled content so a subsequent Save no longer 422s with `TrackedChangeReconciliationUnsupported`
+ * (ET-2 / FR-11). The revision is located by `revisionId` (its native `w:id` = `ImportedRevision.id`) within
+ * `paraId` — NEVER by text/content match (I-7). `revisionId` is required for `Single`, null for `All`.
+ */
+export interface AcceptRevisionOperation extends ComposeOperationBase {
+  type: 'acceptRevision';
+  /** `Single` = one revision by `revisionId`; `All` = every tracked revision (task 013 batch). */
+  scope: ComposeRevisionScope;
+  /** The native OOXML `w:ins`/`w:del` `w:id` to accept (= `ImportedRevision.id`); `null` for `All`. */
+  revisionId: string | null;
+}
+
+/**
+ * `rejectRevision` — REJECT a pre-existing imported Word tracked change (native `w:ins`/`w:del`), the inverse
+ * of {@link AcceptRevisionOperation}. Same shape (two discriminators, one per semantic action — the catalog's
+ * `setMark`/`clearMark` convention); located by `revisionId` within `paraId`, never by text/content match (I-7).
+ */
+export interface RejectRevisionOperation extends ComposeOperationBase {
+  type: 'rejectRevision';
+  /** `Single` = one revision by `revisionId`; `All` = every tracked revision (task 013 batch). */
+  scope: ComposeRevisionScope;
+  /** The native OOXML `w:ins`/`w:del` `w:id` to reject (= `ImportedRevision.id`); `null` for `All`. */
+  revisionId: string | null;
+}
+
+/**
+ * `table` — a STRUCTURAL edit to a table on the imported/tracked path (mirrors the server `TableOperation`
+ * record; G4 / FR-04, R5 task 014). Anchored by the base `paraId` = the `w14:paraId` of a paragraph INSIDE the
+ * target table (canonical: first cell's first paragraph); the server resolves that paragraph O(1) then walks the
+ * ancestry `w:p → w:tc → w:tr → w:tbl` — NEVER a text/content search (I-7 / NFR-02). `row`/`column` address the
+ * cell within the resolved table (0-based).
+ */
+export interface TableOperation extends ComposeOperationBase {
+  type: 'table';
+  /** Which structural table edit to apply (closed set). */
+  kind: ComposeTableOpKind;
+  /** 0-based row index (InsertRow/DeleteRow/SetCellContent); `null` for column-only / table-prop ops. */
+  row?: number | null;
+  /** 0-based grid-column index (InsertColumn/DeleteColumn/SetCellContent); `null` for row-only / table-prop ops. */
+  column?: number | null;
+  /** For InsertRow/InsertColumn — insert the new row/column before/after `row`/`column`. */
+  position?: ComposeParagraphPosition | null;
+  /** Minted `w14:paraId`s for the NEW cells' paragraphs (InsertRow → per column L→R; InsertColumn → per row T→B). */
+  newParaIds?: string[];
+  /** For SetCellContent — the cell's new text content (Tier 3 — document content). */
+  text?: string | null;
+  /** For SetCellContent — optional inline marks on the set content. Omit/empty = inherit. */
+  marks?: ComposeMarkType[];
+  /** For SetTableProps — which table-level property to change. */
+  tableProp?: ComposeTableProp | null;
+  /** For SetTableProps — the property value, interpreted per `tableProp`; `null` clears to style default. */
+  value?: string | null;
+}
+
+/**
+ * The CLOSED discriminated union of exactly thirteen operations (FR-11). Narrow on `type`
  * before reading op-specific fields.
  */
 export type ComposeOperation =
@@ -237,7 +347,10 @@ export type ComposeOperation =
   | MergeParagraphOperation
   | InsertParagraphOperation
   | DeleteParagraphOperation
-  | SetBlockAttrOperation;
+  | SetBlockAttrOperation
+  | AcceptRevisionOperation
+  | RejectRevisionOperation
+  | TableOperation;
 
 /**
  * The op-log ENVELOPE (FR-11): an ORDERED sequence of `operations` plus the

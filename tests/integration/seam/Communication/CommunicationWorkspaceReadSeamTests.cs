@@ -226,10 +226,15 @@ public class CommunicationWorkspaceReadSeamTests
             .And.Contain("sprk_sentat ge 2026-07-01")
             .And.Contain("sprk_sentat le 2026-07-31")
             .And.Contain($"sprk_communicationid eq {matchedMessageId}",
-                "the participant clause resolves to the junction's candidate id and composes as AND with every other facet");
-        // thread + channel + from + to + participant = 5 clauses ⇒ 4 " and " joins.
-        System.Text.RegularExpressions.Regex.Matches(messageQuery!, " and ").Count.Should().Be(4,
-            "all five facets must be AND-composed together in one filter, not just pairwise");
+                "the participant clause resolves to the junction's candidate id and composes as AND with every other facet")
+            .And.Contain("statecode eq 0",
+                "the shared read pipeline wraps every filtered query with the active-only (soft-delete) clause " +
+                "so deactivated messages drop out (messaging-r3 round-8 UAT fix)");
+        // thread + channel + from + to + participant = 5 facet clauses ⇒ 4 " and " joins between them,
+        // PLUS the shared pipeline's active-only wrap `(…facets…) and statecode eq 0` adds a 5th " and ".
+        System.Text.RegularExpressions.Regex.Matches(messageQuery!, " and ").Count.Should().Be(5,
+            "all five facets must be AND-composed together in one filter (4 joins), and the shared read " +
+            "pipeline ANDs the active-only soft-delete clause on top (the 5th join)");
         participantQuery.Should().Contain($"_sprk_systemuser_value eq {personId}");
     }
 

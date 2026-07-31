@@ -68,13 +68,15 @@
  * @see ADR-024  — Polymorphic Resolver Pattern — exactly one regarding field
  */
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
+  Dropdown,
   Field,
   Input,
   MessageBar,
   MessageBarBody,
+  Option,
   Spinner,
   Text,
   Textarea,
@@ -82,7 +84,13 @@ import {
   mergeClasses,
   tokens,
 } from '@fluentui/react-components';
-import { CalendarCheckmarkRegular, CheckmarkCircleFilled, MailRegular } from '@fluentui/react-icons';
+import {
+  CalendarCheckmarkRegular,
+  CheckmarkCircleFilled,
+  DismissRegular,
+  MailRegular,
+  SearchRegular,
+} from '@fluentui/react-icons';
 
 // NOTE: barrel imports only (not deep `@spaarke/ui-components/components/...`
 // paths) — this package's jest config maps only the exact `@spaarke/
@@ -92,11 +100,9 @@ import { CalendarCheckmarkRegular, CheckmarkCircleFilled, MailRegular } from '@f
 import {
   ANALYSIS_REGARDING_TARGETS,
   AddTodoFollowOnStep,
-  AssociateToStep,
   CreateRecordWizard,
   EMPTY_TODO_FORM,
   EntityCreationService,
-  LookupField,
   SendEmailFollowOnStep,
   SprkAnalysisStatus,
   SprkAnalysisWorkType,
@@ -104,6 +110,7 @@ import {
   applyResolverFields,
   createTodoRegardingChild,
   discoverNavProps,
+  resolveAnalysisFilePreview,
 } from '@spaarke/ui-components';
 import type {
   AssociationResult,
@@ -177,6 +184,13 @@ export interface CreateAnalysisWizardData {
   workTypeValue?: number;
   /** Display label for the work type (used in the wizard title). Defaults to "Agreement Review". */
   workTypeLabel?: string;
+  /**
+   * Optional agreement sub-domain hint (the `sprk_agreementtype.sprk_key`, e.g. `'nda'`)
+   * to pre-select in the Agreement Type picker — set when the launch surface already
+   * implies the type (e.g. the "NDA Analysis" Quick Start card). Falls back to the
+   * registry's fallback row (`sprk_isfallback`) when absent.
+   */
+  defaultSubDomain?: string;
   /** Search callback for the Access (owner) lookup — searches systemuser. */
   searchUsers?: (query: string) => Promise<ILookupItem[]>;
   /** Search callback for the To Do Assignee lookup — searches contact/systemuser per host convention. */
@@ -242,6 +256,15 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
+  // Assigned Attorney / Paralegal share one row (UAT round 3).
+  assignRow: {
+    display: 'flex',
+    gap: tokens.spacingHorizontalM,
+  },
+  assignField: {
+    flex: 1,
+    minWidth: 0,
+  },
   stepTitle: {
     color: tokens.colorNeutralForeground1,
     marginBottom: tokens.spacingVerticalXS,
@@ -250,12 +273,6 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     marginBottom: tokens.spacingVerticalS,
   },
-  associateToWrap: {
-    padding: tokens.spacingHorizontalM,
-    borderRadius: tokens.borderRadiusMedium,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
 });
 
 // ---------------------------------------------------------------------------
@@ -263,6 +280,72 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 const EMPTY_SEARCH = () => Promise.resolve([] as ILookupItem[]);
+
+/**
+ * Standard Fluent lookup field (ai-advanced-capabilities-analysis-hub-r1 UAT round 3):
+ * a read-only `Input` that shows the picked record's name (or a `---` placeholder) with
+ * a trailing lookup (search) icon — the same affordance as an OOB Dataverse lookup. The
+ * whole field OR the icon opens the OOB right-side lookup pane (caller's `onPick` →
+ * `navigationService.openLookup`); once selected, the trailing icon becomes a Clear (×).
+ * Used for Assigned Attorney / Paralegal (both `contact` lookups).
+ */
+interface ContactLookupControlProps {
+  value: ILookupItem | null;
+  onPick: () => void;
+  onClear: () => void;
+  disabled?: boolean;
+  placeholder?: string;
+}
+
+const ContactLookupControl: React.FC<ContactLookupControlProps> = ({ value, onPick, onClear, disabled, placeholder }) => (
+  <Input
+    readOnly
+    value={value?.name ?? ''}
+    placeholder={placeholder ?? '---'}
+    disabled={disabled}
+    onClick={disabled ? undefined : onPick}
+    input={{ style: { cursor: disabled ? 'default' : 'pointer' } }}
+    contentAfter={
+      value ? (
+        <Button
+          appearance="transparent"
+          size="small"
+          icon={<DismissRegular />}
+          aria-label="Clear selection"
+          disabled={disabled}
+          onClick={e => {
+            e.stopPropagation();
+            onClear();
+          }}
+        />
+      ) : (
+        <Button
+          appearance="transparent"
+          size="small"
+          icon={<SearchRegular />}
+          aria-label="Open lookup"
+          disabled={disabled}
+          onClick={e => {
+            e.stopPropagation();
+            onPick();
+          }}
+        />
+      )
+    }
+  />
+);
+
+/**
+ * A selectable row from the `sprk_agreementtype` reference table (the data-driven
+ * agreement sub-domain registry — rows owned by agreements-r1). `key` is the stable
+ * `sprk_key` slug carried as `subDomain` in the launch envelope; `id` is the lookup GUID.
+ */
+interface AgreementTypeRow {
+  id: string;
+  key: string;
+  name: string;
+  isFallback: boolean;
+}
 
 /** Adapt IDataService to the webApi shape CreateRecordWizard/PolymorphicResolverService expect. */
 function buildWebApiAdapter(dataService: IDataService) {
@@ -293,20 +376,32 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
   const styles = useStyles();
   const dispatch = useDispatchPaneEvent();
 
-  // ── Step 2 form state (name / description / access / associate-to) ──────
+  // ── Analysis Details form state (name / description / attorney / paralegal) ──
+  // UAT (2026-07-30): 'Access' (ownerid) removed; 'Associate To' moved to a
+  // dedicated FIRST step (config.associateToStep). Assigned Attorney / Paralegal
+  // are `contact` lookups opened via the OOB right-side lookup pane
+  // (navigationService.openLookup), NOT inline typeahead.
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [owner, setOwner] = useState<ILookupItem | null>(null);
-  const [association, setAssociation] = useState<AssociationResult | null>(data?.initialAssociation ?? null);
+  const [attorney, setAttorney] = useState<ILookupItem | null>(null);
+  const [paralegal, setParalegal] = useState<ILookupItem | null>(null);
+  // Transient OOB-lookup error (a failed pane open degrades to an inline notice).
+  const [lookupError, setLookupError] = useState<string | null>(null);
 
   const nameRef = useRef(name);
   nameRef.current = name;
   const descriptionRef = useRef(description);
   descriptionRef.current = description;
-  const ownerRef = useRef(owner);
-  ownerRef.current = owner;
-  const associationRef = useRef(association);
-  associationRef.current = association;
+  const attorneyRef = useRef(attorney);
+  attorneyRef.current = attorney;
+  const paralegalRef = useRef(paralegal);
+  paralegalRef.current = paralegal;
+
+  // ── Agreement Type (sub-domain) picker — reads the sprk_agreementtype registry ──
+  const [agreementTypes, setAgreementTypes] = useState<AgreementTypeRow[]>([]);
+  const [selectedAgreementTypeId, setSelectedAgreementTypeId] = useState<string | null>(null);
+  const selectedAgreementTypeIdRef = useRef<string | null>(null);
+  selectedAgreementTypeIdRef.current = selectedAgreementTypeId;
 
   // ── Next-steps state (Send Email / Create To Do) ────────────────────────
   const [emailTo, setEmailTo] = useState('');
@@ -352,6 +447,61 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
   const searchAssignees = data?.searchAssignees ?? data?.searchUsers ?? EMPTY_SEARCH;
 
   const handleSearchAssignees = useCallback((query: string) => searchAssignees(query), [searchAssignees]);
+
+  // Assigned Attorney / Paralegal — open the OOB right-side `contact` lookup pane
+  // (navigationService.openLookup, ADR: OOB modal over inline typeahead). Both
+  // columns (`sprk_assignedattorney1` / `sprk_assignedparalegal1`) target `contact`.
+  const handlePickContact = useCallback(
+    async (setter: (v: ILookupItem | null) => void): Promise<void> => {
+      if (!navigationService) return;
+      setLookupError(null);
+      try {
+        const results = await navigationService.openLookup({ entityType: 'contact', allowMultiSelect: false });
+        if (results && results.length > 0) {
+          setter({ id: results[0].id, name: results[0].name });
+        }
+      } catch (err) {
+        setLookupError(err instanceof Error ? err.message : 'Could not open the lookup. Please try again.');
+      }
+    },
+    [navigationService]
+  );
+
+  // ── Load the Agreement Type registry (sprk_agreementtype) for the picker ────
+  // Data-driven: only `sprk_isselectable` rows appear; default selection is the
+  // launch hint (defaultSubDomain → sprk_key) else the fallback row (sprk_isfallback).
+  // The lookup is optional — an unavailable/empty table leaves the picker blank and
+  // the analysis still creates.
+  const defaultSubDomain = data?.defaultSubDomain;
+  useEffect(() => {
+    if (!dataService) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await dataService.retrieveMultipleRecords(
+          'sprk_agreementtype',
+          '?$select=sprk_agreementtypeid,sprk_key,sprk_name,sprk_isfallback' +
+            '&$filter=sprk_isselectable eq true&$orderby=sprk_name'
+        );
+        if (cancelled) return;
+        const rows: AgreementTypeRow[] = (result.entities ?? []).map((e: Record<string, unknown>) => ({
+          id: String(e.sprk_agreementtypeid ?? ''),
+          key: String(e.sprk_key ?? ''),
+          name: String(e.sprk_name ?? '(unnamed)'),
+          isFallback: Boolean(e.sprk_isfallback),
+        }));
+        setAgreementTypes(rows);
+        const byHint = defaultSubDomain ? rows.find(r => r.key === defaultSubDomain) : undefined;
+        const initial = byHint ?? rows.find(r => r.isFallback) ?? null;
+        if (initial) setSelectedAgreementTypeId(initial.id);
+      } catch {
+        // Reference table unavailable (dev / not yet seeded) — picker stays empty.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [dataService, defaultSubDomain]);
 
   // ── Next-steps card set: Send Email / Create To Do (spec FR-12) ─────────
   const followOnCards: FollowOnCardConfig[] = useMemo(
@@ -410,7 +560,25 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
       entityLabel: 'analysis',
       filesStepSubtitle: 'Upload the document to analyze, or select an existing one.',
 
-      // Step 1 extension (task 040): "select existing Document" alongside upload.
+      // Step 1 (UAT 2026-07-30): "Associate To" is now a dedicated FIRST step via
+      // CreateRecordWizard's built-in `associateToStep` (mirrors Create New Matter).
+      // Footer Cancel | Back | Skip | Next comes free from WizardShell; the step's
+      // Next is enabled once a record is selected, Skip bypasses it. `initialAssociation`
+      // (entry case 2b — opened in a Matter/Project) pre-fills the picker.
+      associateToStep: navigationService
+        ? {
+            entityTypes: ANALYSIS_REGARDING_ENTITY_TYPES as EntityTypeOption[],
+            navigationService,
+            initialAssociation: data?.initialAssociation,
+          }
+        : undefined,
+
+      // Step 2: Add file(s) — REQUIRED (UAT #4): the analysis IS a document review,
+      // so onFinish cannot proceed without a doc. Skip is hidden; Next gates on a
+      // file or an existing-Document pick.
+      requireFilesStep: true,
+
+      // Step 2 extension (task 040): "select existing Document" alongside upload.
       existingRecordPicker: navigationService
         ? {
             navigationService,
@@ -419,10 +587,9 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           }
         : undefined,
 
-      // Step 2: name + description + access + associate-to, all in ONE step
-      // (spec FR-12's 3-step framing — NOT CreateRecordWizard's built-in
-      // separate associateToStep, which would add a 4th step before the
-      // files step).
+      // Step 3: Analysis Details — name + description + Assigned Attorney / Paralegal.
+      // (UAT #5: the description sits on its own line below the title; UAT #6: 'Access'
+      // removed, two `contact` lookups added, opened via the OOB right-side pane.)
       infoStep: {
         id: 'analysis-details',
         label: 'Analysis Details',
@@ -433,10 +600,16 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
               <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
                 Analysis Details
               </Text>
-              <Text size={200} className={styles.stepSubtitle}>
-                Set the name, description, access, and the record this analysis is regarding.
+              <Text as="p" size={200} block className={styles.stepSubtitle}>
+                Set the name, description, and assignments for this analysis.
               </Text>
             </div>
+
+            {lookupError && (
+              <MessageBar intent="error">
+                <MessageBarBody>{lookupError}</MessageBarBody>
+              </MessageBar>
+            )}
 
             <Field label="Name" required>
               <Input
@@ -457,25 +630,42 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
               />
             </Field>
 
-            <LookupField
-              label="Access"
-              value={owner}
-              onChange={setOwner}
-              onSearch={searchUsers}
-              placeholder="Search for a person…"
-            />
+            <Field label="Agreement Type">
+              <Dropdown
+                aria-label="Agreement type"
+                placeholder="Select agreement type"
+                disabled={agreementTypes.length === 0}
+                value={agreementTypes.find(r => r.id === selectedAgreementTypeId)?.name ?? ''}
+                selectedOptions={selectedAgreementTypeId ? [selectedAgreementTypeId] : []}
+                onOptionSelect={(_, d) => setSelectedAgreementTypeId(d.optionValue ?? null)}
+              >
+                {agreementTypes.map(r => (
+                  <Option key={r.id} value={r.id} text={r.name}>
+                    {r.name}
+                  </Option>
+                ))}
+              </Dropdown>
+            </Field>
 
-            {navigationService && (
-              <div className={styles.associateToWrap}>
-                <AssociateToStep
-                  entityTypes={ANALYSIS_REGARDING_ENTITY_TYPES as EntityTypeOption[]}
-                  navigationService={navigationService}
-                  value={association}
-                  onChange={setAssociation}
-                  variant="compact"
+            <div className={styles.assignRow}>
+              <Field label="Assigned Attorney" className={styles.assignField}>
+                <ContactLookupControl
+                  value={attorney}
+                  onPick={() => handlePickContact(setAttorney)}
+                  onClear={() => setAttorney(null)}
+                  disabled={!navigationService}
                 />
-              </div>
-            )}
+              </Field>
+
+              <Field label="Assigned Paralegal" className={styles.assignField}>
+                <ContactLookupControl
+                  value={paralegal}
+                  onPick={() => handlePickContact(setParalegal)}
+                  onClear={() => setParalegal(null)}
+                  disabled={!navigationService}
+                />
+              </Field>
+            </div>
           </div>
         ),
       },
@@ -493,10 +683,26 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         // -- Step 1: resolve the document (upload OR selected-existing) -----
         let documentId: string | null = null;
         let documentName = finishName;
+        // SPE pointer for opening the document in the editable Compose surface (Phase 1).
+        let speDriveItemId: string | undefined;
+        let speDriveId: string | undefined;
 
         if (context.selectedExistingRecord) {
           documentId = context.selectedExistingRecord.recordId;
           documentName = context.selectedExistingRecord.recordName;
+          // Resolve the SPE pointer from the picked sprk_document (mirrors DocumentComposeLaunch).
+          try {
+            const docRec = await dataService.retrieveRecord(
+              'sprk_document',
+              documentId,
+              '?$select=sprk_filename,sprk_graphitemid,sprk_graphdriveid'
+            );
+            speDriveItemId = docRec['sprk_graphitemid'] as string | undefined;
+            speDriveId = docRec['sprk_graphdriveid'] as string | undefined;
+            documentName = (docRec['sprk_filename'] as string | undefined) ?? documentName;
+          } catch {
+            /* pointer unavailable — the compose open falls back to the read-only viewer below */
+          }
         } else if (context.uploadedFiles.length > 0) {
           if (!authFetch || !bffBaseUrl || !webApiAdapter) {
             throw new Error('Document upload is not available right now. Please try again shortly.');
@@ -521,6 +727,10 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
             const firstErr = uploadResult.errors[0]?.error ?? 'unknown error';
             throw new Error(`Document upload failed: ${firstErr}`);
           }
+          // Capture the SPE pointer from the upload (id = drive-item, driveId = drive) so
+          // the document can open in the editable Compose surface (Phase 1).
+          speDriveItemId = uploadResult.uploadedFiles[0]?.id;
+          speDriveId = uploadResult.uploadedFiles[0]?.driveId;
 
           // Create a STANDALONE sprk_document (empty navigationProperty → createDocumentRecords
           // skips the parent @odata.bind). The Analysis is the SUBJECT-owner via its
@@ -552,14 +762,55 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           'sprk_documentid@odata.bind': `/sprk_documents(${documentId})`,
         };
 
-        if (ownerRef.current?.id) {
-          payload['ownerid@odata.bind'] = `/systemusers(${ownerRef.current.id})`;
-        }
-
         const warnings: string[] = [];
 
+        // -- Assigned Attorney / Paralegal (both `contact` lookups, UAT #6) --------
+        // Bind via the discovered PascalCase nav-props (`sprk_AssignedAttorney1` /
+        // `sprk_AssignedParalegal1`) → `/contacts(id)`, the SAME pattern matterService
+        // uses. Discovery is best-effort; the hardcoded PascalCase fallback matches
+        // the schema names when discovery is unavailable (e.g. dev).
+        const attorneyPick = attorneyRef.current;
+        const paralegalPick = paralegalRef.current;
+        if (attorneyPick?.id || paralegalPick?.id) {
+          let assignNavProps: Awaited<ReturnType<typeof discoverNavProps>> = [];
+          try {
+            assignNavProps = await discoverNavProps('sprk_analysis');
+          } catch {
+            /* fall through to hardcoded nav-prop names below */
+          }
+          const navPropFor = (col: string, fallback: string): string =>
+            assignNavProps.find(e => e.columnName === col)?.navPropName ?? fallback;
+          if (attorneyPick?.id) {
+            payload[`${navPropFor('sprk_assignedattorney1', 'sprk_AssignedAttorney1')}@odata.bind`] =
+              `/contacts(${attorneyPick.id.replace(/[{}]/g, '')})`;
+          }
+          if (paralegalPick?.id) {
+            payload[`${navPropFor('sprk_assignedparalegal1', 'sprk_AssignedParalegal1')}@odata.bind`] =
+              `/contacts(${paralegalPick.id.replace(/[{}]/g, '')})`;
+          }
+        }
+
+        // -- Agreement sub-domain (A1/A2): bind the sprk_agreementtype lookup — the
+        // level-2 type the review machine orients on. Same discover-nav-prop pattern
+        // as the assignees; PascalCase fallback matches the schema name when metadata
+        // discovery is unavailable (e.g. dev).
+        const agreementTypeId = selectedAgreementTypeIdRef.current;
+        if (agreementTypeId) {
+          let atNavProps: Awaited<ReturnType<typeof discoverNavProps>> = [];
+          try {
+            atNavProps = await discoverNavProps('sprk_analysis');
+          } catch {
+            /* fall through to hardcoded nav-prop name below */
+          }
+          const atNavProp =
+            atNavProps.find(e => e.columnName === 'sprk_agreementtypeid')?.navPropName ?? 'sprk_AgreementType';
+          payload[`${atNavProp}@odata.bind`] = `/sprk_agreementtypes(${agreementTypeId.replace(/[{}]/g, '')})`;
+        }
+
         // -- Associate-to: ADR-024 resolver fields + Field-Mapping inheritance --
-        const finishAssociation = associationRef.current;
+        // Association now comes from the dedicated "Associate To" first step
+        // (config.associateToStep → IFinishContext.association), not a local field.
+        const finishAssociation = context.association;
         if (finishAssociation) {
           const entitySet = REGARDING_ENTITY_SET_BY_TYPE[finishAssociation.entityType];
           const navPropHint = REGARDING_NAVPROP_HINT_BY_TYPE[finishAssociation.entityType];
@@ -666,22 +917,72 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
         }
 
-        // -- Load the file to a workspace tab (existing document-viewer widget) --
-        dispatch('workspace', {
-          type: 'widget_load',
-          widgetType: 'document-viewer',
-          widgetData: {
-            documentId,
-            title: documentName,
-            sessionId: data?.sessionId,
-          },
-        });
+        // -- Open the document in the EDITABLE Compose/TipTap surface (Phase 1, UAT
+        // round 5) so the analysis surface IS the review surface, not a read-only
+        // preview. Requires BOTH the SPE drive-item id and drive id (ComposeEditor
+        // contract; mirrors DocumentComposeLaunch). Falls back to the read-only
+        // document-viewer when the SPE pointer is incomplete.
+        const analysisActiveWorkType =
+          workTypeValue === SprkAnalysisWorkType.AgreementAnalysis ? 'agreement-analysis' : undefined;
+        // agreements-r1 contract A3: carry the picked agreement sub-domain (sprk_key) so the
+        // review machine opens ORIENTED (binds the type's knowledge pack) instead of re-inferring.
+        const selectedSubDomain = agreementTypes.find(r => r.id === selectedAgreementTypeIdRef.current)?.key;
+
+        if (speDriveItemId && speDriveId) {
+          dispatch('workspace', {
+            type: 'widget_load',
+            widgetType: 'compose',
+            widgetData: {
+              compose: {
+                speDriveItemId,
+                speDriveId,
+                sprkDocumentId: documentId,
+                fileName: documentName,
+                ...(analysisActiveWorkType ? { activeWorkType: analysisActiveWorkType } : {}),
+                ...(selectedSubDomain ? { subDomain: selectedSubDomain } : {}),
+              },
+            },
+            displayName: documentName,
+          });
+        } else {
+          // Incomplete SPE pointer → read-only preview fallback (correct shape so it
+          // doesn't render "Unknown file"). Reuse the shared resolver by treating the
+          // document id as the analysis's `sprk_documentid` value.
+          const createdFilePreview = resolveAnalysisFilePreview(
+            { _sprk_documentid_value: documentId, sprk_name: documentName },
+            { bffBaseUrl: bffBaseUrl ?? '', authenticatedFetch: authFetch ?? (globalThis.fetch as typeof fetch) }
+          );
+          dispatch('workspace', {
+            type: 'widget_load',
+            widgetType: 'document-viewer',
+            widgetData: {
+              filename: documentName,
+              contentType: 'application/octet-stream',
+              textContent: '',
+              documentId,
+              ...(createdFilePreview.status === 'resolved'
+                ? { fetchPreviewUrl: createdFilePreview.fetchPreviewUrl }
+                : {}),
+            },
+            displayName: documentName,
+          });
+        }
 
         setCompletedName(finishName);
 
         const hasWarnings = warnings.length > 0;
+        // "View" opens the new Analysis as a MODAL (UAT round 3): the OOB
+        // `sprk_analysis` form at 85%×85% (openRecordModal), consistent with the
+        // grid row-click. Falls back to a plain openRecord when the host adapter
+        // doesn't implement the modal variant. The embedded SpaarkeAi on that form
+        // now resolves the record via the parent-form frame-walk (main.tsx), so the
+        // modal shows THIS analysis rather than the cold workspace.
         const viewAnalysis = () => {
-          navigationService?.openRecord?.('sprk_analysis', analysisId);
+          if (navigationService?.openRecordModal) {
+            void navigationService.openRecordModal('sprk_analysis', analysisId);
+          } else {
+            void navigationService?.openRecord?.('sprk_analysis', analysisId);
+          }
           handleClose();
         };
 
@@ -714,12 +1015,14 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
     workTypeLabel,
     name,
     description,
-    owner,
-    association,
-    searchUsers,
+    attorney,
+    paralegal,
+    lookupError,
+    handlePickContact,
     followOnCards,
     styles,
     dispatch,
+    data?.initialAssociation,
     data?.resolveSpeContainerId,
     data?.sessionId,
     handleClose,
@@ -742,6 +1045,11 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         webApi={webApiAdapter!}
         config={config}
         embedded={false}
+        // UAT #2: match the Dataverse Create-wizard modal footprint (60% × 70%),
+        // instead of WizardShell's 95vw default which read as oversized next to
+        // "Create New Matter".
+        maxWidth="60vw"
+        height="70vh"
       />
     );
   }

@@ -239,6 +239,19 @@ public static class ComposeEndpoints
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status500InternalServerError);
 
+        // G10 (FR-09, task 040): the manual "Refresh Profile" leg — re-run the Document Profile on demand.
+        // Fire-and-forget best-effort (202): reuses IComposeService.RefreshProfileAsync → the SAME
+        // DispatchBackgroundProfile pipeline the save-hook + reload re-trigger use (never a second trigger).
+        // Under the authenticated group (OBO); no SPE/Graph type crosses the endpoint (ADR-007).
+        group.MapPost("/documents/{documentRecordId:guid}/refresh-profile", RefreshProfileAsync)
+            .WithName("ComposeRefreshProfile")
+            .WithSummary("Re-run the Document Profile for a Compose document on demand (FR-09 / G10)")
+            .RequireRateLimiting("ai-context")
+            .Produces(StatusCodes.Status202Accepted)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status500InternalServerError);
+
         // (13) POST /api/compose/document/{documentSpeId}/reanchor-annotations — FR-27 (task 054):
         // after a Word round-trip produced a new SPE version (detected by 052/053), download the
         // CURRENT bytes, extract paragraph text, and re-anchor the client's prior Compose anchors
@@ -629,6 +642,59 @@ public static class ComposeEndpoints
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 detail: "An unexpected error occurred while checking for changes.");
+        }
+    }
+
+    // G10 (FR-09, task 040): the manual "Refresh Profile" leg. Delegates to
+    // IComposeService.RefreshProfileAsync → the SAME fire-and-forget DispatchBackgroundProfile pipeline the
+    // save-hook + reload re-trigger use (never a second trigger). Best-effort 202 (the profile runs in the
+    // background under OBO); a bad request 400s. No SPE/Graph type crosses the endpoint (ADR-007).
+    private static async Task<IResult> RefreshProfileAsync(
+        Guid documentRecordId,
+        [FromBody] RefreshProfileBody? body,
+        IComposeService composeService,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (documentRecordId == Guid.Empty) return BadRequest("documentRecordId is required in the route.");
+        if (body is null) return BadRequest("Request body is required.");
+        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
+
+        try
+        {
+            await composeService.RefreshProfileAsync(
+                new RefreshComposeProfileRequest
+                {
+                    DocumentRecordId = documentRecordId,
+                    TenantId = body.TenantId,
+                    DocumentSpeId = body.DocumentSpeId,
+                    ETag = body.ETag,
+                },
+                httpContext,
+                ct).ConfigureAwait(false);
+
+            logger.LogInformation(
+                "Compose refresh-profile: document {DocumentRecordId} — profile re-dispatched (best-effort) TraceId={TraceId}",
+                documentRecordId, httpContext.TraceIdentifier);
+
+            return Results.Accepted(value: new { documentRecordId, correlationId = httpContext.TraceIdentifier });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Compose refresh-profile: unexpected failure for document {DocumentRecordId} TraceId={TraceId}",
+                documentRecordId, httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while refreshing the document profile.");
         }
     }
 
@@ -1181,7 +1247,9 @@ public static class ComposeEndpoints
                 // Upload endpoint (below) reuses the IDENTICAL wire-shape mapping instead of forking it
                 // (root CLAUDE.md §11 — extend, don't duplicate).
                 Projection: MapProjectionResponse(result.Projection),
-                CorrelationId: httpContext.TraceIdentifier));
+                CorrelationId: httpContext.TraceIdentifier,
+                // G1 (FR-01, task 020): the persisted authored-vs-imported origin marker (Path A only).
+                Origin: result.Origin));
         }
         catch (ArgumentException ex)
         {
@@ -1281,6 +1349,10 @@ public static class ComposeEndpoints
             // C2 (UAT 2026-07-20): the client paraId map → stamp minted ids onto the baseline before the engine
             // resolves each op's anchor.
             ParaIdMap = body.ParaIdMap,
+            // G7 (task 022): forwarded for symmetry (ignored on the replace path — a promoted doc already has
+            // its SPE id; the dedup only runs in the transient-create branch).
+            TransientKey = body.TransientKey,
+            ForkNew = body.ForkNew,
         };
 
         return await ExecuteSaveAsync(request, documentSpeId, composeService, logger, httpContext, ct).ConfigureAwait(false);
@@ -1350,6 +1422,11 @@ public static class ComposeEndpoints
             // C2 (UAT 2026-07-20): the client paraId map — carried for symmetry (the stamper is a no-op on the
             // born-in-editor ContentModel path, where the renderer already mints ids into the bytes it authors).
             ParaIdMap = body.ParaIdMap,
+            // G7 (task 022): the transient-key dedup identity + Save-New fork flag — the whole point of this
+            // route (the transient-create branch). transientKey dedups repeated create-on-save to ONE record;
+            // forkNew forces a fresh record ("Save New Document").
+            TransientKey = body.TransientKey,
+            ForkNew = body.ForkNew,
         };
 
         return await ExecuteSaveAsync(request, documentSpeId: null, composeService, logger, httpContext, ct).ConfigureAwait(false);
@@ -1382,7 +1459,12 @@ public static class ComposeEndpoints
                 Size: result.Size,
                 WasPromotedThisSave: result.WasPromotedThisSave,
                 CorrelationId: httpContext.TraceIdentifier,
-                ReanchorSummary: result.ReanchorSummary));
+                ReanchorSummary: result.ReanchorSummary,
+                // G1 (FR-01, task 020): the ComposeOrigin this save resolved (available for 021's
+                // clean-apply engine mode selection without a follow-up Load).
+                Origin: result.Origin,
+                // Prong 1 (task 055): best-effort partial-apply outcome (null on the clean path).
+                PartialApply: result.PartialApply));
         }
         catch (ArgumentException ex)
         {
@@ -1408,16 +1490,20 @@ public static class ComposeEndpoints
         }
         catch (Sprk.Bff.Api.Infrastructure.Graph.DocumentLockedByWordException ex)
         {
-            // DEF-14: the SPE drive-item is checked out / open in Word for Web. The write layer
-            // (UploadSessionManager) translates the Graph 423/resourceLocked ODataError into this
-            // typed domain exception; we map it to a 423 with actionable copy instead of the opaque
-            // 500 that used to leak "ODataError". Mirrors the PushAnnotations handler.
-            logger.LogWarning(ex, "Compose save: drive-item locked by Word (423). TraceId={TraceId}", httpContext.TraceIdentifier);
+            // UAT #10/#11 (task 052): the SPE drive-item is held by a Word-for-web CO-AUTHORING lock — the
+            // write layer (UploadSessionManager) translates the Graph 423/resourceLocked ODataError into this
+            // typed domain exception. Spaarke never does a SharePoint FORMAL checkout, so a 423 here is ALWAYS
+            // the co-authoring lock (Word is / was open), NOT a checkout — the copy is honest about that: there
+            // is no programmatic release (confirmed against Microsoft WOPI docs), it clears on a clean Word
+            // close or SharePoint's ~30-min-from-last-edit timeout. Do NOT say "check it in" (there is nothing
+            // to check in) — that misled users who never checked anything out. The client renders a distinct
+            // Retry affordance (no fake Unlock button).
+            logger.LogWarning(ex, "Compose save: drive-item locked by Word co-authoring (423). TraceId={TraceId}", httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: StatusCodes.Status423Locked,
-                title: "Document Open or Checked Out",
-                detail: "This document is checked out or open in Word — check it in or close the other " +
-                        "editor, then Save again. Your Compose changes are safe and still pending.",
+                title: "Open in Word",
+                detail: "This document is open in Word — close it there, then click Retry. It also releases " +
+                        "automatically within a few minutes. Your Compose changes are safe and still pending.",
                 type: "https://tools.ietf.org/html/rfc4918#section-11.3");
         }
         catch (Sprk.Bff.Api.Infrastructure.Graph.EtagPreconditionFailedException ex)
@@ -2037,7 +2123,16 @@ public sealed record SaveComposeDocumentBody(
     /// physically onto the baseline's id-less paragraphs before the synthesizer resolves (see
     /// <see cref="SaveComposeDocumentRequest.ParaIdMap"/> / <c>ComposeBaselineParaIdStamper</c>).
     /// Optional — an older client omits it and the stamp is skipped.</summary>
-    [property: JsonPropertyName("paraIdMap")] IReadOnlyList<ComposeBaselineParaId>? ParaIdMap = null);
+    [property: JsonPropertyName("paraIdMap")] IReadOnlyList<ComposeBaselineParaId>? ParaIdMap = null,
+    /// <summary>G7 (FR-06, task 022): the client-minted stable transient-draft key (<c>crypto.randomUUID()</c>,
+    /// minted once at mount) sent on every create-on-save so repeated calls dedup to ONE record via the
+    /// <c>sprk_composetransientkey_uk</c> alt-key instead of minting duplicates (the 8-duplicate fix). Null on
+    /// the replace path / older clients. See <see cref="SaveComposeDocumentRequest.TransientKey"/>.</summary>
+    [property: JsonPropertyName("transientKey")] string? TransientKey = null,
+    /// <summary>G7 (FR-06, task 022): the deliberate <b>Save New Document</b> fork — <c>true</c> skips the
+    /// transient-key dedup and mints a fresh record. Default <c>false</c> = <b>Save Version</b> (replace/dedup).
+    /// See <see cref="SaveComposeDocumentRequest.ForkNew"/>.</summary>
+    [property: JsonPropertyName("forkNew")] bool ForkNew = false);
 
 /// <summary>Request body for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
 public sealed record PromoteComposeDocumentBody(
@@ -2073,7 +2168,14 @@ public sealed record LoadComposeDocumentResponse(
     // DOCX→editor projection — paraId-tagged HTML + fail-closed status the client mounts instead of running
     // mammoth. The client keys off Projection.status/canEdit, NOT html length.
     [property: JsonPropertyName("projection")] ComposeProjectionResponse Projection,
-    [property: JsonPropertyName("correlationId")] string CorrelationId);
+    [property: JsonPropertyName("correlationId")] string CorrelationId,
+    // G1 (FR-01, task 020): the persisted authored-vs-imported origin marker (Path A loads only —
+    // an existing sprk_document record). Wire values "authored" | "imported" | null (CamelCaseStringEnumConverter).
+    // Null on Path B continuation (no record yet) OR a legacy pre-existing record — the client MUST treat
+    // null the SAME as "imported" (never strict-equal null to "authored"), per the BINDING null-handling
+    // contract (ComposeOrigin remarks). Optional/trailing so existing callers deserializing this response
+    // are unaffected.
+    [property: JsonPropertyName("origin")] ComposeOrigin? Origin = null);
 
 /// <summary>Wire shape of the server DOCX→editor projection (design §3.3). <c>status</c> is
 /// <c>"success" | "partial" | "failed"</c>; the client mounts <c>html</c> only when <c>canEdit</c>, else it
@@ -2122,7 +2224,21 @@ public sealed record SaveComposeDocumentResponse(
     // log — AUTO applied; REVIEW/ORPHAN surfaced here so the client can present them. Null on every
     // non-stale save (the common case). Optional/trailing so existing callers deserializing this response
     // are unaffected.
-    [property: JsonPropertyName("reanchorSummary")] ReanchorSummary? ReanchorSummary = null);
+    [property: JsonPropertyName("reanchorSummary")] ReanchorSummary? ReanchorSummary = null,
+    // G1 (FR-01, task 020): the ComposeOrigin this save resolved (server-side, from ContentModel
+    // presence — never SPE-id/content inference). Populated on EVERY save so the client/a downstream
+    // consumer (e.g. task 021's clean-apply engine mode selection) learns the origin without a
+    // follow-up Load. On a create-on-save this is also the value persisted onto the new sprk_document
+    // row; a replace-path save of an already-promoted document reports the save's resolved
+    // discriminant WITHOUT mutating the already-persisted field. Wire values "authored" | "imported".
+    // Optional/trailing so existing callers deserializing this response are unaffected.
+    [property: JsonPropertyName("origin")] ComposeOrigin? Origin = null,
+    // Prong 1 (task 055): populated ONLY when the save hit an op-level anchoring refusal and the service
+    // fell back to best-effort per-paragraph recovery — the resolvable paragraphs were applied and the
+    // unresolvable ops are listed here so the client can prompt the user to redo just those edits (never
+    // silently applied, never silently dropped). Null on the common path (clean batch apply) and on a
+    // batch-level refusal (which still fails hard). Optional/trailing so existing callers are unaffected.
+    [property: JsonPropertyName("partialApply")] PartialApplySummary? PartialApply = null);
 
 /// <summary>Response shape for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
 public sealed record PromoteComposeDocumentResponse(
@@ -2179,6 +2295,15 @@ public sealed record SpeDocChangedWebhookResponse(
 /// 052) — driveId is resolved internally by the orchestrator, so callers do not supply it.</summary>
 public sealed record CheckChangesBody(
     [property: JsonPropertyName("containerId")] string ContainerId);
+
+/// <summary>Request body for <c>POST /api/compose/documents/{documentRecordId}/refresh-profile</c>
+/// (FR-09 / G10). The <c>sprk_documentid</c> rides the route; the body carries the tenant + optional SPE
+/// pointer/eTag used only to stamp the profiled version so an immediate reopen does not redundantly
+/// re-trigger the storm-guarded reload leg.</summary>
+public sealed record RefreshProfileBody(
+    [property: JsonPropertyName("tenantId")] string TenantId,
+    [property: JsonPropertyName("documentSpeId")] string? DocumentSpeId = null,
+    [property: JsonPropertyName("eTag")] string? ETag = null);
 
 /// <summary>Response shape for <c>POST /api/compose/document/{id}/check-changes</c> (FR-26) —
 /// whether the document's SPE etag differs from the last-observed (Redis-stored) etag, plus the

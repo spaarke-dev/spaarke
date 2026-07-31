@@ -1,4 +1,9 @@
-$version = "1.10.0"
+# Version is READ from solution.xml (the single source of truth) — do NOT hardcode it here. A hardcoded copy drifted
+# to 1.10.0 while solution.xml said 1.11.0, producing a mislabeled zip (round-8.4). Reading it keeps the filename in
+# lockstep with the packed content and removes a hidden 5th version location from the bump checklist.
+$solutionXmlPath = Join-Path $PSScriptRoot "solution.xml"
+$version = ([xml](Get-Content -LiteralPath $solutionXmlPath)).ImportExportXml.SolutionManifest.Version
+if ([string]::IsNullOrWhiteSpace($version)) { throw "Could not read <Version> from $solutionXmlPath" }
 $solutionName = "CommunicationConversationPanelSolution"
 # Output is anchored to the SCRIPT dir (not the caller's CWD) so the zip always
 # lands in Solution/bin/ regardless of where pack.ps1 is invoked from — the

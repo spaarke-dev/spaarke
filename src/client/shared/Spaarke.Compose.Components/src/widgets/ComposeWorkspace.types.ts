@@ -21,6 +21,7 @@ import type {
   ImportedRevision,
   ImportedComment,
   ComposeServerProjection,
+  ComposeDocumentOrigin,
 } from '../types/compose-contracts';
 
 // ---------------------------------------------------------------------------
@@ -80,6 +81,20 @@ export interface ComposeCheckoutLockedByInfo {
   checkedOutAt: string | null;
 }
 
+/**
+ * Prong 1 (task 055) — the client-side mirror of the BFF `partialApply` save-response summary. Counts
+ * only; the per-op details stay server-side (telemetry) — the user just needs "N of M edits couldn't be
+ * saved, please redo them." All op-centric (comments are handled fail-soft separately server-side).
+ */
+export interface ComposePartialApplyInfo {
+  /** Total ops in the batch the save attempted. */
+  total: number;
+  /** Ops that were successfully anchored + applied. */
+  appliedCount: number;
+  /** Ops that could NOT be anchored and were surfaced (not applied) — what the user must redo. */
+  unresolvedCount: number;
+}
+
 export interface ComposeWorkspaceState {
   status: ComposeWorkspaceStatus;
   documentRef: ComposeDocumentRef | null;
@@ -134,6 +149,18 @@ export interface ComposeWorkspaceState {
   projection: ComposeServerProjection | null;
   /** User-facing error message (NOT a Tier 3 sink). */
   errorMessage: string | null;
+  /** UAT #10/#11 (task 052): true when the last save failed with HTTP 423 (the doc is open in Word — a
+   *  co-authoring lock). Flips the error banner to the honest "Open in Word" bar with Retry + Reload-from-Word
+   *  actions (there is no programmatic unlock). Reset on save-start / success / load. */
+  saveErrorIsLock: boolean;
+  /**
+   * Prong 1 (task 055 — keep-edits graceful degradation): populated when the LAST save applied only PART
+   * of the edit batch — some ops couldn't be anchored server-side, so the save best-effort-applied the
+   * rest and surfaced the unresolvable ones (never silently applied, never silently dropped). Drives an
+   * honest warning banner prompting the user to redo just those edits. `null` when the whole batch applied
+   * cleanly (the common case). Reset on save-start / load.
+   */
+  partialApply: ComposePartialApplyInfo | null;
   /** Last assistant-inserted draft staged for confirm (Flow 5 R1 manual-confirm gate). */
   pendingAssistantInsert: ComposeAssistantToWorkspaceFlow | null;
   /** SPE check-out lifecycle (Task 050 / Spike #3 §9; Task 051 multi-tab UX). */
@@ -151,10 +178,33 @@ export interface ComposeWorkspaceState {
    * 0 = no save has succeeded yet this mount.
    */
   saveSuccessToken: number;
+  /**
+   * G1 (FR-01, task 020): the persisted cross-session origin marker for THIS document —
+   * `'authored'` | `'imported'` | `null`. `null` covers a transient/not-yet-promoted mount (no
+   * `sprk_document` record) OR a legacy pre-existing record (no backfill) — treated the SAME as
+   * `'imported'` by every consumer (BINDING null-handling contract; see `ComposeDocumentOrigin`).
+   * Set on `loadSucceeded` (Path A reopen) and refreshed on `saveSucceeded` (so a same-session
+   * create-on-save's resolved origin is known without a follow-up Load). Drives `triggerSave`'s
+   * clean-vs-tracked routing on a REOPENED document — see the `bornInEditor` discriminant.
+   */
+  origin: ComposeDocumentOrigin | null;
+  /**
+   * G8 (FR-07, task 030): an external change to the underlying document (a new SPE version landed
+   * from the document-management system — e.g. an Office edit) was detected and not yet dismissed/
+   * reloaded. Drives the non-blocking "Document updated from document management system version"
+   * banner. For a CLEAN editor the parent transparently remounts (requestLoad carries the flag
+   * forward so the banner still shows post-reload); for a DIRTY editor the parent sets this WITHOUT
+   * remounting (NFR-08 — the banner offers an explicit Reload so unsaved edits are never silently
+   * dropped). Cleared on dismiss or on a fresh mount.
+   */
+  externalChangePending: boolean;
 }
 
 export type ComposeWorkspaceAction =
-  | { kind: 'requestLoad'; documentRef: ComposeDocumentRef; sessionId: string }
+  // G8 (FR-07, task 030): `externalChange` (default false) carries the external-change flag THROUGH a
+  // remount — a clean-editor auto-remount dispatches requestLoad with externalChange:true so the
+  // banner still renders after loadSucceeded. Every other requestLoad (initial open / Search) omits it.
+  | { kind: 'requestLoad'; documentRef: ComposeDocumentRef; sessionId: string; externalChange?: boolean }
   | {
       kind: 'loadSucceeded';
       docxBytes: ArrayBuffer;
@@ -171,6 +221,10 @@ export type ComposeWorkspaceAction =
       // The server DOCX→editor projection. Undefined (older BFF) → null in the reducer → (task 013,
       // F-2) the editor renders an explicit error/unavailable state — no client fallback reader remains.
       projection?: ComposeServerProjection | null;
+      // G1 (FR-01, task 020): the persisted origin marker (Path A only — Path B continuation and an
+      // older BFF both omit it). Normalized to `null` in the reducer (BINDING null-handling contract —
+      // treated the same as 'imported').
+      origin?: ComposeDocumentOrigin | null;
     }
   | { kind: 'loadFailed'; errorMessage: string }
   // ── FR-03 (task 012): transient upload-mount (no SPE pointer, create-on-save) ──
@@ -201,6 +255,10 @@ export type ComposeWorkspaceAction =
       containerId?: string;
       sessionId?: string;
       projection?: ComposeServerProjection | null;
+      // G7 (FR-06, task 022): the client-minted stable transient-draft dedup key
+      // (mintTransientKey). Carried onto documentRef.transientKey so every create-on-save sends it →
+      // repeated saves dedup to ONE record. Omitted by an older caller → no dedup (unchanged behavior).
+      transientKey?: string;
     }
   // ── DEF-08: AI-drafted full-document seed mount (create-on-save, like mountTransient) ──
   // Item 6 (UAT round-4): `sessionId` carries a MINTED document session id for born-in-editor mounts
@@ -208,7 +266,7 @@ export type ComposeWorkspaceAction =
   // AI toolbar thread `documentSessionId: ''` → a "Draft alternative" is reclassified as informational
   // prose instead of an in-editor redline, and `materializeComposeDraftFromLedger` aborts. Same
   // NEVER-'' invariant as `mountTransient`.
-  | { kind: 'mountDraftHtml'; html: string; fileName?: string; containerId?: string; sessionId?: string }
+  | { kind: 'mountDraftHtml'; html: string; fileName?: string; containerId?: string; sessionId?: string; transientKey?: string }
   | { kind: 'requestSave' }
   // FR-05 (task 100): create-on-save mints a NEW SPE drive-item; `documentSpeId` carries the
   // server-minted id back so a second Save targets the real item (the replace path), not the
@@ -226,8 +284,16 @@ export type ComposeWorkspaceAction =
       // "no baseline could be resolved — supply the retained original bytes (Content)".
       driveId?: string;
       versionId?: string | null;
+      // G1 (FR-01, task 020): the ComposeOrigin THIS save resolved (server-side, from ContentModel
+      // presence). Populated on every save so a same-session create-on-save's resolved origin is
+      // known without a follow-up Load — refreshed into state.origin below (never regressed to null
+      // by an older BFF response that omits the field; see the reducer).
+      origin?: ComposeDocumentOrigin | null;
+      // Prong 1 (task 055): best-effort partial-apply summary when some ops couldn't be anchored server-side
+      // (null/omitted on the common clean-batch path). Drives the honest "N edits couldn't be saved" banner.
+      partialApply?: ComposePartialApplyInfo | null;
     }
-  | { kind: 'saveFailed'; errorMessage: string }
+  | { kind: 'saveFailed'; errorMessage: string; isLock?: boolean }
   | { kind: 'reset' }
   | { kind: 'importWarnings'; warnings: Array<{ type: string; message: string }> }
   | { kind: 'pendingAssistantInsert'; payload: ComposeAssistantToWorkspaceFlow }
@@ -242,7 +308,13 @@ export type ComposeWorkspaceAction =
   | { kind: 'checkoutProbeRequested' }
   | { kind: 'checkoutSameUserConflict'; checkedOutAt: string | null }
   | { kind: 'checkoutDiscarding' }
-  | { kind: 'checkoutCancelled' };
+  | { kind: 'checkoutCancelled' }
+  // ── G8 (FR-07, task 030): external-change detection → banner ──────────────
+  // Set when check-changes/webhook reports the underlying document changed AND the editor is DIRTY
+  // (the parent defers the remount to protect unsaved edits). A CLEAN editor uses requestLoad
+  // (externalChange:true) instead, which remounts + carries the flag forward.
+  | { kind: 'externalChangeDetected' }
+  | { kind: 'externalChangeDismissed' };
 
 export const INITIAL_STATE: ComposeWorkspaceState = {
   status: 'empty',
@@ -258,12 +330,16 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   importedComments: [],
   projection: null,
   errorMessage: null,
+  saveErrorIsLock: false,
+  partialApply: null,
   pendingAssistantInsert: null,
   checkoutStatus: 'idle',
   checkoutLockedBy: null,
   sameUserConflictInfo: null,
   checkoutFailureMessage: null,
   saveSuccessToken: 0,
+  origin: null,
+  externalChangePending: false,
 };
 
 export function composeWorkspaceReducer(
@@ -277,6 +353,10 @@ export function composeWorkspaceReducer(
         status: 'loading',
         documentRef: action.documentRef,
         sessionId: action.sessionId,
+        // G8 (task 030): carry the external-change flag through a clean-editor auto-remount so the
+        // banner still renders after loadSucceeded (which spreads ...state). Defaults false for every
+        // normal load (initial open / Search).
+        externalChangePending: action.externalChange ?? false,
       };
     case 'loadSucceeded':
       return {
@@ -294,6 +374,9 @@ export function composeWorkspaceReducer(
         importedComments: action.importedComments ?? [],
         // The server projection (null for an older BFF → task 013/F-2 error-unavailable state).
         projection: action.projection ?? null,
+        // G1 (FR-01, task 020): normalize an omitted/undefined field (Path B continuation, or an
+        // older BFF) to `null` — the BINDING null-handling contract treats null as 'imported'.
+        origin: action.origin ?? null,
         documentRef: state.documentRef
           ? {
               ...state.documentRef,
@@ -340,7 +423,9 @@ export function composeWorkspaceReducer(
         etag: null,
         versionId: null,
         sessionId: action.sessionId ?? state.sessionId,
-        documentRef: { speDriveItemId: '', fileName: action.fileName, containerId: action.containerId },
+        // G7 (FR-06, task 022): stamp the client-minted transient dedup key onto documentRef so every
+        // create-on-save sends it (triggerSave) → repeated transient saves dedup to ONE record.
+        documentRef: { speDriveItemId: '', fileName: action.fileName, containerId: action.containerId, transientKey: action.transientKey },
         checkoutStatus: 'skipped',
         // A transient (Browse / assistant-upload) mount has no server pre-parse — there is no
         // stored-document Load response to source imports from. Explicitly clear rather than
@@ -357,6 +442,11 @@ export function composeWorkspaceReducer(
         // caller's projection round-trip failed/was unreachable — task 013 (F-2): the editor now
         // renders an explicit error/unavailable state for that case (no client fallback reader).
         projection: action.projection ?? null,
+        // G1 (FR-01, task 020): a fresh transient mount has no persisted origin yet (this doc has
+        // never been saved) — explicitly clear rather than inheriting a PRIOR document's origin from
+        // an earlier mount in the same tab (same "clear rather than inherit" rationale as
+        // paraIdMap/importedRevisions/importedComments above).
+        origin: null,
         errorMessage: null,
       };
     // ── DEF-08: AI-drafted full-document seed. Like mountTransient (create-on-save, no SPE
@@ -373,7 +463,9 @@ export function composeWorkspaceReducer(
         // server round-trip to supply one). Fall back to the existing state.sessionId for the Part-A
         // ledger draft path, which already set it via `requestUploadMount` before this action.
         sessionId: action.sessionId ?? state.sessionId,
-        documentRef: { speDriveItemId: '', fileName: action.fileName, containerId: action.containerId },
+        // G7 (FR-06, task 022): same transient dedup key stamp as mountTransient (born-in-editor drafts
+        // create-on-save on first Save, so they need the same repeat-save dedup identity).
+        documentRef: { speDriveItemId: '', fileName: action.fileName, containerId: action.containerId, transientKey: action.transientKey },
         checkoutStatus: 'skipped',
         // An AI-drafted seed has no server pre-parse either — same rationale as `mountTransient`.
         paraIdMap: [],
@@ -383,16 +475,23 @@ export function composeWorkspaceReducer(
         // editor seeds directly from `initialHtml`), so the editor's docx-mount branch (projection /
         // error-unavailable) is never reached here — this was never a mammoth consumer (task 012 audit).
         projection: null,
+        // G1 (FR-01, task 020): same rationale as mountTransient — a fresh AI-drafted seed has no
+        // persisted origin yet.
+        origin: null,
         errorMessage: null,
       };
     case 'requestSave':
       if (state.status !== 'loaded') return state;
-      return { ...state, status: 'saving', errorMessage: null };
+      return { ...state, status: 'saving', errorMessage: null, saveErrorIsLock: false, partialApply: null };
     case 'saveSucceeded':
       return {
         ...state,
         status: 'loaded',
         etag: action.etag,
+        // Prong 1 (task 055): a save may succeed WITH a partial-apply summary (some ops couldn't be
+        // anchored). Carry it so the banner stack prompts the user to redo just those edits; null on a
+        // clean batch (the common path) clears any prior partial-apply banner.
+        partialApply: action.partialApply ?? null,
         // UAT #7: bump the token so the banner stack surfaces a fresh transient "Saved ✓".
         saveSuccessToken: state.saveSuccessToken + 1,
         // UAT 2026-07-19 P2: adopt the just-saved SPE version id as the baseline ONLY on the
@@ -404,6 +503,10 @@ export function composeWorkspaceReducer(
         //   every save is a delta vs the load-time original (FR-01). Advancing it each save would
         //   re-baseline onto the just-saved version and corrupt the tracked-change accumulation.
         versionId: state.versionId ?? (action.versionId && action.versionId.length > 0 ? action.versionId : null),
+        // G1 (FR-01, task 020): refresh from this save's resolved origin when the response carries
+        // one; otherwise keep whatever state already had (never regress a known origin to null just
+        // because an older BFF response omitted the field).
+        origin: action.origin ?? state.origin,
         documentRef: state.documentRef
           ? {
               ...state.documentRef,
@@ -422,7 +525,7 @@ export function composeWorkspaceReducer(
           : state.documentRef,
       };
     case 'saveFailed':
-      return { ...state, status: 'loaded', errorMessage: action.errorMessage };
+      return { ...state, status: 'loaded', errorMessage: action.errorMessage, saveErrorIsLock: action.isLock ?? false };
     case 'reset':
       return INITIAL_STATE;
     case 'importWarnings':
@@ -505,6 +608,11 @@ export function composeWorkspaceReducer(
         sameUserConflictInfo: null,
         checkoutFailureMessage: null,
       };
+    // ── G8 (task 030): external-change banner ────────────────────────────────
+    case 'externalChangeDetected':
+      return { ...state, externalChangePending: true };
+    case 'externalChangeDismissed':
+      return { ...state, externalChangePending: false };
     default:
       return state;
   }

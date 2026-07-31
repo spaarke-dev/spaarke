@@ -105,6 +105,21 @@ describe('EmailCardList', () => {
     expect(onSelect).toHaveBeenCalledWith('e1');
   });
 
+  it('renders the association review status dot when a card carries a reviewTone (owner UAT 2026-07-30 R2 item 5)', () => {
+    const items: EmailCardItem[] = [
+      makeItem({ id: 'r', subject: 'Needs review', reviewTone: 'red' }),
+      makeItem({ id: 'y', subject: 'Needs confirm', reviewTone: 'yellow' }),
+      makeItem({ id: 'g', subject: 'Confirmed', reviewTone: 'green' }),
+    ];
+
+    renderWithProvider(<EmailCardList items={items} onSelect={jest.fn()} />);
+
+    // Each tone renders its labelled status dot (role="img"), left of the sender.
+    expect(screen.getByRole('img', { name: 'Requires review' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Needs confirmation' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Confirmed' })).toBeInTheDocument();
+  });
+
   it('fires onSelect on keyboard activation (Enter)', () => {
     const onSelect = jest.fn();
     const items: EmailCardItem[] = [makeItem({ id: 'e1' })];

@@ -150,6 +150,8 @@ export interface IConversationModalProps {
   threadNames: Record<string, string>;
   /** Host-provided OOB record open (Layout 1). The host closes this modal first, then navigates. */
   onOpenRecord: (entityType: string, id: string) => void;
+  /** Thread to open on first load (round-8.4 item 8) — set when the modal is opened by double-clicking a message row. */
+  initialThreadId?: string;
 }
 
 export const ConversationModal: React.FC<IConversationModalProps> = ({
@@ -162,6 +164,7 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
   currentUserSystemUserId,
   threadNames,
   onOpenRecord,
+  initialThreadId,
 }) => {
   const s = useStyles();
 
@@ -261,6 +264,7 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
               regarding={{ entityType, id }}
               renderConversation={renderConversation}
               navigationService={navigationService}
+              initialThreadId={initialThreadId}
             />
           </div>
         </div>

@@ -170,7 +170,7 @@ public sealed class ComposeFidelitySeamTests : IClassFixture<ComposeFidelitySeam
             tenantId = ComposeFidelitySeamFixture.TestTenantId,
             driveId,
             content = original,
-            operationLog = new { schemaVersion = "compose-ops-v1", operations },
+            operationLog = new { schemaVersion = "compose-ops-v2", operations },
         });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK,
@@ -387,7 +387,7 @@ public sealed class ComposeFidelitySeamTests : IClassFixture<ComposeFidelitySeam
             content = rendered,
             operationLog = new
             {
-                schemaVersion = "compose-ops-v1",
+                schemaVersion = "compose-ops-v2",
                 operations = new object[]
                 {
                     new

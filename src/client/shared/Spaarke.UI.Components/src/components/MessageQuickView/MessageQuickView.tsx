@@ -119,10 +119,15 @@ function joinRecipients(to: string | string[] | null | undefined): string {
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
+  // Round-8.4 item 7: size to fit content (body is capped at 200 chars, so height is bounded) with NO vertical
+  // scrollbar, and NO horizontal scrollbar — `overflowX: hidden` + `boxSizing: border-box` + word-breaking body/field
+  // values keep a long unbroken token from forcing a left/right scroll.
   surface: {
     width: '360px',
-    maxHeight: '400px',
-    overflowY: 'auto',
+    maxWidth: '360px',
+    boxSizing: 'border-box',
+    overflowX: 'hidden',
+    overflowY: 'visible',
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalS,
@@ -151,13 +156,20 @@ const useStyles = makeStyles({
   fieldValue: {
     color: tokens.colorNeutralForeground1,
     wordBreak: 'break-word',
+    overflowWrap: 'anywhere', // long email addresses must wrap, never force a horizontal scrollbar (round-8.4 item 7)
+    minWidth: 0,
   },
+  // Round-8.4 item 7: reserve ~5 lines (5 × 20px lineHeightBase300) so even a blank/short preview shows a consistent
+  // box that doesn't jump; `overflowWrap: anywhere` keeps a long unbroken token inside the fixed width.
   body: {
+    minHeight: '100px',
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
+    overflowWrap: 'anywhere',
     color: tokens.colorNeutralForeground1,
   },
   emptyBody: {
+    minHeight: '100px',
     color: tokens.colorNeutralForeground3,
   },
   errorState: {

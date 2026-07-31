@@ -79,6 +79,14 @@ interface SectionConfigBase {
    * Useful for replacing the section title with a view selector dropdown.
    */
   titleContent?: React.ReactNode;
+  /**
+   * When true, suppress the section title bar (round-8.2 per operator). Set by
+   * grid-backed sections (Documents, Matters, Projects, Invoices, Work Assignments)
+   * whose embedded `<DataGrid />` renders its OWN elevated header — the SectionPanel
+   * title would be a redundant second header. Non-grid sections (Messages, Daily
+   * Briefing, Calendar, …) omit this and keep their 16px/semibold title.
+   */
+  hideTitle?: boolean;
   /** Optional badge count shown beside the title. */
   badgeCount?: number;
   /** Custom toolbar node rendered in the section header (right side). */

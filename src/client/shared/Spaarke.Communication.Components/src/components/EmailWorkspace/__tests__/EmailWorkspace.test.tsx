@@ -158,20 +158,57 @@ function renderWorkspace(overrides: Partial<EmailWorkspaceProps> = {}, theme = w
 }
 
 describe('EmailWorkspace', () => {
-  it('composes the two-pane surface: view selector + card list + reading-pane shell placeholder', async () => {
+  it('composes the two-pane surface and auto-selects the first email on load (owner UAT R2 item 3)', async () => {
     renderWorkspace();
 
-    expect(await screen.findByText('Quarterly filing update')).toBeInTheDocument();
+    // The card renders in the left list...
+    const listPane = await screen.findByTestId('email-list-pane');
+    expect(await within(listPane).findByText('Quarterly filing update')).toBeInTheDocument();
     expect(screen.getByTestId('email-workspace')).toBeInTheDocument();
-    expect(screen.getByTestId('email-list-pane')).toBeInTheDocument();
     expect(screen.getByTestId('email-reading-pane')).toBeInTheDocument();
-    expect(screen.getByText('Select an email')).toBeInTheDocument();
+    // ...and the first email is auto-selected (item 3): the reading header paints
+    // and the "Select an email" placeholder is gone — no user click required.
+    expect(await screen.findByTestId('email-reading-header')).toBeInTheDocument();
+    expect(screen.queryByText('Select an email')).not.toBeInTheDocument();
+  });
+
+  it('auto-selects the FIRST of several rows and drives the per-selection read for it (owner UAT R2 item 3)', async () => {
+    const ROW_A = {
+      ...VIEW_ROW,
+      sprk_communicationid: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      sprk_subject: 'First email',
+    };
+    const ROW_B = {
+      ...VIEW_ROW,
+      sprk_communicationid: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      sprk_subject: 'Second email',
+    };
+    const dataverseClient = makeDataverseClient();
+    (dataverseClient.retrieveMultipleRecords as jest.Mock).mockResolvedValue({
+      entities: [ROW_A, ROW_B],
+      moreRecords: false,
+    });
+    const dataService = makeDataService();
+
+    renderWorkspace({ dataverseClient, dataService });
+
+    // The per-selection record read fires for the FIRST row's id — the first email
+    // is auto-selected on load, not a later one and not none.
+    await waitFor(() =>
+      expect(dataService.retrieveRecord).toHaveBeenCalledWith(
+        'sprk_communication',
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+      )
+    );
   });
 
   it('selecting a card paints the header from the record and swaps the body into the reading pane', async () => {
     renderWorkspace();
 
-    fireEvent.click(await screen.findByText('Quarterly filing update'));
+    // Click the card in the LEFT list (the subject now also appears in the reading
+    // pane once auto-selected, so scope the click to the list pane to stay unambiguous).
+    const listPane = await screen.findByTestId('email-list-pane');
+    fireEvent.click(await within(listPane).findByText('Quarterly filing update'));
 
     // Title bar paints from the record (EmailReadingHeader) — the subject appears
     // on its own light-gray row (no tracking trio, no from/to/cc/bcc here).
@@ -210,7 +247,8 @@ describe('EmailWorkspace', () => {
   it('renders a Subject line directly above the message body (owner UAT #4)', async () => {
     renderWorkspace();
 
-    fireEvent.click(await screen.findByText('Quarterly filing update'));
+    const listPane = await screen.findByTestId('email-list-pane');
+    fireEvent.click(await within(listPane).findByText('Quarterly filing update'));
 
     // A dedicated subject line lives in the body region (above EmailBodyView),
     // carrying the same subject value the title bar shows (populated once the
@@ -227,7 +265,8 @@ describe('EmailWorkspace', () => {
     });
 
     renderWorkspace({ dataService });
-    fireEvent.click(await screen.findByText('Quarterly filing update'));
+    const listPane = await screen.findByTestId('email-list-pane');
+    fireEvent.click(await within(listPane).findByText('Quarterly filing update'));
 
     await waitFor(() =>
       expect(screen.getByTestId('section-toggle-related-to')).toHaveAttribute('aria-expanded', 'false')
@@ -254,7 +293,8 @@ describe('EmailWorkspace', () => {
 
     renderWorkspace({ dataService, authenticatedFetch });
 
-    fireEvent.click(await screen.findByText('Quarterly filing update'));
+    const listPane = await screen.findByTestId('email-list-pane');
+    fireEvent.click(await within(listPane).findByText('Quarterly filing update'));
 
     // Loading: a skeleton renders while the eml-render fetch is in flight (EmailBodyView, task 033).
     // Loaded: the resolved archive id flows through to `EmailBodyView`, which calls `authenticatedFetch`
@@ -277,7 +317,9 @@ describe('EmailWorkspace', () => {
         </div>
       </FluentProvider>
     );
-    expect(await screen.findByText('Quarterly filing update')).toBeInTheDocument();
+    // Await a SETTLED reading-pane marker (item 3 auto-selects the first email, so
+    // both mounts reach the same loaded state before we snapshot the HTML).
+    await within(await screen.findByTestId('email-reading-pane')).findByText(/latest draft/i);
     const widgetHtml = first.container.querySelector('[data-testid="email-workspace"]')?.outerHTML;
     first.unmount();
 
@@ -288,19 +330,30 @@ describe('EmailWorkspace', () => {
         </main>
       </FluentProvider>
     );
-    expect(await screen.findByText('Quarterly filing update')).toBeInTheDocument();
+    await within(await screen.findByTestId('email-reading-pane')).findByText(/latest draft/i);
     const codePageHtml = second.container.querySelector('[data-testid="email-workspace"]')?.outerHTML;
 
+    // Now that item 3 auto-loads the reading pane, the surface mounts Fluent
+    // components (Menu / CollapsibleSection) that mint INSTANCE-SCOPED `useId`
+    // values — those legitimately differ between two sequential mounts and are not
+    // a parity break. Strip the generated-id attributes before comparing so the
+    // assertion tests structural parity (NFR-06), not id-counter timing.
+    const stripVolatileIds = (html: string | undefined): string =>
+      (html ?? '').replace(
+        /\s(?:id|for|aria-controls|aria-labelledby|aria-describedby|aria-owns|aria-activedescendant)="[^"]*"/g,
+        ''
+      );
+
     expect(widgetHtml).toBeTruthy();
-    expect(widgetHtml).toEqual(codePageHtml);
+    expect(stripVolatileIds(widgetHtml)).toEqual(stripVolatileIds(codePageHtml));
   });
 
   it('renders correctly under a dark FluentProvider theme (ADR-021) with no console errors', async () => {
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     renderWorkspace({}, webDarkTheme);
 
-    expect(await screen.findByText('Quarterly filing update')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Quarterly filing update'));
+    // First email auto-selects (item 3) → the reading header paints in dark mode
+    // with no console errors, no user click required.
     await waitFor(() => expect(screen.getByTestId('email-reading-header')).toBeInTheDocument());
 
     expect(errorSpy).not.toHaveBeenCalled();

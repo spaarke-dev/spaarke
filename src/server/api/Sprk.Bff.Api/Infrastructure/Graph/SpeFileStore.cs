@@ -136,6 +136,20 @@ public class SpeFileStore : ISpeFileOperations
         => _driveItemOps.GetPreviewUrlAsync(driveId, itemId, correlationId, ct);
 
     /// <summary>
+    /// Creates a recipient-openable SPE sharing link for a DriveItem via OBO (R2 item 12 — the email
+    /// composer's "Link" attachments). Delegates to <see cref="DriveItemOperations.CreateSharingLinkAsUserAsync"/>.
+    /// </summary>
+    public Task<string?> CreateSharingLinkAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        string linkType,
+        string scope,
+        DateTimeOffset? expiration = null,
+        CancellationToken ct = default)
+        => _driveItemOps.CreateSharingLinkAsUserAsync(ctx, driveId, itemId, linkType, scope, expiration, ct);
+
+    /// <summary>
     /// Resolve a container ID to its drive ID.
     /// Drive IDs start with "b!" (base64-encoded SharePoint site reference).
     /// Container IDs are GUIDs like "a1234567-89ab-cdef-0123-456789abcdef".

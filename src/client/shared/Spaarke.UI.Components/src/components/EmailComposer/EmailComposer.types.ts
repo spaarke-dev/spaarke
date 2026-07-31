@@ -438,6 +438,17 @@ export interface IEmailComposerProps {
    * Attach only.
    */
   onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
+  /**
+   * Resolve a recipient-openable SPE **sharing link** for a governed `sprk_document`
+   * (owner UAT 2026-07-30 R2 item 12). Called AT SEND for every attachment the author toggled
+   * **Link** on that has a `documentId` — the returned URL REPLACES the attachment's `linkUrl` in
+   * the body-link block, so recipients (including external) open the actual file rather than an
+   * internal Dataverse/SPE-storage URL. Best-effort: return `null` (or throw) and the send keeps the
+   * prior `linkUrl` — a share-link failure NEVER blocks the send. Context-agnostic (ADR-012): the
+   * host owns the BFF call (`POST /api/documents/{id}/share-link`). Omitted → links keep their
+   * original (internal) URL, unchanged.
+   */
+  onResolveShareLink?: (documentId: string) => Promise<string | null>;
 
   // — Recipient directory lookup (RecipientField) —
   /** Mirrors `searchUsersAndContacts(dataService, query)` shape, pre-bound by the host. */

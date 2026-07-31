@@ -66,6 +66,9 @@ public sealed class CommunicationArrivedProducer
     private const string RegardingIdField = "sprk_regardingrecordid";
     private const string RegardingTypeField = "sprk_regardingrecordtype";
     private const string ThreadPrivacyStateField = "sprk_privacystate";
+    private const string ThreadNameField = "sprk_name";  // thread name for the enriched notification (round-8.4 item 2)
+    private const string SentByField = "sprk_sentby";    // sender systemuser lookup — its .Name is the DISPLAY NAME (round-8.4 item 2)
+    private const string FromField = "sprk_from";        // fallback sender string (external inbound with no systemuser)
 
     // Q2 app-notification mirror. Category is load-bearing for idempotency (recipient + category + regarding=thread).
     private const string CommunicationNotificationCategory = "communication";
@@ -90,13 +93,18 @@ public sealed class CommunicationArrivedProducer
         {
             ThreadLookupField, CommunicationTypeField, DirectionField,
             IsInternalOnlyField, CreatedOnField,
-            RegardingIdField, RegardingTypeField,
+            RegardingIdField, RegardingTypeField, SentByField, FromField,
         };
         cols.AddRange(RegardingFieldMap.AllRegardingFields);
         return cols.ToArray();
     }
 
-    private static readonly string[] ThreadColumns = { ThreadPrivacyStateField };
+    // Round-8.4 item 2: the thread carries the ADR-024 regarding lookups + name. Loading them lets the deep-link open
+    // the REGARDING record (which hosts the conversation PCF) instead of falling back to the non-navigable
+    // sprk_communicationthread record (that fallback was the source of the "Open" → generic MDA error), and lets the
+    // notification name the thread.
+    private static readonly string[] ThreadColumns =
+        new[] { ThreadPrivacyStateField, ThreadNameField }.Concat(RegardingFieldMap.AllRegardingFields).ToArray();
 
     private readonly IGenericEntityService _entityService;
     private readonly CommunicationFanOutTargetingService _targeting;
@@ -202,11 +210,33 @@ public sealed class CommunicationArrivedProducer
             var regardingId = message.GetAttributeValue<string>(RegardingIdField);
             var regardingType = message.GetAttributeValue<string>(RegardingTypeField);
 
-            // Q2 (2026-07-28): deep-link target for the MDA bell notification = the REGARDING record (it hosts the
-            // Communications conversation panel), resolved from the TYPED ADR-024 lookup for a reliable entity
-            // logical name; a record-less thread falls back to the thread record so the notification stays clickable.
-            var (linkEntityType, linkId) = ResolveTypedRegarding(message) ?? (ThreadEntity, threadRef.Id);
+            // Q2 (2026-07-28) + round-8.4 item 2: deep-link target for the MDA bell notification = the REGARDING record
+            // (it hosts the Communications conversation panel). Resolve from the TYPED ADR-024 lookup for a reliable
+            // entity logical name — first from the MESSAGE (auto-threaded messages may not have it stamped yet), then
+            // from the THREAD (which carries the regarding), and only THEN fall back to the thread record. The thread
+            // fallback opened `sprk_communicationthread`, which has no navigable app form → the "Open" click errored.
+            var (linkEntityType, linkId) =
+                ResolveTypedRegarding(message)
+                ?? (thread is not null ? ResolveTypedRegarding(thread) : null)
+                ?? (ThreadEntity, threadRef.Id);
             var actionUrl = BuildRecordDeepLink(linkEntityType, linkId);
+
+            // Enriched notification content (round-8.4 item 2): name the thread + who sent it. Sender is the systemuser
+            // DISPLAY NAME (sprk_sentby.Name), NOT the raw sprk_from address — so the notification names a person, not an
+            // address (stays within the signal-only, no-address posture of NFR-02/03). Falls back to sprk_from only for
+            // external inbound with no resolved systemuser, and omits the sender line entirely if neither is present.
+            var threadName = thread?.GetAttributeValue<string>(ThreadNameField);
+            var senderName = message.GetAttributeValue<EntityReference>(SentByField)?.Name;
+            if (string.IsNullOrWhiteSpace(senderName))
+            {
+                senderName = message.GetAttributeValue<string>(FromField);
+            }
+            var notifyTitle = string.IsNullOrWhiteSpace(threadName)
+                ? envelope.SenderDisplay
+                : $"{envelope.SenderDisplay} · {threadName}";
+            var notifyBody = string.IsNullOrWhiteSpace(senderName)
+                ? "Open to view the conversation."
+                : $"From {senderName} — open to view the conversation.";
 
             // 5) Per recipient: durable outbox row FIRST, then best-effort ping. Ordering is structural
             //    (PingUserAsync requires the outboxRowId that only exists after the write). Then mirror a
@@ -234,8 +264,8 @@ public sealed class CommunicationArrivedProducer
                 var notify = await _actionSeam.CreateNotificationAsync(
                     new CreateNotificationRequest
                     {
-                        Title = envelope.SenderDisplay, // "New email" / "New message" — privacy-safe label
-                        Body = "Open to view the conversation.",
+                        Title = notifyTitle, // "New message · {thread name}" (round-8.4 item 2)
+                        Body = notifyBody,   // "From {sender} — open to view the conversation." (round-8.4 item 2)
                         RecipientId = recipientSystemUserId,
                         Category = CommunicationNotificationCategory,
                         RegardingId = threadRef.Id,      // idempotency key = thread → one unread bell per thread

@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>G3 alignment applier — setBlockAttr Alignment → w:pPrChange (tracked) / clean paragraph property</title>
+    <phase>1 Edit-path ops</phase>
+    <gate>dep:001</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the shared OOXML write engine (ComposeShadowPatchEngine.cs); tags include bff-api + engine; save/apply change requires ADR-038 seam DoD + byte-diff no-regression.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fills one existing StructuralOpNotYetImplemented throw for a single already-enumerated attr (Alignment); client already emits it; scope is narrow and fully specified with a reference applier to copy.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies ComposeShadowPatchEngine.cs (setBlockAttr throw :249 / enum :1438), the shared engine file every Phase-1 task edits. Serialize against 011/012/013/014 to avoid engine churn; this task is first in the G3 applier sequence.</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, compose, engine</tags>
+    <estimated-effort>4-6 hours (S)</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Implement the setBlockAttr applier branch for the Alignment case in ComposeShadowPatchEngine.cs: fill the
+    StructuralOpNotYetImplemented throw at :249 for Alignment so an alignment edit applies as a tracked w:pPrChange
+    on an imported/tracked doc, or as a clean paragraph property on an authored doc. The client already emits the
+    Alignment step. Re-enable the alignment control in ComposeFormatToolbar.tsx (structural guard :537-581). Add a
+    seam slice proving alignment round-trips and untouched OOXML subtrees stay byte-identical.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the ComposeShadowPatchEngine surgical-op model, OOXML paragraph-property
+    (w:pPr) / revision (w:pPrChange) generation, and the (paraId, runIndex, offset) anchor contract. Honor ADR-049
+    and CLAUDE.md §10.
+  </role>
+
+  <goal>
+    ComposeShadowPatchEngine applies a setBlockAttr Alignment op: tracked w:pPrChange for imported docs, clean w:pPr
+    for authored docs — resolved by paraId, never by text-search. The R4 ET-1 alignment guard is removed (control
+    re-enabled on loaded docs in ComposeFormatToolbar.tsx). A tests/integration/seam/Compose/ slice proves alignment
+    round-trips through the wire and untouched subtrees are byte-identical; the corpus byte-diff harness (24/24)
+    does not regress.
+  </goal>
+
+  <context>
+    <background>
+      Spec FR-03 (G3) partial + gap G3 alignment + R4 guard ET-1. ComposeShadowPatchEngine currently throws
+      StructuralOpNotYetImplemented at :249 for setBlockAttr; Alignment is already an enumerated ComposeBlockAttr
+      value (:1438) and the client already emits the Alignment step in classifyStep — so only the engine applier
+      branch and the toolbar guard removal remain. Alignment is the smallest structural op (S) and lands first so
+      the heading/list applier (011) builds on the same setBlockAttr surface.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx</file>
+      <file>tests/integration/seam/Compose/</file>
+    </relevant-files>
+    <dependencies>001 (Phase-0 gate outputs — R4.5 merge confirmation / baseline green).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Honor I-1…I-7 + D1–D5. Engine is byte[]-in/byte[]-out; the Alignment edit is a surgical op anchored by (paraId, runIndex, offset); untouched OOXML subtrees stay byte-identical after save. Preserve the two-byte-author split — imported/tracked → w:pPrChange via the engine; authored → clean w:pPr.</constraint>
+    <constraint source="ADR-049">NO text-search anywhere in the write path (I-7 / NFR-02) — locate the target paragraph by paraId, never by content match.</constraint>
+    <constraint source="ADR-010">Patch engine = stateless concrete singleton; the new alignment branch carries no per-request state.</constraint>
+    <constraint source="ADR-013">No AI internals in Services/Compose/ (Tier-1 NetArchTest) — no IOpenAiClient/executor/routing types.</constraint>
+    <constraint source="ADR-038">Add a through-the-wire WebApplicationFactory seam slice in tests/integration/seam/Compose/ for this apply change. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="project">NFR-01 — the corpus byte-diff harness (R4's 24/24) MUST NOT regress. NFR-08 — removing the ET-1 guard MUST NOT reintroduce a user-triggerable error or silent-loss path.</constraint>
+    <constraint source="CLAUDE.md-10">BFF task — state Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); engine/save orchestration stays in Services/Compose/. Verify publish ≤60 MB compressed and report absolute + delta vs ~46.11 MB baseline. Run /conflict-check before the PR. Zero new runtime package (NFR-03).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+    </files>
+    <patterns>
+      <pattern name="Tracked applier reference" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs">
+        Copy the surgical-op shape of ApplyInsertText:314 / WrapRunAsDeleted:942 — locate the target paragraph by paraId, emit the revision markup (here w:pPrChange for tracked / plain w:pPr for clean), touch nothing else.
+      </pattern>
+      <pattern name="Clean paragraph-property authoring" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs">
+        BuildRun:366 / AssembleParagraph:346 show the clean-authoring conventions the authored-path alignment property should match (no w:ins/w:del/w:pPrChange).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read ComposeShadowPatchEngine.cs around the setBlockAttr throw (:249) and the ComposeBlockAttr enum (:1438); read ApplyInsertText:314 / WrapRunAsDeleted:942 for the surgical-op shape and how the origin (imported/tracked vs authored/clean) is determined.</step>
+    <step order="2">Implement the Alignment branch: resolve the target paragraph by paraId; for imported/tracked docs emit a w:pPrChange recording the prior w:jc + set the new w:jc; for authored docs set/replace w:jc as a clean paragraph property with no revision markup. No text-search.</step>
+    <step order="3">Re-enable the alignment control in ComposeFormatToolbar.tsx (structural guard :537-581) for the alignment case only; leave heading/list/table guards intact (owned by 011/014).</step>
+    <step order="4">Add a tests/integration/seam/Compose/ slice: apply an alignment change on a loaded corpus doc through the wire, assert the paragraph carries the expected w:jc (+ w:pPrChange on the tracked path), and assert untouched subtrees are byte-identical.</step>
+    <step order="5">Run the corpus byte-diff harness (confirm 24/24) and dotnet publish -c Release; report absolute size + delta vs ~46.11 MB baseline.</step>
+    <step order="6">Run /conflict-check; state Placement Justification for the PR.</step>
+    <step order="7">Run/verify: build + this task's seam/unit tests pass.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If applying the w:pPrChange (or locating the target paragraph) would require a text/content search instead of resolving by paraId, STOP and escalate — this is an I-7 / NFR-02 violation, not something to work around.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, test, and publish the BFF; run the corpus byte-diff harness.</tool>
+    <tool name="npm">Build the Spaarke.Compose.Components client for the toolbar change.</tool>
+    <tool name="terminal">Run /conflict-check before the PR.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs (Alignment setBlockAttr branch)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx (alignment guard removed)</output>
+    <output type="test">tests/integration/seam/Compose/ (alignment round-trip seam slice)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an imported/tracked doc, when a setBlockAttr Alignment op is applied and saved, then the target paragraph carries a w:pPrChange recording the prior alignment plus the new w:jc, and the doc opens in Word with a tracked paragraph-property change.</criterion>
+    <criterion testable="true">Given an authored doc, when a setBlockAttr Alignment op is applied and saved, then the paragraph carries a clean w:jc with zero w:ins/w:del/w:pPrChange markup.</criterion>
+    <criterion testable="true">Given any alignment edit, when the target paragraph is resolved, then it is located by paraId only — no text-search occurs in the write path (assert/inspect: no content-match code on the apply path).</criterion>
+    <criterion testable="true">Given the seam slice runs through the wire, then untouched OOXML subtrees are byte-identical and the corpus byte-diff harness remains 24/24 (no regression).</criterion>
+    <criterion testable="true">Given the ET-1 guard is removed, then the alignment control is enabled on loaded docs and applying it produces no user-triggerable error and no silent-loss path (NFR-08).</criterion>
+    <criterion testable="true">Given dotnet publish -c Release, then compressed output is ≤60 MB and the absolute size + delta vs ~46.11 MB baseline is reported; no new runtime package was added.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Alignment is already an enumerated ComposeBlockAttr and already emitted by the client, so this task adds no new op
+    type — it fills an existing seam. First of the G3 applier sequence; 011 (heading/list) builds on the same
+    setBlockAttr surface, hence parallel-safe=false. Spec §FR-03; guard site ComposeFormatToolbar.tsx :537-581.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files first. Follow task-execute pre-execution checklist incl. Step 9.5 gates (code-review + adr-check, FULL/BFF). Enforce §10 publish-size gate and /conflict-check.</protocol>
+  </execution>
+</task>

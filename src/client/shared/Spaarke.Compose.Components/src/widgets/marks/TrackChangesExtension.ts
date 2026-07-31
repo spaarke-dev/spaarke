@@ -156,6 +156,13 @@ export const TrackChangesExtension = Extension.create<TrackChangesOptions>({
         props: {
           decorations(state) {
             const pluginState = trackChangesPluginKey.getState(state);
+            // G11 (FR-10, task 032 — UAT BUG-B): the toggle flips ONLY this DECORATION overlay (the
+            // user's own free-typed edits). Imported/AI redlines are first-class schema MARKS
+            // (insertion/deletion), which are document content and render independently of this plugin —
+            // so returning DecorationSet.empty here hides ONLY the user's overlay, never an imported/AI
+            // redline. buildTrackChangeDecorations additionally SKIPS any mark-bearing block, so the
+            // overlay never touches an imported redline even when enabled. Locked by
+            // TrackChangesExtension.test.ts "G11 (task 032)".
             if (!pluginState?.enabled) return DecorationSet.empty;
             return buildTrackChangeDecorations(state.doc, options.getBaseline());
           },
