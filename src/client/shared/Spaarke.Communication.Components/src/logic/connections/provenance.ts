@@ -130,24 +130,38 @@ function nameMatchOf(candidate: ProvenanceCandidate): NameMatchInfo | null {
   return null;
 }
 
+// Streamlined so every reason fits ONE line inside the ~200px candidate card, so
+// all cards render at the same height (owner UAT 2026-07-31 — "streamline the
+// matching wording"). Dropped the "the" articles + "number"/"because" filler.
 const WHERE_LABEL: Record<string, string> = {
-  subject: 'the subject line',
-  body: 'the email body',
+  subject: 'subject line',
+  body: 'email body',
   attachment: 'an attachment',
 };
 
-/** Human, specific match reason for a candidate (e.g. "Matched by name in the subject line"). */
+/** Short one-line reason for non-name-match candidates, keyed on the leading contributor rung. */
+const RUNG_REASON_SHORT: Record<string, string> = {
+  ExplicitReference: 'Matched subject reference',
+  ThreadContinuity: 'Matched from email thread',
+  ParticipantCorrelation: 'Matched known participants',
+  StructuralDetector: 'Matched message structure',
+  SemanticMatch: 'Matched content',
+  AiClassification: 'AI classified content',
+  RecordNameMatch: 'Matched name or number',
+};
+
+/** Human, one-line match reason for a candidate (e.g. "Matched reference in subject line"). */
 export function candidateMatchReason(candidate: ProvenanceCandidate): string {
   const nm = nameMatchOf(candidate);
   if (nm) {
-    const kind = nm.matched === 'number' ? 'reference number' : 'name';
+    const kind = nm.matched === 'number' ? 'reference' : 'name';
     const where = WHERE_LABEL[nm.where ?? ''] ?? 'the email';
-    return `Matched by ${kind} in ${where}`;
+    return `Matched ${kind} in ${where}`;
   }
-  // Fall back to the rung-phrase rationale for non-name-match candidates (thread/participant/AI).
-  const phrases = (candidate.contributors ?? []).map(contributorPhrase);
-  if (phrases.length === 0) return 'No match reason recorded';
-  return `Matched because ${phrases[0]}`;
+  // Fall back to a short rung reason for non-name-match candidates (thread/participant/AI).
+  const firstRung = candidate.contributors?.[0]?.rung;
+  if (firstRung && RUNG_REASON_SHORT[firstRung]) return RUNG_REASON_SHORT[firstRung];
+  return 'No match reason recorded';
 }
 
 /** The record's reference number when a RecordNameMatch contributor captured it. */
