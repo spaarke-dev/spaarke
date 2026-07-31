@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>FR-14 — "Create Summary Memo" toolbar dropdown: generate-docx download + Email memo</title>
+    <phase>5 Output Deliverables</phase>
+    <gate>blocked (deps 050)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF docx generation + client toolbar + EmailComposer integration (.tsx + server).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Wiring shipped engines (renderer, EmailComposer) to 050's content — fully specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>050</deps>
+    <tags>compose, bff, memo, fluent-ui, email</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add a Compose toolbar control "Create Summary Memo" with a dropdown: (a) GENERATE MEMO — server renders the 050 memo
+    as a .docx (ComposeDocumentRenderer/OpenXML — the nda-r1 Summary-Page engines) and the client downloads it;
+    (b) EMAIL MEMO — opens the shipped EmailComposer with the memo in the body + a prefilled subject.
+  </prompt>
+  <role>SPAARKE platform developer. Compose toolbar, OpenXML rendering, EmailComposer integration.</role>
+  <goal>One toolbar affordance produces a downloadable memo .docx or a prefilled email draft.</goal>
+
+  <context>
+    <background>
+      Engines: ComposeDocumentRenderer / ComposeShadowPatchEngine (server OpenXML — same engines the nda-r1 Summary-Page
+      writer used; DocxAnnotationWriter is RETIRED, do not resurrect). Email: the canonical EmailComposer form
+      (Spaarke.UI.Components) + the ADR-045 send engine — no ad-hoc send path; "Email memo" OPENS the composer prefilled
+      (user sends; we do not auto-send). Toolbar placement: the Compose toolbar's existing extension pattern
+      (ComposeAiToolbar / toolbar activation) — a persistent tool per UI-element criteria. Memo content: read the 050
+      record (or generate-then-render in one flow — decide; prefer render-from-persisted so docx ≡ record). PDF export
+      is NOT in scope (DOCX only; compose-r5 owns PDF).
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components (toolbar control)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs (memo rendering — extension)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components (EmailComposer)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">the memo content/record</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-045">Email path = the canonical EmailComposer + send engine; the control PREFILLS and opens — never auto-sends. Scope: (b).</constraint>
+    <constraint source="ADR-021">Toolbar control + dropdown in Fluent v9 tokens + dark mode. Scope: client UI.</constraint>
+    <constraint source="project">Render-from-persisted: the .docx and email body derive from the persisted 050 record so exports ≡ the durable artifact. Scope: both paths.</constraint>
+    <constraint source="project">Reuse the nda-r1 Summary-Page OpenXML approach; DocxAnnotationWriter is RETIRED — never reference it. Scope: server rendering.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Docx rendering + email composition</topic>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md</file>
+    </files>
+    <patterns>
+      <pattern name="Summary-Page writer" location="nda-r1 task 041 output in Services/Compose (ComposeDocumentRenderer/ShadowPatchEngine section-insert)">The OpenXML precedent for memo rendering.</pattern>
+      <pattern name="EmailComposer prefill" location="src/client/shared/Spaarke.UI.Components (EmailComposer)">Open-with-body+subject pattern.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; locate the toolbar extension seam + the Summary-Page rendering precedent + EmailComposer's prefill contract.</step>
+    <step order="1">Server: memo-record → .docx rendering (extend the renderer; layout: title, doc/analysis metadata, per-section table rows {location, before, after, why, golden-ref}).</step>
+    <step order="2">Client: toolbar dropdown; Generate → download; Email → EmailComposer prefilled (subject: "Review Summary Memo — {analysis name}").</step>
+    <step order="3">Tests: rendering (sections present), download flow, composer prefill; publish-size check.</step>
+    <step order="4">Update TASK-INDEX.md: 051 ✅.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Generate memo"><steps><step>Complete a review; toolbar → Create Summary Memo → Generate</step></steps><expected>A .docx downloads; opening it shows the memo sections matching the review.</expected></test>
+    <test name="Email memo"><steps><step>Toolbar → Create Summary Memo → Email</step></steps><expected>EmailComposer opens with memo body + prefilled subject; nothing auto-sends.</expected></test>
+    <test name="Dark mode"><steps><step>Toggle dark mode with the dropdown open</step></steps><expected>Semantic tokens.</expected></test>
+  </ui-tests>
+
+  <tools><tool name="dotnet">renderer + publish-size</tool><tool name="npm">client build/tests</tool></tools>
+  <outputs>
+    <output type="code">toolbar control + memo docx rendering + EmailComposer wiring</output>
+    <output type="test">rendering + flow tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Generate memo downloads a .docx whose sections match the persisted memo record exactly.</criterion>
+    <criterion testable="true">Email memo opens EmailComposer with body + subject prefilled; the user must act to send.</criterion>
+    <criterion testable="true">Negative: no memo record yet → the dropdown actions surface a clear "generate the review/memo first" state, not an empty export.</criterion>
+    <criterion testable="true">BFF publish ≤60 MB reported; builds green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-14; design Lens 2 #6. DOCX only (PDF → compose-r5).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

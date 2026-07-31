@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>DEF-01 — advisory-comment placement precision + restore original assertion</title>
+    <phase>1 Fidelity</phase>
+    <gate>blocked (deps 011)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING (restores a weakened assertion) — unconditional code-review + adr-check per root CLAUDE.md §8; correctness-critical placement logic.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Brownfield root-cause with the fix vector already identified (deterministic anchoring from 011).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>011</deps>
+    <tags>compose, frontend, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Fix the DEF-01 correctness bug: placeAdvisoryComments materializes a comment for a target that should surface as
+    ambiguous (placed=2 where the original test expects placed=1). A target matching more than one location (or below a
+    confidence bar) MUST be reported ambiguous/not_found — never silently placed on the wrong clause. Restore the
+    ORIGINAL strict assertion in ComposeEditor.advisoryComments.test.tsx (verified: the suite has NO skip markers — the
+    assertion was WEAKENED, not skipped; diff against its original via git history and restore).
+  </prompt>
+  <role>SPAARKE platform developer. Compose editor target-resolution internals; legal-correctness mindset.</role>
+  <goal>placeAdvisoryComments never silently places ambiguous targets; the original strict test passes; multi-match reports ambiguous.</goal>
+
+  <context>
+    <background>
+      R4.5 handoff ITEM 1 (DEF-01): pre-existing on master; NOT the numbering-label issue (disproven by A/B). Root cause
+      = match/ambiguity precision in placeAdvisoryComments (~ComposeEditor.tsx:2519 pre-merge; re-locate). With 011's
+      deterministic sectionRef→paraId path, the ambiguity class for AI-supplied refs largely disappears; the remaining
+      text-resolution fallback needs the precision fix: >1 match (or sub-threshold confidence) → report, don't place.
+      Test: "a unique target resolves + materializes a comment thread; not_found/ambiguous targets are reported, not
+      dropped" (sessionId session-nda-review-031). Find the ORIGINAL assertion in git history (pre-weakening) and
+      restore it verbatim.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (placeAdvisoryComments)</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.advisoryComments.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">deterministic anchoring (removes the ambiguity class for resolvable refs)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Restore the ORIGINAL strict assertion — never weaken a test to pass; the test file is the exit criterion. Scope: the advisoryComments suite.</constraint>
+    <constraint source="ADR-049">Placement stays paraId-anchored; the fix must not reintroduce text-search placement for resolvable refs. Scope: placeAdvisoryComments.</constraint>
+    <constraint source="project">Report semantics: ambiguous and not_found are DISTINCT reported outcomes surfaced to the caller (feeds the Assistant outcome summary) — not silent drops.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Advisory placement correctness</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>projects/ai-advanced-capabilities-agreements-r1/notes/HANDOFF-from-compose-fidelity-r4.5.md</file>
+    </files>
+    <patterns>
+      <pattern name="original assertion" location="git log -p -- '**/ComposeEditor.advisoryComments.test.tsx'">Locate the pre-weakening assertion and restore verbatim.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; git-archaeology the test file to find the original assertion + the weakening commit; record both in notes.</step>
+    <step order="1">Reproduce: run the suite, confirm placed=2 on the ambiguous case (empirical-reproduction-FIRST per §F.3).</step>
+    <step order="2">Fix the match/ambiguity logic: >1 candidate match (or below the confidence bar) → ambiguous; zero → not_found; exactly one → place.</step>
+    <step order="3">Restore the original assertion; run the full suite; verify unique-target placement still works.</step>
+    <step order="4">Update TASK-INDEX.md: 012 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If restoring the original assertion reveals the expected behavior is itself ambiguous in the original test's intent (e.g., the original asserted something the deterministic path changes legitimately), STOP and present the diff + options — do not redefine the contract unilaterally.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Ambiguous target reported"><steps><step>Run a review whose finding has an ambiguous target</step></steps><expected>No comment placed for it; the outcome reports it as ambiguous (visible in the Assistant summary).</expected></test>
+  </ui-tests>
+  <tools><tool name="npm">test suite</tool></tools>
+
+  <outputs>
+    <output type="code">ComposeEditor.tsx (placement precision)</output>
+    <output type="test">ComposeEditor.advisoryComments.test.tsx (original assertion restored)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The ambiguous-target case yields placed=1 + one reported ambiguous outcome (original assertion, verbatim, passing).</criterion>
+    <criterion testable="true">A multi-match text target is reported ambiguous — never placed; a zero-match target is reported not_found.</criterion>
+    <criterion testable="true">Unique targets (incl. 011's deterministic refs) still place correctly — no regression in the rest of the suite.</criterion>
+    <criterion testable="true">Negative: no assertion in the suite was weakened relative to its original (diff proof in notes).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-04; hub reverse doc Part C.2. This contract underpins durable-recall fidelity (030-032): wrong-clause comments must be impossible before we make them durable.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

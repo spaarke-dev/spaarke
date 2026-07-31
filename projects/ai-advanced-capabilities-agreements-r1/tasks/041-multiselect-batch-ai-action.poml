@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>#3 Multi-select Review Notes + sequential batch AI action with progress</title>
+    <phase>4 Review-Depth UX</phase>
+    <gate>blocked (deps 021,031,040)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Client-heavy new interaction surface (selection model + sub-toolbar + batch orchestration) on hot files; rate-limit compliance.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Large but fully specified: batch = loop the SHIPPED single-note dispatch sequentially; UI patterns named.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>021,031,040</deps>
+    <tags>compose, spaarkeai, frontend, fluent-ui, batch</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add multi-select to the Review Notes gutter: a checkbox at the upper-left of each note; select one/many/all. When
+    ≥1 selected, a sub-toolbar appears with the AI-action dropdown (work-type-scoped via getToolsForSurface; when
+    exactly 1 selected, include "select all"). Running an action executes it PER SELECTED NOTE, SEQUENTIALLY (ADR-016),
+    with a progress bar; each note's outcome surfaces in the Assistant exactly as an individually-run note does. Soft
+    cap ~25 with a confirm above it (assumption in spec — tunable).
+  </prompt>
+  <role>SPAARKE platform developer. Compose gutter UX, batch orchestration over the shipped dispatch, Fluent v9.</role>
+  <goal>A reviewer batches an AI action over N selected notes in one gesture; sequential execution; per-note outcomes identical to single runs.</goal>
+
+  <context>
+    <background>
+      The per-note unit is SHIPPED: ComposeCommentGutter noteTools/onRunNoteTool → ConversationPane.dispatchComposeAction
+      → makeComposeEditControlsMessage. Batch = selection state (gutter) + sub-toolbar + a sequential loop over the
+      existing single-note dispatch — do NOT build a new dispatch mechanism. Progress: reuse the
+      NdaReviewProgressModal / AiProgressStepper pattern (or a lighter inline bar — pick per UI-element criteria: this
+      is a persistent operation indicator, not a chip). Failure isolation: one note failing continues the batch; failed
+      notes reported in the summary. Respect 031's routing/gating for any findings-class actions. Note actions available
+      come from the Contextual AI Tool Library filtered by activeWorkType.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeCommentGutter.tsx (selection + sub-toolbar)</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (sequential batch loop)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.AI.Widgets (NdaReviewProgressModal / AiProgressStepper)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="021" status="pending">ConversationPane orientation changes committed (hot-file order)</dependency>
+      <dependency task="031" status="pending">dispatch routing/gating committed (hot-file order)</dependency>
+      <dependency task="040" status="pending">gutter changes committed (hot-file order)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-016">STRICTLY SEQUENTIAL execution — one dispatch in flight; no parallel burst; scope: the batch loop.</constraint>
+    <constraint source="ADR-021">Checkboxes, sub-toolbar, dropdown, progress UI in Fluent v9 semantic tokens + dark mode; scope: all new UI.</constraint>
+    <constraint source="ADR-041">Per-note outcomes render via the existing confirmation flow (store-before-render); the batch adds NO new outcome shape; scope: outcome surfacing.</constraint>
+    <constraint source="project">Batch reuses the SHIPPED single-note dispatch verbatim per iteration (a wrapper, not a fork); actions offered = getToolsForSurface(gutter-surface, activeWorkType) — no batch-only actions. Scope: orchestration.</constraint>
+    <constraint source="project">Soft cap ~25: selecting more prompts a confirm ("N notes — this will run sequentially and may take a while"); cap value a constant that is trivially tunable. Scope: select-all path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Batch UX over shipped dispatch</topic>
+    <files>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-041-judgment-confirmation-completion-policy.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+    <patterns>
+      <pattern name="single-note dispatch" location="ComposeCommentGutter noteTools/onRunNoteTool → ConversationPane.dispatchComposeAction">The batch unit — loop it; do not reimplement.</pattern>
+      <pattern name="progress" location="NdaReviewProgressModal / AiProgressStepper (Spaarke.AI.Widgets)">The shipped progress pattern to reuse or lighten.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; trace the single-note dispatch path end-to-end; commit-fresh ConversationPane baseline (hot-file rule).</step>
+    <step order="1">Selection model + checkboxes in the gutter (keyboard accessible; select-all affordance when 1 selected).</step>
+    <step order="2">Sub-toolbar with the scoped action dropdown; soft-cap confirm.</step>
+    <step order="3">Sequential batch loop wrapping the shipped dispatch; progress UI; failure isolation + end-of-batch summary.</step>
+    <step order="4">Tests: selection state, sequentiality (assert one in-flight), outcome parity with single runs, failure isolation, cap confirm.</step>
+    <step order="5">Update TASK-INDEX.md: 041 ✅. Commit before 042.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Batch run"><steps><step>Review a doc; select 3 notes via checkboxes</step><step>Run "Draft alternative" from the sub-toolbar</step></steps><expected>Progress bar; 3 sequential runs; 3 per-note Assistant outcomes identical in form to single runs.</expected></test>
+    <test name="Select all + cap"><steps><step>Select 1 note → "select all" appears; select all (&gt;25)</step></steps><expected>Confirm prompt appears before running.</expected></test>
+    <test name="Dark mode"><steps><step>Toggle dark mode with sub-toolbar open</step></steps><expected>Semantic tokens; no hardcoded colors.</expected></test>
+  </ui-tests>
+
+  <tools><tool name="npm">lib + SpaarkeAi builds/tests</tool></tools>
+  <outputs><output type="code">gutter selection + sub-toolbar + batch loop</output><output type="test">batch orchestration tests</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Selecting N notes + running an action executes N sequential dispatches (assert never &gt;1 in flight) with a visible progress indicator.</criterion>
+    <criterion testable="true">Each note's outcome is byte-equivalent in form to an individually-run note's outcome.</criterion>
+    <criterion testable="true">A mid-batch failure continues remaining notes; the summary reports success/failure per note.</criterion>
+    <criterion testable="true">Action list = getToolsForSurface scoped set; no batch-only actions.</criterion>
+    <criterion testable="true">Negative: zero-selected shows no sub-toolbar; &gt;cap prompts confirm before any dispatch.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-11; design Lens 2 #3. Batch-cap ~25 is the spec assumption — owner-tunable constant.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

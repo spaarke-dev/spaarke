@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>FR-15 — Word-comment export mirror + configurable author (#7)</title>
+    <phase>5 Output Deliverables</phase>
+    <gate>blocked (deps 002,010)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Export fidelity for legal work product; Compose shared-lib .tsx/.ts changes; lifts a deliberate never-export scope decision.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Root-caused to file:line with the fix mapped (word-comment-export-gap.md); client-only.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>002,010</deps>
+    <tags>compose, frontend, export</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Make the exported Word comments mirror the on-screen gutter. Today each w:comment bakes the RAW explanation prose +
+    a hardcoded author. Build the export mirror: configurable AUTHOR (prop/config, not the literal at
+    ComposeEditor.tsx:2146) · "Flagged clause" label (not "Grounded fact") · "Assessment says: …" · "Standard: …"
+    (citation; full clause text when available). With 002's discrete fields there is NOTHING to string-parse — compose
+    the structured export text from flaggedClause/assessment/standardRef. Server ApplyComment needs NO change.
+  </prompt>
+  <role>SPAARKE platform developer. Compose comment-thread export mapping, docx save flow.</role>
+  <goal>A saved-then-opened-in-Word agreement shows structured comments identical in content to the gutter; author configurable.</goal>
+
+  <context>
+    <background>
+      Root cause (notes/word-comment-export-gap.md — one cause, four symptoms): the relabel exists ONLY in the gutter
+      (ComposeCommentGutter.tsx:343-378 display-only); export reads only author/text/timestamp
+      (composeSessionCommentThreadsToAnchoredComments, ComposeCommentThread.types.ts:256-262) and standardRef is
+      explicitly dropped (never-export scope at :89 — lift it deliberately, documenting the decision); author hardcoded
+      at ComposeEditor.tsx:2146 (useComposeCommentThreads(editor,'AI Advisory Review')). Two candidate seams: compose the
+      structured string at placeAdvisoryComments-time OR at the export mapping — the export-mapping seam keeps the
+      thread's raw fields intact for the UI; prefer it unless step-0 audit says otherwise. Post-002 threads carry
+      discrete metadata; older threads (pre-split) may carry only explanation — degrade gracefully (export raw text).
+      Line refs are pre-merge — re-locate. Also verify against 030-032: durable-recalled threads must export identically
+      to live-placed ones.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeCommentThread.types.ts (export mapping + scope lift)</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (author config)</file>
+      <file role="canonical-reference">projects/ai-advanced-capabilities-agreements-r1/notes/word-comment-export-gap.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs (ApplyComment — NO change)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">discrete flaggedClause/assessment fields</dependency>
+      <dependency task="010" status="pending">renamed files (same-file order)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Server ApplyComment unchanged — it renders whatever commentText/Author it is given; the fix is client-side export composition. Scope: whole task.</constraint>
+    <constraint source="project">The never-export scope lift (:89) is a deliberate decision — document it at the change site (why standardRef now exports). Scope: the mapping.</constraint>
+    <constraint source="project">Export structure mirrors the GUTTER's labels exactly ("Flagged clause" / "Assessment says:" / "Standard:") — one relabel source shared between gutter + export, not two copies. Scope: label source.</constraint>
+    <constraint source="ADR-012">Author configurability is a lib-level prop/config with the current literal as default; scope: the author fix.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Comment export fidelity</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>projects/ai-advanced-capabilities-agreements-r1/notes/word-comment-export-gap.md</file>
+    </files>
+    <patterns>
+      <pattern name="gutter relabel" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeCommentGutter.tsx (:343-378 pre-merge)">Hoist the relabel/structure into a shared helper both gutter + export consume.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; re-locate the four seam points post-merge; audit which seam (placement vs export mapping) best serves both live and durable-recalled threads.</step>
+    <step order="1">Hoist the structured-comment composition into a shared helper (gutter display + export use one source).</step>
+    <step order="2">Export mapping: compose commentText from the discrete fields (+ standardRef; full clause text when present); lift the :89 scope with an explanatory comment.</step>
+    <step order="3">Author: prop/config with default; thread through useComposeCommentThreads.</step>
+    <step order="4">Tests: export mapping (structured output; legacy-thread graceful degrade); author config; save→reopen round-trip assertion at the mapping level.</step>
+    <step order="5">Manual: save a reviewed doc, open in Word, verify all four symptoms fixed.</step>
+    <step order="6">Update TASK-INDEX.md: 052 ✅.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Word fidelity"><steps><step>Save a reviewed doc; download; open in Word</step></steps><expected>Each comment: configured author, "Flagged clause", "Assessment says: ...", "Standard: ..." — mirroring the gutter.</expected></test>
+  </ui-tests>
+  <tools><tool name="npm">lib build/tests</tool></tools>
+  <outputs>
+    <output type="code">export mapping + shared relabel helper + author config</output>
+    <output type="test">export-mapping tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A saved-then-opened-in-Word review shows per comment: configured author · "Flagged clause" · "Assessment says: …" · "Standard: …" — mirroring the gutter (manual + mapping test).</criterion>
+    <criterion testable="true">standardRef exports (citation; full clause text when the thread carries it); the scope-lift is documented at the change site.</criterion>
+    <criterion testable="true">The gutter and the export consume ONE shared relabel source (no duplicated label maps — grep proof).</criterion>
+    <criterion testable="true">Legacy threads (raw explanation only) export their text without crash or fabricated structure.</criterion>
+    <criterion testable="true">Negative: server ApplyComment untouched (git diff proof); durable-recalled threads export identically to live ones.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-15; notes/word-comment-export-gap.md is the authoritative root-cause map. Shares the relabel source with the gutter — the "do it once, both win" design.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>FR-13 — Review Summary Memo assembly (final dispositions) + persistence to sprk_analysisoutput</title>
+    <phase>5 Output Deliverables</phase>
+    <gate>blocked (deps 002)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF-touching (memo assembly/persistence) + the business deliverable's correctness (before/after semantics).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Assembly logic with locked semantics (Decision #4: before=original, after=final disposition) over verified stores.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>002</deps>
+    <tags>bff, ai, memo, dataverse</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build the Review Summary Memo: for each changed/flagged section assemble {location, before(original text),
+    after(accepted result or rejected outcome), why(assessment), golden-ref(standardRef + flaggedClause)} — derived at
+    GENERATION TIME from the document's final tracked-change disposition state (NOT per-accept event capture) — and
+    persist it to sprk_analysisoutput (structured fields + a JSON body for the section array). No new entity.
+  </prompt>
+  <role>SPAARKE platform developer. Compose disposition state, sprk_analysisoutput persistence, BFF service assembly.</role>
+  <goal>A memo record exists on the Analysis with the full section array; content derives from final dispositions; survives session deletion.</goal>
+
+  <context>
+    <background>
+      Sources: findings (002's discrete fields — flaggedClause/assessment/standardRef/sectionRef/quotedText) + the
+      document's tracked-change dispositions (ADR-040 ledger / compose state — before=original text, after=what was
+      accepted or the rejected outcome). analysisId comes from session.HostContext.EntityId (flows as HostEntityId in
+      every dispatch envelope — HUB-R1-REVIEW §2-A5; FOOTGUN: EntityType is the sentinel "sprk_analysisoutput" but
+      EntityId is the sprk_analysis GUID — never query the output table with it). Persistence: sprk_analysisoutput via
+      the existing IAnalysisDataverseService.CreateAnalysisOutputAsync / AnalysisResultPersistence path (KEEP list).
+      Placement (assembly server vs client): the disposition state + renderers live in Compose — decide where assembly
+      runs with the §10/§11 questions; prefer extending an existing service. RATIONALE (spec FR-13): DELETE /sessions
+      erases the Cosmos ledger — the memo is the ONLY review artifact surviving deletion; it must be self-contained.
+      standardRef depth: full clause text when grounding supplies it, else citation (spec assumption).
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisResultPersistence.cs (or the extension point step 1 selects)</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/IAnalysisDataverseService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs (HostEntityId flow)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">discrete finding fields the memo consumes</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Before/after = FINAL disposition state at generation time (Decision #4) — no timestamps, no per-accept capture; a rejected change shows the rejected outcome. Scope: assembly semantics.</constraint>
+    <constraint source="ADR-013">Assembly reaching AI internals goes through existing services/facade; state the Placement Justification (bff-extensions) in the PR. Scope: server placement.</constraint>
+    <constraint source="ADR-015">The memo is a Dataverse business artifact (survives ledger deletion) — include everything needed to stand alone; no Cosmos back-references as load-bearing content. Scope: memo shape.</constraint>
+    <constraint source="ADR-019">Generation failures return ProblemDetails; partial memos are not silently persisted. Scope: error paths.</constraint>
+    <constraint source="project">Footgun: HostContext.EntityId = sprk_analysis GUID under the sentinel EntityType — reference an existing sentinel constant; never re-type the literal. Scope: analysisId resolution.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Memo assembly + output persistence</topic>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="output persistence" location="src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisResultPersistence.cs">The KEEP-list persistence path to extend for the memo record.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; audit where final disposition state is readable (ledger vs compose session vs saved doc) and where findings are available post-002; decide assembly placement with §10/§11 answers documented.</step>
+    <step order="1">Define the memo shape (structured fields + JSON section array) — self-contained per ADR-015.</step>
+    <step order="2">Implement assembly from final dispositions + findings; resolve analysisId via HostContext (sentinel-aware).</step>
+    <step order="3">Persist via the existing output path; verify the 1:N on the Analysis.</step>
+    <step order="4">Tests: assembly correctness (accepted/rejected/unchanged sections), persistence round-trip, failure paths; publish-size check.</step>
+    <step order="5">Update TASK-INDEX.md: 050 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If final-disposition state is not fully recoverable at generation time for any section class (e.g., edits outside tracked changes), STOP and present the semantic gap + options rather than silently approximating "before/after".</trigger>
+  </escalation>
+
+  <tools><tool name="dotnet">BFF build/tests + publish-size</tool></tools>
+  <outputs>
+    <output type="code">memo assembly + persistence (extension of the existing output path)</output>
+    <output type="test">assembly + round-trip tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a reviewed doc with 1 accepted + 1 rejected + 1 untouched flagged section, the memo rows show correct {location, before, after, why, golden-ref} per Decision #4 semantics.</criterion>
+    <criterion testable="true">The memo persists to sprk_analysisoutput under the right Analysis (read_query proof); JSON body parses to the section array.</criterion>
+    <criterion testable="true">After DELETE /sessions/{id}, the memo remains fully readable (survives-deletion proof).</criterion>
+    <criterion testable="true">Negative: generation with no completed review returns a clear error (ProblemDetails), persisting nothing.</criterion>
+    <criterion testable="true">BFF publish ≤60 MB reported; build + tests green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-13; Decisions #3/#4. 051 consumes this content for docx/email. The memo is the deletion-surviving artifact — its self-containedness is the point.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>subDomain envelope — cold-load/deep-link threading + open-existing derivation (hub A3 deferred legs)</title>
+    <phase>2 Classifier + Routing</phase>
+    <gate>blocked (deps 001)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Launch-envelope plumbing across main.tsx/ThreePaneShell/WorkspacePane (.tsx hot files); cross-project seam with hub-r1.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped plumbing with the hub's A3-core commit (bd64a69d4) as the exact pattern to extend.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>spaarkeai, frontend</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Finish the subDomain launch envelope. Hub shipped A1 (wizard picker persisting the lookup, 1e1a6579b) and A3-core
+    (subDomain on ComposeLaunchContextValue + the compose seed, carried from wizard-finish, bd64a69d4). Two legs were
+    DEFERRED "to land with your consumer": (a) cold-load URL/ribbon deep-link threading — openSpaarkeAi subDomain param
+    → main.tsx parse → App/ThreePaneShell → AnalysisLaunchContext; (b) open-existing derivation — on reopen of an
+    Analysis, expand the persisted sprk_agreementtype lookup's sprk_key into the envelope. COORDINATE FIRST: the hub
+    offered to finish both when we wire a reader ("tell us the moment") — ask; build only what they don't take.
+  </prompt>
+  <role>SPAARKE platform developer. SpaarkeAi launch/host plumbing (launch-resolver, main.tsx, WorkspacePane), OData expand.</role>
+  <goal>subDomain flows on ALL entry doors: wizard-finish (shipped), cold-load deep-link, and open-existing (derived from the lookup) — one envelope contract.</goal>
+
+  <context>
+    <background>
+      Hub's coordination doc (Part B A3, updated 41047aa50): "Deferred to land with your consumer (so the shape matches
+      your reader, not a guess): the cold-load URL/ribbon deep-link threading (openSpaarkeAi URL param →
+      App/ThreePaneShell → AnalysisLaunchContext) and the open-existing subDomain derivation (expand
+      sprk_agreementtype.sprk_key from the persisted lookup on reopen). Tell us the moment you wire a reader and we
+      finish both." Our reader lands in 021 (orientation consumes subDomain). Pattern to follow: bd64a69d4 touched
+      CreateAnalysisWizardWidget + composeLaunchContext + main.tsx; the open-existing analysis-load path is
+      WorkspacePane's by-analysis branch (master ~:968-1010) with the $expand on sprk_documentid — extend the $expand to
+      sprk_agreementtype($select=sprk_key). NAMING: subDomain ≡ sprk_key; lookup attribute logical name sprk_agreementtype.
+    </background>
+    <relevant-files>
+      <file role="modify">src/solutions/SpaarkeAi/src/utils/launch-resolver.ts (SpaarkeAiLaunchParams + buildLaunchUrl)</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/main.tsx (URL parse)</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx (open-existing derivation)</file>
+      <file role="canonical-reference">git show bd64a69d4 (the A3-core pattern)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">registry mirror (sprk_key type)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-044">GUIDs in deep-link params are bare-lowercase (existing brace-stripping convention in buildLaunchUrl); scope: param encoding.</constraint>
+    <constraint source="ADR-030">Envelope→pane propagation follows the existing typed context/event paths (AnalysisLaunchContext / composeLaunchContext) — no new side channels; scope: threading.</constraint>
+    <constraint source="project">ONE envelope contract: the same subDomain field name/semantics across all three doors; wizard-set value is authoritative (explicit path), classifier fills it only when absent.</constraint>
+    <constraint source="project">Coordinate-first: check with hub-r1 (they offered to finish both legs). If they take them, this task reduces to the consumer-side verification + contract test. Record the outcome.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Launch envelope + host plumbing</topic>
+    <files>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>projects/ai-advanced-capabilities-analysis-hub-r1/notes/COORDINATION-hub-r1-TO-agreements-r1.md</file>
+    </files>
+    <patterns>
+      <pattern name="A3-core" location="git show bd64a69d4">The hub's subDomain field addition — extend the same shape to the URL/reopen doors.</pattern>
+      <pattern name="analysisId threading" location="src/solutions/SpaarkeAi/src/main.tsx (analysisId/worktype parse ~:562-612)">The existing param-parse pattern to mirror for subDomain.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; notify/ask hub-r1 whether they take the two deferred legs (their standing offer); record the split.</step>
+    <step order="1">(Ours per split) Add subDomain to SpaarkeAiLaunchParams + buildLaunchUrl + main.tsx parse → AnalysisLaunchContext.</step>
+    <step order="2">(Ours per split) Open-existing: extend the by-analysis load $expand with sprk_agreementtype($select=sprk_key); write into the envelope before the compose widget_load.</step>
+    <step order="3">Contract test: all three doors deliver the same subDomain to the reader (021's consumption point).</step>
+    <step order="4">Update TASK-INDEX.md: 022 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the hub takes the legs but their timeline slips past our 023/033 needs, STOP and re-split rather than double-building or waiting silently.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Deep-link door"><steps><step>Open a deep link with subDomain=nda</step></steps><expected>Three-pane opens oriented (agreement tools scoped; envelope populated).</expected></test>
+    <test name="Open-existing door"><steps><step>Open an existing Analysis with the employment lookup set</step></steps><expected>Envelope carries subDomain=employment.</expected></test>
+  </ui-tests>
+  <tools><tool name="npm">SpaarkeAi build + tests</tool></tools>
+
+  <outputs>
+    <output type="code">launch-resolver.ts + main.tsx + WorkspacePane.tsx (per split)</output>
+    <output type="test">envelope contract test (three doors)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A deep-link with subDomain=nda opens the three-pane with the envelope populated (cold-load door).</criterion>
+    <criterion testable="true">Opening an existing Analysis whose lookup = employment yields subDomain='employment' in the envelope (derivation door).</criterion>
+    <criterion testable="true">Wizard-finish door still works unchanged (regression on bd64a69d4 behavior).</criterion>
+    <criterion testable="true">Negative: absent subDomain + no lookup → envelope field absent (classifier path owns it); no fabricated default.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-09 explicit-path plumbing; hub Q1 answered by their A1/A3 ship — this is the residual. The hub relationship: notify at task start (their offer), then split.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

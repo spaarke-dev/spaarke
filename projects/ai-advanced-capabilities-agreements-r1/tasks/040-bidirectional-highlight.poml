@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>#2 Bidirectional highlight — summary row → document section AND gutter Review Note</title>
+    <phase>4 Review-Depth UX</phase>
+    <gate>blocked (deps 011)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Compose shared-lib .tsx changes (auto-FULL); cross-pane interaction correctness.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, well-specified UX link over an existing join key.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>011</deps>
+    <tags>compose, frontend, fluent-ui</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Selecting a Review Summary row today highlights the document section but NOT the matching gutter Review Note. Add
+    the reverse link: row selection also scrolls to + highlights the matching gutter note. Join key = the finding's
+    computed clause number / paraId anchor (deterministic since 011).
+  </prompt>
+  <role>SPAARKE platform developer. Compose panel/gutter interaction, Fluent v9.</role>
+  <goal>One click on a summary row lights up BOTH the clause in the document AND its gutter note.</goal>
+
+  <context>
+    <background>
+      AgreementReviewSummaryPanel rows already resolve docPosition (doc→highlight shipped in nda-r1). The gutter
+      (ComposeCommentGutter) renders notes anchored by thread/paraId. Add: row select → locate the gutter note by the
+      shared anchor (011's paraId/ComputedNumber) → scroll + transient highlight (same visual language as the doc-side
+      highlight). Keep it ADR-030-typed if it crosses panes (panel and gutter are both Compose-side — likely a direct
+      callback/context, not a bus event; decide at the seam).
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/AgreementReviewSummaryPanel.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeCommentGutter.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">stable paraId/ComputedNumber join key</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Highlight styling uses Fluent v9 semantic tokens (works in dark mode); hover/pointer affordances only on clickable regions. Scope: new UI states.</constraint>
+    <constraint source="project">The reverse link must NOT steal focus from the editor or scroll the document a second time — one coordinated highlight action. Scope: the interaction.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Compose panel/gutter UX</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+    <patterns>
+      <pattern name="doc-side highlight" location="src/client/shared/Spaarke.Compose.Components/src/widgets/AgreementReviewSummaryPanel.tsx (docPosition resolution)">Mirror the existing doc-highlight mechanism for the gutter side.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; trace the existing row→doc highlight flow + the gutter's note-identity model.</step>
+    <step order="1">Implement row→gutter-note resolution via the shared anchor; scroll + highlight with the doc-side visual language.</step>
+    <step order="2">Tests: matched note highlights; unmatched (note deleted) degrades gracefully; no double-scroll.</step>
+    <step order="3">Update TASK-INDEX.md: 040 ✅.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Bidirectional highlight"><steps><step>Run a review; open the summary panel</step><step>Click a row</step></steps><expected>Document section AND its gutter note both highlight; gutter scrolls the note into view.</expected></test>
+    <test name="Dark mode"><steps><step>Toggle dark mode; click a row</step></steps><expected>Highlight colors from semantic tokens; readable in both themes.</expected></test>
+  </ui-tests>
+
+  <tools><tool name="npm">lib build + tests</tool></tools>
+  <outputs><output type="code">panel + gutter (reverse link)</output><output type="test">interaction tests</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Selecting a summary row highlights BOTH the doc section and the matching gutter note (scrolled into view).</criterion>
+    <criterion testable="true">A row whose note was removed highlights the doc only + no error (graceful).</criterion>
+    <criterion testable="true">Negative: rapid row-switching leaves exactly one highlighted pair (no stacking).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-10; design Lens 2 #2.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

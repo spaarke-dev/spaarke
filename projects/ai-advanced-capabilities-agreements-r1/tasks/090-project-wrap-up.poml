@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>Project wrap-up — status, lessons-learned, test-diet, handoffs</title>
+    <phase>6 Deploy + Verify</phase>
+    <gate>blocked (deps 060,061)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>090-wrapup task — the mandatory /test-diet gate (root CLAUDE.md §7) + project-close hygiene.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Procedural close-out per the binding checklist.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Project-close is serialized and main-session (touches TASK-INDEX/README/portfolio).</parallel-reason>
+    <deps>060,061</deps>
+    <tags>wrap-up, documentation</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Close the project: README status → Complete; lessons-learned.md authored; /test-diet reconciliation (BINDING gate);
+    coordination close-outs (hub answers final state; per-type pack projects seeded with the registration recipe);
+    doc-drift check on the docs this project touched.
+  </prompt>
+  <role>SPAARKE platform developer. Project close-out procedures.</role>
+  <goal>Project marked complete with recoverable history, test-diet report, and clean handoffs.</goal>
+
+  <context>
+    <background>
+      /test-diet is a HARD gate at 090 (root CLAUDE.md §7): classify tests added during the project (KEEP vs
+      scaffolding) → notes/test-diet-report.md; the wrap-up PR cites it. Lessons candidates already visible: master
+      moved 3× during planning (merge-before-plan discipline); coordination docs beat assumptions (A1/A3 shipped while
+      we planned); the disposition re-route's 4-change reality vs "flip a flag". Handoffs OUT: the per-type pack
+      registration recipe (registry row + pack + zero code) for lease/employment/… sibling projects; any remaining
+      hub items (071/072 status). Update projects/INDEX.md row (status/last-touched).
+    </background>
+    <relevant-files>
+      <file role="modify">projects/ai-advanced-capabilities-agreements-r1/README.md</file>
+      <file role="new">projects/ai-advanced-capabilities-agreements-r1/notes/lessons-learned.md</file>
+      <file role="new">projects/ai-advanced-capabilities-agreements-r1/notes/test-diet-report.md</file>
+    </relevant-files>
+    <dependencies><dependency task="060" status="pending"/><dependency task="061" status="pending"/></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="root-CLAUDE §7">/test-diet runs BEFORE marking complete; skipping = HARD WARNING; the wrap-up PR cites the report. Scope: this task.</constraint>
+    <constraint source="project">The per-type registration recipe handoff is the project's legacy — write it so a sibling project needs ONLY it (row + pack + eval) to add a type. Scope: handoffs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project close</topic>
+    <files>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/doc-drift-audit/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns><pattern name="predecessor close" location="projects/ai-advanced-capabilities-nda-r1/notes/lessons-learned.md">Format precedent.</pattern></patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Declare rigor; confirm 060/061 ✅ and no open blocking findings.</step>
+    <step order="1">Run /test-diet → notes/test-diet-report.md; stage the reviewer's git commands (read-only skill).</step>
+    <step order="2">Author lessons-learned.md; author the per-type pack registration recipe (notes/ or docs/guides per drift-audit judgment).</step>
+    <step order="3">README status Complete; TASK-INDEX all ✅; current-task.md → none/"run /repo-cleanup"; update projects/INDEX.md row.</step>
+    <step order="4">Doc-drift check on touched docs (design/spec/coordination accuracy at close).</step>
+    <step order="5">Wrap-up commit + PR citing the test-diet report.</step>
+  </steps>
+
+  <justification>
+    <existing>Standard project-close artifacts (lessons-learned, test-diet report) — the 090 pattern every project carries (nda-r1 precedent); no product surface added.</existing>
+    <extension>Yes — follows the mandatory close-out checklist; the registration recipe extends docs, not code.</extension>
+    <cost-of-doing-nothing>The binding §7 test-diet gate is skipped (HARD WARNING) and per-type sibling projects have no registration recipe — the zero-code extensibility promise dies with this project's context.</cost-of-doing-nothing>
+  </justification>
+  <tools><tool name="terminal">test-diet, git</tool></tools>
+  <outputs>
+    <output type="doc">notes/lessons-learned.md + notes/test-diet-report.md + registration recipe</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">test-diet-report.md exists and the wrap-up PR cites it.</criterion>
+    <criterion testable="true">README=Complete; TASK-INDEX fully ✅; current-task reset; INDEX.md row updated.</criterion>
+    <criterion testable="true">The per-type registration recipe exists and names the exact row fields + pack + eval obligations.</criterion>
+  </acceptance-criteria>
+
+  <notes>Root CLAUDE.md §7 gate. The recipe is what makes "new agreement type = new row + pack, zero code" true for successors.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

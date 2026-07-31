@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>FR-16(a,b) — Binding disposition → compose + findings branch in the ledger materializer</title>
+    <phase>3 Durable Review</phase>
+    <gate>blocked (deps 002,012)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Core durable-recall change on the dispatch/ledger spine (ADR-040/043) + ComposeWorkspace hot file; legal work product durability.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The materializer findings-branch design (metadata-preserving re-materialization semantics, idempotency, interplay with FR-29 annotations) is the highest-blast-radius client change in the project.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>002,012</deps>
+    <tags>ai, compose, spaarkeai, durable-recall, bff</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Make review findings durable-by-disposition. (a) Flip the agreement-review Binding's sprk_disposition
+    informational→compose (Dataverse data — server code unchanged: the compose leg is already store-then-pass-through).
+    (b) Extend ComposeWorkspace.materializeComposeDraftFromLedger with a FINDINGS branch: a compose-disposition payload
+    carrying flaggedSections[] re-materializes via ComposeEditor.placeAdvisoryComments — preserving
+    riskLevel/sectionRef/standardRef/flaggedClause/assessment — instead of falling into the draft/edits branches.
+    Result: reopening a reviewed document restores the gutter Review Notes deterministically, zero LLM calls.
+  </prompt>
+  <role>SPAARKE platform developer. ADR-040 ledger semantics, Compose materialization pipeline, Binding catalog data.</role>
+  <goal>Reviews route through the durable compose path; reload re-materializes advisory comments with full metadata; no re-dispatch.</goal>
+
+  <context>
+    <background>
+      Verified seam (HUB-R1-REVIEW §4): OutputRouter writes SessionOutput with the Binding's disposition
+      (OutputRouter.cs:193-224); compose leg = store-then-pass-through (:280-281) identical to informational — flipping
+      the Binding row changes durability class without server code. GET /sessions/{id}/compose-outputs projects
+      compose-disposition entries (ChatEndpoints.cs:1312-1334; skips truncation markers :1326-1329). The FR-04
+      refresh-durability effect (ComposeWorkspace.tsx:1609-1616 → materializeComposeDraftFromLedger :1385-1484) branches
+      on payload shape: edits[] / single-edit / comments[{target_text,comment}] / rationale. flaggedSections[] matches
+      NO branch — add the findings branch calling placeAdvisoryComments (which carries metadata; the comments[]→
+      registerAiReviewComments path would DROP risk/section/standard metadata — do not use it for findings).
+      AUDIT-BEFORE-IMPLEMENT (nda-r1 lesson): re-verify these line refs and check nothing already routes findings.
+      COORDINATION: spaarke-notification-spine-r1 flips the same DispositionRoutability registry surface (ADR-043) —
+      /conflict-check before the PR. Session-routing (DEF-09) + apply-leg gating are task 031 — this task lands the
+      branch + flip; 031 makes the write/read sessions coincide.
+    </background>
+    <relevant-files>
+      <file role="modify">infra/dataverse/sprk_playbookconsumer-rows.json (Binding disposition — via Seed-PlaybookConsumers.ps1 -DiffOnly)</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx (materializeComposeDraftFromLedger findings branch)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter.cs (no change expected)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.redline-from-ledger.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">the split schema (flaggedClause/assessment) the branch consumes</dependency>
+      <dependency task="012" status="pending">placement correctness (never durable-ize wrong-clause comments)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-043">Disposition routability stays single-sourced in the DispositionRoutability registry — verify the compose flip needs NO registry change (compose already routable); if it does, coordinate with notification-spine-r1's registry work. Scope: the flip.</constraint>
+    <constraint source="ADR-040">Store-before-render preserved; the findings branch consumes ComposeLedgerOutputDto {key,bindingId,turn,disposition,payload} as-is — no new ledger shape. Scope: the materializer.</constraint>
+    <constraint source="project">Metadata preservation is the point: the re-materialized gutter must carry riskLevel/sectionRef/standardRef/flaggedClause/assessment — route via placeAdvisoryComments, NOT registerAiReviewComments. Scope: the findings branch.</constraint>
+    <constraint source="project">Idempotency: reuse the lastMaterializedKey guard — a findings payload materializes once per load; server code changes require explicit §10 justification (none expected).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Ledger disposition + materialization</topic>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/ai-advanced-capabilities-agreements-r1/notes/HUB-R1-REVIEW-2026-07-30.md</file>
+    </files>
+    <patterns>
+      <pattern name="redline-from-ledger" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.redline-from-ledger.test.tsx">The existing materializer test pattern — add the findings-branch cases alongside.</pattern>
+      <pattern name="Binding seed round-trip" location="scripts/dataverse/Seed-PlaybookConsumers.ps1">-DiffOnly verify before/after the disposition flip.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; audit-before-implement: re-verify the seam line refs; confirm compose is routable in DispositionRoutability without change; /conflict-check vs notification-spine-r1.</step>
+    <step order="1">Flip the Binding row disposition in the seed mirror; deploy + -DiffOnly verify.</step>
+    <step order="2">Implement the findings branch: detect flaggedSections payload → map to placeAdvisoryComments items (metadata intact) → idempotent via lastMaterializedKey.</step>
+    <step order="3">Extend the redline-from-ledger test family: findings payload re-materializes on load; metadata asserted; edits/comments branches unaffected.</step>
+    <step order="4">Manual: run a review, reload the document session — gutter restores without dispatch (network assert).</step>
+    <step order="5">Update TASK-INDEX.md: 030 ✅. Commit before 031 touches adjacent code (hot-file rule).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the compose flip DOES require a DispositionRoutability registry change, or the findings payload cannot re-materialize without server-side projection changes, STOP — present the §10-scoped server delta before implementing it.</trigger>
+  </escalation>
+
+  <tools><tool name="npm">Compose lib build/tests</tool><tool name="terminal">Seed-PlaybookConsumers -DiffOnly</tool></tools>
+
+  <outputs>
+    <output type="config">Binding row (disposition=compose) in the seed mirror</output>
+    <output type="code">ComposeWorkspace.tsx findings branch</output>
+    <output type="test">findings-branch materializer tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A review's SessionOutput lands with disposition=compose (ledger inspect); GET compose-outputs returns it.</criterion>
+    <criterion testable="true">Reloading the document session re-materializes the gutter Review Notes with riskLevel/sectionRef/standardRef/flaggedClause/assessment intact — zero dispatch/LLM calls (network assertion).</criterion>
+    <criterion testable="true">Existing edits[]/single-edit/comments[]/rationale branches behave unchanged (full redline-from-ledger suite green).</criterion>
+    <criterion testable="true">Materialization is idempotent across repeated loads (lastMaterializedKey).</criterion>
+    <criterion testable="true">Negative: a malformed findings payload logs + skips gracefully — no crash, no partial placement.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-16(a,b); hub Part C.1 accepted. 031 = session routing + apply-leg gating; 032 = summary-panel restore + caps. Server expected UNCHANGED — that's the design's elegance; escalate if not true.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
