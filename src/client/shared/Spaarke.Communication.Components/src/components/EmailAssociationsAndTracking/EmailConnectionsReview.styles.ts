@@ -22,28 +22,29 @@ export const useConnectionsReviewStyles = makeStyles({
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
     gap: tokens.spacingHorizontalM,
+    // Cells sized to content; every card box carries the same `minHeight: 72px` floor
+    // and its text stays ONE line (identity is nowrap + ellipsis, the reason is clamped
+    // to one line and the wording is streamlined), so all four card boxes render the
+    // same size (owner UAT 2026-07-31). A selected card's Confirm button hangs BELOW
+    // its box in the extra cell space without changing the box heights.
     alignItems: 'start',
   },
   // Right-hand column holding the "Link another record" affordance / picker.
   linkCol: { flexShrink: 0, alignSelf: 'flex-start', display: 'flex', alignItems: 'center', maxWidth: '100%' },
-  // "Link another record" — a VISUAL SIBLING of the candidate cards (owner UAT
-  // #5; corrected 2026-07-31 R2 item "match the other cards"): identical box
-  // (border / radius / padding / neutral surface / hover) AND the same footprint
-  // as a sibling card — a SINGLE left-aligned row (search icon + label), vertically
-  // centered, at the same `minHeight` (64px) as the blank slots so all four cards
-  // line up on one row instead of the link tile standing taller. No explicit
-  // `fontFamily` — inherits Fluent's default Segoe UI (there is no Arial to remove).
+  // "Link another record" — a VISUAL SIBLING of the candidate cards: identical box
+  // (border / radius / padding / neutral surface / hover). Layout per owner UAT
+  // 2026-07-31: the LABEL is top-left aligned (like a candidate card's primary line)
+  // and the SEARCH ICON is centered in the remaining space below. `flexGrow: 1` +
+  // the grid's `align-items: stretch` make it exactly as tall as the sibling cards.
   linkCard: {
     boxSizing: 'border-box',
     width: '100%',
     minWidth: 0,
-    // Match the candidate card's rendered height (2 short lines + padding) so all four
-    // cards line up on the row (owner UAT 2026-07-31 item 3).
     minHeight: '72px',
     display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: tokens.spacingVerticalXXS,
     textAlign: 'left',
     paddingBlock: tokens.spacingVerticalS,
     paddingInline: tokens.spacingHorizontalM,
@@ -57,21 +58,27 @@ export const useConnectionsReviewStyles = makeStyles({
     fontFamily: 'inherit',
     ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
+  // Top-left label — same size/weight as a candidate card's primary identity line.
   linkCardLabel: {
     minWidth: 0,
-    flex: '1 1 auto',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    // Match the candidate card's primary line exactly (owner UAT #5): base300 + semibold.
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
-  // Search icon inline before the label (left-aligned row) — brand-toned to read as
-  // the one actionable "add" affordance among the muted candidate cards.
+  // Search icon CENTERED in the space beneath the label (owner UAT 2026-07-31).
+  linkCardIconRow: {
+    display: 'flex',
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
   linkCardIcon: { flexShrink: 0, color: tokens.colorBrandForeground1, fontSize: '20px' },
   // One grid cell — the card itself plus its own Confirm slot directly beneath it.
+  // Stretches to the row height (grid `align-items: stretch`); the card inside fills it.
   cardCell: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS, minWidth: 0 },
 
   card: {
@@ -79,7 +86,8 @@ export const useConnectionsReviewStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
     minWidth: 0,
-    // Shared height floor so candidate / blank / link cards line up (owner UAT item 3).
+    // Shared height floor so candidate / blank / link card boxes all render the same
+    // size (content stays one line, so it never exceeds the floor) (owner UAT item 3).
     minHeight: '72px',
     textAlign: 'left',
     paddingBlock: tokens.spacingVerticalS,
@@ -145,14 +153,15 @@ export const useConnectionsReviewStyles = makeStyles({
     fontVariantNumeric: 'tabular-nums',
     color: tokens.colorNeutralForeground3,
   },
-  // ── Card line 2 — plain-English match reason ──
+  // ── Card line 2 — plain-English match reason (clamped to ONE line so every card
+  //    box stays the same height; the wording is streamlined to fit) ──
   cardReason: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     display: '-webkit-box',
-    WebkitLineClamp: 2,
+    WebkitLineClamp: 1,
     WebkitBoxOrient: 'vertical',
   },
 
