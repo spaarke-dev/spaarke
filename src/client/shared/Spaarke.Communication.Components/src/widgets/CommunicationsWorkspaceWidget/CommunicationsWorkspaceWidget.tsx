@@ -209,7 +209,14 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
   // re-implemented) per root CLAUDE.md §11. Forwards the shell's
   // `onMarkThreadRead` (item 5c) so the message-toolbar tool clears the list badge.
   const renderConversation = React.useCallback(
-    ({ threadId, threadName, authenticatedFetch: fetchFn, bffBaseUrl, onMarkThreadRead }: IConversationRendererProps) => (
+    ({
+      threadId,
+      threadName,
+      authenticatedFetch: fetchFn,
+      bffBaseUrl,
+      onMarkThreadRead,
+      onThreadRenamed,
+    }: IConversationRendererProps) => (
       <ConversationView
         threadId={threadId}
         authenticatedFetch={fetchFn}
@@ -218,6 +225,8 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
         onMarkThreadRead={onMarkThreadRead}
         // Thread name in the message-pane header (round-8.4 item 3b) — the shell resolves it from the thread list.
         title={threadName}
+        // Inline rename (round-8.4): pencil in the header → renames the thread; shell refreshes the list.
+        onThreadRenamed={onThreadRenamed}
         // An email is a sprk_communication row (TimelineMessage.id IS the
         // sprk_communication GUID) — open it in the NEW Spaarke Email surface
         // (Pattern B: the `sprk_emailpage` code page as a centred modal, single-

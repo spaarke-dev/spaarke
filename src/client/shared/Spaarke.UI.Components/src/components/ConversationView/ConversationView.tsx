@@ -44,6 +44,9 @@ import {
   DialogTitle,
   Input,
   Link,
+  Popover,
+  PopoverSurface,
+  PopoverTrigger,
   Spinner,
   Text,
   Textarea,
@@ -59,6 +62,7 @@ import {
   ArrowForwardRegular,
   ChatRegular,
   DeleteRegular,
+  EditRegular,
   MailRegular,
   SearchRegular,
   SendRegular,
@@ -71,6 +75,7 @@ import {
 } from '../CommunicationTimeline/CommunicationTimeline.reducer';
 import type { TimelineMessage } from '../CommunicationTimeline/CommunicationTimeline.types';
 import { deactivateMessage, sendTimelineMessage } from '../../services/communicationTimelineApi';
+import { renameThread } from '../../services/communicationThreadListApi';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import { MessageBubble } from './subcomponents/MessageBubble';
 import { EmailInFlowBlock } from './subcomponents/EmailInFlowBlock';
@@ -107,8 +112,12 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
   },
   // Plain (record-less) title — non-interactive text. Explicit 20px (round-8.4 item 3b) so the Fluent
-  // <Text> default size (14px) doesn't override the header size.
+  // <Text> default size (14px) doesn't override the header size. Truncates within the flex title group.
   titleText: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
     fontSize: tokens.fontSizeBase500,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
@@ -117,9 +126,44 @@ const useStyles = makeStyles({
   // the record open to the host's `onOpenRecord`. Weight/size match the plain
   // title so linking a title doesn't reflow the header.
   titleLink: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
     fontSize: tokens.fontSizeBase500,
     fontWeight: tokens.fontWeightSemibold,
     textAlign: 'left',
+  },
+  // Round-8.4: header title + inline rename pencil laid out in a row; the pencil reveals on hover/focus.
+  titleGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXXS,
+    ':hover': {
+      '& [data-title-edit]': { opacity: 1 },
+    },
+  },
+  titleEditButton: {
+    flexShrink: 0,
+    opacity: 0,
+    transitionProperty: 'opacity',
+    transitionDuration: tokens.durationFaster,
+    transitionTimingFunction: tokens.curveEasyEase,
+    ':focus-visible': { opacity: 1 },
+  },
+  titleEditButtonVisible: {
+    opacity: 1, // keep the pencil shown while the rename popover is open
+  },
+  renamePopover: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    minWidth: '260px',
+  },
+  renameActions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: tokens.spacingHorizontalS,
   },
   list: {
     flex: 1,
@@ -672,6 +716,7 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
   const {
     threadId,
     title,
+    onThreadRenamed,
     regarding,
     onOpenRecord,
     currentUserSystemUserId,
@@ -778,6 +823,47 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
         if (err instanceof Error) onError?.(err);
       });
   }, [pendingDeleteMessage, authenticatedFetch, bffBaseUrl, refresh, onError]);
+
+  // Inline thread-name edit (round-8.4): a pencil in the header title opens a small popover with a text input.
+  // ConversationView owns the rename call (like deactivateMessage), optimistically overrides its own displayed title,
+  // and notifies the host (onThreadRenamed) to refresh the thread-list row. Enabled only when the host wires
+  // onThreadRenamed. `titleOverride` wins over the `title` prop until the host's refresh flows the new name back.
+  const [titleOverride, setTitleOverride] = React.useState<string | null>(null);
+  const [renameOpen, setRenameOpen] = React.useState(false);
+  const [renameDraft, setRenameDraft] = React.useState('');
+  const [renameBusy, setRenameBusy] = React.useState(false);
+  const effectiveTitle = titleOverride ?? title;
+  const canRename = Boolean(onThreadRenamed && threadId);
+
+  // Reset any local override when the selected thread changes (the incoming title prop is authoritative again).
+  React.useEffect(() => {
+    setTitleOverride(null);
+    setRenameOpen(false);
+  }, [threadId]);
+
+  const openRename = React.useCallback(() => {
+    setRenameDraft(effectiveTitle ?? '');
+    setRenameOpen(true);
+  }, [effectiveTitle]);
+
+  const submitRename = React.useCallback(() => {
+    const next = renameDraft.trim();
+    if (!next || next === (effectiveTitle ?? '')) {
+      setRenameOpen(false);
+      return;
+    }
+    setRenameBusy(true);
+    renameThread(threadId, next, { authenticatedFetch, bffBaseUrl })
+      .then(persisted => {
+        setTitleOverride(persisted);
+        setRenameOpen(false);
+        onThreadRenamed?.(persisted);
+      })
+      .catch(err => {
+        if (err instanceof Error) onError?.(err);
+      })
+      .finally(() => setRenameBusy(false));
+  }, [renameDraft, effectiveTitle, threadId, authenticatedFetch, bffBaseUrl, onThreadRenamed, onError]);
 
   const timeline = React.useMemo(() => buildTimeline(state.messages), [state.messages]);
 
@@ -930,15 +1016,15 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
           `Xrm`, ADR-012); otherwise plain text. The trailing tools are SOLO
           channel filters + search + Refresh, right-aligned. Every control keeps a
           resolvable accessible name (NFR-05). */}
-      {(title || state.status === 'ready') && (
+      {(effectiveTitle || state.status === 'ready') && (
         <div className={filterStyles.bar} role="group" aria-label="Message tools">
-          {title && (
+          {effectiveTitle && (
             // role=heading (aria-level 2) on the WRAPPER so a screen-reader user
             // can jump to the conversation title by heading nav; the interactive
             // link/plain text sits INSIDE and keeps its own role (a button, not a
             // heading — the wrapper carries the heading semantics). `marginInlineEnd:
             // auto` (filterStyles.title) pushes the trailing tools to the right.
-            <div className={filterStyles.title} role="heading" aria-level={2}>
+            <div className={mergeClasses(filterStyles.title, styles.titleGroup)} role="heading" aria-level={2}>
               {regarding && onOpenRecord ? (
                 <Link
                   as="button"
@@ -946,13 +1032,72 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
                   // activating the title link never submits a host <form>.
                   type="button"
                   className={styles.titleLink}
-                  aria-label={`${title}, open associated record`}
+                  aria-label={`${effectiveTitle}, open associated record`}
                   onClick={() => onOpenRecord(regarding.entityType, regarding.id)}
                 >
-                  {title}
+                  {effectiveTitle}
                 </Link>
               ) : (
-                <Text className={styles.titleText}>{title}</Text>
+                <Text className={styles.titleText}>{effectiveTitle}</Text>
+              )}
+              {/* Inline rename (round-8.4): pencil on hover → small popover with a name input. */}
+              {canRename && (
+                <Popover open={renameOpen} onOpenChange={(_, d) => setRenameOpen(d.open)} trapFocus>
+                  <PopoverTrigger disableButtonEnhancement>
+                    <Tooltip content="Rename thread" relationship="label">
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        data-title-edit
+                        className={mergeClasses(
+                          styles.titleEditButton,
+                          renameOpen && styles.titleEditButtonVisible
+                        )}
+                        icon={<EditRegular />}
+                        aria-label="Rename thread"
+                        onClick={openRename}
+                      />
+                    </Tooltip>
+                  </PopoverTrigger>
+                  <PopoverSurface aria-label="Rename thread">
+                    <div className={styles.renamePopover}>
+                      <Input
+                        value={renameDraft}
+                        onChange={(_, d) => setRenameDraft(d.value)}
+                        aria-label="Thread name"
+                        placeholder="Thread name"
+                        disabled={renameBusy}
+                        autoFocus
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            submitRename();
+                          } else if (e.key === 'Escape') {
+                            setRenameOpen(false);
+                          }
+                        }}
+                      />
+                      <div className={styles.renameActions}>
+                        <Button
+                          size="small"
+                          appearance="subtle"
+                          onClick={() => setRenameOpen(false)}
+                          disabled={renameBusy}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          size="small"
+                          appearance="primary"
+                          onClick={submitRename}
+                          disabled={renameBusy || !renameDraft.trim()}
+                        >
+                          {renameBusy ? 'Saving…' : 'Save'}
+                        </Button>
+                      </div>
+                    </div>
+                  </PopoverSurface>
+                </Popover>
               )}
             </div>
           )}

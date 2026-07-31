@@ -205,7 +205,10 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
         authenticatedFetch={props.authenticatedFetch}
         bffBaseUrl={props.bffBaseUrl}
         currentUserSystemUserId={currentUserSystemUserId}
-        title={threadNames[props.threadId]}
+        // Prefer the shell's live thread name (updates after a rename); fall back to the record-read map (round-8.4).
+        title={props.threadName ?? threadNames[props.threadId]}
+        // Inline rename (round-8.4): pencil in the header renames the thread; shell refreshes the list.
+        onThreadRenamed={props.onThreadRenamed}
         regarding={{ entityType, id }}
         onOpenRecord={onOpenRecord}
         // An email is a sprk_communication row (TimelineMessage.id IS the
