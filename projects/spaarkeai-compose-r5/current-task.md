@@ -1,20 +1,23 @@
 # Current Task State — Spaarke Compose R5
 
-> **Last Updated**: 2026-07-30 (by context-handoff — ALL impl+hardening done; AT deploy gate; pre-compaction)
-> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-compose-r5`. Working tree CLEAN, all pushed (tip `23b676a57`).
+> **Last Updated**: 2026-07-30 (by context-handoff — Phase 5 UAT COMPLETE + synced to master; NEXT = fix 4 master-inherited test failures)
+> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-compose-r5`. Working tree CLEAN, all pushed (tip `f99f790d7` = merge of origin/master).
 >
-> **▶ NEXT ACTION (post-compaction):** 🔧 **PHASE 5 UAT REMEDIATION IN PROGRESS.** Task 042 deployed (operator); UAT surfaced 11 findings → 5 R5-owned (Phase 5 wave 050–054, see `notes/uat-remediation-r5.md`). Status:
-> - **050 ✅** UAT #1A redline routing + origin fix (SEV-1) — committed `e5c82afe6`. Compose suite 822/822, byte-diff green, publish 46.84 MB.
-> - **053 ✅** UAT #5 external-change on visibilitychange + Reload-from-source button — committed `1abd5785f`. Toolbar 46/46.
-> - **054 ✅** UAT #9 profile-button (gate already correct; added spinner feedback) — committed `bf3104e86`. Toolbar 47/47.
-> - **051 ⛔🔔 ESCALATED** UAT #1B persist computed numbering — feasibility investigation contradicts the premise; escalation trigger fired. **Awaiting owner decision** (options A/B/C in `notes/task-051-deviations.md`; recommend A = reduced scope, 050 already preserves numbering byte-identical).
-> - **052 ✅** UAT #10/#11 honest Word co-authoring lock UX — committed `2ed296f0c`. Confirmed (Microsoft docs) NO Graph unlock for co-auth locks → honest 423 copy + Retry + Reload-from-Word (no fake Unlock). DEF-14 regression updated; banner 7/7; Compose 822/822.
-> - **Directive #2 ✅** checkout-retirement plan drafted (`notes/checkout-retirement-plan.md`) — cross-cutting (10 files incl. non-Compose FileAccess/DocumentOperations); promote to its own project.
+> **▶ NEXT ACTION (post-compaction):** 🔧 **FIX 4 MASTER-INHERITED TEST FAILURES**, then prong 1 → operator re-deploy → 090. All R5 UAT work (050–055) is DONE, green on R5's own surface, committed + pushed. The branch is synced to master (merge `f99f790d7`), which brought in 4 FAILING tests from OTHER projects (analysis-hub/ai-redesign + messaging-r3/email) — NOT R5 code, but the owner wants them GREEN before merge-to-master/deploy. Fix these next:
 >
-> **Re-verify (2026-07-30):** Compose suite **822/822**; full BFF **9544 passed / 3 failed / 101 skipped**. The **3 failures are PRE-EXISTING from the master merge** (`AnalysisEndpointsExecuteDispatchContractTests` — analysis-hub/ai-redesign/email dispatch; R5 hardening baseline was 9319/0/101 before the merges; R5 diff is 100% Compose). **NOT R5** — flag to those project owners (same family as out-of-scope UAT #7/#8). Publish ~46.84 MB (052 server delta = one message string). BFF build 0 errors.
+> **FAILURE GROUP A — `AnalysisEndpointsExecuteDispatchContractTests` (3 fails)** — `tests/**/Api/Ai/…` (analysis-hub-r1 / ai-redesign):
+>   - `Post_NoDocumentProfileBindingRow_FallsThroughToEnginePath`, `Post_PlaybookIdMatchesDocumentProfileBinding_DispatchesLinearBranch`, `Post_PlaybookIdDoesNotMatchBinding_FallsThroughToEnginePath`.
+>   - Error: `System.InvalidOperationException: Failure to infer one or more parameters … sessionManager | UNKNOWN`. The analysis EXECUTE/dispatch endpoint handler has a `sessionManager` parameter ASP.NET Minimal API cannot bind (not a registered service, not a body param). **Root cause = asymmetric DI registration** (endpoint mapped but `sessionManager`'s service not registered / not in the test fixture) — the RB-T028 / BFF §10 "endpoints mapped unconditionally must have unconditional service registration" class. Fix: register the missing service (or correct the handler signature). Grep the AnalysisEndpoints Execute/dispatch map + its `sessionManager` type; check `Program.cs`/the relevant `*Module.cs` DI.
 >
-> **NEXT:** (1) owner picks **051** option A/B/C (`notes/task-051-deviations.md`; recommend A). (2) Operator **re-deploys BFF + `sprk_spaarkeai` client together** → re-UAT the 4 fixes. (3) Then 090 wrap-up (/test-diet + review + merge-to-master) — the 3 pre-existing analysis failures should be resolved by their owners or accepted before the master-merge gate.
-> **Out-of-scope UAT items (#2,3,4,7,8)** captured in `notes/uat-remediation-r5.md` (other projects; no issues filed per owner). **Do NOT deploy autonomously.**
+> **FAILURE GROUP B — `CommunicationWorkspaceReadSeamTests.QueryCommunicationsAsync_AllFiveFacetsComposedTogether_AndsThreadChannelDateRangeAndParticipant` (1 fail)** — `tests/integration/seam/Communication/…` (messaging-r3 / email-r5):
+>   - Error: `Expected …Matches(messageQuery, " and ").Count to be 4 … but found 5`. The composed OData filter now has an EXTRA ` and ` (5 vs expected 4). A merge interaction (email-r5 + messaging-r3 both touched the Communication query builder) added a facet/AND. Fix: inspect the query composition vs the test — either the query has a spurious extra AND (fix the builder) OR a legitimately-added 6th facet means the test's expected count is stale (update to 5). Determine which by reading the query builder + the 5-facet test setup.
+>
+> **After the 4 fixes are green** (re-run full BFF suite → expect 9648-ish / 0 failed / 101 skipped):
+> - (1) **Prong 1 (055 fast-follow, DEFERRED):** keep-edits recovery — on an anchor-refusal batch, best-effort apply resolvable ops + surface unresolvable (reuse `ReanchorStaleSaveAsync` AUTO/REVIEW/ORPHAN model). Safety net; prong 2 already fixed the root cause.
+> - (2) **Operator re-deploys BFF + `sprk_spaarkeai` client together** → re-UAT (esp. the 422 flow on a FRESH upload + Open-Document modal).
+> - (3) **090 wrap-up** (/test-diet + /code-review + /adr-check + /merge-to-master).
+>
+> **Do NOT deploy autonomously.** Out-of-scope UAT items (#2,3,4,7,8) captured in `notes/uat-remediation-r5.md` (other projects; no issues filed per owner).
 
 ---
 
@@ -23,7 +26,9 @@
 | Field | Value |
 |-------|-------|
 | **Project** | spaarkeai-compose-r5 (Editing Completeness — additive on R4's Shadow Document Architecture) |
-| **Progress** | Phase 0 ✅ · Phase 1 ✅ (010–014) · Phase 2 ✅ (020 G1, 021 G2, 022 G7) · Phase 3 ✅ (030 G8, 031 G9, 032 G11, 033 G5) · Phase 4: 040 ✅ (G10), 041 ✅ (hardening PASS). **NEXT: 042 deploy (operator gate) → 090 wrap-up.** |
+| **Progress** | Phases 0–4 ✅ (010–041); 042 deploy ✅ (operator). **Phase 5 UAT remediation ✅** — 050 #1A redline routing, 051 #1B numbering (opt A), 052 #10/#11 Word-lock UX, 053 #5 external-change, 054 #9 profile feedback, 055 422 anchor paraOffset + Open-Document modal + diagnostic. All committed + pushed; synced to master (`f99f790d7`). **NEXT: fix 4 master-inherited test fails (Groups A+B above) → prong 1 → re-deploy → 090.** |
+| **Branch state** | tip `f99f790d7` (merge of origin/master), pushed, working tree CLEAN, behind master 0. |
+| **Test state** | R5's own surface GREEN (Compose 827/0, byte-diff 24/24). **4 known fails, ALL inherited from the master merge, NOT R5**: 3× `AnalysisEndpointsExecuteDispatchContractTests` (DI `sessionManager` param-inference) + 1× `CommunicationWorkspaceReadSeamTests…FacetsComposedTogether` (extra ` and ` in composed filter). Fix next (details in the ▶ NEXT ACTION block). |
 | **Branch state** | tip `23b676a57`, pushed to `origin/work/spaarkeai-compose-r5`, working tree CLEAN. NOT merged to master (090 does that). |
 | **Full-suite state** | byte-diff **24/24** · Compose C# **821/821** · full BFF **9319 passed / 0 failed / 101 skipped** · client suites green · ArchTests **3 pre-existing only** (ADR-007, ADR-010×2; Tier-1 no-AI passes) · publish **48.13 MB compressed incl PDBs** (≤60) · zero new runtime package. |
 | **This-session tasks (022→041 + comm fix)** | 022 G7 dedup+split-button (`410b08669`) · 030 G8 banner+webhook seam (`9a9346dd9`) · 031 G9 scroll-sync (`26990ba10`) · 032 G11 redline-visibility lock (`3e5746690`) · 033 G5 hyperlinks both paths (`485ca406f`) · 040 G10 profile re-run (`d5bad935c`) · 041 hardening PASS (`6d2c514ac`) · checkpoint (`c5349d5cd`) · Communication stale-test fix (`23b676a57`). Each has a `notes/task-0NN-deviations.md`. |
