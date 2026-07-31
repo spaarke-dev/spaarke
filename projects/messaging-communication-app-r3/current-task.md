@@ -45,7 +45,7 @@ Operator spec: keep the `SectionPanel` title but **16px / semibold** (was my wro
 | Round 7 **toast flood** (toast live arrivals only) | ✅ (#700) | ✅ SpaarkeAi |
 | **Q2** clickable app-notification (bell, deep-linked) | ✅ (#700) | ✅ BFF |
 
-**Live BFF** (`spaarke-bff-dev`) = master `e61d9eaeb` (all thread fixes + Q2). Hash-verified, health 200, smoke 401.
+**Live BFF** (`spaarke-bff-dev`) = **round-8 + round-8.1 redeployed 2026-07-31** (HEAD `9ddd9dc68` BFF tree). Hash-verified (4/4), health 200, DELETE endpoints smoke 401 (were 404 pre-deploy). ⚠️ **Root-cause note**: the BFF was NOT redeployed during rounds 8/8.1 even though the client surfaces were — deployed BFF was stuck at `e61d9eaeb` (pre-round-8), returning 404 on the DELETE routes and lacking the `sprk_openconversation=1` deep-link. That caused the "delete doesn't work / notification doesn't open modal" UAT regressions. Fixed 2026-07-31 by redeploying BFF. See memory `deploy-sequence-preference` (post-deploy verification recipe).
 
 ## Verification at merge
 - BFF build 0 errors; **50/50** Communication tests (incl. Q2 seam test 6/6); ConversationView 17/17 (thread-switch regression); widget 10/10. No new packages (publish ~47.5 MB, ceiling 60). No new HIGH CVE.

@@ -223,12 +223,21 @@ function senderLabel(message: TimelineMessage): string {
   return (message.senderName ?? message.sender ?? 'Unknown sender').toString();
 }
 
-const MessagePreviewRow: React.FC<{ message: TimelineMessage }> = ({ message }) => {
+const MessagePreviewRow: React.FC<{ message: TimelineMessage; onOpenThread?: () => void }> = ({
+  message,
+  onOpenThread,
+}) => {
   const s = useStyles();
   const isEmail = message.channelType === 'email';
   const dateTimeLabel = formatDateTime(message.sentOn ?? message.createdOn);
   const trigger = (
-    <Button appearance="subtle" className={s.messageRow} aria-label={`Preview message from ${senderLabel(message)}`}>
+    <Button
+      appearance="subtle"
+      className={s.messageRow}
+      aria-label={`Preview message from ${senderLabel(message)}`}
+      // Round-8.4 item 8: double-click the row opens the full modal ON this message's thread.
+      onDoubleClick={onOpenThread}
+    >
       <span className={s.messageInner}>
         {/* Item 7 (UAT §A): channel pill on the left, text only, no icon. */}
         <span
@@ -267,11 +276,12 @@ const MessagePreviewRow: React.FC<{ message: TimelineMessage }> = ({ message }) 
   );
 };
 
-const ThreadPreview: React.FC<{ thread: PreviewThread; defaultExpanded: boolean; isNew: boolean }> = ({
-  thread,
-  defaultExpanded,
-  isNew,
-}) => {
+const ThreadPreview: React.FC<{
+  thread: PreviewThread;
+  defaultExpanded: boolean;
+  isNew: boolean;
+  onOpenThread?: (threadId: string) => void;
+}> = ({ thread, defaultExpanded, isNew, onOpenThread }) => {
   const s = useStyles();
   const [expanded, setExpanded] = React.useState(defaultExpanded);
   const countLabel = `${thread.threadMessageCount} message${thread.threadMessageCount === 1 ? '' : 's'}`;
@@ -299,7 +309,11 @@ const ThreadPreview: React.FC<{ thread: PreviewThread; defaultExpanded: boolean;
         (thread.messages.length > 0 ? (
           <>
             {thread.messages.map(m => (
-              <MessagePreviewRow key={m.id} message={m} />
+              <MessagePreviewRow
+                key={m.id}
+                message={m}
+                onOpenThread={onOpenThread ? () => onOpenThread(thread.threadId) : undefined}
+              />
             ))}
             {thread.hasMore && (
               <div className={s.moreRow}>
@@ -328,6 +342,8 @@ export interface IConversationPreviewProps {
   newThreadIds?: ReadonlySet<string>;
   /** Raised by the header "Open conversations" affordance to launch the record-filtered modal. */
   onOpen: () => void;
+  /** Raised when a message row is double-clicked (round-8.4 item 8) — opens the modal ON that message's thread. */
+  onOpenThread?: (threadId: string) => void;
   className?: string;
 }
 
@@ -338,6 +354,7 @@ export const ConversationPreview: React.FC<IConversationPreviewProps> = ({
   title,
   newThreadIds,
   onOpen,
+  onOpenThread,
   className,
 }) => {
   const s = useStyles();
@@ -366,6 +383,7 @@ export const ConversationPreview: React.FC<IConversationPreviewProps> = ({
               thread={thread}
               defaultExpanded={thread.threadId === model.defaultExpandedThreadId}
               isNew={newIds.has(thread.threadId)}
+              onOpenThread={onOpenThread}
             />
           ))
         ) : (

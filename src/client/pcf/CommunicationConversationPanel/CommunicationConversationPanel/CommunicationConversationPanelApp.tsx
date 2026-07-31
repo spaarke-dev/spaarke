@@ -175,6 +175,18 @@ export const CommunicationConversationPanelApp: React.FC<ICommunicationConversat
   const [result, setResult] = React.useState<IRegardingReadResultDto | null>(null);
   const [readError, setReadError] = React.useState<string | null>(null);
   const [modalOpen, setModalOpen] = React.useState(false);
+  // Round-8.4 item 8: which thread the modal opens ON. Undefined → default (most-recent) select; set when the user
+  // double-clicks a specific message row in the compact preview.
+  const [targetThreadId, setTargetThreadId] = React.useState<string | undefined>(undefined);
+
+  const openModalDefault = React.useCallback(() => {
+    setTargetThreadId(undefined);
+    setModalOpen(true);
+  }, []);
+  const openModalOnThread = React.useCallback((threadId: string) => {
+    setTargetThreadId(threadId);
+    setModalOpen(true);
+  }, []);
 
   // Round-7 item 11: auto-open the Messages modal once when arrived via the
   // notification deep-link (`sprk_openconversation=1`). The record IS the target
@@ -329,7 +341,8 @@ export const CommunicationConversationPanelApp: React.FC<ICommunicationConversat
         showVersionFooter={showVersionFooter}
         title={title}
         newThreadIds={newThreadIds}
-        onOpen={() => setModalOpen(true)}
+        onOpen={openModalDefault}
+        onOpenThread={openModalOnThread}
       />
       {modalOpen && (
         <ConversationModal
@@ -342,6 +355,7 @@ export const CommunicationConversationPanelApp: React.FC<ICommunicationConversat
           currentUserSystemUserId={currentUserSystemUserId}
           threadNames={threadNames}
           onOpenRecord={handleOpenRecord}
+          initialThreadId={targetThreadId}
         />
       )}
     </div>

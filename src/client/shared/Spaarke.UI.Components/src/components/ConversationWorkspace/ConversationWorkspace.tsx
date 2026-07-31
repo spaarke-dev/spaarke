@@ -135,6 +135,13 @@ export interface ConversationWorkspaceProps {
   onThreadSelected?: (threadId: string | undefined) => void;
 
   /**
+   * Optional thread to select on first load instead of the most-recent default (round-8.4 item 8). Used when a host
+   * opens the workspace targeting a specific thread — e.g. the PCF preview double-click opens the modal ON the
+   * double-clicked message's thread. Ignored if the id isn't in the loaded, access-filtered thread set.
+   */
+  initialThreadId?: string;
+
+  /**
    * Optional accessory rendered to the right of the "Threads" title (round 3
    * item 3) — the widget passes its "N new communications" count here so it
    * lives in the thread-pane header instead of a separate awareness bar.
@@ -263,6 +270,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   navigationService,
   onCreateThread,
   onThreadSelected,
+  initialThreadId,
   threadsHeaderAccessory,
   onError,
   pageSize = 50,
@@ -386,12 +394,15 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
     }
 
     if (!selectedThreadId && allRows.length > 0) {
-      const next = allRows[0].threadId;
+      // Round-8.4 item 8: prefer the host-requested initial thread when it's in the loaded set; else most-recent.
+      const requested =
+        initialThreadId && allRows.some(r => r.threadId === initialThreadId) ? initialThreadId : undefined;
+      const next = requested ?? allRows[0].threadId;
       setSelectedThreadId(next);
       onThreadSelected?.(next);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [listStatus, allRows, regardingKey]);
+  }, [listStatus, allRows, regardingKey, initialThreadId]);
 
   const handleSelectThread = React.useCallback(
     (threadId: string) => {

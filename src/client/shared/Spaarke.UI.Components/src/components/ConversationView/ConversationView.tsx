@@ -106,15 +106,18 @@ const useStyles = makeStyles({
     borderBottomColor: tokens.colorNeutralStroke2,
     backgroundColor: tokens.colorNeutralBackground1,
   },
-  // Plain (record-less) title — non-interactive text.
+  // Plain (record-less) title — non-interactive text. Explicit 20px (round-8.4 item 3b) so the Fluent
+  // <Text> default size (14px) doesn't override the header size.
   titleText: {
+    fontSize: tokens.fontSizeBase500,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
   // Record-linked title — a Fluent Link (rendered as a button) that delegates
-  // the record open to the host's `onOpenRecord`. Weight matches the plain
+  // the record open to the host's `onOpenRecord`. Weight/size match the plain
   // title so linking a title doesn't reflow the header.
   titleLink: {
+    fontSize: tokens.fontSizeBase500,
     fontWeight: tokens.fontWeightSemibold,
     textAlign: 'left',
   },
@@ -305,11 +308,12 @@ const useFilterStyles = makeStyles({
     flex: 1,
     minWidth: 0,
   },
-  // Thread name, left-aligned in the tools row (round 7 item 9 / round 8 update 2).
+  // Thread name, left-aligned in the tools row (round 7 item 9 / round 8 update 2 / round-8.4 item 3b).
   // `marginInlineEnd: auto` pushes the trailing tools to the right edge; ellipsis
   // keeps a long name from crowding the tools. Typography per operator spec:
-  // 14px (fontSizeBase300) · 600 (fontWeightSemibold) · #242424
+  // 20px (fontSizeBase500) · 600 (fontWeightSemibold) · Segoe UI (fontFamilyBase) · #242424
   // (colorNeutralForeground1 in light; semantic token adapts in dark — ADR-021).
+  // NOTE: operator wrote "128px" in round-8.4 UAT — interpreted as a typo; 20px matches the header in the screenshot.
   title: {
     flexShrink: 1,
     minWidth: 0,
@@ -317,7 +321,8 @@ const useFilterStyles = makeStyles({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: tokens.fontSizeBase300,
+    fontFamily: tokens.fontFamilyBase,
+    fontSize: tokens.fontSizeBase500,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
@@ -744,7 +749,7 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
     [onError]
   );
 
-  const { pollNow } = useThreadPoll({
+  const { pollNow, refresh } = useThreadPoll({
     threadId,
     authenticatedFetch,
     bffBaseUrl,
@@ -768,11 +773,11 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
     setPendingDeleteMessage(null);
     if (!target) return;
     deactivateMessage(target.id, { authenticatedFetch, bffBaseUrl })
-      .then(() => pollNow())
+      .then(() => refresh()) // FULL reload — a delta pollNow can't drop the now-deactivated row (round-8.4 items 1/10)
       .catch(err => {
         if (err instanceof Error) onError?.(err);
       });
-  }, [pendingDeleteMessage, authenticatedFetch, bffBaseUrl, pollNow, onError]);
+  }, [pendingDeleteMessage, authenticatedFetch, bffBaseUrl, refresh, onError]);
 
   const timeline = React.useMemo(() => buildTimeline(state.messages), [state.messages]);
 
@@ -831,7 +836,18 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
     const el = listRef.current;
     if (!el) return;
     if (!hasScrolledInitiallyRef.current) {
+      // Round-8.4 item 12: don't claim the initial scroll until the FIRST non-empty render — otherwise we "scroll"
+      // an empty list (length 0 on mount, before the async load) and the real messages later go through the
+      // at-bottom path, which can land mid-list when the surface (e.g. a modal animating open) hadn't settled its
+      // height yet. Scroll now, then once more after layout settles so the newest message is reliably in view.
+      if (renderItems.length === 0) return;
       el.scrollTop = el.scrollHeight;
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => {
+          const node = listRef.current;
+          if (node) node.scrollTop = node.scrollHeight;
+        });
+      }
       hasScrolledInitiallyRef.current = true;
       isAtBottomRef.current = true;
       setShowJumpToLatest(false);
@@ -997,14 +1013,14 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
               )}
             </>
           )}
-          {/* Refresh — always available so an empty thread can still be polled. */}
+          {/* Refresh — full reload (not delta) so soft-deleted messages actually drop out (round-8.4 item 4). */}
           <Tooltip content="Refresh conversation" relationship="label">
             <Button
               appearance="subtle"
               size="small"
               icon={<ArrowClockwiseRegular />}
               aria-label="Refresh conversation"
-              onClick={pollNow}
+              onClick={refresh}
             />
           </Tooltip>
         </div>
@@ -1083,6 +1099,37 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
                           isOwn={isOwn}
                           status={isOwn ? 'sent' : undefined}
                           onOpenAttachment={onOpenAttachment}
+                          /* Round-8.4 items 3a/9: per-message actions live INLINE in the bubble
+                             header (right of sender/time), not in a separate row under the message. */
+                          headerAction={
+                            <>
+                              {onForwardMessage && (
+                                <Tooltip content={forwardLabel(item.entry.message)} relationship="label">
+                                  <Button
+                                    appearance="subtle"
+                                    size="small"
+                                    icon={<ArrowForwardRegular />}
+                                    aria-label={forwardLabel(item.entry.message)}
+                                    onClick={() => onForwardMessage(item.entry.message)}
+                                  />
+                                </Tooltip>
+                              )}
+                              <Tooltip content="Delete message" relationship="label">
+                                <Button
+                                  appearance="subtle"
+                                  size="small"
+                                  icon={<DeleteRegular />}
+                                  aria-label="Delete message"
+                                  onClick={() =>
+                                    setPendingDeleteMessage({
+                                      id: item.entry.message.id,
+                                      label: item.entry.message.body?.slice(0, 60) ?? 'this message',
+                                    })
+                                  }
+                                />
+                              </Tooltip>
+                            </>
+                          }
                         />
                       )}
 
@@ -1103,41 +1150,22 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
                       deletion is owned by the email surface (not here). Both are
                       revealed on row hover/focus (NFR-05) and kept in the DOM/tab
                       order. Rendered when at least one action applies. */}
-                      {(onForwardMessage || !isEmail) && (
+                      {/* Email-in-flow blocks have no header slot, so their Forward action stays in a
+                          trailing row here. Message-type actions moved INTO the bubble header (above). */}
+                      {isEmail && onForwardMessage && (
                         <div
-                          className={mergeClasses(
-                            styles.messageActions,
-                            isOwn ? styles.messageActionsOwn : styles.messageActionsOther
-                          )}
+                          className={mergeClasses(styles.messageActions, styles.messageActionsOther)}
                           data-message-actions
                         >
-                          {onForwardMessage && (
-                            <Tooltip content={forwardLabel(item.entry.message)} relationship="label">
-                              <Button
-                                appearance="subtle"
-                                size="small"
-                                icon={<ArrowForwardRegular />}
-                                aria-label={forwardLabel(item.entry.message)}
-                                onClick={() => onForwardMessage(item.entry.message)}
-                              />
-                            </Tooltip>
-                          )}
-                          {!isEmail && (
-                            <Tooltip content="Delete message" relationship="label">
-                              <Button
-                                appearance="subtle"
-                                size="small"
-                                icon={<DeleteRegular />}
-                                aria-label="Delete message"
-                                onClick={() =>
-                                  setPendingDeleteMessage({
-                                    id: item.entry.message.id,
-                                    label: item.entry.message.body?.slice(0, 60) ?? 'this message',
-                                  })
-                                }
-                              />
-                            </Tooltip>
-                          )}
+                          <Tooltip content={forwardLabel(item.entry.message)} relationship="label">
+                            <Button
+                              appearance="subtle"
+                              size="small"
+                              icon={<ArrowForwardRegular />}
+                              aria-label={forwardLabel(item.entry.message)}
+                              onClick={() => onForwardMessage(item.entry.message)}
+                            />
+                          </Tooltip>
                         </div>
                       )}
                     </div>
