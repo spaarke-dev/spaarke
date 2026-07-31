@@ -60,6 +60,7 @@ public sealed class AssociationSpineSeamTests
     {
         var parent = new DataverseEntity("sprk_communication");
         parent["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId);
+        parent["sprk_associationstatus"] = new OptionSetValue(AssociationStatusCodes.Resolved); // P3: confirmed parent ⇒ reply inherits at 1.0
         dv.Setup(d => d.GetCommunicationByGraphMessageIdAsync(parentMsgId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(parent);
     }

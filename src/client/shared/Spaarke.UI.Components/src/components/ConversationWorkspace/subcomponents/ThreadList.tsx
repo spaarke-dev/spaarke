@@ -23,8 +23,22 @@
  * `FluentProvider`.
  */
 import * as React from 'react';
-import { Button, Spinner, Text, Tooltip, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { AddRegular, CommentMultipleRegular, PinFilled, PinRegular } from '@fluentui/react-icons';
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
+  Spinner,
+  Text,
+  Tooltip,
+  makeStyles,
+  mergeClasses,
+  tokens,
+} from '@fluentui/react-components';
+import { AddRegular, CommentMultipleRegular, DeleteRegular, PinFilled, PinRegular } from '@fluentui/react-icons';
 
 export interface IThreadListRow {
   threadId: string;
@@ -70,6 +84,13 @@ export interface IThreadListProps {
    * pin toggle entirely (e.g. a read-only host).
    */
   onTogglePin?: (threadId: string, nextPinned: boolean) => void;
+  /**
+   * Fired when the row's delete (trash) affordance is confirmed (R3 UAT round 7 item 7). The host owns the
+   * soft-delete (deactivate) API call + list refresh + re-selection; this component only surfaces the trash icon
+   * (revealed on row select/hover, left of the pin) and runs the confirmation dialog before calling back. Omit to
+   * hide the delete affordance entirely (e.g. a read-only host).
+   */
+  onDeleteThread?: (threadId: string) => void;
   className?: string;
 }
 
@@ -176,40 +197,64 @@ const useStyles = makeStyles({
     // Hide the visible scrollbar (round 4) — wheel scroll still works.
     scrollbarWidth: 'none',
     '::-webkit-scrollbar': { width: 0, height: 0 },
-    // Breathing room between thread rows (R3 UAT 2026-07-22 item 5b).
-    rowGap: tokens.spacingVerticalXS,
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
-    paddingLeft: tokens.spacingHorizontalS,
-    paddingRight: tokens.spacingHorizontalS,
+    // Rows are separated by thin divider lines (round 7 item 6, Email-widget
+    // style) — no inter-row gap, no card radius. Padding lives on the rows so the
+    // divider spans the full row width.
+    paddingTop: 0,
+    paddingBottom: 0,
+    paddingLeft: 0,
+    paddingRight: 0,
   },
   row: {
     display: 'flex',
     flexDirection: 'column',
     cursor: 'pointer',
-    // Roomier rows (item 5b) — vertical M padding + a rounded card look now that
-    // rows are separated by a gap rather than a divider line.
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalM,
+    // Roomier rows: vertical M padding + 2px (round 7 item 2). Horizontal padding
+    // on the row (not the list) so the divider line spans the full width.
+    paddingTop: `calc(${tokens.spacingVerticalM} + 2px)`,
+    paddingBottom: `calc(${tokens.spacingVerticalM} + 2px)`,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    borderRadius: tokens.borderRadiusMedium,
+    // Thin subtle divider between rows (round 7 item 6) — like the Email widget.
+    borderBottomWidth: tokens.strokeWidthThin,
+    borderBottomStyle: 'solid',
+    borderBottomColor: tokens.colorNeutralStroke2,
     outlineStyle: 'none',
     ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
+      // Reveal the row's trailing actions (delete + pin) on hover (items 4/7).
+      '& [data-row-action]': { opacity: 1 },
+    },
+    // Keyboard focus keeps the ring; mouse-click selection does NOT (round 7 item
+    // 5 — no dark border on select, only the light-blue fill). `:focus-visible`
+    // fires for keyboard/roving-tabindex focus but not pointer clicks.
+    ':focus-visible': {
+      boxShadow: `inset 0 0 0 2px ${tokens.colorStrokeFocus2}`,
+    },
+    // Keyboard users reaching the row actions via Tab reveals them too.
+    ':focus-within': {
+      '& [data-row-action]': { opacity: 1 },
     },
   },
   rowSelected: {
+    // Light-blue highlight only (round 7 item 5) — no border/outline.
     backgroundColor: tokens.colorBrandBackground2,
-  },
-  rowFocused: {
-    boxShadow: `inset 0 0 0 2px ${tokens.colorStrokeFocus2}`,
+    // Selected row reveals its trailing actions (items 4/7).
+    '& [data-row-action]': { opacity: 1 },
   },
   rowHeader: {
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
+  },
+  // Trailing row-action cluster (delete + pin). Right-aligned after the name.
+  rowActions: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXXS,
+    flexShrink: 0,
   },
   rowName: {
     flex: '1 1 auto',
@@ -223,16 +268,34 @@ const useStyles = makeStyles({
   rowNameSelected: {
     fontWeight: tokens.fontWeightSemibold,
   },
-  pinButton: {
+  // Trailing action buttons (delete + pin). Hidden by default (opacity 0, but
+  // kept in the DOM + tab order — NFR-05); revealed when the row is selected,
+  // hovered, or focus-within (items 4/7). `data-row-action` is the reveal hook
+  // the row's :hover/:focus-within + `.rowSelected` target.
+  rowActionButton: {
     flexShrink: 0,
     minWidth: 'auto',
     padding: 0,
-    // Smaller pin glyph (R3 UAT 2026-07-23 item 7) — the icon font-size drives
-    // the SVG size; base100 (~10px) is a subtle affordance.
     fontSize: tokens.fontSizeBase100,
+    opacity: 0,
+    transitionProperty: 'opacity',
+    transitionDuration: tokens.durationFaster,
+    transitionTimingFunction: tokens.curveEasyEase,
+    ':focus-visible': { opacity: 1 },
   },
   pinButtonActive: {
     color: tokens.colorBrandForeground1,
+  },
+  // A pinned thread ALWAYS shows its (filled) pin — even when the row is not
+  // selected/hovered — so the pinned state stays visible (item 4 caveat). Wins the
+  // opacity over `rowActionButton` (later class in mergeClasses).
+  pinButtonPinned: {
+    opacity: 1,
+  },
+  // Delete (trash) tint — subtle by default, danger-red on hover so the destructive
+  // affordance reads clearly.
+  deleteButton: {
+    ':hover': { color: tokens.colorPaletteRedForeground1 },
   },
   // Compact unread signal (item 5b) — a brand dot replaces the "N new messages"
   // text row + its inline "Mark as read" button (that action moved to the message
@@ -243,6 +306,9 @@ const useStyles = makeStyles({
     height: '8px',
     borderRadius: tokens.borderRadiusCircular,
     backgroundColor: tokens.colorBrandBackground,
+    // Extra breathing room between the status dot and the thread name (round 7
+    // item 3) — on top of the rowHeader gap.
+    marginInlineEnd: tokens.spacingHorizontalXS,
   },
   centeredState: {
     display: 'flex',
@@ -270,11 +336,15 @@ export const ThreadList: React.FC<IThreadListProps> = ({
   onCollapse,
   titleAccessory,
   onTogglePin,
+  onDeleteThread,
   className,
 }) => {
   const styles = useStyles();
   const rowRefs = React.useRef<Map<string, HTMLDivElement>>(new Map());
   const [focusedThreadId, setFocusedThreadId] = React.useState<string | undefined>(undefined);
+  // Pending delete target for the confirmation dialog (round 7 item 7). Null =
+  // dialog closed. Captures the name so the prompt can reference the thread.
+  const [pendingDelete, setPendingDelete] = React.useState<{ threadId: string; name: string } | null>(null);
 
   const focusRowByIndex = React.useCallback(
     (index: number) => {
@@ -368,7 +438,6 @@ export const ThreadList: React.FC<IThreadListProps> = ({
         <div className={styles.list} role="list" aria-label="Conversation threads" onKeyDown={handleListKeyDown}>
           {rows.map(row => {
             const isSelected = row.threadId === selectedThreadId;
-            const isFocused = row.threadId === focusedThreadId;
             const displayName = row.name && row.name.trim().length > 0 ? row.name : '(Untitled thread)';
             // Defensive falsy coercion (task 040 caveat: a pre-existing thread's sprk_ispinned reads back null,
             // not false — the host normalizes it before building rows, but this component never assumes a strict
@@ -384,11 +453,10 @@ export const ThreadList: React.FC<IThreadListProps> = ({
                 role="listitem"
                 aria-selected={isSelected}
                 tabIndex={isSelected || (!selectedThreadId && row === rows[0]) ? 0 : -1}
-                className={mergeClasses(
-                  styles.row,
-                  isSelected ? styles.rowSelected : undefined,
-                  isFocused ? styles.rowFocused : undefined
-                )}
+                // Round 7 item 5: no mouse-click focus border — selection is the
+                // light-blue fill only; the keyboard ring comes from CSS
+                // `:focus-visible` (see styles.row), not an onFocus-driven class.
+                className={mergeClasses(styles.row, isSelected ? styles.rowSelected : undefined)}
                 onClick={() => onSelectThread(row.threadId)}
                 onFocus={() => setFocusedThreadId(row.threadId)}
               >
@@ -406,28 +474,90 @@ export const ThreadList: React.FC<IThreadListProps> = ({
                   <Text className={mergeClasses(styles.rowName, isSelected ? styles.rowNameSelected : undefined)}>
                     {displayName}
                   </Text>
-                  {onTogglePin && (
-                    <Button
-                      appearance="transparent"
-                      size="small"
-                      className={mergeClasses(styles.pinButton, isPinned ? styles.pinButtonActive : undefined)}
-                      icon={isPinned ? <PinFilled /> : <PinRegular />}
-                      aria-label={isPinned ? `Unpin ${displayName}` : `Pin ${displayName}`}
-                      aria-pressed={isPinned}
-                      onClick={e => {
-                        // Prevent the click from bubbling to the row's onClick (which would also select the
-                        // thread) — the pin toggle is an independent affordance.
-                        e.stopPropagation();
-                        onTogglePin(row.threadId, !isPinned);
-                      }}
-                    />
-                  )}
+                  {/* Trailing actions (round 7 items 4/7): delete (trash) left of
+                      the pin. Both are hidden until the row is selected/hovered
+                      (except a pinned thread's filled pin, which stays visible).
+                      `data-row-action` is the reveal hook. */}
+                  <div className={styles.rowActions}>
+                    {onDeleteThread && (
+                      <Tooltip content="Delete thread" relationship="label">
+                        <Button
+                          data-row-action
+                          appearance="transparent"
+                          size="small"
+                          className={mergeClasses(styles.rowActionButton, styles.deleteButton)}
+                          icon={<DeleteRegular />}
+                          aria-label={`Delete ${displayName}`}
+                          onClick={e => {
+                            e.stopPropagation();
+                            setPendingDelete({ threadId: row.threadId, name: displayName });
+                          }}
+                        />
+                      </Tooltip>
+                    )}
+                    {onTogglePin && (
+                      <Button
+                        data-row-action
+                        appearance="transparent"
+                        size="small"
+                        className={mergeClasses(
+                          styles.rowActionButton,
+                          isPinned ? styles.pinButtonActive : undefined,
+                          isPinned ? styles.pinButtonPinned : undefined
+                        )}
+                        icon={isPinned ? <PinFilled /> : <PinRegular />}
+                        aria-label={isPinned ? `Unpin ${displayName}` : `Pin ${displayName}`}
+                        aria-pressed={isPinned}
+                        onClick={e => {
+                          // Prevent the click from bubbling to the row's onClick (which would also select the
+                          // thread) — the pin toggle is an independent affordance.
+                          e.stopPropagation();
+                          onTogglePin(row.threadId, !isPinned);
+                        }}
+                      />
+                    )}
+                  </div>
                 </div>
               </div>
             );
           })}
         </div>
       )}
+
+      {/* Delete-thread confirmation (round 7 item 7). Soft-delete (deactivate) is
+          reversible, but a mis-click still removes the thread from the list, so we
+          gate it behind an explicit confirm. The host owns the actual API call. */}
+      <Dialog
+        open={pendingDelete !== null}
+        onOpenChange={(_e, data) => {
+          if (!data.open) setPendingDelete(null);
+        }}
+      >
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Delete thread?</DialogTitle>
+            <DialogContent>
+              {pendingDelete
+                ? `“${pendingDelete.name}” will be removed from your list. This deactivates the thread; it can be restored by an administrator.`
+                : ''}
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="secondary" onClick={() => setPendingDelete(null)}>
+                Cancel
+              </Button>
+              <Button
+                appearance="primary"
+                onClick={() => {
+                  if (pendingDelete) onDeleteThread?.(pendingDelete.threadId);
+                  setPendingDelete(null);
+                }}
+              >
+                Delete
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
     </div>
   );
 };

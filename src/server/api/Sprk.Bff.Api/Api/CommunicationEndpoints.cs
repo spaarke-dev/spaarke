@@ -169,6 +169,31 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
+        // DELETE /api/communications/threads/{threadId} — soft-delete (deactivate) a thread (round 7 item 7).
+        // Same authorization shape as rename/pin: the caller is resolved server-side and authorized AGAINST the
+        // thread by an impersonated visibility check (403 if the caller cannot see it — ADR-028 / NFR-01), then
+        // statecode/statuscode are set to Inactive via IThreadResolver.DeactivateThreadAsync (reversible; no
+        // physical delete, no Dataverse plugin). Distinct route: DELETE verb + literal /threads segment, no
+        // collision with the DELETE /{id} message-deactivate below.
+        group.MapDelete("/threads/{threadId:guid}", DeactivateThreadAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("DeactivateThread")
+            .WithDescription("Soft-delete (deactivate) a communication thread (round 7 item 7): sets statecode/statuscode to Inactive. Caller resolved server-side; 403 if the caller cannot see the thread. Reversible — no physical delete, no Dataverse plugin.")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
+        // DELETE /api/communications/{id} — soft-delete (deactivate) a single message (round 7 item 8). Caller
+        // resolved + authorized AGAINST the message by an impersonated visibility check (403 if the caller cannot
+        // see it), then statecode/statuscode set to Inactive via IThreadResolver.DeactivateMessageAsync. DELETE
+        // verb + bare /{id} (no suffix) is distinct from POST /{id}/archive and the DELETE /threads/{threadId}
+        // above (literal /threads segment).
+        group.MapDelete("/{id:guid}", DeactivateCommunicationAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("DeactivateCommunication")
+            .WithDescription("Soft-delete (deactivate) a single message (round 7 item 8): sets statecode/statuscode to Inactive. Caller resolved server-side; 403 if the caller cannot see the message. Reversible — no physical delete.")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
         // GET /api/communications/by-regarding/{entityType}/{id} — ALL of a regarding record's threads + their
         // messages for the record-level regarding-mode Timeline (R2 task 010 / FR-01, Surface 1). Entity-set-agnostic
         // across all 11 ADR-024 regarding families (matter, contact, …). Impersonated (Dataverse row-level security)
@@ -729,6 +754,59 @@ public static class CommunicationEndpoints
 
         var persisted = await threadResolver.SetPinnedAsync(threadId, request.Pinned, ct);
         return TypedResults.Ok(new SetThreadPinnedResponse { ThreadId = threadId, IsPinned = persisted });
+    }
+
+    /// <summary>
+    /// Soft-delete (deactivate) a thread (round 7 item 7). Authorizes the caller against the thread via the SAME
+    /// impersonated visibility check as pin/rename (403 if the caller cannot see it — never deactivate an
+    /// inaccessible thread), then sets statecode/statuscode to Inactive via
+    /// <see cref="IThreadResolver.DeactivateThreadAsync"/>. Reversible — no physical delete, no Dataverse plugin.
+    /// </summary>
+    private static async Task<IResult> DeactivateThreadAsync(
+        Guid threadId,
+        CommunicationThreadReadService readService,
+        IThreadResolver threadResolver,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var canSee = await readService.CanCallerSeeThreadAsync(threadId, context.User, ct);
+        if (!canSee)
+        {
+            throw new SdapProblemException(
+                code: "THREAD_DELETE_FORBIDDEN",
+                title: "Forbidden",
+                detail: "The thread does not exist or is not visible to the caller.",
+                statusCode: 403);
+        }
+
+        await threadResolver.DeactivateThreadAsync(threadId, ct);
+        return TypedResults.NoContent();
+    }
+
+    /// <summary>
+    /// Soft-delete (deactivate) a single message (round 7 item 8). Authorizes the caller against the message via an
+    /// impersonated visibility check (403 if the caller cannot see it — NFR-01), then sets statecode/statuscode to
+    /// Inactive via <see cref="IThreadResolver.DeactivateMessageAsync"/>. Reversible — no physical delete.
+    /// </summary>
+    private static async Task<IResult> DeactivateCommunicationAsync(
+        Guid id,
+        CommunicationThreadReadService readService,
+        IThreadResolver threadResolver,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var canSee = await readService.CanCallerSeeMessageAsync(id, context.User, ct);
+        if (!canSee)
+        {
+            throw new SdapProblemException(
+                code: "MESSAGE_DELETE_FORBIDDEN",
+                title: "Forbidden",
+                detail: "The message does not exist or is not visible to the caller.",
+                statusCode: 403);
+        }
+
+        await threadResolver.DeactivateMessageAsync(id, ct);
+        return TypedResults.NoContent();
     }
 
     /// <summary>

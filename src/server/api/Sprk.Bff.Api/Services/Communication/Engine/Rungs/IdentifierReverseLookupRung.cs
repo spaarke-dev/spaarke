@@ -229,6 +229,14 @@ public sealed class IdentifierReverseLookupRung : IAssociationRung
                     var value = m.Value.Trim();
                     if (value.Length == 0)
                         continue;
+                    // P1 (FR-12 UAT, 2026-07-30): a bare-numeric run that is a SUBSTRING of an already-matched
+                    // well-formed identifier is NOT an independent reference — e.g. "123456" and "2026" inside
+                    // "REAL-2026-123456.02". Well-formed tokens are scanned first (all three sources), so they
+                    // are all present here. Extracting the inner digit-run as its own token caused a real
+                    // misfile: the "123456" segment of a matter number collided with an unrelated invoice
+                    // #123456 and became the record's primary Regarding. Skip it.
+                    if (!wellFormed && IsSubstringOfWellFormedToken(value, byValue))
+                        continue;
                     if (!byValue.ContainsKey(value))
                     {
                         byValue[value] = wellFormed;
@@ -253,6 +261,21 @@ public sealed class IdentifierReverseLookupRung : IAssociationRung
         Scan(BareNumericTokenPattern, false, message.AttachmentText);
 
         return order.Select(v => new TokenCandidate(v, byValue[v])).ToArray();
+    }
+
+    /// <summary>
+    /// True when <paramref name="bareValue"/> (a bare-numeric candidate) is a substring of any well-formed
+    /// token already extracted — i.e. it is the inner digit-run of a structured identifier, not an independent
+    /// reference. P1 misfile guard (FR-12 UAT).
+    /// </summary>
+    private static bool IsSubstringOfWellFormedToken(string bareValue, Dictionary<string, bool> byValue)
+    {
+        foreach (var kv in byValue)
+        {
+            if (kv.Value && kv.Key.Contains(bareValue, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     // ── Confidence policy ──────────────────────────────────────────────────────────

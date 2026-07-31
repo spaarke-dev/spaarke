@@ -207,6 +207,35 @@ describe('EmailWorkspace', () => {
     expect(screen.getByRole('button', { name: /link another record/i })).toBeInTheDocument();
   });
 
+  it('renders a Subject line directly above the message body (owner UAT #4)', async () => {
+    renderWorkspace();
+
+    fireEvent.click(await screen.findByText('Quarterly filing update'));
+
+    // A dedicated subject line lives in the body region (above EmailBodyView),
+    // carrying the same subject value the title bar shows (populated once the
+    // per-selection record read resolves).
+    await waitFor(() => expect(screen.getByTestId('email-body-subject')).toHaveTextContent('Quarterly filing update'));
+  });
+
+  it('collapses the "Related to" section by default once the primary is CONFIRMED (owner UAT #7)', async () => {
+    const dataService = makeDataService();
+    // Resolved association status → confirmed (🟢). The section starts collapsed.
+    (dataService.retrieveRecord as jest.Mock).mockResolvedValue({
+      ...FULL_RECORD,
+      sprk_associationstatus: 100000000,
+    });
+
+    renderWorkspace({ dataService });
+    fireEvent.click(await screen.findByText('Quarterly filing update'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('section-toggle-related-to')).toHaveAttribute('aria-expanded', 'false')
+    );
+    // Collapsed → the resolver body is not mounted.
+    expect(screen.queryByTestId('email-connections-review')).not.toBeInTheDocument();
+  });
+
   it('given a selected card WITH a `.eml` archive, resolves the archive document id and renders the server-rendered body (loading→loaded transition)', async () => {
     const EML_DOCUMENT_ID = '99999999-9999-9999-9999-999999999999';
     const authenticatedFetch = jest.fn().mockResolvedValue({

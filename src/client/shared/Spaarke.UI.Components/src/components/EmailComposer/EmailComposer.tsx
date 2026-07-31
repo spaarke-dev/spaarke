@@ -25,7 +25,15 @@ import * as React from 'react';
 import { forwardRef, useImperativeHandle } from 'react';
 import {
   Button,
+  Dialog,
+  DialogSurface,
+  DialogTitle,
+  DialogBody,
+  DialogContent,
+  DialogActions,
   Input,
+  Textarea,
+  Spinner,
   Link,
   MessageBar,
   MessageBarBody,
@@ -33,11 +41,14 @@ import {
   Tooltip,
   ToolbarButton,
   Menu,
+  MenuButton,
   MenuTrigger,
   MenuPopover,
   MenuList,
   MenuItem,
+  MenuItemRadio,
   makeStyles,
+  shorthands,
   tokens,
   mergeClasses,
 } from '@fluentui/react-components';
@@ -48,7 +59,12 @@ import {
   Search20Regular,
   ChevronDown20Regular,
   ChevronUp20Regular,
+  ArrowMaximize20Regular,
+  ArrowMinimize20Regular,
+  DocumentText20Regular,
+  Sparkle20Regular,
 } from '@fluentui/react-icons';
+import type { CommunicationSendMode } from '../../services/communicationApi';
 
 import { sendCommunication, SendCommunicationError } from '../../services/communicationApi';
 import type { ICommunicationAssociation } from '../../services/communicationApi';
@@ -67,6 +83,8 @@ import type {
   IEmailComposerProps,
   IComposerAttachmentSource,
   IPickedRecord,
+  IEmailTemplateSummary,
+  IEmailAiDraftAction,
   IValidationResult,
 } from './EmailComposer.types';
 import type { RichTextEditorRef } from '../RichTextEditor';
@@ -81,6 +99,39 @@ import { ComposerActionBar } from './subcomponents/ComposerActionBar';
 // picks this type and ATTACHES it, so it's intentionally excluded from the record-search
 // catalog (which inserts a body LINK for every other type). Owner UAT 2026-07-24.
 const DOCUMENT_LOGICAL_NAME = 'sprk_document';
+
+// "From:" sender option labels (owner UAT 2026-07-30, item 3). The engine has NO current-user
+// identity data source (context-agnostic, ADR-012), so the "user" option falls back to the
+// host-supplied `fromMailbox` address when present, else a generic "My mailbox" label — see the
+// report note on this gap. The Spaarke shared mailbox is a fixed, named destination.
+const SHARED_MAILBOX_LABEL = 'Spaarke shared mailbox';
+function userMailboxLabel(fromMailbox: string | undefined): string {
+  return fromMailbox && fromMailbox.trim() ? fromMailbox : 'My mailbox';
+}
+
+// Whether the compose body has any real content (Wave E template picker) — HTML tags,
+// &nbsp;, and whitespace don't count, so an "empty" editor (which serializes to <p><br></p>)
+// reads as empty and a template applies without an overwrite prompt.
+function isComposeBodyEmpty(body: string): boolean {
+  return (
+    (body || '')
+      .replace(/<[^>]*>/g, '')
+      .replace(/&nbsp;/g, '')
+      .trim().length === 0
+  );
+}
+
+// Default AI "sparkle" quick-actions (Wave E). Intent keys are stable + map to a server-side prompt
+// (the label is UI-only). A host may override via `props.aiDraftActions`; the free-text "Enter prompt"
+// action is always appended by the composer.
+const DEFAULT_AI_DRAFT_ACTIONS: IEmailAiDraftAction[] = [
+  { intent: 'reply', label: 'Draft a reply' },
+  { intent: 'summarize', label: 'Summarize the thread' },
+  { intent: 'concise', label: 'Make it concise' },
+  { intent: 'formal', label: 'Formal tone' },
+  { intent: 'friendly', label: 'Friendly tone' },
+  { intent: 'grammar', label: 'Fix grammar & tone' },
+];
 
 // ---------------------------------------------------------------------------
 // Attachment source defaults
@@ -112,6 +163,16 @@ function isSafeHref(url: string): boolean {
 /** Escape a plain string for safe interpolation into HTML (record-link label/href). */
 function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * Humanizes a Dataverse logical entity name for display (e.g. `sprk_matter` → `Matter`) — used
+ * as the replace-confirm's fallback when the current primary association has no `entityName`.
+ * Mirrors the same helper in `AssociationChips.tsx`.
+ */
+function humanizeEntityType(entityType: string): string {
+  const stripped = entityType.startsWith('sprk_') ? entityType.slice(5) : entityType;
+  return stripped.charAt(0).toUpperCase() + stripped.slice(1);
 }
 
 // ---------------------------------------------------------------------------
@@ -148,11 +209,13 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
+  // Window controls (maximize + close) cluster on the LEFT, title beside them (owner UAT
+  // 2026-07-30, item 11 — "upper-left, next to the X close").
   header: {
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     gap: tokens.spacingHorizontalS,
   },
   headerActions: {
@@ -160,21 +223,51 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalXXS,
   },
+  // Dialog/page header title (owner UAT 2026-07-30, item 10): 18px. No token lands exactly on
+  // 18px (base ramp is 16/20/24), so an explicit px is used per ADR-021's "explicit px only
+  // when no token matches" carve-out; color/weight stay token-driven.
+  headerTitle: {
+    fontSize: '18px',
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
+  // "From:" row (owner UAT 2026-07-30, item 3): an Outlook-style sender line ABOVE To/Cc.
+  fromRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  // Label box — visually matches the To/Cc label boxes (RecipientField `labelBox`).
+  labelBox: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    minWidth: '44px',
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    ...shorthands.border(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase300,
+  },
+  // The sender value cell — a subtle menu button (choice) or plain text (fixed sender).
+  fromValue: {
+    flexGrow: 1,
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'center',
+  },
+  fromStaticText: {
+    color: tokens.colorNeutralForeground1,
+    fontSize: tokens.fontSizeBase300,
+  },
   bccToggleRow: {
     display: 'flex',
     justifyContent: 'flex-end',
-  },
-  // Collapsible section (Attachments, Related to) — a clickable header row (label + chevron)
-  // over the section body. Owner UAT 2026-07-24.
-  collapsibleHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: tokens.spacingHorizontalS,
-    cursor: 'pointer',
-    // +4px padding over the section header (owner UAT 2026-07-24).
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
   },
   // Section label — standard Segoe UI 14px semibold, neutral foreground 1 (UI-DESIGN-STANDARDS
   // section-header spec; owner UAT 2026-07-24). Token-only so both themes resolve (ADR-021).
@@ -183,16 +276,32 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
-  // "Related to" body — chips + the link tile stacked (owner UAT 2026-07-30, item 10).
-  relatedBody: {
+  // "Related to" body — owner UAT 2026-07-30 (item 8): the label, chips, AND the "Link another
+  // record" affordance flow on ONE wrapping row (not stacked in a column), so the link reads as a
+  // sibling of the chips inline with the label.
+  relatedRow: {
     display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    gap: tokens.spacingVerticalS,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  // The label + chevron collapse toggle — a clickable cluster that sits at the head of the
+  // wrapping row.
+  relatedToggle: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    cursor: 'pointer',
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
   },
   // "Link another record" tile — the ONLY way to relate an email now that the connector
   // toolbar icon is gone (item 11). Non-bold label + leading search icon; bordered box that
-  // matches the reading-pane resolver's link tile. Token-only so both themes resolve (ADR-021).
+  // matches the reading-pane resolver's link tile. Font normalized to Segoe UI 12px
+  // (`fontSizeBase200`) with `fontFamily: 'inherit'` so it reads as a SIBLING of the chips —
+  // a native <button> otherwise falls back to the UA font (Arial) at a larger size (owner UAT
+  // 2026-07-30, item 8). Token-only so both themes resolve (ADR-021).
   linkTile: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -205,7 +314,8 @@ const useStyles = makeStyles({
     border: `${tokens.strokeWidthThin} dashed ${tokens.colorNeutralStroke1}`,
     backgroundColor: 'transparent',
     color: tokens.colorNeutralForeground2,
-    fontSize: tokens.fontSizeBase300,
+    fontFamily: 'inherit',
+    fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightRegular,
     cursor: 'pointer',
     ':hover': {
@@ -285,6 +395,9 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     [props.attachmentSources, props.wizardContext]
   );
   const showSendModeRadio = props.sendMode === undefined;
+  // The top "From:" row offers the sender choice whenever the host hasn't fixed `sendMode`
+  // and the composer is editable (owner UAT 2026-07-30, item 3).
+  const showSenderChoice = showSendModeRadio && !state.readOnly;
 
   // Bcc is hidden by default (owner UAT mockup 2026-07-22 shows To/Cc only); a small
   // "Bcc" toggle reveals it, and it auto-reveals when the field already carries values.
@@ -304,6 +417,24 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // Related-to section defaults expanded (shows what the email is associated to); Attachments
   // defaults collapsed (owner UAT 2026-07-24 — the latter is owned by AttachmentList).
   const [relatedCollapsed, setRelatedCollapsed] = React.useState(false);
+  // Single-primary "Related to" model (owner UAT 2026-07-30, item 8): a freshly-picked record is
+  // NOT appended silently — it is held here pending a "set as primary regarding?" confirmation.
+  // Non-null → the replace-confirm Dialog is open. Confirming promotes it to associations[0].
+  const [pendingPrimary, setPendingPrimary] = React.useState<ICommunicationAssociation | null>(null);
+
+  // Compose template picker (Wave E, owner UAT 2026-07-30). Templates load lazily when the
+  // menu opens; picking one whose apply would overwrite existing subject/body prompts a confirm.
+  const [templates, setTemplates] = React.useState<IEmailTemplateSummary[] | null>(null);
+  const [templatesLoading, setTemplatesLoading] = React.useState(false);
+  const [templateError, setTemplateError] = React.useState<string | null>(null);
+  const [pendingTemplateId, setPendingTemplateId] = React.useState<string | null>(null);
+
+  // AI "sparkle" draft (Wave E). `aiDrafting` disables the sparkle while a completion is in flight;
+  // the "Enter prompt" free-text action opens `aiPromptOpen` with `aiPromptText`.
+  const [aiDrafting, setAiDrafting] = React.useState(false);
+  const [aiError, setAiError] = React.useState<string | null>(null);
+  const [aiPromptOpen, setAiPromptOpen] = React.useState(false);
+  const [aiPromptText, setAiPromptText] = React.useState('');
 
   // Record lookup (owner UAT round 5, RegardingResolver pattern): a document pick attaches
   // (Attach/Link per row); any other record type is inserted as a link in the message body
@@ -372,8 +503,12 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     [state.attachments.length]
   );
 
-  // Connector toolbar icon → add a relationship (owner UAT 2026-07-24, Option B). The host
-  // runs the OOB lookup + writes the association; we reflect the picked record in "Related to".
+  // "Link another record" → pick a record via the host polymorphic picker, then CONFIRM it as the
+  // primary regarding (owner UAT 2026-07-30, item 8). The pick is NOT appended silently: it is
+  // staged in `pendingPrimary`, which opens a "set as primary regarding?" replace-confirm Dialog.
+  // On confirm the record becomes associations[0] (the BFF maps associations[0] as the primary
+  // regarding at send time — CLIENT-ONLY ordering, no new send field). On cancel the pick is
+  // discarded (nothing added).
   const onAddRelationship = props.onAddRelationship;
   const handleAddRelationship = React.useCallback(() => {
     if (!onAddRelationship) return;
@@ -381,16 +516,22 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     void onAddRelationship()
       .then(picked => {
         if (!picked) return;
-        const association: ICommunicationAssociation = {
+        setPendingPrimary({
           entityType: picked.entityType,
           entityId: picked.id,
           entityName: picked.name,
           entityUrl: picked.url,
-        };
-        dispatch({ type: 'ADD_ASSOCIATION', association });
+        });
       })
       .catch(err => console.warn('[EmailComposer] add relationship failed:', err));
   }, [onAddRelationship]);
+
+  const confirmPrimary = React.useCallback(() => {
+    if (pendingPrimary) dispatch({ type: 'SET_PRIMARY_ASSOCIATION', association: pendingPrimary });
+    setPendingPrimary(null);
+  }, [pendingPrimary]);
+
+  const cancelPrimary = React.useCallback(() => setPendingPrimary(null), []);
 
   // ── Attach-on-compose: local-file → Document resolution (task 042 / FR-20) ──
   // A picked local file (already passed the CHAT-ATTACHMENT-POLICY 25 MB + MIME
@@ -481,8 +622,109 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     [props.onLookupRecord, handleRecordPicked]
   );
 
+  // ── Template picker (Wave E) ───────────────────────────────────────────────
+  // The toolbar template button renders only when the host supplies BOTH the list + render
+  // callbacks and the composer is editable. Applying a template REPLACES subject + body
+  // (mirrors Outlook "Apply template"); the field codes are merged server-side against the
+  // confirmed primary regarding (`associations[0]`).
+  const showTemplatePicker = !state.readOnly && !!props.onListEmailTemplates && !!props.onRenderEmailTemplate;
+
+  const loadTemplates = React.useCallback(() => {
+    const list = props.onListEmailTemplates;
+    if (!list) return;
+    setTemplatesLoading(true);
+    setTemplateError(null);
+    void list()
+      .then(items => setTemplates(items ?? []))
+      .catch(() => setTemplateError('Could not load templates.'))
+      .finally(() => setTemplatesLoading(false));
+  }, [props.onListEmailTemplates]);
+
+  const applyTemplate = React.useCallback(
+    (templateId: string) => {
+      const render = props.onRenderEmailTemplate;
+      if (!render) return;
+      const primary = stateRef.current.associations[0];
+      void render({
+        templateId,
+        regardingEntityType: primary?.entityType,
+        regardingRecordId: primary?.entityId,
+      })
+        .then(result => {
+          if (!result) return;
+          dispatch({ type: 'SET_BODY_FORMAT', value: result.isHtml ? 'HTML' : 'PlainText' });
+          dispatch({ type: 'SET_FIELD', field: 'subject', value: result.subject ?? '' });
+          dispatch({ type: 'SET_FIELD', field: 'body', value: result.body ?? '' });
+        })
+        .catch(() => setTemplateError('Could not apply the template.'));
+    },
+    [props.onRenderEmailTemplate]
+  );
+
+  const handleTemplatePick = React.useCallback(
+    (templateId: string) => {
+      const hasContent = stateRef.current.subject.trim().length > 0 || !isComposeBodyEmpty(stateRef.current.body);
+      if (hasContent) {
+        setPendingTemplateId(templateId);
+      } else {
+        applyTemplate(templateId);
+      }
+    },
+    [applyTemplate]
+  );
+
+  const confirmTemplate = React.useCallback(() => {
+    if (pendingTemplateId) applyTemplate(pendingTemplateId);
+    setPendingTemplateId(null);
+  }, [pendingTemplateId, applyTemplate]);
+  const cancelTemplate = React.useCallback(() => setPendingTemplateId(null), []);
+
+  // ── AI "sparkle" draft (Wave E) ────────────────────────────────────────────
+  // Rendered only when the host wires `onDraftWithAi` and the composer is editable. The engine passes
+  // the CURRENT body/subject; the host builds the prompt + calls the BFF; the returned text REPLACES the
+  // body (the user explicitly invoked a draft). A short in-flight guard prevents double-submits.
+  const showSparkle = !state.readOnly && !!props.onDraftWithAi;
+  const aiDraftActions = props.aiDraftActions ?? DEFAULT_AI_DRAFT_ACTIONS;
+
+  const runAiDraft = React.useCallback(
+    (intent: string, userInstruction?: string) => {
+      const draft = props.onDraftWithAi;
+      if (!draft) return;
+      setAiDrafting(true);
+      setAiError(null);
+      const isHtml = stateRef.current.bodyFormat === 'HTML';
+      void draft({
+        intent,
+        userInstruction,
+        currentBody: stateRef.current.body,
+        isHtml,
+        subject: stateRef.current.subject,
+      })
+        .then(result => {
+          if (!result || !result.text) {
+            setAiError('No draft was produced. Please try again.');
+            return;
+          }
+          const resultIsHtml = result.isHtml ?? isHtml;
+          dispatch({ type: 'SET_BODY_FORMAT', value: resultIsHtml ? 'HTML' : 'PlainText' });
+          dispatch({ type: 'SET_FIELD', field: 'body', value: result.text });
+        })
+        .catch(() => setAiError('AI drafting is unavailable right now.'))
+        .finally(() => setAiDrafting(false));
+    },
+    [props.onDraftWithAi]
+  );
+
+  const submitAiPrompt = React.useCallback(() => {
+    const instruction = aiPromptText.trim();
+    if (!instruction) return;
+    setAiPromptOpen(false);
+    setAiPromptText('');
+    runAiDraft('custom', instruction);
+  }, [aiPromptText, runAiDraft]);
+
   const toolbarSlot =
-    canAddLocal || canLinkDocument || showRecordSearch ? (
+    canAddLocal || canLinkDocument || showRecordSearch || showTemplatePicker || showSparkle ? (
       <div className={styles.toolbarSlot}>
         {(canAddLocal || canLinkDocument) && (
           <Menu positioning="below-end">
@@ -516,6 +758,63 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
                     {t.displayName}
                   </MenuItem>
                 ))}
+              </MenuList>
+            </MenuPopover>
+          </Menu>
+        )}
+        {showTemplatePicker && (
+          // Apply an email template (Wave E). Grouped with the paperclip/search in the same
+          // toolbar section. Templates load on menu open; picking one fills subject + body.
+          <Menu
+            positioning="below-end"
+            onOpenChange={(_e, data) => {
+              if (data.open) loadTemplates();
+            }}
+          >
+            <MenuTrigger disableButtonEnhancement>
+              <Tooltip content="Apply an email template" relationship="label">
+                <ToolbarButton icon={<DocumentText20Regular />} aria-label="Apply template" />
+              </Tooltip>
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                {templatesLoading && <MenuItem disabled>Loading…</MenuItem>}
+                {!templatesLoading && templateError && <MenuItem disabled>{templateError}</MenuItem>}
+                {!templatesLoading && !templateError && (templates?.length ?? 0) === 0 && (
+                  <MenuItem disabled>No templates available</MenuItem>
+                )}
+                {!templatesLoading &&
+                  !templateError &&
+                  templates?.map(t => (
+                    <MenuItem key={t.id} onClick={() => handleTemplatePick(t.id)}>
+                      {t.name}
+                    </MenuItem>
+                  ))}
+              </MenuList>
+            </MenuPopover>
+          </Menu>
+        )}
+        {showSparkle && (
+          // AI draft "sparkle" (Wave E): preset quick-actions + a free-text "Enter prompt" action.
+          // Disabled + spinner while a completion is in flight.
+          <Menu positioning="below-end">
+            <MenuTrigger disableButtonEnhancement>
+              <Tooltip content="Draft or refine with AI" relationship="label">
+                <ToolbarButton
+                  icon={aiDrafting ? <Spinner size="tiny" /> : <Sparkle20Regular />}
+                  aria-label="Draft with AI"
+                  disabled={aiDrafting}
+                />
+              </Tooltip>
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                {aiDraftActions.map(a => (
+                  <MenuItem key={a.intent} onClick={() => runAiDraft(a.intent)}>
+                    {a.label}
+                  </MenuItem>
+                ))}
+                <MenuItem onClick={() => setAiPromptOpen(true)}>Enter prompt…</MenuItem>
               </MenuList>
             </MenuPopover>
           </Menu>
@@ -662,6 +961,50 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         </MessageBar>
       )}
 
+      {/* From: — Outlook-style sender line ABOVE To/Cc (owner UAT 2026-07-30, item 3). Shows the
+          current sender; a dropdown switches between the user's mailbox and the Spaarke shared
+          mailbox. Wired to the engine's existing `sendMode` state (same store the bottom Send
+          selector reads). Hidden in read-only (view) mode — there is nothing to send. */}
+      {!state.readOnly && (
+        <div className={styles.fromRow} role="group" aria-label="From">
+          <span className={styles.labelBox} aria-hidden="true">
+            From
+          </span>
+          <div className={styles.fromValue}>
+            {showSenderChoice ? (
+              <Menu
+                positioning="below-start"
+                checkedValues={{ sendFrom: [state.sendMode] }}
+                onCheckedValueChange={(_e, data) => {
+                  const next = data.checkedItems[0] as CommunicationSendMode | undefined;
+                  if (next) dispatch({ type: 'SET_SEND_MODE', value: next });
+                }}
+              >
+                <MenuTrigger disableButtonEnhancement>
+                  <MenuButton appearance="subtle" size="small" aria-label="From mailbox">
+                    {state.sendMode === 'user' ? userMailboxLabel(state.fromMailbox) : SHARED_MAILBOX_LABEL}
+                  </MenuButton>
+                </MenuTrigger>
+                <MenuPopover>
+                  <MenuList>
+                    <MenuItemRadio name="sendFrom" value="user">
+                      {userMailboxLabel(state.fromMailbox)}
+                    </MenuItemRadio>
+                    <MenuItemRadio name="sendFrom" value="sharedMailbox">
+                      {SHARED_MAILBOX_LABEL}
+                    </MenuItemRadio>
+                  </MenuList>
+                </MenuPopover>
+              </Menu>
+            ) : (
+              <Text className={styles.fromStaticText}>
+                {state.sendMode === 'user' ? userMailboxLabel(state.fromMailbox) : SHARED_MAILBOX_LABEL}
+              </Text>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className={styles.section} role="region" aria-label="Recipients">
         <RecipientField
           label="To"
@@ -742,46 +1085,49 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         />
       </div>
 
-      {/* Related to — what this email is associated to (owner UAT 2026-07-24). Collapsible;
-          the connector toolbar icon adds a new relationship (Option B). */}
+      {/* Related to — what this email is associated to (owner UAT 2026-07-24). Single-primary
+          model (owner UAT 2026-07-30, item 8): the label, the chips (index 0 is the GREEN
+          PRIMARY regarding), and the "Link another record" affordance flow on ONE wrapping row.
+          "Link another record" opens a replace-confirm before promoting a pick to primary. */}
       {showAssociations && (
         <div className={styles.section} role="region" aria-label="Related to">
-          <div
-            className={styles.collapsibleHeader}
-            role="button"
-            tabIndex={0}
-            aria-expanded={!relatedCollapsed}
-            onClick={() => setRelatedCollapsed(c => !c)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                setRelatedCollapsed(c => !c);
-              }
-            }}
-          >
-            <Text className={styles.sectionLabel}>
-              Related to{state.associations.length > 0 ? ` (${state.associations.length})` : ''}
-            </Text>
-            {relatedCollapsed ? <ChevronDown20Regular /> : <ChevronUp20Regular />}
-          </div>
-          {!relatedCollapsed && (
-            <div className={styles.relatedBody}>
-              {state.associations.length > 0 && (
-                <AssociationChips
-                  associations={state.associations}
-                  onRemove={
-                    state.readOnly
-                      ? undefined
-                      : a =>
-                          dispatch({
-                            type: 'REMOVE_ASSOCIATION',
-                            entityType: a.entityType,
-                            entityId: a.entityId,
-                          })
-                  }
-                />
-              )}
-              {canLinkRecord ? (
+          <div className={styles.relatedRow}>
+            <div
+              className={styles.relatedToggle}
+              role="button"
+              tabIndex={0}
+              aria-expanded={!relatedCollapsed}
+              onClick={() => setRelatedCollapsed(c => !c)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setRelatedCollapsed(c => !c);
+                }
+              }}
+            >
+              <Text className={styles.sectionLabel}>
+                Related to{state.associations.length > 0 ? ` (${state.associations.length})` : ''}
+              </Text>
+              {relatedCollapsed ? <ChevronDown20Regular /> : <ChevronUp20Regular />}
+            </div>
+            {!relatedCollapsed && state.associations.length > 0 && (
+              <AssociationChips
+                associations={state.associations}
+                primaryIndex={0}
+                onRemove={
+                  state.readOnly
+                    ? undefined
+                    : a =>
+                        dispatch({
+                          type: 'REMOVE_ASSOCIATION',
+                          entityType: a.entityType,
+                          entityId: a.entityId,
+                        })
+                }
+              />
+            )}
+            {!relatedCollapsed &&
+              (canLinkRecord ? (
                 <button type="button" className={styles.linkTile} onClick={handleAddRelationship}>
                   <Search20Regular />
                   <span>{state.associations.length > 0 ? 'Link another record' : 'Link a record'}</span>
@@ -790,10 +1136,109 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
                 <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
                   Not related to any record yet.
                 </Text>
-              ) : null}
-            </div>
-          )}
+              ) : null)}
+          </div>
         </div>
+      )}
+
+      {/* Replace-confirm for the single-primary regarding (owner UAT 2026-07-30, item 8). Opens
+          when a record is picked via "Link another record". The second line renders ONLY when a
+          primary already exists (state.associations.length > 0) — the empty state has nothing to
+          replace. Confirm → promote to associations[0]; Cancel → discard the pick. */}
+      <Dialog
+        open={pendingPrimary !== null}
+        onOpenChange={(_e, data) => {
+          if (!data.open) cancelPrimary();
+        }}
+      >
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Set as primary regarding record</DialogTitle>
+            <DialogContent>
+              {state.associations.length > 0 && (
+                <Text>
+                  Will replace the currently selected record:{' '}
+                  {state.associations[0].entityName ?? humanizeEntityType(state.associations[0].entityType)}
+                </Text>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="primary" onClick={confirmPrimary}>
+                Set as primary
+              </Button>
+              <Button appearance="secondary" onClick={cancelPrimary}>
+                Cancel
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
+      {/* Template overwrite confirm (Wave E) — only shown when applying would replace
+          existing subject/body. modalType="alert" disables light-dismiss so a stray click
+          can't discard the in-progress draft. */}
+      <Dialog
+        open={pendingTemplateId !== null}
+        modalType="alert"
+        onOpenChange={(_e, data) => {
+          if (!data.open) cancelTemplate();
+        }}
+      >
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Apply template?</DialogTitle>
+            <DialogContent>
+              <Text>This will replace the current subject and message body.</Text>
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="primary" onClick={confirmTemplate}>
+                Apply
+              </Button>
+              <Button appearance="secondary" onClick={cancelTemplate}>
+                Cancel
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
+      {/* AI "Enter prompt" free-text dialog (Wave E). Submitting runs the 'custom' intent. */}
+      <Dialog
+        open={aiPromptOpen}
+        modalType="alert"
+        onOpenChange={(_e, data) => {
+          if (!data.open) setAiPromptOpen(false);
+        }}
+      >
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Draft with AI</DialogTitle>
+            <DialogContent>
+              <Textarea
+                value={aiPromptText}
+                onChange={(_e, data) => setAiPromptText(data.value)}
+                placeholder="e.g. Draft a polite reply asking for the signed contract by Friday."
+                aria-label="AI prompt"
+                resize="vertical"
+                style={{ width: '100%' }}
+              />
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="primary" onClick={submitAiPrompt} disabled={!aiPromptText.trim()}>
+                Generate
+              </Button>
+              <Button appearance="secondary" onClick={() => setAiPromptOpen(false)}>
+                Cancel
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
+      {aiError && (
+        <MessageBar intent="warning">
+          <MessageBarBody>{aiError}</MessageBarBody>
+        </MessageBar>
       )}
 
       <BodyEditor
@@ -821,7 +1266,32 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     >
       {isChromed && (
         <div className={styles.header}>
-          <Text as="h2" size={600} weight="semibold">
+          {/* Window controls cluster on the upper-LEFT: maximize/restore next to the X close
+              (owner UAT 2026-07-30, item 11). Maximize renders only when the host wires
+              `onToggleMaximize` (e.g. SendEmailDialog, which owns the surface sizing). */}
+          {(props.onToggleMaximize || props.onCancel) && (
+            <div className={styles.headerActions}>
+              {props.onToggleMaximize && (
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={props.isMaximized ? <ArrowMinimize20Regular /> : <ArrowMaximize20Regular />}
+                  aria-label={props.isMaximized ? 'Restore dialog size' : 'Maximize dialog'}
+                  onClick={() => props.onToggleMaximize?.()}
+                />
+              )}
+              {props.onCancel && (
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<Dismiss20Regular />}
+                  aria-label="Close dialog"
+                  onClick={() => props.onCancel?.()}
+                />
+              )}
+            </div>
+          )}
+          <Text as="h2" weight="semibold" className={styles.headerTitle}>
             {props.titleOverride ??
               (state.mode === 'view'
                 ? 'Email'
@@ -833,17 +1303,6 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
                       ? 'Edit Draft'
                       : 'New Email')}
           </Text>
-          {props.onCancel && (
-            <div className={styles.headerActions}>
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<Dismiss20Regular />}
-                aria-label="Close dialog"
-                onClick={() => props.onCancel?.()}
-              />
-            </div>
-          )}
         </div>
       )}
 

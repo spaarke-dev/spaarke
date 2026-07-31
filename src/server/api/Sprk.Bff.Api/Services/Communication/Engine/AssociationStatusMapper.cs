@@ -279,6 +279,14 @@ public sealed class AssociationStatusMapper
         {
             if (fw.Conflict) continue; // never assert a conflicting field
             var winner = fw.Winner;
+            // Surface-only rungs (DocumentAssociation / F1) contribute review CANDIDATES but are NEVER written
+            // as a filed association (061 UAT round-2): a document's record is INDIRECT, twice-removed evidence,
+            // so it must be confirmed by the reviewer (r5 "Suggested · confirm to link"), not auto-linked and
+            // shown as "Filed automatically". A field whose winning target has ONLY surface-only contributors is
+            // surfaced as a candidate (BuildCandidateTraces) but skipped here; if a real rung also matched the
+            // same target, it writes normally (the surface-only rung merely reinforced).
+            if (winner.Contributors.All(c => IsSurfaceOnly(c.Rung)))
+                continue;
             // Resolved branch (useDeterministic) writes the PRE-C-1 deterministic set (rung 0–3 via
             // WriteConfidence) so no fallback/structural association is dropped when an email auto-files;
             // Suggested branch writes on FullConfidence (may include AI-derived fields).
@@ -411,6 +419,16 @@ public sealed class AssociationStatusMapper
     /// <summary>Genuine AI rungs (semantic + LLM classify) — these set the provenance "AI involved" flag.</summary>
     private static bool IsAi(RungKind kind) =>
         kind is RungKind.SemanticMatch or RungKind.AiClassification;
+
+    /// <summary>
+    /// Surface-only rungs whose matches are review CANDIDATES but are NEVER written as a filed association nor
+    /// auto-filed — INDIRECT evidence the reviewer confirms (061 UAT round-2). Currently the F1
+    /// attachment→document rung (<see cref="RungKind.DocumentAssociation"/>): a document's own record links are
+    /// twice-removed from the email, so they are suggested ("confirm to link"), not auto-linked. Distinct from
+    /// <see cref="RungKind.RecordNameMatch"/> (a DIRECT name/number appearance in the email text, still written).
+    /// </summary>
+    private static bool IsSurfaceOnly(RungKind kind) =>
+        kind is RungKind.DocumentAssociation;
 
     // ── Internal working types ───────────────────────────────────────────────────
 

@@ -27,9 +27,15 @@ public class ThreadContinuityRungTests
         params string[] references) =>
         new() { Direction = direction, InReplyTo = inReplyTo, References = references };
 
+    // Default: a RESOLVED (confirmed) parent — the good case where a reply legitimately inherits at 1.0 and
+    // auto-files (P3). Use ParentWithStatus to model an unconfirmed parent.
     private static DataverseEntity ParentWith(params (string field, string entity, Guid id)[] regarding)
+        => ParentWithStatus(100000000, regarding);
+
+    private static DataverseEntity ParentWithStatus(int status, params (string field, string entity, Guid id)[] regarding)
     {
         var parent = new DataverseEntity("sprk_communication") { Id = Guid.NewGuid() };
+        parent["sprk_associationstatus"] = new OptionSetValue(status);
         foreach (var (field, entity, id) in regarding)
             parent[field] = new EntityReference(entity, id);
         return parent;
@@ -53,6 +59,28 @@ public class ThreadContinuityRungTests
         matches.Should().Contain(m => m.RegardingFieldName == "sprk_regardingmatter" && m.Target!.Id == matterId);
         matches.Should().Contain(m => m.RegardingFieldName == "sprk_regardingorganization" && m.Target!.Id == orgId);
         matches.Should().OnlyContain(m => m.Rung == RungKind.ThreadContinuity && m.Confidence == 1.0);
+    }
+
+    [Fact]
+    public async Task Evaluate_UnconfirmedParent_InheritsAtSuggestBand_NotAutoFileStrength()
+    {
+        // P3 (FR-12 UAT): a parent whose OWN association is not Resolved (here Suggested) is unconfirmed —
+        // inheriting it at 1.0 would auto-file a weak/unconfirmed association across every reply in the thread.
+        // The rung must inherit it at a suggest-band confidence (0.65 < the 0.85 auto-file threshold) instead,
+        // so the reply surfaces it for review rather than auto-filing off an unconfirmed parent.
+        var matterId = Guid.NewGuid();
+        var parent = ParentWithStatus(100000003, ("sprk_regardingmatter", "sprk_matter", matterId)); // Suggested
+        _dv.Setup(d => d.GetCommunicationByInternetMessageIdAsync("<parent@x.com>", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(parent);
+
+        var matches = await _rung.EvaluateAsync(
+            Envelope(inReplyTo: "<parent@x.com>"), new AssociationContext(), CancellationToken.None);
+
+        var match = matches.Should().ContainSingle().Subject;
+        match.Target!.Id.Should().Be(matterId, "the inherited matter is still surfaced");
+        match.Confidence.Should().Be(0.65);
+        match.Confidence.Should().BeLessThan(0.85, "a reply must not auto-file off an unconfirmed parent");
+        match.Provenance.Should().Contain("parent=unconfirmed");
     }
 
     [Fact]

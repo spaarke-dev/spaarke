@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-07-30 (by context-handoff)
 > **Recovery**: Read "Quick Recovery" first. This is a **UAT-iteration** session on the
-> shipped Email surface (tasks 040/041/042/050 already ✅), NOT a fresh POML task.
+> shipped Email surface — owner-driven rapid iteration, NOT a fresh POML task.
 
 ---
 
@@ -10,118 +10,78 @@
 
 | Field | Value |
 |-------|-------|
-| **Work** | Email reading-pane + composer UAT iteration (owner-driven, live in harness) |
-| **Last checkpoint** | Compose-engine wave **9/10/11/12 SHIPPED** (see below). Prior checkpoint `643f63c00` (resolver + reading-pane polish). |
-| **Status** | ✅ Compose-engine wave done + all packages typecheck/jest green. Remaining: formal pipeline **051 Deploy** + **090 Wrap-up** once UAT settles. |
-| **Next Action** | UAT the compose wave in harness/deployed. Then run **051 Deploy** (BFF+code page+widget; publish-size report). |
+| **Work** | Email reading-pane + composer UAT iteration + Wave E (templates + AI drafting) + open-email-as-form wiring |
+| **Branch** | `work/email-communication-solution-r5` · **HEAD `394c62d6f`** · working tree CLEAN · all pushed to origin |
+| **vs master** | **8 commits ahead of `origin/master`** (the UAT batch below). NOT yet merged to master. |
+| **Status** | All owner UAT items #1–#13 + list dividers + per-user send + #8 DONE. Wave E in progress: BFF template endpoint DONE; **template picker (client) is the NEXT action**. |
+| **Next Action** | Build the **compose-toolbar template picker** — see "NEXT: Wave E template picker" below. Then AI sparkle, then wire Messages "open email" icon. |
+| **Harness** | `http://localhost:5175/` (may be stale) — `SPAARKE_REPO_ROOT="c:/code_files/spaarke-wt-email-communication-solution-r5" npm run dev` in `c:/code_files/spaarke-prototype/projects/email-communication-solution-r5-uat`. Native Xrm (lookup/upload/template/nav) NO-OPS in the harness — deploy-validated only. |
 
-### Compose-engine wave — SHIPPED 2026-07-30
-- **10 + 11**: compose "Related to" = **deletable parent chips** (`AssociationChips` gains `onRemove` → `REMOVE_ASSOCIATION` reducer action) + **"Link another record" tile** (empty → only tile); **connector toolbar icon removed** (relate via the tile now, reusing `handleAddRelationship`).
-- **9a**: verified — paperclip "Link documents" → `onLookupRecord(sprk_document)` → attachment with documentId+linkUrl (already worked).
-- **12**: verified — `AttachmentList` Attach|Link per row (Link gated on `linkUrl`) already worked.
-- **9b**: **wired `onUploadLocalAttachment`** in `createXrmEmailComposeHandlers` (now takes `authenticatedFetch`+`bffBaseUrl`). Flow: resolve **single deployment SPE container** from the user's owning BU (`EntityCreationService.resolveUserBuDefaults` → `businessunit.sprk_containerid`) → `uploadFilesToSpe` → create **unassociated** `sprk_document` (`sprk_graphdriveid`=container; `sprk_containerid` stays NULL) → return `{documentId, driveItemId, linkUrl}`. Engine seam extended to carry `linkUrl` (lights the per-row Link toggle). Threaded through SendEmailDialog → EmailComposeActions deps → EmailWorkspace → both mounts (EmailPage/main.tsx + EmailWorkspaceWidget). **No new BFF endpoint** (reused `PUT /api/obo/containers/{id}/files/{name}` + Dataverse create). **Key correction:** the send path is documentId-only (ADR-045, no raw-bytes attach) — so new-file attach REQUIRES the upload; it was silently dropping before. See memory `spe-single-container-per-deployment`.
-- **Files:** `EmailComposer.{tsx,types.ts,reducer.ts}`, `createXrmEmailComposeHandlers.ts`, `AssociationChips.tsx`, `SendEmailDialog.tsx`, `EmailComposeActions.types.ts`, `useEmailComposeActions.tsx`, `EmailWorkspace.{tsx,types.ts}`, `EmailPage/main.tsx`, `EmailWorkspaceWidget.tsx`, `EmailComposer.reducer.test.ts`.
-| **Harness** | `http://localhost:5175/` — run `SPAARKE_REPO_ROOT="c:/code_files/spaarke-wt-email-communication-solution-r5" npm run dev` in `c:/code_files/spaarke-prototype/projects/email-communication-solution-r5-uat` (HMR views this worktree's source). |
-
-### Verify/build commands (this package)
-- Typecheck: `cd src/client/shared/Spaarke.Communication.Components && npx tsc --noEmit -p tsconfig.json`
-- Tests (jest, NOT vitest): `npx jest <pattern>` in that package.
-
-### Critical context
-Harness renders the **real production components** via alias. Native Xrm record-lookup
-(recipient/record/connect) works in the deployed MDA (proven by the wizard) but no-ops in
-the standalone harness (stub `Xrm.Utility.lookupObjects`). Widget header elevation + viewport
-are host-provided; harness only approximates them.
+### Verify/build commands (per package)
+- **UI.Components** engine/composer/launcher: `cd src/client/shared/Spaarke.UI.Components` → `npx tsc --noEmit -p tsconfig.json` · `npx jest EmailComposer SendEmailDialog openEmailRecord`
+- **Communication.Components** reading pane/workspace: `cd src/client/shared/Spaarke.Communication.Components` → `npx tsc --noEmit -p tsconfig.json` · `npx jest EmailWorkspace EmailCardList EmailConnectionsReview EmailReadingPaneShell EmailComposeActions`
+- **AI.Widgets**: `cd src/client/shared/Spaarke.AI.Widgets` → `npx tsc --noEmit -p tsconfig.json`
+- **BFF**: `dotnet build src/server/api/Sprk.Bff.Api/` · `dotnet test ... --filter CommunicationTemplateEndpointTests`
+- **CRITICAL cross-package build order**: edits to UI.Components require `npm run build` there BEFORE Communication.Components / AI.Widgets typecheck (they consume the built `dist/` .d.ts, not source). Order: UI.Components → Communication.Components. `dist/` is gitignored (never commit it).
+- Tests use **jest** (NOT vitest). Prettier gate is repo-wide (`npx prettier --write` then `--check` your changed files before commit).
 
 ---
 
-## Design decisions LOCKED this session
+## DONE this session — 8 commits (all pushed)
 
-### Resolver (single-primary redesign — SHIPPED in 643f63c00)
-- **Model A**: the reading-pane resolver sets the ONE primary regarding (owns the denorm
-  `sprk_regardingrecord*` fields incl. `sprk_regardingrecordnumber`). The engine's multi-lookup
-  auto-writes are UNCHANGED. No clear-and-set.
-- **One merged "Related to" section** (removed the old separate "Association" section + read-only pills).
-- **3-state, dot-driven**: 🟢 confirmed (human-confirmed only, any %/path) · 🟡 needs-confirmation
-  (autoFiled/100% awaiting confirm) · 🔴 requires-review (below auto-match → pick from candidates).
-- **Cards**: always 3 slots, blank below **70%**; 2-line (`{REC#} : {name}` + %-tag / reason);
-  click-to-select → Confirm appears under the selected card; switchable (incl. down from 100%).
-- **Confirmed chip** lives in the **section header** (`{Type}: {number}`), clickable to open the
-  record (navigationService.openRecordModal) + × to remove.
-- **100% auto-write**: server-side at ingest; UI reflects + allows switch.
-- **Link another record**: an in-grid tile (after the last card), non-bold, search icon (standard
-  `Search20Regular`); click opens the type dropdown + right-pane lookup IN PLACE via `PolymorphicPicker`.
-
-### Reading-pane polish (SHIPPED in 643f63c00)
-No horizontal scroll (readingPaneScroll clips X); circular scroll-down FAB (scrollbar hidden,
-appears only when content below fold — mirrors ComposeEditor); card sender **bold** + subject
-**blue** + association **review dot**; shorter title bar; taller toolbar; **removed** Open-full-form
-icon; recipient labels copied from compose `RecipientField.labelBox` + values **Segoe UI 14px**;
-end-of-body **(i)** on a faint centered divider; toolbar right-icon spacing; widget-header elevation
-(component approximation).
-
-### Item-1 framing (owner asked)
-Make PURE-COMPONENT items exact (fonts/spacing/cards/labels/colors). Host/platform items only
-approximate in harness: native Xrm lookup (deploy-validated), widget header elevation, viewport.
+| Commit | Items | Notes |
+|--------|-------|-------|
+| `967f17b30` | **#1** Email tab loads real widget | `WorkspacePane` FIX #10b intercept gated to the compose DRAFT hand-off only (payload has `mode`/`bodyText`/`attachmentFileName`); plain `email` tab falls through to registry → real `EmailWorkspaceWidget`. Stub kept for the draft hand-off. +regression test. SpaarkeAi-only (code page never had the stub). |
+| `884e809ae` | **#2,4,5,6,7,9,10** reading polish | pane 20/80 default; subject line above body; "Link another" card matches candidate cards; single-click opens type dropdown; Related-to collapses when 🟢 confirmed; primary green; reading title 18px. Communication.Components. |
+| `ca370e3fd` | **#3,10,11,12,13** compose polish | From row above To/Cc; compose title 18px; maximize/restore (fills app container); `modalType="alert"` (no light-dismiss → role `alertdialog`); space above quoted thread. UI.Components. |
+| `9d9d59690` | list dividers + search | `EmailCardList` Today/Yesterday/This Week/This Month/Older via pure `bucketEmailsByDate(items, now)`; search box filters sender/subject. Communication.Components. |
+| `719199430` | **#3** per-user send | Email surface defaults From to current user (new `defaultSendMode` seed keeps switcher interactive — do NOT use `sendMode` which LOCKS the switcher); resolves signed-in email via `resolveCurrentUserEmail()` (`systemuser.internalemailaddress`) at both mounts → `fromMailbox`. Threaded engine→SendEmailDialog→useEmailComposeActions→EmailWorkspace→mounts. |
+| `6daa4ca65` | **#8** compose single-primary | `associations[0]` = primary regarding (BFF `MapAssociationFields` writes `sprk_regardingrecord*` from index 0 — CLIENT-ONLY ordering, no send-contract change). "Link another" → picker → confirm "Set as primary / Will replace current" → `SET_PRIMARY_ASSOCIATION` promotes to index 0. Primary chip green. Inline label+chips+link, font parity. |
+| `f42061e9c` | Wave E template endpoint | `POST /api/communications/template/render { templateId, regardingEntityType?, regardingRecordId? } → { subject, body, isHtml }`. Reuses `EmailTemplateService.FetchAndRenderAsync` + `IGenericEntityService`. `CommunicationTemplateEndpoints.cs` + `EndpointMappingExtensions.cs` reg + 6 tests. App-only Dataverse read (OBO variant is a noted follow-up). |
+| `394c62d6f` | open-email-as-form | EmailPage resolves record id (Pattern B `data` param / `id` / Pattern A host-form context) → `initialSelectedId` + `hideList`. `hideList` single-record mode in `EmailWorkspace` + `EmailReadingPaneShell`. `openEmailRecord(id,{single})` launcher exported from `@spaarke/ui-components`. Tests 19+5. |
 
 ---
 
-## NEXT WAVE — Compose-engine items 9/10/11/12 (fully scoped, decisions captured)
+## Locked design decisions (do NOT re-litigate)
 
-**All live in the shared `EmailComposer` engine** (`src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/`) — consumed by the PCF (`SendEmailPage`), the wizard (`SendEmailStep`), and the reading-pane code page (`SendEmailDialog` via `useEmailComposeActions`). Mind blast radius; prefer per-caller wiring where possible.
-
-### 10 + 11 (a PAIR — do together first)
-- **10**: compose "Related to" shows inherited **parent associations as chips, each DELETABLE (×)**
-  (owner: "may not be related to the parent"), PLUS a **"Link another record" tile**; when empty →
-  show ONLY the Link tile. Lighter than the reading-pane resolver (chips + link, no cards/dots).
-- **11**: **remove the connect/network icon** from the compose toolbar (relating now via the Related-to
-  Link tile). MUST land with 10 or the composer loses its only way to relate.
-- Engine anchors: Related-to render `EmailComposer.tsx` **L721–745** (`AssociationChips` at L745);
-  connect icon `showConnector` gate **L432**, render **L490** (`Connector20Regular`);
-  `handleAddRelationship` **L345–363** (reflects picked record into `state.associations`).
-- Parent associations already flow in via the `associations` prop (reply/forward carry-over — verified working).
-
-### 9a (attach existing document) — VERIFY, likely already works
-- Engine `canLinkDocument = !!props.onLookupRecord` (`EmailComposer.tsx` L424); reading-pane compose
-  passes `onLookupRecord` (createXrmEmailComposeHandlers). Confirm the paperclip's "Link documents"
-  shows + works in the reading-pane compose.
-
-### 12 (Attach | Link per row) — VERIFY, already exists
-- `AttachmentList.tsx` L163: `showIncludeToggles = !readOnly && !!item.documentId`. Local files
-  (no documentId) = **Attach-only**; document-backed items = **Attach + Link**. Already implemented.
-
-### 9b (new-file upload) — CLIENT WIRING ONLY (NO new BFF endpoint — corrected)
-- **Decision**: **Attach = default** for new local files (bytes, universal, works for all recipients).
-  **Link = opt-in** — wire `onUploadLocalAttachment(file) => Promise<{documentId,...}>` to an EXISTING
-  upload endpoint so the file gets a `documentId` (+ `linkUrl`) → the Link toggle lights up (gated on
-  documentId). **External-recipient access = MATCH existing "Link a document" behavior** (no new sharing
-  policy now).
-- Engine seam already exists: `EmailComposer.tsx` L381–415 (`onUploadLocalAttachment` → patches
-  `documentId`); a passing test exists (`__tests__/attachOnCompose.test.tsx`). **No production consumer
-  wires it yet** (grep: only the test). So: unwired, not unbuilt.
-- **Existing upload endpoints** (pick one; NO new BFF surface): `POST /api/spe/containers/{id}/items/upload`
-  (ContainerItemEndpoints:157) · `PUT /api/drives/{driveId}/upload` (DocumentsEndpoints:307) ·
-  `POST /api/containers/{containerId}/upload` + `PUT .../files/{*path}` (UploadEndpoints) · OBO chunked
-  (OBOEndpoints:106/141). Open scoping Q: which endpoint + whether it also creates the governed
-  `sprk_document` or that's a second call. TRACE how existing surfaces create the governed doc before wiring.
+- **Templates**: OOB Dataverse `template` entity (NOT a custom entity/designer). Merge `{!entity.field}` from the **confirmed primary regarding** via the existing BFF `EmailTemplateService`. Template LIST = client-side Xrm on `template`; RENDER = the new BFF endpoint. See memory `email-drafting-templates-and-ai-decisions`.
+- **AI drafting**: lightweight **email sparkle** on the compose toolbar → common prompts + "Enter prompt" → **BFF draft endpoint** (NOT the heavy `Spaarke.Compose` doc subsystem). Prompts sourced from the **prompt library** (admin-editable), not hardcoded. 6 starter prompts: *Draft a reply · Summarize the thread · Make it concise · Formal tone · Friendly tone · Fix grammar & tone* + Enter prompt.
+- **Per-user send (#3)**: email surface defaults to current-user send. ⚠️ **OPEN**: owner said "we need to test the per user" — confirm the sandbox/prod is configured for per-user (send-as) mail; if only the shared mailbox is provisioned, user-send will fail (fall back to shared default). BFF supports it (`CommunicationSendMode = 'sharedMailbox' | 'user'`).
+- **Word templates**: a SEPARATE future effort (OOB Dataverse Document Templates, pairs with the Compose subsystem). Do NOT couple email templates to it now. A unified Spaarke templating concept is a possible larger later project.
+- **SPE container** (attachments, item 9b earlier): ONE per deployment, resolved from the owner BU (`businessunit.sprk_containerid`). Memory `spe-single-container-per-deployment`.
+- **Form patterns**: BOTH Pattern A (embed as the `sprk_communication` form) AND Pattern B (`openEmailRecord` launcher for icons like the Messages "open email"). Foundation shipped in `394c62d6f`.
 
 ---
 
-## Deferred / known follow-ups
-- **External-recipient sharing of Linked SPE docs** = a deliberate, likely ADR-worthy decision (SPE links
-  are Entra-auth-gated; external recipients need Graph sharing links). Out of scope now (match existing).
-- **Old resolver-state tests** already rewritten to the single-primary model (green).
-- Prototype harness seed (`_infra/seed/presets/email-r5-uat.ts`) still models old states; the 🟡
-  needs-confirmation state needs an `autoFiled:true` seed to render cleanly (optional demo polish).
-- (i) info affordance is at body top-right→now bottom divider; owner wanted "in the toolbar" — placed in
-  body (toolbar integration needs the degraded flag lifted to the shell; offered as follow-up).
+## NEXT: Wave E template picker (the immediate next action)
 
-## Formal pipeline remainder (separate from UAT)
-- **051 Deploy** 🔲 (BFF + code page + widget seed; publish-size report) → **090 Wrap-up** 🔲.
-  UAT polish should settle before 051.
+Build a `[📄]` template button in the compose body toolbar (`EmailComposer.tsx` toolbarSlot — same area as the paperclip/search/`| [template] [✨AI]` group). Flow:
+1. **List templates** client-side via the host: add a handler (mirror `createXrmEmailComposeHandlers` pattern) that queries the OOB `template` entity via Xrm.WebApi (email templates; filter by `templatetypecode`/appropriate). Thread it as an optional prop like `onListEmailTemplates` / a picker callback (additive, like `onLookupRecord`).
+2. **Render**: on pick, call `POST {bffBaseUrl}/api/communications/template/render` with `{ templateId, regardingEntityType, regardingRecordId }` = the **primary regarding** (`state.associations[0]`) via `authenticatedFetch`. Response `{ subject, body, isHtml }`.
+3. **Apply**: fill the composer `subject` (if empty or confirm-overwrite) + insert/replace `body` (respect `isHtml` → set bodyFormat). Reuse the engine's SET_FIELD / body set.
+- Thread any new prop through: `EmailComposer.types.ts` → `SendEmailDialog` (spread) → `useEmailComposeActions` → `EmailWorkspace` (+types) → both mounts (`EmailPage/main.tsx`, `EmailWorkspaceWidget.tsx`). Same threading pattern used for `onUploadLocalAttachment` / `fromMailbox` this session.
+- Then AI sparkle (needs a BFF DRAFT endpoint — `EmailDraftService.cs` exists but is matter/agent-specific; likely add a thin generic `POST /api/communications/draft { intent, userInstruction?, currentBody, thread?, regarding?, mode:generate|refine } → { text }` sourcing prompt text from the prompt library). Then a `[✨]` dropdown (6 prompts + Enter prompt) → call it → propose draft into body.
+- Then wire the **Messages "open email" icon** → `openEmailRecord(id)` (locate the Messages surface's email-open call site; replace OOB openForm/navigate with the launcher).
+
+### Key anchors for Wave E
+- BFF render endpoint: `src/server/api/Sprk.Bff.Api/Api/CommunicationTemplateEndpoints.cs`
+- Existing services: `Services/Ai/Delivery/EmailTemplateService.cs` (`FetchAndRenderAsync(templateId, variables, dataverseUrl, accessToken, ct)`); `Api/Agent/EmailDraftService.cs` (matter-specific — DON'T force-fit; add a generic draft endpoint); prompt library `Api/Ai/PromptLibraryEndpoints.cs` / `PlaybookEndpoints.cs`.
+- Compose toolbar: `EmailComposer.tsx` `toolbarSlot` (paperclip Menu + record SearchRegular Menu already there; add `| [template] [✨]`).
+- Launcher already exported: `openEmailRecord` from `@spaarke/ui-components`.
 
 ---
+
+## Verification status (all GREEN at handoff)
+- UI.Components / Communication.Components / AI.Widgets typecheck clean against rebuilt dists.
+- jest: composer 157–164, reading/workspace/shell 71+, EmailCardList 16, openEmailRecord 5, WorkspacePane email-stub 4. BFF: 6 template-endpoint tests. Prettier clean.
+- Pre-existing unrelated failures (documented, verified via git-stash baseline): `useEmailComposeActions` attachment-enum (reading side), some Compose/Timeline/WorkspaceShell suites, EmailPage cross-tree `tsc-surface-gate` reports 66 pre-existing shared-lib errors (canonical package typecheck is clean).
+
+## Memory files written this session (in `~/.claude/projects/.../memory/`)
+- `spe-single-container-per-deployment` · `email-drafting-templates-and-ai-decisions` · indexed in `MEMORY.md`.
+
+## Deploy / merge notes
+- Deploy is FRONTEND-only for the client waves (Email code page `sprk_emailpage` web resource + `@spaarke/communication-components` widget bundle) PLUS the BFF for the new template endpoint (`f42061e9c` — first BFF change this batch; publish-size negligible, no new deps).
+- Branch is 8 ahead of master, pushed but NOT merged. Merge-to-master path: branch protection OFF → direct FF `git push origin HEAD:master` + sync main repo (`c:/code_files/spaarke` → `git fetch && checkout master && merge --ff-only origin/master`). Run Prettier gate first.
 
 ## How to continue
-Say **"continue"** or **"start 10 and 11"**. First read `EmailComposer.tsx` L721–745 + L432/L490,
-then implement deletable chips + Link tile + remove connect icon; typecheck + jest; view in harness.
+Say **"continue"** or **"build the template picker"**. Start at `EmailComposer.tsx` toolbarSlot; thread the new template-picker prop the same way `fromMailbox`/`onUploadLocalAttachment` were threaded this session; call the shipped `POST /api/communications/template/render`.

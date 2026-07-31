@@ -38,6 +38,7 @@ import {
   createXrmDataService,
   createXrmNavigationService,
   createXrmEmailComposeHandlers,
+  resolveCurrentUserEmail,
   searchUsersAndContacts,
   XrmDataverseClient,
   getXrm,
@@ -112,6 +113,94 @@ function buildXrmWebApi(): EmailWorkspaceWebApi {
     updateRecord: (entityLogicalName: string, id: string, data: Record<string, unknown>) =>
       requireXrmWebApi().updateRecord(entityLogicalName, id, data),
   };
+}
+
+const COMMUNICATION_ENTITY = 'sprk_communication';
+
+/**
+ * Minimal structural shape of the cross-frame Xrm surface this file reads for
+ * Pattern A (embedded host form) record resolution. `getXrm()` is loosely typed
+ * and the ambient `@types/xrm` `XrmStatic` doesn't expose `getPageContext` /
+ * the legacy `Page`, so we cast to this local shape (all optional — every access
+ * is null-guarded).
+ */
+interface HostFormXrm {
+  Utility?: {
+    getPageContext?: () => { input?: { entityName?: string; entityId?: string } } | undefined;
+  };
+  Page?: { data?: { entity?: { getId?: () => string | undefined } } };
+}
+
+/**
+ * Resolve the incoming `sprk_communication` record id + view mode from the
+ * launch context, in precedence order:
+ *   (a) `data` query param — Pattern B (`Xrm.Navigation.navigateTo({ data })`,
+ *       e.g. the launcher `openEmailRecord`). Carries the bare communication id,
+ *       optionally with a folded `&single=1` (or `view=record`) flag.
+ *   (b) `id` query param — direct-link / dev fallback.
+ *   (c) the embedded host form's record — Pattern A (Email page embedded on a
+ *       `sprk_communication` form), read via the cross-frame Xrm.
+ *
+ * Single-record ("form") mode is derived from a `single=1` / `view=record` flag,
+ * which may arrive as its own top-level param OR folded into the `data` value.
+ * `hideList` is only meaningful when an id resolves. When nothing resolves →
+ * list mode (id `undefined`, `hideList` false) — i.e. behaves exactly as before.
+ */
+function resolveEmailLaunch(): { initialSelectedId?: string; hideList: boolean } {
+  const normalizeId = (raw: string | null | undefined): string | undefined => {
+    const v = (raw ?? '').replace(/[{}]/g, '').trim().toLowerCase();
+    return v.length > 0 ? v : undefined;
+  };
+  const isSingleFlag = (params: URLSearchParams): boolean =>
+    params.get('single') === '1' || params.get('view') === 'record';
+
+  let id: string | undefined;
+  let single = false;
+
+  try {
+    const search = typeof window !== 'undefined' ? window.location.search : '';
+    const top = new URLSearchParams(search);
+
+    // single / view may arrive as their own top-level param.
+    single = isSingleFlag(top);
+
+    // (a) data param (Pattern B). The value is either `<guid>` or, when the flag
+    //     was folded in by the launcher, `<guid>&single=1` — split the id from
+    //     any trailing flags (Dataverse surfaces the whole `data` string).
+    const rawData = top.get('data');
+    if (rawData) {
+      const [idPart, ...rest] = rawData.split('&');
+      id = normalizeId(idPart);
+      if (rest.length > 0 && isSingleFlag(new URLSearchParams(rest.join('&')))) single = true;
+    }
+
+    // (b) id fallback param.
+    if (!id) id = normalizeId(top.get('id'));
+  } catch {
+    /* URL parse failure → fall through to host-form / list mode */
+  }
+
+  // (c) embedded host form (Pattern A) — only when no param supplied an id.
+  // `getXrm()` is loosely typed; the cross-frame `getPageContext()` and the
+  // legacy `Page` surfaces aren't on the ambient `@types/xrm` `XrmStatic`, so
+  // cast to a minimal local shape (repo `as unknown as` idiom) rather than any.
+  if (!id) {
+    try {
+      const xrm = getXrm() as unknown as HostFormXrm | null;
+      const input = xrm?.Utility?.getPageContext?.()?.input;
+      if (input?.entityId && (!input.entityName || input.entityName === COMMUNICATION_ENTITY)) {
+        id = normalizeId(input.entityId);
+      }
+      if (!id) {
+        const pageId = xrm?.Page?.data?.entity?.getId?.();
+        id = normalizeId(pageId);
+      }
+    } catch {
+      /* not embedded on a form — list mode */
+    }
+  }
+
+  return { initialSelectedId: id, hideList: Boolean(id) && single };
 }
 
 /** Loading state shown while `bootstrapAuth()` resolves config + MSAL init. */
@@ -204,6 +293,24 @@ function Root() {
   );
   const dataverseUrl = React.useMemo(() => getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '', []);
 
+  // Signed-in user's mailbox for the compose "From:" row (item 3) — the email surface
+  // defaults From to send-as this user (switchable to the Spaarke shared mailbox).
+  const [fromMailbox, setFromMailbox] = React.useState<string | undefined>();
+  React.useEffect(() => {
+    let cancelled = false;
+    void resolveCurrentUserEmail().then(email => {
+      if (!cancelled) setFromMailbox(email);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Resolve the incoming record + view mode ONCE from the launch context (URL
+  // `data`/`id` param → embedded host form). Drives `initialSelectedId` (pre-select)
+  // and `hideList` (single-record "form" mode). Absent → list mode (unchanged).
+  const launch = React.useMemo(resolveEmailLaunch, []);
+
   const handleRetry = React.useCallback(() => setAttempt(n => n + 1), []);
 
   let body: React.ReactNode;
@@ -226,7 +333,13 @@ function Root() {
         onLookupRecord={composeHandlers.onLookupRecord}
         onAddRelationship={composeHandlers.onAddRelationship}
         onUploadLocalAttachment={composeHandlers.onUploadLocalAttachment}
+        onListEmailTemplates={composeHandlers.onListEmailTemplates}
+        onRenderEmailTemplate={composeHandlers.onRenderEmailTemplate}
+        onDraftWithAi={composeHandlers.onDraftWithAi}
+        fromMailbox={fromMailbox}
         dataverseUrl={dataverseUrl}
+        initialSelectedId={launch.initialSelectedId}
+        hideList={launch.hideList}
       />
     );
   }

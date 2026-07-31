@@ -36,6 +36,12 @@
 import * as React from 'react';
 import {
   Button,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
   Input,
   Link,
   Spinner,
@@ -52,6 +58,7 @@ import {
   ArrowClockwiseRegular,
   ArrowForwardRegular,
   ChatRegular,
+  DeleteRegular,
   MailRegular,
   SearchRegular,
   SendRegular,
@@ -63,7 +70,7 @@ import {
   initialTimelineState,
 } from '../CommunicationTimeline/CommunicationTimeline.reducer';
 import type { TimelineMessage } from '../CommunicationTimeline/CommunicationTimeline.types';
-import { sendTimelineMessage } from '../../services/communicationTimelineApi';
+import { deactivateMessage, sendTimelineMessage } from '../../services/communicationTimelineApi';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import { MessageBubble } from './subcomponents/MessageBubble';
 import { EmailInFlowBlock } from './subcomponents/EmailInFlowBlock';
@@ -194,7 +201,8 @@ const useStyles = makeStyles({
   // edge for both mine-right and others-left messages.
   messageActions: {
     display: 'flex',
-    justifyContent: 'flex-end',
+    // Round-8 UAT: actions sit on the message's OWN side (near the bubble), not
+    // pinned to the far pane edge — see messageActionsOwn / messageActionsOther.
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
     // Unobtrusive by default; the reveal is opacity-only so the button keeps
@@ -209,6 +217,15 @@ const useStyles = makeStyles({
     ':focus-within': {
       opacity: 1,
     },
+  },
+  // Own (right-aligned bubble) → actions hug the right, under the bubble.
+  messageActionsOwn: {
+    justifyContent: 'flex-end',
+  },
+  // Others (left-aligned bubble) → actions hug the left, next to the message —
+  // NOT floated to the far right of the pane (round-8 UAT feedback).
+  messageActionsOther: {
+    justifyContent: 'flex-start',
   },
   visuallyHidden: {
     position: 'absolute',
@@ -287,6 +304,22 @@ const useFilterStyles = makeStyles({
   spacer: {
     flex: 1,
     minWidth: 0,
+  },
+  // Thread name, left-aligned in the tools row (round 7 item 9 / round 8 update 2).
+  // `marginInlineEnd: auto` pushes the trailing tools to the right edge; ellipsis
+  // keeps a long name from crowding the tools. Typography per operator spec:
+  // 14px (fontSizeBase300) · 600 (fontWeightSemibold) · #242424
+  // (colorNeutralForeground1 in light; semantic token adapts in dark — ADR-021).
+  title: {
+    flexShrink: 1,
+    minWidth: 0,
+    marginInlineEnd: 'auto',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
   },
   search: {
     minWidth: '180px',
@@ -723,6 +756,24 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
     onError: handlePollError,
   });
 
+  // Delete-message (round 7 item 8): soft-delete a message-type row (NOT email —
+  // email deletion is owned by the email surface). ConversationView already makes
+  // BFF calls (send + poll) via `authenticatedFetch`, so it owns the deactivate
+  // call directly (ADR-028 — no Xrm, no host wiring) and forces a poll to refresh.
+  // `pendingDeleteMessage` drives the confirmation dialog; null = closed.
+  const [pendingDeleteMessage, setPendingDeleteMessage] = React.useState<{ id: string; label: string } | null>(null);
+
+  const confirmDeleteMessage = React.useCallback(() => {
+    const target = pendingDeleteMessage;
+    setPendingDeleteMessage(null);
+    if (!target) return;
+    deactivateMessage(target.id, { authenticatedFetch, bffBaseUrl })
+      .then(() => pollNow())
+      .catch(err => {
+        if (err instanceof Error) onError?.(err);
+      });
+  }, [pendingDeleteMessage, authenticatedFetch, bffBaseUrl, pollNow, onError]);
+
   const timeline = React.useMemo(() => buildTimeline(state.messages), [state.messages]);
 
   // Additive filters (FR-09 + task 062 Unread facet) applied to the ALREADY-
@@ -848,40 +899,6 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
     <div className={mergeClasses(styles.root, className)} role="region" aria-label="Conversation">
       <div ref={liveRegionRef} aria-live="polite" className={styles.visuallyHidden} />
 
-      {/* Conversation title header (task 025 / FR-12). The title links to the
-          associated record ONLY when the thread has a `regarding` AND the host
-          wired `onOpenRecord`; clicking delegates the open to the host, which
-          uses the sanctioned OOB record-scoped modal (MODAL-DECISION-CRITERIA
-          Layout 1) — ConversationView imports no `Xrm` and embeds no iframe
-          (ADR-012). Record-less threads (no regarding), or hosts that provide
-          no `onOpenRecord`, render a plain, non-interactive title. Rendered
-          only when a `title` is supplied (header-less otherwise). */}
-      {title && (
-        // role=heading (aria-level 2) so a screen-reader user can jump to the
-        // conversation title via heading navigation; the interactive link/plain
-        // text sits inside (NFR-05).
-        <div className={styles.header} role="heading" aria-level={2}>
-          {regarding && onOpenRecord ? (
-            <Link
-              as="button"
-              // Native <button> defaults to type="submit" — force "button" so
-              // activating the title link never submits a host <form> (matches
-              // the SprkChatMessageRenderer / TextareaField convention).
-              type="button"
-              className={styles.titleLink}
-              // Accessible name keeps the visible title and states the action so
-              // a screen-reader user knows the link opens the record (NFR-05).
-              aria-label={`${title}, open associated record`}
-              onClick={() => onOpenRecord(regarding.entityType, regarding.id)}
-            >
-              {title}
-            </Link>
-          ) : (
-            <Text className={styles.titleText}>{title}</Text>
-          )}
-        </div>
-      )}
-
       {/* Transient poll error while messages are already loaded — inline banner, list stays visible. */}
       {state.error && state.status === 'ready' && (
         <Text role="alert" className={styles.errorBar}>
@@ -889,14 +906,40 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
         </Text>
       )}
 
-      {/* Chat-area toolbar (R3 UAT 2026-07-23 items 10/11) — SOLO channel filters:
-          default shows all; the Email icon solos emails, the Message icon solos
-          chats, clicking the active one returns to "all". Active = brand
-          background + white icon. A search icon reveals a text filter; Refresh is
-          always available. The Unread-only + Mark-as-read icons were removed
-          (item 11). Every control keeps a resolvable accessible name (NFR-05). */}
-      {state.status === 'ready' && (
+      {/* Chat-area toolbar (R3 UAT 2026-07-23 items 10/11 + round 7 item 9). The
+          thread NAME is now left-aligned in this same row (round 7 item 9 — no
+          separate title header). It links to the associated record ONLY when the
+          thread has a `regarding` AND the host wired `onOpenRecord` (delegated to
+          the sanctioned OOB record-scoped modal — ConversationView imports no
+          `Xrm`, ADR-012); otherwise plain text. The trailing tools are SOLO
+          channel filters + search + Refresh, right-aligned. Every control keeps a
+          resolvable accessible name (NFR-05). */}
+      {(title || state.status === 'ready') && (
         <div className={filterStyles.bar} role="group" aria-label="Message tools">
+          {title && (
+            // role=heading (aria-level 2) on the WRAPPER so a screen-reader user
+            // can jump to the conversation title by heading nav; the interactive
+            // link/plain text sits INSIDE and keeps its own role (a button, not a
+            // heading — the wrapper carries the heading semantics). `marginInlineEnd:
+            // auto` (filterStyles.title) pushes the trailing tools to the right.
+            <div className={filterStyles.title} role="heading" aria-level={2}>
+              {regarding && onOpenRecord ? (
+                <Link
+                  as="button"
+                  // Native <button> defaults to type="submit" — force "button" so
+                  // activating the title link never submits a host <form>.
+                  type="button"
+                  className={styles.titleLink}
+                  aria-label={`${title}, open associated record`}
+                  onClick={() => onOpenRecord(regarding.entityType, regarding.id)}
+                >
+                  {title}
+                </Link>
+              ) : (
+                <Text className={styles.titleText}>{title}</Text>
+              )}
+            </div>
+          )}
           {timeline.length > 0 && (
             <>
               <ToggleButton
@@ -1013,35 +1056,35 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
                   </Text>
                 </div>
               ) : (
-                <div
-                  key={item.key}
-                  ref={setAnchorRef(item.entry.message.id)}
-                  data-message-id={item.entry.message.id}
-                  data-highlighted={highlightedId === item.entry.message.id ? 'true' : undefined}
-                  className={mergeClasses(
-                    styles.messageAnchor,
-                    highlightedId === item.entry.message.id && styles.messageAnchorHighlight
-                  )}
-                >
-                  {/* Email-type communications render as a compact in-flow block
+                (() => {
+                  const isOwn = isOwnMessage(item.entry.message, currentUserSystemUserId);
+                  const isEmail = item.entry.message.channelType === 'email';
+                  return (
+                    <div
+                      key={item.key}
+                      ref={setAnchorRef(item.entry.message.id)}
+                      data-message-id={item.entry.message.id}
+                      data-highlighted={highlightedId === item.entry.message.id ? 'true' : undefined}
+                      className={mergeClasses(
+                        styles.messageAnchor,
+                        highlightedId === item.entry.message.id && styles.messageAnchorHighlight
+                      )}
+                    >
+                      {/* Email-type communications render as a compact in-flow block
                     (subject/from/to + single "Email" indicator + open-icon,
                     task 021 / FR-04); message-type keep the chat bubble. Only
                     the child swaps — the anchor wrapper (scrollToMessage) +
                     filters are untouched. */}
-                  {item.entry.message.channelType === 'email' ? (
-                    <EmailInFlowBlock
-                      message={item.entry.message}
-                      isOwn={isOwnMessage(item.entry.message, currentUserSystemUserId)}
-                      onOpen={onOpenEmail}
-                    />
-                  ) : (
-                    <MessageBubble
-                      message={item.entry.message}
-                      isOwn={isOwnMessage(item.entry.message, currentUserSystemUserId)}
-                      status={isOwnMessage(item.entry.message, currentUserSystemUserId) ? 'sent' : undefined}
-                      onOpenAttachment={onOpenAttachment}
-                    />
-                  )}
+                      {isEmail ? (
+                        <EmailInFlowBlock message={item.entry.message} isOwn={isOwn} onOpen={onOpenEmail} />
+                      ) : (
+                        <MessageBubble
+                          message={item.entry.message}
+                          isOwn={isOwn}
+                          status={isOwn ? 'sent' : undefined}
+                          onOpenAttachment={onOpenAttachment}
+                        />
+                      )}
 
                   {/* Forward affordance (task 022 / FR-08) — rendered in the anchor
                     wrapper so it applies uniformly to BOTH the chat bubble and
@@ -1055,20 +1098,51 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
                     button that does nothing. The accessible name is
                     contextualized per message so N Forward buttons are
                     distinguishable to a screen reader. */}
-                  {onForwardMessage && (
-                    <div className={styles.messageActions} data-message-actions>
-                      <Tooltip content={forwardLabel(item.entry.message)} relationship="label">
-                        <Button
-                          appearance="subtle"
-                          size="small"
-                          icon={<ArrowForwardRegular />}
-                          aria-label={forwardLabel(item.entry.message)}
-                          onClick={() => onForwardMessage(item.entry.message)}
-                        />
-                      </Tooltip>
+                  {/* Trailing per-message actions (Forward + Delete). Delete
+                      (round 7 item 8) is offered for MESSAGE-type rows only — email
+                      deletion is owned by the email surface (not here). Both are
+                      revealed on row hover/focus (NFR-05) and kept in the DOM/tab
+                      order. Rendered when at least one action applies. */}
+                      {(onForwardMessage || !isEmail) && (
+                        <div
+                          className={mergeClasses(
+                            styles.messageActions,
+                            isOwn ? styles.messageActionsOwn : styles.messageActionsOther
+                          )}
+                          data-message-actions
+                        >
+                          {onForwardMessage && (
+                            <Tooltip content={forwardLabel(item.entry.message)} relationship="label">
+                              <Button
+                                appearance="subtle"
+                                size="small"
+                                icon={<ArrowForwardRegular />}
+                                aria-label={forwardLabel(item.entry.message)}
+                                onClick={() => onForwardMessage(item.entry.message)}
+                              />
+                            </Tooltip>
+                          )}
+                          {!isEmail && (
+                            <Tooltip content="Delete message" relationship="label">
+                              <Button
+                                appearance="subtle"
+                                size="small"
+                                icon={<DeleteRegular />}
+                                aria-label="Delete message"
+                                onClick={() =>
+                                  setPendingDeleteMessage({
+                                    id: item.entry.message.id,
+                                    label: item.entry.message.body?.slice(0, 60) ?? 'this message',
+                                  })
+                                }
+                              />
+                            </Tooltip>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
+                  );
+                })()
               )
             )}
         </div>
@@ -1096,6 +1170,34 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
         bffBaseUrl={bffBaseUrl}
         onRefresh={pollNow}
       />
+
+      {/* Delete-message confirmation (round 7 item 8). Soft-delete (deactivate) is
+          reversible, but a mis-click still hides the message, so we gate it behind
+          an explicit confirm. */}
+      <Dialog
+        open={pendingDeleteMessage !== null}
+        onOpenChange={(_e, data) => {
+          if (!data.open) setPendingDeleteMessage(null);
+        }}
+      >
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Delete message?</DialogTitle>
+            <DialogContent>
+              This message will be removed from the conversation. This deactivates the message; it can be restored by an
+              administrator.
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="secondary" onClick={() => setPendingDeleteMessage(null)}>
+                Cancel
+              </Button>
+              <Button appearance="primary" onClick={confirmDeleteMessage}>
+                Delete
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
     </div>
   );
 });
