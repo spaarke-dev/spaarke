@@ -67,7 +67,8 @@ public sealed class CommunicationArrivedProducer
     private const string RegardingTypeField = "sprk_regardingrecordtype";
     private const string ThreadPrivacyStateField = "sprk_privacystate";
     private const string ThreadNameField = "sprk_name";  // thread name for the enriched notification (round-8.4 item 2)
-    private const string FromField = "sprk_from";        // sender ("who sent it") for the enriched notification
+    private const string SentByField = "sprk_sentby";    // sender systemuser lookup — its .Name is the DISPLAY NAME (round-8.4 item 2)
+    private const string FromField = "sprk_from";        // fallback sender string (external inbound with no systemuser)
 
     // Q2 app-notification mirror. Category is load-bearing for idempotency (recipient + category + regarding=thread).
     private const string CommunicationNotificationCategory = "communication";
@@ -92,7 +93,7 @@ public sealed class CommunicationArrivedProducer
         {
             ThreadLookupField, CommunicationTypeField, DirectionField,
             IsInternalOnlyField, CreatedOnField,
-            RegardingIdField, RegardingTypeField, FromField,
+            RegardingIdField, RegardingTypeField, SentByField, FromField,
         };
         cols.AddRange(RegardingFieldMap.AllRegardingFields);
         return cols.ToArray();
@@ -220,16 +221,22 @@ public sealed class CommunicationArrivedProducer
                 ?? (ThreadEntity, threadRef.Id);
             var actionUrl = BuildRecordDeepLink(linkEntityType, linkId);
 
-            // Enriched notification content (round-8.4 item 2): name the thread + who sent it. Thread name + sender are
-            // metadata (not body/address content) so this stays within the signal-only posture (NFR-02/03).
+            // Enriched notification content (round-8.4 item 2): name the thread + who sent it. Sender is the systemuser
+            // DISPLAY NAME (sprk_sentby.Name), NOT the raw sprk_from address — so the notification names a person, not an
+            // address (stays within the signal-only, no-address posture of NFR-02/03). Falls back to sprk_from only for
+            // external inbound with no resolved systemuser, and omits the sender line entirely if neither is present.
             var threadName = thread?.GetAttributeValue<string>(ThreadNameField);
-            var senderFrom = message.GetAttributeValue<string>(FromField);
+            var senderName = message.GetAttributeValue<EntityReference>(SentByField)?.Name;
+            if (string.IsNullOrWhiteSpace(senderName))
+            {
+                senderName = message.GetAttributeValue<string>(FromField);
+            }
             var notifyTitle = string.IsNullOrWhiteSpace(threadName)
                 ? envelope.SenderDisplay
                 : $"{envelope.SenderDisplay} · {threadName}";
-            var notifyBody = string.IsNullOrWhiteSpace(senderFrom)
+            var notifyBody = string.IsNullOrWhiteSpace(senderName)
                 ? "Open to view the conversation."
-                : $"From {senderFrom} — open to view the conversation.";
+                : $"From {senderName} — open to view the conversation.";
 
             // 5) Per recipient: durable outbox row FIRST, then best-effort ping. Ordering is structural
             //    (PingUserAsync requires the outboxRowId that only exists after the write). Then mirror a
