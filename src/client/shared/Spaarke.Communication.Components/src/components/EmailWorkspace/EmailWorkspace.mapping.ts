@@ -120,16 +120,33 @@ export function mapRowToEmailCardItem(row: Record<string, unknown>): EmailCardIt
  */
 function deriveCardReviewTone(row: Record<string, unknown>): 'red' | 'yellow' | 'green' | undefined {
   const filed = readFiledAssociations(row);
+  // owner UAT 2026-07-30 R2 item 5 — the review dot went missing because this
+  // "does the row carry association data?" gate ignored the DENORMALIZED
+  // `sprk_regardingrecordname`/`sprk_regardingrecordnumber` columns — which are the
+  // ones a maker most commonly adds to an inbox saved view (to show a "Related to"
+  // grid column), while the raw status/provenance/typed-lookup columns usually are
+  // NOT selected. So a clearly-filed email had a denorm name but the gate returned
+  // `undefined` → no dot. Counting the denorm fields (already passed to
+  // `derivePrimaryReview` below) restores the dot whenever the view surfaces the
+  // Related-to record, without ever forcing a misleading all-red list on a view
+  // that selects no association columns at all.
   const hasAssociationData =
     row['sprk_associationstatus'] != null ||
     (typeof row['sprk_associationprovenance'] === 'string' && row['sprk_associationprovenance'].length > 0) ||
+    asNullableString(row['sprk_regardingrecordname']) != null ||
+    asNullableString(row['sprk_regardingrecordnumber']) != null ||
     filed.length > 0;
   if (!hasAssociationData) return undefined;
   return summarizePrimaryReview(
-    derivePrimaryReview(asNullableString(row['sprk_associationprovenance']), asNullableNumber(row['sprk_associationstatus']), filed, {
-      recordName: asNullableString(row['sprk_regardingrecordname']),
-      recordNumber: asNullableString(row['sprk_regardingrecordnumber']),
-    })
+    derivePrimaryReview(
+      asNullableString(row['sprk_associationprovenance']),
+      asNullableNumber(row['sprk_associationstatus']),
+      filed,
+      {
+        recordName: asNullableString(row['sprk_regardingrecordname']),
+        recordNumber: asNullableString(row['sprk_regardingrecordnumber']),
+      }
+    )
   ).tone;
 }
 

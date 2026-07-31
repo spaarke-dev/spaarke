@@ -159,6 +159,11 @@ export interface ISendEmailDialogProps {
    */
   onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
   /**
+   * Resolve a recipient-openable SPE sharing link for a linked document (R2 item 12). Forwarded to
+   * the engine via `...composerProps`; omitted → links keep their original internal URL.
+   */
+  onResolveShareLink?: (documentId: string) => Promise<string | null>;
+  /**
    * Seeds the initial From/send mode while keeping the switcher interactive (item 3).
    * The email surface passes `'user'`. Forwarded to the engine via `...composerProps`.
    */

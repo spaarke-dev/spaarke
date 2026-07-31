@@ -86,7 +86,9 @@ describe('EmailReadingPaneShell', () => {
 
     // Layout order: header band, then the full-width toolbar, then the body region.
     const readingPane = screen.getByTestId('email-reading-pane');
-    const nodes = Array.from(readingPane.querySelectorAll('[data-testid="header-slot"], [role="toolbar"], [data-testid="body-slot"]'));
+    const nodes = Array.from(
+      readingPane.querySelectorAll('[data-testid="header-slot"], [role="toolbar"], [data-testid="body-slot"]')
+    );
     expect(nodes.map(n => n.getAttribute('data-testid') ?? n.getAttribute('role'))).toEqual([
       'header-slot',
       'toolbar',
@@ -121,6 +123,45 @@ describe('EmailReadingPaneShell', () => {
       'toolbar',
       'body-slot',
     ]);
+  });
+
+  it('adopts a LATE-arriving initialSelectedId while nothing is selected and notifies the host (owner UAT R2 item 3)', () => {
+    const onSelectedIdChange = jest.fn();
+    const items: EmailCardItem[] = [
+      makeItem({ id: 'e1', subject: 'Email one' }),
+      makeItem({ id: 'e2', subject: 'Email two' }),
+    ];
+    const header = (id: string) => <div data-testid="header-slot">header:{id}</div>;
+    const body = (id: string) => <div data-testid="body-slot">body:{id}</div>;
+
+    const { rerender } = renderWithProvider(
+      <EmailReadingPaneShell
+        items={items}
+        onSelectedIdChange={onSelectedIdChange}
+        renderHeader={header}
+        renderBody={body}
+      />
+    );
+    // Nothing selected yet → placeholder.
+    expect(screen.getByText('Select an email')).toBeInTheDocument();
+
+    // The host auto-selects the first email AFTER mount (async rows resolved), so
+    // initialSelectedId arrives late — the shell adopts it and notifies the host.
+    rerender(
+      <FluentProvider theme={webLightTheme}>
+        <EmailReadingPaneShell
+          items={items}
+          initialSelectedId="e1"
+          onSelectedIdChange={onSelectedIdChange}
+          renderHeader={header}
+          renderBody={body}
+        />
+      </FluentProvider>
+    );
+
+    expect(screen.queryByText('Select an email')).not.toBeInTheDocument();
+    expect(screen.getByTestId('header-slot')).toHaveTextContent('header:e1');
+    expect(onSelectedIdChange).toHaveBeenCalledWith('e1');
   });
 
   it('notifies the host of selection changes via onSelectedIdChange without controlling selection', () => {

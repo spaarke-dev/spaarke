@@ -153,6 +153,20 @@ const EmailReadingPaneShellInner: React.FC<EmailReadingPaneShellProps> = ({
     [onSelectedIdChange]
   );
 
+  // owner UAT 2026-07-30 R2 item 3 — adopt a LATE-arriving `initialSelectedId`.
+  // The shell seeds `selectedId` from `initialSelectedId` on mount, but the host
+  // auto-selects the first email only AFTER the async row load resolves (long
+  // after mount), so that first value would otherwise be missed. Adopt it ONLY
+  // while nothing is selected yet — a user's manual click (selectedId defined)
+  // is never overridden. Notifies the host through the same callback so its
+  // mirrored selection (driving the per-selection record read) stays in sync.
+  React.useEffect(() => {
+    if (initialSelectedId && selectedId === undefined) {
+      setSelectedId(initialSelectedId);
+      onSelectedIdChange?.(initialSelectedId);
+    }
+  }, [initialSelectedId, selectedId, onSelectedIdChange]);
+
   // Circular scroll-down cue — visible only while the reading pane has content
   // below the fold (an alternative to the native scrollbar, per owner UAT;
   // mirrors ComposeEditor's FAB). Re-measured on scroll, on size changes
@@ -214,7 +228,19 @@ const EmailReadingPaneShellInner: React.FC<EmailReadingPaneShellProps> = ({
     >
       {!hideList && (
         <>
-          <div className={s.listPane} style={{ width: primaryWidth }} data-testid="email-list-pane">
+          {/* owner UAT 2026-07-30 R2 item 1 — floor the list pane at `minListWidth`.
+              The reused hook computes `primaryWidth` as `calc(100% - detailWidthPx - splitter)`;
+              when the whole widget container collapses and re-expands (all SpaarkeAi
+              workspace panes closed then reopened), a stale/large `detailWidthPx` can
+              drive that calc to ~0 and the list vanishes. A CSS `minWidth` (the pane is
+              already `flexShrink: 0`) guarantees it can never render below `minListWidth`;
+              the reading pane (`flexShrink: 1`, `minWidth: 0`) absorbs the difference. The
+              20/80 default and `hideList` single-record mode are unaffected. */}
+          <div
+            className={s.listPane}
+            style={{ width: primaryWidth, minWidth: minListWidth }}
+            data-testid="email-list-pane"
+          >
             <EmailCardList items={items} isLoading={isLoading} selectedId={selectedId} onSelect={handleSelect} />
           </div>
 

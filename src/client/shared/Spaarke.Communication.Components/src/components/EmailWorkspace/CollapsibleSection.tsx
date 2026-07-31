@@ -132,8 +132,7 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
 }) => {
   const s = useStyles();
   const [open, setOpen] = React.useState<boolean>(defaultOpen);
-  const dotClass =
-    status?.tone === 'green' ? s.dotGreen : status?.tone === 'yellow' ? s.dotYellow : s.dotRed;
+  const dotClass = status?.tone === 'green' ? s.dotGreen : status?.tone === 'yellow' ? s.dotYellow : s.dotRed;
 
   return (
     <div className={s.root} data-testid={`section-${id}`}>

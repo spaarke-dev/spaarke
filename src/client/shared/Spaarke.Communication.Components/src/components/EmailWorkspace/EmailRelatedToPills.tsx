@@ -61,7 +61,11 @@ export const EmailRelatedToPills: React.FC<EmailRelatedToPillsProps> = ({ associ
   return (
     <div className={s.root} data-testid="email-related-to-pills">
       {associations.map(a => (
-        <span key={`${a.entityType}:${a.recordId}`} className={s.pill} title={`${entityLabel(a.entityType)} · ${a.recordName}`}>
+        <span
+          key={`${a.entityType}:${a.recordId}`}
+          className={s.pill}
+          title={`${entityLabel(a.entityType)} · ${a.recordName}`}
+        >
           <span className={s.icon}>{entityIcon(a.entityType)}</span>
           <Text className={s.type}>{entityLabel(a.entityType)}</Text>
           <Text className={s.name}>{a.recordName}</Text>
