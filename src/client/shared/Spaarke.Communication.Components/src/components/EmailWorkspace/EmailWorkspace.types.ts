@@ -112,6 +112,11 @@ export interface EmailWorkspaceProps {
    */
   onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
   /**
+   * Resolve a recipient-openable SPE sharing link for a linked document (R2 item 12). Mount-supplied
+   * Xrm/BFF handler; omitted → links keep their original internal URL.
+   */
+  onResolveShareLink?: (documentId: string) => Promise<string | null>;
+  /**
    * Compose template picker (Wave E) — `onListEmailTemplates` lists OOB `template` records,
    * `onRenderEmailTemplate` renders the chosen one (merging field codes from the primary
    * regarding). Forwarded to the composer via `useEmailComposeActions`. Mount-supplied Xrm/BFF
