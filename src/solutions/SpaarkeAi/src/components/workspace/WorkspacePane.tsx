@@ -940,7 +940,6 @@ export function WorkspacePane(): React.JSX.Element {
     let cancelled = false;
     const timerId = window.setTimeout(() => {
       void (async () => {
-        let sessionRestored = false;
         try {
           const lookupUrl = buildBffApiUrl(
             bffBaseUrl,
@@ -955,9 +954,9 @@ export function WorkspacePane(): React.JSX.Element {
           if (response.ok) {
             const session = (await response.json()) as { sessionId?: string };
             if (!cancelled && session.sessionId) {
-              sessionRestored = true;
-              // Restores the transcript (Assistant history) + the session-keyed
-              // review/findings widgets (which include the analysis's document).
+              // Restores the transcript (Assistant history) + session-keyed
+              // review/findings widgets. The Compose document is mounted separately
+              // below so it survives a cross-browser reopen (no localStorage tab).
               dispatch("conversation", {
                 type: "session_switch",
                 sessionId: session.sessionId,
@@ -968,13 +967,26 @@ export function WorkspacePane(): React.JSX.Element {
           // Network/parse failure — fall through to the document-only surface.
         }
 
-        // No bound session → open the analysis's linked document in the EDITABLE
-        // Compose/TipTap surface (Phase 1, UAT round 5): the analysis surface IS the
-        // review surface, not a read-only preview. Resolve the SPE pointer from the
-        // linked sprk_document (`sprk_graphitemid` = drive-item, `sprk_graphdriveid` =
-        // drive — BOTH required by ComposeEditor; mirrors DocumentComposeLaunch).
-        // Falls back to the read-only document-viewer if the pointer is incomplete.
-        if (cancelled || sessionRestored) return;
+        // Surface the analysis's linked document in the EDITABLE Compose/TipTap
+        // surface (Phase 1, UAT round 5): the analysis surface IS the review surface,
+        // not a read-only preview. Resolve the SPE pointer from the linked
+        // sprk_document (`sprk_graphitemid` = drive-item, `sprk_graphdriveid` = drive
+        // — BOTH required by ComposeEditor; mirrors DocumentComposeLaunch). Falls back
+        // to the read-only document-viewer if the pointer is incomplete.
+        //
+        // Cross-browser reopen MUST-HAVE (durable Compose + history together): mount
+        // the document even when a session was restored above. `session_switch`
+        // restores the CONVERSATION transcript (server-backed by-analysis lookup), but
+        // the Compose WORKSPACE tab only restores from the per-Analysis localStorage
+        // snapshot — absent in a fresh browser / cleared storage. Without this,
+        // cross-browser reopen lands on chat history with NO editor. Guard against
+        // double-mount in the same-browser case where restoreFromPersistence already
+        // rehydrated a compose tab from localStorage (tabRestoreSettled gate above
+        // guarantees restore has completed, so this snapshot is authoritative).
+        if (cancelled) return;
+        const hasComposeTab =
+          managerRef.current?.getSnapshot().tabs.some((t) => t.widgetType === "compose") ?? false;
+        if (hasComposeTab) return;
         try {
           const rec = (await analysisWizardDataService.retrieveRecord(
             "sprk_analysis",
