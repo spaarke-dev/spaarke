@@ -57,9 +57,31 @@ public class AutoFileOptions
     public bool Rung2And3AutoFileEnabled { get; set; } = false;
 
     /// <summary>
+    /// Core record types (Dataverse entity logical names) that may be AUTO-ASSOCIATED at capture — i.e.
+    /// written to a <c>sprk_regarding*</c> lookup by the engine without human confirmation. Default:
+    /// matter + project + service request. A match on ANY OTHER regarding target (contact, organization,
+    /// account, invoice, work-assignment, event, budget, report-card, analysis) is surfaced as a
+    /// <c>Suggested</c> review candidate the user confirms — NEVER written automatically (owner rule,
+    /// 061 UAT round-3, 2026-07-31: "only auto-associate to our core records; contacts/orgs/invoices/etc.
+    /// can be suggestions the user associates, but never auto-associated").
+    /// <para>
+    /// This is BOTH the auto-file-STATUS gate (only a core target can push a communication to
+    /// <c>Resolved</c>) AND the WRITE gate (only a core field is persisted; non-core fields stay
+    /// candidate-only). Tunable per ADR-018 without a redeploy — an operator can add a type here (e.g.
+    /// <c>sprk_workassignment</c>) or remove one, and the engine picks it up on the next decision.
+    /// </para>
+    /// </summary>
+    public List<string> CoreWritableEntities { get; set; } = new()
+    {
+        "sprk_matter",
+        "sprk_project",
+        "sprk_servicerequest",
+    };
+
+    /// <summary>
     /// Optional per-tenant overrides, keyed by an opaque tenant key. A present override replaces the
-    /// global <see cref="Enabled"/>, <see cref="Threshold"/>, and/or <see cref="Rung2And3AutoFileEnabled"/>
-    /// for that tenant only.
+    /// global <see cref="Enabled"/>, <see cref="Threshold"/>, <see cref="Rung2And3AutoFileEnabled"/>,
+    /// and/or <see cref="CoreWritableEntities"/> for that tenant only.
     /// </summary>
     public Dictionary<string, AutoFileTenantOverride> Tenants { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
@@ -83,4 +105,11 @@ public class AutoFileTenantOverride
     /// <see cref="AutoFileOptions.Rung2And3AutoFileEnabled"/>.
     /// </summary>
     public bool? Rung2And3AutoFileEnabled { get; set; }
+
+    /// <summary>
+    /// Per-tenant core-writable-entities override; null = inherit global
+    /// <see cref="AutoFileOptions.CoreWritableEntities"/>. A present list REPLACES the global set for
+    /// that tenant (it is not merged).
+    /// </summary>
+    public List<string>? CoreWritableEntities { get; set; }
 }
