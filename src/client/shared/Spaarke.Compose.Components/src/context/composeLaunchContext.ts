@@ -75,6 +75,14 @@ export interface ComposeLaunchContextValue {
    * (unscoped, no regression).
    */
   activeWorkType?: string;
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1 (agreements-r1 contract A3): the level-2
+   * agreement sub-domain (`sprk_agreementtype.sprk_key`, e.g. `'nda'`) the host launched
+   * with. Carried alongside `activeWorkType` so the review machine (agreements-r1) opens
+   * ORIENTED — binds the type's knowledge pack + scopes tools — instead of re-inferring.
+   * Absent on non-agreement launches; a null/undefined subDomain routes to the general pack.
+   */
+  subDomain?: string;
 }
 
 export const ComposeLaunchContext = React.createContext<ComposeLaunchContextValue | null>(null);

@@ -924,6 +924,9 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         // document-viewer when the SPE pointer is incomplete.
         const analysisActiveWorkType =
           workTypeValue === SprkAnalysisWorkType.AgreementAnalysis ? 'agreement-analysis' : undefined;
+        // agreements-r1 contract A3: carry the picked agreement sub-domain (sprk_key) so the
+        // review machine opens ORIENTED (binds the type's knowledge pack) instead of re-inferring.
+        const selectedSubDomain = agreementTypes.find(r => r.id === selectedAgreementTypeIdRef.current)?.key;
 
         if (speDriveItemId && speDriveId) {
           dispatch('workspace', {
@@ -936,6 +939,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
                 sprkDocumentId: documentId,
                 fileName: documentName,
                 ...(analysisActiveWorkType ? { activeWorkType: analysisActiveWorkType } : {}),
+                ...(selectedSubDomain ? { subDomain: selectedSubDomain } : {}),
               },
             },
             displayName: documentName,
