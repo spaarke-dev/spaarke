@@ -733,6 +733,18 @@ public sealed record SaveComposeDocumentResult : ComposeDocumentResult
     public ReanchorSummary? ReanchorSummary { get; init; }
 
     /// <summary>
+    /// Prong 1 (task 055 — keep-edits graceful degradation). Populated ONLY when the loaded-doc apply
+    /// hit an op-level anchoring refusal and the service fell back to best-effort per-paragraph recovery:
+    /// the resolvable paragraph-units were applied and the unresolvable ops are surfaced here (never
+    /// silently applied — the paragraph is the atomic unit under the engine's intra-paragraph sequential
+    /// rebasing — and never silently dropped). Null on the common path (the whole batch applied cleanly,
+    /// or the refusal was batch-level — malformed docx / schema skew — which still fails hard). The client
+    /// shows a banner prompting the user to redo just the unresolved edits; their content is safe (still
+    /// in the editor's op-log until they retry).
+    /// </summary>
+    public PartialApplySummary? PartialApply { get; init; }
+
+    /// <summary>
     /// G1 (FR-01, task 020): the <see cref="ComposeOrigin"/> this save resolved (server-side, from
     /// <c>request.ContentModel is not null</c> — never SPE-id/content inference). Populated on EVERY
     /// save (not only create-on-save) so a caller does not need a subsequent Load to learn the origin
@@ -744,6 +756,34 @@ public sealed record SaveComposeDocumentResult : ComposeDocumentResult
     /// </summary>
     public ComposeOrigin? Origin { get; init; }
 }
+
+/// <summary>
+/// Prong 1 (task 055) — the best-effort partial-apply outcome surfaced on a
+/// <see cref="SaveComposeDocumentResult.PartialApply"/>. When a loaded-doc save hit an op-level anchoring
+/// refusal, the service applied the resolvable paragraph-units and lists the ops it could NOT anchor here so
+/// the client can prompt the user to redo just those edits — never silently applying a wrong edit (the
+/// paragraph is the atomic unit under the engine's intra-paragraph sequential rebasing) and never silently
+/// dropping one. Serialized camelCase to mirror the client type.
+/// </summary>
+public sealed record PartialApplySummary(
+    [property: JsonPropertyName("total")] int Total,
+    [property: JsonPropertyName("appliedCount")] int AppliedCount,
+    [property: JsonPropertyName("unresolvedCount")] int UnresolvedCount,
+    [property: JsonPropertyName("unresolved")] IReadOnlyList<UnresolvedComposeOp> Unresolved,
+    [property: JsonPropertyName("computedAtUtc")] DateTimeOffset ComputedAtUtc);
+
+/// <summary>
+/// Prong 1 (task 055) — one op the best-effort recovery could not anchor. Carries the durable
+/// <c>w14:paraId</c>, the op discriminator (<c>InsertTextOperation</c>, …), the
+/// <c>ComposePatchErrorKind</c> (as a string — the enum lives in the engine namespace, kept off this
+/// contract), and the engine's human-readable refusal reason so telemetry + the client banner self-explain.
+/// No document content — only anchor metadata (NFR-02 / I-7: nothing content-derived leaves the engine).
+/// </summary>
+public sealed record UnresolvedComposeOp(
+    [property: JsonPropertyName("paraId")] string ParaId,
+    [property: JsonPropertyName("opType")] string OpType,
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("reason")] string Reason);
 
 /// <summary>
 /// G10 (FR-09, task 040): manual "Refresh Profile" payload — re-run the Document Profile on demand for an

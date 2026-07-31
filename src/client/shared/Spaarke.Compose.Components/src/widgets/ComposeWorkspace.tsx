@@ -1364,6 +1364,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         eTag?: string;
         size: number;
         wasPromotedThisSave: boolean;
+        // Prong 1 (task 055): best-effort partial-apply summary — present only when some ops couldn't be
+        // anchored server-side (the save still succeeded with the resolvable edits). Absent on the common
+        // clean-batch path. Drives the honest "N edits couldn't be saved — please redo them" banner.
+        partialApply?: {
+          total: number;
+          appliedCount: number;
+          unresolvedCount: number;
+        } | null;
       };
 
       // #1(b): the persisted document id drives the Assistant's persistent "Saved to the DMS" chat
@@ -1391,6 +1399,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // save of a born-in-editor doc can resolve its baseline (server re-fetch by versionId).
         driveId: payload.driveId,
         versionId: payload.versionId,
+        // Prong 1 (task 055): surface a best-effort partial-apply outcome (some ops couldn't be anchored)
+        // so the banner prompts the user to redo just those edits. Only carried when the server actually
+        // recovered — a clean batch omits it (→ null → clears any prior partial-apply banner).
+        partialApply:
+          payload.partialApply && payload.partialApply.unresolvedCount > 0 ? payload.partialApply : null,
       });
       // Clear the local dirty flag so the Save button disables until the
       // next edit. ComposeEditor's internal dirtyRef also resets on the
@@ -2697,6 +2710,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             hideImportWarnings
             pendingAssistantInsert={state.pendingAssistantInsert}
             saveSuccessToken={state.saveSuccessToken}
+            // Prong 1 (task 055): when the last save could only anchor PART of the batch, show the honest
+            // "N edits couldn't be saved — please redo them" warning (replaces the plain Saved ✓ bar).
+            partialApply={state.partialApply}
             // FIX #7a: the transient "Open preview" link was REMOVED from the Saved ✓ banner — the
             // persistent affordance now lives in the Assistant chat (a "Saved to the DMS" message
             // with "Open preview", posted via the save-completed conduit). The banner keeps its

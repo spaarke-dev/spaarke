@@ -132,3 +132,51 @@ describe('ComposeBannerStack — DEF-15 dismissible simplification warning', () 
     expect(container.innerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 });
+
+// Prong 1 (task 055) — best-effort partial-apply warning banner.
+describe('ComposeBannerStack — prong 1 partial-apply banner', () => {
+  beforeEach(() => window.sessionStorage.clear());
+
+  it('shows the honest partial-apply warning (applied/total + redo prompt) when some ops were unresolved', () => {
+    renderStack({ partialApply: { total: 3, appliedCount: 2, unresolvedCount: 1 } });
+
+    expect(screen.getByTestId('compose-workspace-partial-apply-banner')).toBeInTheDocument();
+    expect(screen.getByText("Some edits couldn't be saved")).toBeInTheDocument();
+    const body = screen.getByTestId('compose-workspace-partial-apply-banner').textContent ?? '';
+    expect(body).toContain('Saved 2 of 3 edits');
+    expect(body).toContain('please redo');
+  });
+
+  it('suppresses the plain "Saved ✓" success bar when a partial-apply summary is present', () => {
+    renderStack({ saveSuccessToken: 1, partialApply: { total: 2, appliedCount: 1, unresolvedCount: 1 } });
+
+    expect(screen.getByTestId('compose-workspace-partial-apply-banner')).toBeInTheDocument();
+    expect(screen.queryByTestId('compose-workspace-save-success-banner')).not.toBeInTheDocument();
+  });
+
+  it('does NOT render when the whole batch applied (unresolvedCount 0 / null)', () => {
+    renderStack({ partialApply: { total: 3, appliedCount: 3, unresolvedCount: 0 } });
+    expect(screen.queryByTestId('compose-workspace-partial-apply-banner')).not.toBeInTheDocument();
+
+    renderStack({ partialApply: null });
+    expect(screen.queryByTestId('compose-workspace-partial-apply-banner')).not.toBeInTheDocument();
+  });
+
+  it('hides after the dismiss control is clicked', async () => {
+    const user = userEvent.setup();
+    renderStack({ partialApply: { total: 2, appliedCount: 1, unresolvedCount: 1 } });
+
+    expect(screen.getByTestId('compose-workspace-partial-apply-banner')).toBeInTheDocument();
+    await user.click(screen.getByTestId('compose-workspace-partial-apply-dismiss'));
+    expect(screen.queryByTestId('compose-workspace-partial-apply-banner')).not.toBeInTheDocument();
+  });
+
+  it('dark mode (ADR-021): renders with no hardcoded hex color', () => {
+    const { container } = renderStack(
+      { partialApply: { total: 2, appliedCount: 1, unresolvedCount: 1 } },
+      webDarkTheme
+    );
+    expect(screen.getByTestId('compose-workspace-partial-apply-banner')).toBeInTheDocument();
+    expect(container.innerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  });
+});

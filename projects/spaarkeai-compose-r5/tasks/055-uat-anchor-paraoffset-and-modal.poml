@@ -5,9 +5,9 @@
     <phase>5 UAT remediation</phase>
     <gate>dep:050</gate>
     <status>completed</status>
-    <!-- Prong 2 (paraOffset anchor fix), Open-Document modal, and the anchor diagnostic are DONE (see
-         notes/task-055-deviations.md). Prong 1 (keep-edits graceful degradation) DEFERRED as a fast-follow
-         (prong 2 fixes the root cause; prong 1 is a safety net). -->
+    <!-- ALL FOUR deliverables DONE (see notes/task-055-deviations.md): prong 2 (paraOffset anchor fix),
+         Open-Document modal, anchor diagnostic (2026-07-30), and prong 1 (keep-edits best-effort
+         per-paragraph recovery + PartialApplySummary surface + client banner, 2026-07-31 fast-follow). -->
 
     <rigor>FULL</rigor>
     <rigor-reason>Write-path anchor-model change (fidelity-critical, D2-adjacent, owner-approved additive), plus client + server + modal. Mandatory code-review + adr-check + byte-diff at Step 9.5.</rigor-reason>

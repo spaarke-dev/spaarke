@@ -39,7 +39,11 @@ import {
 } from '@fluentui/react-components';
 import { Dismiss16Regular } from '@fluentui/react-icons';
 
-import type { ComposeCheckoutLockedByInfo, ComposeCheckoutStatus } from './ComposeWorkspace.types';
+import type {
+  ComposeCheckoutLockedByInfo,
+  ComposeCheckoutStatus,
+  ComposePartialApplyInfo,
+} from './ComposeWorkspace.types';
 import type { ComposeAssistantToWorkspaceFlow } from '../types/compose-contracts';
 
 export interface ComposeBannerStackProps {
@@ -69,6 +73,12 @@ export interface ComposeBannerStackProps {
    * MessageBar that auto-dismisses after {@link SAVE_SUCCESS_VISIBLE_MS}. 0 = no save yet.
    */
   saveSuccessToken?: number;
+  /**
+   * Prong 1 (task 055): populated when the last save applied only PART of the edit batch (some ops could
+   * not be anchored server-side). Renders an honest warning bar — "Saved, but N of M edits couldn't be
+   * anchored; please redo them" — INSTEAD of the plain "Saved ✓" success bar. Null/omitted on a clean save.
+   */
+  partialApply?: ComposePartialApplyInfo | null;
 }
 
 /** How long the transient "Saved ✓" confirmation stays up before auto-dismissing. */
@@ -142,6 +152,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     hideImportWarnings = false,
     pendingAssistantInsert,
     saveSuccessToken = 0,
+    partialApply = null,
   } = props;
 
   // FR-21 (DEF-15, R3 UAT round-3 carry-in): the "Document opened with N
@@ -179,13 +190,26 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     return () => clearTimeout(timer);
   }, [saveSuccessToken]);
 
-  const showSaveSuccessBanner = showSaveSuccess && !errorMessage;
+  // Prong 1 (task 055): a partial-apply outcome (some ops couldn't be anchored). Dismissable; re-shows on
+  // each NEW partial save (the parent passes a fresh object per saveSucceeded, cleared to null otherwise).
+  const showPartialApply = !!partialApply && partialApply.unresolvedCount > 0;
+  const [partialApplyDismissed, setPartialApplyDismissed] = React.useState(false);
+  React.useEffect(() => {
+    // Reset the dismissal whenever a new partial-apply summary arrives (or it clears).
+    setPartialApplyDismissed(false);
+  }, [partialApply]);
+  const showPartialApplyBanner = showPartialApply && !partialApplyDismissed;
+
+  // A partial save DID persist (the resolvable edits) but is not a clean success — suppress the plain
+  // "Saved ✓" bar in favor of the honest partial-apply warning so the two never stack redundantly.
+  const showSaveSuccessBanner = showSaveSuccess && !errorMessage && !showPartialApplyBanner;
 
   const showStack =
     showImportWarnings ||
     !!errorMessage ||
     !!pendingAssistantInsert ||
     showSaveSuccessBanner ||
+    showPartialApplyBanner ||
     checkoutStatus === 'conflict' ||
     checkoutStatus === 'failed' ||
     checkoutStatus === 'cancelled';
@@ -208,6 +232,32 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
                 icon={<Dismiss16Regular />}
                 data-testid="compose-workspace-save-success-dismiss"
                 onClick={() => setShowSaveSuccess(false)}
+              />
+            }
+          />
+        </MessageBar>
+      ) : null}
+
+      {showPartialApplyBanner && partialApply ? (
+        // Prong 1 (task 055): the save PERSISTED the resolvable edits but couldn't anchor some ops — honest
+        // "please redo" prompt (never silently applied a wrong edit, never silently dropped one). The
+        // resolved edits are safe; the user re-does just the unresolved ones.
+        <MessageBar intent="warning" data-testid="compose-workspace-partial-apply-banner" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Some edits couldn&apos;t be saved</MessageBarTitle>
+            {`Saved ${partialApply.appliedCount} of ${partialApply.total} edit${partialApply.total === 1 ? '' : 's'}. ` +
+              `${partialApply.unresolvedCount} edit${partialApply.unresolvedCount === 1 ? '' : 's'} couldn't be ` +
+              `placed in the document and ${partialApply.unresolvedCount === 1 ? 'was' : 'were'} not saved — please redo ` +
+              `${partialApply.unresolvedCount === 1 ? 'it' : 'them'}. Nothing else was lost.`}
+          </MessageBarBody>
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-partial-apply-dismiss"
+                onClick={() => setPartialApplyDismissed(true)}
               />
             }
           />

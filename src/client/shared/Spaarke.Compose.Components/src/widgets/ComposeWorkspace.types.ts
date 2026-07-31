@@ -81,6 +81,20 @@ export interface ComposeCheckoutLockedByInfo {
   checkedOutAt: string | null;
 }
 
+/**
+ * Prong 1 (task 055) — the client-side mirror of the BFF `partialApply` save-response summary. Counts
+ * only; the per-op details stay server-side (telemetry) — the user just needs "N of M edits couldn't be
+ * saved, please redo them." All op-centric (comments are handled fail-soft separately server-side).
+ */
+export interface ComposePartialApplyInfo {
+  /** Total ops in the batch the save attempted. */
+  total: number;
+  /** Ops that were successfully anchored + applied. */
+  appliedCount: number;
+  /** Ops that could NOT be anchored and were surfaced (not applied) — what the user must redo. */
+  unresolvedCount: number;
+}
+
 export interface ComposeWorkspaceState {
   status: ComposeWorkspaceStatus;
   documentRef: ComposeDocumentRef | null;
@@ -139,6 +153,14 @@ export interface ComposeWorkspaceState {
    *  co-authoring lock). Flips the error banner to the honest "Open in Word" bar with Retry + Reload-from-Word
    *  actions (there is no programmatic unlock). Reset on save-start / success / load. */
   saveErrorIsLock: boolean;
+  /**
+   * Prong 1 (task 055 — keep-edits graceful degradation): populated when the LAST save applied only PART
+   * of the edit batch — some ops couldn't be anchored server-side, so the save best-effort-applied the
+   * rest and surfaced the unresolvable ones (never silently applied, never silently dropped). Drives an
+   * honest warning banner prompting the user to redo just those edits. `null` when the whole batch applied
+   * cleanly (the common case). Reset on save-start / load.
+   */
+  partialApply: ComposePartialApplyInfo | null;
   /** Last assistant-inserted draft staged for confirm (Flow 5 R1 manual-confirm gate). */
   pendingAssistantInsert: ComposeAssistantToWorkspaceFlow | null;
   /** SPE check-out lifecycle (Task 050 / Spike #3 §9; Task 051 multi-tab UX). */
@@ -267,6 +289,9 @@ export type ComposeWorkspaceAction =
       // known without a follow-up Load — refreshed into state.origin below (never regressed to null
       // by an older BFF response that omits the field; see the reducer).
       origin?: ComposeDocumentOrigin | null;
+      // Prong 1 (task 055): best-effort partial-apply summary when some ops couldn't be anchored server-side
+      // (null/omitted on the common clean-batch path). Drives the honest "N edits couldn't be saved" banner.
+      partialApply?: ComposePartialApplyInfo | null;
     }
   | { kind: 'saveFailed'; errorMessage: string; isLock?: boolean }
   | { kind: 'reset' }
@@ -306,6 +331,7 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   projection: null,
   errorMessage: null,
   saveErrorIsLock: false,
+  partialApply: null,
   pendingAssistantInsert: null,
   checkoutStatus: 'idle',
   checkoutLockedBy: null,
@@ -456,12 +482,16 @@ export function composeWorkspaceReducer(
       };
     case 'requestSave':
       if (state.status !== 'loaded') return state;
-      return { ...state, status: 'saving', errorMessage: null, saveErrorIsLock: false };
+      return { ...state, status: 'saving', errorMessage: null, saveErrorIsLock: false, partialApply: null };
     case 'saveSucceeded':
       return {
         ...state,
         status: 'loaded',
         etag: action.etag,
+        // Prong 1 (task 055): a save may succeed WITH a partial-apply summary (some ops couldn't be
+        // anchored). Carry it so the banner stack prompts the user to redo just those edits; null on a
+        // clean batch (the common path) clears any prior partial-apply banner.
+        partialApply: action.partialApply ?? null,
         // UAT #7: bump the token so the banner stack surfaces a fresh transient "Saved ✓".
         saveSuccessToken: state.saveSuccessToken + 1,
         // UAT 2026-07-19 P2: adopt the just-saved SPE version id as the baseline ONLY on the

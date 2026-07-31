@@ -1462,7 +1462,9 @@ public static class ComposeEndpoints
                 ReanchorSummary: result.ReanchorSummary,
                 // G1 (FR-01, task 020): the ComposeOrigin this save resolved (available for 021's
                 // clean-apply engine mode selection without a follow-up Load).
-                Origin: result.Origin));
+                Origin: result.Origin,
+                // Prong 1 (task 055): best-effort partial-apply outcome (null on the clean path).
+                PartialApply: result.PartialApply));
         }
         catch (ArgumentException ex)
         {
@@ -2230,7 +2232,13 @@ public sealed record SaveComposeDocumentResponse(
     // row; a replace-path save of an already-promoted document reports the save's resolved
     // discriminant WITHOUT mutating the already-persisted field. Wire values "authored" | "imported".
     // Optional/trailing so existing callers deserializing this response are unaffected.
-    [property: JsonPropertyName("origin")] ComposeOrigin? Origin = null);
+    [property: JsonPropertyName("origin")] ComposeOrigin? Origin = null,
+    // Prong 1 (task 055): populated ONLY when the save hit an op-level anchoring refusal and the service
+    // fell back to best-effort per-paragraph recovery — the resolvable paragraphs were applied and the
+    // unresolvable ops are listed here so the client can prompt the user to redo just those edits (never
+    // silently applied, never silently dropped). Null on the common path (clean batch apply) and on a
+    // batch-level refusal (which still fails hard). Optional/trailing so existing callers are unaffected.
+    [property: JsonPropertyName("partialApply")] PartialApplySummary? PartialApply = null);
 
 /// <summary>Response shape for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
 public sealed record PromoteComposeDocumentResponse(

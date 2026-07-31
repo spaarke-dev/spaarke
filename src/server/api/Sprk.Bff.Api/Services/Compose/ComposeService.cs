@@ -750,6 +750,7 @@ public class ComposeService : IComposeService
         // ────────────────────────────────────────────────────────────────────────────
         string? preWriteETag = null;
         ReanchorSummary? reanchorSummary = null;
+        PartialApplySummary? partialApplySummary = null; // prong 1 (task 055) — set iff best-effort recovery ran
 
         if (!isTransientCreate && !string.IsNullOrWhiteSpace(request.DriveId))
         {
@@ -808,13 +809,56 @@ public class ComposeService : IComposeService
             // Pure/in-memory BEFORE any SPE write: a refusal (unresolved paraId/anchor, unsupported schema
             // version, opaque-atom/structural refusal) throws ComposePatchException here — mapped to a
             // ProblemDetails by the endpoint — so no partial or wrong SPE version can land.
-            contentToPersist = _patchEngine.Apply(
-                contentToPersist,
-                request.OperationLog ?? new ComposeOperationLog(),
-                request.Comments,
-                ResolveRevisionAuthor(httpContext),
-                observedAt,
-                trackChanges: !cleanApply);
+            var revisionAuthor = ResolveRevisionAuthor(httpContext);
+            var editLog = request.OperationLog ?? new ComposeOperationLog();
+            try
+            {
+                contentToPersist = _patchEngine.Apply(
+                    contentToPersist,
+                    editLog,
+                    request.Comments,
+                    revisionAuthor,
+                    observedAt,
+                    trackChanges: !cleanApply);
+            }
+            catch (ComposePatchException ex) when (!IsBatchLevelPatchRefusal(ex.Kind))
+            {
+                // Prong 1 (task 055 — keep-edits graceful degradation). An OP-LEVEL anchoring refusal (a
+                // single op whose paraId/anchor can't resolve) no longer loses the WHOLE editing session:
+                // best-effort apply the resolvable paragraph-units and SURFACE the unresolvable ops so the
+                // client prompts the user to redo just those edits. Never silently applies a wrong edit (the
+                // paragraph is the atomic unit under the engine's intra-paragraph sequential rebasing) and
+                // never silently drops one. Prong 2's paraOffset anchor already fixed the common root cause;
+                // this is the residual safety net. BATCH-level refusals (malformed docx / schema skew) are
+                // filtered OUT by the `when` guard and still throw hard → the endpoint's ProblemDetails.
+                _logger.LogWarning(ex,
+                    "Compose save: batch patch refusal ({Kind}) on the loaded-doc path — entering best-effort per-paragraph recovery (session={SessionId}).",
+                    ex.Kind, request.SessionId);
+
+                var bestEffortBytes = ApplyBestEffortByParagraph(
+                    contentToPersist, editLog, request.Comments, revisionAuthor, observedAt,
+                    trackChanges: !cleanApply, out var partial);
+
+                if (partial.AppliedCount == 0)
+                {
+                    // Nothing resolved — there is no partial success to preserve. Fail HARD exactly as before
+                    // prong 1 (a typed ProblemDetails via the endpoint), rather than persist a no-op version +
+                    // a partial-apply banner. Prong 1's value is salvaging a batch where SOME edits are fine;
+                    // a wholly-unanchorable batch stays a hard refusal (the op-log survives client-side for a
+                    // retry). Re-throws the ORIGINAL op-level refusal.
+                    _logger.LogWarning(
+                        "Compose save: best-effort recovery resolved ZERO of {Total} op(s) — re-throwing the original refusal ({Kind}) as a hard failure (session={SessionId}).",
+                        partial.Total, ex.Kind, request.SessionId);
+                    throw;
+                }
+
+                contentToPersist = bestEffortBytes;
+                partialApplySummary = partial;
+
+                _logger.LogWarning(
+                    "Compose save: best-effort recovery applied {Applied}/{Total} op(s); {Unresolved} surfaced as unresolvable (session={SessionId}).",
+                    partial.AppliedCount, partial.Total, partial.UnresolvedCount, request.SessionId);
+            }
         }
         // UAT round-3 (2026-07-27) — advisory comments on the CREATE-ON-SAVE / ContentModel path.
         // The block above only bakes comments when ContentModel is null (a loaded-doc delta save). But a
@@ -1122,6 +1166,7 @@ public class ComposeService : IComposeService
             WasPromotedThisSave = promotion.WasCreated,
             CompletionState = completion,
             ReanchorSummary = reanchorSummary,
+            PartialApply = partialApplySummary,
             Origin = origin,
         };
     }
@@ -1576,6 +1621,196 @@ public class ComposeService : IComposeService
         }
 
         return (patched, summary);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────
+    // Prong 1 (task 055) — best-effort per-paragraph recovery for an OP-LEVEL patch refusal on the loaded-doc
+    // save path. Distinct from ReanchorStaleSaveAsync above (which handles a STALE BASE — an eTag mismatch —
+    // by content-similarity re-anchoring across old→current paragraphs). Here the base is CURRENT; a single op
+    // just fails to anchor. Rather than lose the whole editing session (the pre-prong-1 behavior: any refusal
+    // → 422), apply the resolvable paragraph-units and surface the unresolvable ops.
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A <see cref="ComposePatchErrorKind"/> that condemns the WHOLE batch (the docx itself is unreadable, or
+    /// the op-log schema version is unsupported) rather than a single op's anchor — for these, best-effort
+    /// partial apply is meaningless, so the save must still fail hard (mapped to a ProblemDetails by the
+    /// endpoint). Every OTHER kind is an op-level anchoring/resolution refusal eligible for prong-1 recovery.
+    /// </summary>
+    private static bool IsBatchLevelPatchRefusal(ComposePatchErrorKind kind) =>
+        kind is ComposePatchErrorKind.MalformedDocument or ComposePatchErrorKind.UnsupportedSchemaVersion;
+
+    /// <summary>
+    /// True for a STRUCTURAL / whole-document op — one that splits/merges/inserts/deletes paragraphs, edits a
+    /// table's structure, or reconciles EVERY tracked revision (scope=All). These span or renumber paragraphs
+    /// (and mint child paraIds later ops depend on), so under the engine's intra-paragraph sequential rebasing
+    /// they are NOT safe to apply piecemeal: prong-1 groups them into ONE all-or-nothing unit applied LAST
+    /// (mirroring the engine's own structural-last pass). Inline ops (text/mark/setBlockAttr/single-revision)
+    /// are grouped by paraId instead — the paragraph being the safe atomic unit.
+    /// </summary>
+    private static bool IsStructuralOrGlobalOp(ComposeOperation op) => op switch
+    {
+        SplitParagraphOperation or MergeParagraphOperation or InsertParagraphOperation
+            or DeleteParagraphOperation or TableOperation => true,
+        AcceptRevisionOperation { Scope: ComposeRevisionScope.All } => true,
+        RejectRevisionOperation { Scope: ComposeRevisionScope.All } => true,
+        _ => false,
+    };
+
+    /// <summary>
+    /// Prong 1 (task 055). Applies <paramref name="log"/> onto <paramref name="baseline"/> in the LARGEST
+    /// units provably safe under the engine's intra-paragraph sequential rebasing, applying every unit that
+    /// resolves and surfacing every unit that refuses (never a wrong edit, never a silent drop):
+    /// <list type="bullet">
+    /// <item>Inline ops (text/mark/setBlockAttr/single-revision) grouped by <c>paraId</c> — the paragraph is
+    ///   atomic (dropping one op would leave later same-paragraph ops mis-anchored), applied in first-seen
+    ///   order; each paragraph's anchored comments ride its unit so the engine's comments-first-per-Apply
+    ///   ordering (EDGE-1) is preserved per paragraph.</item>
+    /// <item>Structural / All-revision ops as ONE all-or-nothing unit applied LAST (keeps minted-paraId
+    ///   lineage intact).</item>
+    /// </list>
+    /// Each unit runs through the SAME <see cref="ComposeShadowPatchEngine.Apply"/> onto the cumulative bytes,
+    /// so the byte result for the resolvable paragraphs matches the clean-batch path. A unit throwing a
+    /// batch-level refusal (a malformed cumulative package — not expected mid-recovery) propagates.
+    /// </summary>
+    private byte[] ApplyBestEffortByParagraph(
+        byte[] baseline,
+        ComposeOperationLog log,
+        IReadOnlyList<ComposeAnchoredComment>? comments,
+        string author,
+        DateTimeOffset observedAt,
+        bool trackChanges,
+        out PartialApplySummary summary)
+    {
+        var ops = log.Operations ?? Array.Empty<ComposeOperation>();
+        var schemaVersion = log.SchemaVersion;
+
+        // Inline ops grouped by paraId (first-seen order preserved) + a single structural/global unit.
+        var inlineOrder = new List<string>();
+        var inlineOps = new Dictionary<string, List<ComposeOperation>>(StringComparer.OrdinalIgnoreCase);
+        var structural = new List<ComposeOperation>();
+        foreach (var op in ops)
+        {
+            if (IsStructuralOrGlobalOp(op))
+            {
+                structural.Add(op);
+                continue;
+            }
+            if (!inlineOps.TryGetValue(op.ParaId, out var list))
+            {
+                list = new List<ComposeOperation>();
+                inlineOps[op.ParaId] = list;
+                inlineOrder.Add(op.ParaId);
+            }
+            list.Add(op);
+        }
+
+        // Distribute anchored comments into their paraId's unit; a comment whose paraId carries no inline op
+        // gets its own comment-only unit (still applied in the inline pass, so it lands before any structural
+        // change to that paragraph — mirrors the engine's comments-first ordering).
+        var commentsByPara = new Dictionary<string, List<ComposeAnchoredComment>>(StringComparer.OrdinalIgnoreCase);
+        var unbakeableComments = 0;
+        foreach (var c in comments ?? Array.Empty<ComposeAnchoredComment>())
+        {
+            var key = c.ParaId ?? string.Empty;
+            if (!commentsByPara.TryGetValue(key, out var list))
+            {
+                list = new List<ComposeAnchoredComment>();
+                commentsByPara[key] = list;
+                if (!inlineOps.ContainsKey(key))
+                {
+                    inlineOrder.Add(key); // comment-only paragraph unit
+                    inlineOps[key] = new List<ComposeOperation>();
+                }
+            }
+            list.Add(c);
+        }
+
+        var unresolved = new List<UnresolvedComposeOp>();
+        var appliedCount = 0;
+        var current = baseline;
+
+        // Inline paragraph units first, then the structural unit LAST.
+        foreach (var paraId in inlineOrder)
+        {
+            var unitOps = inlineOps[paraId];
+            commentsByPara.TryGetValue(paraId, out var unitComments);
+            var (bytes, refusal) = TryApplyPatchUnit(current, schemaVersion, unitOps, unitComments, author, observedAt, trackChanges);
+            if (refusal is null)
+            {
+                current = bytes;
+                appliedCount += unitOps.Count;
+            }
+            else
+            {
+                foreach (var op in unitOps)
+                    unresolved.Add(new UnresolvedComposeOp(op.ParaId, op.GetType().Name, refusal.Kind.ToString(), refusal.Message));
+                if (unitComments is not null)
+                    unbakeableComments += unitComments.Count;
+            }
+        }
+
+        if (structural.Count > 0)
+        {
+            var (bytes, refusal) = TryApplyPatchUnit(current, schemaVersion, structural, null, author, observedAt, trackChanges);
+            if (refusal is null)
+            {
+                current = bytes;
+                appliedCount += structural.Count;
+            }
+            else
+            {
+                foreach (var op in structural)
+                    unresolved.Add(new UnresolvedComposeOp(op.ParaId, op.GetType().Name, refusal.Kind.ToString(), refusal.Message));
+            }
+        }
+
+        if (unbakeableComments > 0)
+        {
+            _logger.LogWarning(
+                "Compose save: best-effort recovery could not bake {UnbakeableComments} advisory comment(s) whose paragraph unit refused.",
+                unbakeableComments);
+        }
+
+        summary = new PartialApplySummary(
+            Total: ops.Count,
+            AppliedCount: appliedCount,
+            UnresolvedCount: unresolved.Count,
+            Unresolved: unresolved,
+            ComputedAtUtc: observedAt);
+        return current;
+    }
+
+    /// <summary>
+    /// Applies ONE prong-1 unit through the patch engine, returning the patched bytes on success or the
+    /// ORIGINAL bytes + the op-level <see cref="ComposePatchException"/> on refusal. A batch-level refusal
+    /// (malformed / schema — see <see cref="IsBatchLevelPatchRefusal"/>) is rethrown (the cumulative bytes are
+    /// unusable). A unit with no ops and no comments is a byte-identical no-op (the engine's passthrough).
+    /// </summary>
+    private (byte[] Bytes, ComposePatchException? Refusal) TryApplyPatchUnit(
+        byte[] input,
+        string schemaVersion,
+        IReadOnlyList<ComposeOperation> unitOps,
+        IReadOnlyList<ComposeAnchoredComment>? unitComments,
+        string author,
+        DateTimeOffset observedAt,
+        bool trackChanges)
+    {
+        try
+        {
+            var bytes = _patchEngine.Apply(
+                input,
+                new ComposeOperationLog { SchemaVersion = schemaVersion, Operations = unitOps },
+                unitComments,
+                author,
+                observedAt,
+                trackChanges: trackChanges);
+            return (bytes, null);
+        }
+        catch (ComposePatchException ex) when (!IsBatchLevelPatchRefusal(ex.Kind))
+        {
+            return (input, ex);
+        }
     }
 
     /// <summary>0-based index of the FIRST current paraId equal to <paramref name="paraId"/> (case-sensitive
