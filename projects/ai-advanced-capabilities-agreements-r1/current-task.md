@@ -4,12 +4,17 @@
 
 ## Active task
 
-- **Task**: 060 DEPLOY running (parallel phase ✅ 20/23; last commit 057a41972, pushed; 042 done incl.
-  main-session locationLabel wiring in ComposeEditor dispatchNoteToolRequest).
-- **060 env-state brief given**: live already = registry/agreement-review Action/Binding flip/packs;
-  to deploy = classify Action+schemas+Binding row; CLOBBER HAZARD = mirror behind live ~16 fields
-  (surgical ops only); known limitations = NO Reasoning-tier AOAI deployment in dev (owner action),
-  PR #690 OPEN (CI seam tests red until merged). Then 061 e2e → 090 wrap-up (+test-diet gate).
+- **Task**: 061 🔄 BLOCKED-ON-OWNER (21/23 done; 060 ✅ deployed+verified — deploy-report-060.md).
+  Run plan READY: notes/e2e-runplan-061.md (5 flows, both themes, negatives, Word checklist, findings protocol).
+- **OWNER PREREQUISITES for 061**: (1) provision Reasoning-tier AOAI deployment — config key
+  DocumentIntelligence__ReasoningModel, az commands in nda-r1 notes/task-013-reasoning-provisioning.md
+  (gpt-5-reasoning on spaarke-openai-dev; App Service spe-api-dev-67e2xz); currently falls back to gpt-4o-mini.
+  (2) --chrome session or manual operator for the browser flows. (3) manual Word-open check (052's four
+  symptoms + the \n\n-literal-LF rendering question). NOTE: only nda+general types have packs (by design —
+  per-type packs = sibling projects); don't file grounding gaps on other types as bugs.
+- **Then**: 090 wrap-up (+/test-diet gate, registration-recipe handoff) after 061 results (or owner defers 061).
+- **PR-description must-cites accumulated**: §6.5 Path A (021 gate-state vs ADR-041); 050 sprk_value schema
+  column (Path C); PR #690 dependency; hub NOTIFY doc relayed; Binding-mirror 15-field pre-existing drift.
 - **Wave 7/8 highlights**: 041 ✅ (batch in ComposeEditor via useSerialActionQueue; ConversationPane untouched)
   · 033 ✅ (SESSION-COINCIDENCE: wizard mints ONE Analysis-owned session = document + adopted chat session;
   refined B-i — literal shape would have dispatched into a file-less session; ensureChatSession zero-diff;
