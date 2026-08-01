@@ -81,6 +81,7 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
     associations,
     onSent,
     onError,
+    onClose,
   } = deps;
 
   const [dialogState, setDialogState] = React.useState<DialogState | null>(null);
@@ -138,7 +139,12 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
     [dataService, dataverseUrl]
   );
 
-  const handleClose = React.useCallback(() => setDialogState(null), []);
+  const handleClose = React.useCallback(() => {
+    setDialogState(null);
+    // Standalone hosts (the sprk_emailpage compose mode) close their window here;
+    // the reading-pane host omits `onClose` and the dialog just unmounts in place.
+    onClose?.();
+  }, [onClose]);
 
   const actions = React.useMemo(
     () => ({

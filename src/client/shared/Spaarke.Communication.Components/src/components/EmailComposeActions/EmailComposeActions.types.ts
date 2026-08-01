@@ -148,6 +148,13 @@ export interface EmailComposeActionsDeps {
   onSent?: (communicationId: string) => void;
   /** Fired on a send error (surfacing — e.g. a MessageBar — is the host's responsibility). */
   onError?: (err: SendCommunicationError) => void;
+  /**
+   * Fired whenever the composer dialog CLOSES — on Cancel OR after a successful Send.
+   * The reading-pane host omits this (the dialog simply unmounts in place); a STANDALONE
+   * compose launcher (e.g. the `sprk_emailpage` compose mode opened via `openEmailCompose`)
+   * uses it to close its own host window once the compose is done.
+   */
+  onClose?: () => void;
 }
 
 export interface UseEmailComposeActionsResult {
