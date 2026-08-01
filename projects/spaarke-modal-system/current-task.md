@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-01 (Group A + task 004 complete)
+> **Last Updated**: 2026-08-01 (Group A + 004 + Group B complete)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,13 +10,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Group B — presets 005/006/007/008 (next; not started) |
+| **Task** | 009 — barrel exports + a11y snapshot + dual-React verify (next; not started) |
 | **Step** | — |
 | **Status** | not-started |
-| **Next Action** | Execute Group B (005 Confirm/Choice · 006 Form · 007 Preview/Browse · 008 Wizard) — parallel-safe presets under `SprkModal/presets/`. Or say "continue". |
+| **Next Action** | Execute task 009 (`tasks/009-barrel-exports-and-tests.poml`) — wires `SprkModal/index.ts` + `components/index.ts`, a11y snapshot, dual-React verify. Or say "continue". |
 
 ### Critical Context
-Group A (001/002/003) ✅ + **004 SprkModal base shell** ✅ complete 2026-08-01. `SprkModal/` now has `sizes.ts`, `scaledTheme.ts`, `SprkModal.tsx` (+ `.types.ts`), `ModalScrollArea.tsx`. Shared-lib build **green**, **30/30** tests pass, eslint clean, **transform-robust portal verified**. Group B presets are thin configs of `SprkModal` — each imports `{ SprkModal, type SprkModalProps }` from `../SprkModal` and lives in `SprkModal/presets/`. **ChoiceModal is built FRESH** (not in prototype; re-base of ChoiceDialog, ADR-023); **BrowseModal = PreviewModal + nav** prop. Prototype presets live in ONE `presets.tsx` at `c:/code_files/spaarke-prototype/projects/2026-07-sprk-modal-system/src/components/presets.tsx`. Barrel wiring is task 009 (NOT the presets) — presets import from `../SprkModal` directly to avoid a barrel race. **Env note**: fresh worktree — `npm install` done in `Spaarke.UI.Components` + siblings `Spaarke.SdapClient`/`Spaarke.Auth` built.
+P0 build is nearly done: Group A (001/002/003) ✅ + **004 shell** ✅ + Group B presets (005/006/007/008) ✅ complete 2026-08-01. `SprkModal/` now has `sizes.ts`, `scaledTheme.ts`, `SprkModal.tsx` (+`.types.ts`), `ModalScrollArea.tsx`, and `presets/{ConfirmModal,ChoiceModal,FormModal,PreviewModal,BrowseModal,WizardModal}.tsx` (+ tests). Consolidated build **green**, **81/81** tests pass, eslint clean. **Task 009 wires the barrels** (nothing is exported from `SprkModal/index.ts` or `components/index.ts` yet — presets import `../SprkModal` directly). Then docs (010→012; 011; 013 — **011/012/013 main-session-only**, they write `.claude/`) + conversion phases P1–P7 open. **020** (P0.5, needs 002) and **090** (P7 OOB) are independent and runnable anytime. **007 design note**: BrowseModal uses SprkModal's single-header `nav` + an `onBeforeNavigate` guard seam (does NOT nest RecordNavigationModalShell) — see [`notes/wave-b-completion.md`](./notes/wave-b-completion.md) ⚠️ for the owner-review flag. **Env**: fresh worktree — `npm install` done in `Spaarke.UI.Components` + siblings built.
 
 ---
 
@@ -24,9 +24,9 @@ Group A (001/002/003) ✅ + **004 SprkModal base shell** ✅ complete 2026-08-01
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 005/006/007/008 (Group B wave) |
-| **Task File** | tasks/00[5-8]-*.poml |
-| **Title** | Presets: Confirm/Choice · Form · Preview/Browse · Wizard |
+| **Task ID** | 009 |
+| **Task File** | tasks/009-barrel-exports-and-tests.poml |
+| **Title** | Barrel exports + a11y snapshot + dual-React verify |
 | **Phase** | 0 Build |
 | **Status** | not-started |
 | **Started** | — |

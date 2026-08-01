@@ -4,7 +4,7 @@
     <title>Preset: WizardModal (stepper sidebar) — FR-09</title>
     <phase>0 Build</phase>
     <gate>blocked until 004</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New preset surface consumed by P6 wizard re-base; must be a thin `SprkModal` config (NOT a fork of `WizardShell`); modifies `.tsx`; depends on the base shell.</rigor-reason>
     <model-tier>sonnet</model-tier>

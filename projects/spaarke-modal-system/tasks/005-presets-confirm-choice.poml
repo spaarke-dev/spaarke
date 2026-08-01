@@ -4,7 +4,7 @@
     <title>Presets: ConfirmModal + ChoiceModal (ADR-023) — FR-09</title>
     <phase>0 Build</phase>
     <gate>blocked until 004</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New preset surface (two components) that must preserve the ADR-023 choice-dialog contract; modifies `.tsx`; depends on the base shell.</rigor-reason>
     <model-tier>sonnet</model-tier>

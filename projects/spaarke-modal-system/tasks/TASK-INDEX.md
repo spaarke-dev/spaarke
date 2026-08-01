@@ -18,10 +18,10 @@
 | 002 | Scaled Fluent theme builder (scaleTheme) | 0 | ✅ | none | A | FULL | sonnet/high |
 | 003 | Reconcile ModalWindowControls glyph | 0 | ✅ | none | A | FULL | sonnet/high |
 | 004 | SprkModal base shell | 0 | ✅ | 001,002,003 | — | FULL | sonnet/high |
-| 005 | Presets: ConfirmModal + ChoiceModal (ADR-023) | 0 | 🔲 | 004 | B | FULL | sonnet/high |
-| 006 | Preset: FormModal | 0 | 🔲 | 004 | B | FULL | sonnet/high |
-| 007 | Presets: PreviewModal + BrowseModal | 0 | 🔲 | 004 | B | FULL | sonnet/high |
-| 008 | Preset: WizardModal | 0 | 🔲 | 004 | B | FULL | sonnet/high |
+| 005 | Presets: ConfirmModal + ChoiceModal (ADR-023) | 0 | ✅ | 004 | B | FULL | sonnet/high |
+| 006 | Preset: FormModal | 0 | ✅ | 004 | B | FULL | sonnet/high |
+| 007 | Presets: PreviewModal + BrowseModal | 0 | ✅ | 004 | B | FULL | sonnet/high |
+| 008 | Preset: WizardModal | 0 | ✅ | 004 | B | FULL | sonnet/high |
 | 009 | Barrel exports + a11y snapshot + dual-React verify | 0 | 🔲 | 005,006,007,008 | — | FULL | sonnet/high |
 | 010 | Standards doc: MODAL-DESIGN-SYSTEM.md | 0 | 🔲 | 004 | — | STANDARD | sonnet/medium |
 | 011 | ADR-050: Canonical Modal Shell 🔒 | 0 | 🔲 | 004 | — | STANDARD | sonnet/high |
@@ -122,8 +122,8 @@ P0 is the gate for everything. P0.5 (020) needs only 002. P7 (090) is independen
 
 ## Next Action
 
-Group **A** (001·002·003) ✅ + **004** (SprkModal base shell) ✅ complete (2026-08-01) — shared-lib build green, 30/30 tests pass, transform-robust portal verified. **Group B is now unblocked.**
+Group **A** (001·002·003) ✅ + **004** shell ✅ + Group **B** (005·006·007·008 presets) ✅ complete (2026-08-01) — build green, 81/81 tests pass. **009 is now unblocked.**
 
-Execute Group **B** (005·006·007·008 presets) — parallel-safe, prereq 004 ✅. Each is a thin config of `SprkModal` under `SprkModal/presets/`. Then 009 (barrel + a11y snapshot) joins them.
+Execute task **009** (barrel exports + a11y snapshot + dual-React verify) — serial/solo join (deps 005,006,007,008 ✅). It wires `SprkModal/index.ts` + `export * from './SprkModal'` in `components/index.ts`, adds the a11y snapshot, and verifies dual-React. Then the docs branch (010→012; 011; 013 — main-session) and the conversion phases (P1–P7) open up. Also runnable any time: **020** (P0.5, needs 002 ✅), **090** (P7 OOB, independent).
 
-Run three/four `task-execute` calls in one message (005/006/007/008), or say "continue".
+Run: `/task-execute projects/spaarke-modal-system/tasks/009-barrel-exports-and-tests.poml`, or say "continue".

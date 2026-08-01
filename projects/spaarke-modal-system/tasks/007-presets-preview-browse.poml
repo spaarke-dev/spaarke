@@ -4,7 +4,7 @@
     <title>Presets: PreviewModal + BrowseModal (compose RecordNavigationModalShell) — FR-09</title>
     <phase>0 Build</phase>
     <gate>blocked until 004</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New preset surface (two components) that must COMPOSE the existing `RecordNavigationModalShell` (no forked nav chrome) + preserve its cross-frame dirty-check; modifies `.tsx`; depends on the base shell.</rigor-reason>
     <model-tier>sonnet</model-tier>
