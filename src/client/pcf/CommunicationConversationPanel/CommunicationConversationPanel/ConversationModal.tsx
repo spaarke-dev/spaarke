@@ -44,15 +44,16 @@
 
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
-import { Button, FluentProvider, webLightTheme, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { FullScreenMaximizeRegular, FullScreenMinimizeRegular, DismissRegular } from '@fluentui/react-icons';
+import { FluentProvider, webLightTheme, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import {
   ConversationWorkspace,
   ConversationView,
+  ModalWindowControls,
   createXrmNavigationService,
   type ConversationWorkspaceProps,
   type ConversationViewProps,
   type IConversationRendererProps,
+  type IModalWindowControlsProps,
   type AuthenticatedFetchFn,
 } from '@spaarke/ui-components';
 
@@ -60,6 +61,8 @@ import {
 // as the sibling CommunicationTimelineRegarding control). Runtime is unaffected.
 const ConversationWorkspaceR16 = ConversationWorkspace as unknown as React.ComponentType<ConversationWorkspaceProps>;
 const ConversationViewR16 = ConversationView as unknown as React.ComponentType<ConversationViewProps>;
+// Shared, standardized modal chrome (maximize/restore + close) — owner UAT 2026-07-31 "standardize on all modals".
+const ModalWindowControlsR16 = ModalWindowControls as unknown as React.ComponentType<IModalWindowControlsProps>;
 
 const useStyles = makeStyles({
   // Full-viewport dimmed overlay that CENTERS the surface (round 5) — copied from
@@ -104,11 +107,11 @@ const useStyles = makeStyles({
     height: '94vh',
     maxHeight: '94vh',
   },
-  // Expand/collapse toggle pinned left of the close "x".
-  expandButton: {
+  // Shared maximize/restore + close cluster pinned to the modal's upper-right corner (round-8.4 standardization).
+  windowControls: {
     position: 'absolute',
     top: tokens.spacingVerticalM,
-    right: `calc(${tokens.spacingHorizontalM} + 40px)`,
+    right: tokens.spacingHorizontalM,
     zIndex: 1,
   },
   title: {
@@ -123,15 +126,6 @@ const useStyles = makeStyles({
     lineHeight: tokens.lineHeightBase500,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-  },
-  // §B1 (UAT): the close "x" pinned to the modal's upper-right corner —
-  // independent of the title row's own layout/padding, so it reads
-  // unambiguously as "the corner", not just "the right end of a padded row".
-  closeButton: {
-    position: 'absolute',
-    top: tokens.spacingVerticalM,
-    right: tokens.spacingHorizontalM,
-    zIndex: 1,
   },
   content: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' },
   workspaceHost: { flex: 1, minHeight: 0, minWidth: 0, display: 'flex' },
@@ -240,24 +234,15 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
         aria-label="Messages"
         tabIndex={-1}
       >
-        {/* Round-7 item 10: expand/collapse the modal to fill the app container. */}
-        <Button
-          appearance="subtle"
-          className={s.expandButton}
-          aria-label={expanded ? 'Collapse conversations' : 'Expand conversations'}
-          title={expanded ? 'Collapse' : 'Expand'}
-          // Standardized modal chrome (round-8.4): full-screen maximize/minimize pair, pinned left of the close X.
-          icon={expanded ? <FullScreenMinimizeRegular /> : <FullScreenMaximizeRegular />}
-          onClick={() => setExpanded(v => !v)}
-        />
-        {/* §B1 (UAT): close "x" pinned to the surface's literal upper-right corner. */}
-        <Button
-          appearance="subtle"
-          className={s.closeButton}
-          aria-label="Close conversations"
-          icon={<DismissRegular />}
-          onClick={onClose}
-        />
+        {/* Standardized modal chrome (round-8.4): the shared maximize/restore + close cluster, pinned to the upper-
+            right corner. Expand fills the app container (Round-7 item 10). Single source of truth = ModalWindowControls. */}
+        <div className={s.windowControls}>
+          <ModalWindowControlsR16
+            isMaximized={expanded}
+            onToggleMaximize={() => setExpanded(v => !v)}
+            onClose={onClose}
+          />
+        </div>
         {/* §B2 (UAT): modal title = "Messages". */}
         <div className={s.title}>Messages</div>
         <div className={s.content}>
