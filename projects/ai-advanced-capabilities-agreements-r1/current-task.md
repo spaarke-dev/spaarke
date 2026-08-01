@@ -4,8 +4,12 @@
 
 ## Active task
 
-- **Task**: 042 dispatched (LAST parallel-phase task; 19/23 done; last commit f0e1c8144, pushed).
-  Then SEQUENTIAL close: 060 deploy → 061 e2e → 090 wrap-up (main-session per plan).
+- **Task**: 060 DEPLOY running (parallel phase ✅ 20/23; last commit 057a41972, pushed; 042 done incl.
+  main-session locationLabel wiring in ComposeEditor dispatchNoteToolRequest).
+- **060 env-state brief given**: live already = registry/agreement-review Action/Binding flip/packs;
+  to deploy = classify Action+schemas+Binding row; CLOBBER HAZARD = mirror behind live ~16 fields
+  (surgical ops only); known limitations = NO Reasoning-tier AOAI deployment in dev (owner action),
+  PR #690 OPEN (CI seam tests red until merged). Then 061 e2e → 090 wrap-up (+test-diet gate).
 - **Wave 7/8 highlights**: 041 ✅ (batch in ComposeEditor via useSerialActionQueue; ConversationPane untouched)
   · 033 ✅ (SESSION-COINCIDENCE: wizard mints ONE Analysis-owned session = document + adopted chat session;
   refined B-i — literal shape would have dispatched into a file-less session; ensureChatSession zero-diff;

@@ -30,7 +30,7 @@
 | 050 | Memo assembly + persistence (sprk_analysisoutput) | 5 | ✅ | 002 | FULL | sonnet | xhigh | C |
 | 051 | Memo toolbar (docx download + EmailComposer) | 5 | ✅ | 050 | FULL | sonnet | high | I |
 | 052 | Word-comment export mirror + configurable author | 5 | ✅ | 002,010 | FULL | sonnet | high | B |
-| 060 | Deploy (BFF + code page + Dataverse data) | 6 | 🔲 | 003,012,023,032,033,042,051,052 | FULL | sonnet | high | — |
+| 060 | Deploy (BFF + code page + Dataverse data) | 6 | ✅ | 003,012,023,032,033,042,051,052 | FULL | sonnet | high | — |
 | 061 | E2E UI tests (5 flows incl. zero-LLM reopen) | 6 | 🔲 | 060 | STANDARD | sonnet | high | — |
 | 090 | Wrap-up + test-diet + registration-recipe handoff | 6 | 🔲 | 060,061 | FULL | sonnet | high | — |
 

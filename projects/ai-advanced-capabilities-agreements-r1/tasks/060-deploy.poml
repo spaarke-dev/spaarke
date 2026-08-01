@@ -4,7 +4,7 @@
     <title>Deploy — BFF + SpaarkeAi code page + Dataverse data (Actions/Bindings/registry)</title>
     <phase>6 Deploy + Verify</phase>
     <gate>blocked (all implementation tasks)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deployment to the shared dev environment; publish-size + CVE gates; irreversible env changes.</rigor-reason>
     <model-tier>sonnet</model-tier>
