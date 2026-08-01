@@ -4,7 +4,7 @@
 > **Created**: 2026-07-01
 > **Last sharpened**: 2026-07-01 by `ai-spaarke-ai-workspace-UI-r2` task 023 (FR-15) — added Two-Layout Standard framing + verbatim MS Learn 2025-05-07 quote + 2026 CSP tightening fact.
 > **Audience**: Anyone opening a record, document, form, wizard, confirm, or preview as a modal from any Spaarke client surface (Code Pages, PCF controls, ribbon commands, SPAs)
-> **Companion**: [`.claude/patterns/ui/record-modal-selection.md`](../../.claude/patterns/ui/record-modal-selection.md) (pattern pointer) · [`docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`](DATA-ACCESS-DECISION-CRITERIA.md) (sibling standard for data access decisions)
+> **Companion**: [`.claude/patterns/ui/record-modal-selection.md`](../../.claude/patterns/ui/record-modal-selection.md) (pattern pointer) · [`docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`](DATA-ACCESS-DECISION-CRITERIA.md) (sibling standard for data access decisions) · [`MODAL-DESIGN-SYSTEM.md`](MODAL-DESIGN-SYSTEM.md) (**component layer** — the `SprkModal` shell + 6 presets that IMPLEMENT the family you pick here; sizes, header/footer, dismiss, theming, wiring; governed by ADR-050)
 
 ---
 

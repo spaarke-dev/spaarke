@@ -4,7 +4,7 @@
     <title>ADR-050: Canonical Modal Shell — FR-10</title>
     <phase>0 Build</phase>
     <gate>blocked until 004</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New file creation (ADR) with project constraints; no code, no quality gate at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>

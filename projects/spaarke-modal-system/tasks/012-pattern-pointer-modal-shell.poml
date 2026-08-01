@@ -4,7 +4,7 @@
     <title>Pattern pointer: modal-shell.md + update record-modal-selection.md — FR-10</title>
     <phase>0 Build</phase>
     <gate>blocked until 010</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Short pointer-file authoring + two index/cross-link edits; documentation, no code, no quality gate.</rigor-reason>
     <model-tier>sonnet</model-tier>

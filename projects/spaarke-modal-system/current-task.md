@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-01 (Group A + 004 + Group B complete)
+> **Last Updated**: 2026-08-01 (🎉 PHASE 0 COMPLETE — tasks 001–013)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,13 +10,15 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 009 — barrel exports + a11y snapshot + dual-React verify (next; not started) |
+| **Task** | none active — **Phase 0 (Build) complete**; conversions (P0.5/P1–P7) not started |
 | **Step** | — |
-| **Status** | not-started |
-| **Next Action** | Execute task 009 (`tasks/009-barrel-exports-and-tests.poml`) — wires `SprkModal/index.ts` + `components/index.ts`, a11y snapshot, dual-React verify. Or say "continue". |
+| **Status** | phase-boundary |
+| **Next Action** | Start conversions. Recommended next: **P1 window-controls rollout (030, 031)** or **P0.5 app-shell scale (020, SpaarkeAi hot-path — `/conflict-check` first)**. Or say "continue" / "work on 030, 031". |
 
 ### Critical Context
-P0 build is nearly done: Group A (001/002/003) ✅ + **004 shell** ✅ + Group B presets (005/006/007/008) ✅ complete 2026-08-01. `SprkModal/` now has `sizes.ts`, `scaledTheme.ts`, `SprkModal.tsx` (+`.types.ts`), `ModalScrollArea.tsx`, and `presets/{ConfirmModal,ChoiceModal,FormModal,PreviewModal,BrowseModal,WizardModal}.tsx` (+ tests). Consolidated build **green**, **81/81** tests pass, eslint clean. **Task 009 wires the barrels** (nothing is exported from `SprkModal/index.ts` or `components/index.ts` yet — presets import `../SprkModal` directly). Then docs (010→012; 011; 013 — **011/012/013 main-session-only**, they write `.claude/`) + conversion phases P1–P7 open. **020** (P0.5, needs 002) and **090** (P7 OOB) are independent and runnable anytime. **007 design note**: BrowseModal uses SprkModal's single-header `nav` + an `onBeforeNavigate` guard seam (does NOT nest RecordNavigationModalShell) — see [`notes/wave-b-completion.md`](./notes/wave-b-completion.md) ⚠️ for the owner-review flag. **Env**: fresh worktree — `npm install` done in `Spaarke.UI.Components` + siblings built.
+**PHASE 0 (Build) is COMPLETE (001–013, 2026-08-01).** The canonical modal system ships in `@spaarke/ui-components`: `SprkModal/` = `sizes.ts`, `scaledTheme.ts`, `SprkModal.tsx` (+`.types.ts`), `ModalScrollArea.tsx`, `presets/{Confirm,Choice,Form,Preview,Browse,Wizard}Modal.tsx`, `index.ts` (barrel), + tests. Consolidated `tsc` build **green**, **86/86** tests (11 suites), eslint clean, zero hex/`'1px'`/inline-color. Importable: `import { SprkModal, ConfirmModal, ChoiceModal, FormModal, PreviewModal, BrowseModal, WizardModal } from '@spaarke/ui-components'`. Docs: `docs/standards/MODAL-DESIGN-SYSTEM.md` + `.claude/adr/ADR-050` + `.claude/patterns/ui/modal-shell.md` + crosslinks + root CLAUDE.md §17 row + CHANGELOG. **6 commits** (dc27660→…→docs). Notes: [`wave-a-completion.md`](./notes/wave-a-completion.md), [`wave-b-completion.md`](./notes/wave-b-completion.md) (⚠️ 007 BrowseModal single-header decision for owner review).
+
+**Conversions NOT started** (each modifies EXISTING dialogs across `src/` + solutions — read target files carefully; higher blast radius). Order: P0.5 (020) · P1 (030/031) · P2 (040/041/042) · P3 (050/051) · P4 (060/061) · P5 (070) · P6 (080) · P7 (090→091/092) · P8 wrap-up (100). Preset→conversion map + escalation triggers are in each POML. **Env**: fresh worktree — `npm install` done in `Spaarke.UI.Components` + siblings `Spaarke.SdapClient`/`Spaarke.Auth` built.
 
 ---
 
@@ -24,11 +26,11 @@ P0 build is nearly done: Group A (001/002/003) ✅ + **004 shell** ✅ + Group B
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 009 |
-| **Task File** | tasks/009-barrel-exports-and-tests.poml |
-| **Title** | Barrel exports + a11y snapshot + dual-React verify |
-| **Phase** | 0 Build |
-| **Status** | not-started |
+| **Task ID** | none (phase boundary — P0 done) |
+| **Task File** | — (next: tasks/030-* / 031-* for P1, or 020-* for P0.5) |
+| **Title** | — |
+| **Phase** | 0 Build ✅ → conversions pending |
+| **Status** | none |
 | **Started** | — |
 
 ---

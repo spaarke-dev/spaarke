@@ -4,7 +4,7 @@
     <title>Cross-link MODAL-DECISION-CRITERIA.md component layer + root CLAUDE.md §17 — FR-10</title>
     <phase>0 Build</phase>
     <gate>blocked until 010,011</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Doc cross-linking + a root CLAUDE.md (hot-path) edit with a governance obligation (§18 CHANGELOG); no code.</rigor-reason>
     <model-tier>sonnet</model-tier>
