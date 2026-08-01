@@ -3,8 +3,8 @@
   <metadata>
     <title>FR-17 — wizard→review auto-run bridge (fileId impedance + durable bind)</title>
     <phase>3 Durable Review</phase>
-    <gate>blocked (escalated 2026-07-31 — bind+auto-dispatch converge on ConversationPane.tsx/task-041 OR new BFF endpoint; see notes/033-execution-notes.md)</gate>
-    <status>blocked</status>
+    <gate>none (escalation RESOLVED 2026-07-31: B-i approved, B-ii rejected; ConversationPane.tsx freed at 9b28628bc)</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Cross-surface bridge (wizard→session→dispatch); the owner's Phase-2 must-have leg; auth+durability semantics.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -116,6 +116,24 @@
     <criterion testable="true">BFF publish ≤60 MB reported; no new HIGH CVE; build + tests green.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-17; hub Phase-2 leg + Part C.4; hub Q2 RESOLVED: hub fixes the FK (their closeout); we verify + regression-test. With 030-032, completes the owner's 3-phase must-have.</notes>
+  <notes>Spec FR-17; hub Phase-2 leg + Part C.4; hub Q2 RESOLVED: hub fixes the FK (their closeout); we verify + regression-test. With 030-032, completes the owner's 3-phase must-have.
+
+COMPLETED 2026-07-31 (two sessions; full record: notes/033-execution-notes.md).
+Session 1 (escalation phase): FK fix 2f8f11123 verified in-tree + empirically (new regression
+tests/integration/regression/Analysis/PromoteDurableFkVisibilityTests.cs — bind-with-no-anchor-row → by-analysis
+round-trip, 3/3 green); seam audit proved no pointer-registration path exists (bridge = shipped DEF-10 register)
+and that fork/promote both mint a NEW Analysis (neither binds to the wizard's pre-existing one); escalated per the
+task's own trigger. Session 2 (escalation resolved — B-i approved, ConversationPane freed at 9b28628bc): SESSION-
+COINCIDENCE wiring — the wizard mints the ANALYSIS-OWNED session at finish (documentId anchor + sentinel HostContext
+→ create-time durable FK; sentinel via the ONE new client constant ANALYSIS_SESSION_HOST_ENTITY_TYPE), the seed's
+composeSessionId makes ComposeWorkspace RESUME it as the document session (initialSessionId → Load ?sessionId=,
+zero Compose.Components changes) AND ConversationPane ADOPTS it (new workspace-channel listener; handleSelectHistory-
+Session mechanism), so upload/dispatch/ledger/FK all converge on ONE session; auto-run rides 023's shipped
+runExplicit buffer (armed by the listener, fired by the register's new sourceDocReadyToken bump) with a 30s
+bridge-failure watchdog (ADR-019 three-distinct-surfaces). Client-only (zero src/server/** changes — B-ii rejected).
+Tests: wizard +3 (HostContext wire assert + negatives), new ConversationPane.wizard-auto-run.e2e.test.tsx (6: happy
+ONE-session forcing, dedupe, 2 negatives, watchdog failure + no-false-alarm). Full suites green (SpaarkeAi 90/832;
+widgets 677/678 — the 1 failure is the pre-existing communications-list rename baseline break, proven at clean HEAD
+via stash). agreementTypeLookupWrite invocation SKIPPED per coordinator (wizard A1 already persists the lookup).</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

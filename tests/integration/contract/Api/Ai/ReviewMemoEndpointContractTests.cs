@@ -19,6 +19,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Export;
 using Sprk.Bff.Api.Services.Ai.ReviewMemo;
+using Sprk.Bff.Api.Services.Compose;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
@@ -280,6 +281,162 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
             s => s.CreateAnalysisOutputAsync(It.IsAny<AnalysisOutputEntity>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FR-14 (task 051) — READ path: GET .../review-memo (JSON) and .../review-memo/docx (file)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private static ReviewMemoDocument BuildPersistedMemo() => new(
+        SchemaVersion: "review-memo-v1",
+        OverallRisk: "High",
+        SectionCount: 1,
+        Sections: new[]
+        {
+            new ReviewMemoSection(
+                Location: "Section 4.2, para 2 (p. 3)",
+                Before: "Confidential Information means information marked Confidential in writing.",
+                After: "Confidential Information means any information disclosed, whether or not marked.",
+                Why: "Materially narrower than the standard.",
+                FlaggedClause: "The clause defines Confidential Information only as information marked in writing.",
+                StandardRef: "B5 - Use & disclosure obligations",
+                RiskLevel: "High"),
+        });
+
+    private string BindSessionToAnalysis(Guid analysisId)
+    {
+        var sessionId = Guid.NewGuid().ToString("N");
+        _fx.ChatRepo.SessionsById[sessionId] = new ChatSession(
+            SessionId: sessionId,
+            TenantId: ReviewMemoEndpointTestFixture.TenantId,
+            DocumentId: Guid.NewGuid().ToString(),
+            PlaybookId: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            LastActivity: DateTimeOffset.UtcNow,
+            Messages: Array.Empty<ChatMessage>(),
+            HostContext: new ChatHostContext(
+                EntityType: ChatSessionManager.AnalysisHostContextEntityType,
+                EntityId: analysisId.ToString()));
+        return sessionId;
+    }
+
+    [Fact]
+    public async Task GetReviewMemo_MemoPersisted_Returns200WithMemoAndAnalysisName()
+    {
+        _fx.Reset();
+        var analysisId = Guid.NewGuid();
+        var sessionId = BindSessionToAnalysis(analysisId);
+        var memo = BuildPersistedMemo();
+
+        _fx.AnalysisServiceMock
+            .Setup(s => s.GetLatestAnalysisOutputByNameAsync(analysisId, "Review Summary Memo", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AnalysisOutputEntity
+            {
+                Id = Guid.NewGuid(),
+                Name = "Review Summary Memo",
+                Value = JsonSerializer.Serialize(memo),
+                AnalysisId = analysisId,
+            });
+        _fx.AnalysisServiceMock
+            .Setup(s => s.GetAnalysisAsync(analysisId.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AnalysisEntity { Id = analysisId, Name = "Acme NDA Review", DocumentId = Guid.Empty });
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.GetAsync($"/api/ai/chat/sessions/{sessionId}/review-memo");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<ReviewMemoReadResponse>(JsonOptions);
+        body.Should().NotBeNull();
+        body!.AnalysisId.Should().Be(analysisId);
+        body.AnalysisName.Should().Be("Acme NDA Review");
+        body.Memo.SectionCount.Should().Be(1);
+        body.Memo.Sections[0].Location.Should().Be(memo.Sections[0].Location);
+        body.Memo.Sections[0].Before.Should().Be(memo.Sections[0].Before);
+        body.Memo.Sections[0].After.Should().Be(memo.Sections[0].After);
+    }
+
+    [Fact]
+    public async Task GetReviewMemo_NoMemoPersistedYet_Returns404WithGenerateFirstMessage()
+    {
+        _fx.Reset();
+        var analysisId = Guid.NewGuid();
+        var sessionId = BindSessionToAnalysis(analysisId);
+
+        _fx.AnalysisServiceMock
+            .Setup(s => s.GetLatestAnalysisOutputByNameAsync(analysisId, "Review Summary Memo", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AnalysisOutputEntity?)null);
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.GetAsync($"/api/ai/chat/sessions/{sessionId}/review-memo");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var problem = await response.Content.ReadAsStringAsync();
+        problem.Should().Contain("Generate the review memo first");
+    }
+
+    [Fact]
+    public async Task GetReviewMemo_SessionNotFound_Returns404()
+    {
+        _fx.Reset();
+        var client = _fx.CreateAuthenticatedClient();
+
+        var response = await client.GetAsync($"/api/ai/chat/sessions/{Guid.NewGuid():N}/review-memo");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task GetReviewMemoDocx_MemoPersisted_Returns200WithWordprocessingContentType()
+    {
+        _fx.Reset();
+        var analysisId = Guid.NewGuid();
+        var sessionId = BindSessionToAnalysis(analysisId);
+        var memo = BuildPersistedMemo();
+
+        _fx.AnalysisServiceMock
+            .Setup(s => s.GetLatestAnalysisOutputByNameAsync(analysisId, "Review Summary Memo", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AnalysisOutputEntity
+            {
+                Id = Guid.NewGuid(),
+                Name = "Review Summary Memo",
+                Value = JsonSerializer.Serialize(memo),
+                AnalysisId = analysisId,
+            });
+        _fx.AnalysisServiceMock
+            .Setup(s => s.GetAnalysisAsync(analysisId.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AnalysisEntity { Id = analysisId, Name = "Acme NDA Review", DocumentId = Guid.Empty });
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.GetAsync($"/api/ai/chat/sessions/{sessionId}/review-memo/docx");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Content.Headers.ContentType!.MediaType.Should().Be(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+
+        var bytes = await response.Content.ReadAsByteArrayAsync();
+        bytes.Length.Should().BeGreaterThan(0, "the rendered .docx must have real content, not an empty download");
+        // OOXML .docx packages are ZIP archives — verify the local-file-header magic bytes ("PK\x03\x04").
+        bytes[0].Should().Be(0x50);
+        bytes[1].Should().Be(0x4B);
+    }
+
+    [Fact]
+    public async Task GetReviewMemoDocx_NoMemoPersistedYet_Returns404_NeverAnEmptyDownload()
+    {
+        _fx.Reset();
+        var analysisId = Guid.NewGuid();
+        var sessionId = BindSessionToAnalysis(analysisId);
+
+        _fx.AnalysisServiceMock
+            .Setup(s => s.GetLatestAnalysisOutputByNameAsync(analysisId, "Review Summary Memo", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AnalysisOutputEntity?)null);
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.GetAsync($"/api/ai/chat/sessions/{sessionId}/review-memo/docx");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        response.Content.Headers.ContentType?.MediaType.Should().NotBe(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    }
 }
 
 /// <summary>
@@ -354,6 +511,8 @@ public sealed class ReviewMemoEndpointTestFixture : IAsyncLifetime, IDisposable
         builder.Services.AddSingleton(Mock.Of<IStorageRetryPolicy>());
         builder.Services.AddSingleton(new ExportServiceRegistry(Array.Empty<IExportService>()));
         builder.Services.AddSingleton<AnalysisResultPersistence>();
+        // FR-14 (task 051) — the docx READ handler's rendering engine (real; pure/stateless, no I/O).
+        builder.Services.AddSingleton<ComposeDocumentRenderer>();
 
         builder.WebHost.UseTestServer();
 

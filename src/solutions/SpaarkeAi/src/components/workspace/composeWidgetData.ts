@@ -48,6 +48,30 @@ export interface ComposeWidgetSeed {
    * Absent for every pre-existing seed — no regression (ComposeEditor defaults to `'*'`).
    */
   activeWorkType?: string;
+  /**
+   * agreements-r1 A3 (`bd64a69d4`): the picked agreement sub-domain (`sprk_agreementtype.sprk_key`,
+   * e.g. `'nda'` / `'employment'`) the wizard-finish seed has carried since Phase 1 — declared here
+   * (task 033) so the ConversationPane wizard hand-off listener reads it TYPED instead of untyped.
+   */
+  subDomain?: string;
+  /**
+   * agreements-r1 task 033 (FR-17 wizard→review auto-run bridge) — the three hand-off fields the
+   * Create-Analysis wizard adds on finish for an agreement analysis:
+   *
+   * `composeSessionId`: the wizard-minted ANALYSIS-OWNED chat session (HostContext sentinel →
+   *   create-time durable `sprk_analysis` FK). Dual-consumed: (1) `ComposeDirectWidget` threads it
+   *   as `<ComposeWorkspace initialSessionId>` so the BFF Load RESUMES it as the document session
+   *   (chat ≡ document session — the upload-mount door's coincidence, now for the stored door);
+   *   (2) ConversationPane's workspace listener ADOPTS it as the pane's active chat session.
+   * `analysisId`: the `sprk_analysis` GUID (bare lowercase, ADR-044) the session is durably bound
+   *   to — the listener's once-per-Analysis dedupe key. NEVER an `sprk_analysisoutput` id.
+   * `autoRunReview`: arms the explicit review door (`useAgreementReviewGate.runExplicit` on
+   *   `subDomain`'s pack) once the DEF-10 register lands the file. Only ever set alongside
+   *   `composeSessionId` + `subDomain`. Absent for every non-wizard seed — no behavior change.
+   */
+  composeSessionId?: string;
+  analysisId?: string;
+  autoRunReview?: boolean;
 }
 
 /** Tab `widgetData` shape for the `'compose'` Direct widget. */

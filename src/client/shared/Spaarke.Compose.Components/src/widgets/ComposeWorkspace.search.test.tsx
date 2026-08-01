@@ -54,6 +54,9 @@ const retrieveRecordMock = jest.fn();
 jest.mock('@spaarke/ui-components', () => ({
   createXrmNavigationService: () => ({ openLookup: openLookupMock }),
   createXrmDataService: () => ({ retrieveRecord: retrieveRecordMock }),
+  // FR-14 (task 051) — ComposeWorkspace mounts <SendEmailDialog/> unconditionally (controlled via its
+  // own `open` prop, mirroring ComposeConflictDialog); a no-op stub keeps this mock complete.
+  SendEmailDialog: () => null,
 }));
 
 // ── PaneEventBus (no-op in this test) ───────────────────────────────────────

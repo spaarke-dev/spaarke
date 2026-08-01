@@ -31,6 +31,10 @@ import { QuickStartModal } from "./QuickStartModal";
 import { MemoryDialog } from "./MemoryDialog";
 import { useAiSession, useDispatchPaneEvent, usePaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
+// task 033 (FR-17 wizard→review auto-run bridge): the typed compose-seed shape the wizard hand-off
+// listener narrows `widget_load{widgetType:'compose'}` payloads to (composeSessionId / analysisId /
+// subDomain / autoRunReview — declared additively on the SAME seed every compose door already uses).
+import type { ComposeWidgetSeed } from "../workspace/composeWidgetData";
 import type {
   IChatMessage,
   DispatchWorkspaceEvent,
@@ -189,6 +193,27 @@ export const COMPOSE_EDIT_CONFIRMATION =
  */
 export const COMPOSE_WHOLE_DOCUMENT_EDIT_CONFIRMATION =
   'I revised the document — review the tracked changes in the document, then accept, reject, or try another.';
+
+/**
+ * agreements-r1 task 033 (FR-17) — the DISTINCT bridge-failure surface (ADR-019): the wizard armed
+ * an auto-run review, but the document never finished registering as a session file (the DEF-10
+ * register's upload failed or never landed) within the watchdog window. The Analysis itself is
+ * already durable and consistent (created + bound by the wizard BEFORE the hand-off) — only the
+ * auto-run leg degraded, and the recovery is the user's normal conversational trigger. Deliberately
+ * different copy from the wizard's own session-mint failure warning (bind failure) and from the
+ * dispatch path's own error surface (dispatch failure) — three legs, three distinct surfaces.
+ */
+export const WIZARD_AUTO_RUN_BRIDGE_FAILURE_MESSAGE =
+  'I couldn\'t start the agreement review automatically — the document didn\'t finish preparing. ' +
+  'Your analysis was created and saved; open the document tab and ask me to "review this document" to run the review.';
+
+/**
+ * task 033: how long the auto-run watchdog waits for the DEF-10 register to land the session file
+ * before surfacing {@link WIZARD_AUTO_RUN_BRIDGE_FAILURE_MESSAGE} and standing down. Generous vs.
+ * the normal path (doc load + upload is seconds; the server manifest probe alone is ~5s) so a slow
+ * network never false-alarms, while a genuinely failed bridge still surfaces within the session.
+ */
+export const WIZARD_AUTO_RUN_WATCHDOG_MS = 30_000;
 
 export function ConversationPane(): React.JSX.Element {
   const styles = useConversationPaneLayoutStyles();
@@ -485,6 +510,20 @@ export function ConversationPane(): React.JSX.Element {
   // effect below calls `agreementReviewGate.runExplicit` directly — no classification gate, ever.
   const [pendingExplicitAgreementReview, setPendingExplicitAgreementReview] = React.useState<{
     subDomainKey: string;
+  } | null>(null);
+  // task 033 (FR-17 wizard→review auto-run bridge) — wizard hand-off state:
+  //  - `wizardAutoRunHandledRef`: once-per-Analysis dedupe for the workspace-channel hand-off
+  //    listener (a re-dispatched/duplicate `widget_load` for the SAME analysisId must not re-adopt
+  //    or re-arm; a SECOND wizard run in the same pane session — a NEW analysisId — legitimately
+  //    fires again). Deliberately NOT session-scoped-reset: the bind/arm for an Analysis happens
+  //    exactly once per pane mount regardless of intervening session switches.
+  //  - `wizardAutoRunWatchdog`: armed alongside the explicit-door buffer when the WIZARD (not text)
+  //    armed it — drives the bounded bridge-failure surface (the buffered effect never fires when
+  //    the DEF-10 register's upload fails, and the TEXT door's indefinite-buffer semantics are
+  //    correct for a human mid-conversation but wrong for a machine-armed run the user never sees).
+  const wizardAutoRunHandledRef = React.useRef<Set<string>>(new Set());
+  const [wizardAutoRunWatchdog, setWizardAutoRunWatchdog] = React.useState<{
+    analysisId: string;
   } | null>(null);
 
   // ── Behaviour hooks (see module map in the header) ────────────────────────
@@ -1645,6 +1684,15 @@ export function ConversationPane(): React.JSX.Element {
         // of an already-registered document. No-op when `documentSessionId` is undefined (a
         // pointer-only registration with no session yet).
         documentSessionWaiterRef.current.notify(sessionFileId, documentSessionId);
+        // task 033 (FR-17): bump the GENERIC source-doc readiness signal now that
+        // `activeSourceDocRef.sessionFileId` is real via THIS (Compose-register) path too — the
+        // race-safe buffered effects (notably the explicit-door auto-run, armed by the wizard
+        // hand-off BEFORE this register lands) re-run on it. Mirrors `handleSessionFileUploaded`'s
+        // bump exactly (the token is documented as "a generic 'a source doc just became ready'
+        // signal, not revise-specific"); pre-033 the chat-upload path was simply the only bump
+        // site because no machine-armed intent could precede a Compose-side registration. Effects
+        // whose own pending state is unset no-op on the re-run (each gates on its buffer).
+        setSourceDocReadyToken((t) => t + 1);
         // Wave 3 Part 2 (DEF-11 TEXT-path close): thread the tab's `documentSessionId` so the server
         // sets ChatSession.ActiveDocument.DocumentSessionId → BindingCapabilityTool routes a typed
         // revise/draft into THIS document session (redline in the open doc), not the chat session.
@@ -1982,6 +2030,32 @@ export function ConversationPane(): React.JSX.Element {
     void runExplicitAgreementReview(active.sessionFileId, active.fileName, subDomainKey);
   }, [sourceDocReadyToken, pendingExplicitAgreementReview, runExplicitAgreementReview, ndaReviewBindingId]);
 
+  // task 033 (FR-17) — the wizard auto-run BRIDGE-FAILURE watchdog (ADR-019 distinct surfacing).
+  // Armed by the wizard hand-off listener alongside the explicit-door buffer. Three outcomes:
+  //  - SUCCESS: the buffered effect above consumed `pendingExplicitAgreementReview` (dispatch
+  //    fired) → this effect re-runs, sees the buffer empty, and stands down silently.
+  //  - BRIDGE FAILURE: the DEF-10 register never landed a sessionFileId (upload failed / Compose
+  //    never mounted) → the buffer is still full when the timer fires → clear it + surface the
+  //    DISTINCT bridge-failure message. The Analysis stays consistent (created + bound before the
+  //    hand-off); recovery is the user's normal conversational "review this document".
+  //  - SESSION RESET: `handleSessionCreated` clears the buffer → same silent stand-down as success.
+  // The timer never resets on unrelated re-renders (deps are the two state objects, identity-stable
+  // until actually changed), and a text-armed buffer (no watchdog) keeps its shipped
+  // indefinite-buffer semantics untouched.
+  React.useEffect(() => {
+    if (!wizardAutoRunWatchdog) return undefined;
+    if (!pendingExplicitAgreementReview) {
+      setWizardAutoRunWatchdog(null);
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setPendingExplicitAgreementReview(null);
+      setWizardAutoRunWatchdog(null);
+      injection.enqueue(makeLocalAssistantMessage(WIZARD_AUTO_RUN_BRIDGE_FAILURE_MESSAGE));
+    }, WIZARD_AUTO_RUN_WATCHDOG_MS);
+    return () => clearTimeout(timer);
+  }, [wizardAutoRunWatchdog, pendingExplicitAgreementReview, injection]);
+
   // R4-4 (UAT 2026-07-19) — the FIX #7 AUTO-LOAD-on-attach effect was REMOVED. Owner reversed the
   // earlier decision: attaching files should NOT auto-open Compose (uploading 2 files spawned 2 Compose
   // tabs, which was jarring). Opening a file in Compose is now an ON-DEMAND action — the "Revise in
@@ -2105,6 +2179,56 @@ export function ConversationPane(): React.JSX.Element {
       // 'create' if unspecified.
       setQuickStartTab(event.quickStartTab ?? "create");
       setQuickStartOpen(true);
+    }
+  });
+
+  // task 033 (FR-17) — the wizard→review auto-run hand-off listener. The Create-Analysis wizard's
+  // finish hook dispatches the SAME `widget_load{widgetType:'compose'}` seed WorkspacePane consumes
+  // to open the document, now additionally carrying `{ composeSessionId, analysisId, subDomain,
+  // autoRunReview }` (ComposeWidgetSeed, agreement work-type only). This pane rides the SAME bus
+  // event (no new channel/event type — ADR-030) to do its two legs:
+  //  (1) ADOPT the wizard-minted ANALYSIS-OWNED session as the pane's active chat session — the
+  //      IDENTICAL adopt+remount mechanism the History menu / hub-grid `session_switch` use
+  //      (`handleSelectHistorySession`), plus the SAME synchronous ref update `ensureChatSession`
+  //      documents (so a same-tick / pre-re-render `getSessionId()` reader — notably the DEF-10
+  //      register's lazy-create guard — sees the adopted id and never mints a SECOND session).
+  //      ComposeWorkspace independently resumes this SAME session as its document session
+  //      (`initialSessionId` → BFF Load resume), so chat ≡ document session: the register's file
+  //      upload, the review's `sessionIdOverride` dispatch, and the compose-outputs read all
+  //      target ONE session (DEF-09 holds; no file-id impedance).
+  //  (2) ARM the shipped explicit review door (task 023's buffer — `runExplicit` on the picked
+  //      sub-domain's pack, deterministic, no classifier gate) + the bridge-failure watchdog. The
+  //      buffered effect fires when the DEF-10 register lands the sessionFileId (the register's
+  //      `sourceDocReadyToken` bump) AND capability discovery resolves the review bindingId.
+  // A seed WITHOUT the hand-off fields (every non-wizard compose open — upload door, Browse,
+  // "Open in Compose", revise mounts) returns immediately: zero behavior change.
+  usePaneEvent("workspace", (event) => {
+    const evt = event as WorkspacePaneEvent & {
+      widgetType?: string;
+      widgetData?: { compose?: ComposeWidgetSeed };
+    };
+    if (evt.type !== "widget_load" || evt.widgetType !== "compose") return;
+    const seed = evt.widgetData?.compose;
+    const composeSessionId = seed?.composeSessionId;
+    const analysisId = seed?.analysisId;
+    if (!composeSessionId || !analysisId) return; // not a wizard hand-off seed
+    if (wizardAutoRunHandledRef.current.has(analysisId)) return; // once per Analysis
+    wizardAutoRunHandledRef.current.add(analysisId);
+
+    if (chatSessionIdRef.current !== composeSessionId) {
+      // Synchronous ref update FIRST (ensureChatSession's own documented pattern) so any
+      // same-tick getSessionId() reader sees the adopted session before the re-render lands.
+      chatSessionIdRef.current = composeSessionId;
+      handleSelectHistorySession(composeSessionId);
+    }
+
+    if (seed?.autoRunReview === true && seed.subDomain) {
+      // Enable the SAME deferred capability-discovery fetch the text door uses, so the review
+      // bindingId resolves by the time the buffered effect needs it (never dispatch inline here —
+      // the bindingId is virtually never resolved on this synchronous tick).
+      setAgreementReviewGateNeeded(true);
+      setPendingExplicitAgreementReview({ subDomainKey: seed.subDomain });
+      setWizardAutoRunWatchdog({ analysisId });
     }
   });
 

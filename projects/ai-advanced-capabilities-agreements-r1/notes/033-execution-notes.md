@@ -1,9 +1,11 @@
 # Task 033 — FR-17 wizard→review auto-run bridge — execution notes
 
-> Rigor: FULL · Model tier: opus @ high · Step mode: directional · Status: **BLOCKED (escalated)** — core
-> bind + auto-dispatch legs converge on `ConversationPane.tsx` (task 041's owned file this wave) OR a new BFF
-> endpoint; both are STOP-and-report boundaries. FK-fix verification + the durable-bind FK regression test
-> (acceptance criterion 2) are DELIVERED and green; the remaining legs need an owner decision (below).
+> Rigor: FULL · Model tier: opus @ high · Step mode: directional · Status: **COMPLETE** — the escalation
+> below was RESOLVED by the coordinator (2026-07-31): **path B-i approved** (client-side Analysis-owned session
+> mint per §11 reuse-first + ADR-013 no-new-surface; B-ii new endpoint REJECTED), and `ConversationPane.tsx`
+> was FREED (task 041 landed in commit `9b28628bc` WITHOUT touching it — its batch loop went to ComposeEditor).
+> Part 1 (unchanged below) is the escalation-phase investigation/design record. **Part 2 (appended at the
+> bottom, "WIRING — Part 2") records the B-i implementation that completed legs 2/3.**
 
 ---
 
@@ -238,3 +240,163 @@ Each surface is DISTINCT (wizard error vs Assistant affordance) and no step sile
 - **Added:** `tests/integration/regression/Analysis/PromoteDurableFkVisibilityTests.cs` (new regression test + in-memory double).
 - **Not modified (HARD BOUNDARIES honored):** `src/server/**` (READ-ONLY verification), `ConversationPane.tsx`,
   `ComposeCommentGutter.tsx`, `.claude/**`, `current-task.md`, `TASK-INDEX.md`. No git commit/push.
+
+---
+---
+
+# WIRING — Part 2 (escalation resolved: B-i approved, ConversationPane freed at `9b28628bc`)
+
+## B-i rationale citation (the coordinator's decision, 2026-07-31)
+
+**Approved:** mint the compose session ANALYSIS-OWNED via HostContext (`EntityType` = the existing
+`"sprk_analysisoutput"` sentinel, `EntityId` = the wizard's pre-existing analysisId) so
+`CreateSessionAsync`'s create-time FK write binds it durably — the exact path
+`PromoteDurableFkVisibilityTests` already proves at the repository level, hardened by hub fix `2f8f11123`.
+**Rejected:** B-ii (new bind-to-existing endpoint) per §11 reuse-first + ADR-013 no-new-surface. Zero
+`src/server/**` changes (verified: none made).
+
+## The design refinement that made B-i COMPLETE (found during wiring, not in the escalation doc)
+
+The escalation doc's Part-1 design had legs 2/3 landing in ConversationPane only. Wiring surfaced a
+**deeper impedance** the coordinator's decision then resolves even more cleanly: the review dispatch
+(`runExplicit` → `sessionIdOverride` = the waiter-resolved **document session**) targets the session whose
+`UploadedFiles` must contain the file — but for a stored-doc open, ComposeWorkspace's document session was a
+**separately minted** compose session (`ComposeService.LoadAsync` :432-438), while the register uploads into
+the **chat** session. Dispatching on the document session would have hit `ResolveTargetFiles` → "No session
+files were available" (verified server-side: dispatch fetches the override session and resolves ONLY its own
+manifest — `SessionDispatchOrchestrator.cs:214-221` 404-on-missing, `:1170-1195` own-manifest-only).
+
+**Resolution — SESSION COINCIDENCE (the upload-mount door's invariant, extended to the wizard door):** the
+WIZARD mints the Analysis-owned session at finish (it owns the moment when analysisId + documentId + name
+are all in hand and "no session exists"), and that ONE session becomes:
+1. the **document session** — the seed's `composeSessionId` threads `ComposeDirectWidget` →
+   `<ComposeWorkspace initialSessionId>` → the BFF Load's `?sessionId=` (ComposeWorkspace.tsx:910, already
+   shipped) → `ComposeService.LoadAsync` RESUME (`IsSameCrossVersionBinding` :612-622 — DocumentId
+   ordinal-match, matter-null pass). The session is minted with `documentId` = the bare-lowercase
+   `sprk_document` GUID precisely so it matches the server's resume bindingId
+   (`DocumentRecordId.Value.ToString()`, "D" lowercase — ADR-044 alignment made load-bearing).
+2. the **chat session** — ConversationPane's new workspace-channel listener ADOPTS it
+   (`handleSelectHistorySession`, the identical hub-grid/History mechanism + `ensureChatSession`'s
+   documented synchronous-ref pattern), so the DEF-10 register's lazy-create guard finds it and uploads the
+   file INTO it (never a second session).
+
+Chat ≡ document session ⇒ the register's `/documents` upload, `documentSessionWaiter.notify`, the review's
+`sessionIdOverride` dispatch, the compose-outputs ledger read, AND the durable `sprk_analysis` FK all
+converge on ONE session. DEF-09 holds; the file-id impedance is gone; by-analysis returns this session.
+
+## What was wired (all client; every server read remained read-only)
+
+1. **`CreateAnalysisWizardWidget.tsx`** (Spaarke.AI.Widgets):
+   - `ANALYSIS_SESSION_HOST_ENTITY_TYPE` — the ONE client sentinel constant site (doc comment carries the
+     footgun + the server's triplicated sites incl. `ChatSessionManager.cs:473`); call sites import it,
+     never re-type the literal.
+   - `onFinish`: for agreement work-type + full SPE pointer, POST `/api/ai/chat/sessions`
+     `{ documentId: <bare-lc sprk_document GUID>, hostContext: { entityType: SENTINEL, entityId: <bare-lc
+     analysisId>, entityName: finishName } }` (the endpoint passes HostContext verbatim —
+     `ChatEndpoints.cs:361-393`, no validation barrier; `ChatCreateSessionRequest` :3173). Failure =
+     NON-FATAL + the DISTINCT bind-failure warning on the wizard success panel; hand-off fields are then
+     OMITTED (no half-armed auto-run pointing at a nonexistent session).
+   - Compose seed: additive `{ composeSessionId, analysisId, autoRunReview: true-only-when-subDomain-picked }`
+     alongside the already-shipped `subDomain`/`activeWorkType`.
+2. **`composeWidgetData.ts`** (SpaarkeAi): `ComposeWidgetSeed` + typed `subDomain` (declaring the field the
+   wizard has sent since A3) + `composeSessionId`/`analysisId`/`autoRunReview` (documented).
+3. **`ComposeDirectWidget.tsx`** (SpaarkeAi): threads `data.compose.composeSessionId` →
+   `<ComposeWorkspace initialSessionId>` (was hardcoded `""`); absent seed → `""` = exact pre-033 wire shape.
+   ZERO `Spaarke.Compose.Components` changes (ComposeWorkspace already forwards `initialSessionId` to Load).
+4. **`ConversationPane.tsx`** (freed):
+   - Workspace-channel `usePaneEvent` listener (rides the wizard's EXISTING `widget_load{compose}` event —
+     no new channel/event type, ADR-030): narrows the seed to `ComposeWidgetSeed`; on
+     `composeSessionId+analysisId` → once-per-analysisId (ref Set) ADOPT via `handleSelectHistorySession` +
+     synchronous `chatSessionIdRef` update; on `autoRunReview===true && subDomain` → arm
+     `setAgreementReviewGateNeeded(true)` + `setPendingExplicitAgreementReview({subDomainKey})` (023's
+     SHIPPED buffer — `runExplicit` fires deterministically, classifier sanity-check non-blocking) + the
+     watchdog. Non-wizard seeds return immediately (zero behavior change).
+   - `registerComposeActiveDocument`: `setSourceDocReadyToken(t=>t+1)` after the waiter notify — the
+     GENERIC readiness bump (mirrors `handleSessionFileUploaded`'s, per the token's own documented
+     "generic, not revise-specific" contract) so the machine-armed buffer fires when the register lands.
+   - Bridge-failure watchdog (`WIZARD_AUTO_RUN_WATCHDOG_MS` = 30s + `WIZARD_AUTO_RUN_BRIDGE_FAILURE_MESSAGE`):
+     armed only for WIZARD-armed buffers; stands down silently when the buffer is consumed (dispatch fired)
+     or the session resets; on expiry clears the buffer + injects the DISTINCT recovery message. The TEXT
+     door's indefinite-buffer semantics are untouched.
+
+## ADR-019 failure legs as BUILT (three legs, three DISTINCT surfaces, no orphans)
+
+| Leg | Failure | Surface | State left |
+|---|---|---|---|
+| BIND | wizard session-mint non-2xx/throw | Wizard success panel warning ("review could not be started automatically…") | Analysis fully durable + consistent; Compose opens; NO hand-off fields (auto-run never half-arms) |
+| BRIDGE | DEF-10 register upload fails / never lands | Assistant watchdog message after 30s (`WIZARD_AUTO_RUN_BRIDGE_FAILURE_MESSAGE`) — names the recovery ("ask me to review this document") | Session adopted + Analysis-bound; buffer cleared (a late register can't fire a stale run) |
+| DISPATCH | review dispatch fails | The SHIPPED chips/dispatch error surface (`runBindingDispatch`) — untouched | File registered + session bound; user retriggers conversationally |
+
+## agreementTypeLookupWrite (coordinator item 3a) — SKIPPED, per instruction
+
+The wizard flow already persists `_sprk_agreementtype_value` at finish via the A1 picker write
+(`CreateAnalysisWizardWidget.tsx` — the `sprk_agreementtype` discoverNavProps + `sprk_AgreementType`
+fallback block, hub `1e1a6579b` + naming fix). 023's `applyAgreementTypeToAnalysis` seam remains the
+CLASSIFIER-path (promote) writer; invoking it here would be a redundant second write of the same lookup.
+
+## Tests (Part 2)
+
+**Spaarke.AI.Widgets — `CreateAnalysisWizardWidget.test.tsx` (+3, new describe "task 033"):**
+1. Mints the ANALYSIS-OWNED session (wire-level body assert: `documentId` + `hostContext{entityType:
+   'sprk_analysisoutput', entityId: <analysisId>, entityName}`) + hands off
+   `composeSessionId/analysisId/subDomain/autoRunReview` on the compose seed.
+2. NEGATIVE: non-agreement work type → ZERO session mint; seed carries NONE of the hand-off fields.
+3. Bind-failure: mint attempted once, wizard still succeeds, Compose still opens WITHOUT hand-off, the
+   distinct warning renders on the success panel.
+
+**SpaarkeAi — `ConversationPane.wizard-auto-run.e2e.test.tsx` (new, 6 tests; 031's forcing harness:
+real ConversationPane + real PaneEventBus + unmocked `createConsumerDispatcher` + session-keyed in-memory
+ledger; STATEFUL cold-pane session mock — starts null, adoption observable):**
+1. Happy path: adopt → register lands → EXACTLY ONE review dispatch on the WIZARD session
+   (`/sessions/{WIZARD_SESSION}/dispatch`), `args.subDomain='employment'` (classifier sanity-check
+   disagreeing at 0.95 toward 'nda' never re-routes), `args.fileIds=[sessionFileId]`; upload went to the
+   SAME session; ledger entry (`disposition:'compose'`) in the SAME session; no failure message.
+2. Duplicate hand-off for the SAME analysisId → still exactly one dispatch (once-per-Analysis dedupe).
+3. NEGATIVE: plain compose open (no hand-off fields) → no adoption, no arming, no dispatch, no messages.
+4. NEGATIVE: hand-off WITHOUT autoRunReview/subDomain → adoption + file lands (durable bind leg alone),
+   NO review dispatch.
+5. Bridge failure (upload 500, fake timers): after `WIZARD_AUTO_RUN_WATCHDOG_MS` the DISTINCT message is
+   injected, no dispatch ever, and a LATE successful register cannot fire a stale run.
+6. Watchdog never false-alarms on the happy path (timer advance after success → no message).
+
+### Results (exact)
+
+```
+CreateAnalysisWizardWidget.test.tsx                      10/10  PASS (7 pre-existing + 3 new)
+ConversationPane.wizard-auto-run.e2e.test.tsx (new)       6/6   PASS
+Full SpaarkeAi package suite (npx jest, stable tree)     90 suites / 832 tests  ALL PASS
+                                                          (baseline 89/826 per 023 notes + this task's 1/6;
+                                                          one earlier run flaked CreateOnSaveAssociation —
+                                                          14/14 in isolation + two full-suite green re-runs)
+SpaarkeAi npm run typecheck (tsc-surface-gate)           0 surface-owned errors (73 pre-existing shared-lib
+                                                          errors deferred — unchanged baseline)
+SpaarkeAi npm run build (vite)                           GREEN (exit 0; ribbon launch scripts built)
+Full Spaarke.AI.Widgets suite (npx jest)                 38 suites: 37 PASS + 1 PRE-EXISTING FAIL
+                                                          (register-workspace-widgets.test.ts:379 expects
+                                                          displayName 'Communications', code at HEAD says
+                                                          'Messages' — a sibling messaging-project rename;
+                                                          PROVEN pre-existing at clean HEAD via scoped
+                                                          git-stash re-run; zero relation to task 033)
+Spaarke.AI.Widgets npm run typecheck                     exit 0 (pre-existing Communication.Components
+                                                          errors reported, none in this task's files)
+Spaarke.AI.Widgets npm run build                         FAILS AT CLEAN HEAD identically (the SAME
+                                                          pre-existing Spaarke.Communication.Components
+                                                          errors — proven via scoped git-stash; this task's
+                                                          files contribute ZERO build errors)
+tests/integration/regression/Analysis (Part 1, dotnet)   3/3 PASS (C# untouched in Part 2)
+```
+
+## §10 / §11 (Part 2)
+
+- **§10:** still N/A — zero `src/server/**` modifications (B-ii rejected; B-i is entirely client-side over
+  the EXISTING `POST /api/ai/chat/sessions` + Load-resume + `/documents` + dispatch contracts). No publish-
+  size impact.
+- **§11 (per new surface):**
+  - `ANALYSIS_SESSION_HOST_ENTITY_TYPE`: Existing = server-side triplicated literal only (no client
+    constant existed — grep-verified); Extension = a constant, not a module; Cost-of-doing-nothing =
+    re-typed sentinel literals (the exact footgun the project CLAUDE.md bans).
+  - The workspace listener/watchdog: Existing = 023's buffer + `handleSelectHistorySession` +
+    `sourceDocReadyToken` — ALL reused, zero new dispatch/session/registration machinery; the only new
+    mechanism is the ~30-line listener + a bounded timer. Cost-of-doing-nothing = FR-17 unmet (no auto-run)
+    and machine-armed intents silently stuck forever (the watchdog's concrete failure mode).
+  - Seed fields: additive on the ONE existing seed shape (no parallel envelope).

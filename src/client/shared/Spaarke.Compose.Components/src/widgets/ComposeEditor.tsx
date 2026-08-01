@@ -720,6 +720,20 @@ export interface ComposeEditorProps {
      * reintroducing that removed UI.
      */
     overallRisk?: string;
+    /**
+     * FR-14 (ai-advanced-capabilities-agreements-r1 task 051) — "Create Summary Memo" toolbar
+     * dropdown's Generate action (downloads the persisted memo as a .docx). Rendered by
+     * `ComposeFormatToolbar` only when `hasFindings` AND at least one of this / `onEmailMemo` is set.
+     * The host (ComposeWorkspace) owns the fetch + download; the editor is a pure forwarder.
+     */
+    onGenerateMemo?: () => void;
+    /**
+     * FR-14 (task 051) — the dropdown's Email action (reads the persisted memo, opens the canonical
+     * EmailComposer prefilled with its body + subject; the user must act to send — ADR-045).
+     */
+    onEmailMemo?: () => void;
+    /** True while a memo generate/email fetch is in flight — the toolbar disables both actions + spins the trigger. */
+    isMemoActionInFlight?: boolean;
   };
   /**
    * Contextual AI Tool Library — the ACTIVE work type (the product surface the user chose):
@@ -2968,6 +2982,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onToggleReviewSummary={reviewSummary?.onToggle}
           reviewNotesOpen={reviewNotesVisible}
           onToggleReviewNotes={() => setReviewNotesVisible(v => !v)}
+          // FR-14 (task 051) — "Create Summary Memo" dropdown. Pure forwarder to the host
+          // (ComposeWorkspace), which owns the fetch/download/EmailComposer-open logic.
+          onGenerateMemo={reviewSummary?.onGenerateMemo}
+          onEmailMemo={reviewSummary?.onEmailMemo}
+          isMemoActionInFlight={reviewSummary?.isMemoActionInFlight}
         />
         {/* task 038 (spaarkeai-compose-r4 zero-error guardrails) — non-blocking, dismissible notice for a
             deferred/unrepresentable/refused step (most importantly formatted or linked PASTE that slips

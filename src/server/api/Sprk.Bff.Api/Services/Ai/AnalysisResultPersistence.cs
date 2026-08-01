@@ -329,4 +329,53 @@ public class AnalysisResultPersistence
 
     /// <summary>Display name for the persisted memo row — the categorization signal (see <see cref="PersistReviewMemoAsync"/> remarks on <c>OutputTypeId</c>).</summary>
     private const string ReviewMemoOutputName = "Review Summary Memo";
+
+    /// <summary>
+    /// FR-14 (ai-advanced-capabilities-agreements-r1 task 051) — the Review Summary Memo READ path.
+    /// Reads the MOST RECENT persisted memo for <paramref name="analysisId"/> (via the new
+    /// <see cref="IAnalysisDataverseService.GetLatestAnalysisOutputByNameAsync"/> — the smallest read
+    /// extension of 050's endpoint family, per project CLAUDE.md §10) plus the analysis/document display
+    /// names, so BOTH the "Generate memo" (.docx) and "Email memo" toolbar actions render from the SAME
+    /// persisted record (render-from-persisted, the binding project constraint — exports ≡ the durable
+    /// artifact). Returns <c>null</c> when no memo has been generated yet (a malformed/undeserializable
+    /// persisted value is also treated as absent, logged as a warning — never surfaced as a 500).
+    /// </summary>
+    public async Task<ReviewMemoReadResult?> GetReviewMemoWithMetadataAsync(
+        Guid analysisId,
+        CancellationToken cancellationToken)
+    {
+        var output = await _analysisService.GetLatestAnalysisOutputByNameAsync(analysisId, ReviewMemoOutputName, cancellationToken);
+        if (string.IsNullOrEmpty(output?.Value))
+        {
+            return null;
+        }
+
+        ReviewMemoDocument? memo;
+        try
+        {
+            memo = JsonSerializer.Deserialize<ReviewMemoDocument>(output.Value);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to deserialize the persisted Review Summary Memo for analysis {AnalysisId} — treating as not-yet-generated.",
+                analysisId);
+            return null;
+        }
+
+        if (memo is null)
+        {
+            return null;
+        }
+
+        var analysis = await _analysisService.GetAnalysisAsync(analysisId.ToString(), cancellationToken);
+        string? documentName = null;
+        if (analysis is not null && analysis.DocumentId != Guid.Empty)
+        {
+            var document = await _documentService.GetDocumentAsync(analysis.DocumentId.ToString(), cancellationToken);
+            documentName = document?.Name;
+        }
+
+        return new ReviewMemoReadResult(memo, analysis?.Name, documentName);
+    }
 }

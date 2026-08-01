@@ -426,6 +426,49 @@ public class DataverseWebApiService : IDataverseService
         return outputId;
     }
 
+    /// <summary>FR-14 (task 051) — the Review Summary Memo READ path (REST variant; the live-wired
+    /// implementation is <see cref="DataverseServiceClientImpl"/>, but this class implements the same
+    /// composite <see cref="IDataverseService"/> interface and must satisfy it too). Most-recent-first
+    /// so a re-generated memo (a future re-run) always reads back as the latest row.</summary>
+    public async Task<AnalysisOutputEntity?> GetLatestAnalysisOutputByNameAsync(Guid analysisId, string name, CancellationToken ct = default)
+    {
+        var escapedName = name.Replace("'", "''");
+        var filter = $"_sprk_analysisid_value eq {analysisId} and sprk_name eq '{escapedName}'";
+        var url = $"sprk_analysisoutputs?$select=sprk_analysisoutputid,sprk_name,sprk_value&$filter={Uri.EscapeDataString(filter)}&$orderby=createdon desc&$top=1";
+
+        _logger.LogDebug("[DATAVERSE-API] Querying latest analysis output named '{Name}' for analysis {AnalysisId}", name, analysisId);
+
+        try
+        {
+            var response = await SendGetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (result?.Value == null || result.Value.Count == 0)
+            {
+                return null;
+            }
+
+            var data = result.Value[0];
+            var idString = data.TryGetValue("sprk_analysisoutputid", out var idElement) && idElement.ValueKind != JsonValueKind.Null
+                ? idElement.GetString()
+                : null;
+
+            return new AnalysisOutputEntity
+            {
+                Id = Guid.TryParse(idString, out var outputId) ? outputId : Guid.Empty,
+                Name = data.TryGetValue("sprk_name", out var nameEl) && nameEl.ValueKind != JsonValueKind.Null ? nameEl.GetString() : null,
+                Value = data.TryGetValue("sprk_value", out var valueEl) && valueEl.ValueKind != JsonValueKind.Null ? valueEl.GetString() : null,
+                AnalysisId = analysisId,
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error querying latest analysis output named '{Name}' for analysis {AnalysisId}", name, analysisId);
+            throw;
+        }
+    }
+
     /// <summary>
     /// Associates skill, knowledge, and tool scope records with an analysis via N:N relationships.
     /// Empty collections are silently skipped. Already-existing associations (HTTP 400) are tolerated.

@@ -382,4 +382,194 @@ describe('CreateAnalysisWizardWidget', () => {
     renderWidget(buildData(), 'dark');
     expect(screen.getAllByText('Associate To').length).toBeGreaterThan(0);
   });
+
+  // -------------------------------------------------------------------------
+  // task 033 (FR-17) — wizard→review auto-run hand-off: the Analysis-OWNED
+  // compose-session mint (path B-i: HostContext sentinel → create-time durable
+  // sprk_analysis FK) + the compose-seed hand-off fields.
+  // -------------------------------------------------------------------------
+  describe('task 033 (FR-17): Analysis-owned session mint + auto-run hand-off', () => {
+    /** dataService whose existing-document pick resolves a FULL SPE pointer (the compose door). */
+    function buildSpeDataService(): IDataService {
+      const dataService = buildDataService();
+      (dataService.retrieveRecord as jest.Mock).mockResolvedValue({
+        sprk_filename: 'MSA Draft.docx',
+        sprk_graphitemid: 'spe-item-1',
+        sprk_graphdriveid: 'spe-drive-1',
+      });
+      // The agreement-type registry (one selectable row; `defaultSubDomain` auto-selects it).
+      (dataService.retrieveMultipleRecords as jest.Mock).mockImplementation(async (entityName: string) =>
+        entityName === 'sprk_agreementtype'
+          ? {
+              entities: [
+                { sprk_agreementtypeid: 'nda-type-id', sprk_key: 'nda', sprk_name: 'NDA / Confidentiality', sprk_isfallback: false },
+              ],
+            }
+          : { entities: [] }
+      );
+      return dataService;
+    }
+
+    /** Routed authenticatedFetch: session create → configurable; everything else generic-ok. */
+    function buildRoutedAuthFetch(sessionCreate: { ok: boolean; sessionId?: string }) {
+      return jest.fn(async (input: RequestInfo, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/api/ai/chat/sessions') && init?.method === 'POST') {
+          return {
+            ok: sessionCreate.ok,
+            status: sessionCreate.ok ? 201 : 500,
+            json: async () => (sessionCreate.ok ? { sessionId: sessionCreate.sessionId } : {}),
+          } as unknown as Response;
+        }
+        return { ok: true, json: async () => ({}) } as unknown as Response;
+      });
+    }
+
+    async function driveToFinish(name: string) {
+      skipAssociateTo();
+      await selectExistingDocument();
+      clickPrimary('Next');
+      fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: name } });
+      clickPrimary('Next');
+      await act(async () => {
+        clickPrimary('Finish');
+        for (let i = 0; i < 8; i++) await Promise.resolve();
+      });
+    }
+
+    it('mints the ANALYSIS-OWNED session (documentId anchor + HostContext sentinel) and hands off composeSessionId/analysisId/subDomain/autoRunReview on the compose seed', async () => {
+      const dispatchMock = jest.fn();
+      (useDispatchPaneEvent as jest.Mock).mockReturnValue(dispatchMock);
+      const authenticatedFetch = buildRoutedAuthFetch({ ok: true, sessionId: 'wizard-session-1' });
+      const data = buildData({
+        dataService: buildSpeDataService(),
+        authenticatedFetch,
+        workTypeValue: 100000000, // Agreement Review — the FR-17 flow
+        workTypeLabel: 'Agreement Review',
+        defaultSubDomain: 'nda',
+      });
+
+      renderWidget(data);
+      await driveToFinish('FR-17 Handoff');
+
+      // (1) BIND (wire-level HostContext assert): ONE session-create POST, document-anchored,
+      // carrying the ANALYSIS-OWNED sentinel with the created sprk_analysis id — the create-time
+      // durable-FK trigger (ChatDataverseRepository.CreateSessionAsync). Sentinel value comes from
+      // the ONE client constant site (ANALYSIS_SESSION_HOST_ENTITY_TYPE), asserted literally here.
+      const sessionCalls = authenticatedFetch.mock.calls.filter(
+        ([url, init]: [RequestInfo, RequestInit?]) =>
+          String(url).endsWith('/api/ai/chat/sessions') && init?.method === 'POST'
+      );
+      expect(sessionCalls).toHaveLength(1);
+      const sessionBody = JSON.parse(sessionCalls[0][1]!.body as string);
+      expect(sessionBody).toEqual({
+        documentId: 'existing-doc-id',
+        hostContext: {
+          entityType: 'sprk_analysisoutput',
+          entityId: 'new-analysis-id',
+          entityName: 'FR-17 Handoff',
+        },
+      });
+
+      // (2) HAND-OFF: the compose seed carries the session + analysis + sub-domain + auto-run arm.
+      await waitFor(() =>
+        expect(dispatchMock).toHaveBeenCalledWith(
+          'workspace',
+          expect.objectContaining({
+            type: 'widget_load',
+            widgetType: 'compose',
+            widgetData: expect.objectContaining({
+              compose: expect.objectContaining({
+                speDriveItemId: 'spe-item-1',
+                speDriveId: 'spe-drive-1',
+                activeWorkType: 'agreement-analysis',
+                subDomain: 'nda',
+                composeSessionId: 'wizard-session-1',
+                analysisId: 'new-analysis-id',
+                autoRunReview: true,
+              }),
+            }),
+          })
+        )
+      );
+    });
+
+    it('non-agreement work type: NO session mint and NO hand-off fields on the compose seed (negative)', async () => {
+      const dispatchMock = jest.fn();
+      (useDispatchPaneEvent as jest.Mock).mockReturnValue(dispatchMock);
+      const authenticatedFetch = buildRoutedAuthFetch({ ok: true, sessionId: 'should-never-mint' });
+      const data = buildData({
+        dataService: buildSpeDataService(),
+        authenticatedFetch,
+        workTypeValue: 100000001, // NOT Agreement Review
+        workTypeLabel: 'Legal Research',
+      });
+
+      renderWidget(data);
+      await driveToFinish('Non-Agreement Analysis');
+
+      // No Analysis-owned session mint for a non-agreement analysis.
+      const sessionCalls = authenticatedFetch.mock.calls.filter(
+        ([url, init]: [RequestInfo, RequestInit?]) =>
+          String(url).endsWith('/api/ai/chat/sessions') && init?.method === 'POST'
+      );
+      expect(sessionCalls).toHaveLength(0);
+
+      // Compose still opens (SPE pointer present) with NONE of the hand-off fields.
+      await waitFor(() =>
+        expect(dispatchMock).toHaveBeenCalledWith(
+          'workspace',
+          expect.objectContaining({ type: 'widget_load', widgetType: 'compose' })
+        )
+      );
+      const composeEvent = dispatchMock.mock.calls.find(
+        ([, evt]: [string, { widgetType?: string }]) => evt.widgetType === 'compose'
+      )![1] as { widgetData: { compose: Record<string, unknown> } };
+      expect(composeEvent.widgetData.compose.composeSessionId).toBeUndefined();
+      expect(composeEvent.widgetData.compose.analysisId).toBeUndefined();
+      expect(composeEvent.widgetData.compose.autoRunReview).toBeUndefined();
+    });
+
+    it('session-mint failure: wizard still succeeds, Compose still opens WITHOUT the hand-off, and the distinct bind-failure warning surfaces (ADR-019)', async () => {
+      const dispatchMock = jest.fn();
+      (useDispatchPaneEvent as jest.Mock).mockReturnValue(dispatchMock);
+      const authenticatedFetch = buildRoutedAuthFetch({ ok: false });
+      const data = buildData({
+        dataService: buildSpeDataService(),
+        authenticatedFetch,
+        workTypeValue: 100000000,
+        workTypeLabel: 'Agreement Review',
+        defaultSubDomain: 'nda',
+      });
+
+      renderWidget(data);
+      await driveToFinish('Bind Failure Case');
+
+      // The mint was ATTEMPTED (no silent skip) …
+      const sessionCalls = authenticatedFetch.mock.calls.filter(
+        ([url, init]: [RequestInfo, RequestInit?]) =>
+          String(url).endsWith('/api/ai/chat/sessions') && init?.method === 'POST'
+      );
+      expect(sessionCalls).toHaveLength(1);
+
+      // … Compose STILL opens (shipped behavior — the failure is non-fatal) with NO hand-off
+      // fields (no half-armed auto-run pointing at a session that does not exist) …
+      await waitFor(() =>
+        expect(dispatchMock).toHaveBeenCalledWith(
+          'workspace',
+          expect.objectContaining({ type: 'widget_load', widgetType: 'compose' })
+        )
+      );
+      const composeEvent = dispatchMock.mock.calls.find(
+        ([, evt]: [string, { widgetType?: string }]) => evt.widgetType === 'compose'
+      )![1] as { widgetData: { compose: Record<string, unknown> } };
+      expect(composeEvent.widgetData.compose.composeSessionId).toBeUndefined();
+      expect(composeEvent.widgetData.compose.autoRunReview).toBeUndefined();
+
+      // … and the DISTINCT bind-failure warning is surfaced on the wizard success panel.
+      expect(
+        await screen.findByText(/The review could not be started automatically/)
+      ).toBeInTheDocument();
+    });
+  });
 });

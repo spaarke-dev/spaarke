@@ -4,7 +4,7 @@
     <title>FR-14 — "Create Summary Memo" toolbar dropdown: generate-docx download + Email memo</title>
     <phase>5 Output Deliverables</phase>
     <gate>blocked (deps 050)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF docx generation + client toolbar + EmailComposer integration (.tsx + server).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -93,6 +93,22 @@
     <criterion testable="true">BFF publish ≤60 MB reported; builds green.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-14; design Lens 2 #6. DOCX only (PDF → compose-r5).</notes>
+  <notes>Spec FR-14; design Lens 2 #6. DOCX only (PDF → compose-r5).
+
+    COMPLETED (2026-07-31). Full details: notes/051-execution-notes.md.
+    Seams: ComposeFormatToolbar.tsx (persistent toolbar, NOT the selection ComposeAiToolbar BubbleMenu) →
+    ComposeEditor.tsx reviewSummary prop (additive fields) → ComposeWorkspace.tsx (owns fetch/download/
+    SendEmailDialog). Server: extended ReviewMemoEndpoints.cs (050's file) with 2 new GET reads
+    (JSON + docx), 1 new Dataverse read primitive (GetLatestAnalysisOutputByNameAsync, both impls),
+    1 new pure ReviewMemoDocumentBuilder.cs (ComposeDocumentRenderer.SynthesizeDocument, from-scratch
+    authoring path — DocxAnnotationWriter NOT referenced). Both toolbar actions are READ-only over the
+    persisted 050 record (render-from-persisted proven); negative "no memo yet" path returns 404 with a
+    clear message, never an empty export. Tests: 19 ReviewMemo server tests (11 existing + 8 new) pass;
+    9638/9740 BFF suite green (1 pre-existing unrelated flaky failure); Compose.Components Jest suite
+    zero regressions (15 pre-existing failures unchanged, confirmed via git-stash baseline comparison) +
+    7 new toolbar tests pass; typecheck clean. Publish 48.25 MB (Δ+0.01 MB vs 48.24 MB baseline); no new
+    CVE; build green. UI-tests (live download, live email open, dark mode) deferred to 060/061 per task
+    brief. One incidental fix: added SendEmailDialog stub to 4 pre-existing ComposeWorkspace test mocks
+    that lacked it (the new unconditional &lt;SendEmailDialog/&gt; mount exposed the gap).</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

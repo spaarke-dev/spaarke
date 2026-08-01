@@ -107,8 +107,16 @@ import {
   createXrmNavigationService,
   createXrmDataService,
   RichFilePreviewDialog,
+  SendEmailDialog,
   type LookupResult,
 } from '@spaarke/ui-components';
+// FR-14 (task 051) — "Create Summary Memo" toolbar control: shared types + pure email-body formatting
+// for the persisted review-memo record (render-from-persisted; see file docblock).
+import {
+  buildReviewMemoEmailBody,
+  buildReviewMemoEmailSubject,
+  type ReviewMemoReadResponse,
+} from './reviewMemoFormatting';
 
 // FIX #5 (UAT): the separate `ComposeToolbar` command bar (Open-in-Word + Save +
 // Push) was folded into the consolidated single-row `ComposeFormatToolbar` that
@@ -1788,6 +1796,109 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // never leaves a PRIOR document's stale findings visible. The LIVE `onAdvisoryComments` handler
   // (wholesale-replace semantics, unchanged) also updates this ref so the two paths never fight.
   const reviewSummarySessionRef = React.useRef<string | null>(null);
+
+  // FR-14 (ai-advanced-capabilities-agreements-r1 task 051) — "Create Summary Memo" toolbar control
+  // state. `memoActionInFlight` gates BOTH actions (they are mutually exclusive, user-triggered one at
+  // a time — the toolbar disables both + spins the trigger while either is running).
+  // `memoActionMessage` surfaces the honest negative state ("generate the review memo first" — 404, no
+  // memo persisted yet) or a transient network-failure message; never a silent empty export.
+  const [memoActionInFlight, setMemoActionInFlight] = React.useState(false);
+  const [memoActionMessage, setMemoActionMessage] = React.useState<string | null>(null);
+  const [memoEmailOpen, setMemoEmailOpen] = React.useState(false);
+  const [memoEmailSubject, setMemoEmailSubject] = React.useState('');
+  const [memoEmailBody, setMemoEmailBody] = React.useState('');
+
+  const NO_MEMO_MESSAGE = 'Generate the review memo first — no summary memo has been created for this review yet.';
+
+  /**
+   * Shared READ of the persisted review-memo record (render-from-persisted, the project's binding FR-14
+   * constraint: both the .docx download and the email prefill derive from the SAME server-persisted
+   * `sprk_analysisoutput` row task 050's POST assembled — never a client-side re-derivation). `null`
+   * means no memo has been generated yet for this session's bound Analysis (404) — the caller surfaces
+   * the honest negative state.
+   */
+  const fetchReviewMemo = React.useCallback(async (): Promise<ReviewMemoReadResponse | null> => {
+    if (!bffBaseUrl || !state.sessionId) return null;
+    const response = await authenticatedFetch(
+      `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(state.sessionId)}/review-memo`,
+      { method: 'GET' }
+    );
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new ApiError(`Failed to read the review memo (${response.status})`, response.status);
+    }
+    return (await response.json()) as ReviewMemoReadResponse;
+  }, [bffBaseUrl, state.sessionId]);
+
+  /**
+   * "Generate memo" — downloads the SERVER-RENDERED .docx (title, doc/analysis metadata, per-section
+   * table) via the docx READ endpoint. A blob download, not a client-side render — the .docx byte
+   * authoring stays server-side (ComposeDocumentRenderer), matching every other Compose document write.
+   */
+  const handleGenerateMemo = React.useCallback(async (): Promise<void> => {
+    if (!bffBaseUrl || !state.sessionId || memoActionInFlight) return;
+    setMemoActionInFlight(true);
+    setMemoActionMessage(null);
+    try {
+      const response = await authenticatedFetch(
+        `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(state.sessionId)}/review-memo/docx`,
+        { method: 'GET' }
+      );
+      if (response.status === 404) {
+        setMemoActionMessage(NO_MEMO_MESSAGE);
+        return;
+      }
+      if (!response.ok) {
+        throw new ApiError(`Failed to generate the review memo (${response.status})`, response.status);
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get('content-disposition') ?? '';
+      const match = /filename\*?=(?:UTF-8''|")?([^";]+)"?/i.exec(disposition);
+      const fileName = match?.[1] ? decodeURIComponent(match[1]) : 'Review Summary Memo.docx';
+
+      const url = URL.createObjectURL(blob);
+      try {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      setMemoActionMessage(err instanceof ApiError ? err.message : 'Could not generate the review memo.');
+    } finally {
+      setMemoActionInFlight(false);
+    }
+  }, [bffBaseUrl, state.sessionId, memoActionInFlight]);
+
+  /**
+   * "Email memo" — reads the persisted memo (JSON) and opens the canonical `<EmailComposer />`
+   * (ADR-045) prefilled with a deterministic HTML body + the "Review Summary Memo — {analysis name}"
+   * subject. Opens the dialog only; the user must act to send (never auto-send).
+   */
+  const handleEmailMemo = React.useCallback(async (): Promise<void> => {
+    if (!bffBaseUrl || !state.sessionId || memoActionInFlight) return;
+    setMemoActionInFlight(true);
+    setMemoActionMessage(null);
+    try {
+      const memo = await fetchReviewMemo();
+      if (!memo) {
+        setMemoActionMessage(NO_MEMO_MESSAGE);
+        return;
+      }
+      setMemoEmailSubject(buildReviewMemoEmailSubject(memo));
+      setMemoEmailBody(buildReviewMemoEmailBody(memo));
+      setMemoEmailOpen(true);
+    } catch (err) {
+      setMemoActionMessage(err instanceof ApiError ? err.message : 'Could not load the review memo.');
+    } finally {
+      setMemoActionInFlight(false);
+    }
+  }, [bffBaseUrl, state.sessionId, memoActionInFlight, fetchReviewMemo]);
   // Task 032 — exact-key idempotency for findings outputs materialized via the LEDGER path (`key:`
   // tokens, scoped by session — ledger turn numbers are session-local so a bare key could collide
   // across two different sessions) PLUS content-signature bookkeeping for the 031-residual dedupe
@@ -3130,6 +3241,26 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             </div>
           ) : null}
 
+          {/* FR-14 (task 051) — "Create Summary Memo" negative-path / failure surface. Covers BOTH the
+              honest "no memo yet" 404 (never a silent empty export) and a transient generate/email
+              network failure. Cleared at the start of the next Generate/Email attempt (mirrors the
+              `composeDraftError` banner above — no separate dismiss affordance). */}
+          {memoActionMessage ? (
+            <div
+              className={styles.bannerStack}
+              role="status"
+              aria-live="polite"
+              data-testid="compose-workspace-memo-action-message"
+            >
+              <MessageBar intent="warning">
+                <MessageBarBody>
+                  <MessageBarTitle>Create Summary Memo</MessageBarTitle>
+                  {memoActionMessage}
+                </MessageBarBody>
+              </MessageBar>
+            </div>
+          ) : null}
+
           <div className={styles.editorSlot}>
             <ComposeEditor
               ref={editorRef}
@@ -3216,11 +3347,33 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 // (ignored) by that standing UAT decision; this just stops the value from being
                 // silently discarded.
                 overallRisk: reviewSummaryOverallRisk,
+                // FR-14 (task 051) — "Create Summary Memo" toolbar dropdown. Both actions READ the
+                // persisted review-memo record server-side (render-from-persisted); the negative "no
+                // memo yet" state surfaces via the memoActionMessage banner above, never a silent
+                // empty export.
+                onGenerateMemo: () => void handleGenerateMemo(),
+                onEmailMemo: () => void handleEmailMemo(),
+                isMemoActionInFlight: memoActionInFlight,
               }}
             />
           </div>
         </>
       ) : null}
+
+      {/* FR-14 (task 051) — "Email memo" prefilled EmailComposer (ADR-045 canonical dialog wrapper).
+          Opens ONLY after a successful memo read (handleEmailMemo); the user must act to send — this
+          NEVER auto-sends. Body/subject are derived entirely from the persisted memo record. */}
+      <SendEmailDialog
+        open={memoEmailOpen}
+        onClose={() => setMemoEmailOpen(false)}
+        mode="compose"
+        initialSubject={memoEmailSubject}
+        initialBody={memoEmailBody}
+        initialBodyFormat="HTML"
+        authenticatedFetch={authenticatedFetch}
+        bffBaseUrl={bffBaseUrl}
+        onSent={() => setMemoEmailOpen(false)}
+      />
 
       {/* "Open Document" preview modal — opened from the format toolbar's "Open Document"
           button. Reuses the shared RichFilePreviewDialog + the BFF

@@ -713,3 +713,95 @@ describe('ComposeFormatToolbar — Review Summary / Notes toggles (UAT round-7 #
     expect(onToggleReviewSummary).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// FR-14 (ai-advanced-capabilities-agreements-r1 task 051) — "Create Summary Memo" dropdown.
+// Pure forwarder (mirrors the Word dropdown pattern): the toolbar only calls the host-provided
+// onGenerateMemo/onEmailMemo handlers — it owns no fetch/download/EmailComposer logic itself.
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Create Summary Memo dropdown (FR-14, task 051)', () => {
+  it('is hidden when no review is present, even with both handlers wired', () => {
+    renderFormatToolbar(
+      {},
+      { props: { hasReview: false, onGenerateMemo: jest.fn(), onEmailMemo: jest.fn() } }
+    );
+    expect(screen.queryByTestId('compose-format-memo-menu')).not.toBeInTheDocument();
+  });
+
+  it('is hidden when a review is present but neither handler is wired', () => {
+    renderFormatToolbar({}, { props: { hasReview: true } });
+    expect(screen.queryByTestId('compose-format-memo-menu')).not.toBeInTheDocument();
+  });
+
+  it('shows the dropdown trigger when a review is present and at least one handler is wired', () => {
+    renderFormatToolbar({}, { props: { hasReview: true, onGenerateMemo: jest.fn() } });
+    expect(screen.getByTestId('compose-format-memo-menu')).toBeInTheDocument();
+  });
+
+  it('opening the dropdown reveals Generate + Email items and each fires its own handler', async () => {
+    const user = userEvent.setup();
+    const onGenerateMemo = jest.fn();
+    const onEmailMemo = jest.fn();
+    renderFormatToolbar({}, { props: { hasReview: true, onGenerateMemo, onEmailMemo } });
+
+    await user.click(screen.getByTestId('compose-format-memo-menu'));
+    await user.click(screen.getByTestId('compose-format-memo-generate'));
+
+    expect(onGenerateMemo).toHaveBeenCalledTimes(1);
+    expect(onEmailMemo).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTestId('compose-format-memo-menu'));
+    await user.click(screen.getByTestId('compose-format-memo-email'));
+
+    expect(onEmailMemo).toHaveBeenCalledTimes(1);
+    expect(onGenerateMemo).toHaveBeenCalledTimes(1);
+  });
+
+  it('a menu item without its handler wired renders disabled (never silently no-ops on click)', async () => {
+    const user = userEvent.setup();
+    const onGenerateMemo = jest.fn();
+    renderFormatToolbar({}, { props: { hasReview: true, onGenerateMemo } });
+
+    await user.click(screen.getByTestId('compose-format-memo-menu'));
+
+    // Fluent's MenuItem renders a <div role="menuitem"> (not a native button/input), so its
+    // disabled state surfaces as aria-disabled, not the native `disabled` attribute jest-dom's
+    // toBeDisabled() checks for.
+    expect(screen.getByTestId('compose-format-memo-generate')).not.toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByTestId('compose-format-memo-email')).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('disables both actions and shows a spinner on the trigger while isMemoActionInFlight', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar(
+      {},
+      {
+        props: {
+          hasReview: true,
+          onGenerateMemo: jest.fn(),
+          onEmailMemo: jest.fn(),
+          isMemoActionInFlight: true,
+        },
+      }
+    );
+
+    expect(screen.getByTestId('compose-format-memo-menu')).toBeDisabled();
+  });
+
+  it('is disabled entirely when the global `disabled` prop is set', () => {
+    renderFormatToolbar(
+      {},
+      {
+        props: {
+          hasReview: true,
+          onGenerateMemo: jest.fn(),
+          onEmailMemo: jest.fn(),
+          disabled: true,
+        },
+      }
+    );
+
+    expect(screen.getByTestId('compose-format-memo-menu')).toBeDisabled();
+  });
+});

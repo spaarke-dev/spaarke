@@ -157,3 +157,13 @@ public sealed record ReviewMemoSection(
     [property: JsonPropertyName("flaggedClause")] string FlaggedClause,
     [property: JsonPropertyName("standardRef")] string StandardRef,
     [property: JsonPropertyName("riskLevel")] string? RiskLevel);
+
+/// <summary>
+/// FR-14 (task 051) — the persisted memo PLUS the doc/analysis display metadata the read path resolves
+/// alongside it (analysis + document names, for the .docx title block and the "Review Summary Memo —
+/// {analysis name}" email subject line). Returned by
+/// <see cref="Sprk.Bff.Api.Services.Ai.AnalysisResultPersistence.GetReviewMemoWithMetadataAsync"/> — a
+/// pure read-side aggregate, not a new persistence shape (the memo JSON itself is unchanged from what
+/// task 050 wrote).
+/// </summary>
+public sealed record ReviewMemoReadResult(ReviewMemoDocument Memo, string? AnalysisName, string? DocumentName);

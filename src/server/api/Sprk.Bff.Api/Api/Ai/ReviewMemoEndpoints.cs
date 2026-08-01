@@ -2,6 +2,7 @@ using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.ReviewMemo;
+using Sprk.Bff.Api.Services.Compose;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -37,9 +38,25 @@ namespace Sprk.Bff.Api.Api.Ai;
 /// task's edit to it is a single additive method). Persistence is ONE new method on the EXISTING
 /// KEEP-list <see cref="AnalysisResultPersistence"/> — no new persistence mechanism.
 /// </para>
+/// <para>
+/// <b>READ path (FR-14, task 051)</b>: two GET siblings added in the SAME file (still one feature —
+/// "the Review Summary Memo" — not one file per HTTP verb): <c>GET .../review-memo</c> (JSON, for the
+/// "Email memo" toolbar action's prefill) and <c>GET .../review-memo/docx</c> (the rendered, downloadable
+/// file, for the "Generate memo" toolbar action). Both derive from the SAME persisted record
+/// (render-from-persisted, project-binding) via the ONE new
+/// <see cref="AnalysisResultPersistence.GetReviewMemoWithMetadataAsync"/> read method, which itself adds
+/// exactly ONE new Dataverse read primitive (<see cref="Spaarke.Dataverse.IAnalysisDataverseService.GetLatestAnalysisOutputByNameAsync"/>)
+/// — the smallest read surface that satisfies "how to read the memo back" (POML task 051). No memo
+/// generated yet → both GETs return 404 ProblemDetails ("generate the review memo first"), never an
+/// empty 200 (negative-path acceptance criterion).
+/// </para>
 /// </remarks>
 public static class ReviewMemoEndpoints
 {
+    /// <summary>The rendered memo's download MIME type (OOXML WordprocessingML — matches the existing
+    /// <c>.docx</c> constant used elsewhere in <c>Api/Ai/*.cs</c>, e.g. <c>ChatDocumentEndpoints</c>).</summary>
+    private const string DocxContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
     public static IEndpointRouteBuilder MapReviewMemoEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/ai/chat/sessions")
@@ -65,6 +82,35 @@ public static class ReviewMemoEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        // GET /api/ai/chat/sessions/{sessionId}/review-memo (FR-14, task 051)
+        group.MapGet("/{sessionId}/review-memo", GetReviewMemo)
+            .AddAiAuthorizationFilter()
+            .WithName("GetReviewMemo")
+            .WithSummary("Read the persisted Review Summary Memo for the session's bound Analysis")
+            .WithDescription(
+                "Reads the most recently persisted Review Summary Memo (task 050) plus its analysis/" +
+                "document display names, for the 'Email memo' toolbar action's prefill. 404 when no " +
+                "memo has been generated yet for this session's bound Analysis.")
+            .Produces<ReviewMemoReadResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        // GET /api/ai/chat/sessions/{sessionId}/review-memo/docx (FR-14, task 051)
+        group.MapGet("/{sessionId}/review-memo/docx", GetReviewMemoDocx)
+            .AddAiAuthorizationFilter()
+            .WithName("GetReviewMemoDocx")
+            .WithSummary("Render the persisted Review Summary Memo as a downloadable .docx")
+            .WithDescription(
+                "Renders the persisted Review Summary Memo (task 050) via ComposeDocumentRenderer — " +
+                "title, doc/analysis metadata, a per-section table {location, before, after, why, " +
+                "golden-ref} — for the 'Generate memo' toolbar action. 404 when no memo has been " +
+                "generated yet for this session's bound Analysis (never an empty download).")
+            .Produces(StatusCodes.Status200OK, contentType: DocxContentType)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         return app;
     }
@@ -97,27 +143,10 @@ public static class ReviewMemoEndpoints
                 "The review has no flagged sections to memo-ize. Generate a memo only after a completed review with at least one flagged section.");
         }
 
-        var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
-        if (session is null)
+        var (analysisId, resolveError) = await ResolveBoundAnalysisIdAsync(sessionId, tenantId, sessionManager, cancellationToken);
+        if (resolveError is not null)
         {
-            return Problem(
-                StatusCodes.Status404NotFound,
-                "Session Not Found",
-                $"Session {sessionId} was not found.");
-        }
-
-        // Sentinel-aware analysisId resolution (BINDING footgun, project CLAUDE.md): HostContext
-        // carries the sentinel literal EntityType == ChatSessionManager.AnalysisHostContextEntityType
-        // ("sprk_analysisoutput") while EntityId is the sprk_analysis GUID — never the output row id.
-        // Referencing the EXISTING internal constant (not re-typing the literal) per the binding rule.
-        if (session.HostContext is null ||
-            session.HostContext.EntityType != ChatSessionManager.AnalysisHostContextEntityType ||
-            !Guid.TryParse(session.HostContext.EntityId, out var analysisId))
-        {
-            return Problem(
-                StatusCodes.Status400BadRequest,
-                "Session Not Bound To Analysis",
-                $"Session {sessionId} is not bound to an Analysis — there is no completed review to memo-ize.");
+            return resolveError;
         }
 
         // Assembly (pure, no second LLM call) — partial/invalid assembly never reaches persistence:
@@ -129,6 +158,128 @@ public static class ReviewMemoEndpoints
         return Results.Created(
             $"/api/ai/analysis/{analysisId}",
             new GenerateReviewMemoResponse(analysisId, outputId, memo.SectionCount));
+    }
+
+    /// <summary>GET /api/ai/chat/sessions/{sessionId}/review-memo (FR-14, task 051).</summary>
+    private static async Task<IResult> GetReviewMemo(
+        string sessionId,
+        ChatSessionManager sessionManager,
+        AnalysisResultPersistence persistence,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Problem(StatusCodes.Status400BadRequest, "Tenant Required",
+                "Tenant ID not found in token claims or X-Tenant-Id header.");
+        }
+
+        var (analysisId, resolveError) = await ResolveBoundAnalysisIdAsync(sessionId, tenantId, sessionManager, cancellationToken);
+        if (resolveError is not null)
+        {
+            return resolveError;
+        }
+
+        var result = await persistence.GetReviewMemoWithMetadataAsync(analysisId, cancellationToken);
+        if (result is null)
+        {
+            return NoMemoProblem();
+        }
+
+        return Results.Ok(new ReviewMemoReadResponse(analysisId, result.AnalysisName, result.DocumentName, result.Memo));
+    }
+
+    /// <summary>GET /api/ai/chat/sessions/{sessionId}/review-memo/docx (FR-14, task 051).</summary>
+    private static async Task<IResult> GetReviewMemoDocx(
+        string sessionId,
+        ChatSessionManager sessionManager,
+        AnalysisResultPersistence persistence,
+        ComposeDocumentRenderer documentRenderer,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Problem(StatusCodes.Status400BadRequest, "Tenant Required",
+                "Tenant ID not found in token claims or X-Tenant-Id header.");
+        }
+
+        var (analysisId, resolveError) = await ResolveBoundAnalysisIdAsync(sessionId, tenantId, sessionManager, cancellationToken);
+        if (resolveError is not null)
+        {
+            return resolveError;
+        }
+
+        var result = await persistence.GetReviewMemoWithMetadataAsync(analysisId, cancellationToken);
+        if (result is null)
+        {
+            return NoMemoProblem();
+        }
+
+        var model = ReviewMemoDocumentBuilder.Build(result.Memo, result.DocumentName, result.AnalysisName);
+        var bytes = documentRenderer.SynthesizeDocument(model, author: string.Empty);
+
+        return Results.File(bytes, DocxContentType, BuildMemoFileName(result.AnalysisName));
+    }
+
+    /// <summary>
+    /// Sentinel-aware analysisId resolution (BINDING footgun, project CLAUDE.md): HostContext carries
+    /// the sentinel literal EntityType == ChatSessionManager.AnalysisHostContextEntityType
+    /// ("sprk_analysisoutput") while EntityId is the sprk_analysis GUID — never the output row id.
+    /// Referencing the EXISTING internal constant (not re-typing the literal) per the binding rule.
+    /// Shared by all three review-memo handlers (§11 reuse — extracted in task 051 without changing
+    /// <see cref="GenerateReviewMemo"/>'s original tenant-check→sections-check→session-lookup order).
+    /// </summary>
+    private static async Task<(Guid AnalysisId, IResult? Error)> ResolveBoundAnalysisIdAsync(
+        string sessionId,
+        string tenantId,
+        ChatSessionManager sessionManager,
+        CancellationToken cancellationToken)
+    {
+        var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
+        if (session is null)
+        {
+            return (Guid.Empty, Problem(
+                StatusCodes.Status404NotFound,
+                "Session Not Found",
+                $"Session {sessionId} was not found."));
+        }
+
+        if (session.HostContext is null ||
+            session.HostContext.EntityType != ChatSessionManager.AnalysisHostContextEntityType ||
+            !Guid.TryParse(session.HostContext.EntityId, out var analysisId))
+        {
+            return (Guid.Empty, Problem(
+                StatusCodes.Status400BadRequest,
+                "Session Not Bound To Analysis",
+                $"Session {sessionId} is not bound to an Analysis — there is no completed review to memo-ize."));
+        }
+
+        return (analysisId, null);
+    }
+
+    /// <summary>The negative-path 404 shared by both READ handlers (POML acceptance criterion: never
+    /// surface an empty export — surface this clear message instead).</summary>
+    private static IResult NoMemoProblem() => Problem(
+        StatusCodes.Status404NotFound,
+        "No Review Memo",
+        "No Review Summary Memo has been generated for this session's Analysis yet. Generate the review memo first.");
+
+    /// <summary>Sanitizes the analysis name into a safe Content-Disposition filename; falls back to a
+    /// stable default when the name is blank or sanitizes to empty.</summary>
+    private static string BuildMemoFileName(string? analysisName)
+    {
+        const string suffix = "Review Summary Memo.docx";
+        if (string.IsNullOrWhiteSpace(analysisName))
+        {
+            return suffix;
+        }
+
+        var invalid = Path.GetInvalidFileNameChars();
+        var sanitized = new string(analysisName.Where(c => !invalid.Contains(c)).ToArray()).Trim();
+        return sanitized.Length == 0 ? suffix : $"{sanitized} - {suffix}";
     }
 
     /// <summary>Builds a canonical ProblemDetails result (ADR-019).</summary>
@@ -163,3 +314,8 @@ public static class ReviewMemoEndpoints
 
 /// <summary>Response for <c>POST /api/ai/chat/sessions/{sessionId}/review-memo</c>.</summary>
 public sealed record GenerateReviewMemoResponse(Guid AnalysisId, Guid OutputId, int SectionCount);
+
+/// <summary>Response for <c>GET /api/ai/chat/sessions/{sessionId}/review-memo</c> (FR-14, task 051) —
+/// the persisted memo plus the display metadata the "Email memo" toolbar action needs for its subject
+/// line ("Review Summary Memo — {AnalysisName}") without a second round-trip.</summary>
+public sealed record ReviewMemoReadResponse(Guid AnalysisId, string? AnalysisName, string? DocumentName, ReviewMemoDocument Memo);
