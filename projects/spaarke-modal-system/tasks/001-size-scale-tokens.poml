@@ -4,7 +4,7 @@
     <title>Size scale + layout tokens (sizes.ts) — FR-02</title>
     <phase>0 Build</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New typed shared-lib surface with unit tests; foundation the whole shell depends on.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -102,7 +102,9 @@
     <criterion testable="true">Module imports no React and compiles under `@types/react` 18 and 19.</criterion>
   </acceptance-criteria>
 
-  <notes>Prototype `SIZE_ORDER = ["xs","sm","md","lg","xl","wizard","full"]`. `getSurfaceStyle` also sets maxWidth 96vw / maxHeight 92vh (100vw/100vh when full). This module is consumed by task 004 (base shell) and every preset.</notes>
+  <notes>Prototype `SIZE_ORDER = ["xs","sm","md","lg","xl","wizard","full"]`. `getSurfaceStyle` also sets maxWidth 96vw / maxHeight 92vh (100vw/100vh when full). This module is consumed by task 004 (base shell) and every preset.
+
+**COMPLETED 2026-08-01.** Ported `sizes.ts` verbatim from the prototype (7-size `SIZE_SPEC`, `SIZE_ORDER`, `getSurfaceStyle`, `widthLabel`, `SprkModalSize`/`SprkModalLayout` types). 10 Jest assertions green; shared-lib `tsc` build green; eslint clean. `import type { CSSProperties }` (type-only, dual-React safe). Deviations (per notes/wave-a-completion.md): added `uiScale=1` default to both fns; width uses spec FR-02's pre-multiplied `min(cap·uiScale px, N·vw)` form (NOT `calc(var())`), confirmed against spec §6.2. No escalation — md/lg caps match spec exactly.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

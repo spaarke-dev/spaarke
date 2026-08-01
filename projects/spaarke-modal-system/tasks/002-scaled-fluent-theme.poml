@@ -4,7 +4,7 @@
     <title>Scaled Fluent theme builder (scaleTheme) — FR-06</title>
     <phase>0 Build</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New scaled-theme surface (the `--sprk-ui-scale` mechanism) that the base shell + P0.5 app-shell control both depend on; ported pure function with unit tests.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -111,7 +111,9 @@
     <criterion testable="true">Module imports no React/JSX and compiles under `@types/react` 18 and React 19.</criterion>
   </acceptance-criteria>
 
-  <notes>Prototype `SCALED_TOKEN_PREFIXES = ["fontSize","lineHeight","spacing","strokeWidth","borderRadius"]`; rounding is `Math.round(n * scale * 100) / 100`. The prototype's CSS-`zoom` arm lives in its `App.tsx` and is explicitly NOT ported (rejected mechanism). This module is consumed by task 004 (base shell) and the P0.5 app-shell scale control.</notes>
+  <notes>Prototype `SCALED_TOKEN_PREFIXES = ["fontSize","lineHeight","spacing","strokeWidth","borderRadius"]`; rounding is `Math.round(n * scale * 100) / 100`. The prototype's CSS-`zoom` arm lives in its `App.tsx` and is explicitly NOT ported (rejected mechanism). This module is consumed by task 004 (base shell) and the P0.5 app-shell scale control.
+
+**COMPLETED 2026-08-01.** Ported `scaledTheme.ts` verbatim from prototype `theme.ts` (`scaleTheme` + `baseTheme`, 5-prefix list, 2dp rounding, `scale===1` base identity short-circuit). 7 Jest assertions green (px tokens multiply; colors byte-identical; identity short-circuit; dark parity; no base mutation; `baseTheme` mapping); shared-lib `tsc` build green; eslint clean. No React import. No deviation from the prototype. No escalation (installed `@fluentui/react-components ^9.73.2` `Theme` shape matches the prefix families).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

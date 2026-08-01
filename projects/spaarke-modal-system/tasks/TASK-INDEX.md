@@ -14,9 +14,9 @@
 
 | ID | Title | Phase | Status | Deps | Group | Rigor | Model/Effort |
 |----|-------|-------|--------|------|-------|-------|--------------|
-| 001 | Size scale + layout tokens (sizes.ts) | 0 | 🔲 | none | A | FULL | sonnet/high |
-| 002 | Scaled Fluent theme builder (scaleTheme) | 0 | 🔲 | none | A | FULL | sonnet/high |
-| 003 | Reconcile ModalWindowControls glyph | 0 | 🔲 | none | A | FULL | sonnet/high |
+| 001 | Size scale + layout tokens (sizes.ts) | 0 | ✅ | none | A | FULL | sonnet/high |
+| 002 | Scaled Fluent theme builder (scaleTheme) | 0 | ✅ | none | A | FULL | sonnet/high |
+| 003 | Reconcile ModalWindowControls glyph | 0 | ✅ | none | A | FULL | sonnet/high |
 | 004 | SprkModal base shell | 0 | 🔲 | 001,002,003 | — | FULL | sonnet/high |
 | 005 | Presets: ConfirmModal + ChoiceModal (ADR-023) | 0 | 🔲 | 004 | B | FULL | sonnet/high |
 | 006 | Preset: FormModal | 0 | 🔲 | 004 | B | FULL | sonnet/high |
@@ -122,6 +122,8 @@ P0 is the gate for everything. P0.5 (020) needs only 002. P7 (090) is independen
 
 ## Next Action
 
-Execute Group **A** (tasks 001, 002, 003) — no prerequisites; three parallel `task-execute` calls. They unblock 004 (the base shell), which unblocks all presets and every conversion phase.
+Group **A** (001·002·003) ✅ complete (2026-08-01) — shared-lib build green, 20/20 tests pass. **004 is now unblocked.**
 
-Run: `/task-execute projects/spaarke-modal-system/tasks/001-size-scale-tokens.poml` (and 002, 003 in the same message), or say "work on tasks 001, 002, 003".
+Execute task **004** (SprkModal base shell) — serial/solo core join (deps 001,002,003 all ✅; `parallel-safe=false`). It consumes `sizes.ts` + `scaledTheme.ts` + the reconciled `ModalWindowControls`, and unblocks Group **B** (005·006·007·008 presets).
+
+Run: `/task-execute projects/spaarke-modal-system/tasks/004-sprkmodal-base.poml`, or say "work on task 004" / "continue".

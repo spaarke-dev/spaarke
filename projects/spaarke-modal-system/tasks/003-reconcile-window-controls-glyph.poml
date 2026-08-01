@@ -4,7 +4,7 @@
     <title>Reconcile ModalWindowControls to Dataverse FullScreen glyph — FR-03/FR-12</title>
     <phase>0 Build</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies a shipped shared-lib `.tsx` consumed across surfaces (blast radius); the glyph is a P1 rollout prerequisite, so correctness + test update are load-bearing.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -104,7 +104,9 @@
     <criterion testable="true">Tests updated to the new glyph pass; shared-lib build green under `@types/react` 18 and 19.</criterion>
   </acceptance-criteria>
 
-  <notes>Modify-only — no `&lt;justification&gt;` (the component already exists; this edits it, per §11 "modification does not require justification"). The reconciliation is cosmetic and same-owner (2026-07-31), not an ADR-023/021 conflict. Unblocks P1 tasks 030/031 (window-controls rollout to the remaining ~12 dialogs).</notes>
+  <notes>Modify-only — no `&lt;justification&gt;` (the component already exists; this edits it, per §11 "modification does not require justification"). The reconciliation is cosmetic and same-owner (2026-07-31), not an ADR-023/021 conflict. Unblocks P1 tasks 030/031 (window-controls rollout to the remaining ~12 dialogs).
+
+**COMPLETED 2026-08-01.** Swapped `ArrowMaximize20Regular/ArrowMinimize20Regular` → `FullScreenMaximize20Regular/FullScreenMinimize20Regular` (import + toggle JSX) + added a JSDoc glyph note; `Dismiss20Regular`, `IModalWindowControlsProps`, and the both-handlers-optional / renders-nothing logic unchanged. Existing `ModalWindowControls.test.tsx` (aria-label based) stays green — no snapshot to update, so no test edit was required (see notes/wave-a-completion.md deviation 4). `FullScreen*` icons resolve in `@fluentui/react-icons ^2.0.320`; sole consumer `EmailComposer` compiles; shared-lib build green; eslint clean. No escalation.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
