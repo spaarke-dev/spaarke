@@ -8,7 +8,7 @@
     <Descriptions>
       <Description description="Virtual PCF (Surface 1, R3 FR-13): record right-pane conversation panel - compact preview (max 3 threads, last 5 comms, default expanded) with counter and per-message quick-view, opening the shared ConversationWorkspace as a record-filtered modal. ADR-026 Path-A; mounts the shared conversation widget, no reimplementation." languagecode="1033" />
     </Descriptions>
-    <Version>1.13.0</Version>
+    <Version>1.14.0</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>
