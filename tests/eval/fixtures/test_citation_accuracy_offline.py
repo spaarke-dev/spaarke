@@ -109,11 +109,43 @@ def test_malformed_output_scores_zero() -> None:
     print("[PASS] malformed/unparseable output scores 0.0 without raising")
 
 
+def test_findings_carry_split_flaggedclause_and_assessment_not_explanation() -> None:
+    """FR-05 (agreements-r1 task 002): the Action output schema splits the single 'explanation'
+    blob into two discrete fields — flaggedClause (grounded fact) + assessment (reasoned judgment).
+    Every fixture finding must carry both, must NOT carry the legacy 'explanation' key, and NEITHER
+    field may embed an inline 'grounded fact'/'judgment' marker (the split IS the fact/judgment
+    distinction, so downstream consumers — memo FR-13, Word export FR-15, FR-16 materializer — never
+    string-parse a marker out of prose)."""
+    output, _ = _load_fixture()
+    findings = output["flaggedSections"]
+    assert findings, "fixture must have findings to check the split shape"
+
+    banned_markers = ("grounded fact —", "grounded fact -", "advisory judgment —",
+                      "advisory judgment -", "assessment —", "flagged clause —")
+    for i, f in enumerate(findings):
+        assert "explanation" not in f, f"finding[{i}] still carries the legacy 'explanation' blob"
+        assert isinstance(f.get("flaggedClause"), str) and f["flaggedClause"].strip(), \
+            f"finding[{i}] must carry a non-empty flaggedClause (grounded fact)"
+        assert isinstance(f.get("assessment"), str) and f["assessment"].strip(), \
+            f"finding[{i}] must carry a non-empty assessment (reasoned judgment)"
+        for field in ("flaggedClause", "assessment"):
+            low = f[field].lower()
+            for marker in banned_markers:
+                assert marker not in low, (
+                    f"finding[{i}].{field} embeds an inline '{marker.strip()}' marker — the "
+                    "flaggedClause/assessment split carries the fact/judgment distinction structurally"
+                )
+
+    print("[PASS] every finding carries discrete flaggedClause + assessment (FR-05 split), no legacy "
+          "explanation blob, no inline fact/judgment markers")
+
+
 def main() -> None:
     test_mixed_fixture_discriminates_pass_and_fail()
     test_promptflow_tool_entrypoint_matches_score_report()
     test_clean_nda_with_zero_findings_is_vacuously_accurate()
     test_malformed_output_scores_zero()
+    test_findings_carry_split_flaggedclause_and_assessment_not_explanation()
     print("\nALL OFFLINE CHECKS PASSED")
 
 

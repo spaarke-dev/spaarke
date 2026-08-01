@@ -95,6 +95,31 @@ export interface ComposePartialApplyInfo {
   unresolvedCount: number;
 }
 
+/**
+ * ai-advanced-capabilities-agreements-r1 task 032 (FR-16 128KB budget, Leg B — visible notice, not
+ * chunking). ADR-040's `InlinePayloadCapBytes` (128 KB) truncates an over-cap findings payload at the
+ * LEDGER WRITE seam — the full `flaggedSections[]` is gone before the client ever sees it, and the
+ * read projection (`ChatEndpoints.ProjectComposeOutputs`) SKIPS a truncation-marker entry entirely,
+ * so a truncated review is INDISTINGUISHABLE from "no review ran" on the GET response alone.
+ * Chunking would need a SERVER write-seam change (splitting one Action turn's output into multiple
+ * ledger entries before the cap applies) — out of this task's read-only `src/server/**` boundary.
+ * This is the client-only fallback signal: never silently show nothing when a prior review is known
+ * (via the sessionStorage marker or an unusable-but-present payload) to have produced findings.
+ * Placed in this neutral types module (not `ComposeWorkspace.tsx`) so `ComposeBannerStack.tsx` can
+ * import it without a circular `ComposeWorkspace.tsx` ⇄ `ComposeBannerStack.tsx` dependency.
+ */
+export interface ComposeReviewFindingsDegraded {
+  /** Best-known count of findings that should have restored (0 for the 'malformed' case). */
+  expectedCount: number;
+  /**
+   * 'skipped' — the read-projection shows ZERO findings-shaped outputs but a same-tab sessionStorage
+   * marker says a prior review placed N findings (a truncated payload silently dropped server-side).
+   * 'malformed' — a findings-shaped output IS present in the read-projection but every entry failed
+   * the `projectLedgerFindingsToAdvisoryComments` guard (corrupted/partial payload).
+   */
+  reason: 'skipped' | 'malformed';
+}
+
 export interface ComposeWorkspaceState {
   status: ComposeWorkspaceStatus;
   documentRef: ComposeDocumentRef | null;

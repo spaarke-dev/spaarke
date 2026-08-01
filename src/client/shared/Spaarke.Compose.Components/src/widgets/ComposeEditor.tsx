@@ -118,17 +118,31 @@ import {
 import { ComposeFindReplace } from './ComposeFindReplace';
 import { ComposeCommentThread, type ComposeCommentPendingRange } from './ComposeCommentThread';
 import {
-  NdaReviewSummaryPanel,
+  AgreementReviewSummaryPanel,
   NDA_REVIEW_DISCLAIMER_TEXT,
+  formatClauseLocation,
   type NdaReviewFindingSummary,
-} from './NdaReviewSummaryPanel';
-import { deriveClauseLocationLabel } from './ndaClauseLocation';
+} from './AgreementReviewSummaryPanel';
+import { deriveClauseLocationLabel } from './clauseLocation';
 import {
   composeSessionCommentThreadsToAnchoredComments,
   findCommentAnchorRange,
   type ComposeCommentThreadModel,
 } from './ComposeCommentThread.types';
-import { ComposeCommentGutter, COMMENT_GUTTER_WIDTH_PX, MAX_COMMENT_GUTTER_WIDTH_PX } from './ComposeCommentGutter';
+import {
+  ComposeCommentGutter,
+  COMMENT_GUTTER_WIDTH_PX,
+  MAX_COMMENT_GUTTER_WIDTH_PX,
+  resolveMatchingThreadId,
+} from './ComposeCommentGutter';
+// Task 041 (FR-11 multi-select batch AI action) — the sequential batch loop (ADR-016) + its
+// persistent progress/summary Dialog. See batchNoteToolRunner.ts's file header for why the loop
+// mechanics are a standalone module rather than inlined here.
+import { runBatchNoteTool as runBatchNoteToolSequential, type BatchNoteToolProgress } from './batchNoteToolRunner';
+import {
+  ComposeBatchNoteToolProgressModal,
+  type BatchNoteToolOutcomeDisplay,
+} from './ComposeBatchNoteToolProgressModal';
 import { authenticatedFetch } from '@spaarke/auth';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
@@ -176,8 +190,17 @@ import {
 } from './stepOperationInterceptor';
 import { Extension } from '@tiptap/core';
 import { COMPOSE_R4_OPAQUE_ATOMS } from './opaqueAtomNode';
-import { applyImportedRevisions, renderUnresolvedRevisionPlaceholders } from './importedRevisions';
+import {
+  applyImportedRevisions,
+  renderUnresolvedRevisionPlaceholders,
+  collectBlocks,
+  type BlockInfo,
+} from './importedRevisions';
 import { applyImportedCommentAnchors, groupImportedComments } from './importedComments';
+// ai-advanced-capabilities-agreements-r1 task 011 (spec FR-03) — the WS-4 CLIENT CITATION RESOLVER
+// mirroring `Services/Compose/CitationResolver.cs`. See that module's header for the reuse-first
+// justification (CLAUDE.md §11) for why this is a mirror, not a new BFF endpoint.
+import { resolveCitation } from './composeCitationResolver';
 import type {
   ParaIdMapEntry,
   ComposeServerProjection,
@@ -656,10 +679,21 @@ export interface ComposeEditorProps {
   commentAuthor?: string;
 
   /**
+   * task 052 (FR-15, Word-comment export mirror; ADR-012 lib-level configurability) — display name
+   * attributed to advisory (NDA/agreement-review finding) comment threads placed via
+   * {@link ComposeEditorHandle.placeAdvisoryComments}, separate from the session Comments panel's
+   * own `commentAuthor` above (the two use dedicated `useComposeCommentThreads` instances — see
+   * that field's own placement JSDoc). Defaults to `'AI Advisory Review'` — the PRE-EXISTING
+   * hardcoded literal this prop replaces — so every current mount keeps its exact current behavior
+   * until a host opts into a different name.
+   */
+  advisoryCommentAuthor?: string;
+
+  /**
    * ai-advanced-capabilities-nda-r1 (UAT round-2 items #1/#2) — the review-summary panel's
    * visibility state, threaded from the host (`ComposeWorkspace`) so the editor's own "Review"
    * toolbar dropdown can toggle it alongside the right-gutter "Review Notes". The host owns the
-   * panel (it renders `NdaReviewSummaryPanel`); the editor owns the gutter. Omitted for a mount with
+   * panel (it renders `AgreementReviewSummaryPanel`); the editor owns the gutter. Omitted for a mount with
    * no NDA advisory review — the "Review" control then never appears.
    */
   reviewSummary?: {
@@ -673,11 +707,33 @@ export interface ComposeEditorProps {
      * UAT round-5 #1 — the flagged-section findings, so the editor can render the Review Summary panel
      * INSIDE its own top region (below the toolbar), replacing the former host-rendered docked panel.
      * The editor enriches each finding with a doc-derived `locationLabel` (section heading + ordinal —
-     * {@link ../widgets/ndaClauseLocation.ts}) before rendering.
+     * {@link ../widgets/clauseLocation.ts}) before rendering.
      */
     findings: readonly NdaReviewFindingSummary[];
     /** Count of advisory comments that couldn't be anchored (passed through to the panel's notice). */
     placementFailureCount?: number;
+    /**
+     * ai-advanced-capabilities-agreements-r1 task 032 (FR-16 gap #1) — the server-asserted overall
+     * risk, combined across all restored/live findings by the host. Forwarded verbatim to
+     * `AgreementReviewSummaryPanel`'s existing (currently inert per UAT round-5 #2 — the dedicated
+     * banner was deliberately removed) `overallRisk` prop, completing the data path without
+     * reintroducing that removed UI.
+     */
+    overallRisk?: string;
+    /**
+     * FR-14 (ai-advanced-capabilities-agreements-r1 task 051) — "Create Summary Memo" toolbar
+     * dropdown's Generate action (downloads the persisted memo as a .docx). Rendered by
+     * `ComposeFormatToolbar` only when `hasFindings` AND at least one of this / `onEmailMemo` is set.
+     * The host (ComposeWorkspace) owns the fetch + download; the editor is a pure forwarder.
+     */
+    onGenerateMemo?: () => void;
+    /**
+     * FR-14 (task 051) — the dropdown's Email action (reads the persisted memo, opens the canonical
+     * EmailComposer prefilled with its body + subject; the user must act to send — ADR-045).
+     */
+    onEmailMemo?: () => void;
+    /** True while a memo generate/email fetch is in flight — the toolbar disables both actions + spins the trigger. */
+    isMemoActionInFlight?: boolean;
   };
   /**
    * Contextual AI Tool Library — the ACTIVE work type (the product surface the user chose):
@@ -713,6 +769,24 @@ export interface AdvisoryCommentInput {
   riskLevel?: string;
   /** Optional standard/playbook reference the flag cites. */
   standardRef?: string;
+  /**
+   * task 052 (FR-15, Word-comment export mirror) — the review Action's discrete grounded-fact /
+   * reasoned-judgment fields (`ai-advanced-capabilities-agreements-r1` task 002 schema split:
+   * `explanation` → `flaggedClause` + `assessment`). When a caller supplies these, the created
+   * thread's export mirrors the gutter's structured "Flagged clause: … / Assessment says: …" text
+   * with NO string-parsing (see `./advisoryNoteFormatting.getAdvisoryNoteSegments`). Optional and
+   * additive: `explanation` remains required above (unchanged) as the thread's `text`/legacy-degrade
+   * source; no current caller populates these two yet (the client bridge that projects the review
+   * Action's `flaggedSections[]` still reads the pre-002 `explanation` field — see the task 052
+   * execution notes) — they are here so that wiring, once landed, needs no further ComposeEditor
+   * change.
+   */
+  flaggedClause?: string;
+  /** Reasoned-judgment prose (task 002 discrete field) — see `flaggedClause` above. */
+  assessment?: string;
+  /** Full resolved standard-clause text, when the caller has it (task 052 "full clause text when
+   *  available" criterion) — see `ComposeCommentThreadModel.standardText`. */
+  standardText?: string;
 }
 
 /**
@@ -894,16 +968,31 @@ export interface ComposeEditorHandle {
 
   /**
    * NDA-REVIEW advisory comments (ai-advanced-capabilities-nda-r1 task 031). For each flagged
-   * clause, resolves `targetText` against the CURRENT document via `resolveTargetSpans('strict')`
-   * — the SAME anchoring primitive {@link highlightCitedSpan} uses — and, on a unique match,
-   * creates a PERSISTENT comment thread (`useComposeCommentThreads.createThread`) carrying
-   * `explanation` as the thread's text. Uses a DEDICATED `useComposeCommentThreads` instance
-   * (author `'AI Advisory Review'`), separate from the session Comments panel's own instance —
-   * both apply the SAME `commentAnchor` mark to the document, so both are visible as
-   * comment-anchor spans; a future right-gutter layout unifies the browsing UI across both
-   * authors. Ranges that fail strict resolution (`not_found` / `ambiguous`) are reported via the
-   * result's `failed` list — NEVER silently dropped (FR-19 "do not guess" rule). No-op (returns
-   * every item as `not_found`) if the editor is unmounted.
+   * clause, resolves an anchor span and, on a match, creates a PERSISTENT comment thread
+   * (`useComposeCommentThreads.createThread`) carrying `explanation` as the thread's text. Uses a
+   * DEDICATED `useComposeCommentThreads` instance (author = the configurable `advisoryCommentAuthor`
+   * prop, task 052 — defaults to `'AI Advisory Review'`), separate from the session Comments panel's
+   * own instance — both apply the SAME `commentAnchor` mark to the document, so both are visible as
+   * comment-anchor spans; a future right-gutter layout unifies the browsing UI across both authors.
+   * Ranges that fail resolution (`not_found` / `ambiguous`) are reported via the result's `failed`
+   * list — NEVER silently dropped (FR-19 "do not guess" rule). No-op (returns every item as
+   * `not_found`) if the editor is unmounted.
+   *
+   * ai-advanced-capabilities-agreements-r1 task 011 (spec FR-03) — FIXED, binding anchor-resolution
+   * order (never the reverse): (1) DETERMINISTIC — when `item.sectionRef` is present and the `paraIdMap`
+   * prop carries WS-4 `computedNumber`/`listPath` data, {@link resolveDeterministicAnchorSpan} resolves
+   * it via the client `CitationResolver` mirror (`composeCitationResolver.ts`) to the exact paraId's
+   * live span — no text-search (ADR-049). (2) LEGACY TEXT — ONLY when step 1 is skipped (no
+   * `sectionRef`) or returns no match (unparseable citation, zero resolved paragraphs, or a resolved
+   * paraId no longer present in the document): `targetText` resolves against the current document via
+   * `resolveTargetSpans('strict')` + a UNIQUE-match-only prefix retry (`resolveAdvisoryAnchorSpan`,
+   * precision-fixed by task 012 / DEF-01) — the SAME anchoring primitive {@link highlightCitedSpan} uses.
+   * A `sectionRef` that resolves deterministically is NEVER overridden by a fuzzy text guess. An item
+   * whose `sectionRef` AND `targetText` both fail to resolve reports `not_found` (zero matches) or
+   * `ambiguous` (the text — or its distinctive prefix — recurs at more than one location); either way NO
+   * comment is placed, and which of the two is reported is preserved end-to-end (feeds task 012's DEF-01
+   * "never silently place an ambiguous/unresolvable target" contract — `ambiguous` is never silently
+   * downgraded to a first-occurrence placement or to an undifferentiated `not_found`).
    */
   placeAdvisoryComments(items: readonly AdvisoryCommentInput[]): AdvisoryCommentPlacementResult;
 
@@ -1555,37 +1644,95 @@ function distinctiveAnchorPrefix(text: string): string {
   return lastSpace >= 24 ? cap.slice(0, lastSpace) : cap;
 }
 
+/** Outcome of {@link resolveAdvisoryAnchorSpan} — a resolved span, or a REPORTED failure kind. Never a
+ *  silent placement of a should-be-ambiguous target (task 012, DEF-01). */
+type AdvisoryAnchorResolution =
+  | { span: { from: number; to: number }; kind?: undefined }
+  | { span: null; kind: 'not_found' | 'ambiguous' };
+
 /**
- * UAT round-3 S1 — resolve an advisory comment's anchor with graceful fallbacks so a flagged clause is
- * still highlighted/commented when its verbatim `targetText` doesn't STRICTLY resolve (the model lightly
- * paraphrased or truncated it, it spans a paragraph boundary, or it recurs in the document). Unlike a
- * redline EDIT — which MUST stay strict, since a wrong anchor corrupts the document — an advisory COMMENT
- * only needs to sit on the flagged text, so anchoring to a verbatim PREFIX or the FIRST occurrence is a
- * safe, useful fallback, NOT a blind guess (the prefix / first match is real document text that actually
- * appears). Returns null only when even a distinctive prefix cannot be located — the finding then stays
- * in the Review Summary, unanchored (surfaced via the placement-failure count), never silently forced
- * onto the wrong text.
+ * UAT round-3 S1 (task 012 DEF-01 precision fix, ai-advanced-capabilities-agreements-r1) — resolve an
+ * advisory comment's anchor against the live document text. A flagged clause still highlights/comments
+ * when its verbatim `targetText` doesn't STRICTLY resolve because the model lightly paraphrased,
+ * truncated, or split it across a paragraph boundary: retrying with a distinctive verbatim PREFIX
+ * anchors the comment at the flagged clause's start — real document text, not a guess — and this leg
+ * stays because it only ever fires when the retry itself is UNIQUE.
+ *
+ * What this does NOT do (post-012): silently anchor to the FIRST occurrence of a target that recurs
+ * verbatim in the document. The original S1 relaxation added exactly that fallback for the `ambiguous`
+ * case (and again for an ambiguous prefix retry) — but "recurs verbatim" means MULTIPLE real locations
+ * are equally plausible, which is precisely the case the project's binding contract requires to be
+ * REPORTED ambiguous, never silently placed on one of them (a wrong-clause anchor is a legal-correctness
+ * defect, not a cosmetic one). Multiplicity — not light divergence — is the correctness hazard; a UNIQUE
+ * fuzzy (prefix) match is not ambiguous, so that fallback is preserved. `sectionRef`-bearing findings
+ * bypass this text path entirely via {@link resolveDeterministicAnchorSpan} (task 011), which is why the
+ * ambiguity class this closes is now scoped to text-only advisory targets.
+ *
+ * Returns `{ span: null, kind: 'ambiguous' }` when `targetText` (or its distinctive prefix) matches more
+ * than one location, `{ span: null, kind: 'not_found' }` when it matches zero, and the resolved span
+ * otherwise — the finding stays in the Review Summary, unanchored (surfaced via the placement-failure
+ * list, distinguishing which of the two it was), never silently forced onto the wrong text.
  */
-function resolveAdvisoryAnchorSpan(editor: Editor, targetText: string): { from: number; to: number } | null {
+function resolveAdvisoryAnchorSpan(editor: Editor, targetText: string): AdvisoryAnchorResolution {
   const strict = resolveTargetSpans(editor, targetText, 'strict');
-  if (strict.ok) return strict.spans[0];
-  // Recurs verbatim (ambiguous) → anchor the FIRST occurrence of the flagged clause.
+  if (strict.ok) return { span: strict.spans[0] };
   if (strict.kind === 'ambiguous') {
-    const first = resolveTargetSpans(editor, targetText, 'first');
-    if (first.ok) return first.spans[0];
+    // Recurs verbatim at >1 location — REPORT ambiguous. Do NOT guess via first-occurrence (task 012).
+    return { span: null, kind: 'ambiguous' };
   }
   // Paraphrased / truncated / cross-paragraph (not_found) → retry with a distinctive verbatim PREFIX,
-  // which anchors the comment at the flagged clause's start.
+  // which anchors the comment at the flagged clause's start — kept ONLY for a UNIQUE prefix match.
   const prefix = distinctiveAnchorPrefix(targetText);
   if (prefix && prefix !== targetText) {
     const p = resolveTargetSpans(editor, prefix, 'strict');
-    if (p.ok) return p.spans[0];
+    if (p.ok) return { span: p.spans[0] };
     if (p.kind === 'ambiguous') {
-      const pf = resolveTargetSpans(editor, prefix, 'first');
-      if (pf.ok) return pf.spans[0];
+      // The prefix ALSO recurs at >1 location — still a multiplicity hazard, still reported ambiguous,
+      // never resolved via first-occurrence (the same rule as the exact-text case above).
+      return { span: null, kind: 'ambiguous' };
     }
   }
-  return null;
+  return { span: null, kind: 'not_found' };
+}
+
+/**
+ * ai-advanced-capabilities-agreements-r1 task 011 (spec FR-03) — the DETERMINISTIC advisory-anchor
+ * path. Resolves a finding's `sectionRef` ("Section 4.2" / "4.2(b)(iii)" / "Sections 4–7") against the
+ * WS-4 `paraIdMap` (`computedNumber`/`listPath`, already on the Load response — see
+ * `composeCitationResolver.ts`'s header for why this reads that array rather than calling the server),
+ * then anchors to the resolved paragraph(s)' LIVE document span via {@link collectBlocks} — the SAME
+ * paraId→span primitive `applyImportedCommentAnchors`/`applyImportedRevisions` already use (no new
+ * paraId-walk; `blocks` is built ONCE per `placeAdvisoryComments` call, not per item).
+ *
+ * A RANGE citation ("Sections 4–7") resolves to MULTIPLE paragraphs (CitationResolver semantics); this
+ * anchors the single resulting comment thread across the full span — from the FIRST matched
+ * paragraph's start to the LAST matched paragraph's end, in document order (both `resolveCitation`'s
+ * `matches` and `collectBlocks`'s doc-order walk preserve document order, so `matches[0]`/`matches[length-1]`
+ * are the range's true first/last clauses).
+ *
+ * Returns `null` — never a guess — when `sectionRef` is absent, the `paraIdMap` prop is missing/empty
+ * (pre-WS-4 caller or a response predating the reference layer), the citation is unparseable, it
+ * resolves to zero paragraphs, or a resolved paraId is no longer present in the live document (map/doc
+ * drift). The caller falls through to {@link resolveAdvisoryAnchorSpan} (legacy text/position
+ * resolution) in every one of those cases — the FIXED fallback order this task's constraints require
+ * (deterministic first; legacy ONLY when sectionRef is absent/unresolvable; ADR-049 — no text-search
+ * placement when a deterministic paraId resolution exists).
+ */
+function resolveDeterministicAnchorSpan(
+  blocks: readonly BlockInfo[],
+  sectionRef: string | undefined,
+  referenceMap: readonly ParaIdMapEntry[] | undefined
+): { from: number; to: number } | null {
+  if (!sectionRef || !referenceMap || referenceMap.length === 0) return null;
+
+  const resolution = resolveCitation(sectionRef, referenceMap);
+  if (resolution.matches.length === 0) return null;
+
+  const firstBlock = blocks.find(b => b.paraId === resolution.matches[0].paraId);
+  const lastBlock = blocks.find(b => b.paraId === resolution.matches[resolution.matches.length - 1].paraId);
+  if (!firstBlock || !lastBlock || lastBlock.to <= firstBlock.from) return null;
+
+  return { from: firstBlock.from, to: lastBlock.to };
 }
 
 // ---------------------------------------------------------------------------
@@ -1636,6 +1783,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       onOpenDocument,
       isRefreshingProfile,
       commentAuthor = 'You',
+      advisoryCommentAuthor = 'AI Advisory Review',
       reviewSummary,
       activeWorkType = '*',
     } = props;
@@ -2190,10 +2338,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     const qaHighlight = useDocQaHighlight(editor);
 
     // ----- NDA-REVIEW advisory comments (ai-advanced-capabilities-nda-r1 task 031) -----------
-    // A DEDICATED useComposeCommentThreads instance (author 'AI Advisory Review'), separate from
-    // ComposeCommentThread's own panel instance below — see placeAdvisoryComments' JSDoc on
-    // ComposeEditorHandle for why the two stay independent.
-    const advisoryComments = useComposeCommentThreads(editor, 'AI Advisory Review');
+    // A DEDICATED useComposeCommentThreads instance (author = the configurable `advisoryCommentAuthor`
+    // prop, task 052 — default 'AI Advisory Review' preserves the pre-existing hardcoded behavior),
+    // separate from ComposeCommentThread's own panel instance below — see placeAdvisoryComments'
+    // JSDoc on ComposeEditorHandle for why the two stay independent.
+    const advisoryComments = useComposeCommentThreads(editor, advisoryCommentAuthor);
 
     // ----- UAT round-4 #8 — bidirectional linked highlight (doc anchor ↔ gutter card) --------------
     // A single "selected advisory thread" id, shared between the in-document anchor (turns yellow via
@@ -2224,9 +2373,15 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // Gutter-card click → TOGGLE selection (re-clicking the selected card deselects; clicking another
     // switches). On SELECT, scroll the document to the clause so the linked yellow anchor is in view —
     // reusing the coordsAtPos ancestor-scroll technique useDocQaHighlight/the gutter already use.
+    //
+    // `forceSelect` (task 040, bidirectional highlight) — additive param, default false (unchanged
+    // toggle behavior for the gutter-card click site below, which always calls with one arg). Summary-
+    // row navigation (`handleReviewNavigate`) passes `true` so re-clicking the SAME row always
+    // re-selects + re-scrolls rather than toggling the note off — "navigate here" semantics, not
+    // "toggle this note", since a row click's affordance never suggested a deselect action.
     const selectThread = React.useCallback(
-      (threadId: string): void => {
-        const willSelect = selectedThreadIdRef.current !== threadId;
+      (threadId: string, forceSelect = false): void => {
+        const willSelect = forceSelect || selectedThreadIdRef.current !== threadId;
         setSelectedThreadId(willSelect ? threadId : null);
         if (!willSelect || !editor) return;
         const span = findCommentAnchorRange(editor.state.doc, threadId);
@@ -2247,7 +2402,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
 
     // ----- UAT round-5 #1 — Review Summary hosted INSIDE the editor -----------------------------
     // Enrich each finding with a doc-derived location label (section heading + ordinal, which the
-    // model's sectionRef lacks — ndaClauseLocation.ts) by strict-resolving its quotedText to a document
+    // model's sectionRef lacks — clauseLocation.ts) by strict-resolving its quotedText to a document
     // position, then walking to the governing heading. Recomputed only when the finding set changes
     // (a snapshot at review time — a later edit that shifts headings does not re-label, which is fine
     // for an advisory digest). Falls back to the model-only label when a quote can't be resolved.
@@ -2273,11 +2428,35 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
 
     // Summary-row navigation: reuse the editor's own cited-span primitive (strict resolve + ephemeral
     // highlight + scrollIntoView), the SAME anchoring the gutter comment uses — no host round-trip.
+    //
+    // Task 040 (bidirectional highlight, spec FR-10) — SEAM DECISION: this component is the ONE place
+    // both the Review Summary findings (`enrichedReviewFindings`) AND the gutter's advisory threads
+    // (`advisoryComments.threads`) are jointly in scope — `ComposeWorkspace` only holds the findings,
+    // `ComposeCommentGutter` only holds the threads. The reverse link therefore wires HERE, at the call
+    // site, rather than inside `AgreementReviewSummaryPanel.tsx`/`ComposeCommentGutter.tsx` (both stay
+    // presentational; the only new LOGIC — `resolveMatchingThreadId`, the deterministic join — lives in
+    // the gutter module as a pure, directly-unit-tested export). When the finding's shared anchor
+    // resolves to a live thread, drive BOTH the document highlight and the gutter card highlight through
+    // the SAME `selectThread` mechanism the gutter's own card-click already uses (UAT round-4 #8) — ONE
+    // coordinated action: `selectThread` never touches ProseMirror selection/focus (only a decoration +
+    // a manual `scrollTo`), so this never steals editor focus, and it is the ONLY highlight/scroll call
+    // on this path (qaHighlight is explicitly cleared, never also invoked) — no double scroll.
+    // `forceSelect=true` so re-clicking the SAME row always re-navigates. Falls back to the pre-existing
+    // doc-only ephemeral highlight when no note matches (placement failed, or a later edit removed the
+    // anchor) — degrades gracefully, never errors — and clears any stale note selection so rapid
+    // row-switching (matched → unmatched or vice versa) never leaves more than one highlighted pair.
     const handleReviewNavigate = React.useCallback(
       (finding: NdaReviewFindingSummary): void => {
+        const matchedThreadId = resolveMatchingThreadId(finding, advisoryComments.threads);
+        if (matchedThreadId) {
+          qaHighlight.clear();
+          selectThread(matchedThreadId, true);
+          return;
+        }
+        setSelectedThreadId(null);
         if (finding.quotedText) qaHighlight.highlight(finding.quotedText, finding.sectionRef);
       },
-      [qaHighlight]
+      [advisoryComments.threads, selectThread, qaHighlight]
     );
 
     // ----- UAT round-8 #3/#4/#5 — per-Review-Note AI edit tools (the gutter ⋮ menu) --------------
@@ -2329,10 +2508,66 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       resolve?.(result);
     }, []);
 
+    // Task 041 (FR-11 batch reuse) — build + dispatch ONE note-tool request against `threadId`'s
+    // LIVE clause span. This IS `runNoteTool`'s prior request-building body (round-8 #3/#4),
+    // extracted UNCHANGED so `runNoteTool` (single, fire-and-forget below) and the batch loop
+    // (`runBatchNoteToolAsync`, sequential + awaited) share ONE code path — the spec 041 "each
+    // note's outcome is byte-equivalent in form to an individually-run note's outcome" acceptance
+    // criterion holds BY CONSTRUCTION (same function builds the request either way), not by
+    // convention. REJECTS (never silently no-ops) when the note's anchor can't be resolved or the
+    // editor/queue isn't ready — `runNoteTool` still swallows that via its own `.catch()` (unchanged
+    // single-note UX); the batch loop RELIES on the rejection for per-note failure isolation
+    // (`batchNoteToolRunner.runBatchNoteTool` catches it and records a failed outcome).
+    const dispatchNoteToolRequest = React.useCallback(
+      (threadId: string, action: ComposeAiToolbarAction, instruction: string | undefined): Promise<void> => {
+        if (!editor || !enqueueComposeAction || !sessionId) {
+          return Promise.reject(new Error('The editor is not ready to run AI tools.'));
+        }
+        const span = findCommentAnchorRange(editor.state.doc, threadId);
+        if (!span) {
+          return Promise.reject(new Error('This note’s clause could not be located in the current document.'));
+        }
+        const rawText = editor.state.doc.textBetween(span.from, span.to, ' ');
+        const selectionText = rawText.length > 16000 ? rawText.slice(0, 16000) : rawText;
+        return enqueueComposeAction({
+          id: `${action.id}#note-${threadId}#${(noteToolSeqRef.current += 1)}`,
+          bindingId: action.bindingId,
+          args: {
+            slots: {
+              selectionText,
+              selectionAnchorStart: span.from,
+              selectionAnchorEnd: span.to,
+              documentSpeId: documentRef?.speDriveItemId,
+              documentRecordId: documentRef?.sprkDocumentId,
+              sessionId,
+              // Task 042 (FR-12): computed clause-location label for the Assistant's confirmation
+              // header — ConversationPane's extractComposeEditLocationLabel reads this slot. The
+              // advisory thread's sectionRef (when the note came from a review finding) refines the
+              // position-derived label; a non-advisory thread just gets the positional label.
+              locationLabel: deriveClauseLocationLabel(
+                editor.state.doc,
+                span.from,
+                advisoryComments.threads.find(t => t.id === threadId)?.sectionRef
+              ),
+              // Contextual AI Tool Library (phase 3): the free-text instruction for an inputPrompt tool.
+              ...(instruction ? { instruction } : {}),
+            },
+          },
+          // Every note tool is an in-editor EDIT action, so ALWAYS route to the document session (DEF-09)
+          // so the result materializes as an inline redline — independent of the registry's
+          // `materializesInEditor` flag (which the catalog seed may not preserve).
+          documentSessionId: sessionId,
+        }).then(() => undefined);
+      },
+      [editor, enqueueComposeAction, sessionId, documentRef, advisoryComments.threads]
+    );
+
     // Run a note tool: dispatch the compose EDIT action against the NOTE's live clause span — the SAME
     // slot shape `ComposeAiToolbar.handleActionClick` builds for a selection — routed to the document
     // session so the result materializes as an inline redline (DEF-09) and the Assistant confirms with
-    // the model's rationale (round-8 #7).
+    // the model's rationale (round-8 #7). UNCHANGED behavior post-refactor: still fire-and-forget,
+    // still swallows a failed dispatch (the single-note ⋮ menu path never awaited this Promise anyway —
+    // see `ComposeCommentGutter`'s `onRunNoteTool` prop, typed `=> void`).
     const runNoteTool = React.useCallback(
       async (threadId: string, toolId: string): Promise<void> => {
         if (!editor || !enqueueComposeAction || !sessionId) return;
@@ -2346,33 +2581,78 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           if (!entered || !entered.trim()) return;
           instruction = entered.trim();
         }
-        const span = findCommentAnchorRange(editor.state.doc, threadId);
-        if (!span) return;
-        const rawText = editor.state.doc.textBetween(span.from, span.to, ' ');
-        const selectionText = rawText.length > 16000 ? rawText.slice(0, 16000) : rawText;
-        void enqueueComposeAction({
-          id: `${action.id}#note-${threadId}#${(noteToolSeqRef.current += 1)}`,
-          bindingId: action.bindingId,
-          args: {
-            slots: {
-              selectionText,
-              selectionAnchorStart: span.from,
-              selectionAnchorEnd: span.to,
-              documentSpeId: documentRef?.speDriveItemId,
-              documentRecordId: documentRef?.sprkDocumentId,
-              sessionId,
-              // Contextual AI Tool Library (phase 3): the free-text instruction for an inputPrompt tool.
-              ...(instruction ? { instruction } : {}),
-            },
-          },
-          // Every note tool is an in-editor EDIT action, so ALWAYS route to the document session (DEF-09)
-          // so the result materializes as an inline redline — independent of the registry's
-          // `materializesInEditor` flag (which the catalog seed may not preserve).
-          documentSessionId: sessionId,
-        }).catch(() => undefined);
+        void dispatchNoteToolRequest(threadId, action, instruction).catch(() => undefined);
       },
-      [editor, enqueueComposeAction, sessionId, documentRef, promptForInstruction]
+      [editor, enqueueComposeAction, sessionId, promptForInstruction, dispatchNoteToolRequest]
     );
+
+    // ----- Task 041 (FR-11) — sequential batch note-tool run + progress ---------------------------
+    // UI state for `ComposeBatchNoteToolProgressModal`: `progress` non-null WHILE the sequential loop
+    // is running (batchNoteToolRunner.ts owns the loop itself — ADR-016 one-in-flight); `outcomes`
+    // non-null once it finishes (the end-of-batch summary — failure isolation). `null` overall = no
+    // batch modal rendered.
+    const [batchRun, setBatchRun] = React.useState<{
+      toolLabel: string;
+      progress: BatchNoteToolProgress | null;
+      outcomes: readonly BatchNoteToolOutcomeDisplay[] | null;
+    } | null>(null);
+
+    const runBatchNoteToolAsync = React.useCallback(
+      async (threadIds: readonly string[], toolId: string): Promise<void> => {
+        if (!editor || !enqueueComposeAction || !sessionId || threadIds.length === 0) return;
+        const action = getComposeAiToolbarActions().find(a => a.id === toolId);
+        if (!action?.bindingId || !(action.surfaces ?? ['selection']).includes('review-note')) return;
+        // Free-text tool (inputPrompt): collect the instruction ONCE, up front — applied to EVERY
+        // selected note (a per-note prompt across up to BATCH_NOTE_TOOL_SOFT_CAP notes would be
+        // impractical). Cancelling aborts the WHOLE batch — zero dispatches, mirroring the single-note
+        // path's own cancel behavior.
+        let instruction: string | undefined;
+        if (action.inputPrompt) {
+          const entered = await promptForInstruction(action);
+          if (!entered || !entered.trim()) return;
+          instruction = entered.trim();
+        }
+        setBatchRun({
+          toolLabel: action.label,
+          progress: { total: threadIds.length, completed: 0, currentThreadId: threadIds[0] ?? null, outcomes: [] },
+          outcomes: null,
+        });
+        const outcomes = await runBatchNoteToolSequential(
+          threadIds,
+          tid => dispatchNoteToolRequest(tid, action, instruction),
+          progress => setBatchRun(prev => (prev ? { ...prev, progress } : prev))
+        );
+        // Resolve a display label per outcome (clause location when known) for the summary's failure
+        // list — mirrors the gutter card's own no-editor fallback (`formatClauseLocation`), not the
+        // live `deriveClauseLocationLabel` (this modal has no reason to hold an editor position).
+        const displayOutcomes: BatchNoteToolOutcomeDisplay[] = outcomes.map(o => {
+          const thread = advisoryComments.threads.find(t => t.id === o.threadId);
+          const label = thread?.sectionRef ? formatClauseLocation(thread.sectionRef) : 'Note';
+          return { ...o, label };
+        });
+        setBatchRun(prev => (prev ? { ...prev, progress: null, outcomes: displayOutcomes } : prev));
+      },
+      [
+        editor,
+        enqueueComposeAction,
+        sessionId,
+        promptForInstruction,
+        dispatchNoteToolRequest,
+        advisoryComments.threads,
+      ]
+    );
+
+    // `ComposeCommentGutter.onRunBatchNoteTool` is typed `=> void` (fire-and-forget, mirroring
+    // `onRunNoteTool`'s own convention) — the gutter never awaits a dispatch outcome; this component
+    // owns the whole async lifecycle via `batchRun` state instead.
+    const runBatchNoteTool = React.useCallback(
+      (threadIds: readonly string[], toolId: string): void => {
+        void runBatchNoteToolAsync(threadIds, toolId);
+      },
+      [runBatchNoteToolAsync]
+    );
+
+    const closeBatchRun = React.useCallback((): void => setBatchRun(null), []);
 
     // ----- Task 044 — FR-23 "Comments" panel toggle -------------------------
     // Toggling OPEN captures the editor's live selection at click time (see the state declaration
@@ -2516,10 +2796,16 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         highlightCitedSpan: (sourceText, sectionLabel) => qaHighlight.highlight(sourceText, sectionLabel),
         clearCitedHighlight: () => qaHighlight.clear(),
         // NDA-REVIEW advisory comments (ai-advanced-capabilities-nda-r1 task 031): resolve each
-        // flagged clause via the SAME resolveTargetSpans('strict') anchoring highlightCitedSpan
-        // uses, then createThread (the dedicated `advisoryComments` instance above) instead of an
-        // ephemeral highlight. FR-19 "do not guess" — a failed resolution is reported, never
+        // flagged clause, then createThread (the dedicated `advisoryComments` instance above) instead
+        // of an ephemeral highlight. FR-19 "do not guess" — a failed resolution is reported, never
         // silently dropped.
+        //
+        // ai-advanced-capabilities-agreements-r1 task 011 (spec FR-03) — FIXED fallback order: the
+        // deterministic sectionRef→paraId path (resolveDeterministicAnchorSpan) is tried FIRST for
+        // every item; the legacy resolveTargetSpans('strict')/resolveAdvisoryAnchorSpan text path
+        // is the fallback, used ONLY when the deterministic path returns no span (no sectionRef, no
+        // WS-4 reference data, an unparseable citation, or zero/unresolvable matches) — never the
+        // reverse (ADR-049: no text-search when a deterministic paraId resolution exists).
         placeAdvisoryComments: items => {
           if (!editor) {
             return {
@@ -2529,20 +2815,39 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           }
           let placed = 0;
           const failed: AdvisoryCommentFailure[] = [];
+          // Built ONCE per call (a single doc walk), not per item — the SAME paraId→span primitive
+          // applyImportedCommentAnchors/applyImportedRevisions already use (no new paraId-walk).
+          const blocks = collectBlocks(editor);
           for (const item of items) {
-            // UAT round-3 S1: strict-first, then graceful fallbacks (first-occurrence / verbatim prefix)
-            // so a finding whose excerpt lightly diverges or recurs still highlights instead of being
-            // dropped — see resolveAdvisoryAnchorSpan. A comment mis-anchor is non-destructive (unlike a
-            // redline edit), so this is a safe relaxation of strict placement, scoped to advisory comments.
-            const span = resolveAdvisoryAnchorSpan(editor, item.targetText);
+            // (1) DETERMINISTIC — task 011: sectionRef → paraId via the WS-4 CitationResolver mirror.
+            // (2) LEGACY TEXT — UAT round-3 S1, precision-fixed by task 012 (DEF-01): strict-first, then
+            // a verbatim-PREFIX retry so a finding whose excerpt lightly diverges (paraphrase/truncation)
+            // still highlights instead of being dropped — see resolveAdvisoryAnchorSpan. A target that
+            // recurs at >1 location (exact OR prefix) is REPORTED ambiguous, never guessed via
+            // first-occurrence — a wrong-clause anchor is a correctness defect, not a cosmetic one.
+            const deterministicSpan = resolveDeterministicAnchorSpan(blocks, item.sectionRef, paraIdMap);
+            let span: { from: number; to: number } | null;
+            let failureKind: AdvisoryCommentFailure['kind'] = 'not_found';
+            if (deterministicSpan) {
+              span = deterministicSpan;
+            } else {
+              const resolution = resolveAdvisoryAnchorSpan(editor, item.targetText);
+              span = resolution.span;
+              if (resolution.kind) failureKind = resolution.kind;
+            }
             if (!span) {
-              failed.push({ targetText: item.targetText, kind: 'not_found' });
+              failed.push({ targetText: item.targetText, kind: failureKind });
               continue;
             }
             const threadId = advisoryComments.createThread(item.explanation, span, {
               riskLevel: item.riskLevel,
               sectionRef: item.sectionRef,
               standardRef: item.standardRef,
+              // task 052 (FR-15): additive passthrough — undefined today until the upstream
+              // bridge supplies them (see AdvisoryCommentInput's own JSDoc).
+              flaggedClause: item.flaggedClause,
+              assessment: item.assessment,
+              standardText: item.standardText,
             });
             if (threadId) {
               placed += 1;
@@ -2563,8 +2868,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       // via `React.useMemo`), so depending on it directly would rebuild this handle every render.
       // `advisoryComments.threads` (read by getAdvisoryCommentThreads) is intentionally included so
       // the handle refreshes when new threads are added — it changes only on an actual createThread
-      // call (React state), not every render.
-      [editor, redline, qaHighlight, advisoryComments.createThread, advisoryComments.threads]
+      // call (React state), not every render. `paraIdMap` (task 011) is included so a doc
+      // reload/reassignment that changes the WS-4 reference map rebuilds the deterministic
+      // resolution closure rather than reading a stale array.
+      [editor, redline, qaHighlight, advisoryComments.createThread, advisoryComments.threads, paraIdMap]
     );
 
     // ----- Render ---------------------------------------------------------
@@ -2684,6 +2991,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onToggleReviewSummary={reviewSummary?.onToggle}
           reviewNotesOpen={reviewNotesVisible}
           onToggleReviewNotes={() => setReviewNotesVisible(v => !v)}
+          // FR-14 (task 051) — "Create Summary Memo" dropdown. Pure forwarder to the host
+          // (ComposeWorkspace), which owns the fetch/download/EmailComposer-open logic.
+          onGenerateMemo={reviewSummary?.onGenerateMemo}
+          onEmailMemo={reviewSummary?.onEmailMemo}
+          isMemoActionInFlight={reviewSummary?.isMemoActionInFlight}
         />
         {/* task 038 (spaarkeai-compose-r4 zero-error guardrails) — non-blocking, dismissible notice for a
             deferred/unrepresentable/refused step (most importantly formatted or linked PASTE that slips
@@ -2711,13 +3023,16 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             toolbar), replacing the former host-rendered docked panel. Toggling "Review Summary" in the
             toolbar's Review dropdown expands/collapses this in-flow area. The editor owns navigation
             (its own highlightCitedSpan primitive) and enriches each finding's location with the section
-            heading/ordinal from the live document (ndaClauseLocation.ts). */}
+            heading/ordinal from the live document (clauseLocation.ts). */}
         {reviewSummary ? (
-          <NdaReviewSummaryPanel
+          <AgreementReviewSummaryPanel
             open={reviewSummary.open}
             onClose={reviewSummary.onToggle}
             findings={enrichedReviewFindings}
             placementFailureCount={reviewSummary.placementFailureCount}
+            // Task 032 gap #1 — forwarded to the panel's existing (currently inert, UAT round-5 #2)
+            // `overallRisk` prop; completes the data path without reintroducing removed UI.
+            overallRisk={reviewSummary.overallRisk}
             onNavigate={handleReviewNavigate}
           />
         ) : null}
@@ -3004,7 +3319,21 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             onSelectThread={selectThread}
             noteTools={enqueueComposeAction ? noteTools : undefined}
             onRunNoteTool={enqueueComposeAction ? runNoteTool : undefined}
+            onRunBatchNoteTool={enqueueComposeAction ? runBatchNoteTool : undefined}
+            isBatchRunning={batchRun?.progress != null}
           />
+          {/* Task 041 (FR-11) — the persistent batch progress/summary Dialog. Rendered only while a
+              batch is running or showing its just-finished summary (`batchRun !== null`); Fluent's
+              Dialog portals to document.body regardless of where it mounts in the tree, so co-locating
+              it here (next to the gutter that triggers it) needs no new cross-pane conduit. */}
+          {batchRun ? (
+            <ComposeBatchNoteToolProgressModal
+              toolLabel={batchRun.toolLabel}
+              progress={batchRun.progress}
+              outcomes={batchRun.outcomes}
+              onClose={closeBatchRun}
+            />
+          ) : null}
           {/* UAT round-6 #3b — the floating "Comments" (TipTap OOB session-comments) toggle FAB was
               REMOVED per reviewer request (those comments aren't used in the NDA advisory flow; the
               advisory Review Notes gutter is the comment surface). The ComposeCommentThread panel +

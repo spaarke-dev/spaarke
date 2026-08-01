@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>End-to-end UI tests — classifier flow, batch, reopen-durability, memo, Word export</title>
+    <phase>6 Deploy + Verify</phase>
+    <gate>blocked (deps 060)</gate>
+    <status>blocked</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Verification-only against the deployed environment; no product code changes (findings become fix tasks).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scripted browser verification per the ui-test skill.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Runs against the single dev environment post-deploy.</parallel-reason>
+    <deps>060</deps>
+    <tags>e2e-test, testing, ui</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Run the end-to-end verification pass on dev covering the project's five flows: (1) interactive classifier
+    (untyped upload → orient/confirm → grounded review), (2) explicit wizard path (type picked → deterministic bind →
+    auto-run 033), (3) reopen durability (zero-LLM restore of gutter + summary panel), (4) batch + confirmations UX,
+    (5) memo generate/email + Word-comment export fidelity (manual Word open).
+  </prompt>
+  <role>SPAARKE QA-minded developer. ui-test skill (Chrome), dev environment.</role>
+  <goal>All five flows pass on dev (or failures are filed as precise fix tasks); the FR-16 zero-LLM assertion is verified live.</goal>
+
+  <context>
+    <background>
+      Environment: sprk_spaarkeai on spaarkedev1 + spaarke-bff-dev. Test docs: an NDA, a non-NDA agreement (employment-
+      like), a composite (employment+NDA addendum), a non-agreement (invoice), a large agreement (cap test). The
+      zero-LLM reopen assertion: reload the reviewed doc with devtools network open — no dispatch/LLM traffic during
+      re-materialization. Word fidelity: save, download, open in Word (manual step — owner or operator). UI-tests
+      defined per-task (021/040/041/042/051) are the per-flow scripts to compose here.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">.claude/skills/ui-test/SKILL.md</file>
+      <file role="canonical-reference">projects/ai-advanced-capabilities-agreements-r1/spec.md (Success Criteria)</file>
+    </relevant-files>
+    <dependencies><dependency task="060" status="pending">deployed increment</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Findings are FILED (defer-issue tracking or fix tasks), not hot-fixed inside this task; scope: whole task.</constraint>
+    <constraint source="ADR-021">Every flow checked in light AND dark mode; scope: all UI flows.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>E2E verification</topic>
+    <files>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns><pattern name="per-task ui-tests" location="tasks/021,040,041,042,051 &lt;ui-tests&gt; blocks">Compose these into the run plan.</pattern></patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; assemble the test-doc set + the run plan from the per-task ui-tests blocks.</step>
+    <step order="1">Run flows 1–4 (both themes); capture evidence (screenshots, network traces for the zero-LLM assert).</step>
+    <step order="2">Flow 5: memo docx + email prefill + Word-open fidelity (coordinate the manual Word step).</step>
+    <step order="3">File findings; write the e2e report (notes/e2e-report-061.md).</step>
+    <step order="4">Update TASK-INDEX.md: 061 ✅.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Composed run plan"><steps><step>Execute the five-flow plan assembled from tasks 021/040/041/042/051 ui-tests blocks (both themes)</step></steps><expected>All flows PASS with evidence; zero-LLM reopen trace captured.</expected></test>
+  </ui-tests>
+  <tools><tool name="browser">ui-test Chrome integration</tool></tools>
+  <outputs><output type="doc">notes/e2e-report-061.md (evidence + verdicts per flow)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All five flows verdict PASS (or filed findings with repro steps); evidence attached.</criterion>
+    <criterion testable="true">The reopen flow shows ZERO dispatch/LLM network calls during re-materialization (trace attached).</criterion>
+    <criterion testable="true">Dark-mode pass on every new UI surface.</criterion>
+    <criterion testable="true">Negative flows verified: non-agreement decline, below-threshold confirm, over-cap batch confirm.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec Success Criteria 1–14 live verification. Word-open is a manual gate — schedule with the owner.
+
+STEP 0 COMPLETE (2026-08-01): the composed, executable run plan is written to
+notes/e2e-runplan-061.md (five flow scripts assembled verbatim from tasks 021/040/041/042/051/052's
+&lt;ui-tests&gt; blocks + the deferred-UAT notes in 011/012/022/023/032/033 + deploy-report-060.md's
+deployed-state GUIDs + spec.md Success Criteria). Steps 1-3 are BLOCKED pending three prerequisites,
+all documented with exact unblock commands in the run plan §1:
+  (P1) Reasoning-tier Azure OpenAI deployment in spaarkedev1 — config key
+       DocumentIntelligence:ReasoningModel (App Setting DocumentIntelligence__ReasoningModel, token
+       #{AI_REASONING_MODEL}#), currently EMPTY per deploy-report-060.md; ModelTierDeploymentResolver
+       falls back to StandardModel (gpt-4o-mini) so dispatch doesn't hard-fail, but classifier-accuracy/
+       confidence-gate assertions (FR-08/NFR-04) aren't meaningful until this lands. Owner: Azure/infra
+       (env-blocked-external since nda-r1 task 013; commands ready in the run plan, ~15 min once
+       region/model availability is confirmed).
+  (P2) A Claude Code --chrome session (ui-test skill requirements) OR a manual human operator running
+       the same flow scripts in Chrome with a DevTools HAR export for the Flow 3 zero-LLM assertion.
+  (P3) Five DOCX test documents (NDA / employment-like non-NDA / composite employment+NDA / invoice
+       non-agreement / 50+-section cap-test doc) — sourcing guidance + registry notes (only nda+general
+       knowledge packs are indexed; employment/lease/etc. are identity-only rows) in run plan §1.P3.
+Who does what + the five flow scripts (both themes, incl. negative flows: non-agreement decline,
+below-threshold confirm chips, over-cap batch confirm, mismatch warn-only notice, DEF-01 ambiguous-
+target spot-check) + the §3 manual Word-open 4-symptom checklist (incl. the \n\n-as-literal-LF
+rendering nuance 052 flagged as an open question) + the §4 findings-filing protocol are all in the run
+plan. No code changes, no env changes, no .claude/** writes made by this step.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

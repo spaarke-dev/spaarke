@@ -207,6 +207,49 @@ describe('buildLaunchUrl — Analysis params (task 052)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// buildLaunchUrl — subDomain deep-link param (ai-advanced-capabilities-
+// agreements-r1 task 022, spec FR-09 — hub A3 deferred deep-threading leg)
+// ---------------------------------------------------------------------------
+
+describe('buildLaunchUrl — subDomain deep-link param (task 022)', () => {
+  test('omits subDomain when not supplied (back-compat with every existing launch)', () => {
+    const url = buildLaunchUrl({
+      analysisId: 'analysis-guid-1',
+    });
+
+    expect(url).not.toContain('subDomain');
+  });
+
+  test('emits subDomain alongside analysisId (cold-load open-existing door)', () => {
+    const url = buildLaunchUrl({
+      analysisId: 'analysis-guid-1',
+      subDomain: 'nda',
+    });
+
+    expect(url).toContain('analysisId=analysis-guid-1');
+    expect(url).toContain('subDomain=nda');
+  });
+
+  test('emits subDomain alongside worktype (cold-load new-analysis-hub hint door)', () => {
+    const url = buildLaunchUrl({
+      worktype: '100000000',
+      subDomain: 'employment',
+    });
+
+    expect(url).toContain('worktype=100000000');
+    expect(url).toContain('subDomain=employment');
+  });
+
+  test('subDomain is a plain slug — no brace-stripping applied (not a GUID)', () => {
+    const url = buildLaunchUrl({
+      subDomain: 'asset-purchase',
+    });
+
+    expect(url).toContain('subDomain=asset-purchase');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // openSpaarkeAi — back-compat regression
 // ---------------------------------------------------------------------------
 
@@ -296,6 +339,17 @@ describe('openSpaarkeAi — Analysis params (task 052 §ui-tests)', () => {
     expect(params.get('analysisId')).toBe('analysis-guid-1');
     expect(params.get('worktype')).toBeNull();
     expect(navOptions).toMatchObject({ target: 2 });
+  });
+
+  /** task 022 (spec FR-09) ui-test: "Deep-link door" — subDomain=nda reaches the URL data blob. */
+  test('Deep-link door (task 022): subDomain=nda reaches the URL data blob alongside analysisId', () => {
+    openSpaarkeAi({ analysisId: 'analysis-guid-1', subDomain: 'nda' });
+
+    const [pageInput] = nav.navigateTo.mock.calls[0];
+    const params = new URLSearchParams((pageInput as { data: string }).data);
+
+    expect(params.get('analysisId')).toBe('analysis-guid-1');
+    expect(params.get('subDomain')).toBe('nda');
   });
 });
 

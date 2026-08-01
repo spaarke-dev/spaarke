@@ -31,6 +31,10 @@ import { QuickStartModal } from "./QuickStartModal";
 import { MemoryDialog } from "./MemoryDialog";
 import { useAiSession, useDispatchPaneEvent, usePaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
+// task 033 (FR-17 wizard→review auto-run bridge): the typed compose-seed shape the wizard hand-off
+// listener narrows `widget_load{widgetType:'compose'}` payloads to (composeSessionId / analysisId /
+// subDomain / autoRunReview — declared additively on the SAME seed every compose door already uses).
+import type { ComposeWidgetSeed } from "../workspace/composeWidgetData";
 import type {
   IChatMessage,
   DispatchWorkspaceEvent,
@@ -103,6 +107,20 @@ import {
 } from "./composeReviseRouting";
 import { ComposeDocActionChips } from "./ReviseIntentChips";
 import { useCapabilityDiscovery } from "./useCapabilityDiscovery";
+// task 021 (FR-07/08/09 interactive orientation + confirmation gate): the review-intent text
+// detector (checked BEFORE detectReviseThisDocumentIntent — see the decorate hook below) and the
+// stateful gate controller. Deep-import useComposeLaunch from the shared context module (NOT the
+// `@spaarke/compose-components` barrel) — mirrors this file's existing composeActionBridge
+// deep-import rationale (avoids transitively pulling the TipTap editor widgets into the Assistant
+// pane bundle); composeLaunchContext.ts is a READ-ONLY canonical reference this task consumes,
+// never modifies (Spaarke.Compose.Components is off-limits this wave — task 012 owns it).
+import { detectAgreementReviewIntent } from "./agreementReviewRouting";
+import { useAgreementReviewGate } from "./useAgreementReviewGate";
+// task 031 (DEF-09 routing): the pure waiter/timeout seam that resolves the reviewed file's
+// REAL document session (backfilled by registerComposeActiveDocument), so the review dispatch's
+// `sessionIdOverride` can target the SAME session ComposeWorkspace reads compose-outputs from.
+import { createDocumentSessionWaiter } from "./documentSessionWaiter";
+import { useComposeLaunch } from "@spaarke/compose-components/context/composeLaunchContext";
 import {
   AuthLoadingState,
   PlaybookHeaderStrip,
@@ -176,6 +194,90 @@ export const COMPOSE_EDIT_CONFIRMATION =
 export const COMPOSE_WHOLE_DOCUMENT_EDIT_CONFIRMATION =
   'I revised the document — review the tracked changes in the document, then accept, reject, or try another.';
 
+/**
+ * agreements-r1 task 042 (FR-12) — best-effort extraction of a resolvable clause-LOCATION string for
+ * a compose EDIT confirmation, if the dispatch's request or result happens to carry one.
+ *
+ * **Wiring status (2026-07-31)**: neither shipped caller of `enqueueComposeAction`
+ * (`ComposeAiToolbar.tsx`'s inline-toolbar dispatch, `ComposeEditor.tsx`'s `dispatchNoteToolRequest` —
+ * both in the read-only-for-this-task `@spaarke/compose-components` package) currently populates a
+ * location field on `args.slots`, and none of the compose-draft-alternative / compose-revise-document
+ * result schemas (`infra/dataverse/outputschemas/compose-*.schema.json`) carry one either.
+ * `deriveClauseLocationLabel` (`clauseLocation.ts`) is computed today ONLY for the gutter's own note
+ * card (`ComposeCommentGutter.tsx`) — it is never threaded into the AI-action dispatch that reaches
+ * this pane. Closing that gap is a `ComposeEditor.tsx` change (one field added to
+ * `dispatchNoteToolRequest`'s `slots`) outside this task's file boundary (task 042 owns
+ * `ConversationPane.tsx` only — see `notes/042-execution-notes.md`).
+ *
+ * This extraction is written FORWARD-COMPATIBLE / defensive rather than hard-coded to "always empty":
+ * it checks the established `locationLabel` field name (mirrors `ComposeEditor.tsx`'s own
+ * `locationLabel: deriveClauseLocationLabel(...)` convention) plus the `sectionRef`/`location` names
+ * already used elsewhere in this file's result-shape handling (`useNdaReviewAdvisoryCommentsBridge.ts`),
+ * on BOTH the outbound request's forwarded slots and the dispatched result payload. The moment a future
+ * change populates any of these, {@link withComposeEditLocationHeader} activates the bold header with
+ * ZERO further change here. Until then this consistently returns `null`.
+ */
+function extractComposeEditLocationLabel(request: ComposeActionRequest, result: unknown): string | null {
+  const asTrimmedString = (value: unknown): string | null =>
+    typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+
+  const slots = asRecord(request.args?.slots);
+  const fromRequest =
+    asTrimmedString(slots?.locationLabel) ?? asTrimmedString(slots?.sectionRef) ?? asTrimmedString(slots?.location);
+  if (fromRequest) return fromRequest;
+
+  const record = asRecord(result);
+  return (
+    asTrimmedString(record?.locationLabel) ?? asTrimmedString(record?.sectionRef) ?? asTrimmedString(record?.location)
+  );
+}
+
+/**
+ * agreements-r1 task 042 (FR-12) — prepend a BOLD clause-location header to a compose EDIT
+ * confirmation, with clear whitespace separating it from the summary/explanation body below. Renders
+ * the header as a markdown `###` heading — the exact same `.sprk-markdown h3` rule (`SPRK_MARKDOWN_CSS`,
+ * `@spaarke/ui-components/services/renderMarkdown`) every other Assistant message already renders
+ * through: `font-weight: var(--fontWeightBold)`, `margin-top: var(--spacingVerticalL)`,
+ * `margin-bottom: var(--spacingVerticalS)` — Fluent v9 SEMANTIC TOKENS, dark-mode-safe by construction
+ * (ADR-021), with NO new styling surface added by this task (`ConversationPane.tsx` never renders its
+ * own JSX for message content — `content` is a markdown string SprkChat renders).
+ *
+ * When `locationLabel` is unresolved (today's universal case — see
+ * {@link extractComposeEditLocationLabel}) the header is OMITTED rather than replaced with a filler
+ * string: (1) it keeps the confirmation BYTE-IDENTICAL to pre-042 behavior in that case, which is the
+ * exact scenario `ConversationPane.compose-edit-controls.test.tsx` locks with an exact `.toBe` match
+ * (ADR-041 "existing tests pass untouched"); (2) a repeated, non-distinguishing filler label on every
+ * entry of a batch ("Clause update", "Clause update", …) would not actually help a reviewer tell
+ * entries apart — the "graceful… no undefined" requirement is satisfied by cleanly omitting the header,
+ * never by fabricating one.
+ */
+function withComposeEditLocationHeader(confirmationText: string, locationLabel: string | null): string {
+  return locationLabel ? `### ${locationLabel}\n\n${confirmationText}` : confirmationText;
+}
+
+/**
+ * agreements-r1 task 033 (FR-17) — the DISTINCT bridge-failure surface (ADR-019): the wizard armed
+ * an auto-run review, but the document never finished registering as a session file (the DEF-10
+ * register's upload failed or never landed) within the watchdog window. The Analysis itself is
+ * already durable and consistent (created + bound by the wizard BEFORE the hand-off) — only the
+ * auto-run leg degraded, and the recovery is the user's normal conversational trigger. Deliberately
+ * different copy from the wizard's own session-mint failure warning (bind failure) and from the
+ * dispatch path's own error surface (dispatch failure) — three legs, three distinct surfaces.
+ */
+export const WIZARD_AUTO_RUN_BRIDGE_FAILURE_MESSAGE =
+  'I couldn\'t start the agreement review automatically — the document didn\'t finish preparing. ' +
+  'Your analysis was created and saved; open the document tab and ask me to "review this document" to run the review.';
+
+/**
+ * task 033: how long the auto-run watchdog waits for the DEF-10 register to land the session file
+ * before surfacing {@link WIZARD_AUTO_RUN_BRIDGE_FAILURE_MESSAGE} and standing down. Generous vs.
+ * the normal path (doc load + upload is seconds; the server manifest probe alone is ~5s) so a slow
+ * network never false-alarms, while a genuinely failed bridge still surfaces within the session.
+ */
+export const WIZARD_AUTO_RUN_WATCHDOG_MS = 30_000;
+
 export function ConversationPane(): React.JSX.Element {
   const styles = useConversationPaneLayoutStyles();
 
@@ -198,6 +300,12 @@ export function ConversationPane(): React.JSX.Element {
   const restoreCtx = useRestoreContext();
   const paneCollapse = usePaneCollapseContext();
   const dispatch = useDispatchPaneEvent();
+  // task 021 (FR-09 "skip when subDomain already present — explicit path owns it, 023"): a non-null
+  // `subDomain` here means the app was launched already-oriented (composeMode='editor' ribbon launch,
+  // or a server-seeded `workspace_open_tab` — main.tsx's SpaarkeAiWorkspaceRenderer). The interactive
+  // gate (below) skips classification entirely when this is set — read-only consumption of the
+  // shared launch context (composeLaunchContext.ts), never written here.
+  const explicitComposeLaunch = useComposeLaunch();
 
   // Wave 3 Part 1 (UAT-R3 Test #1) — the client-side "active source document" pointer. When a chat
   // upload / browse-direct-upload / opened host document has been registered as the session's active
@@ -210,6 +318,17 @@ export function ConversationPane(): React.JSX.Element {
     documentSessionId?: string;
     fileName?: string;
   } | null>(null);
+
+  // task 031 (DEF-09 routing) — the pure waiter/timeout seam (documentSessionWaiter.ts) that resolves
+  // a REVIEWED file's REAL document session, keyed by that file's session-file id (never a different
+  // file's stale value), backfilled by `registerComposeActiveDocument` below (the SAME reactive
+  // conduit the "revise this document" flow's `activeComposeDocSessionId` already uses). One instance
+  // per pane mount; reset on a fresh chat session (`handleSessionCreated`).
+  const documentSessionWaiterRef = React.useRef(createDocumentSessionWaiter());
+  const awaitDocumentSessionIdFor = React.useCallback(
+    (fileId: string): Promise<string | null> => documentSessionWaiterRef.current.awaitDocumentSessionId(fileId),
+    []
+  );
 
   // #2 double-classify fix (UAT 2026-07-18) — CROSS-PATH dedup registry keyed by filename. A chat file
   // upload promotes via useAttachments' auto-promote (`POST /documents` → classify #1). FIX #7 then
@@ -263,13 +382,23 @@ export function ConversationPane(): React.JSX.Element {
   // seed shape is consumed verbatim by ComposeDirectWidget.buildLaunchFromSeed). WorkspacePane reuses
   // the single Compose tab per distinct file. Returns true when a mount was dispatched.
   const mountFileInCompose = React.useCallback(
-    (sessionFileId: string, fileName?: string): boolean => {
+    (sessionFileId: string, fileName?: string, activeWorkType?: string): boolean => {
       const sessionId = chatSessionIdRef.current;
       if (!sessionFileId || !sessionId) return false;
       dispatch("workspace", {
         type: "widget_load",
         widgetType: "compose",
-        widgetData: { compose: { upload: { sessionId, sessionFileId, fileName } } },
+        widgetData: {
+          compose: {
+            upload: { sessionId, sessionFileId, fileName },
+            // task 021 (FR-07 orientation writes): threaded through the SAME
+            // `ComposeWidgetSeed.activeWorkType` field task 041 (hub) already wired end-to-end
+            // (`buildLaunchFromSeed` -> `<ComposeWorkspace activeWorkType>` -> `getToolsForSurface`).
+            // Omitted (every pre-021 caller) preserves the exact prior wire shape — ComposeEditor's
+            // own `'*'` unscoped default applies.
+            ...(activeWorkType ? { activeWorkType } : {}),
+          },
+        },
         displayName: "Compose",
       } as WorkspacePaneEvent);
       return true;
@@ -340,10 +469,15 @@ export function ConversationPane(): React.JSX.Element {
   // be wired in later via a one-line registry addition, not a code fork). Declared here (before
   // the `ndaReviewBindingId` memo below) so the memo can depend on it.
   const [ndaReviewConsumerType, setNdaReviewConsumerType] = React.useState<string>("nda-review");
+  // task 021 — the SAME deferred capability-discovery seam resolves the `agreement-classify`
+  // bindingId, enabled the moment the review-intent text detector first fires (see the decorate
+  // hook below) — well before classification actually needs to dispatch.
+  const [agreementReviewGateNeeded, setAgreementReviewGateNeeded] = React.useState<boolean>(false);
   const { capabilities: launchableCapabilities } = useCapabilityDiscovery({
     bffBaseUrl,
     authenticatedFetch,
-    enabled: reviseCapabilityNeeded || draftCapabilityNeeded || ndaReviewCapabilityNeeded,
+    enabled:
+      reviseCapabilityNeeded || draftCapabilityNeeded || ndaReviewCapabilityNeeded || agreementReviewGateNeeded,
   });
   const reviseBindingId = React.useMemo<string | null>(
     () =>
@@ -383,6 +517,16 @@ export function ConversationPane(): React.JSX.Element {
     [launchableCapabilities, ndaReviewConsumerType]
   );
 
+  // task 021 (FR-07/08/09 interactive orientation + confirmation gate) — the `agreement-classify`
+  // Binding id, resolved from the SAME closed capability catalog (ADR-039: bindingId only from
+  // discovery, never invented/hardcoded — portable across environments exactly like the bindingIds
+  // above). Enables the SAME deferred capability-discovery fetch the moment review-intent is first
+  // detected (see `agreementReviewGateNeeded` below), so it is resolved by the time the gate needs it.
+  const classifyBindingId = React.useMemo<string | null>(
+    () => launchableCapabilities.find((c) => c.consumerType === "agreement-classify")?.bindingId ?? null,
+    [launchableCapabilities]
+  );
+
   // Wave 4 — the natural-language revise flow's client state:
   //  - `reviseChipsPending`: after auto-mount + the mount-then-ask message, show the four intent chips.
   //  - `pendingNamedRevise`: the user NAMED an intent in the original message ("flag risks in this
@@ -417,6 +561,33 @@ export function ConversationPane(): React.JSX.Element {
     namedIntent: RevisionIntent | null;
   } | null>(null);
   const [sourceDocReadyToken, setSourceDocReadyToken] = React.useState(0);
+  // task 021 — the SAME race-safe buffer, for a natural-language "review this document" (agreement
+  // review-intent) that arrives BEFORE the upload's registration has back-filled
+  // `activeSourceDocRef.sessionFileId`. Reuses the SAME `sourceDocReadyToken` bump (a generic
+  // "a source doc just became ready" signal, not revise-specific) — the effect below fires the
+  // gate once the file is available.
+  const [pendingAgreementReview, setPendingAgreementReview] = React.useState<boolean>(false);
+  // task 023 (FR-09 explicit door) — the SAME race-safe buffer, for a "review this document" that
+  // arrives when the session was launched ALREADY oriented (`explicitComposeLaunch?.subDomain`).
+  // Carries the bound subDomainKey (captured at detection time, not re-read later) so the buffered
+  // effect below calls `agreementReviewGate.runExplicit` directly — no classification gate, ever.
+  const [pendingExplicitAgreementReview, setPendingExplicitAgreementReview] = React.useState<{
+    subDomainKey: string;
+  } | null>(null);
+  // task 033 (FR-17 wizard→review auto-run bridge) — wizard hand-off state:
+  //  - `wizardAutoRunHandledRef`: once-per-Analysis dedupe for the workspace-channel hand-off
+  //    listener (a re-dispatched/duplicate `widget_load` for the SAME analysisId must not re-adopt
+  //    or re-arm; a SECOND wizard run in the same pane session — a NEW analysisId — legitimately
+  //    fires again). Deliberately NOT session-scoped-reset: the bind/arm for an Analysis happens
+  //    exactly once per pane mount regardless of intervening session switches.
+  //  - `wizardAutoRunWatchdog`: armed alongside the explicit-door buffer when the WIZARD (not text)
+  //    armed it — drives the bounded bridge-failure surface (the buffered effect never fires when
+  //    the DEF-10 register's upload fails, and the TEXT door's indefinite-buffer semantics are
+  //    correct for a human mid-conversation but wrong for a machine-armed run the user never sees).
+  const wizardAutoRunHandledRef = React.useRef<Set<string>>(new Set());
+  const [wizardAutoRunWatchdog, setWizardAutoRunWatchdog] = React.useState<{
+    analysisId: string;
+  } | null>(null);
 
   // ── Behaviour hooks (see module map in the header) ────────────────────────
   const injection = useInjectionQueue();
@@ -621,6 +792,47 @@ export function ConversationPane(): React.JSX.Element {
     }, []),
   });
   acceptChipsRef.current = chips.acceptChips;
+
+  // task 021 (FR-07/08/09 interactive orientation + confirmation gate) — the stateful gate
+  // controller. Declared AFTER `chips` (needs `chips.dispatchBinding`/`chips.acceptChips`) and
+  // AFTER `classifyBindingId`/`ndaReviewBindingId` (both resolved above via the SAME
+  // capability-discovery seam). `dataService` reuses the SAME Xrm.WebApi adapter instance the
+  // email-recipient lookup already created (§11 — one instance, two read-only consumers).
+  const agreementReviewGate = useAgreementReviewGate({
+    bffBaseUrl,
+    getAccessToken,
+    getSessionId,
+    dispatch,
+    dataService: emailLookupDataService,
+    classifyBindingId,
+    reviewBindingId: ndaReviewBindingId,
+    mountFileInCompose,
+    dispatchReviewBinding: chips.dispatchBinding,
+    acceptChips: chips.acceptChips,
+    enqueueAssistantMessage: injection.enqueue,
+    inject: injection.inject,
+    // task 031 (DEF-09 routing): resolves the reviewed file's REAL document session so the gate's
+    // dispatch(es) can target it via sessionIdOverride — see documentSessionWaiter.ts header.
+    awaitDocumentSessionId: awaitDocumentSessionIdFor,
+  });
+
+  // task 023 (classifier-path lookup-write seam) — resolves the CLASSIFIER-determined subDomain for
+  // a session being promoted (`HistoryOverlay`'s "Promote to Analysis…"), so the promote flow can
+  // write the resolved `sprk_agreementtype` lookup onto the new Analysis (persistence-matches-
+  // routing; see `agreementTypeLookupWrite.ts`). Only the CURRENT session's classifier resolution is
+  // knowable client-side (`agreementReviewGate` is session-scoped, reset in `handleSessionCreated`)
+  // — promoting a DIFFERENT/older session from the History list deliberately returns `null` rather
+  // than guessing (never a fabricated lookup value). An EXPLICIT-door bind is NOT surfaced here — it
+  // already has a persisted lookup from its own door (wizard/deep-link/open-existing), so it needs
+  // no NEW write (see `getLastResolvedSubDomainKey`'s own doc comment).
+  const getLastResolvedSubDomainKey = agreementReviewGate.getLastResolvedSubDomainKey;
+  const resolveClassifiedSubDomainForSession = React.useCallback(
+    (sessionId: string): string | null => {
+      if (sessionId !== chatSessionIdRef.current) return null;
+      return getLastResolvedSubDomainKey();
+    },
+    [getLastResolvedSubDomainKey]
+  );
 
   // UAT round-5 #9 — when a dispatch settles WITHOUT an NDA result having completed the run, mark it
   // failed. `fail` no-ops unless the run is still `running` (a successful `complete` already won, since
@@ -987,13 +1199,17 @@ export function ConversationPane(): React.JSX.Element {
             const confirmationText = explanation
               ? `${baseConfirmation}\n\n**What I changed:** ${explanation}`
               : baseConfirmation;
+            // task 042 (FR-12) — bold, separated clause-location header when resolvable (see
+            // extractComposeEditLocationLabel's doc comment for current wiring status + fallback).
+            const locationLabel = extractComposeEditLocationLabel(request, dispatched.result);
+            const finalConfirmationText = withComposeEditLocationHeader(confirmationText, locationLabel);
             injection.enqueue(
               ledgerRef
-                ? makeComposeEditControlsMessage(confirmationText, {
+                ? makeComposeEditControlsMessage(finalConfirmationText, {
                     ledgerRef,
                     bindingId: request.bindingId,
                   })
-                : makeLocalAssistantMessage(confirmationText)
+                : makeLocalAssistantMessage(finalConfirmationText)
             );
           }
           if (ledgerRef) {
@@ -1136,7 +1352,18 @@ export function ConversationPane(): React.JSX.Element {
     const { fileId, fileName, cardLabel } = ndaReviewFile;
     mountFileInCompose(fileId, fileName);
     if (ndaReviewBindingId) {
-      chips.dispatchBinding(ndaReviewBindingId, { slots: { fileIds: [fileId] } });
+      // task 031 (DEF-09 routing): await the mounted file's REAL document session (may already be
+      // known — an already-open/ingested document — or back-fill shortly after the mount above) and
+      // thread it as `sessionIdOverride` so this review's compose-disposition SessionOutput lands
+      // where ComposeWorkspace reads compose-outputs. Gracefully proceeds on the bound chat session
+      // (undefined override) if the document session never establishes (no open document / mount
+      // failure) — never blocks, never drops the review.
+      void awaitDocumentSessionIdFor(fileId).then((documentSessionId) => {
+        chips.dispatchBinding(ndaReviewBindingId, {
+          slots: { fileIds: [fileId] },
+          sessionIdOverride: documentSessionId ?? undefined,
+        });
+      });
     } else {
       // Capability discovery hasn't resolved yet (or the catalog is unreachable) — the file still
       // opens in Compose above; tell the user the review itself didn't start (never a silent drop).
@@ -1147,7 +1374,7 @@ export function ConversationPane(): React.JSX.Element {
       );
     }
     setNdaReviewFile(null);
-  }, [ndaReviewFile, ndaReviewBindingId, mountFileInCompose, chips, injection]);
+  }, [ndaReviewFile, ndaReviewBindingId, mountFileInCompose, chips, injection, awaitDocumentSessionIdFor]);
 
   const handleDocAction = React.useCallback(
     (action: ComposeDocAction): void => {
@@ -1250,11 +1477,25 @@ export function ConversationPane(): React.JSX.Element {
           // SAME mount-in-Compose + dispatch-nda-review flow the old top-of-pane card used.
           handleReviewNda();
           return;
+        case LOCAL_CHIP.agreementReviewConfirm:
+        case LOCAL_CHIP.agreementReviewGeneral:
+        case LOCAL_CHIP.agreementReviewBoth:
+          // task 021 — the confirmation-gate chips (below-threshold confirm / pick-another / non-
+          // agreement general-review escape hatch / composite "Both") all route back to the gate
+          // controller, which resolves the pending decision and dispatches the review.
+          agreementReviewGate.handleGateChipAction(actionId);
+          return;
         default:
+          // task 021 — the composite choice-of-lens chips carry a dynamic per-candidate id
+          // (`local:agreement-review-lens:{subDomainKey}`) that cannot be a fixed `case` label; the
+          // gate controller itself no-ops on any id it doesn't recognize (defensive, never throws).
+          if (actionId.startsWith("local:agreement-review-lens:")) {
+            agreementReviewGate.handleGateChipAction(actionId);
+          }
           return;
       }
     },
-    [handleDocAction, injection, handleReviseInCompose, handleReviewNda]
+    [handleDocAction, injection, handleReviseInCompose, handleReviewNda, agreementReviewGate]
   );
   localChipActionRef.current = handleLocalChipAction;
 
@@ -1504,6 +1745,21 @@ export function ConversationPane(): React.JSX.Element {
         // Set BEFORE the active-document POST so a POST failure (chat-visibility loss) does NOT leave
         // this pointing at a STALE prior file — the bytes are already uploaded (sessionFileId is real).
         activeSourceDocRef.current = { sessionFileId, documentSessionId, fileName: name };
+        // task 031 (DEF-09 routing): back-fill the document-session waiter keyed by THIS file's
+        // session-file id — resolves any in-flight `awaitDocumentSessionIdFor(sessionFileId)` call
+        // (the agreement-review dispatch's routing wait) and remembers the value for a repeat review
+        // of an already-registered document. No-op when `documentSessionId` is undefined (a
+        // pointer-only registration with no session yet).
+        documentSessionWaiterRef.current.notify(sessionFileId, documentSessionId);
+        // task 033 (FR-17): bump the GENERIC source-doc readiness signal now that
+        // `activeSourceDocRef.sessionFileId` is real via THIS (Compose-register) path too — the
+        // race-safe buffered effects (notably the explicit-door auto-run, armed by the wizard
+        // hand-off BEFORE this register lands) re-run on it. Mirrors `handleSessionFileUploaded`'s
+        // bump exactly (the token is documented as "a generic 'a source doc just became ready'
+        // signal, not revise-specific"); pre-033 the chat-upload path was simply the only bump
+        // site because no machine-armed intent could precede a Compose-side registration. Effects
+        // whose own pending state is unset no-op on the re-run (each gates on its buffer).
+        setSourceDocReadyToken((t) => t + 1);
         // Wave 3 Part 2 (DEF-11 TEXT-path close): thread the tab's `documentSessionId` so the server
         // sets ChatSession.ActiveDocument.DocumentSessionId → BindingCapabilityTool routes a typed
         // revise/draft into THIS document session (redline in the open doc), not the chat session.
@@ -1622,9 +1878,45 @@ export function ConversationPane(): React.JSX.Element {
       }
 
       const messageText = typeof body.message === "string" ? body.message : "";
-      const detection = detectReviseThisDocumentIntent(messageText);
       const hasActiveSourceDoc =
         activeSourceDocRef.current?.sessionFileId != null && chatSessionIdRef.current != null;
+
+      // task 021 (FR-07/08/09 interactive orientation + confirmation gate) — CHECKED FIRST, before
+      // the generic revise detector below: "review this document" (a review/assessment verb, no
+      // revise-specific verb/keyword) routes here instead of the whole-document revise flow
+      // (compose-revise-document) — design Lens 3d's canonical trigger phrase. task 023 (FR-09 the
+      // ONE routing decision point for both doors, per project instruction "not two"): when the
+      // session was launched ALREADY oriented (`explicitComposeLaunch?.subDomain` — the wizard /
+      // deep-link / open-existing envelope, task 022 delivers it on all three doors), the classifier
+      // NEVER gates the run — `runExplicit` binds the pack DETERMINISTICALLY (no confirm chips, no
+      // re-route); the classifier still runs, but only as a NON-BLOCKING, warn-only sanity check
+      // (ADR-041 — see agreementReviewGate.runExplicit / resolveAgreementReviewSanityMismatch). With
+      // no explicit subDomain, the classifier confirmation gate (`runGate`) runs as before. Negative
+      // criterion (project constraint, BOTH branches): a bare "review" with no document reference,
+      // or with NO active/uploading document, falls through unchanged to the normal agent turn —
+      // neither door ever fires on text alone.
+      if (detectAgreementReviewIntent(messageText)) {
+        const explicitSubDomain = explicitComposeLaunch?.subDomain;
+        if (hasActiveSourceDoc || attachments.uploadedFileCount > 0) {
+          // ALWAYS buffer through an effect (never dispatch inline here) — mirrors the
+          // revise/draft-document race-safe pattern: the review bindingId is resolved by a DEFERRED
+          // capability-discovery fetch enabled by `agreementReviewGateNeeded` just below, so it is
+          // virtually never ready on THIS same synchronous call (the very first trigger in a
+          // session). The buffered effect(s) below fire once BOTH the source file is registered AND
+          // the needed bindingId has resolved.
+          setAgreementReviewGateNeeded(true);
+          if (explicitSubDomain) {
+            setPendingExplicitAgreementReview({ subDomainKey: explicitSubDomain });
+          } else {
+            setPendingAgreementReview(true);
+          }
+          return null; // suppress the agent turn — the explicit bind or the classify->confirm->dispatch gate orchestrates
+        }
+        // No attached/target document — the negative criterion: fall through to the normal agent
+        // turn below (never fire either door on text alone).
+      }
+
+      const detection = detectReviseThisDocumentIntent(messageText);
 
       // R6-6 (UAT 2026-07-21): the document is ALREADY open in Compose (a live document session).
       // A revise/rewrite instruction should update the OPEN document, not answer in the chat pane.
@@ -1715,6 +2007,7 @@ export function ConversationPane(): React.JSX.Element {
       draftBindingId,
       chips,
       modelTierOverride,
+      explicitComposeLaunch,
     ]
   );
 
@@ -1766,6 +2059,69 @@ export function ConversationPane(): React.JSX.Element {
       setReviseChipsPending(true);
     }
   }, [sourceDocReadyToken, pendingReviseThisDocument, mountActiveSourceDocInCompose, injection]);
+
+  // task 021 — the race-safe buffer for a natural-language "review this document" (agreement
+  // review-intent). Fires the classify+gate only once BOTH preconditions are met: (1) the source
+  // file is registered (`sourceDocReadyToken` — the same generic upload-readiness signal the
+  // revise buffer above consumes; already true immediately when `hasActiveSourceDoc` was true at
+  // detection time) AND (2) the deferred capability-discovery fetch has resolved
+  // `classifyBindingId` (mirrors the `pendingDraftDocument`/`draftBindingId` wait above) — every
+  // decorate-hook trigger buffers through here UNCONDITIONALLY (never dispatches inline) precisely
+  // because `classifyBindingId` is virtually never resolved on the same synchronous call that
+  // first flips `agreementReviewGateNeeded`.
+  const runAgreementReviewGate = agreementReviewGate.runGate;
+  React.useEffect(() => {
+    if (!pendingAgreementReview) return;
+    const active = activeSourceDocRef.current;
+    if (active?.sessionFileId == null || chatSessionIdRef.current == null) return;
+    if (!classifyBindingId) return;
+    setPendingAgreementReview(false);
+    void runAgreementReviewGate(active.sessionFileId, active.fileName);
+  }, [sourceDocReadyToken, pendingAgreementReview, runAgreementReviewGate, classifyBindingId]);
+
+  // task 023 (FR-09 explicit door) — the race-safe buffer for a "review this document" arriving on
+  // an ALREADY-oriented session. Gates on `ndaReviewBindingId` (the review dispatch target) rather
+  // than `classifyBindingId` — the explicit door dispatches deterministically and does not need the
+  // classifier ready to proceed (the sanity check inside `runExplicit` degrades gracefully via
+  // `runClassify`'s own null-safe contract if it resolves later or never). Both bindingIds come from
+  // the SAME shared capability-discovery fetch (`agreementReviewGateNeeded` enables it above), so in
+  // practice they resolve together.
+  const runExplicitAgreementReview = agreementReviewGate.runExplicit;
+  React.useEffect(() => {
+    if (!pendingExplicitAgreementReview) return;
+    const active = activeSourceDocRef.current;
+    if (active?.sessionFileId == null || chatSessionIdRef.current == null) return;
+    if (!ndaReviewBindingId) return;
+    const { subDomainKey } = pendingExplicitAgreementReview;
+    setPendingExplicitAgreementReview(null);
+    void runExplicitAgreementReview(active.sessionFileId, active.fileName, subDomainKey);
+  }, [sourceDocReadyToken, pendingExplicitAgreementReview, runExplicitAgreementReview, ndaReviewBindingId]);
+
+  // task 033 (FR-17) — the wizard auto-run BRIDGE-FAILURE watchdog (ADR-019 distinct surfacing).
+  // Armed by the wizard hand-off listener alongside the explicit-door buffer. Three outcomes:
+  //  - SUCCESS: the buffered effect above consumed `pendingExplicitAgreementReview` (dispatch
+  //    fired) → this effect re-runs, sees the buffer empty, and stands down silently.
+  //  - BRIDGE FAILURE: the DEF-10 register never landed a sessionFileId (upload failed / Compose
+  //    never mounted) → the buffer is still full when the timer fires → clear it + surface the
+  //    DISTINCT bridge-failure message. The Analysis stays consistent (created + bound before the
+  //    hand-off); recovery is the user's normal conversational "review this document".
+  //  - SESSION RESET: `handleSessionCreated` clears the buffer → same silent stand-down as success.
+  // The timer never resets on unrelated re-renders (deps are the two state objects, identity-stable
+  // until actually changed), and a text-armed buffer (no watchdog) keeps its shipped
+  // indefinite-buffer semantics untouched.
+  React.useEffect(() => {
+    if (!wizardAutoRunWatchdog) return undefined;
+    if (!pendingExplicitAgreementReview) {
+      setWizardAutoRunWatchdog(null);
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setPendingExplicitAgreementReview(null);
+      setWizardAutoRunWatchdog(null);
+      injection.enqueue(makeLocalAssistantMessage(WIZARD_AUTO_RUN_BRIDGE_FAILURE_MESSAGE));
+    }, WIZARD_AUTO_RUN_WATCHDOG_MS);
+    return () => clearTimeout(timer);
+  }, [wizardAutoRunWatchdog, pendingExplicitAgreementReview, injection]);
 
   // R4-4 (UAT 2026-07-19) — the FIX #7 AUTO-LOAD-on-attach effect was REMOVED. Owner reversed the
   // earlier decision: attaching files should NOT auto-open Compose (uploading 2 files spawned 2 Compose
@@ -1822,8 +2178,24 @@ export function ConversationPane(): React.JSX.Element {
       // task 064: reset the resolved consumerType to the default alongside the file — keeps the
       // two pieces of state consistent even though only `ndaReviewFile` gates behavior.
       setNdaReviewConsumerType("nda-review");
+      // task 021: a fresh session drops any pending confirmation-gate decision + per-file resolved
+      // cache (a new session has no already-oriented files) and any buffered race-safe gate intent.
+      agreementReviewGate.resetForSession();
+      setPendingAgreementReview(false);
+      // task 023: a fresh session also drops any buffered EXPLICIT-door review intent.
+      setPendingExplicitAgreementReview(null);
+      // task 031: a fresh session drops any known/pending document-session routing state — a prior
+      // session's file ids/session ids must never leak into a new session's resolution.
+      documentSessionWaiterRef.current.reset();
     },
-    [setChatSessionId, clearRefinementPrompts, resetAttachments, resetChips, resetEventBatch]
+    [
+      setChatSessionId,
+      clearRefinementPrompts,
+      resetAttachments,
+      resetChips,
+      resetEventBatch,
+      agreementReviewGate,
+    ]
   );
 
   const handleHeaderCollapse = React.useCallback(() => {
@@ -1874,6 +2246,56 @@ export function ConversationPane(): React.JSX.Element {
       // 'create' if unspecified.
       setQuickStartTab(event.quickStartTab ?? "create");
       setQuickStartOpen(true);
+    }
+  });
+
+  // task 033 (FR-17) — the wizard→review auto-run hand-off listener. The Create-Analysis wizard's
+  // finish hook dispatches the SAME `widget_load{widgetType:'compose'}` seed WorkspacePane consumes
+  // to open the document, now additionally carrying `{ composeSessionId, analysisId, subDomain,
+  // autoRunReview }` (ComposeWidgetSeed, agreement work-type only). This pane rides the SAME bus
+  // event (no new channel/event type — ADR-030) to do its two legs:
+  //  (1) ADOPT the wizard-minted ANALYSIS-OWNED session as the pane's active chat session — the
+  //      IDENTICAL adopt+remount mechanism the History menu / hub-grid `session_switch` use
+  //      (`handleSelectHistorySession`), plus the SAME synchronous ref update `ensureChatSession`
+  //      documents (so a same-tick / pre-re-render `getSessionId()` reader — notably the DEF-10
+  //      register's lazy-create guard — sees the adopted id and never mints a SECOND session).
+  //      ComposeWorkspace independently resumes this SAME session as its document session
+  //      (`initialSessionId` → BFF Load resume), so chat ≡ document session: the register's file
+  //      upload, the review's `sessionIdOverride` dispatch, and the compose-outputs read all
+  //      target ONE session (DEF-09 holds; no file-id impedance).
+  //  (2) ARM the shipped explicit review door (task 023's buffer — `runExplicit` on the picked
+  //      sub-domain's pack, deterministic, no classifier gate) + the bridge-failure watchdog. The
+  //      buffered effect fires when the DEF-10 register lands the sessionFileId (the register's
+  //      `sourceDocReadyToken` bump) AND capability discovery resolves the review bindingId.
+  // A seed WITHOUT the hand-off fields (every non-wizard compose open — upload door, Browse,
+  // "Open in Compose", revise mounts) returns immediately: zero behavior change.
+  usePaneEvent("workspace", (event) => {
+    const evt = event as WorkspacePaneEvent & {
+      widgetType?: string;
+      widgetData?: { compose?: ComposeWidgetSeed };
+    };
+    if (evt.type !== "widget_load" || evt.widgetType !== "compose") return;
+    const seed = evt.widgetData?.compose;
+    const composeSessionId = seed?.composeSessionId;
+    const analysisId = seed?.analysisId;
+    if (!composeSessionId || !analysisId) return; // not a wizard hand-off seed
+    if (wizardAutoRunHandledRef.current.has(analysisId)) return; // once per Analysis
+    wizardAutoRunHandledRef.current.add(analysisId);
+
+    if (chatSessionIdRef.current !== composeSessionId) {
+      // Synchronous ref update FIRST (ensureChatSession's own documented pattern) so any
+      // same-tick getSessionId() reader sees the adopted session before the re-render lands.
+      chatSessionIdRef.current = composeSessionId;
+      handleSelectHistorySession(composeSessionId);
+    }
+
+    if (seed?.autoRunReview === true && seed.subDomain) {
+      // Enable the SAME deferred capability-discovery fetch the text door uses, so the review
+      // bindingId resolves by the time the buffered effect needs it (never dispatch inline here —
+      // the bindingId is virtually never resolved on this synchronous tick).
+      setAgreementReviewGateNeeded(true);
+      setPendingExplicitAgreementReview({ subDomainKey: seed.subDomain });
+      setWizardAutoRunWatchdog({ analysisId });
     }
   });
 
@@ -1998,6 +2420,8 @@ export function ConversationPane(): React.JSX.Element {
               onSelectSession={handleSelectHistorySession}
               bffBaseUrl={bffBaseUrl}
               authenticatedFetch={authenticatedFetch}
+              resolveClassifiedSubDomain={resolveClassifiedSubDomainForSession}
+              dataService={emailLookupDataService}
             />
             {/* R4-5: New session — clears the persisted session id and remounts
                 SprkChat to mint a fresh session. PaneHeader's rightSlot already

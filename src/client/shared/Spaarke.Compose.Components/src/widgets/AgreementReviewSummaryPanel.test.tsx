@@ -1,11 +1,12 @@
 /**
- * NdaReviewSummaryPanel.test.tsx — review-summary docked panel (ai-advanced-capabilities-nda-r1
- * task 030, FR-07).
+ * AgreementReviewSummaryPanel.test.tsx — review-summary docked panel (ai-advanced-capabilities-nda-r1
+ * task 030, FR-07; renamed off the NDA-specific filename by ai-advanced-capabilities-agreements-r1
+ * task 010 — pure rename).
  *
  * Two layers, mirroring `ComposeCommentThread.test.tsx`'s convention:
  *  1. `deriveOverallRisk` — pure function unit tests (empty/undefined-riskLevel handling, max-severity
  *     selection across mixed findings).
- *  2. UI — `NdaReviewSummaryPanel` rendered directly (no editor dependency — this panel is
+ *  2. UI — `AgreementReviewSummaryPanel` rendered directly (no editor dependency — this panel is
  *     presentational only): closed renders nothing, empty state, the disclaimer banner is always
  *     present, findings render with citations, the placement-failure notice is optional, and an
  *     ADR-021 dark-mode check (no hex literals in the rendered output).
@@ -15,14 +16,14 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import {
-  NdaReviewSummaryPanel,
+  AgreementReviewSummaryPanel,
   deriveOverallRisk,
   deriveTakeaway,
   formatSectionRef,
   formatClauseLocation,
   NDA_REVIEW_DISCLAIMER_TEXT,
   type NdaReviewFindingSummary,
-} from './NdaReviewSummaryPanel';
+} from './AgreementReviewSummaryPanel';
 
 // ---------------------------------------------------------------------------
 // 1. deriveOverallRisk — pure function
@@ -150,7 +151,7 @@ describe('formatClauseLocation', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. NdaReviewSummaryPanel — Fluent v9 UI
+// 2. AgreementReviewSummaryPanel — Fluent v9 UI
 // ---------------------------------------------------------------------------
 
 const SAMPLE_FINDINGS: NdaReviewFindingSummary[] = [
@@ -183,7 +184,7 @@ function renderPanel(opts: {
   const onClose = opts.onClose ?? jest.fn();
   const result = render(
     <FluentProvider theme={opts.theme ?? webLightTheme}>
-      <NdaReviewSummaryPanel
+      <AgreementReviewSummaryPanel
         open={opts.open ?? true}
         onClose={onClose}
         findings={opts.findings ?? SAMPLE_FINDINGS}
@@ -195,7 +196,7 @@ function renderPanel(opts: {
   return { ...result, onClose };
 }
 
-describe('NdaReviewSummaryPanel', () => {
+describe('AgreementReviewSummaryPanel', () => {
   it('renders nothing when closed', () => {
     renderPanel({ open: false });
     expect(screen.queryByTestId('nda-review-summary-panel')).not.toBeInTheDocument();

@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>Document classifier — Reasoning-tier work-type + sub-domain detection (registry-driven)</title>
+    <phase>2 Classifier + Routing</phase>
+    <gate>blocked (deps 001)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New AI capability on the dispatch surface (ADR-039 catalogs); classification correctness gates every downstream review; eval obligation.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Classifier prompt design (two-level intent inference + composite/multiplicity detection + calibrated confidence) is high-judgment prompt authoring.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>ai, jps, azure-openai, classifier, eval</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Author the document classifier: given a document, infer (1) is this an AGREEMENT at all (vs pleading, invoice,
+    correspondence, memo) and (2) WHICH agreement sub-domain(s) — the typed enum drawn from sprk_agreementtype rows —
+    with a calibrated confidence per candidate, detecting COMPOSITE documents (e.g., employment agreement containing an
+    NDA addendum → multiple candidates). Reuse the Insights Layer-1 classification node CONTRACT (typed enum +
+    confidence) but run on the REASONING tier — accuracy-first, NOT gpt-4o-mini (a wrong route wastes a full review).
+  </prompt>
+  <role>SPAARKE AI capability author. Classification prompt design, structured outputs, calibration, the Layer-1 node pattern.</role>
+  <goal>
+    A classifier capability (Action/node in the closed catalog) returns {isAgreement, candidates[{subDomainKey, confidence}],
+    composite:boolean, reasoning} with subDomainKey drawn from the live registry; eval set green incl. negative + composite cases.
+  </goal>
+
+  <context>
+    <background>
+      Ground truth: NO sub-domain classifier exists — nda-review has only an inline prompt scope-guard that declines
+      non-NDAs. The Insights Layer-1 node (layer1-classification.node.json: 8-value enum + confidence + gate, executed
+      by AiAnalysisNodeExecutor, knowledgeRetrieval Never, tight token cap) is the proven CONTRACT to copy — but its
+      cheap-model economics are INVERTED here (design Lens 3d): classify on the Reasoning tier. The enum values must be
+      DATA-DRIVEN from sprk_agreementtype (sprk_key + sprk_classificationcue per row + the general fallback row) so a
+      new registered type extends the classifier with zero code. Output is consumed by 021 (orientation + confirmation
+      gate: ≥0.85 auto-proceed / below → confirm / composite → choice-of-lens) and 023 (explicit-path sanity check).
+      nda-r1 eval lesson: author negative cases early — they exposed the missing scope guard last time.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/layer1-classification.node.json</file>
+      <file role="new">infra/dataverse/actions/agreement-classify.action.json (+ output schema) — or node config per the Layer-1 pattern; decide in step 1</file>
+      <file role="canonical-reference">infra/dataverse/sprk_agreementtype-rows.json (001)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">registry rows (enum source + classification cues + per-type thresholds)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">The classifier is prompt-controlled + schema-validated inside the closed catalogs — NO second intent-detection mechanism outside the catalog; scope: the new capability row/config.</constraint>
+    <constraint source="ADR-016">Reasoning tier via the model-tier resolver (catalog stores tier intent, not deployment name); rate limits honored. Scope: tier fields + dispatch.</constraint>
+    <constraint source="ADR-013">No new executor unless the extension test fails — prefer AiAnalysisNodeExecutor / ActionRunner reuse (the Layer-1 precedent). Scope: execution wiring.</constraint>
+    <constraint source="project">Enum values come from the REGISTRY at prompt-assembly time (data-driven) — hardcoding the 10 keys in the prompt/schema is a defect; the general fallback is selected via sprk_isfallback, no magic strings.</constraint>
+    <constraint source="project">Confidence is per-candidate and calibrated-in-intent: instruct honest uncertainty; the ≥0.85 gate (021) depends on it. Per-row sprk_confidencethreshold overrides the global baseline (null → 0.85).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Classification capability authoring</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+    </files>
+    <patterns>
+      <pattern name="Layer-1 classification node" location="src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/layer1-classification.node.json">Copy the contract shape (typed enum + confidence + retry-once structured output); change tier economics + make the enum registry-driven.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; audit-before-implement: check how Layer-1 is dispatched + whether a registry-driven enum can ride the same structured-output path.</step>
+    <step order="1">Decide packaging (Action row vs node config) with the extension test; document.</step>
+    <step order="2">Author the classifier prompt: two-level inference, composite detection, per-candidate calibrated confidence, honest-uncertainty instruction, registry-supplied type list + cues injected as template data.</step>
+    <step order="3">Define the closed output schema {isAgreement, candidates[], composite, reasoning}; retryOnce structured output.</step>
+    <step order="4">Wire Reasoning-tier dispatch (resolver path); token budget appropriate for a classification (small output, full-doc input).</step>
+    <step order="5">Author the eval set: per-type positives (NDA + at least one stub non-NDA agreement), non-agreement negatives (invoice/pleading), a composite (employment+NDA), a low-confidence ambiguous case; run green.</step>
+    <step order="6">Update TASK-INDEX.md: 020 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If registry-driven enum injection cannot ride the existing structured-output/dispatch path without a NEW executor or endpoint, STOP and present the §11 extension-test result before building one.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Insights Layer-1 classifier (layer1-classification.node.json — typed enum + confidence, gpt-4o-mini) and nda-review's inline prompt scope-guard (declines only, no routing). No sub-domain classifier exists (HUB-R1-REVIEW grep evidence).</existing>
+    <extension>Yes — reuses the Layer-1 node CONTRACT + existing executor/dispatch path; new is only the capability row/config + registry-driven enum + Reasoning-tier economics. No new executor unless the extension test fails (escalation).</extension>
+    <cost-of-doing-nothing>"Review this document" cannot identify the agreement or its type — no orientation, no type-specific knowledge binding; the interactive path (FR-07/08) and the type-agnostic promise fail outright.</cost-of-doing-nothing>
+  </justification>
+  <tools><tool name="terminal">jps-validate, eval runs, dotnet test</tool></tools>
+
+  <outputs>
+    <output type="config">classifier Action/node config + output schema</output>
+    <output type="test">classifier eval cases (contract/Eval family)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A sample NDA classifies isAgreement=true, top candidate nda with high confidence; a lease-like doc (no lease pack yet) yields a lower-confidence candidate or the general fallback with composite=false.</criterion>
+    <criterion testable="true">A composite employment+NDA doc returns BOTH candidates with composite=true.</criterion>
+    <criterion testable="true">Negative: an invoice/pleading returns isAgreement=false — no agreement candidates fabricated.</criterion>
+    <criterion testable="true">The type list in the prompt/schema is assembled from registry rows at runtime — adding a stub row extends the enum with zero code change (test with a stub).</criterion>
+    <criterion testable="true">The run routes to the Reasoning deployment (assert via dispatch telemetry/config, not assumption); eval suite green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-07 core; design Lens 3(d). Consumed by 021 (orientation+gate) and 023 (sanity check). The registry is the single source of truth — zero code per new type.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

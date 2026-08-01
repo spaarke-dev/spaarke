@@ -19,6 +19,9 @@ import {
   DOCUMENT_REVIEW_CAPABILITIES,
   getDocumentReviewCapability,
   buildNdaReviewChip,
+  buildAgreementReviewLensChipId,
+  decodeAgreementReviewLensChipId,
+  isLocalChip,
   LOCAL_CHIP,
 } from '../localActionChips';
 
@@ -71,5 +74,39 @@ describe('buildNdaReviewChip — label parameterization', () => {
     // The local-chip bindingId sentinel stays the same regardless of docType — only the
     // display label and the resolved consumerType (via getDocumentReviewCapability) vary.
     expect(chip.bindingId).toBe(LOCAL_CHIP.ndaReview);
+  });
+});
+
+/**
+ * task 021 (FR-08 interactive confirmation gate — composite choice-of-lens chips).
+ * A per-candidate dynamic chip id cannot be a fixed `LOCAL_CHIP` constant (the candidate
+ * set is classifier output, not catalog data) — the sub-domain key is encoded as a suffix
+ * and decoded on click.
+ */
+describe('agreement-review composite-lens chip id encode/decode', () => {
+  it('round-trips a sub-domain key through encode -> decode', () => {
+    const id = buildAgreementReviewLensChipId('employment');
+    expect(id).toBe('local:agreement-review-lens:employment');
+    expect(decodeAgreementReviewLensChipId(id)).toBe('employment');
+  });
+
+  it('round-trips a hyphenated key', () => {
+    const id = buildAgreementReviewLensChipId('asset-purchase');
+    expect(decodeAgreementReviewLensChipId(id)).toBe('asset-purchase');
+  });
+
+  it('decode returns null for a bindingId that is not a lens chip', () => {
+    expect(decodeAgreementReviewLensChipId(LOCAL_CHIP.agreementReviewConfirm)).toBeNull();
+    expect(decodeAgreementReviewLensChipId('some-real-binding-guid')).toBeNull();
+  });
+
+  it('a lens chip id is recognized as a local chip (isLocalChip)', () => {
+    expect(isLocalChip(buildAgreementReviewLensChipId('nda'))).toBe(true);
+  });
+
+  it('the three new gate action ids are reserved local:* sentinels, not real Binding guids', () => {
+    expect(isLocalChip(LOCAL_CHIP.agreementReviewConfirm)).toBe(true);
+    expect(isLocalChip(LOCAL_CHIP.agreementReviewGeneral)).toBe(true);
+    expect(isLocalChip(LOCAL_CHIP.agreementReviewBoth)).toBe(true);
   });
 });

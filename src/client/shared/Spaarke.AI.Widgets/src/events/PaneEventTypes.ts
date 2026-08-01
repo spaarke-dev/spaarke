@@ -93,14 +93,21 @@ export interface ComposeFlowSelection {
 export interface ComposeAdvisoryCommentItem {
   /** Verbatim quoted NDA clause excerpt — the `resolveTargetSpans('strict')` anchor target. Tier-3. */
   targetText: string;
-  /** The AI's advisory explanation for this flag — becomes the comment thread's text. Tier-3. */
+  /** The AI's advisory explanation for this flag — becomes the comment thread's text. Tier-3.
+   *  Post the agreements-r1 task-002 schema split the Action emits `flaggedClause`/`assessment`
+   *  instead; dispatchers then compose this from those fields (legacy-degrade source for the
+   *  thread's `text`) and ALSO carry the discrete fields below. */
   explanation: string;
-  /** Section/clause reference from the NDA-REVIEW output (e.g. "3.2"). Tier-1 safe identifier. */
+  /** Section/clause reference from the review output (e.g. "3.2"). Tier-1 safe identifier. */
   sectionRef?: string;
   /** Coarse qualitative risk signal (NEVER a numeric score, per ADR-039). Tier-1 safe enum-like string. */
   riskLevel?: string;
   /** Optional standard/playbook reference the flag cites. Tier-1 safe identifier. */
   standardRef?: string;
+  /** Grounded-fact prose (agreements-r1 task-002 split: what the clause does). Tier-3. */
+  flaggedClause?: string;
+  /** Reasoned-judgment prose (agreements-r1 task-002 split: why it is a risk/deviation). Tier-3. */
+  assessment?: string;
 }
 
 // ---------------------------------------------------------------------------

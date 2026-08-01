@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>FR-16 completion — summary-panel restore + 128KB payload budget + supersede/highest-turn protection</title>
+    <phase>3 Durable Review</phase>
+    <gate>open (deps 031 satisfied)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Completes the durable-recall guarantee; edge-case correctness (caps, coexisting outputs) for legal work product; ComposeWorkspace/panel .tsx changes.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Specified edge-case engineering against verified constraints (cap value, highest-turn selection, FR-29 second layer).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>031</deps>
+    <tags>compose, spaarkeai, frontend, durable-recall</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Close the FR-16 guarantee's three gaps. (1) SUMMARY-PANEL RESTORE: AgreementReviewSummaryPanel is fed ONLY from the
+    live event today — on reopen it must repopulate from the re-materialized findings (rows + risk badges + overallRisk),
+    not just the gutter. (2) 128KB BUDGET: an over-cap findings payload becomes a truncation marker the projection
+    SKIPS — silently vanishing on reopen; chunk findings across outputs or budget the payload, and surface (never
+    swallow) a truncated case. (3) COEXISTENCE: the materializer replays only the HIGHEST-turn compose output — a later
+    draft-alternative must not evict findings durability, and supersede ("Try another") must never retract the findings entry.
+  </prompt>
+  <role>SPAARKE platform developer. Compose materialization pipeline, panel state, ledger payload management.</role>
+  <goal>Reopen restores gutter + summary panel; big reviews survive the cap; findings durability survives coexisting/superseded edits.</goal>
+
+  <context>
+    <background>
+      Verified facts (HUB-R1-REVIEW §4): NdaReviewSummaryPanel fed only from the live PaneEventBus event
+      (ComposeWorkspace.tsx:1577-1586); InlinePayloadCapBytes=128KB (SessionLedgerEntries.cs:50), truncation markers
+      skipped by ProjectComposeOutputs (ChatEndpoints.cs:1326-1329); materializer selects targetLedgerRef or the single
+      highest-turn output (ComposeWorkspace.tsx:1420-1422); FR-29 session-annotations store (:814-852 save-on-mutation,
+      :731/:759 rehydrate) is the second durability layer for placed comments; POST /compose-outputs/supersede exists
+      (ChatEndpoints.cs:1337-1408). Design options for coexistence: multi-select materialization (replay findings +
+      latest edit outputs distinctly) vs relying on FR-29 for placed comments + findings re-read — choose deliberately,
+      document. Chunking option: emit findings as multiple compose outputs (per-section groups) each under the cap.
+      A long agreement with many quotedText findings plausibly exceeds 128KB — budget realistically.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx (materialization selection + panel feed)</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/AgreementReviewSummaryPanel.tsx (restore path)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionLedgerEntries.cs (cap)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="031" status="pending">routing + gating (findings land in the right session, classified)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">The reopen guarantee is CLOSED: gutter AND summary panel AND overallRisk restore with zero LLM calls; a truncated payload is SURFACED (visible notice) — silent vanish is the named failure mode. Scope: all three gaps.</constraint>
+    <constraint source="ADR-040">Chunked findings stay ADR-040-conformant (each output store-before-render, standard DTO shape); no new ledger entry types. Scope: chunking.</constraint>
+    <constraint source="project">Supersede semantics: superseding an EDIT output must not touch findings outputs; findings are never superseded by edits. Scope: coexistence design.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Materialization completeness + payload management</topic>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>projects/ai-advanced-capabilities-agreements-r1/notes/HUB-R1-REVIEW-2026-07-30.md</file>
+    </files>
+    <patterns>
+      <pattern name="FR-29 annotations layer" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx (~:814-852, :731-759)">The second durability layer — decide its role in coexistence deliberately.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; measure a realistic worst-case findings payload (50-section agreement) against the cap; re-verify selection logic refs.</step>
+    <step order="1">Design + document the coexistence model (multi-output replay vs FR-29-backed) and the chunking scheme; pick the simplest that meets the closed guarantee.</step>
+    <step order="2">Implement summary-panel restore from re-materialized findings (rows, badges, overallRisk).</step>
+    <step order="3">Implement chunking/budget + the visible truncated-case notice.</step>
+    <step order="4">Implement coexistence: findings replay alongside the latest edit output; supersede leaves findings intact.</step>
+    <step order="5">Tests: reopen-full-restore, over-cap chunked review restores, findings+edit coexistence, supersede protection.</step>
+    <step order="6">Update TASK-INDEX.md: 032 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the closed guarantee cannot be met without changing the server projection/selection (ChatEndpoints), STOP and present the minimal server delta with §10 justification before implementing.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Zero-LLM reopen restore"><steps><step>Review a doc; reload the page/session with devtools network open</step></steps><expected>Gutter notes + summary rows + overallRisk restore; zero dispatch/LLM calls in the trace.</expected></test>
+    <test name="Dark mode"><steps><step>Reopen in dark mode</step></steps><expected>Restored badges/rows use semantic tokens.</expected></test>
+  </ui-tests>
+  <tools><tool name="npm">Compose lib build + tests</tool></tools>
+
+  <outputs>
+    <output type="code">ComposeWorkspace.tsx + AgreementReviewSummaryPanel.tsx (restore + caps + coexistence)</output>
+    <output type="test">reopen/cap/coexistence tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Reopen a reviewed doc: gutter notes AND summary-panel rows AND overallRisk all restore; zero LLM calls (network assert).</criterion>
+    <criterion testable="true">A synthetic &gt;128KB findings set restores completely via chunking (or the truncated case shows an explicit notice — never silent absence).</criterion>
+    <criterion testable="true">Run review → accept a draft-alternative → reload: findings AND the edit state both restore (highest-turn-only eviction fixed).</criterion>
+    <criterion testable="true">Supersede an edit output → findings unaffected (ledger + UI proof).</criterion>
+    <criterion testable="true">Negative: a corrupted/partial chunk set surfaces a visible degraded-restore notice, not a crash.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-16 completion; HUB-R1-REVIEW §4 risks. With this task, "reopen restores the review deterministically" is fully true — the owner's Phase-3 leg.
+
+COMPLETION SUMMARY (2026-07-31): All 3 gaps closed client-side, no server changes, no escalation fired.
+(1) Summary-panel restore: `materializeFindingsOutput` (new, extracted from the old inline branch) now
+populates `reviewSummaryFindings`/`reviewSummaryFailedCount`/`reviewSummaryOverallRisk` on the ledger-restore
+path, mirroring the live `onAdvisoryComments` capture — mirrors moved earlier in ComposeWorkspace.tsx so the
+restore path can see them. (2) 128KB budget: chosen Leg B (explicit visible notice, not chunking — chunking
+needs a server write-seam split, out of the read-only src/server/** boundary, exactly as the POML pre-empted).
+Two detection legs: (a) a findings-shaped-but-empty-after-projection output → immediate degraded notice
+(reason 'malformed'); (b) a same-tab sessionStorage marker (`spaarke.compose.reviewFindingsMarker:{sessionId}`)
+recording the last known-good finding count, compared against a fully-empty read-projection → degraded notice
+(reason 'skipped'). Rendered via a new `ComposeBannerStack` row (`reviewFindingsDegraded` prop), mirroring the
+existing `partialApply` dismiss/reshow pattern verbatim. (3) Coexistence: chosen "multi-select materialization"
+(replay ALL findings outputs + the latest edit-shaped output separately) over the FR-29 layer — simplest fit,
+since FR-29 `anchoredAnnotations` is a structurally different store (DEF-11/DEF-13 comment annotations, not the
+TipTap-native advisory-comment threads `placeAdvisoryComments` creates) and extending its type union for a
+marker would touch a wider blast radius (any consumer that iterates all annotations). Server's own supersede
+(`ChatEndpoints.SupersedeComposeOutput`) is verified BindingId-scoped (`ComposeDisposition.ResolveCurrent`), so
+findings (a different Binding) are structurally unreachable by an edit-binding's supersede — proven by a
+same-file client test. 031-residual dedupe guard: content-signature-based (no `ledgerRef` on the live wire
+shape today — verified `useNdaReviewAdvisoryCommentsBridge.ts` never sets it), tracked in a new
+`materializedFindingsKeysRef` Set alongside exact ledger-key idempotency; empirically verified load-bearing
+(temporarily disabled → the dedupe test's assertion flipped from 1 to 2 anchors, confirmed, then restored).
+6 new integration tests + 6 new ComposeBannerStack unit tests, all green; 0 regressions (16/16
+redline-from-ledger, 18/18 ComposeBannerStack, 0 tsc errors, `npm run build` clean). Pre-existing 15/5-suite
+failure set (bornInEditorSave/imports/saveOpLogPreservation/search + stepOperationInterceptor) untouched,
+unaffected. Full detail: projects/ai-advanced-capabilities-agreements-r1/notes/032-execution-notes.md.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

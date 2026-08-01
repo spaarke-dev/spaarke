@@ -154,9 +154,22 @@ interface ComposeDirectMountProps {
   workspaceTabId?: string;
   /** spaarkeai-compose-r2 (multi-Compose-tab): whether this tab is the active (visible) tab. */
   isActiveTab?: boolean;
+  /**
+   * agreements-r1 task 033 (FR-17): the wizard-minted ANALYSIS-OWNED session to open the stored
+   * document ON (`ComposeWidgetSeed.composeSessionId`). Threaded as `<ComposeWorkspace
+   * initialSessionId>` so the BFF Load's FR-29/FR-33 resume path (`?sessionId=` +
+   * `IsSameCrossVersionBinding` on the document GUID) RESUMES it as the document session — chat
+   * session ≡ document session, the same coincidence the upload-mount door has by construction.
+   * Absent for every pre-existing seed → `""` (the exact prior wire shape — server mints as before).
+   */
+  initialSessionId?: string;
 }
 
-const ComposeDirectMount: React.FC<ComposeDirectMountProps> = ({ workspaceTabId, isActiveTab = true }) => {
+const ComposeDirectMount: React.FC<ComposeDirectMountProps> = ({
+  workspaceTabId,
+  isActiveTab = true,
+  initialSessionId,
+}) => {
   const { bffBaseUrl } = useAiSession();
   const composeLaunch = useComposeLaunch();
   // FR-13: forward the Assistant serial-dispatch queue ONLY when the bridge is
@@ -202,7 +215,9 @@ const ComposeDirectMount: React.FC<ComposeDirectMountProps> = ({ workspaceTabId,
     initialDocumentRef: composeLaunch?.document ?? null,
     initialUploadRef: composeLaunch?.upload ?? null,
     initialDraftRef: composeLaunch?.draft ?? null,
-    initialSessionId: "",
+    // task 033 (FR-17): resume the wizard-minted Analysis-owned session when the seed carries one
+    // (see ComposeDirectMountProps.initialSessionId); "" preserves the exact pre-033 wire shape.
+    initialSessionId: initialSessionId ?? "",
     enqueueComposeAction: bridge?.hasDispatcher ? bridge.enqueue : undefined,
     // spaarkeai-compose-r2 (multi-Compose-tab): thread the tab id + active flag so this editor
     // tab-scopes its active-document registration and only the ACTIVE tab claims the session doc.
@@ -235,6 +250,8 @@ export const ComposeDirectWidget: React.FC<WorkspaceWidgetProps<ComposeWidgetDat
   const mount = React.createElement(ComposeDirectMount, {
     workspaceTabId: tabId,
     isActiveTab,
+    // task 033 (FR-17): the wizard hand-off's Analysis-owned session (absent on every other seed).
+    initialSessionId: data?.compose?.composeSessionId,
   });
   const inner = launch
     ? React.createElement(ComposeLaunchContext.Provider, { value: launch }, mount)

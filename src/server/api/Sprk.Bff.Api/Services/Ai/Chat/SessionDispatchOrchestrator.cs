@@ -94,6 +94,12 @@ public class SessionDispatchOrchestrator
     // orchestrator omit it and get null → enrichment is skipped (the launch payload is stored
     // unchanged, exactly the pre-013p3 behavior). Never fails the dispatch (ADR-032).
     private readonly ISurfaceLaunchEnricher? _surfaceLaunchEnricher;
+    // ai-advanced-capabilities-agreements-r1 task 021 (FR-08 pack binding): OPTIONAL — registered
+    // unconditionally inside the same compound Analysis/DocumentIntelligence gate as task 020's
+    // classifier assembler (AnalysisServicesModule), but hand-built test constructions of this
+    // orchestrator omit it and get null → the subDomain->KnowledgeSourceIds resolution below is
+    // skipped (byte-identical to pre-021 behavior: an unscoped review run). Never fails the dispatch.
+    private readonly Sprk.Bff.Api.Services.Ai.Classification.IAgreementTypeRegistryReader? _agreementTypeRegistryReader;
 
     public SessionDispatchOrchestrator(
         ChatSessionManager sessionManager,
@@ -109,7 +115,8 @@ public class SessionDispatchOrchestrator
         Sprk.Bff.Api.Telemetry.AiTelemetry aiTelemetry,
         ILogger<SessionDispatchOrchestrator> logger,
         TimeProvider? timeProvider = null,
-        ISurfaceLaunchEnricher? surfaceLaunchEnricher = null)
+        ISurfaceLaunchEnricher? surfaceLaunchEnricher = null,
+        Sprk.Bff.Api.Services.Ai.Classification.IAgreementTypeRegistryReader? agreementTypeRegistryReader = null)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
@@ -134,6 +141,9 @@ public class SessionDispatchOrchestrator
         _timeProvider = timeProvider ?? TimeProvider.System;
         // Optional (may be null in hand-built test constructions); see field doc.
         _surfaceLaunchEnricher = surfaceLaunchEnricher;
+        // Optional (may be null in hand-built test constructions or when the compound AI gate is
+        // off); see field doc — task 021.
+        _agreementTypeRegistryReader = agreementTypeRegistryReader;
     }
 
     /// <summary>
@@ -159,6 +169,7 @@ public class SessionDispatchOrchestrator
         _aiTelemetry = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = null!;
+        _agreementTypeRegistryReader = null;
     }
 
     /// <summary>
@@ -444,11 +455,50 @@ public class SessionDispatchOrchestrator
             // structured operand (selectionText/changesText/documentText arg, or a ledger_resolution
             // reference — e.g. the compose actions) resolves from the dispatch args WITHOUT session files;
             // otherwise the shipped file/`## Document` path runs unchanged (non-regression).
+            // ai-advanced-capabilities-agreements-r1 task 021 (FR-08 pack binding): when the dispatch
+            // args carry a `subDomain` (the interactive orientation gate's classified/confirmed
+            // sprk_agreementtype.sprk_key), resolve its sprk_knowledgepackref via the SAME registry
+            // reader task 020 built for the classifier, and scope THIS run's reference grounding to
+            // that pack (LinearRunContext.KnowledgeSourceIds) — fixing the task-003 finding that
+            // ActionRunner searched the whole spaarke-rag-references corpus regardless of the
+            // classified type. Additive + fail-open: no `subDomain` arg, no reader registered (compound
+            // AI gate off), no matching row, or a registry read failure all degrade to the pre-021
+            // unscoped behavior — never blocks or fails the dispatch.
+            IReadOnlyList<string>? knowledgeSourceIds = null;
+            var requestedSubDomain = TryReadSubDomain(request.Args);
+            if (!string.IsNullOrWhiteSpace(requestedSubDomain) && _agreementTypeRegistryReader is not null)
+            {
+                try
+                {
+                    var registryRows = await _agreementTypeRegistryReader
+                        .GetRowsAsync(cancellationToken)
+                        .ConfigureAwait(false);
+                    var matchedRow = registryRows.FirstOrDefault(r =>
+                        string.Equals(r.Key, requestedSubDomain, StringComparison.OrdinalIgnoreCase));
+                    if (matchedRow is not null && !string.IsNullOrWhiteSpace(matchedRow.KnowledgePackRef))
+                    {
+                        knowledgeSourceIds = new[] { matchedRow.KnowledgePackRef! };
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "SessionDispatchOrchestrator: sprk_agreementtype registry lookup failed for " +
+                        "subDomain={SubDomain}; running unscoped (whole-corpus grounding). binding={BindingId}",
+                        requestedSubDomain, binding.BindingId);
+                }
+            }
+
             var runContext = new LinearRunContext
             {
                 ConsumerType = binding.ConsumerType,
                 CorrelationId = request.CorrelationId,
                 TenantId = request.TenantId,
+                KnowledgeSourceIds = knowledgeSourceIds,
             };
 
             // The context fingerprint + the output entry share the turn ordinal (max prior output turn + 1),
@@ -996,6 +1046,27 @@ public class SessionDispatchOrchestrator
             return null;
         }
         if (!obj.TryGetProperty(ConfirmGateArgKey, out var el) || el.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+        var value = el.GetString();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    /// <summary>
+    /// ai-advanced-capabilities-agreements-r1 task 021 (FR-08 pack binding): reads an optional
+    /// <c>subDomain</c> arg (the classified/confirmed <c>sprk_agreementtype.sprk_key</c>, e.g.
+    /// <c>"nda"</c>) forwarded by the interactive orientation gate's review dispatch. Mirrors
+    /// <see cref="TryReadConfirmGateId"/>'s shape exactly. Absent/malformed → null (every dispatch
+    /// that does not carry this key, i.e. every pre-021 caller, is unaffected).
+    /// </summary>
+    internal static string? TryReadSubDomain(JsonElement? args)
+    {
+        if (args is not { ValueKind: JsonValueKind.Object } obj)
+        {
+            return null;
+        }
+        if (!obj.TryGetProperty("subDomain", out var el) || el.ValueKind != JsonValueKind.String)
         {
             return null;
         }

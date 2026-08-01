@@ -1,8 +1,13 @@
 /**
- * uatR2Chrome.test.tsx — owner UAT 2026-07-30 R2 items 8 + 11.
+ * uatR2Chrome.test.tsx — owner UAT R2 items 8 + 11, with item 8 SUPERSEDED by
+ * 2026-07-31 item 4 (standard modal chrome).
  *
- * Item 8: the chromed header no longer renders a close 'X' button; the maximize/restore control
- *   stays (the modal is closed via ComposerActionBar's Cancel/Close, wired to the same onCancel).
+ * Item 8 → item 4: the chromed header renders the STANDARD Spaarke modal window
+ *   controls — maximize/restore AND a close 'X' — in the upper-right, via the shared
+ *   `ModalWindowControls`. (R2 had briefly removed the X; the owner reversed that to
+ *   standardize expand + X across all modals.) Close routes to the same onCancel the
+ *   action-bar Cancel uses. The maximize button appears only when onToggleMaximize is
+ *   wired; the close button only when onCancel (onClose) is wired.
  * Item 11: in compose ("New") mode with ZERO associations the "Related to" section still renders
  *   the "Link another record" affordance (reads "Link a record" in the empty state) and invoking
  *   it calls the host's onAddRelationship.
@@ -26,19 +31,23 @@ function renderComposer(overrides: Partial<IEmailComposerProps>) {
   );
 }
 
-describe('EmailComposer — chromed header window controls (R2 item 8)', () => {
-  it('renders the maximize control but NOT a close X in the header', () => {
-    renderComposer({ onToggleMaximize: jest.fn(), onCancel: jest.fn() });
+describe('EmailComposer — standard modal window controls (item 4, supersedes R2 item 8)', () => {
+  it('renders BOTH the maximize control and a close X in the header, and close calls onCancel', () => {
+    const onCancel = jest.fn();
+    renderComposer({ onToggleMaximize: jest.fn(), onCancel });
     expect(screen.getByRole('button', { name: /maximize dialog/i })).toBeInTheDocument();
-    // The close 'X' was removed — the modal is closed via the action-bar Cancel button.
-    expect(screen.queryByRole('button', { name: /close dialog/i })).toBeNull();
+    const closeBtn = screen.getByRole('button', { name: /^close$/i });
+    expect(closeBtn).toBeInTheDocument();
+    // The header close routes to the SAME onCancel the action-bar Cancel button uses.
+    fireEvent.click(closeBtn);
+    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it('renders no header window-control cluster when only onCancel is wired (no maximize)', () => {
+  it('renders the close X (but no maximize) when only onCancel is wired', () => {
     renderComposer({ onCancel: jest.fn() });
     expect(screen.queryByRole('button', { name: /maximize dialog/i })).toBeNull();
-    expect(screen.queryByRole('button', { name: /close dialog/i })).toBeNull();
-    // onCancel still reaches the action-bar Cancel button.
+    expect(screen.getByRole('button', { name: /^close$/i })).toBeInTheDocument();
+    // onCancel still also reaches the action-bar Cancel button.
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
 });

@@ -281,6 +281,13 @@ public sealed class ActionRunner : IActionRunner
                     // Never drop a standard clause the operand does not resemble — omissions (clauses the
                     // NDA is MISSING) are exactly what an advisory review must be able to flag.
                     MinScore = 0.0f,
+                    // ai-advanced-capabilities-agreements-r1 task 021 (FR-08 pack binding): scope the
+                    // search to the classified type's own knowledge pack when the dispatch context
+                    // resolved one (SessionDispatchOrchestrator, from the sprk_agreementtype registry's
+                    // sprk_knowledgepackref). Null/empty (every pre-021 call site + every non-agreement
+                    // Action) preserves the EXACT prior unscoped, whole-corpus behavior —
+                    // ReferenceRetrievalService/RagService both no-op the filter when this is empty.
+                    KnowledgeSourceIds = context.KnowledgeSourceIds,
                 },
                 cancellationToken);
 

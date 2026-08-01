@@ -246,6 +246,42 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return outputId;
     }
 
+    /// <summary>FR-14 (task 051) — the Review Summary Memo READ path. Most-recent-first so a
+    /// re-generated memo (a future re-run) always reads back as the latest row.</summary>
+    public async Task<AnalysisOutputEntity?> GetLatestAnalysisOutputByNameAsync(Guid analysisId, string name, CancellationToken ct = default)
+    {
+        var query = new QueryExpression("sprk_analysisoutput")
+        {
+            ColumnSet = new ColumnSet("sprk_name", "sprk_value", "sprk_analysisid", "sprk_outputtypeid"),
+            TopCount = 1,
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression("sprk_analysisid", ConditionOperator.Equal, analysisId),
+                    new ConditionExpression("sprk_name", ConditionOperator.Equal, name),
+                }
+            },
+            Orders = { new OrderExpression("createdon", OrderType.Descending) }
+        };
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        var entity = results.Entities.FirstOrDefault();
+        if (entity is null)
+        {
+            return null;
+        }
+
+        return new AnalysisOutputEntity
+        {
+            Id = entity.Id,
+            Name = entity.GetAttributeValue<string>("sprk_name"),
+            Value = entity.GetAttributeValue<string>("sprk_value"),
+            AnalysisId = entity.GetAttributeValue<EntityReference>("sprk_analysisid")?.Id ?? analysisId,
+            OutputTypeId = entity.GetAttributeValue<EntityReference>("sprk_outputtypeid")?.Id,
+        };
+    }
+
     public async Task AssociateScopesAsync(
         Guid analysisId,
         IEnumerable<Guid> skillIds,

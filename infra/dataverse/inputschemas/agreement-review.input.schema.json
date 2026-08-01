@@ -1,0 +1,19 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for agreement-review (ai-advanced-capabilities-agreements-r1 task 002; generalized from nda-review). Normalized OpenAI-function-parameters subset (validated by CatalogInputSchemaContractTests' directory-wide Theory + jps-validate; server twin OpenAiFunctionSchemaValidator). MIRROR-FIRST from the document/session context: documentText is the WHOLE uploaded agreement's current text — the Compose surface / agent loop supplies it from the open document (session doc text), exactly as compose-revise-document sources documentText. The applicable firm standard for the agreement's type is GROUNDING supplied by the retrieval layer, NOT a maker-provided input field. Property-level \"required\": true is FORBIDDEN (use the object-level required array). Custom keyword ledger_resolution is maker metadata (OpenAI-tolerated unknown keyword). No actionId here — assigned in Dataverse at deploy time. actionCode carries NO version suffix (owner hygiene).",
+  "$comment-grounding": "The firm standard for the agreement's type is retrieved from spaarke-rag-references (NDA exemplar = KNW-011) by the retrieval/grounding layer; the classifier's resolved subDomain selects which per-type pack is retrieved. This Action is authored correctly regardless of the retrieval tenant-pin path; live grounding depends on the retrieval layer supplying the applicable standard.",
+  "actionCode": "agreement-review",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["documentText"],
+    "properties": {
+      "documentText": {
+        "type": "string",
+        "description": "The WHOLE uploaded agreement's current text to review (the open Compose document / session doc text). The agent loop / Compose surface supplies it from the open document, not from Dataverse. Every quotedText the review emits must be a verbatim substring of this field. The applicable firm standard for the agreement's type is supplied separately by the retrieval/grounding layer, not here.",
+        "maxLength": 60000,
+        "elicitation_prompt": "Which agreement should I review? Open or attach the document first.",
+        "ledger_resolution": "compose.documentText — the current open Compose document text (session doc text) dispatched for whole-document review. The firm standard for the agreement's type is supplied by the retrieval layer at dispatch time (not a maker-provided field)."
+      }
+    }
+  }
+}

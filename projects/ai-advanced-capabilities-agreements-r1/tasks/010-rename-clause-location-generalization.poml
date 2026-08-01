@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>Rename ndaClauseLocation → clauseLocation (+ summary-panel naming) — pure rename</title>
+    <phase>1 Fidelity</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx in the shared Compose lib (auto-FULL trigger) — though mechanically a pure rename, gates catch accidental logic drift.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical rename with a closed verification set; zero design judgment beyond the panel-name choice (pre-decided below).</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>compose, refactor, frontend</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Pure rename, zero logic change: ndaClauseLocation.ts → clauseLocation.ts (the logic is already document-agnostic —
+    verified in the R4.5 handoff). Rename NdaReviewSummaryPanel → AgreementReviewSummaryPanel (keep a deprecated
+    re-export alias if any external import exists). Removes the recurring "is this NDA-only?" confusion permanently.
+  </prompt>
+  <role>SPAARKE platform developer. TypeScript refactoring in Spaarke.Compose.Components.</role>
+  <goal>No ndaClauseLocation-named symbol remains; imports resolve; all touched tests pass with behavior unchanged.</goal>
+
+  <context>
+    <background>
+      R4.5 handoff ITEM 2: deriveClauseLocationLabel / findGoverningHeading / computedNumberAt have ZERO NDA branching —
+      every "nda" reference is a comment, the filename, or the review-model name. Blast radius (spec Unresolved): grep
+      FIRST for external consumers of ndaClauseLocation/NdaReviewSummaryPanel outside Compose.Components before renaming;
+      ComposeCommentGutter.tsx + ComposeEditor.tsx + tests are the known importers. NdaReviewSummaryPanel is on the hub's
+      KEEP list and referenced across docs — the rename must leave a re-export alias so nothing dangles.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ndaClauseLocation.ts (→ clauseLocation.ts)</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/NdaReviewSummaryPanel.tsx (→ AgreementReviewSummaryPanel.tsx + alias)</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeCommentGutter.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (imports only)</file>
+    </relevant-files>
+    <dependencies>none (Wave 0)</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Shared-lib surface: keep exports stable — a deprecated re-export alias for NdaReviewSummaryPanel remains until all consumers migrate. Scope: the lib's public index exports.</constraint>
+    <constraint source="project">PURE RENAME — zero logic/behavior change; if any test needs a non-name change to pass, STOP (that is drift, not rename).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Compose shared-lib refactor</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>projects/ai-advanced-capabilities-agreements-r1/notes/HANDOFF-from-compose-fidelity-r4.5.md</file>
+    </files>
+    <patterns>
+      <pattern name="lib exports" location="src/client/shared/Spaarke.Compose.Components/src/index.ts">Update + alias exports here.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Declare rigor; grep repo-wide for ndaClauseLocation + NdaReviewSummaryPanel importers (record the list — spec Unresolved 'rename blast radius').</step>
+    <step order="1">git mv ndaClauseLocation.ts clauseLocation.ts (+ its .test.ts); fix imports; comments referencing "NDA" in the file become "agreement/document".</step>
+    <step order="2">Rename NdaReviewSummaryPanel → AgreementReviewSummaryPanel; add `export const NdaReviewSummaryPanel = AgreementReviewSummaryPanel` deprecated alias at the old export site.</step>
+    <step order="3">Build + run the touched test suites; verify zero behavior diffs.</step>
+    <step order="4">Update TASK-INDEX.md: 010 ✅; record the importer list in notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the step-0 grep finds importers outside Compose.Components/SpaarkeAi that the alias cannot cover (e.g., string-keyed registry references), STOP and list them before renaming.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Rename regression smoke"><steps><step>Run a review; inspect gutter note location labels + summary panel render</step></steps><expected>Labels and panel render identically to pre-rename (pure rename proof at the UI level).</expected></test>
+  </ui-tests>
+  <tools><tool name="npm">build + test the shared lib</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/clauseLocation.ts (+ renamed panel + alias)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep for ndaClauseLocation returns zero hits repo-wide (excluding docs/notes history).</criterion>
+    <criterion testable="true">All touched tests pass UNCHANGED in assertions (pure rename proof); lib + SpaarkeAi builds green.</criterion>
+    <criterion testable="true">NdaReviewSummaryPanel alias resolves — no consumer breaks (hub KEEP-list intact).</criterion>
+    <criterion testable="true">Negative: git diff shows no logic-line changes in clauseLocation.ts beyond identifiers/comments.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-02; R4.5 handoff ITEM 2. Wave-0 sibling of 001/002 (disjoint files).
+    COMPLETED 2026-07-31: pure rename executed exactly as scoped — ndaClauseLocation.ts to clauseLocation.ts,
+    NdaReviewSummaryPanel/-Props to AgreementReviewSummaryPanel/-Props, deprecated aliases added (component +
+    Props type, both in the widget file and re-exported from index.ts). Zero escalations (the 2 out-of-package
+    hits were comment-only, not imports). Build green (Compose.Components + SpaarkeAi, 0 own-code errors).
+    75/75 touched-suite tests pass. Broader ComposeEditor/ComposeWorkspace regression run surfaced 6 failing
+    tests across 5 suites; verified via git-stash isolation that all 6 are pre-existing (5 unrelated
+    ComposeWorkspace suite failures + the documented DEF-01 ComposeEditor.advisoryComments bug, task 012's
+    scope) — reproduced byte-identically on pre-rename code. Full detail:
+    projects/ai-advanced-capabilities-agreements-r1/notes/010-execution-notes.md.
+  </notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

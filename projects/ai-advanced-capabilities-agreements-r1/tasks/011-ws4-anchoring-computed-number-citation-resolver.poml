@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>WS-4 anchoring — review notes + citations consume ComputedNumber / CitationResolver</title>
+    <phase>1 Fidelity</phase>
+    <gate>open (deps 010 satisfied — clauseLocation.ts rename shipped)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Brownfield anchoring change in ComposeEditor/gutter — correctness-critical (what DEF-01 rides on); .tsx modification.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Root-cause/brownfield wiring against a shipped, documented reference layer.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>010</deps>
+    <tags>compose, frontend, ai</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Wire review-note anchoring + citations to the R4.5 WS-4 reference layer: ComposeDocxProjection.ParaIdMap[].ComputedNumber
+    (also on client nodes as computedNumber) and CitationResolver (citation string ↔ paraId — "Section 4.2",
+    "4.2(b)(iii)", "Sections 4–7"). Where the model supplies a sectionRef, resolve it DETERMINISTICALLY to a paraId
+    instead of fuzzy text/position matching. This is the substrate that makes DEF-01 (012) fixable and gives the
+    bidirectional highlight (040) its stable join key.
+  </prompt>
+  <role>SPAARKE platform developer. Compose client anchoring + the WS-3/WS-4 numbering/reference layer.</role>
+  <goal>Advisory-target resolution prefers CitationResolver(sectionRef)→paraId; anchors survive edits; join key = computed clause number.</goal>
+
+  <context>
+    <background>
+      R4.5 shipped: server NumberingComputationEngine → ParaIdMap ComputedNumber (+ session ledger ReferenceMap); client
+      computedNumber node attr via composeNumberAtomExtension; CitationResolver.cs is "not yet wired to a consumer —
+      the agreements review is the natural consumer" (handoff). Today placeAdvisoryComments resolves targets by
+      text/position (resolveTargetSpans). Add the deterministic path: sectionRef → CitationResolver (server; expose via
+      the projection/session payload as needed) or client-side ComputedNumber map lookup → paraId → anchor. Fall back to
+      the existing text resolution only when no sectionRef resolves. ComposeCitationResolverSeamTests.cs +
+      ComposeNumberingRoundTripSeamTests.cs are the shipped seam tests to extend, not duplicate.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (target resolution)</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/clauseLocation.ts</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/CitationResolver.cs</file>
+      <file role="canonical-reference">tests/integration/seam/Compose/ComposeCitationResolverSeamTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">renamed clauseLocation.ts (same files — sequence)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">paraId-anchored operations only in the write path — no text-search placement when a deterministic paraId resolution exists. Scope: the new resolution path.</constraint>
+    <constraint source="ADR-038">Dispatch-spine/seam changes carry the tests/integration/seam/** DoD — extend the existing Compose seam tests. Scope: server-side resolver exposure if added.</constraint>
+    <constraint source="project">Fallback order is FIXED: CitationResolver/ComputedNumber first; legacy text resolution only when sectionRef absent/unresolvable; never silently prefer fuzzy over deterministic.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>WS-4 reference layer + Compose anchoring</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/ai-advanced-capabilities-agreements-r1/notes/HANDOFF-from-compose-fidelity-r4.5.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="numbering round-trip" location="tests/integration/seam/Compose/ComposeNumberingRoundTripSeamTests.cs">The shipped verification pattern for ComputedNumber fidelity — extend for citation-anchored comments.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; audit-before-implement (nda-r1 lesson): trace how sectionRef flows today and what resolveTargetSpans does; check whether any resolver exposure already exists.</step>
+    <step order="1">Design the resolution path (client ComputedNumber-map lookup vs server CitationResolver call — prefer whichever the projection already carries; document the choice).</step>
+    <step order="2">Implement sectionRef→paraId deterministic resolution in the advisory-target path; keep text fallback ordered behind it.</step>
+    <step order="3">Extend seam/unit tests: single ref, sub-item ref, range, unresolvable→fallback.</step>
+    <step order="4">Verify anchors survive a doc edit above the target (paraId stability).</step>
+    <step order="5">Update TASK-INDEX.md: 011 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the projection payload does not carry enough of the ReferenceMap client-side and a NEW BFF endpoint seems needed, STOP — check the session-ledger ReferenceMap first (it ships there per R4.5); a new endpoint requires §10 placement justification.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Deterministic anchor placement"><steps><step>Run a review on a numbered agreement</step><step>Click a finding with sectionRef "Section 4.2"</step></steps><expected>The comment/note anchors on the exact clause 4.2 paragraph; label shows the computed legal number.</expected></test>
+    <test name="Anchor survives edit"><steps><step>Insert a paragraph above the anchored clause</step></steps><expected>The anchor stays on the same clause (paraId stability).</expected></test>
+  </ui-tests>
+  <tools><tool name="npm">lib build/tests</tool><tool name="dotnet">seam tests</tool></tools>
+
+  <outputs>
+    <output type="code">ComposeEditor.tsx + clauseLocation.ts (deterministic resolution)</output>
+    <output type="test">extended seam/unit tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a finding with sectionRef "Section 4.2", the anchor resolves via ComputedNumber/CitationResolver to the exact paraId (assert no text-search used).</criterion>
+    <criterion testable="true">Sub-item ("4.2(b)(iii)") and range ("Sections 4–7") refs resolve per CitationResolver semantics.</criterion>
+    <criterion testable="true">Unresolvable sectionRef falls back to the legacy path (behavior unchanged for legacy inputs).</criterion>
+    <criterion testable="true">Anchors survive an edit inserted above the target (paraId stability test).</criterion>
+    <criterion testable="true">Negative: a sectionRef matching nothing does NOT place a comment (feeds 012's contract); build + all touched tests green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-03. Consumes R4.5 WS-3/WS-4; hub reverse doc Part C.3. Wire-a-reader signal for the hub's A3 deferred legs comes from 022, not here.
+
+COMPLETION (2026-07-31): Implemented a client-side mirror of `Services/Compose/CitationResolver.cs`
+(`composeCitationResolver.ts`, new) — the projection payload already carries `computedNumber`/`listPath` on
+`paraIdMap` end-to-end (only the client TS type needed extending), so no new BFF endpoint was needed and the
+escalation trigger did not fire. `placeAdvisoryComments` (ComposeEditor.tsx) now tries `resolveDeterministicAnchorSpan`
+(sectionRef → paraId via the resolver + `collectBlocks` for the live span) FIRST, falling back to the legacy
+`resolveAdvisoryAnchorSpan` text path only when the deterministic path returns null (no sectionRef, no WS-4 data,
+unparseable citation, zero/unresolvable matches). `clauseLocation.ts` was audited and left unchanged — a
+different concern (position→label vs. citation-string→paraId); see `notes/011-execution-notes.md` Step 1 for the
+scope-decision rationale. Parity with the server resolver proven via ported (verbatim) cases from
+`ComposeCitationResolverSeamTests.cs`'s structured-map tests; paraId stability proven via a headless-editor
+insert-above-target test. 37 new tests added, all passing; full package suite 794/778/16 with the 16 failures
+confirmed pre-existing via a stash A/B isolation (identical 757/741/16 baseline). Full details:
+`projects/ai-advanced-capabilities-agreements-r1/notes/011-execution-notes.md`.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

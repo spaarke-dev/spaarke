@@ -151,6 +151,25 @@ const REGARDING_NAVPROP_HINT_BY_TYPE: Record<string, string> = Object.fromEntrie
 );
 
 // ---------------------------------------------------------------------------
+// Analysis-owned session HostContext sentinel (agreements-r1 task 033 / FR-17)
+// ---------------------------------------------------------------------------
+
+/**
+ * The HostContext `EntityType` sentinel that marks a chat session ANALYSIS-OWNED — the
+ * create-time trigger for the durable `sprk_analysis` FK write on the session's
+ * `sprk_aichatsummary` anchor row (`ChatDataverseRepository.CreateSessionAsync`), which is
+ * what makes the Analysis queryable via `GET /api/ai/chat/sessions/by-analysis/{analysisId}`.
+ *
+ * ⚠️ FOOTGUN (verified, HUB-R1-REVIEW §2 A5): under this EntityType, `EntityId` carries an
+ * `sprk_analysis` GUID — NOT an `sprk_analysisoutput` GUID. NEVER query the output table with
+ * it. This is the ONE client-side constant site; the value MUST match the server's triplicated
+ * convention (`ChatSessionManager.AnalysisHostContextEntityType` — ChatSessionManager.cs:473 —
+ * plus `ChatDataverseRepository.cs` / `AnalysisEndpoints.cs`). Do not re-type the literal at
+ * call sites — import this constant.
+ */
+export const ANALYSIS_SESSION_HOST_ENTITY_TYPE = 'sprk_analysisoutput';
+
+// ---------------------------------------------------------------------------
 // Data payload shape
 // ---------------------------------------------------------------------------
 
@@ -297,7 +316,13 @@ interface ContactLookupControlProps {
   placeholder?: string;
 }
 
-const ContactLookupControl: React.FC<ContactLookupControlProps> = ({ value, onPick, onClear, disabled, placeholder }) => (
+const ContactLookupControl: React.FC<ContactLookupControlProps> = ({
+  value,
+  onPick,
+  onClear,
+  disabled,
+  placeholder,
+}) => (
   <Input
     readOnly
     value={value?.name ?? ''}
@@ -931,6 +956,64 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         // review machine opens ORIENTED (binds the type's knowledge pack) instead of re-inferring.
         const selectedSubDomain = agreementTypes.find(r => r.id === selectedAgreementTypeIdRef.current)?.key;
 
+        // -- FR-17 (agreements-r1 task 033, path B-i): mint the ANALYSIS-OWNED compose session --
+        // The wizard-finish flow has no chat session yet; minting it HERE — document-anchored
+        // (`documentId` = the durable sprk_document GUID) and Analysis-owned (HostContext sentinel)
+        // — does three things at once:
+        //   1. DURABLE BIND: `CreateSessionAsync`'s create-time FK write stamps `sprk_analysis` on
+        //      the session's `sprk_aichatsummary` row → the session is visible via
+        //      `GET /sessions/by-analysis/{analysisId}` (the FR-17 durable-bind acceptance; the
+        //      promote silent-FK gap is bypassed entirely — no promote call, hub fix 2f8f11123
+        //      hardens the fallback path).
+        //   2. SESSION COINCIDENCE: the seed's `composeSessionId` below threads into
+        //      `ComposeWorkspace`'s Load request (`?sessionId=`), whose resume path
+        //      (`ComposeService.LoadAsync` — `IsSameCrossVersionBinding` on DocumentId) RESUMES
+        //      this session as the DOCUMENT session. Chat session ≡ document session, exactly like
+        //      the shipped upload-mount door "by construction" — so the DEF-10 register's file
+        //      upload, the review dispatch's `sessionIdOverride`, and ComposeWorkspace's
+        //      compose-outputs read all target ONE session (no file-id impedance, DEF-09 holds).
+        //   3. ADOPTION HAND-OFF: ConversationPane's workspace listener adopts this session as the
+        //      pane's active chat session, so the Assistant sees the file + review conversation.
+        // Failure is NON-FATAL and DISTINCT (ADR-019): the wizard still succeeds, Compose still
+        // opens (shipped behavior), and the warning below tells the user the review must be
+        // started manually — no silent partial success, no orphan (the Analysis is already
+        // consistent and durable at this point).
+        let composeSessionId: string | undefined;
+        if (analysisActiveWorkType && speDriveItemId && speDriveId && authFetch && bffBaseUrl) {
+          // ADR-044: bare-lowercase GUIDs. The session's DocumentId must ORDINAL-match the
+          // server's resume bindingId (`DocumentRecordId.Value.ToString()` — "D" lowercase).
+          const cleanDocumentId = documentId.replace(/[{}]/g, '').toLowerCase();
+          const cleanAnalysisId = analysisId.replace(/[{}]/g, '').toLowerCase();
+          try {
+            const sessionResp = await authFetch(`${bffBaseUrl}/api/ai/chat/sessions`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                documentId: cleanDocumentId,
+                hostContext: {
+                  entityType: ANALYSIS_SESSION_HOST_ENTITY_TYPE,
+                  entityId: cleanAnalysisId,
+                  entityName: finishName,
+                },
+              }),
+            });
+            if (sessionResp.ok) {
+              const sessionJson = (await sessionResp.json()) as { sessionId?: string };
+              composeSessionId =
+                typeof sessionJson?.sessionId === 'string' && sessionJson.sessionId.length > 0
+                  ? sessionJson.sessionId
+                  : undefined;
+            }
+          } catch {
+            /* degrade to the warning below — the wizard result is already durable */
+          }
+          if (!composeSessionId) {
+            warnings.push(
+              'The review could not be started automatically — open the document and ask the Assistant to review it.'
+            );
+          }
+        }
+
         if (speDriveItemId && speDriveId) {
           dispatch('workspace', {
             type: 'widget_load',
@@ -943,6 +1026,19 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
                 fileName: documentName,
                 ...(analysisActiveWorkType ? { activeWorkType: analysisActiveWorkType } : {}),
                 ...(selectedSubDomain ? { subDomain: selectedSubDomain } : {}),
+                // FR-17 (task 033) hand-off: the Analysis-owned session (adopt + resume as the
+                // document session) + the analysisId it is durably bound to. `autoRunReview`
+                // arms ConversationPane's explicit review door (runExplicit on the picked
+                // sub-domain's pack) — only when a sub-domain was actually picked (a
+                // deterministic explicit run needs a subDomainKey; without one the user
+                // triggers the review conversationally, classifier-gated, as today).
+                ...(composeSessionId
+                  ? {
+                      composeSessionId,
+                      analysisId: analysisId.replace(/[{}]/g, '').toLowerCase(),
+                      ...(selectedSubDomain ? { autoRunReview: true } : {}),
+                    }
+                  : {}),
               },
             },
             displayName: documentName,

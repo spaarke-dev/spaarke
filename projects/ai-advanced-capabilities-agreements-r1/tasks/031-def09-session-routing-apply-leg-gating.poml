@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>FR-16(c,d) — DEF-09 document-session dispatch routing + apply-leg gating for findings</title>
+    <phase>3 Durable Review</phase>
+    <gate>blocked (deps 030)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Dispatch routing correctness (write/read session coincidence) + edit-machinery gating in ConversationPane hot file.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Precisely specified by the verified DEF-09 seam (sessionIdOverride) + apply-leg code refs; brownfield but mapped.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>030</deps>
+    <tags>spaarkeai, compose, frontend, durable-recall</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Make the FR-16 write and read coincide, and keep findings out of the edit machinery. (c) DEF-09 routing: the review
+    dispatch must write its compose output to the DOCUMENT session that ComposeWorkspace reads compose-outputs from —
+    thread documentSessionId → args.sessionIdOverride on the review dispatch (today informational reviews run on the
+    CHAT session; a compose-disposition output there is invisible to the materializer). (d) Apply-leg gating: a
+    compose-disposition FINDINGS output must NOT enter the applied-edit machinery (Accept/Reject/Try-another,
+    supersession) nor stage spurious redlines via materializeComposeDraft — classify findings outputs explicitly.
+  </prompt>
+  <role>SPAARKE platform developer. ConversationPane dispatch routing, compose apply-leg/undo machinery.</role>
+  <goal>Review outputs land in the document session; reopening finds them; findings never render Accept/Reject or stage redlines.</goal>
+
+  <context>
+    <background>
+      Verified (HUB-R1-REVIEW §4): DEF-09 — "the WRITE and the redline-materialize READ must coincide"
+      (ConversationPane.tsx:939-949 sessionIdOverride precedent); informational NDA review dispatches on the chat
+      session (:951-965, !isEditAction branch :964). Apply-leg: compose outputs are resolved as applied edits →
+      Accept/Reject controls + FR-17 supersession (emitComposeApplyLeg, ConversationPane.tsx:966-1002); a comments-only/
+      findings payload with no edits[] still hits materializeComposeDraft (no branch guard) — 030 adds the branch;
+      this task gates the LIVE-dispatch side so the findings output is classified as review-findings (not edit), skips
+      the apply leg, and still produces the per-section Assistant outcome summary. The live gutter projection
+      (useNdaReviewAdvisoryCommentsBridge) may now be redundant with ledger materialization — decide keep-for-live-turn
+      vs retire (dedupe with 030's idempotency guard either way; no double-placement).
+    </background>
+    <relevant-files>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (dispatch routing + gating)</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/conversation/useNdaReviewAdvisoryCommentsBridge.ts (keep/retire decision)</file>
+      <file role="canonical-reference">src/solutions/SpaarkeAi/src/components/conversation/composeApplyLeg.ts (or the apply-leg module step 0 locates)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">compose-disposition findings + materializer branch</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Write/read coincidence is the acceptance bar: the review's compose output MUST be visible to the document session's compose-outputs projection. Scope: dispatch routing.</constraint>
+    <constraint source="ADR-041">Per-section Assistant outcomes still render for findings (the shipped confirmation flow) — gating removes the EDIT controls, not the outcome reporting. Scope: gating.</constraint>
+    <constraint source="project">No double-placement: live projection + ledger materialization must dedupe (one source of truth per turn). Scope: the bridge decision.</constraint>
+    <constraint source="ADR-016">Routing changes must not alter dispatch concurrency semantics (still sequential where batched). Scope: dispatch calls.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dispatch session routing + apply-leg</topic>
+    <files>
+      <file>.claude/adr/ADR-041-judgment-confirmation-completion-policy.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>projects/ai-advanced-capabilities-agreements-r1/notes/HUB-R1-REVIEW-2026-07-30.md</file>
+    </files>
+    <patterns>
+      <pattern name="sessionIdOverride" location="src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (~:939-949)">The DEF-09 precedent — thread documentSessionId the same way for review dispatches.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; trace the live dispatch path for the review (chat vs document session) + the apply-leg resolution; confirm current line refs.</step>
+    <step order="1">Thread documentSessionId → sessionIdOverride for agreement-review dispatches (both single and batch paths).</step>
+    <step order="2">Classify findings outputs at the apply-leg boundary: skip applied-edit resolution + edit controls; keep per-section outcome summaries.</step>
+    <step order="3">Bridge decision: keep the live projection for turn-immediacy with dedupe against materialization, or retire it — document + implement.</step>
+    <step order="4">Tests: routing (output visible in document session), gating (no Accept/Reject on findings), no double-placement on reload-after-live.</step>
+    <step order="5">Update TASK-INDEX.md: 031 ✅. Commit before 041/042 touch ConversationPane.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If review dispatch cannot target the document session without server changes (sessionIdOverride insufficient for this consumer), STOP and present the server delta with §10 justification.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Findings show no edit controls"><steps><step>Run a review</step><step>Inspect the findings outcome entries</step></steps><expected>Per-section outcomes render; NO Accept/Reject/Try-another controls; no staged redlines.</expected></test>
+  </ui-tests>
+  <tools><tool name="npm">SpaarkeAi build + tests</tool></tools>
+
+  <outputs>
+    <output type="code">ConversationPane.tsx (routing + gating) + bridge decision</output>
+    <output type="test">routing/gating tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">After a review, GET compose-outputs on the DOCUMENT session contains the findings output (write/read coincide).</criterion>
+    <criterion testable="true">Findings outputs render per-section Assistant outcomes but NO Accept/Reject/Try-another controls and stage NO redlines.</criterion>
+    <criterion testable="true">Live turn + subsequent reload yields exactly ONE set of gutter comments (dedupe proven).</criterion>
+    <criterion testable="true">A draft-alternative (real edit) output still gets the full apply-leg (regression).</criterion>
+    <criterion testable="true">Negative: a findings output arriving on a session with no open document logs gracefully (no crash, no orphan placement).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-16(c,d). The doc's "disposition problem" framing was incomplete — this task is why (HUB-R1-REVIEW §4 changes 3+4).
+
+COMPLETION SUMMARY (see projects/ai-advanced-capabilities-agreements-r1/notes/031-execution-notes.md for full detail):
+(c) ROUTING — FIXED. Re-located ALL FOUR agreement-review dispatch call sites post-021 reshape
+(ConversationPane.handleReviewNda; useAgreementReviewGate.dispatchReview [auto-proceed + confirm-chip
++ lens-click]; .dispatchBothSequentially). All funnel through useConsumerChips.dispatchBinding, which
+did NOT thread sessionIdOverride. Fix: new pure documentSessionWaiter.ts module (per-file-keyed,
+promise-based, bounded-timeout backfill wait) + sessionIdOverride threaded through
+useConsumerChips/useAgreementReviewGate/ConversationPane. Proven end-to-end by
+ConversationPane.agreement-review-session-routing.e2e.test.tsx (two-session forcing test).
+(d) GATING — VERIFIED NON-ISSUE (documented, not defensively coded). Traced: the review dispatches via
+chips.dispatchBinding, never via dispatchComposeAction (the ONLY caller of emitComposeApplyLeg /
+the apply-leg machinery). Structurally unreachable today, even post-030's disposition flip. Fixed a
+stale doc comment in composeApplyLeg.ts (predated the flip) and added a regression test proving no
+composeEdit metadata attaches to a review's confirmation message. Draft-alternative's apply-leg
+regression is covered by the EXISTING (unmodified) ConversationPane.compose-draft-alternative-session-routing.e2e.test.tsx.
+BRIDGE DECISION — KEEP useNdaReviewAdvisoryCommentsBridge (live-turn immediacy). Dedupe: the PRIMARY
+"live turn + reload" scenario is safe by construction (a fresh ComposeWorkspace mount has no prior
+live-placed DOM state; 030's own test already proves the ledger-materializer's OWN idempotency
+against re-invocation). ESCALATED (not silently dropped): a narrow same-mount residual (state.status
+cycling via ComposeWorkspace's externalChange/requestLoad broadcast-channel path, ALREADY live-placed
+comments in the SAME editor instance) genuinely requires a Compose.Components change
+(onAdvisoryComments has no lastMaterializedKey-equivalent guard) — out of this wave's boundary; flagged
+for a follow-on task.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

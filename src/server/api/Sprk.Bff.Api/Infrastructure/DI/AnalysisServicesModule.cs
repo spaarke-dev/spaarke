@@ -670,6 +670,19 @@ public static class AnalysisServicesModule
         // unconditional consumer of AnalysisPersonaService exists.
         services.AddHttpClient<AnalysisPersonaService>();
         services.AddHttpClient<IScopeResolverService, ScopeResolverService>();
+        // ai-advanced-capabilities-agreements-r1 task 020 (FR-07 / design Lens 3d): the agreement
+        // document classifier's REGISTRY-DRIVEN assembly path. IAgreementTypeRegistryReader reads the
+        // live sprk_agreementtype rows (typed HttpClient + managed-identity credential, symmetric with
+        // the ScopeResolverService registration above); AgreementTypeRegistryPromptAssembler formats
+        // them into the agreement-classify Action prompt at dispatch (candidate key set = registry,
+        // zero code per new type). Registered INSIDE the same compound Analysis+DocumentIntelligence
+        // gate as its future consumers (tasks 021/023 dispatch agreement-classify via ActionRunner,
+        // itself gated here) — no asymmetric-registration (CLAUDE.md §10 F.1): registration and consumer
+        // share this gate. The assembler is stateless/pure (singleton); no Null-Object peer needed (not
+        // feature-gated beyond this compound gate; no unconditional consumer).
+        services.AddHttpClient<Sprk.Bff.Api.Services.Ai.Classification.IAgreementTypeRegistryReader,
+                               Sprk.Bff.Api.Services.Ai.Classification.DataverseAgreementTypeRegistryReader>();
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Classification.AgreementTypeRegistryPromptAssembler>();
         services.AddScoped<IScopeManagementService, ScopeManagementService>();
         services.AddScoped<IAnalysisContextBuilder, AnalysisContextBuilder>();
         // IWorkingDocumentService promoted to unconditional (task 011 Phase 1b Tier 1.5 round 3,

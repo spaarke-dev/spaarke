@@ -248,6 +248,11 @@ export * from './MessageQuickView';
 // omitted — the shipped endpoint persists neither (§6.5 Path A, see task-024 notes).
 export * from './NewThreadModal';
 
+// ModalWindowControls - the standard Spaarke modal window-controls cluster
+// (maximize/restore + close ×), right-aligned in a dialog header. Shared so all
+// modals standardize on the same chrome (owner UAT 2026-07-31 item 4).
+export * from './ModalWindowControls';
+
 // TrackingFieldTrio - Entity-agnostic Monitor/High-Priority/Access-Permission
 // flag trio, lifted from the TrackingFieldTrio PCF (task 023, FR-14). Options
 // (segments + field labels) are injected via props — no `sprk_communication`

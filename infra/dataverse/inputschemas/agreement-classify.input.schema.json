@@ -1,0 +1,18 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for agreement-classify (ai-advanced-capabilities-agreements-r1 task 020; FR-07 / design Lens 3d — the document classifier). Normalized OpenAI-function-parameters subset (validated by CatalogInputSchemaContractTests' directory-wide Theory + the server twin OpenAiFunctionSchemaValidator). MIRROR-FIRST from the document/session context: documentText is the current text of the document being oriented — the Assistant chat-upload path (task 021) or the Compose surface supplies it from the just-uploaded / open document, exactly as agreement-review sources documentText. The classifier is self-contained over the document alone (no RAG grounding, AllowsKnowledge=false); the sprk_agreementtype registry (candidate key set + cues) is supplied to the model as prompt data by AgreementTypeRegistryPromptAssembler, NOT as a maker-provided input field. Property-level \"required\": true is FORBIDDEN (use the object-level required array). Custom keyword ledger_resolution is maker metadata (OpenAI-tolerated unknown keyword). No actionId here — assigned in Dataverse at deploy time. actionCode carries NO version suffix (owner hygiene).",
+  "actionCode": "agreement-classify",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["documentText"],
+    "properties": {
+      "documentText": {
+        "type": "string",
+        "description": "The current text of the document to classify (the just-uploaded / open document). Task 021 (interactive chat-upload) and task 023 (explicit path) supply it from the session/open document, not from Dataverse. The classifier reasons over this text plus the sprk_agreementtype registry cues injected into the prompt; it does not retrieve any other grounding. Bounded to keep the classification call economical — classification keys on the document's structure, opening, defined terms, and operative clauses.",
+        "maxLength": 60000,
+        "elicitation_prompt": "Which document should I classify? Upload or open the document first.",
+        "ledger_resolution": "session.documentText / compose.documentText — the just-uploaded (chat) or open (Compose) document text dispatched for classification. The sprk_agreementtype candidate key set + cues are supplied by the registry assembler at dispatch time, not a maker-provided field."
+      }
+    }
+  }
+}

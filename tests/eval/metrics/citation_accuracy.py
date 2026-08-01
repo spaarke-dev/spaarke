@@ -108,9 +108,10 @@ def citation_accuracy(output: str, document_text: str) -> float:
     completeness.py signature convention: takes the model output, returns a float score).
 
     Args:
-        output: JSON string (or dict) of the NDA-REVIEW Action output
-                 {overallRisk, flaggedSections[{sectionRef, quotedText, riskLevel, explanation,
-                 standardRef}]}.
+        output: JSON string (or dict) of the AGREEMENT-REVIEW Action output
+                 {overallRisk, flaggedSections[{sectionRef, quotedText, riskLevel, flaggedClause,
+                 assessment, standardRef}]} (FR-05 split; this metric reads only quotedText +
+                 standardRef, so the flaggedClause/assessment split does not change scoring).
         document_text: the source NDA text the Action was run against (the documentText input).
 
     Returns:

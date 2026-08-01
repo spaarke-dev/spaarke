@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>FR-15 — Word-comment export mirror + configurable author (#7)</title>
+    <phase>5 Output Deliverables</phase>
+    <gate>startable (deps 002,010 both completed)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Export fidelity for legal work product; Compose shared-lib .tsx/.ts changes; lifts a deliberate never-export scope decision.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Root-caused to file:line with the fix mapped (word-comment-export-gap.md); client-only.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>002,010</deps>
+    <tags>compose, frontend, export</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Make the exported Word comments mirror the on-screen gutter. Today each w:comment bakes the RAW explanation prose +
+    a hardcoded author. Build the export mirror: configurable AUTHOR (prop/config, not the literal at
+    ComposeEditor.tsx:2146) · "Flagged clause" label (not "Grounded fact") · "Assessment says: …" · "Standard: …"
+    (citation; full clause text when available). With 002's discrete fields there is NOTHING to string-parse — compose
+    the structured export text from flaggedClause/assessment/standardRef. Server ApplyComment needs NO change.
+  </prompt>
+  <role>SPAARKE platform developer. Compose comment-thread export mapping, docx save flow.</role>
+  <goal>A saved-then-opened-in-Word agreement shows structured comments identical in content to the gutter; author configurable.</goal>
+
+  <context>
+    <background>
+      Root cause (notes/word-comment-export-gap.md — one cause, four symptoms): the relabel exists ONLY in the gutter
+      (ComposeCommentGutter.tsx:343-378 display-only); export reads only author/text/timestamp
+      (composeSessionCommentThreadsToAnchoredComments, ComposeCommentThread.types.ts:256-262) and standardRef is
+      explicitly dropped (never-export scope at :89 — lift it deliberately, documenting the decision); author hardcoded
+      at ComposeEditor.tsx:2146 (useComposeCommentThreads(editor,'AI Advisory Review')). Two candidate seams: compose the
+      structured string at placeAdvisoryComments-time OR at the export mapping — the export-mapping seam keeps the
+      thread's raw fields intact for the UI; prefer it unless step-0 audit says otherwise. Post-002 threads carry
+      discrete metadata; older threads (pre-split) may carry only explanation — degrade gracefully (export raw text).
+      Line refs are pre-merge — re-locate. Also verify against 030-032: durable-recalled threads must export identically
+      to live-placed ones.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeCommentThread.types.ts (export mapping + scope lift)</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (author config)</file>
+      <file role="canonical-reference">projects/ai-advanced-capabilities-agreements-r1/notes/word-comment-export-gap.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs (ApplyComment — NO change)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">discrete flaggedClause/assessment fields</dependency>
+      <dependency task="010" status="pending">renamed files (same-file order)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Server ApplyComment unchanged — it renders whatever commentText/Author it is given; the fix is client-side export composition. Scope: whole task.</constraint>
+    <constraint source="project">The never-export scope lift (:89) is a deliberate decision — document it at the change site (why standardRef now exports). Scope: the mapping.</constraint>
+    <constraint source="project">Export structure mirrors the GUTTER's labels exactly ("Flagged clause" / "Assessment says:" / "Standard:") — one relabel source shared between gutter + export, not two copies. Scope: label source.</constraint>
+    <constraint source="ADR-012">Author configurability is a lib-level prop/config with the current literal as default; scope: the author fix.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Comment export fidelity</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>projects/ai-advanced-capabilities-agreements-r1/notes/word-comment-export-gap.md</file>
+    </files>
+    <patterns>
+      <pattern name="gutter relabel" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeCommentGutter.tsx (:343-378 pre-merge)">Hoist the relabel/structure into a shared helper both gutter + export consume.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; re-locate the four seam points post-merge; audit which seam (placement vs export mapping) best serves both live and durable-recalled threads.</step>
+    <step order="1">Hoist the structured-comment composition into a shared helper (gutter display + export use one source).</step>
+    <step order="2">Export mapping: compose commentText from the discrete fields (+ standardRef; full clause text when present); lift the :89 scope with an explanatory comment.</step>
+    <step order="3">Author: prop/config with default; thread through useComposeCommentThreads.</step>
+    <step order="4">Tests: export mapping (structured output; legacy-thread graceful degrade); author config; save→reopen round-trip assertion at the mapping level.</step>
+    <step order="5">Manual: save a reviewed doc, open in Word, verify all four symptoms fixed.</step>
+    <step order="6">Update TASK-INDEX.md: 052 ✅.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Word fidelity"><steps><step>Save a reviewed doc; download; open in Word</step></steps><expected>Each comment: configured author, "Flagged clause", "Assessment says: ...", "Standard: ..." — mirroring the gutter.</expected></test>
+  </ui-tests>
+  <tools><tool name="npm">lib build/tests</tool></tools>
+  <outputs>
+    <output type="code">export mapping + shared relabel helper + author config</output>
+    <output type="test">export-mapping tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A saved-then-opened-in-Word review shows per comment: configured author · "Flagged clause" · "Assessment says: …" · "Standard: …" — mirroring the gutter (manual + mapping test).</criterion>
+    <criterion testable="true">standardRef exports (citation; full clause text when the thread carries it); the scope-lift is documented at the change site.</criterion>
+    <criterion testable="true">The gutter and the export consume ONE shared relabel source (no duplicated label maps — grep proof).</criterion>
+    <criterion testable="true">Legacy threads (raw explanation only) export their text without crash or fabricated structure.</criterion>
+    <criterion testable="true">Negative: server ApplyComment untouched (git diff proof); durable-recalled threads export identically to live ones.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-15; notes/word-comment-export-gap.md is the authoritative root-cause map. Shares the relabel source with the gutter — the "do it once, both win" design.
+
+COMPLETED 2026-07-31 (sonnet/high, FULL rigor). Full execution record: notes/052-execution-notes.md.
+SEAM DECISION: export-mapping seam confirmed (POML default) — composes in composeSessionCommentThreadsToAnchoredComments (LIVE save path) + composeCommentThreadsToDocxAnnotations (legacy sibling, updated for consistency), NOT at placeAdvisoryComments-time, so the gutter keeps raw fields for its own styled/interactive rendering (risk badge, clickable Standard popover).
+DELIVERED: new shared helper src/client/shared/Spaarke.Compose.Components/src/widgets/advisoryNoteFormatting.ts (isAdvisoryCommentThread / getAdvisoryNoteSegments / composeAdvisoryCommentExportText — hoisted from ComposeCommentGutter.tsx's local label map + parseAdvisoryNote, now the ONE source both gutter + export consume); ComposeCommentThreadModel gains flaggedClause/assessment/standardText (scope-lift documented at the field-group doc comment); ComposeEditorProps gains advisoryCommentAuthor (default 'AI Advisory Review', threaded through useComposeCommentThreads, replacing the ComposeEditor.tsx:2196 hardcoded literal); AdvisoryCommentInput + ComposeCommentThreadMetadata gain the same 3 fields, additively threaded through placeAdvisoryComments/createThread.
+TESTS (NEW): advisoryNoteFormatting.test.ts, ComposeCommentThread.exportMirror.test.ts (mapping-level: discrete-field composition, legacy degrade both marker and no-marker, plain-comment passthrough, save-reopen round-trip, durable-recall parity fixture), ComposeEditor.advisoryCommentAuthor.test.tsx (real-editor author-config proof, kept separate from the DEF-01-affected advisoryComments suite).
+BUILD/TEST: tsc 0 errors. Touched/new suites: 80/81 pass (1 pre-existing DEF-01 failure in ComposeEditor.advisoryComments.test.tsx, task 012 scope). Full package regression (67 suites/757 tests): 741/757 pass, 16 failures across the SAME 6 pre-existing suites verified byte-identical via git-stash isolation against pre-052 code (4 ComposeWorkspace suites + stepOperationInterceptor.test.ts + the DEF-01 suite) — zero new failures introduced.
+NEGATIVE CRITERION: src/server/** untouched by this task (git diff --stat confirms; the one src/server change present in the worktree belongs to a concurrent parallel task, not this diff).
+MANUAL WORD VERIFICATION: DEFERRED to deploy-wave UAT (tasks 060/061) per the task's own instruction — this session cannot open Word. Noted nuance for that UAT: ApplyComment (server, unchanged) writes commentText as a single OOXML run; this task's \n\n segment separators are literal LF characters (no <w:br/>), so confirm Word's actual line-break rendering at UAT.
+IMPORTANT FINDING (documented, NOT fixed — out of this task's file scope): src/solutions/SpaarkeAi/src/components/conversation/useNdaReviewAdvisoryCommentsBridge.ts still reads the pre-002 `explanation` field (removed by task 002's schema split) — every flagged section from a live post-002 review is currently silently dropped before reaching placeAdvisoryComments. Needs a follow-up task (whichever next touches ConversationPane.tsx/the bridge) to read flaggedClause/assessment instead and extend ComposeAdvisoryCommentItem (Spaarke.AI.Widgets) with the 2 new fields. Does not block this task's acceptance criteria (verified at the fixture/mapping level per design) but is material to observing FR-15 end-to-end.
+  </notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

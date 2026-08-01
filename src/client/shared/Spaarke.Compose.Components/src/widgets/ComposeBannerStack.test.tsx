@@ -180,3 +180,72 @@ describe('ComposeBannerStack — prong 1 partial-apply banner', () => {
     expect(container.innerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 });
+
+// ai-advanced-capabilities-agreements-r1 task 032 — FR-16 128KB budget, Leg B: an honest
+// degraded-restore notice (never silent absence). Mirrors the partial-apply banner's dismiss +
+// reshow-on-a-new-instance convention exactly.
+describe('ComposeBannerStack — task 032 review-findings-degraded banner', () => {
+  it('shows the "skipped" message with the expected count when a prior review could not be restored', () => {
+    renderStack({ reviewFindingsDegraded: { expectedCount: 3, reason: 'skipped' } });
+
+    const banner = screen.getByTestId('compose-workspace-review-findings-degraded-banner');
+    expect(banner).toBeInTheDocument();
+    expect(screen.getByText("Review results couldn't be fully restored")).toBeInTheDocument();
+    expect(banner.textContent).toContain('about 3 findings');
+    expect(banner.textContent).toMatch(/exceeded the storage limit/i);
+  });
+
+  it('shows the "malformed" message (no count claim) for a corrupted/partial payload', () => {
+    renderStack({ reviewFindingsDegraded: { expectedCount: 0, reason: 'malformed' } });
+
+    const banner = screen.getByTestId('compose-workspace-review-findings-degraded-banner');
+    expect(banner.textContent).toMatch(/incomplete/i);
+    expect(banner.textContent).not.toMatch(/exceeded the storage limit/i);
+  });
+
+  it('does NOT render when reviewFindingsDegraded is null/omitted', () => {
+    renderStack({ reviewFindingsDegraded: null });
+    expect(screen.queryByTestId('compose-workspace-review-findings-degraded-banner')).not.toBeInTheDocument();
+    renderStack({});
+    expect(screen.queryByTestId('compose-workspace-review-findings-degraded-banner')).not.toBeInTheDocument();
+  });
+
+  it('hides after the dismiss control is clicked', async () => {
+    const user = userEvent.setup();
+    renderStack({ reviewFindingsDegraded: { expectedCount: 2, reason: 'skipped' } });
+
+    expect(screen.getByTestId('compose-workspace-review-findings-degraded-banner')).toBeInTheDocument();
+    await user.click(screen.getByTestId('compose-workspace-review-findings-degraded-dismiss'));
+    expect(screen.queryByTestId('compose-workspace-review-findings-degraded-banner')).not.toBeInTheDocument();
+  });
+
+  it('re-shows when a NEW degraded instance arrives after a dismissal', async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderStack({ reviewFindingsDegraded: { expectedCount: 2, reason: 'skipped' } });
+
+    await user.click(screen.getByTestId('compose-workspace-review-findings-degraded-dismiss'));
+    expect(screen.queryByTestId('compose-workspace-review-findings-degraded-banner')).not.toBeInTheDocument();
+
+    rerender(
+      <FluentProvider theme={webLightTheme}>
+        <ComposeBannerStack
+          errorMessage={null}
+          checkoutStatus="idle"
+          checkoutLockedBy={null}
+          checkoutFailureMessage={null}
+          importWarnings={[]}
+          pendingAssistantInsert={null}
+          reviewFindingsDegraded={{ expectedCount: 5, reason: 'skipped' }}
+        />
+      </FluentProvider>
+    );
+
+    expect(screen.getByTestId('compose-workspace-review-findings-degraded-banner')).toBeInTheDocument();
+  });
+
+  it('dark mode (ADR-021): renders with no hardcoded hex color', () => {
+    const { container } = renderStack({ reviewFindingsDegraded: { expectedCount: 1, reason: 'malformed' } }, webDarkTheme);
+    expect(screen.getByTestId('compose-workspace-review-findings-degraded-banner')).toBeInTheDocument();
+    expect(container.innerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  });
+});

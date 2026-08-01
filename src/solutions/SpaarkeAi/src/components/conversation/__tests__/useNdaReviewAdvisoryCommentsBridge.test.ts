@@ -3,10 +3,11 @@
  * (ai-advanced-capabilities-nda-r1 task 031).
  *
  * Proves the shape-detection + projection boundary:
- *   - an NDA-REVIEW result ({ overallRisk, flaggedSections[] }) dispatches ONE
+ *   - a review result ({ overallRisk, flaggedSections[] }) dispatches ONE
  *     `compose_advisory_comments` event on the `workspace` channel, with one
- *     projected item per USABLE flagged section (quotedText + explanation both
- *     present, non-empty);
+ *     projected item per USABLE flagged section (quotedText + at least one of
+ *     explanation [pre-split] / flaggedClause / assessment [agreements-r1
+ *     task-002 split] present, non-empty);
  *   - a flagged section missing `quotedText` or `explanation` is skipped (never
  *     thrown), and if EVERY section is unusable, nothing is dispatched;
  *   - a result that structurally matches an UNRELATED Compose action shape
@@ -75,6 +76,48 @@ describe('useNdaReviewAdvisoryCommentsBridge — shape detection + projection (t
       ],
     });
     expect(typeof event.timestamp).toBe('string');
+  });
+
+  it('POST-SPLIT shape (agreements-r1 task 002: flaggedClause/assessment, NO explanation): projects every section — composed explanation + discrete fields carried through', () => {
+    const { dispatch, result } = setup();
+
+    result.current.emitFromResult({
+      overallRisk: 'high',
+      flaggedSections: [
+        {
+          sectionRef: '4.1',
+          quotedText: 'Confidentiality obligations survive for ten years after termination.',
+          riskLevel: 'high',
+          flaggedClause: 'The clause imposes a ten-year survival period on confidentiality.',
+          assessment: 'Materially longer than the standard three-year term.',
+          standardRef: 'B8',
+        },
+        {
+          sectionRef: '7.2',
+          quotedText: 'The disclosing party makes no warranty as to accuracy.',
+          riskLevel: 'low',
+          flaggedClause: 'The clause disclaims accuracy warranties.',
+          // no assessment — explanation composes from flaggedClause alone
+        },
+      ],
+    });
+
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    const [, event] = dispatch.mock.calls[0];
+    expect(event.advisoryComments).toHaveLength(2);
+    expect(event.advisoryComments[0]).toMatchObject({
+      targetText: 'Confidentiality obligations survive for ten years after termination.',
+      explanation:
+        'The clause imposes a ten-year survival period on confidentiality.\n\nMaterially longer than the standard three-year term.',
+      flaggedClause: 'The clause imposes a ten-year survival period on confidentiality.',
+      assessment: 'Materially longer than the standard three-year term.',
+      standardRef: 'B8',
+    });
+    expect(event.advisoryComments[1]).toMatchObject({
+      explanation: 'The clause disclaims accuracy warranties.',
+      flaggedClause: 'The clause disclaims accuracy warranties.',
+    });
+    expect(event.advisoryComments[1].assessment).toBeUndefined();
   });
 
   it('skips a flagged section missing quotedText or explanation, without throwing', () => {

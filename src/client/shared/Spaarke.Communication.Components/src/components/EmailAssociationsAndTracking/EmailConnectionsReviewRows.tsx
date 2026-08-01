@@ -126,7 +126,10 @@ export function ConfirmedChip({
   onRemove: () => void;
   s: ConnectionsReviewStyles;
 }): React.ReactElement {
-  const type = primary.entity ? entityLabel(primary.entity) : 'Record';
+  // Prefer the denorm type label ("Matter") when the primary was filed via denorm
+  // fields only (no typed `entity` to resolve); else map the typed entity; else the
+  // generic fallback (owner UAT 2026-07-31 item 1). Feeds BOTH the chip and its tooltip.
+  const type = primary.typeLabel ?? (primary.entity ? entityLabel(primary.entity) : 'Record');
   const value = primary.recordNumber ?? primary.targetName;
   const title = `${type} · ${primary.targetName}${primary.recordNumber ? ' · ' + primary.recordNumber : ''}`;
   return (

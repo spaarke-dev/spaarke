@@ -38,9 +38,43 @@ export const LOCAL_CHIP = {
   askAboutFiles: "local:ask-about-files",
   reviseInCompose: "local:revise-in-compose",
   ndaReview: "local:nda-review",
+  /**
+   * task 021 (FR-08 interactive confirmation gate) — below-threshold "Yes, review as
+   * {type}" chip. Accepts the classifier's top (unconfirmed) candidate.
+   */
+  agreementReviewConfirm: "local:agreement-review-confirm",
+  /**
+   * task 021 — "Use the general review instead" (below-threshold pick-another) AND the
+   * non-agreement decline's "Run a general review anyway" escape hatch. Both branches
+   * fall back to the SAME general/fallback pack, so they share one local-action id.
+   */
+  agreementReviewGeneral: "local:agreement-review-general",
+  /** task 021 — composite choice-of-lens "Both" chip: sequential multi-pack dispatch (ADR-016). */
+  agreementReviewBoth: "local:agreement-review-both",
 } as const;
 
 export type LocalChipActionId = (typeof LOCAL_CHIP)[keyof typeof LOCAL_CHIP];
+
+/**
+ * task 021 — reserved prefix for the composite choice-of-lens chips, one per classified
+ * candidate (e.g. `local:agreement-review-lens:employment`). A per-candidate dynamic id
+ * cannot be a static `LOCAL_CHIP` constant (the candidate set is classifier output, not
+ * catalog data), so the sub-domain key is encoded as a suffix and decoded on click —
+ * mirrors the `LOCAL_CHIP_PREFIX` reserved-namespace pattern above, one level deeper.
+ */
+const AGREEMENT_REVIEW_LENS_CHIP_PREFIX = "local:agreement-review-lens:";
+
+/** Builds a composite-lens chip's local bindingId for the given classified sub-domain key. */
+export function buildAgreementReviewLensChipId(subDomainKey: string): string {
+  return `${AGREEMENT_REVIEW_LENS_CHIP_PREFIX}${subDomainKey}`;
+}
+
+/** Extracts the sub-domain key from a composite-lens chip's bindingId, or null if it isn't one. */
+export function decodeAgreementReviewLensChipId(bindingId: string): string | null {
+  return bindingId.startsWith(AGREEMENT_REVIEW_LENS_CHIP_PREFIX)
+    ? bindingId.slice(AGREEMENT_REVIEW_LENS_CHIP_PREFIX.length)
+    : null;
+}
 
 /** True when a chip's bindingId is a client-only local action (not a real Binding). */
 export function isLocalChip(bindingId: string | undefined | null): boolean {

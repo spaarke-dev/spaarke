@@ -101,6 +101,19 @@
   </ItemGroup>
 
   <!--
+    ai-advanced-capabilities-agreements-r1 task 050 (2026-07-31) — first backfill of the
+    tests/unit/domain/** KEEP category (ADR-038 §2 path #6: pure domain logic — calculations,
+    mappings, parsing, serialization; no mocks, no DI, no I/O). The path existed only as a README
+    placeholder ("Bulk move pending", zero compiled files) prior to this task. Compiled INTO this
+    assembly for the same reason as the contract/regression/seam/tenant globs above (no duplicate
+    test project; namespaces preserved). New pure-domain tests add files under
+    tests/unit/domain/{Module}/.
+  -->
+  <ItemGroup>
+    <Compile Include="..\domain\**\*.cs" LinkBase="DomainTests" />
+  </ItemGroup>
+
+  <!--
     ai-advanced-capabilities-nda-r1 task 052 (2026-07-26) — first backfill of the
     tests/integration/tenant/** KEEP category (ADR-038 §2 path #4: tenant boundary
     enforcement). Prior to this task the category had zero compiled test files (flagged

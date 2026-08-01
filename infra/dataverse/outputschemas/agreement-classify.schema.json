@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/agreement-classify.schema.json",
+  "title": "Agreement Classify — Output Schema (agreement-classify)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='agreement-classify' (ai-advanced-capabilities-agreements-r1 task 020, FR-07 / design Lens 3d — the document classifier). MIRRORS VERBATIM the outputSchema in infra/dataverse/actions/agreement-classify.action.json. Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required arrays, no anyOf/oneOf/discriminator, no property-level boolean required, no in-schema numeric/length bounds (conveyed in descriptions + the prompt). CLOSED CONTRACT: exactly {isAgreement, candidates[{subDomainKey, confidence}], composite, reasoning}. subDomainKey is an UNCONSTRAINED string by design — its valid set is the live sprk_agreementtype registry, injected into the prompt at assembly time (registry-driven, zero code per new type), NOT a schema enum (a $choices/enum cannot ride the ActionRunner static-schema path and cannot reach a nested array-item field; see the Action file's $comment-registry-driven). Consumed by task 021 (orientation + >=0.85 confirmation gate; composite -> choice-of-lens) and task 023 (explicit-path sanity check).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["isAgreement", "candidates", "composite", "reasoning"],
+  "$comment-required": "Object-level required array only — property-level boolean 'required' is FORBIDDEN. All four fields required; subDomainKey/confidence required on each candidate item.",
+  "properties": {
+    "isAgreement": {
+      "type": "boolean",
+      "description": "True only if the document is genuinely an agreement/contract that creates enforceable obligations between parties. False for a pleading, invoice/receipt/purchase order, letter/email/memo, marketing material, report, or policy. When false, candidates MUST be empty and composite MUST be false."
+    },
+    "candidates": {
+      "type": "array",
+      "description": "One entry per plausible agreement sub-domain, ordered by descending confidence. EMPTY when isAgreement=false. Usually a single entry; more than one ONLY for a genuine composite document (each entry a distinct sub-domain substantively present). Do not fabricate candidates.",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["subDomainKey", "confidence"],
+        "properties": {
+          "subDomainKey": {
+            "type": "string",
+            "description": "The sub-domain key, copied verbatim from the supplied sprk_agreementtype registry (e.g. the key of the matched registered type, or the fallback row's key when the agreement matches no specific type). MUST be one of the registry keys supplied in the prompt; never an invented key, a display label, or a description.",
+            "maxLength": 100
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Calibrated probability from 0.0 to 1.0 that the document is this sub-domain (an honest frequency, not a vibe). A textbook example ~0.9+; a resembling-but-ambiguous document 0.4-0.7 (do not round up); the downstream gate auto-proceeds at/above a per-type threshold (default 0.85) and otherwise asks the user to confirm, so honest calibration is required. Minimum 0.0, maximum 1.0 (range conveyed here + in the prompt; Azure OpenAI structured output does not enforce numeric bounds in-schema)."
+          }
+        }
+      }
+    },
+    "composite": {
+      "type": "boolean",
+      "description": "True only when the document substantively contains two or more distinct registered sub-domains (e.g. an employment agreement with a self-contained NDA addendum), in which case candidates carries one entry per present sub-domain. A single incidental clause of another type does NOT make a document composite. False for a single-type agreement or a non-agreement."
+    },
+    "reasoning": {
+      "type": "string",
+      "description": "One concise plain-language paragraph explaining the classification: what signals drove isAgreement, which registered cue(s) matched (or why none did -> fallback), why the per-candidate confidences are what they are (including any honest uncertainty), and, if composite, which distinct types are present. Grounded in the document; not a restatement of it. Not legal advice.",
+      "maxLength": 2000
+    }
+  }
+}

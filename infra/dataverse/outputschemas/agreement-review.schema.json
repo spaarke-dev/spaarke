@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/agreement-review.schema.json",
+  "title": "Agreement Review — Output Schema (agreement-review)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='agreement-review' (ai-advanced-capabilities-agreements-r1 task 002, generalized from nda-review + FR-05 split). MIRRORS VERBATIM the outputSchema in infra/dataverse/actions/agreement-review.action.json. Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required arrays, no anyOf/oneOf/discriminator; overallRisk and riskLevel are constrained strings via the enum keyword. CLOSED CONTRACT (FR-05 split): exactly {overallRisk, flaggedSections[{sectionRef, quotedText, riskLevel, flaggedClause, assessment, standardRef}]} — the memo (FR-13), Word-comment export (FR-15), and the FR-16 findings materializer consume these discrete fields; flaggedClause (grounded fact) + assessment (reasoned judgment) replace the single explanation blob so no consumer string-parses 'Grounded fact —' markers. No disclaimer field: the not-legal-advice framing is a systemPrompt posture + a fixed review-summary-panel constant (see the Action's $comment-disclaimer), not a per-run generated output field. Advisory determinism (ADR-039 amendment, inherited): reasoning is probabilistic but every factual claim is cited (quotedText+sectionRef for the document span, standardRef for the standard clause).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["overallRisk", "flaggedSections"],
+  "$comment-required": "Object-level required array only — property-level boolean 'required' is FORBIDDEN. overallRisk/riskLevel are closed sets via enum.",
+  "properties": {
+    "overallRisk": {
+      "type": "string",
+      "description": "Overall risk rating for the whole agreement (Part A rubric). Low = safe to sign as-is/trivial edits; Medium = sign after noted edits; High = material concern requiring negotiation; Critical = severe issue potentially blocking signature. At least as severe as the most severe sign/no-sign-driving finding. High/Critical are the attorney-review signal.",
+      "enum": ["Low", "Medium", "High", "Critical"]
+    },
+    "flaggedSections": {
+      "type": "array",
+      "description": "One entry per grounded finding, from the represented party's perspective. Empty array when the agreement has no material deviations from the standard, when the document is not an agreement, or when no applicable standard was retrieved (do not invent findings). Emit a finding ONLY when all six fields can be grounded in the agreement + the retrieved standard; decline (omit) anything unverifiable.",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sectionRef", "quotedText", "riskLevel", "flaggedClause", "assessment", "standardRef"],
+        "properties": {
+          "sectionRef": {
+            "type": "string",
+            "description": "Page/section/paragraph locator for where the finding sits in the agreement (e.g. 'Section 4.2, para 2 (p. 3)'). Derived from the agreement's own numbering; paragraph position when unnumbered. This locates the finding for the reviewing attorney.",
+            "maxLength": 300
+          },
+          "quotedText": {
+            "type": "string",
+            "description": "VERBATIM excerpt copied from the agreement (documentText input) — the exact relevant/offending language, not paraphrased. The document-span citation that makes the finding auditable.",
+            "maxLength": 2000
+          },
+          "riskLevel": {
+            "type": "string",
+            "description": "Severity of THIS finding per the Part A rubric. High or Critical marks it attorney-review-worthy (the machine signal the review classification + summary panel use).",
+            "enum": ["Low", "Medium", "High", "Critical"]
+          },
+          "flaggedClause": {
+            "type": "string",
+            "description": "GROUNDED FACT only: what this clause actually says or does, stated plainly and objectively so it is directly checkable against quotedText and the retrieved standard (e.g. 'The clause defines Confidential Information only as information marked Confidential in writing.'). Contains NO judgment, risk characterization, recommendation, or deviation analysis, and NO inline 'grounded fact —' marker. Paired with assessment (the reasoned-judgment field); the two fields carry the fact/judgment distinction structurally so downstream consumers never string-parse a marker.",
+            "maxLength": 1500
+          },
+          "assessment": {
+            "type": "string",
+            "description": "REASONED JUDGMENT only: how this clause deviates from the retrieved standard and why it carries the stated risk, advisory in tone (e.g. 'Materially narrower than the standard, which protects regardless of marking, risking loss of protection for oral/unmarked disclosures.'). Does NOT restate the raw clause text (that is flaggedClause) and carries NO inline 'assessment —' / 'judgment —' marker. Not legal advice.",
+            "maxLength": 2000
+          },
+          "standardRef": {
+            "type": "string",
+            "description": "The clause of the retrieved firm standard the finding is measured against, named using that standard's own clause taxonomy/label (e.g. the clause id or section name the retrieved standard uses). Must be a real clause of the supplied standard. The standard-side citation.",
+            "maxLength": 300
+          }
+        }
+      }
+    }
+  }
+}

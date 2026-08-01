@@ -42,9 +42,14 @@ import {
   searchUsersAndContacts,
   XrmDataverseClient,
   getXrm,
+  type OpenEmailComposeMode,
 } from '@spaarke/ui-components';
 import { resolveRuntimeConfig, getAuthProvider } from '@spaarke/auth';
-import { EmailWorkspace, type EmailWorkspaceWebApi } from '@spaarke/communication-components';
+import {
+  EmailWorkspace,
+  useEmailComposeActions,
+  type EmailWorkspaceWebApi,
+} from '@spaarke/communication-components';
 import { setRuntimeConfig, getBffBaseUrl } from './config/runtimeConfig';
 import { ensureAuthInitialized, authenticatedFetch } from './services/authInit';
 
@@ -146,13 +151,38 @@ interface HostFormXrm {
  * `hideList` is only meaningful when an id resolves. When nothing resolves →
  * list mode (id `undefined`, `hideList` false) — i.e. behaves exactly as before.
  */
-function resolveEmailLaunch(): { initialSelectedId?: string; hideList: boolean } {
+function resolveEmailLaunch(): {
+  initialSelectedId?: string;
+  hideList: boolean;
+  compose?: { mode: OpenEmailComposeMode; sourceId?: string };
+} {
   const normalizeId = (raw: string | null | undefined): string | undefined => {
     const v = (raw ?? '').replace(/[{}]/g, '').trim().toLowerCase();
     return v.length > 0 ? v : undefined;
   };
   const isSingleFlag = (params: URLSearchParams): boolean =>
     params.get('single') === '1' || params.get('view') === 'record';
+
+  // (0) COMPOSE mode (Pattern B via `openEmailCompose`) — short-circuits the reading
+  //     surface entirely. `compose=<mode>` (+ optional `&id=<source>`) arrives either
+  //     as its own top-level param or folded into `data`. Parsing `data` as
+  //     URLSearchParams is safe for the record case too: a bare-guid `data` yields no
+  //     `compose` key.
+  try {
+    const search = typeof window !== 'undefined' ? window.location.search : '';
+    const top = new URLSearchParams(search);
+    const rawData = top.get('data');
+    const dataParams = rawData ? new URLSearchParams(rawData) : null;
+    const rawCompose = top.get('compose') ?? dataParams?.get('compose') ?? '';
+    if (rawCompose) {
+      const valid: OpenEmailComposeMode[] = ['new', 'reply', 'replyAll', 'forward'];
+      const mode = (valid as string[]).includes(rawCompose) ? (rawCompose as OpenEmailComposeMode) : 'new';
+      const sourceId = normalizeId(top.get('id') ?? dataParams?.get('id'));
+      return { hideList: false, compose: { mode, sourceId } };
+    }
+  } catch {
+    /* URL parse failure → fall through to record/list resolution */
+  }
 
   let id: string | undefined;
   let single = false;
@@ -234,6 +264,100 @@ const EmailPageAuthError: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
   );
 };
 EmailPageAuthError.displayName = 'EmailPageAuthError';
+
+interface EmailComposeStandaloneProps {
+  compose: { mode: OpenEmailComposeMode; sourceId?: string };
+  bffBaseUrl: string;
+  dataService: ReturnType<typeof createXrmDataService>;
+  navigationService: ReturnType<typeof createXrmNavigationService>;
+  composeHandlers: ReturnType<typeof createXrmEmailComposeHandlers>;
+  fromMailbox?: string;
+  dataverseUrl: string;
+}
+
+/**
+ * Standalone compose host for the `openEmailCompose` launcher. Mounts ONLY the
+ * composer dialog (no reading surface), auto-triggers the requested action
+ * (New / Reply / Reply All / Forward) once on mount — `useEmailComposeActions`
+ * fetches the reply/forward source itself — and closes its own web-resource modal
+ * window on Cancel or after a successful Send (via the `onClose` hook).
+ */
+const EmailComposeStandalone: React.FC<EmailComposeStandaloneProps> = ({
+  compose,
+  bffBaseUrl,
+  dataService,
+  navigationService,
+  composeHandlers,
+  fromMailbox,
+  dataverseUrl,
+}) => {
+  const closedRef = React.useRef(false);
+  const closeWindow = React.useCallback(() => {
+    if (closedRef.current) return;
+    closedRef.current = true;
+    // Modal target=2 responds to window.close; postMessage is the host fallback
+    // (mirrors NotepadShell's documented two-strategy close mechanism).
+    try {
+      window.close();
+    } catch {
+      /* ignore */
+    }
+    try {
+      window.parent?.postMessage({ type: 'email-compose-close' }, '*');
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const handleSearchRecipients = React.useCallback(
+    (query: string) => searchUsersAndContacts(dataService, query),
+    [dataService]
+  );
+
+  const { actions, composerDialog } = useEmailComposeActions({
+    authenticatedFetch,
+    bffBaseUrl,
+    dataService,
+    navigationService,
+    onSearchRecipients: handleSearchRecipients,
+    onLookupRecipients: composeHandlers.onLookupRecipients,
+    recordLookupCatalog: composeHandlers.recordLookupCatalog,
+    onLookupRecord: composeHandlers.onLookupRecord,
+    onAddRelationship: composeHandlers.onAddRelationship,
+    onUploadLocalAttachment: composeHandlers.onUploadLocalAttachment,
+    onResolveShareLink: composeHandlers.onResolveShareLink,
+    onListEmailTemplates: composeHandlers.onListEmailTemplates,
+    onRenderEmailTemplate: composeHandlers.onRenderEmailTemplate,
+    onDraftWithAi: composeHandlers.onDraftWithAi,
+    fromMailbox,
+    dataverseUrl,
+    onClose: closeWindow,
+  });
+
+  // Auto-open the requested composer ONCE on mount.
+  const triggeredRef = React.useRef(false);
+  React.useEffect(() => {
+    if (triggeredRef.current) return;
+    triggeredRef.current = true;
+    // `useEmailComposeActions` always populates all four handlers; the toolbar-actions
+    // type marks them optional, so optional-chain the calls (safe no-op if ever absent).
+    const { mode, sourceId } = compose;
+    if (mode === 'reply' && sourceId) actions.onReply?.(sourceId);
+    else if (mode === 'replyAll' && sourceId) actions.onReplyAll?.(sourceId);
+    else if (mode === 'forward' && sourceId) actions.onForward?.(sourceId);
+    else actions.onNew?.();
+  }, [actions, compose]);
+
+  // A subtle loading state shows behind the dialog during the reply/forward source
+  // fetch; the composer dialog's own modal backdrop covers it once it opens.
+  return (
+    <>
+      <EmailPageLoading />
+      {composerDialog}
+    </>
+  );
+};
+EmailComposeStandalone.displayName = 'EmailComposeStandalone';
 
 function Root() {
   const [theme, setTheme] = React.useState(resolveCodePageTheme);
@@ -318,6 +442,19 @@ function Root() {
     body = <EmailPageAuthError onRetry={handleRetry} />;
   } else if (bffBaseUrl === null) {
     body = <EmailPageLoading />;
+  } else if (launch.compose) {
+    // Compose mode (openEmailCompose) — mount ONLY the composer, not the workspace.
+    body = (
+      <EmailComposeStandalone
+        compose={launch.compose}
+        bffBaseUrl={bffBaseUrl}
+        dataService={dataService}
+        navigationService={navigationService}
+        composeHandlers={composeHandlers}
+        fromMailbox={fromMailbox}
+        dataverseUrl={dataverseUrl}
+      />
+    );
   } else {
     body = (
       <EmailWorkspace

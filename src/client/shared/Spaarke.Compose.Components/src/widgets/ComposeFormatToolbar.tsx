@@ -107,6 +107,9 @@ import {
   DocumentSync24Regular,
   ArrowClockwise24Regular,
   DocumentText24Regular,
+  DocumentBulletList24Regular,
+  ArrowDownload24Regular,
+  Mail24Regular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -263,6 +266,20 @@ export interface ComposeFormatToolbarProps {
    * a popover. Replaces the standing disclaimer banner that used to sit inside the Review Summary.
    */
   reviewDisclaimer?: string;
+
+  // ---- Create Summary Memo (FR-14, ai-advanced-capabilities-agreements-r1 task 051) — a dropdown with
+  //      two actions, rendered ONLY when a review is present (same `hasReview` gate as the Review
+  //      Summary/Notes toggles above) AND at least one handler is threaded. Both actions READ the
+  //      PERSISTED review-memo record server-side (render-from-persisted, project-binding constraint) —
+  //      a record that hasn't been generated yet surfaces the host's "generate the review/memo first"
+  //      negative state, never a silent empty export. Pure forwarder (mirrors onSave/onOpenDocument): the
+  //      host (ComposeWorkspace) owns the fetch/download/EmailComposer-open logic. ----
+  /** Generate + download the memo as a .docx. Rendered only when set. */
+  onGenerateMemo?: () => void;
+  /** Read the persisted memo and open the EmailComposer prefilled with its body + subject. Rendered only when set. */
+  onEmailMemo?: () => void;
+  /** True while a memo generate/email fetch is in flight — disables both actions and shows a spinner on the trigger. */
+  isMemoActionInFlight?: boolean;
 }
 
 /**
@@ -382,6 +399,9 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     reviewNotesOpen,
     onToggleReviewNotes,
     reviewDisclaimer,
+    onGenerateMemo,
+    onEmailMemo,
+    isMemoActionInFlight,
   } = props;
 
   // Re-render on selection/transaction to keep the "active" highlight in sync.
@@ -828,6 +848,48 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
             data-testid="compose-format-review-notes-toggle"
           />
         </Tooltip>
+      ) : null}
+
+      {/* ---- Create Summary Memo (FR-14, task 051) — a dropdown of two READ-and-render actions,
+             rendered ONLY when a review is present (same `hasReview` gate as the Review Summary/Notes
+             toggles). The trigger shows a spinner + disables both items while a memo fetch is in
+             flight; the host's click handler surfaces the "generate the review/memo first" negative
+             state when no memo has been persisted yet — never a silent empty export. ---- */}
+      {hasReview && (onGenerateMemo || onEmailMemo) ? (
+        <Menu positioning="below-end">
+          <MenuTrigger disableButtonEnhancement>
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={isMemoActionInFlight ? <Spinner size="tiny" /> : <DocumentBulletList24Regular />}
+              iconPosition="before"
+              disabled={controlDisabled || isMemoActionInFlight}
+              data-testid="compose-format-memo-menu"
+            >
+              Create Summary Memo
+            </Button>
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              <MenuItem
+                icon={<ArrowDownload24Regular />}
+                disabled={!onGenerateMemo || controlDisabled || isMemoActionInFlight}
+                onClick={() => onGenerateMemo?.()}
+                data-testid="compose-format-memo-generate"
+              >
+                Generate memo (.docx)
+              </MenuItem>
+              <MenuItem
+                icon={<Mail24Regular />}
+                disabled={!onEmailMemo || controlDisabled || isMemoActionInFlight}
+                onClick={() => onEmailMemo?.()}
+                data-testid="compose-format-memo-email"
+              >
+                Email memo
+              </MenuItem>
+            </MenuList>
+          </MenuPopover>
+        </Menu>
       ) : null}
 
       {/* ---- Track Changes toggle (item 4, UAT round-4) — task 039 P1: ICON-ONLY, right-aligned.

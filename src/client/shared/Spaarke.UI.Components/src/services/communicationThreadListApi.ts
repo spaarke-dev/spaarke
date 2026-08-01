@@ -512,6 +512,47 @@ export async function setThreadPinned(
 }
 
 // ---------------------------------------------------------------------------
+// renameThread — POST /api/communications/threads/{threadId}/rename (FR-17)
+// ---------------------------------------------------------------------------
+//
+// Renames a thread: the server sets sprk_name and flips sprk_nameisautoderived to Edited so the auto re-derive never
+// overwrites the user's name. Returns the persisted name (server may truncate to 200 chars). Same authenticatedFetch/
+// BFF path + ProblemDetails error shape as the other writes (ADR-028 / ADR-019). `<ConversationView />` calls this from
+// the header title's inline edit, then asks the host to refresh the thread list so the new name shows everywhere.
+// ---------------------------------------------------------------------------
+
+/**
+ * Renames a thread (`POST /api/communications/threads/{threadId}/rename`). Returns the persisted (possibly truncated)
+ * name. Throws {@link CommunicationThreadListError} on any non-2xx — a blank name is a 400, an invisible thread a 403.
+ */
+export async function renameThread(
+  threadId: string,
+  name: string,
+  client: IThreadListApiClientOptions
+): Promise<string> {
+  if (!threadId) {
+    throw new Error('renameThread: threadId is required.');
+  }
+  if (!client.authenticatedFetch) {
+    throw new Error('renameThread: authenticatedFetch is required.');
+  }
+
+  const url = resolveUrl(client.bffBaseUrl, `/api/communications/threads/${encodeURIComponent(threadId)}/rename`);
+  const response = await client.authenticatedFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+
+  if (!response.ok) {
+    throw await CommunicationThreadListError.fromResponse(response);
+  }
+
+  const result = (await response.json()) as { threadId: string; name: string };
+  return result.name;
+}
+
+// ---------------------------------------------------------------------------
 // deactivateThread — DELETE /api/communications/threads/{threadId} (round 7 item 7)
 // ---------------------------------------------------------------------------
 //

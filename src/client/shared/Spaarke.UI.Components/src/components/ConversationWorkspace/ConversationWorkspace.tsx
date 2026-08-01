@@ -97,6 +97,11 @@ export interface IConversationRendererProps {
    * `<ConversationView onMarkThreadRead={…} />`.
    */
   onMarkThreadRead: () => void;
+  /**
+   * Called after the message pane renames the selected thread (round-8.4). The shell refreshes its thread list so the
+   * new name shows on the left-pane row too. Forward it to `<ConversationView onThreadRenamed={…} />`.
+   */
+  onThreadRenamed: (newName: string) => void;
 }
 
 export interface ConversationWorkspaceProps {
@@ -450,6 +455,14 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
     setUnreadCounts(prev => ({ ...prev, [threadId]: 0 }));
   }, []);
 
+  // — Thread rename (round-8.4): the message pane already persisted the new name; here we just reflect it in the list.
+  // Optimistic row update so the left-pane name changes instantly; reloadToken re-fetches to reconcile (server may
+  // truncate to 200 chars).
+  const handleThreadRenamed = React.useCallback((threadId: string, newName: string) => {
+    setAllRows(prev => prev.map(r => (r.threadId === threadId ? { ...r, name: newName } : r)));
+    setReloadToken(t => t + 1);
+  }, []);
+
   // — Pin/unpin (task 041, FR-24): optimistic local update + rollback on failure —
   const handleTogglePin = React.useCallback(
     (threadId: string, nextPinned: boolean) => {
@@ -518,6 +531,8 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
         // Relocated mark-as-read (item 5c): clear THIS thread's list badge when
         // the message-toolbar tool fires.
         onMarkThreadRead: () => handleMarkThreadRead(selectedThreadId),
+        // Reflect an in-pane rename on the left-pane row (round-8.4).
+        onThreadRenamed: (newName: string) => handleThreadRenamed(selectedThreadId, newName),
       })
     ) : (
       <DefaultConversationPane threadId={selectedThreadId} />

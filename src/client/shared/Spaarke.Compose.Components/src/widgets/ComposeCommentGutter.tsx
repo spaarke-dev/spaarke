@@ -54,12 +54,12 @@
  *     than reinventing them.
  *   - Cost-of-doing-nothing: without it, NDA-REVIEW advisory comments have no vertically-aligned,
  *     at-a-glance right-rail presentation — only an in-document underline + the top-of-column
- *     `NdaReviewSummaryPanel` list (spec FR-16 unmet).
+ *     `AgreementReviewSummaryPanel` list (spec FR-16 unmet).
  *
  * @see ./ComposeCommentThread.types.ts — `findCommentAnchorRange` (live position), `ComposeCommentThreadModel`
  * @see ./marks/TrackChangesExtension.ts — the coordsAtPos/widget-decoration precedent this reuses
  * @see ./ComposeEditor.tsx — mount point (inside `editorScrollWrap`) + `advisoryComments.threads` source
- * @see ./NdaReviewSummaryPanel.tsx — `riskBadgeColor` (reused for the per-card risk badge)
+ * @see ./AgreementReviewSummaryPanel.tsx — `riskBadgeColor` (reused for the per-card risk badge)
  * @see projects/ai-advanced-capabilities-nda-r1/spec.md FR-16
  */
 import * as React from 'react';
@@ -78,14 +78,32 @@ import {
   MenuItem,
   Button,
   Tooltip,
+  Checkbox,
+  Dropdown,
+  Option,
+  Dialog,
+  DialogSurface,
+  DialogBody,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
   makeStyles,
   mergeClasses,
   tokens,
 } from '@fluentui/react-components';
 import { ChevronDoubleDown16Regular, MoreVertical20Regular, SparkleRegular } from '@fluentui/react-icons';
 import { findCommentAnchorRange, type ComposeCommentThreadModel } from './ComposeCommentThread.types';
-import { riskBadgeColor, formatClauseLocation } from './NdaReviewSummaryPanel';
-import { deriveClauseLocationLabel } from './ndaClauseLocation';
+import { riskBadgeColor, formatClauseLocation, type NdaReviewFindingSummary } from './AgreementReviewSummaryPanel';
+import { deriveClauseLocationLabel } from './clauseLocation';
+// task 052 (FR-15, Word-comment export mirror): the label map + parse/compose logic moved to this
+// shared module so the export mapping (`ComposeCommentThread.types.ts`) consumes the SAME source —
+// re-exported below (`parseAdvisoryNote`/`AdvisoryNoteSegment`) so existing import sites (this
+// file's own test suite) are unaffected.
+import { getAdvisoryNoteSegments, parseAdvisoryNote } from './advisoryNoteFormatting';
+import type { AdvisoryNoteSegment } from './advisoryNoteFormatting';
+
+export { parseAdvisoryNote };
+export type { AdvisoryNoteSegment };
 
 /** Right-rail column DEFAULT width — cards clear of the document's own right margin. */
 export const COMMENT_GUTTER_WIDTH_PX = 220;
@@ -106,6 +124,14 @@ const DEFAULT_CARD_HEIGHT_PX = 96;
  * expanded card shows the full text. Kept short so the default (collapsed) rail stays scannable.
  */
 const COLLAPSED_BODY_MAX_CHARS = 140;
+/**
+ * Task 041 (FR-11 multi-select batch AI action) — soft cap on a single batch run. Selecting MORE
+ * than this many notes and clicking Run prompts a confirm ("N notes — sequential, may take a
+ * while") before any dispatch starts; selecting up to and including this many runs immediately.
+ * Deliberately a trivially-tunable named constant (spec assumption, owner-tunable — design.md
+ * Lens 6 "Unresolved Questions"), not threaded through configuration — see that doc for rationale.
+ */
+export const BATCH_NOTE_TOOL_SOFT_CAP = 25;
 
 const useStyles = makeStyles({
   rail: {
@@ -316,69 +342,57 @@ const useStyles = makeStyles({
   expandCueOpen: {
     transform: 'rotate(180deg)',
   },
+  // Task 041 — the checkbox sits at the upper-LEFT of the card header, before the location label.
+  checkboxSlot: {
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  // Task 041 — the batch sub-toolbar: a persistent bar pinned to the top of the (bounded) rail while
+  // ≥1 note is checked, ABOVE any note cards beneath it (raised z-index + a solid, elevated surface —
+  // the same "overlay toolbar on selection" pattern list/grid UIs use).
+  subToolbar: {
+    position: 'absolute',
+    top: 0,
+    left: tokens.spacingHorizontalXS,
+    right: tokens.spacingHorizontalXS,
+    zIndex: 4,
+    pointerEvents: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: tokens.spacingVerticalXS,
+    padding: tokens.spacingHorizontalS,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    boxShadow: tokens.shadow8,
+  },
+  subToolbarRow: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalXS,
+    flexWrap: 'wrap',
+  },
+  subToolbarCount: {
+    color: tokens.colorNeutralForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+    flexShrink: 0,
+  },
+  subToolbarDropdown: {
+    minWidth: '140px',
+  },
+  subToolbarSpacer: {
+    flexGrow: 1,
+  },
+  capConfirmBody: {
+    color: tokens.colorNeutralForeground1,
+  },
 });
 
-/** Truncated, log-safe-length label (mirrors ComposeCommentThread's / NdaReviewSummaryPanel's helper). */
+/** Truncated, log-safe-length label (mirrors ComposeCommentThread's / AgreementReviewSummaryPanel's helper). */
 function truncate(text: string, max: number): string {
   const trimmed = text.trim();
   return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
-}
-
-/** One labelled aspect of an advisory note ("Grounded fact" / "Advisory judgment"), or an unlabelled run. */
-export interface AdvisoryNoteSegment {
-  /** The aspect label (e.g. "Grounded fact"), or undefined for text with no recognized label. */
-  label?: string;
-  /** The aspect's prose. */
-  body: string;
-}
-
-/** The labels the NDA-REVIEW Action authors its advisory explanations with (case-insensitive). */
-const ADVISORY_NOTE_LABELS = ['Grounded fact', 'Advisory judgment', 'Judgment'] as const;
-
-/**
- * UAT round-6 #5 — the DISPLAY labels the reviewer asked for, mapped from the model's authored markers:
- * "Grounded fact" → "Flagged clause", "Advisory judgment" / "Judgment" → "Assessment says". Detection
- * still keys on the model's original words; only the rendered label changes.
- */
-const ADVISORY_NOTE_DISPLAY_LABEL: Record<string, string> = {
-  'grounded fact': 'Flagged clause',
-  'advisory judgment': 'Assessment says',
-  judgment: 'Assessment says',
-};
-
-/**
- * UAT round-5 #7 — split an advisory note into its "Grounded fact" / "Advisory judgment" aspects so each
- * renders as its own labelled, separated paragraph (the reviewer asked what the labels mean + for them to
- * be bold + separate for readability). The Action authors explanations as
- * "Grounded fact: … Advisory judgment: …" (also older "Judgment: …"); we split on those markers. Text
- * with no recognized label returns a single unlabelled segment (rendered plainly, unchanged) — so a note
- * that doesn't follow the convention never gets mangled.
- */
-export function parseAdvisoryNote(text: string): AdvisoryNoteSegment[] {
-  const trimmed = (text ?? '').trim();
-  if (!trimmed) return [];
-  // Find every label occurrence (label + following “:”/“—”/“-”), in document order.
-  const pattern = new RegExp(`\\b(${ADVISORY_NOTE_LABELS.join('|')})\\b\\s*[:—-]\\s*`, 'gi');
-  const marks: { label: string; start: number; bodyStart: number }[] = [];
-  for (let m = pattern.exec(trimmed); m !== null; m = pattern.exec(trimmed)) {
-    marks.push({ label: m[1], start: m.index, bodyStart: m.index + m[0].length });
-  }
-  if (marks.length === 0) return [{ body: trimmed }];
-  const segments: AdvisoryNoteSegment[] = [];
-  // Any prose before the first label is kept as an unlabelled lead segment (never dropped).
-  if (marks[0].start > 0) {
-    const lead = trimmed.slice(0, marks[0].start).trim();
-    if (lead) segments.push({ body: lead });
-  }
-  for (let i = 0; i < marks.length; i++) {
-    const end = i + 1 < marks.length ? marks[i + 1].start : trimmed.length;
-    const body = trimmed.slice(marks[i].bodyStart, end).trim();
-    // UAT round-6 #5 — display the reviewer's preferred label ("Flagged clause" / "Assessment says"),
-    // falling back to the model's own word for any unmapped label.
-    const label = ADVISORY_NOTE_DISPLAY_LABEL[marks[i].label.toLowerCase()] ?? marks[i].label;
-    segments.push({ label, body });
-  }
-  return segments;
 }
 
 export interface ComposeCommentGutterProps {
@@ -425,6 +439,23 @@ export interface ComposeCommentGutterProps {
   noteTools?: readonly NoteTool[];
   /** UAT round-8 #4 — run a note tool against the thread's clause span (host dispatches the AI edit). */
   onRunNoteTool?: (threadId: string, toolId: string) => void;
+  /**
+   * Task 041 (FR-11 multi-select batch AI action) — batch-run a note tool across every CHECKED note,
+   * sequentially (ADR-016 — the host owns the sequential loop; this callback fires once per Run
+   * click, not once per note). Receives the checked thread ids in this component's OWN `threads`
+   * order (stable, deterministic dispatch order) + the chosen tool id. Omit → no checkboxes / sub-
+   * toolbar render at all (mirrors `onRunNoteTool`'s own gating — keeps standalone/library mounts,
+   * e.g. LegalWorkspace, unaffected). The action list offered is `noteTools` — the SAME
+   * work-type-scoped `getToolsForSurface('review-note', activeWorkType)` set the ⋮ menu uses; there
+   * are no batch-only actions.
+   */
+  onRunBatchNoteTool?: (threadIds: readonly string[], toolId: string) => void;
+  /**
+   * Task 041 — true while a dispatched batch run is in flight. Disables the sub-toolbar's action
+   * dropdown + Run button (checkboxes stay interactive so the reviewer can build the NEXT selection
+   * while this run finishes) and swaps the Run button for a busy state.
+   */
+  isBatchRunning?: boolean;
 }
 
 /** One AI edit tool offered on a Review Note's ⋮ menu (UAT round-8 #3/#4). */
@@ -537,6 +568,43 @@ export function layoutCommentGutterCards(
   return result;
 }
 
+/**
+ * Task 040 (bidirectional highlight, spec FR-10) — resolve the gutter Review Note thread that
+ * corresponds to a Review Summary finding, so selecting a summary row can locate + highlight the SAME
+ * note (the reverse of the shipped row→document highlight). Pure + editor/DOM-free (mirrors {@link
+ * layoutCommentGutterCards}'s testability), so the actual scroll/highlight/select side effects stay in
+ * the caller (`ComposeEditor.tsx`'s `handleReviewNavigate` — the one place both the findings AND the
+ * threads are jointly in scope: `ComposeWorkspace` only holds the findings, this gutter only holds the
+ * threads).
+ *
+ * The join is DETERMINISTIC, not a re-derived guess: a finding and its thread are built from the SAME
+ * source item in `ComposeWorkspace`'s `onAdvisoryComments` handler — `item.sectionRef` becomes BOTH
+ * `finding.sectionRef` and `thread.sectionRef` verbatim (`placeAdvisoryComments` → `createThread`'s
+ * metadata), and `item.explanation` becomes BOTH `finding.explanation` and the thread's root `text`
+ * verbatim. Matching on the WS-4/task-011 `sectionRef` citation first is usually sufficient and unique;
+ * when it's absent, unmatched, or ambiguous (two findings citing the same clause), the finding's full
+ * `explanation` — effectively unique prose per finding — disambiguates. Returns `undefined` — never a
+ * guess — when zero or more than one candidate remains after both signals (mirrors the DEF-01
+ * "ambiguous → report, never place" discipline task 012 established for anchor resolution): the caller
+ * degrades to a doc-only highlight. A finding whose comment failed to place (or was later removed) has
+ * no thread to find, so this naturally returns `undefined` for it too — the graceful-degrade path.
+ */
+export function resolveMatchingThreadId(
+  finding: Pick<NdaReviewFindingSummary, 'sectionRef' | 'explanation'>,
+  threads: readonly Pick<ComposeCommentThreadModel, 'id' | 'sectionRef' | 'text'>[]
+): string | undefined {
+  const sectionRef = finding.sectionRef?.trim();
+  const bySectionRef = sectionRef ? threads.filter(t => t.sectionRef?.trim() === sectionRef) : [];
+  if (bySectionRef.length === 1) return bySectionRef[0].id;
+
+  // Absent, unmatched, or ambiguous by sectionRef alone — narrow (or resolve outright) on the full
+  // explanation text.
+  const candidates = bySectionRef.length > 1 ? bySectionRef : threads;
+  const explanation = finding.explanation?.trim();
+  const byExplanation = explanation ? candidates.filter(t => t.text.trim() === explanation) : [];
+  return byExplanation.length === 1 ? byExplanation[0].id : undefined;
+}
+
 export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JSX.Element | null {
   const {
     editor,
@@ -549,6 +617,8 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
     onSelectThread,
     noteTools,
     onRunNoteTool,
+    onRunBatchNoteTool,
+    isBatchRunning = false,
   } = props;
   const styles = useStyles();
   const railRef = React.useRef<HTMLDivElement | null>(null);
@@ -738,15 +808,83 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
     recompute();
   }, [expandedIds, recompute]);
 
+  // ----- Task 041 (FR-11) — multi-select + batch sub-toolbar -----------------------------
+  // Selection state lives HERE (uncontrolled, internal to the gutter — design.md's Component
+  // Justification table: "Extend the gutter — add selection state + one sub-toolbar"), not on the
+  // host: the host only needs to know WHICH notes were checked at the moment Run is clicked
+  // (`onRunBatchNoteTool`), never the live selection itself. Gated identically to the existing
+  // `noteTools`/`onRunNoteTool` wiring — no `onRunBatchNoteTool` (standalone/library mount) → no
+  // checkboxes, no sub-toolbar, zero behavior change from before this task.
+  const batchEnabled = Boolean(onRunBatchNoteTool);
+  const [checkedIds, setCheckedIds] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [batchToolId, setBatchToolId] = React.useState<string | null>(null);
+  const [capConfirmPending, setCapConfirmPending] = React.useState<readonly string[] | null>(null);
+
+  const toggleChecked = React.useCallback((threadId: string): void => {
+    setCheckedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(threadId)) next.delete(threadId);
+      else next.add(threadId);
+      return next;
+    });
+  }, []);
+
+  const selectAllNotes = React.useCallback((): void => {
+    setCheckedIds(new Set(threads.map(t => t.id)));
+  }, [threads]);
+
+  const clearSelection = React.useCallback((): void => {
+    setCheckedIds(new Set());
+    setBatchToolId(null);
+  }, []);
+
+  // Dispatch order = this component's OWN `threads` prop order (stable/deterministic), not checkbox
+  // click order — mirrors `resolveMatchingThreadId`'s / `layoutCommentGutterCards`'s own
+  // input-order-is-the-contract convention elsewhere in this file.
+  const orderedCheckedIds = React.useMemo(
+    () => threads.map(t => t.id).filter(id => checkedIds.has(id)),
+    [threads, checkedIds]
+  );
+
+  const dispatchBatch = React.useCallback(
+    (threadIds: readonly string[], toolId: string): void => {
+      onRunBatchNoteTool?.(threadIds, toolId);
+      clearSelection();
+    },
+    [onRunBatchNoteTool, clearSelection]
+  );
+
+  const handleRunBatch = React.useCallback((): void => {
+    if (!batchToolId || orderedCheckedIds.length === 0) return;
+    if (orderedCheckedIds.length > BATCH_NOTE_TOOL_SOFT_CAP) {
+      setCapConfirmPending(orderedCheckedIds);
+      return;
+    }
+    dispatchBatch(orderedCheckedIds, batchToolId);
+  }, [batchToolId, orderedCheckedIds, dispatchBatch]);
+
+  const handleCapConfirmContinue = React.useCallback((): void => {
+    if (capConfirmPending && batchToolId) dispatchBatch(capConfirmPending, batchToolId);
+    setCapConfirmPending(null);
+  }, [capConfirmPending, batchToolId, dispatchBatch]);
+
+  const handleCapConfirmCancel = React.useCallback((): void => {
+    setCapConfirmPending(null);
+  }, []);
+
   if (!editor || threads.length === 0) return null;
 
+  // Task 041 — the currently-chosen batch tool's label (for the cap-confirm dialog + Run button).
+  const batchToolLabel = noteTools?.find(t => t.id === batchToolId)?.label ?? '';
+
   return (
-    <div
-      ref={railRef}
-      className={styles.rail}
-      style={{ width: `${width}px`, height: railHeight != null ? `${railHeight}px` : '100%' }}
-      data-testid="compose-comment-gutter"
-    >
+    <>
+      <div
+        ref={railRef}
+        className={styles.rail}
+        style={{ width: `${width}px`, height: railHeight != null ? `${railHeight}px` : '100%' }}
+        data-testid="compose-comment-gutter"
+      >
       {onWidthChange ? (
         <div
           className={styles.resizeHandle}
@@ -783,10 +921,79 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
           <ChevronDoubleDown16Regular />
         </button>
       ) : null}
+      {/* Task 041 (FR-11) — the batch sub-toolbar: appears once ≥1 note is checked. Action list =
+          `noteTools` (the SAME `getToolsForSurface('review-note', activeWorkType)` set the ⋮ menu
+          uses — no batch-only actions). "Select all" only when EXACTLY 1 is selected (spec). */}
+      {batchEnabled && orderedCheckedIds.length > 0 ? (
+        <div className={styles.subToolbar} data-testid="compose-comment-gutter-batch-toolbar">
+          <div className={styles.subToolbarRow}>
+            {/* Count derives from `orderedCheckedIds` (threads-filtered), NOT the raw `checkedIds` Set
+                size — keeps the displayed count truthful to what Run will actually dispatch even if
+                `threads` shrinks out from under a stale checked id (e.g. Review Notes toggled off then
+                on) while a checkbox stays checked. */}
+            <Text size={200} className={styles.subToolbarCount} data-testid="compose-comment-gutter-batch-count">
+              {`${orderedCheckedIds.length} selected`}
+            </Text>
+            {orderedCheckedIds.length === 1 && threads.length > 1 ? (
+              <Button
+                appearance="subtle"
+                size="small"
+                onClick={selectAllNotes}
+                data-testid="compose-comment-gutter-batch-select-all"
+              >
+                {`Select all (${threads.length})`}
+              </Button>
+            ) : null}
+            <div className={styles.subToolbarSpacer} />
+            <Button
+              appearance="subtle"
+              size="small"
+              onClick={clearSelection}
+              disabled={isBatchRunning}
+              data-testid="compose-comment-gutter-batch-clear"
+            >
+              Clear
+            </Button>
+          </div>
+          <div className={styles.subToolbarRow}>
+            <Dropdown
+              className={styles.subToolbarDropdown}
+              placeholder="Choose an action…"
+              value={batchToolLabel}
+              selectedOptions={batchToolId ? [batchToolId] : []}
+              onOptionSelect={(_e, data) => setBatchToolId(data.optionValue ?? null)}
+              disabled={isBatchRunning || !noteTools || noteTools.length === 0}
+              aria-label="Batch AI action"
+              data-testid="compose-comment-gutter-batch-tool-dropdown"
+            >
+              {(noteTools ?? []).map(tool => (
+                <Option key={tool.id} value={tool.id} data-testid={`compose-comment-gutter-batch-tool-${tool.id}`}>
+                  {tool.label}
+                </Option>
+              ))}
+            </Dropdown>
+            <Button
+              appearance="primary"
+              size="small"
+              onClick={handleRunBatch}
+              disabled={isBatchRunning || !batchToolId}
+              data-testid="compose-comment-gutter-batch-run"
+            >
+              {isBatchRunning ? <Spinner size="tiny" /> : 'Run'}
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {threads.map(thread => {
         const top = cardTops[thread.id];
         if (top === undefined) return null; // anchor unresolved (deleted) — omitted, never guessed
-        const fullText = thread.text.trim();
+        // task 052 (FR-15): the SAME shared source the export mapping uses — discrete task-002
+        // fields (flaggedClause/assessment) when the thread carries them, legacy marker-parsed
+        // `text` otherwise. `fullText` (for the truncation-length check below) is derived from the
+        // resolved segments' bodies, NOT the raw `thread.text`, so a legacy marker-laden note's
+        // truncation threshold reflects its VISIBLE length (markers are never shown to the reviewer).
+        const allSegments = getAdvisoryNoteSegments(thread);
+        const fullText = allSegments.map(seg => seg.body).join(' ').trim();
         const isExpanded = expandedIds.has(thread.id);
         const isTruncatable = fullText.length > COLLAPSED_BODY_MAX_CHARS;
         const showStructured = isExpanded || !isTruncatable;
@@ -794,7 +1001,6 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
         // says" segments (with the renamed labels) — including when COLLAPSED (the reviewer saw the raw
         // model labels "Grounded fact" / "Advisory judgment" in the collapsed preview). Collapsed shows
         // just the FIRST segment with a truncated body; expanding reveals every segment in full.
-        const allSegments = parseAdvisoryNote(fullText);
         const segments = showStructured
           ? allSegments
           : allSegments.length > 0
@@ -863,6 +1069,24 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
             data-testid={`compose-comment-gutter-card-${thread.id}`}
           >
             <div className={styles.cardHeader}>
+              {/* Task 041 (FR-11) — the multi-select checkbox, upper-LEFT of the card. stopPropagation
+                  keeps checking a box from also selecting/expanding the card (mirrors the ⋮ tools
+                  button's own stopPropagation just below). Keyboard accessible via Fluent's Checkbox
+                  (native input semantics — Space toggles, Tab reaches it). */}
+              {batchEnabled ? (
+                <div
+                  className={styles.checkboxSlot}
+                  onClick={e => e.stopPropagation()}
+                  onKeyDown={e => e.stopPropagation()}
+                >
+                  <Checkbox
+                    checked={checkedIds.has(thread.id)}
+                    onChange={() => toggleChecked(thread.id)}
+                    aria-label={`Select note${thread.sectionRef ? `: ${thread.sectionRef}` : ''} for batch action`}
+                    data-testid={`compose-comment-gutter-checkbox-${thread.id}`}
+                  />
+                </div>
+              ) : null}
               {/* UAT round-5 #6 — one clear location line (no § / ¶ glyph soup), identical to the summary. */}
               <Text weight="semibold" size={200} className={styles.sectionRef}>
                 {loc ?? 'Comment'}
@@ -984,7 +1208,40 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
           </div>
         );
       })}
-    </div>
+      </div>
+      {/* Task 041 (FR-11) — soft-cap confirm. Fires only on Run when the selection exceeds
+          BATCH_NOTE_TOOL_SOFT_CAP; the "select all" click itself never confirms (only Run does). */}
+      {capConfirmPending ? (
+        <Dialog open onOpenChange={(_e, data) => (!data.open ? handleCapConfirmCancel() : undefined)}>
+          <DialogSurface data-testid="compose-comment-gutter-batch-cap-confirm">
+            <DialogBody>
+              <DialogTitle>Run on {capConfirmPending.length} notes?</DialogTitle>
+              <DialogContent>
+                <Text className={styles.capConfirmBody}>
+                  {`${capConfirmPending.length} notes — this will run sequentially and may take a while.`}
+                </Text>
+              </DialogContent>
+              <DialogActions>
+                <Button
+                  appearance="secondary"
+                  onClick={handleCapConfirmCancel}
+                  data-testid="compose-comment-gutter-batch-cap-confirm-cancel"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  appearance="primary"
+                  onClick={handleCapConfirmContinue}
+                  data-testid="compose-comment-gutter-batch-cap-confirm-continue"
+                >
+                  Run anyway
+                </Button>
+              </DialogActions>
+            </DialogBody>
+          </DialogSurface>
+        </Dialog>
+      ) : null}
+    </>
   );
 }
 

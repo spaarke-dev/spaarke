@@ -130,6 +130,13 @@ export interface AppProps {
   analysisId?: string;
   /** `sprk_worktype` Choice value for a new analysis (analysisMode='new'). */
   worktype?: string;
+  /**
+   * ai-advanced-capabilities-agreements-r1 task 022 (spec FR-09; hub A3 deferred deep-threading
+   * leg — cold-load/deep-link door): the level-2 agreement sub-domain (`sprk_agreementtype.sprk_key`,
+   * e.g. "nda") for a cold-load open of the Analysis entry matrix. Forwarded to `ThreePaneShell` →
+   * `AnalysisLaunchContext`. Omitted for every non-agreement launch.
+   */
+  subDomain?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +238,7 @@ function AppWithAuth(props: AppProps): React.JSX.Element {
           analysisMode={props.analysisMode}
           analysisId={props.analysisId}
           worktype={props.worktype}
+          subDomain={props.subDomain}
         />
       </div>
     </div>
