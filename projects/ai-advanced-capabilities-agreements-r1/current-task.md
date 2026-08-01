@@ -4,13 +4,14 @@
 
 ## Active task
 
-- **Task**: WAVE 7 — 041 running; 033 🔄 PARTIAL (planned stop): FK fix 2f8f11123 verified in-tree + FK-regression
-  test DELIVERED (PromoteDurableFkVisibilityTests 3/3); bridge leg = shipped DEF-10 auto-register (audited);
-  BIND+AUTO-DISPATCH legs blocked ONLY on ConversationPane.tsx (041's file this wave). DECISION (main session,
-  per §11/ADR-013): path **B-i** — mint compose session Analysis-owned via HostContext sentinel (create-time FK
-  write binds; zero new surface; rides the 2f8f11123-hardened path). Fork/promote REJECTED (both CreateAnalysisAsync
-  → duplicate analysis). RESUME the 033 agent after 041 commits to wire legs 2/3 in ConversationPane.
-  (Merged master 9d83f2a05; UAT ok per owner Q5.)
+- **Task**: 042 dispatched (LAST parallel-phase task; 19/23 done; last commit f0e1c8144, pushed).
+  Then SEQUENTIAL close: 060 deploy → 061 e2e → 090 wrap-up (main-session per plan).
+- **Wave 7/8 highlights**: 041 ✅ (batch in ComposeEditor via useSerialActionQueue; ConversationPane untouched)
+  · 033 ✅ (SESSION-COINCIDENCE: wizard mints ONE Analysis-owned session = document + adopted chat session;
+  refined B-i — literal shape would have dispatched into a file-less session; ensureChatSession zero-diff;
+  90 suites/832 tests) · 051 ✅ (render-from-persisted memo toolbar; 2 GET siblings; publish 48.25 MB flat).
+  PRE-EXISTING (stash-proven, sibling messaging project): AI.Widgets standalone tsc build + 'Messages' test
+  broken at clean HEAD — SpaarkeAi vite build (deploy artifact) green; note for 060.
 - **Wave 6**: 023 ✅ (one decision point; sanity warn-only; lookup-write corrected A1 stale column; 826/826)
   · 032 ✅ (FR-16 CLOSED: panel restore, Leg-B cap notice, multi-select materialization, supersede
   BindingId-safe, dedupe guard proven; cross-device Leg-B residual documented)

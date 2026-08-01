@@ -195,6 +195,69 @@ export const COMPOSE_WHOLE_DOCUMENT_EDIT_CONFIRMATION =
   'I revised the document — review the tracked changes in the document, then accept, reject, or try another.';
 
 /**
+ * agreements-r1 task 042 (FR-12) — best-effort extraction of a resolvable clause-LOCATION string for
+ * a compose EDIT confirmation, if the dispatch's request or result happens to carry one.
+ *
+ * **Wiring status (2026-07-31)**: neither shipped caller of `enqueueComposeAction`
+ * (`ComposeAiToolbar.tsx`'s inline-toolbar dispatch, `ComposeEditor.tsx`'s `dispatchNoteToolRequest` —
+ * both in the read-only-for-this-task `@spaarke/compose-components` package) currently populates a
+ * location field on `args.slots`, and none of the compose-draft-alternative / compose-revise-document
+ * result schemas (`infra/dataverse/outputschemas/compose-*.schema.json`) carry one either.
+ * `deriveClauseLocationLabel` (`clauseLocation.ts`) is computed today ONLY for the gutter's own note
+ * card (`ComposeCommentGutter.tsx`) — it is never threaded into the AI-action dispatch that reaches
+ * this pane. Closing that gap is a `ComposeEditor.tsx` change (one field added to
+ * `dispatchNoteToolRequest`'s `slots`) outside this task's file boundary (task 042 owns
+ * `ConversationPane.tsx` only — see `notes/042-execution-notes.md`).
+ *
+ * This extraction is written FORWARD-COMPATIBLE / defensive rather than hard-coded to "always empty":
+ * it checks the established `locationLabel` field name (mirrors `ComposeEditor.tsx`'s own
+ * `locationLabel: deriveClauseLocationLabel(...)` convention) plus the `sectionRef`/`location` names
+ * already used elsewhere in this file's result-shape handling (`useNdaReviewAdvisoryCommentsBridge.ts`),
+ * on BOTH the outbound request's forwarded slots and the dispatched result payload. The moment a future
+ * change populates any of these, {@link withComposeEditLocationHeader} activates the bold header with
+ * ZERO further change here. Until then this consistently returns `null`.
+ */
+function extractComposeEditLocationLabel(request: ComposeActionRequest, result: unknown): string | null {
+  const asTrimmedString = (value: unknown): string | null =>
+    typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+
+  const slots = asRecord(request.args?.slots);
+  const fromRequest =
+    asTrimmedString(slots?.locationLabel) ?? asTrimmedString(slots?.sectionRef) ?? asTrimmedString(slots?.location);
+  if (fromRequest) return fromRequest;
+
+  const record = asRecord(result);
+  return (
+    asTrimmedString(record?.locationLabel) ?? asTrimmedString(record?.sectionRef) ?? asTrimmedString(record?.location)
+  );
+}
+
+/**
+ * agreements-r1 task 042 (FR-12) — prepend a BOLD clause-location header to a compose EDIT
+ * confirmation, with clear whitespace separating it from the summary/explanation body below. Renders
+ * the header as a markdown `###` heading — the exact same `.sprk-markdown h3` rule (`SPRK_MARKDOWN_CSS`,
+ * `@spaarke/ui-components/services/renderMarkdown`) every other Assistant message already renders
+ * through: `font-weight: var(--fontWeightBold)`, `margin-top: var(--spacingVerticalL)`,
+ * `margin-bottom: var(--spacingVerticalS)` — Fluent v9 SEMANTIC TOKENS, dark-mode-safe by construction
+ * (ADR-021), with NO new styling surface added by this task (`ConversationPane.tsx` never renders its
+ * own JSX for message content — `content` is a markdown string SprkChat renders).
+ *
+ * When `locationLabel` is unresolved (today's universal case — see
+ * {@link extractComposeEditLocationLabel}) the header is OMITTED rather than replaced with a filler
+ * string: (1) it keeps the confirmation BYTE-IDENTICAL to pre-042 behavior in that case, which is the
+ * exact scenario `ConversationPane.compose-edit-controls.test.tsx` locks with an exact `.toBe` match
+ * (ADR-041 "existing tests pass untouched"); (2) a repeated, non-distinguishing filler label on every
+ * entry of a batch ("Clause update", "Clause update", …) would not actually help a reviewer tell
+ * entries apart — the "graceful… no undefined" requirement is satisfied by cleanly omitting the header,
+ * never by fabricating one.
+ */
+function withComposeEditLocationHeader(confirmationText: string, locationLabel: string | null): string {
+  return locationLabel ? `### ${locationLabel}\n\n${confirmationText}` : confirmationText;
+}
+
+/**
  * agreements-r1 task 033 (FR-17) — the DISTINCT bridge-failure surface (ADR-019): the wizard armed
  * an auto-run review, but the document never finished registering as a session file (the DEF-10
  * register's upload failed or never landed) within the watchdog window. The Analysis itself is
@@ -1136,13 +1199,17 @@ export function ConversationPane(): React.JSX.Element {
             const confirmationText = explanation
               ? `${baseConfirmation}\n\n**What I changed:** ${explanation}`
               : baseConfirmation;
+            // task 042 (FR-12) — bold, separated clause-location header when resolvable (see
+            // extractComposeEditLocationLabel's doc comment for current wiring status + fallback).
+            const locationLabel = extractComposeEditLocationLabel(request, dispatched.result);
+            const finalConfirmationText = withComposeEditLocationHeader(confirmationText, locationLabel);
             injection.enqueue(
               ledgerRef
-                ? makeComposeEditControlsMessage(confirmationText, {
+                ? makeComposeEditControlsMessage(finalConfirmationText, {
                     ledgerRef,
                     bindingId: request.bindingId,
                   })
-                : makeLocalAssistantMessage(confirmationText)
+                : makeLocalAssistantMessage(finalConfirmationText)
             );
           }
           if (ledgerRef) {

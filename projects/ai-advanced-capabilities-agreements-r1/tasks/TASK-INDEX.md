@@ -26,7 +26,7 @@
 | 033 | Wizard auto-run bridge (FK fix = hub closeout; verify) | 3 | ✅ | 023,031 | FULL | opus | high | H |
 | 040 | Bidirectional highlight | 4 | ✅ | 011 | FULL | sonnet | high | E |
 | 041 | Multi-select batch AI action + progress | 4 | ✅ | 021,031,040 | FULL | sonnet | xhigh | H |
-| 042 | Separated location-labelled confirmations | 4 | 🔲 | 041 | FULL | sonnet | medium | I |
+| 042 | Separated location-labelled confirmations | 4 | ✅ | 041 | FULL | sonnet | medium | I |
 | 050 | Memo assembly + persistence (sprk_analysisoutput) | 5 | ✅ | 002 | FULL | sonnet | xhigh | C |
 | 051 | Memo toolbar (docx download + EmailComposer) | 5 | ✅ | 050 | FULL | sonnet | high | I |
 | 052 | Word-comment export mirror + configurable author | 5 | ✅ | 002,010 | FULL | sonnet | high | B |

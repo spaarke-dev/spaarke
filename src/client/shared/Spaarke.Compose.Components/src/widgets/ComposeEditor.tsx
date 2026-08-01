@@ -2540,6 +2540,15 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               documentSpeId: documentRef?.speDriveItemId,
               documentRecordId: documentRef?.sprkDocumentId,
               sessionId,
+              // Task 042 (FR-12): computed clause-location label for the Assistant's confirmation
+              // header — ConversationPane's extractComposeEditLocationLabel reads this slot. The
+              // advisory thread's sectionRef (when the note came from a review finding) refines the
+              // position-derived label; a non-advisory thread just gets the positional label.
+              locationLabel: deriveClauseLocationLabel(
+                editor.state.doc,
+                span.from,
+                advisoryComments.threads.find(t => t.id === threadId)?.sectionRef
+              ),
               // Contextual AI Tool Library (phase 3): the free-text instruction for an inputPrompt tool.
               ...(instruction ? { instruction } : {}),
             },
@@ -2550,7 +2559,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           documentSessionId: sessionId,
         }).then(() => undefined);
       },
-      [editor, enqueueComposeAction, sessionId, documentRef]
+      [editor, enqueueComposeAction, sessionId, documentRef, advisoryComments.threads]
     );
 
     // Run a note tool: dispatch the compose EDIT action against the NOTE's live clause span — the SAME

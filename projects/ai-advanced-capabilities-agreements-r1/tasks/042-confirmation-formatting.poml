@@ -3,8 +3,8 @@
   <metadata>
     <title>#4 Separated, location-labelled Assistant confirmations</title>
     <phase>4 Review-Depth UX</phase>
-    <gate>blocked (deps 041)</gate>
-    <status>not-started</status>
+    <gate>deps 041 satisfied (041 complete)</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>.tsx change on the conversation surface (auto-FULL), though small.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -77,6 +77,22 @@
     <criterion testable="true">Negative: confirmation semantics/controls unchanged (existing tests pass untouched).</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-12; design Lens 2 #4.</notes>
+  <notes>
+    Spec FR-12; design Lens 2 #4. COMPLETED 2026-07-31. Renderer seam: `dispatchComposeAction` in
+    ConversationPane.tsx (confirmed unmoved since baseline f0e1c8144 — 021/031/041 all landed
+    elsewhere; 041's own notes confirm ConversationPane.tsx untouched). Added
+    `extractComposeEditLocationLabel` + `withComposeEditLocationHeader` (bold `### {label}` markdown
+    header via SprkChat's existing tokenized `.sprk-markdown h3` CSS, ADR-021-compliant, zero new
+    styling surface). WIRING FINDING: no shipped caller of `enqueueComposeAction` currently populates a
+    location field on the request/result reaching this pane (ComposeEditor.tsx/ComposeCommentGutter.tsx
+    compute `deriveClauseLocationLabel` but never thread it into the dispatch — and those files are
+    read-only for this task). Implementation is forward-compatible (checks `locationLabel`/`sectionRef`/
+    `location` on both request slots and result payload) and gracefully omits the header today (proven
+    byte-identical to pre-042 via the existing locked `ConversationPane.compose-edit-controls.test.tsx`,
+    left untouched). Recommend a fast-follow task to add ONE field to `ComposeEditor.tsx`'s
+    `dispatchNoteToolRequest` slots — see notes/042-execution-notes.md for full detail + escalation.
+    New tests: `ConversationPane.compose-edit-location-header.test.tsx` (6 cases). Full suite: 91
+    suites/838 tests green (baseline 90/832 + this task's 6). Build green.
+  </notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
