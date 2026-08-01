@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="spaarke-modal-system">
+  <metadata>
+    <title>P4 — Re-base FindSimilarDialog onto xl SprkModal — FR-15</title>
+    <phase>4 Preview &amp; browse</phase>
+    <gate>blocked until 004</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Mechanical modify-only re-base of an existing dialog across 3 copies; no new surface, no retirement/deletion, `embedded` behavior preserved. STANDARD per author assignment — task-execute may auto-escalate to FULL given the `.tsx` edits (§8), which is acceptable.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Repetitive, fully specified re-base onto the `xl` `SprkModal`; the three copies and the `embedded` prop are named exactly, no architectural inference required.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>004</deps>
+    <tags>react, typescript, fluent-ui, frontend</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Re-base `FindSimilarDialog` onto the `xl` `SprkModal` (the near-full iframe-host size), preserving the `embedded` prop behavior so the dialog still renders correctly when hosted inside an iframe/embedded surface (FR-15). There are THREE copies to re-base: `components/FindSimilarDialog/FindSimilarDialog.tsx`, `components/FindSimilar/FindSimilarDialog.tsx`, and `src/solutions/LegalWorkspace/src/components/FindSimilar/FindSimilarDialog.tsx`. Re-base all three. If consolidating the three into the single shared copy is out of scope for this task, file a `/defer` note (do NOT half-dedup).</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9, SprkModal sizing, and iframe-embedded dialog hosting. Follow ADRs strictly.</role>
+  <goal>All three `FindSimilarDialog` copies render via `SprkModal` at `size="xl"` with `embedded`-mode behavior intact; shared-lib + LegalWorkspace builds green under `@types/react` 18 and React 19; any deferred consolidation recorded as a `/defer` note.</goal>
+
+  <context>
+    <background>Spec FR-15 re-bases `FindSimilarDialog` onto the standard shell. It is a near-full iframe host, so it takes `xl` (uncapped ~92vw×88vh per the size scale) rather than a mid-size. Discovery found THREE copies of this dialog (project CLAUDE.md Key Facts): two in the shared lib (`components/FindSimilarDialog/`, `components/FindSimilar/`) and one in `src/solutions/LegalWorkspace/`. All three must be re-based to avoid drift; folding them into one shared copy is a larger dedup that may exceed this task's scope — if so, it is deferred with a concrete note, not left half-done.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/FindSimilarDialog/FindSimilarDialog.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/FindSimilar/FindSimilarDialog.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/FindSimilar/FindSimilarDialog.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/SprkModal.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="004" status="pending">Ships the base `SprkModal` shell (envelope + `size="xl"`) all three copies re-base onto.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Any `authenticatedFetch`/service the dialog uses MUST be passed through as a FUNCTION — never snapshotted; the host owns auth identity (relevant across all three copies).</constraint>
+    <constraint source="ADR-021">Semantic tokens only: no hex, `'1px'` literals, or inline color in the re-based dialogs; dark/light parity via inherited host theme (NFR-03).</constraint>
+    <constraint source="ADR-012">Re-base by COMPOSING `SprkModal` — MUST NOT fork the shell or hand-roll a parallel envelope. (Full consolidation of the three copies into one shared component is a separate concern — defer if out of scope, do not fork.)</constraint>
+    <constraint source="project">Use `size="xl"` (near-full iframe host) — MUST NOT reintroduce a per-copy size. The `embedded` prop behavior MUST be preserved so the dialog renders correctly when hosted embedded/inside an iframe. Keep the Fluent `Dialog` envelope (transform-robust portal).</constraint>
+    <constraint source="project">All three copies MUST compile clean under `@types/react` 18 (PCF) and React 19 (Code Pages) — NFR-04.</constraint>
+    <constraint source="project">If three-copy consolidation is out of scope, file the deferral to BOTH `projects/spaarke-modal-system/notes/defer-issues.md` and a GitHub Issue via `/project-defer-issue-tracking`, naming the concrete drift risk — do NOT partially dedup.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Re-basing FindSimilarDialog onto the xl SprkModal (iframe host)</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Shell composition; how a consumer supplies content + `size` to `SprkModal`.</pattern>
+      <pattern name="fluent-v9-portal-gotcha" location=".claude/patterns/ui/fluent-v9-portal-gotcha.md">Portal behavior when a dialog is hosted embedded/inside an iframe.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-15, the base `SprkModal`, and all three `FindSimilarDialog` copies; diff them to understand how much they share and how `embedded` is used in each. Declare RIGOR: STANDARD.</step>
+    <step order="1">Re-base `components/FindSimilarDialog/FindSimilarDialog.tsx` onto `SprkModal` `size="xl"`; map title/actions/footer onto the shell; preserve the `embedded` prop path and content.</step>
+    <step order="2">Re-base `components/FindSimilar/FindSimilarDialog.tsx` the same way.</step>
+    <step order="3">Re-base `src/solutions/LegalWorkspace/src/components/FindSimilar/FindSimilarDialog.tsx` the same way.</step>
+    <step order="4">Decide on consolidation: if folding the three into one shared copy fits this task, do it; otherwise file a `/defer` note (both `notes/defer-issues.md` + GitHub Issue) naming the concrete drift risk of keeping three copies.</step>
+    <step order="5">Run shared-lib + LegalWorkspace builds; confirm all three compile under both React targets; exercise each copy (normal + `embedded`) in a dev host.</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: set 061 status to ✅.</step>
+    <step order="7">Document any deviation (a copy that needed a size other than `xl`, or the deferral decision) in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the `embedded`-mode host cannot render the `xl` `SprkModal` correctly (e.g. the iframe surface clips or mis-sizes the near-full dialog), STOP and surface it per CLAUDE.md §6 rather than reverting a single copy to a hand-rolled size — this may indicate a shell embedded-host gap that belongs upstream.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Near-full render + embedded mode">
+      <steps>
+        <step>Open each of the three `FindSimilarDialog` copies at 1440×900 → expect `xl` near-full.</step>
+        <step>Open the dialog in its `embedded`/iframe-hosted mode.</step>
+      </steps>
+      <expected>Each copy renders near-full (`xl` ~92vw×88vh) with standard shell chrome + window controls; `embedded` mode renders correctly (no clipping/mis-size); body scrolls natively.</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Render each re-based copy under the host dark theme.</step>
+      </steps>
+      <expected>Dark palette correct; no hardcoded light-mode color leak; only host semantic tokens used.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test the shared lib and LegalWorkspace solution</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/FindSimilarDialog/FindSimilarDialog.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/FindSimilar/FindSimilarDialog.tsx</output>
+    <output type="code">src/solutions/LegalWorkspace/src/components/FindSimilar/FindSimilarDialog.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All three `FindSimilarDialog` copies render via `SprkModal` at `size="xl"` (near-full iframe host) with the standard shell chrome.</criterion>
+    <criterion testable="true">The `embedded` prop behavior is preserved in all three copies (embedded/iframe-hosted render is correct).</criterion>
+    <criterion testable="true">Either the three copies are consolidated to the shared one, OR the consolidation is deferred with a note in both `notes/defer-issues.md` and a GitHub Issue naming the concrete drift risk (no partial dedup).</criterion>
+    <criterion testable="true">No hex/`'1px'`/inline color; dark parity holds; shared-lib + LegalWorkspace builds green and compile under `@types/react` 18 and React 19.</criterion>
+  </acceptance-criteria>
+
+  <notes>Three copies confirmed by discovery (project CLAUDE.md Key Facts): `components/FindSimilarDialog/`, `components/FindSimilar/`, and `src/solutions/LegalWorkspace/src/components/FindSimilar/`. `xl` is uncapped (~92vw×88vh) per the size scale (task 001). Consolidation-to-one is explicitly deferrable here — the priority is that all three carry the standard chrome so they do not drift further. Completion summary appended here when done.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-modal-system">
+  <metadata>
+    <title>P1 — Window controls into Spaarke.UI.Components dialogs — FR-12</title>
+    <phase>1 Window-controls rollout</phase>
+    <gate>blocked until 003</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Modify-only rollout across existing `.tsx` dialogs (no new public surface); each dialog keeps its behavior — only the maximize/restore + × cluster is standardized. High file count but mechanical + constrained.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Repetitive shared-lib component edits, fully specified by the shipped `ModalWindowControls` primitive and an explicit dialog list.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>003</deps>
+    <tags>react, fluent-ui, frontend</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Drop the reconciled `ModalWindowControls` (Dataverse `FullScreenMaximize/Minimize` glyph + ×, delivered by task 003) into every `@spaarke/ui-components` dialog header via an interim adapter, AHEAD of full re-basing onto `SprkModal` — this satisfies the owner's 2026-07-31 "expand/collapse + × on all modals" mandate quickly and visibly (FR-12). Convert each dialog's header to show the standard maximize/restore + × cluster while preserving that dialog's existing behavior, messaging, props, and size EXACTLY — this task standardizes only the window-control cluster, nothing else.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 dialog composition and shared-lib conventions. Follow ADRs strictly.</role>
+  <goal>Every listed `@spaarke/ui-components` dialog renders the shared `ModalWindowControls` (FullScreen maximize/restore + ×) in its header; each dialog's prior behavior/size/footer/props are unchanged; the shared-lib, a PCF consumer, and a Code Page consumer all build green under `@types/react` 18 and React 19.</goal>
+
+  <context>
+    <background>Design §8 sequences P1 first because the window-controls mandate is high-visibility and low-risk. `ModalWindowControls` exists but is adopted by only 1 of ~13 dialogs (EmailComposer). Task 003 reconciles its icon to the Dataverse `FullScreenMaximize/Minimize` glyph; this task then rolls it out to the rest of the UI.Components dialogs via an interim header adapter (full re-basing onto `SprkModal` happens in later phases). The `EmailComposer/wrappers/SendEmailDialog.tsx` already consumes `ModalWindowControls`, so it inherits the reconciled glyph automatically — verify, do not duplicate.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/ChoiceDialog/ChoiceDialog.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/FindSimilarDialog/FindSimilarDialog.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/FindSimilar/FindSimilarDialog.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/FindSimilar/FindSimilarDialog.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/SendEmailDialog/SendEmailDialog.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/NewThreadModal/NewThreadModal.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CloseProjectDialog.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/CreateProject/CloseProjectDialog.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/FilePreviewDialog.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/ModalWindowControls/ModalWindowControls.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">Reconciled `ModalWindowControls` (FullScreen glyph + ×) — the primitive this task drops into every header.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Consume the single shared `ModalWindowControls` from `@spaarke/ui-components`; do NOT copy its markup into each dialog or fork a per-dialog control cluster.</constraint>
+    <constraint source="ADR-021">Header edits use semantic tokens only — zero hex, `'1px'` literals, or inline color styles introduced in any touched dialog (NFR-03). If a touched header already contains such literals, leave them in place unless trivially adjacent to the change; note them for a later phase.</constraint>
+    <constraint source="project">Compose the existing primitive — MUST NOT fork `ModalWindowControls`. Preserve each dialog's existing behavior, messaging, props, size, and footer; standardize ONLY the maximize/restore + × cluster. No re-basing onto `SprkModal` in this task.</constraint>
+    <constraint source="project">All touched files MUST compile clean under `@types/react` 18 (PCF) and React 19 (Code Pages) — NFR-04.</constraint>
+    <constraint source="project">`EmailComposer/wrappers/SendEmailDialog.tsx` already consumes `ModalWindowControls` — verify it shows the reconciled glyph after 003 and skip re-wiring it; do not add a second control cluster.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Fluent v9 dialog header composition + window controls</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Shared-lib header/slot conventions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-12 + design §6.4 + the shipped `ModalWindowControls`. Confirm task 003's glyph reconciliation is merged. Declare RIGOR: STANDARD.</step>
+    <step order="1">Design the interim header adapter: the minimal, consistent way to slot `ModalWindowControls` (maximize/restore handler + close handler) into the top-right of each dialog header without disturbing its title/nav/actions or footer.</step>
+    <step order="2">Wire the cluster into each shared-lib dialog: `ChoiceDialog`, both `FindSimilarDialog` copies under `components/`, both `SendEmailDialog` (verify EmailComposer already has it — reconcile only), `NewThreadModal`, `CreateProjectWizard/CloseProjectDialog`, `FilePreview/RichFilePreviewDialog`, `FilePreview/FilePreviewDialog`, `Wizard/WizardShell`.</step>
+    <step order="3">Wire the two solution-local copies that mirror shared dialogs: `LegalWorkspace/.../FindSimilar/FindSimilarDialog.tsx` and `LegalWorkspace/.../CreateProject/CloseProjectDialog.tsx` (fold in the known duplicates so they don't drift).</step>
+    <step order="4">For each dialog, verify the maximize/restore toggles the size the dialog already supports (or wire a sensible maximize target where none exists) and the × invokes the dialog's existing close/cancel handler — behavior otherwise unchanged.</step>
+    <step order="5">Build the shared lib; build one PCF consumer and one Code Page consumer to prove dual-React cleanliness; fix any type breaks.</step>
+    <step order="6">Run the ui-tests below (controls present per dialog + dark-mode parity).</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set 030 status to ✅.</step>
+    <step order="8">Document any dialog that needed a non-mechanical adaptation (e.g. a header with no maximize target) in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any dialog's header cannot accept `ModalWindowControls` without changing that dialog's behavior, layout contract, or removing an existing affordance (e.g. `WizardShell`'s custom title bar or `SendEmailDialog`'s v1.1.59 no-X decision), STOP and surface the specific dialog per CLAUDE.md §6 rather than altering its behavior to fit the cluster.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Standard controls present on every converted dialog">
+      <steps>
+        <step>Open each listed dialog in a harness/consumer and inspect the header top-right.</step>
+        <step>Confirm the FullScreen maximize/restore glyph + × render, maximize/restore toggles size, and × closes via the dialog's existing handler.</step>
+      </steps>
+      <expected>Every listed dialog shows the standard `ModalWindowControls` cluster; prior title/nav/actions/footer/size unchanged.</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Render a representative subset (e.g. `ChoiceDialog`, `RichFilePreviewDialog`, `WizardShell`) under the dark Fluent theme.</step>
+        <step>Verify the controls and header border read correctly with semantic tokens (no hardcoded colors) in both light and dark.</step>
+      </steps>
+      <expected>Controls + header border have correct light/dark contrast via semantic tokens; no hex/inline color introduced.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test shared lib and consumers (build:prod for PCF)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/*/ (window-controls wiring across the listed dialogs)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/components/FindSimilar/FindSimilarDialog.tsx</output>
+    <output type="code">src/solutions/LegalWorkspace/src/components/CreateProject/CloseProjectDialog.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given each of `ChoiceDialog`, both `components/*` `FindSimilarDialog` copies, the `LegalWorkspace` `FindSimilarDialog` copy, both `SendEmailDialog`, `NewThreadModal`, both `CloseProjectDialog` copies, `RichFilePreviewDialog`, `FilePreviewDialog`, and `WizardShell`, when opened, then its header renders the FullScreen maximize/restore + × cluster from the shared `ModalWindowControls`.</criterion>
+    <criterion testable="true">Given `EmailComposer/wrappers/SendEmailDialog.tsx`, then it is verified to already consume the reconciled control (shows the FullScreen glyph after task 003) and is not double-wired.</criterion>
+    <criterion testable="true">Each converted dialog's prior behavior, messaging, props, size, and footer are unchanged; only the window-control cluster is added/standardized.</criterion>
+    <criterion testable="true">Negative: no dialog introduces a new hex value, `'1px'` literal, or inline color style; no fork/copy of `ModalWindowControls` is created.</criterion>
+    <criterion testable="true">Shared-lib build, one PCF consumer (`@types/react` 18), and one Code Page consumer (React 19) all build green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design §3.3 inventory + CLAUDE.md "Key Facts" list the exact copies. Known duplicates folded here: `FindSimilarDialog` (3 copies), `CloseProjectDialog` (2 copies). This is an interim adapter step — later phases (P2+) re-base these onto `SprkModal`/presets, which will supersede the interim wiring. Completion summary appended here when done.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

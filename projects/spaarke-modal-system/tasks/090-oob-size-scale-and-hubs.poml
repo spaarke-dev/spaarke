@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-modal-system">
+  <metadata>
+    <title>P7 — OOB size scale constants + route navigateTo through the two hubs — FR-11/FR-18</title>
+    <phase>7 OOB consolidation</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New typed shared surface (OOB size constants) plus a repoint of ~85–100 `navigateTo` call sites across PCF/solutions/ribbon — high blast radius on how every OOB modal opens; correctness + build verification are load-bearing (FULL trigger: new surface, modifying `.ts`, `pcf` consumers).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical centralization + repoint against a fully-specified size scale (record 85%×85%, create-form 70%×80%, wizard 60%×70%); no architecture decision, but broad and requires an accurate call-site inventory.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>react, typescript, frontend</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add named OOB size constants — `record` 85%×85%, `create-form` 70%×80%, `wizard` 60%×70% — as ONE source of truth, and route ALL OOB `navigateTo` launches through the two sanctioned hubs (`xrmNavigationServiceAdapter` for records/dialogs, `wizardLaunchers` for wizards) using those constants. Inventory the ~85–100 `navigateTo` call sites and repoint the bypasses (PCF `NavigationService`, ribbon one-offs) to the hubs so no launch site hardcodes its own percentage (FR-11 / FR-18).</prompt>
+  <role>SPAARKE platform developer. Expert in Dataverse `Xrm.Navigation.navigateTo`, TypeScript module design, and cross-surface (PCF/Code Page/ribbon) launch consolidation. Follow ADRs strictly.</role>
+  <goal>A single OOB size-constants module exports the three named sizes (`record` 85%×85%, `create-form` 70%×80%, `wizard` 60%×70%); `xrmNavigationServiceAdapter` and `wizardLaunchers` consume it; every inventoried `navigateTo` launch routes through one of the two hubs with a named size (no ad-hoc percentage literals remain at bypass sites); all affected surfaces build green under `@types/react` 18 and React 19.</goal>
+
+  <context>
+    <background>Spec FR-11 mandates ONE source of truth for OOB modal dimensions and FR-18 mandates that all `navigateTo` launches route through the two sanctioned hubs. Today the 85/80/70/60 percentages and px literals are scattered across ≥4 hubs and one-off launch sites (`xrmNavigationServiceAdapter`, `wizardLaunchers` at 60%×70%, solution-local `navigation.ts` at 80%×80%, PCF `NavigationService`, ribbon JS). The `record` open size is the record-modal-selection invariant 85%×85% and MUST NOT vary per entity. This task creates the constants module and repoints the launch sites; tasks 091 (retire solution `navigation.ts`) and 092 (convert the ribbon DOM overlay) depend on it. OOB stays OOB for full main-form editing — this standardizes only the launch size.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/utils/adapters/oobModalSizes.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/utils/adapters/xrmNavigationServiceAdapter.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts</file>
+      <file role="reference">.claude/patterns/ui/record-modal-selection.md</file>
+      <file role="modify">representative `navigateTo` bypass call sites (PCF `NavigationService`, ribbon one-offs) surfaced by the inventory grep</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">The OOB size constants live in the single shared `@spaarke/ui-components` module; MUST NOT be duplicated per solution (CLAUDE.md §11 — one source of truth).</constraint>
+    <constraint source="ADR-021">Type-only + constant module; MUST NOT introduce hex or inline color styles. Percentage/px values here are the OOB size scale itself and are the intended content.</constraint>
+    <constraint source="project">`record` open size is 85%×85% and MUST NOT vary per entity (record-modal-selection.md invariant). MUST keep OOB `navigateTo` for full main-form editing; MUST NOT iframe-embed OOB `main.aspx` (NFR-05, client-only).</constraint>
+    <constraint source="project">MUST compile clean under `@types/react` 18 (PCF) and React 19 (Code Pages) (NFR-04); the constants module imports no React.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OOB navigateTo size consolidation through the two sanctioned launch hubs</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="record-modal-selection" location=".claude/patterns/ui/record-modal-selection.md">OOB `navigateTo` record open at the 85%×85% invariant.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load `xrmNavigationServiceAdapter.ts`, `wizardLaunchers.ts`, and record-modal-selection.md. Declare RIGOR: FULL.</step>
+    <step order="1">Author the OOB size-constants module exporting `record` (85%×85%), `create-form` (70%×80%), `wizard` (60%×70%) as a single named-size source of truth (typed; no React import).</step>
+    <step order="2">Update `xrmNavigationServiceAdapter` (records/dialogs) and `wizardLaunchers` (wizards) to consume the named constants instead of inline percentages.</step>
+    <step order="3">Grep the codebase to inventory the ~85–100 `navigateTo` call sites; classify each as already-routed-through-a-hub vs bypass (PCF `NavigationService`, ribbon one-offs, solution-local launchers).</step>
+    <step order="4">Repoint the bypass call sites to route through the appropriate hub with a named size; leave OOB main-form opens on `navigateTo` (only their size is standardized).</step>
+    <step order="5">Build all affected surfaces (shared lib + PCF + Code Pages) and confirm green; confirm dual-React clean (`@types/react` 18 and React 19).</step>
+    <step order="6">Record the call-site inventory (routed vs repointed vs intentionally-left) in `projects/spaarke-modal-system/notes/` for the P7 visual review and for tasks 091/092.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set 090 status to ✅.</step>
+    <step order="8">Document any deviation (e.g. a launch site that genuinely needs a non-standard size) in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a launch site genuinely requires a size outside the three named constants (i.e. the 85/70-80/60 scale cannot serve it), STOP and surface it for the one-time P7 visual review per CLAUDE.md §6 rather than inventing a fourth ad-hoc size silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No named OOB size-constants module exists. The 85/80/70/60 percentages and px literals are scattered inline across ≥4 hubs/launch sites (`xrmNavigationServiceAdapter`, `wizardLaunchers` at 60%×70%, solution-local `navigation.ts` at 80%×80%, PCF `NavigationService`, ribbon one-offs) — verified by grepping `navigateTo` + width/height percentage literals.</existing>
+    <extension>No — there is no single constants surface to extend; the values live as inline literals in each hub/call site. This module is the seam those literals collapse into.</extension>
+    <cost-of-doing-nothing>Without one constants module, OOB sizes stay fragmented and no single source of truth exists: the 80%/85%/70%/60% divergence and per-entity size drift recur, and FR-11's "one source of truth for OOB dimensions" acceptance is unachievable piecemeal.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="OOB opens at the named sizes (manual)">
+      <steps>
+        <step>Open a record via the repointed adapter; open a create-form; launch a wizard via `wizardLaunchers`.</step>
+        <step>Measure each modal against its viewport.</step>
+      </steps>
+      <expected>Record opens at 85%×85%, create-form at 70%×80%, wizard at 60%×70%; no bypass site opens at a different percentage.</expected>
+    </test>
+    <test name="Record size invariant + dark-mode parity">
+      <steps>
+        <step>Open the same record type from two different entry points, once under a dark host theme.</step>
+      </steps>
+      <expected>Both open at 85%×85% (no per-entity variance); the OOB dialog chrome is host-owned and renders correctly in dark mode.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test shared lib, PCF, and Code Page consumers (build:prod for PCF)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/utils/adapters/oobModalSizes.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/utils/adapters/xrmNavigationServiceAdapter.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A single OOB size-constants module exports `record` (85%×85%), `create-form` (70%×80%), and `wizard` (60%×70%).</criterion>
+    <criterion testable="true">`xrmNavigationServiceAdapter` and `wizardLaunchers` consume the named constants; neither hardcodes the percentages inline.</criterion>
+    <criterion testable="true">Every inventoried `navigateTo` launch routes through one of the two hubs with a named size; no bypass site (PCF `NavigationService`, ribbon one-off) hardcodes its own percentage.</criterion>
+    <criterion testable="true">Record opens at 85%×85% regardless of entity (record-modal-selection invariant); OOB main-form editing still uses `navigateTo`.</criterion>
+    <criterion testable="true">All affected surfaces build green under `@types/react` 18 and React 19; the constants module imports no React.</criterion>
+  </acceptance-criteria>
+
+  <notes>NEW-surface task — `&lt;justification&gt;` included (the named-size constants module is new; existing = scattered 85/80/70/60 literals across ≥4 hubs). This task unblocks 091 (retire solution `navigation.ts`) and 092 (convert the ribbon DOM overlay), both of which consume the constants + hubs. The 80%→85/70-80 collapse is confirmed acceptable pending the one-time P7 visual review (spec "remaining assumption").</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

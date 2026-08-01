@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-modal-system">
+  <metadata>
+    <title>Standards doc: MODAL-DESIGN-SYSTEM.md — FR-10</title>
+    <phase>0 Build</phase>
+    <gate>blocked until 004</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New file creation (documentation) with project constraints; no code, no quality gate at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standards-doc authoring from a settled spec + prototype-locked numbers; no architectural judgment.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>004</deps>
+    <tags>documentation, standards</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author `docs/standards/MODAL-DESIGN-SYSTEM.md` — the canonical design guide for the modal system and the SIBLING of `MODAL-DECISION-CRITERIA.md` (that doc is the decision layer; this doc is the component layer). It documents: the 7 named sizes with EXACT numbers, the two layouts (portrait/landscape), the header contract, the footer contract, dismiss semantics, theming, the component names, the wiring recipe, and a do/don't list — everything a maker or agent needs to build a feature on `SprkModal`. This is FR-10. Invoke the `docs-standards` skill to draft it. Documentation only — do NOT change any code.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9, design-system documentation, and Spaarke standards conventions. Follow ADRs strictly.</role>
+  <goal>`docs/standards/MODAL-DESIGN-SYSTEM.md` exists as the canonical modal design guide with all required sections (sizes, layouts, header, footer, dismiss, theming, component names, wiring recipe, do/don't); the 7 size numbers match spec §6.2 exactly; the doc is a self-contained sibling of `MODAL-DECISION-CRITERIA.md` and is ready to be cross-linked by task 013.</goal>
+
+  <context>
+    <background>Design §7 deliverable #2 and spec FR-10: Spaarke has a decision layer (`MODAL-DECISION-CRITERIA.md`, "which modal family") but no component/design-system layer ("the exact sizes, header, footer, names, and wiring for the custom family"). This doc is that layer. The numbers are prototype-locked (owner review 2026-07-31) and mirror the `SprkModal` shell built in task 004, so the doc is authored after the shell exists.</background>
+    <relevant-files>
+      <file role="new">docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file role="canonical-reference">projects/spaarke-modal-system/design.md</file>
+      <file role="canonical-reference">projects/spaarke-modal-system/spec.md</file>
+      <file role="reference">docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/sizes.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="004" status="pending">The `SprkModal` base shell + presets whose names, props, and wiring this doc documents.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">The 7 sizes MUST be documented with the EXACT numbers from spec §6.2: `xs` = `min(480px, 92vw)` (content height, portrait); `sm` = `min(560px, 92vw)` (auto, portrait); `md` = `min(1040px, 92vw)` × `min(72vh, 720px)` (landscape); `lg` = `min(1280px, 94vw)` × `min(85vh, 880px)` (landscape); `xl` = `92vw` × `88vh` (landscape); `full` = `100vw` × `100vh`; `wizard` = 60% × 70% (OOB dialog dimension). The `md`/`lg` height caps are load-bearing (they hold landscape aspect on tall monitors) — do not omit them.</constraint>
+    <constraint source="project">Document the header contract (space-between; left = optional `N of M` nav + ellipsized title; right = optional actions + `ModalWindowControls` maximize/restore + close using the Dataverse `FullScreenMaximize/Minimize` glyph; the title-source rule that prevents a double header), the footer contract (Cancel ALWAYS left in `footerStart`; navigation/primary actions right in `footer`; danger primary via a token class, never inline color; footer omittable), and dismiss semantics (`light` = backdrop + ESC; `explicit` = no light-dismiss; `alert` = no ESC/backdrop for destructive/blocking).</constraint>
+    <constraint source="project">Include the wiring recipe using the `FormModal` and `BrowseModal` examples from design §6.8 (consumer supplies content + intent; shell supplies all chrome). Name the component set (`SprkModal` base + `ConfirmModal`/`ChoiceModal`/`FormModal`/`PreviewModal`/`BrowseModal`/`WizardModal` presets).</constraint>
+    <constraint source="ADR-021">Document the theming rules the shell enforces: no `FluentProvider` inside the shell (inherits host); scaled Fluent theme realizes `--sprk-ui-scale` (NOT CSS zoom); semantic tokens only — zero hex, `'1px'` literals, or inline color styles; light/dark parity.</constraint>
+    <constraint source="project">This is the component-layer sibling of `MODAL-DECISION-CRITERIA.md` — do NOT duplicate that doc's decision tree; cross-reference it. Documentation only; NO code, NO BFF touch (NFR-05).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Modal design-system standards authoring</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-023-choice-dialog-pattern.md</file>
+      <file>docs/standards/CODING-STANDARDS.md</file>
+    </files>
+    <patterns>
+      <pattern name="record-modal-selection" location=".claude/patterns/ui/record-modal-selection.md">The decision-layer pointer this component-layer doc pairs with.</pattern>
+      <pattern name="fluent-v9-theming" location=".claude/patterns/ui/fluent-v9-theming.md">Semantic-token + scaled-theme rules to summarize in the theming section.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec §6.2 + design §6.2/§6.4/§6.5/§6.6/§6.7/§6.8, `MODAL-DECISION-CRITERIA.md`, and the built `SprkModal/sizes.ts`. Declare RIGOR: STANDARD.</step>
+    <step order="1">Invoke the `docs-standards` skill to scaffold `docs/standards/MODAL-DESIGN-SYSTEM.md` with a header block (status, created, companion pointer to `MODAL-DECISION-CRITERIA.md`).</step>
+    <step order="2">Write the size-scale section: a table of the 7 named sizes with the exact width/height math and layout per the constraint; call out the `md`/`lg` height caps as load-bearing.</step>
+    <step order="3">Write the header, footer, and dismiss-semantics sections per the contracts above (Cancel-left footer, title-source rule, Dataverse glyph, `light`/`explicit`/`alert`).</step>
+    <step order="4">Write the theming section (host-provided theme, scaled theme not zoom, semantic tokens only) and the component-names section (base + 6 presets).</step>
+    <step order="5">Write the wiring recipe using the `FormModal` and `BrowseModal` examples from design §6.8, plus a do/don't list; add a cross-link back to `MODAL-DECISION-CRITERIA.md` (component vs decision layer).</step>
+    <step order="6">Review the doc against spec §6.2 numbers and confirm every required section is present and the sizes match exactly.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set 010 status to ✅.</step>
+    <step order="8">Document any deviation (e.g. a number that had to be reconciled) in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="docs-standards">Standards-document authoring skill</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">docs/standards/MODAL-DESIGN-SYSTEM.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`docs/standards/MODAL-DESIGN-SYSTEM.md` exists and contains all required sections: size scale, layouts, header contract, footer contract, dismiss semantics, theming, component names, wiring recipe, and a do/don't list.</criterion>
+    <criterion testable="true">The documented 7 size numbers match spec §6.2 exactly, including the `md` cap `min(72vh, 720px)` and the `lg` cap `min(85vh, 880px)`.</criterion>
+    <criterion testable="true">The footer contract states Cancel is ALWAYS left (`footerStart`) and the window controls use the Dataverse `FullScreenMaximize/Minimize` glyph; dismiss semantics list `light`/`explicit`/`alert`.</criterion>
+    <criterion testable="true">The doc is a self-contained sibling of `MODAL-DECISION-CRITERIA.md` (cross-references it, does not duplicate its decision tree) and is ready to be cross-linked by task 013.</criterion>
+    <criterion testable="true">No source code is modified by this task (documentation only).</criterion>
+  </acceptance-criteria>
+
+  <notes>Design §7 deliverable #2. The prototype README "Decisions" section and design §0 hold the locked visual contract. This doc is deliberately the component layer; `MODAL-DECISION-CRITERIA.md` remains the decision layer and gets its component-layer cross-link in task 013. Completion summary appended here when done.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute. Invoke docs-standards for the drafting step.</protocol>
+  </execution>
+</task>

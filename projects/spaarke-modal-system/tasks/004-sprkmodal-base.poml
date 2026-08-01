@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarke-modal-system">
+  <metadata>
+    <title>SprkModal base shell (envelope + header + body + footer) — FR-01/03/04/05/07/08</title>
+    <phase>0 Build</phase>
+    <gate>blocked until 001,002,003</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Core architectural join point — the envelope every preset and the whole conversion depend on; owns a11y (focus trap, aria-modal, dismiss), sizing, and transform-robust centering; modifies `.tsx` with 6+ steps and deps on 3 tasks.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified by an existing prototype `SprkModal.tsx`; composes already-built primitives (sizes, scaledTheme, ModalWindowControls). No architectural discovery needed.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Core join point — all six presets (005-008) depend on it; author solo so the public prop contract is settled before presets fan out.</parallel-reason>
+    <deps>001,002,003</deps>
+    <tags>react, typescript, fluent-ui, frontend</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Port the canonical modal shell from the prototype into `@spaarke/ui-components` as `SprkModal/SprkModal.tsx`. It owns the Fluent v9 `Dialog`/`DialogSurface` envelope + a standard header (`space-between`: optional `‹ N of M ›` nav + ellipsized title on the left; `headerActions` + `ModalWindowControls` on the right; bottom border `strokeWidthThin`/`colorNeutralStroke2`) + a native thin-scrollbar body (`scrollbarWidth: thin`, `scrollbarGutter: stable`, rounded inset thumb that darkens on hover; `padded`/`bodyScroll` props) + a standard footer (`footerStart` left / `footer` right, `space-between`, omittable). Props: `size`, `layout`, `dismiss` (`light`|`explicit`|`alert`), `uiScale`, `maximizable`, `nav`, `headerActions`, `footerStart`, `footer`, `padded`, `bodyScroll`. It consumes `getSurfaceStyle` (task 001) and `ModalWindowControls` (task 003). It renders NO `FluentProvider` inside — it inherits the host provider (and therefore the scaled theme from task 002).</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 Dialog/portal, focus management, and scale-aware modal layout. Follow ADRs strictly.</role>
+  <goal>`src/client/shared/Spaarke.UI.Components/src/components/SprkModal/SprkModal.tsx` (+ types) exports `SprkModal` and its public types (`SprkModalProps`, `SprkModalDismiss`, `SprkModalBodyScroll`, `SprkModalNav`); a consumer supplies content + intent only and the shell renders all chrome; the three dismiss modes behave; maximize toggles `full`; a11y (focus trap + announced title + aria-modal) works; centered under a transformed ancestor; compiles under React 18+19; tests green.</goal>
+
+  <context>
+    <background>Design §6.1/§6.4/§6.5/§6.7/§6.9 + spec FR-01/03/04/05/07/08 define the shell. It is "a canonical shell that already exists in pieces" (design §3.2) — this task composes `getSurfaceStyle` (sizes), the scaled theme, and `ModalWindowControls` into ONE envelope-owning shell. The prototype `SprkModal.tsx` is the visual contract. Centering MUST survive a CSS-transformed ancestor (the bug that forced `ConversationModal`/`NewThreadModal` to hand-roll "page-mounted + centered") — Fluent `Dialog`'s portal (mounted at the FluentProvider root) escapes the transform; P5 (task) later validates this against the hardest case.</background>
+    <relevant-files>
+      <file role="canonical-reference">c:/code_files/spaarke-prototype/projects/2026-07-sprk-modal-system/src/components/SprkModal.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/SprkModal.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/SprkModal.types.ts</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/sizes.ts</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/scaledTheme.ts</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/ModalWindowControls/ModalWindowControls.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">`getSurfaceStyle` + `SprkModalSize`/`SprkModalLayout` + `SIZE_SPEC` (sizing).</dependency>
+      <dependency task="002" status="pending">`scaleTheme`/`baseTheme` — inherited from host; the shell reads `uiScale` for sizing while the host supplies the scaled theme.</dependency>
+      <dependency task="003" status="pending">`ModalWindowControls` reconciled to the FullScreen glyph.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Shell lives in `@spaarke/ui-components` under `components/SprkModal/`; not duplicated per solution.</constraint>
+    <constraint source="ADR-021">Semantic tokens only in the shell — ZERO hex, ZERO `'1px'` literals (use `tokens.strokeWidthThin`), ZERO inline color styles (NFR-03). Header/footer borders + scrollbar colors use `tokens.colorNeutralStroke2`/`colorNeutralStroke1`.</constraint>
+    <constraint source="ADR-028">MUST NOT snapshot tokens/auth into props; consumers pass callbacks (`onClose`, `nav.onNavigate`) and any `authenticatedFetch`/`navigationService` as functions, never captured values.</constraint>
+    <constraint source="project">Keep the Fluent `Dialog`/`DialogSurface` envelope (transform-robust portal) — MUST NOT hand-roll a `position:fixed`/`createElement` overlay. `dismiss` maps: `light`→`modalType="modal"` + close on backdrop/ESC via `onOpenChange`; `explicit`→`modal`, no light-dismiss; `alert`→`modalType="alert"` (no ESC/backdrop).</constraint>
+    <constraint source="project">Realize `--sprk-ui-scale` via the scaled theme + `uiScale` sizing — MUST NOT use CSS `zoom`. Body scrolls natively with a thin scrollbar — MUST NOT add chevron scroll overlays for vertical content (the `bodyScroll="arrows"` branch delegates to the existing `ModalScrollArea`, not a new overlay).</constraint>
+    <constraint source="project">NO `FluentProvider` inside the shell — it inherits the host provider (light/dark parity). MUST compile clean under `@types/react` 18 (PCF) and React 19 (Code Pages) (NFR-04).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Fluent v9 canonical modal shell (Dialog envelope + scale-aware sizing + a11y)</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-portal-gotcha" location=".claude/patterns/ui/fluent-v9-portal-gotcha.md">Transform-robust centering; portal mounts above transformed ancestors.</pattern>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Shared-lib authoring + slot conventions.</pattern>
+      <pattern name="fluent-v9-react-version-boundaries" location=".claude/patterns/ui/fluent-v9-react-version-boundaries.md">Dual-React (18/19) safety.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Confirm 001/002/003 landed. Load the prototype `SprkModal.tsx` + design §6.1–§6.9. Declare RIGOR: FULL.</step>
+    <step order="1">Author `SprkModal.types.ts` (or inline types): `SprkModalDismiss` (`light|explicit|alert`), `SprkModalBodyScroll` (`native|arrows`), `SprkModalNav` (`{index,total,onNavigate}`), and `SprkModalProps` (all props from the prompt).</step>
+    <step order="2">Author `SprkModal.tsx`: `Dialog` (modalType from `dismiss`; `onOpenChange` closes only when `dismiss==='light'`) → `DialogSurface` styled by `getSurfaceStyle(effectiveSize, uiScale)`; `maximized` state flips `effectiveSize` to `full` (reset on close).</step>
+    <step order="3">Build the header (`space-between`): left = optional nav group (`ChevronLeft/Right`, tabular-nums "N of M" counter, prev/next disabled at bounds, `aria-live`) + ellipsized title; right = `headerActions` + `ModalWindowControls` (pass `onToggleMaximize` only when `maximizable`). Bottom border `strokeWidthThin`/`colorNeutralStroke2`.</step>
+    <step order="4">Build the body: `bodyScroll==='arrows'` → delegate to existing `ModalScrollArea`; else native thin-scrollbar div (`scrollbarWidth: thin`, `scrollbarGutter: stable`, webkit thumb rounded/inset/hover-darken via tokens; `padded` toggles padding). Set `data-layout` from `layout ?? SIZE_SPEC[size].layout`.</step>
+    <step order="5">Build the footer: render only when `footer || footerStart`; `space-between` when `footerStart` present else end-aligned; top border tokens.</step>
+    <step order="6">Write `__tests__/SprkModal.test.tsx`: renders all chrome from content+intent; the three dismiss modes (alert = no ESC/backdrop close); maximize toggles `full`; focus trap + `aria-modal` + announced title; centered under a CSS-transformed ancestor; light + dark.</step>
+    <step order="7">Build the shared lib under `@types/react` 18 and 19; confirm green.</step>
+    <step order="8">Update `tasks/TASK-INDEX.md`: set 004 status to ✅; document any prop-contract deviation from the prototype in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If native Fluent-portal centering FAILS under a transformed ancestor (the shell is off-center / clipped when a parent has `transform`), STOP and surface per CLAUDE.md §6 — do NOT fall back to a hand-rolled `position:fixed` overlay. Transform-robust centering via the Fluent `Dialog` portal is the hard P5 invariant this whole project rests on; a regression here must be resolved, not worked around.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No unified envelope-owning modal shell exists. Grep: `RecordNavigationModalShell` owns chrome but deliberately NOT the envelope; `WizardShell` owns a wizard-only envelope; ~13 bespoke dialogs each re-declare `Dialog`+header+footer. None unify size+header+footer+window-controls+dismiss.</existing>
+    <extension>No single component can be extended — this composes three existing primitives (`getSurfaceStyle`, `ModalWindowControls`, `ModalScrollArea`) into the missing envelope layer. It is the extension SEAM the ~13 dialogs collapse into (net component count ↓, per NFR-06).</extension>
+    <cost-of-doing-nothing>Without SprkModal, FR-01/03/04/05/07/08 are unachievable and the ≥6-sizes / contradictory-close-rules / 3-hand-rolled-overlays fragmentation (design §1) keeps recurring one dialog at a time; every preset (005-008) would re-hand-roll its own envelope.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Renders all chrome from content + intent">
+      <steps>
+        <step>Render `SprkModal open title="Details" size="md" footerStart={Cancel} footer={Save}` with a child.</step>
+      </steps>
+      <expected>Header (title + ModalWindowControls), scrollable body (child), and footer (Cancel left / Save right) all present; consumer supplied no Dialog/header/footer markup.</expected>
+    </test>
+    <test name="Dismiss modes">
+      <steps>
+        <step>Render with `dismiss="light"`, press ESC / click backdrop → closes.</step>
+        <step>Render with `dismiss="alert"`, press ESC / click backdrop → does NOT close; only the × / footer actions close it.</step>
+      </steps>
+      <expected>`light` closes on ESC/backdrop; `explicit`/`alert` do not; `alert` uses `modalType="alert"`.</expected>
+    </test>
+    <test name="Maximize toggles full">
+      <steps>
+        <step>Click the maximize control.</step>
+      </steps>
+      <expected>Surface grows to `full` (100vw×100vh, borderRadius 0); toggling again restores the named size; closing resets to un-maximized.</expected>
+    </test>
+    <test name="A11y + transform-robust centering">
+      <steps>
+        <step>Open the modal inside an ancestor with `transform: scale(0.9)`.</step>
+        <step>Tab through the modal.</step>
+      </steps>
+      <expected>Modal is centered (not offset by the transform); focus is trapped; `aria-modal` set; title announced.</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Render the shell under a dark FluentProvider theme.</step>
+      </steps>
+      <expected>Header/footer borders, scrollbar, and text use semantic tokens and read correctly in dark mode; no hardcoded color; no `'1px'` literal.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test shared lib (both React versions)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/SprkModal.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/SprkModal.types.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/__tests__/SprkModal.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given only content + intent props, when `SprkModal` renders, then it supplies the full envelope + header (title + ModalWindowControls) + body + footer with no consumer-authored Dialog/header/footer.</criterion>
+    <criterion testable="true">Given `dismiss="alert"`, ESC and backdrop clicks do NOT close the modal; given `dismiss="light"`, both do.</criterion>
+    <criterion testable="true">Given the maximize control is clicked, `effectiveSize` becomes `full` (100vw×100vh); clicking again restores the named size.</criterion>
+    <criterion testable="true">Focus is trapped inside the surface, `aria-modal` is set, and the title is announced (WCAG 2.1 AA path, NFR-02).</criterion>
+    <criterion testable="true">The modal is centered even when an ancestor has a CSS `transform`; no hand-rolled overlay is used.</criterion>
+    <criterion testable="true">Body scrolls natively with a thin scrollbar (no vertical chevron overlay); light + dark parity holds; zero hex / `'1px'` / inline-color in the module.</criterion>
+    <criterion testable="true">Compiles under `@types/react` 18 and React 19; unit tests pass; shared-lib build green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Port the prototype `SprkModal.tsx` behavior: `effectiveSize = maximized ? 'full' : size`; `effectiveLayout = layout ?? SIZE_SPEC[size].layout`; `modalType = dismiss==='alert' ? 'alert' : 'modal'`; footer renders only when `footer||footerStart`. The `bodyScroll="arrows"` path reuses the prototype's `ModalScrollArea` (port it if not already present) — it is NOT a new chevron overlay for vertical content, it is the opt-in the prototype carries. This shell is the sole join point for tasks 005-008.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

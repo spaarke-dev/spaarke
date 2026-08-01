@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-modal-system">
+  <metadata>
+    <title>P3 — EmailComposer SendEmailDialog → FormModal/md; retire legacy SendEmailDialog — FR-14</title>
+    <phase>3 Forms &amp; compose</phase>
+    <gate>blocked until 006</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Re-bases the canonical email-compose dialog `.tsx` AND retires a shipped component (folder delete + barrel edit) with import-graph blast radius; `alert` dismiss semantics + name-resolution correctness are load-bearing.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified re-base + a bounded, greppable retirement; the barrel override and legacy path are named exactly, no architectural inference required.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>006</deps>
+    <tags>react, typescript, fluent-ui, frontend</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Re-base the CANONICAL `EmailComposer/wrappers/SendEmailDialog.tsx` onto the `FormModal` preset at size `md`, keeping `modalType="alert"` semantics via `dismiss="alert"` so the active-compose state cannot be dismissed by ESC or backdrop click (FR-14/FR-05). Then RETIRE the legacy dialog: DELETE the `components/SendEmailDialog/` folder, remove the legacy `export * from './SendEmailDialog';` line (index.ts line 42), and KEEP the canonical named-export override (index.ts line 213) so the `SendEmailDialog`/`ISendEmailDialogProps` names still resolve to the EmailComposer wrapper. Grep to prove no imports of the legacy path remain.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 dialogs, barrel/export resolution, and safe component retirement. Follow ADRs strictly.</role>
+  <goal>The canonical `EmailComposer/wrappers/SendEmailDialog.tsx` renders via `FormModal` at `md` with `dismiss="alert"`; the legacy `components/SendEmailDialog/` folder and its `export *` line are gone; the `SendEmailDialog` name still resolves (via the line-213 override) to the EmailComposer wrapper; no dangling imports; shared-lib build green under `@types/react` 18 and React 19.</goal>
+
+  <context>
+    <background>Discovery confirmed TWO `SendEmailDialog`s: the CANONICAL wrapper at `EmailComposer/wrappers/SendEmailDialog.tsx` (1040×70vh, `onSent`/`onClose` API) which already wins the barrel name via an explicit override at `components/index.ts` line 213, and a LEGACY single-caller copy at `components/SendEmailDialog/` (`onSend` API) re-exported by `export * from './SendEmailDialog';` at line 42. FR-14 unifies the compose surface to `FormModal`/`md` and retires the legacy copy. Active email compose is a blocking state — it takes `alert` dismiss semantics so an in-progress draft is not lost to an accidental ESC/backdrop.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx</file>
+      <file role="delete">src/client/shared/Spaarke.UI.Components/src/components/SendEmailDialog/</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/index.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/FormModal.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="006" status="pending">Ships the `FormModal` preset (with `dismiss` support incl. `alert`) the canonical email dialog re-bases onto.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">`authenticatedFetch` (and any nav service) used by the email dialog MUST be passed through as a FUNCTION — never snapshotted; the host owns auth identity for the send call.</constraint>
+    <constraint source="ADR-021">Semantic tokens only in the re-based dialog: no hex, `'1px'` literals, or inline color; dark/light parity via inherited host theme (NFR-03).</constraint>
+    <constraint source="ADR-012">Re-base by COMPOSING `FormModal` — MUST NOT fork the shell. The canonical dialog stays the single `SendEmailDialog` surface in `@spaarke/ui-components`.</constraint>
+    <constraint source="project">Active-compose state MUST use `dismiss="alert"` (`modalType="alert"`): no ESC and no backdrop light-dismiss while composing. Keep the Fluent `Dialog` envelope (transform-robust portal).</constraint>
+    <constraint source="project">Retirement scope is EXACTLY: delete `components/SendEmailDialog/`, remove the line-42 `export * from './SendEmailDialog';`, and RETAIN the line-213 named-export override. MUST NOT remove line 213 (that is what keeps the name resolving to the wrapper). A grep for the legacy import path MUST return zero hits before completion.</constraint>
+    <constraint source="project">MUST compile clean under `@types/react` 18 (PCF) and React 19 (Code Pages) — NFR-04.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Re-basing the compose dialog + retiring the legacy SendEmailDialog</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Preset composition; `dismiss` mapping to Fluent `modalType`.</pattern>
+      <pattern name="fluent-v9-react-version-boundaries" location=".claude/patterns/ui/fluent-v9-react-version-boundaries.md">Dual-React (18/19) safety.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-14/FR-05, the `FormModal` preset, the canonical `EmailComposer/wrappers/SendEmailDialog.tsx`, and `components/index.ts` (confirm line 42 = legacy `export *`, line 213 = canonical override). Declare RIGOR: FULL.</step>
+    <step order="1">Re-base `EmailComposer/wrappers/SendEmailDialog.tsx` onto `FormModal` at `size="md"` with `dismiss="alert"`; map its title/actions/footer onto the preset; keep the `onSent`/`onClose` API and pass `authenticatedFetch` through as a function.</step>
+    <step order="2">Grep the repo for imports of the legacy path (`components/SendEmailDialog`, the `onSend` API surface, and the `pcf-safe` subpath if any) to enumerate every consumer that would break on deletion.</step>
+    <step order="3">Migrate any legacy consumer found in step 2 to the canonical wrapper (or confirm zero via the barrel — the line-213 override already routes the name). If a legacy consumer needs a non-trivial API port, record it and (if out of scope) file a `/defer` note rather than half-porting.</step>
+    <step order="4">DELETE the `components/SendEmailDialog/` folder; remove the line-42 `export * from './SendEmailDialog';`; RETAIN the line-213 named-export override.</step>
+    <step order="5">Grep again to prove no dangling imports of the legacy path remain; run the shared-lib build + the EmailComposer characterization tests.</step>
+    <step order="6">Exercise the compose dialog in a dev host: confirm ESC and backdrop do NOT dismiss during active compose, and that send + close still work.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set 051 status to ✅.</step>
+    <step order="8">Document any deviation (e.g. a legacy consumer that needed porting, or a deferred dedup) in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a legacy `components/SendEmailDialog/` consumer exists that depends on the old `onSend` API in a way the canonical `onSent`/`onClose` wrapper cannot satisfy without a behavior change, STOP and surface it per CLAUDE.md §6 rather than silently reshaping the send contract — the retirement must not regress a live caller.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Compose modal alert-dismiss semantics">
+      <steps>
+        <step>Open the canonical SendEmailDialog (active compose) in a dev host.</step>
+        <step>Press ESC and click the backdrop; then use the explicit Cancel/close control.</step>
+      </steps>
+      <expected>ESC and backdrop do NOT close the dialog during active compose (`dismiss="alert"`); only the explicit control closes it; the dialog renders at `md` with standard chrome; send succeeds.</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Render the re-based compose dialog under the host dark theme.</step>
+      </steps>
+      <expected>Dark palette correct; no hardcoded light-mode color leak; only host semantic tokens used.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test the shared lib (incl. EmailComposer characterization tests)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the canonical `EmailComposer/wrappers/SendEmailDialog.tsx`, when rendered in active compose, it uses `FormModal` at `md` with `dismiss="alert"` — ESC and backdrop do NOT dismiss; only the explicit control closes.</criterion>
+    <criterion testable="true">The legacy `components/SendEmailDialog/` folder is deleted and the line-42 `export * from './SendEmailDialog';` is removed.</criterion>
+    <criterion testable="true">The line-213 named-export override is retained, so `import { SendEmailDialog } from '.../components'` still resolves to the EmailComposer wrapper.</criterion>
+    <criterion testable="true">Negative: a repo-wide grep for imports of the legacy `components/SendEmailDialog` path returns zero hits (no dangling imports).</criterion>
+    <criterion testable="true">`authenticatedFetch` passed as a function; no hex/`'1px'`/inline color; dark parity holds; shared-lib build green under `@types/react` 18 and React 19; EmailComposer tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Index.ts context (verified): line 42 = legacy `export * from './SendEmailDialog';`; lines 203–213 = the name-collision disambiguation comment + the canonical override `export { SendEmailDialog, type ISendEmailDialogProps } from './EmailComposer';`. The line-210 comment references a separate FilePreviewDialog migration; that is task 060's concern, not this task. Completion summary appended here when done.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

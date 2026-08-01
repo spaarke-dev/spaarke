@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-modal-system">
+  <metadata>
+    <title>P3 — Re-base forms onto FormModal (md) — FR-14</title>
+    <phase>3 Forms &amp; compose</phase>
+    <gate>blocked until 006</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies three shared/solution `.tsx` form dialogs (incl. the SpaarkeAi hot-path `QuickStartModal`) with injected `authenticatedFetch`/`navigationService`; ADR-028 function-passing correctness + submit-behavior preservation are load-bearing.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard shared-lib re-base fully specified by the `FormModal` preset + prototype visual contract; no architectural judgment beyond the escalation boundary.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>006</deps>
+    <tags>react, typescript, fluent-ui, frontend</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Re-base the three form dialogs — `NewThreadModal`, SpaarkeAi's `QuickStartModal`, and `PinnedMemoryEditDialog` — onto the `FormModal` preset at size `md` (the unified mid-size: `min(1040px·uiScale, 92vw) × min(72vh, 720px·uiScale)`), so all three drop their bespoke envelopes and adopt the standard SprkModal chrome (FR-14). Preserve every form's existing fields, validation, and submit behavior, and keep the injected `authenticatedFetch`/`navigationService` flowing through as FUNCTIONS. This unifies mid-size dialogs to a single `md` and removes three more per-dialog size hardcodes.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9, React form dialogs, and the SprkModal preset family. Follow ADRs strictly.</role>
+  <goal>`NewThreadModal.tsx`, `QuickStartModal.tsx`, and `PinnedMemoryEditDialog.tsx` each render via `FormModal` at `md` with their fields/submit intact and auth/nav passed as functions; shared-lib + SpaarkeAi builds green under `@types/react` 18 and React 19.</goal>
+
+  <context>
+    <background>Design §6 + spec FR-14 unify all mid-size forms onto `md` (owner-locked `min(1040px,92vw) × min(72vh,720px)` — the height cap fixes the square-on-tall-monitor failure). These three dialogs today carry their own Fluent `Dialog` envelopes and ad-hoc sizes; `FormModal` (task 006) is the thin preset they collapse into. `QuickStartModal` lives under `src/solutions/SpaarkeAi/**` — a declared SpaarkeAi hot-path — so its PR needs a `/conflict-check` pass before merge.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/NewThreadModal/NewThreadModal.tsx</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/conversation/QuickStartModal.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.AI.Widgets/src/components/memory/PinnedMemoryEditDialog.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/FormModal.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="006" status="pending">Ships the `FormModal` preset (SprkModal config with `dismiss="explicit"`, footer Cancel⟷Save) these forms re-base onto.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">`authenticatedFetch` and `navigationService` MUST be passed through as FUNCTIONS (or function-typed props), never snapshotted into a value/closure at mount — the host owns auth/nav identity.</constraint>
+    <constraint source="ADR-021">Semantic tokens only in the re-based forms: MUST NOT introduce hex, `'1px'` literals, or inline color styles; dark/light parity via inherited host theme (NFR-03).</constraint>
+    <constraint source="ADR-012">Re-base by COMPOSING the `FormModal` preset — MUST NOT fork `SprkModal`/`FormModal` or hand-roll a parallel envelope; the shell lives once in `@spaarke/ui-components`.</constraint>
+    <constraint source="project">Unify the mid-size to `md` — MUST NOT reintroduce a per-form size; keep the Fluent `Dialog` envelope (transform-robust portal). Each form's fields, validation, and submit callback behavior MUST be byte-preserved (visual/wiring re-base only, no content redesign).</constraint>
+    <constraint source="project">SpaarkeAi hot-path: run `/conflict-check` BEFORE opening the SpaarkeAi PR that touches `QuickStartModal` (project CLAUDE.md hot-path rule).</constraint>
+    <constraint source="project">All three files MUST compile clean under `@types/react` 18 (PCF consumers) and React 19 (Code Pages) — NFR-04.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Re-basing form dialogs onto the FormModal preset</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Shared-lib preset-composition conventions; how a consumer supplies content + intent to a SprkModal preset.</pattern>
+      <pattern name="fluent-v9-react-version-boundaries" location=".claude/patterns/ui/fluent-v9-react-version-boundaries.md">Dual-React (18/19) safety for shared-lib + SpaarkeAi consumers.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-14, project CLAUDE.md, and the `FormModal` preset. Read the three current form dialogs to inventory each one's fields, validation, submit callback, and how `authenticatedFetch`/`navigationService` are injected. Declare RIGOR: FULL.</step>
+    <step order="1">Re-base `NewThreadModal.tsx`: replace its bespoke Dialog envelope with `FormModal` at `size="md"`, mapping title/header actions/footer (Cancel⟷Save) onto the preset props; keep all fields + submit wiring; pass `authenticatedFetch`/`navigationService` through as functions.</step>
+    <step order="2">Re-base `PinnedMemoryEditDialog.tsx` (Spaarke.AI.Widgets) the same way onto `FormModal`/`md`, preserving its edit fields + save behavior.</step>
+    <step order="3">Re-base `QuickStartModal.tsx` (SpaarkeAi) onto `FormModal`/`md`; preserve its start-conversation fields + submit; confirm auth/nav still passed as functions. Note the SpaarkeAi hot-path for the PR step.</step>
+    <step order="4">Verify no hex/`'1px'`/inline-color crept in and that each form still compiles under both React targets; run the shared-lib + SpaarkeAi builds.</step>
+    <step order="5">Run `/conflict-check` for the SpaarkeAi surface before staging the `QuickStartModal` change for its PR.</step>
+    <step order="6">Manually exercise each form (submit happy-path + a validation-fail) in a harness or dev host; confirm behavior parity with pre-change.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set 050 status to ✅.</step>
+    <step order="8">Document any deviation (e.g. a form that needed a size other than `md`, or a submit-wiring nuance) in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of the three forms genuinely cannot fit the `md` surface without clipping its fields/footer (i.e. `md` is the wrong unified size for it), STOP and surface it per CLAUDE.md §6 rather than silently picking `lg`/`xl` — the mid-size unification is owner-locked and a per-form exception must be recorded.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Form submit parity on FormModal/md">
+      <steps>
+        <step>Open each re-based form (NewThread, QuickStart, PinnedMemoryEdit) in a dev host at 1440×900.</step>
+        <step>Fill required fields and submit; then re-open and trigger a validation failure.</step>
+      </steps>
+      <expected>Each form renders in the standard SprkModal chrome at `md` (Cancel left, Save right, window controls present), submits successfully, and shows the same validation behavior as before the re-base; footer + primary always visible.</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Render each re-based form under the host dark theme.</step>
+      </steps>
+      <expected>Dark palette is correct with no hardcoded light-mode color leak; only host semantic tokens are used; text/border contrast holds.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test the shared lib and SpaarkeAi solution</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/NewThreadModal/NewThreadModal.tsx</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/QuickStartModal.tsx</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/components/memory/PinnedMemoryEditDialog.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given each of the three forms, when rendered, it uses the `FormModal` preset at `size="md"` (`min(1040px·uiScale, 92vw) × min(72vh, 720px·uiScale)`) with the standard header/footer chrome.</criterion>
+    <criterion testable="true">Given each form, `authenticatedFetch` and `navigationService` are passed as functions (verified by inspection — no snapshotted value/closure), per ADR-028.</criterion>
+    <criterion testable="true">Each form's fields, validation, and submit callback behavior are preserved (submit happy-path + validation-fail both match pre-change behavior).</criterion>
+    <criterion testable="true">The `QuickStartModal` (SpaarkeAi hot-path) change has a `/conflict-check` pass recorded before its PR.</criterion>
+    <criterion testable="true">No hex/`'1px'`/inline-color introduced; dark-mode parity holds; shared-lib + SpaarkeAi builds are green and compile under `@types/react` 18 and React 19.</criterion>
+  </acceptance-criteria>
+
+  <notes>`FormModal` uses `dismiss="explicit"` (no light-dismiss) and Cancel-left/Save-right per FR-04/FR-05. `md` numbers are owner-locked (spec Owner Clarifications). Do not redesign form content — this is a frame/wiring re-base only. Completion summary appended here when done.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

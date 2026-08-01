@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="spaarke-modal-system">
+  <metadata>
+    <title>Barrel exports + shell/preset a11y snapshot + dual-React verify — FR-01/NFR-04</title>
+    <phase>0 Build</phase>
+    <gate>blocked until 005-008</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Test-modifying + public-API surface: adds the barrel that makes the whole shell/preset family importable and the a11y gate; modifies the shared-lib `components/index.ts`; a regression here breaks every consumer's import.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical barrel wiring + a bounded a11y snapshot test + a dual-consumer build check; the collision-override precedent is already in the file (line 213).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>005,006,007,008</deps>
+    <tags>react, typescript, fluent-ui, frontend, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Wire the SprkModal family into the shared-lib barrel and add the family-wide a11y + dual-React gate. (1) Add `SprkModal/index.ts` re-exporting the base shell, all six presets, and the public types. (2) Add a banner comment + `export * from './SprkModal'` to `components/index.ts` — use the named-export override pattern ONLY on a name collision (per the `SendEmailDialog` precedent at index.ts line 213). (3) Author an a11y snapshot test covering focus trap, `aria-modal`, ESC-per-dismiss-mode, and keyboard-operable window controls + nav across the shell + presets. (4) Verify the shared-lib build AND that a PCF consumer (`@types/react` 18) and a Code Page consumer (React 19) both compile. (5) Grep the whole `SprkModal/` tree for zero hex / `'1px'` / inline-color.</prompt>
+  <role>SPAARKE platform developer. Expert in shared-lib barrel exports, Fluent v9 a11y testing, and dual-React (18/19) build verification. Follow ADRs strictly.</role>
+  <goal>`import { SprkModal, ConfirmModal, ChoiceModal, FormModal, PreviewModal, BrowseModal, WizardModal } from '@spaarke/ui-components'` resolves; the a11y snapshot test is green; a PCF (React 18) and a Code Page (React 19) consumer both compile; the `SprkModal/` tree greps clean for hex/`'1px'`/inline-color.</goal>
+
+  <context>
+    <background>FR-01 requires the family ship in `@spaarke/ui-components`; NFR-04 requires clean compilation under `@types/react` 18 (PCF) and React 19 (Code Pages). The barrel convention (project CLAUDE.md): add `SprkModal/index.ts` + `export * from './SprkModal'` in `components/index.ts`, using the named-export override pattern only on collision. The `components/index.ts` line-213 block is the precedent — an explicit `export { X, type IX } from './...'` that shadows two `export *` sources so resolution is deterministic. This task is the P0 close-out: it makes the whole family importable and applies the family-wide a11y (NFR-02) + token-discipline (NFR-03) + dual-React (NFR-04) gates.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/index.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/index.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/__tests__/a11y.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="005" status="pending">ConfirmModal + ChoiceModal presets.</dependency>
+      <dependency task="006" status="pending">FormModal preset.</dependency>
+      <dependency task="007" status="pending">PreviewModal + BrowseModal presets.</dependency>
+      <dependency task="008" status="pending">WizardModal preset.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">The barrel exposes the shell family from `@spaarke/ui-components`; MUST NOT duplicate exports per solution.</constraint>
+    <constraint source="ADR-021">The grep gate MUST confirm ZERO hex, `'1px'` literals, and inline color styles across the entire `SprkModal/` tree (strengthens ADR-021 / NFR-03) — treat any hit as a failing gate.</constraint>
+    <constraint source="ADR-028">The a11y test MUST pass callbacks (`onClose`, `onNavigate`) as functions; MUST NOT snapshot tokens/auth in test props (mirrors consumer usage).</constraint>
+    <constraint source="project">Use the named-export override pattern in `components/index.ts` ONLY on a genuine name collision (per the line-213 precedent) — a plain `export * from './SprkModal'` otherwise. MUST NOT rename any preset to dodge a collision without documenting it.</constraint>
+    <constraint source="project">Dual-React (NFR-04): the family MUST compile clean under `@types/react` 18 (a PCF consumer) AND React 19 (a Code Page consumer). MUST verify BOTH, not just the shared-lib build.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Shared-lib barrel exports + Fluent v9 a11y snapshot + dual-React verification</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-react-version-boundaries" location=".claude/patterns/ui/fluent-v9-react-version-boundaries.md">Dual-React (18/19) build verification for shared-lib exports.</pattern>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Barrel + type-export conventions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Confirm 005-008 landed. Load `components/index.ts` (esp. the line-213 override block). Declare RIGOR: FULL.</step>
+    <step order="1">Author `SprkModal/index.ts`: re-export `SprkModal` + its public types and all six presets (`ConfirmModal`, `ChoiceModal`, `FormModal`, `PreviewModal`, `BrowseModal`, `WizardModal`) + their prop types.</step>
+    <step order="2">Add a banner comment + `export * from './SprkModal'` to `components/index.ts`. Check for name collisions against existing exports; if any preset name collides, add an explicit `export { Name, type IName } from './SprkModal'` override (line-213 pattern) and document why — otherwise leave the plain `export *`.</step>
+    <step order="3">Author `__tests__/a11y.test.tsx`: for the shell + each preset, assert focus trap, `aria-modal`, ESC honored per `dismiss` (light closes, explicit/alert don't), and keyboard-operable window controls + nav (Tab/Enter reach maximize/close and prev/next).</step>
+    <step order="4">Run `SprkModal/` a full grep for hex (`#[0-9a-fA-F]{3,8}`), `'1px'`/`"1px"` literals, and inline color styles; confirm zero hits (fail the task if any).</step>
+    <step order="5">Build the shared lib; then verify a PCF consumer (`@types/react` 18) and a Code Page consumer (React 19) both compile against the new barrel exports.</step>
+    <step order="6">Run the full a11y + preset test suite; confirm green.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set 009 status to ✅ (and, if this closes P0, note P0 complete).</step>
+    <step order="8">Document any collision-override added or dual-React fix in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a preset name collides with an existing barrel export in a way the line-213 override cannot resolve deterministically (e.g. two same-named components must both stay public), STOP and surface per CLAUDE.md §6 rather than silently renaming a public preset — the public API names are owner-locked (spec Owner Clarifications).</trigger>
+    <trigger>If the family fails to compile under EITHER `@types/react` 18 or React 19, STOP and surface the version-boundary defect per CLAUDE.md §6 (NFR-04 is a hard gate) rather than pinning a consumer to a single React version.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Family-wide a11y pass">
+      <steps>
+        <step>Open each of `SprkModal`, `ConfirmModal`, `FormModal`, `BrowseModal`, `WizardModal`.</step>
+        <step>Tab through; press ESC.</step>
+      </steps>
+      <expected>Focus is trapped; `aria-modal` set; ESC closes only `light`/default-dismiss modals; maximize/close + prev/next are keyboard-operable (WCAG 2.1 AA, NFR-02).</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Render the a11y harness under a dark FluentProvider theme.</step>
+      </steps>
+      <expected>All family members render correctly in dark mode; the `SprkModal/` grep confirms zero hex / `'1px'` / inline-color across the tree.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test shared lib; build a PCF (React 18) + Code Page (React 19) consumer</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/index.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/__tests__/a11y.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `@spaarke/ui-components`, when a consumer imports `{ SprkModal, ConfirmModal, ChoiceModal, FormModal, PreviewModal, BrowseModal, WizardModal }`, then all seven resolve.</criterion>
+    <criterion testable="true">`components/index.ts` uses a plain `export * from './SprkModal'` unless a documented name collision requires the line-213 override pattern.</criterion>
+    <criterion testable="true">The a11y snapshot test passes: focus trap, `aria-modal`, ESC-per-dismiss, keyboard-operable window controls + nav across shell + presets.</criterion>
+    <criterion testable="true">A PCF consumer (`@types/react` 18) AND a Code Page consumer (React 19) both compile against the new exports.</criterion>
+    <criterion testable="true">Grep of the `SprkModal/` tree returns zero hex, `'1px'` literals, and inline color styles; shared-lib build green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Modify-only barrel + added tests — no `&lt;justification&gt;` (adds exports/tests to existing surface, not a new component). The line-213 precedent in `components/index.ts` is an explicit `export { SendEmailDialog, type ISendEmailDialogProps } from './EmailComposer'` shadowing two `export *` sources — mirror that only if a preset name collides. Closes P0; P0.5 + P1-P7 conversion follow in later waves.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

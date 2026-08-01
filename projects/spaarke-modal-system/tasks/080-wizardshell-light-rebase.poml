@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="spaarke-modal-system">
+  <metadata>
+    <title>P6 — WizardShell light-first re-base on SprkModal tokens + window controls — FR-17</title>
+    <phase>6 Wizards</phase>
+    <gate>blocked until 003,008</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies a shipped shared-lib `.tsx` (`WizardShell`) consumed by every `Create*`/direct wizard plus the iframe web-resource builds — high blast radius, so correctness + consumer/build verification are load-bearing (FULL trigger: modifying `.tsx`, tags include `fluent-ui`).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded token/size/glyph alignment on an existing component with a clear reference (the shipped `SprkModal` header/footer tokens + the `WizardModal` preset); no architecture decision this pass.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>High blast radius — `WizardShell` is consumed by all `Create*`/direct wizards and by the iframe web-resource builds; a token/size change ripples to every consumer at once. Author and run solo, not in a parallel wave.</parallel-reason>
+    <deps>003,008</deps>
+    <tags>react, fluent-ui, frontend</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Do a LIGHT-FIRST re-base of `Wizard/WizardShell.tsx`: adopt the `SprkModal` standard header/footer + size tokens and the reconciled `ModalWindowControls` (task 003 `FullScreenMaximize/Minimize` glyph), and align the shell to the named `wizard` size. RETAIN the existing WizardShell envelope + `embedded` mode + the 200px stepper — this pass is chrome-token alignment only; do NOT perform a full internal re-base onto `SprkModal` (owner decision §11-G, light-first). All `Create*`/direct wizards inherit the aligned chrome; explicitly VERIFY the iframe web-resource builds are unaffected (FR-17).</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9, shared-lib wizard chrome, and dual-React (18/19) component maintenance. Follow ADRs strictly.</role>
+  <goal>`Wizard/WizardShell.tsx` renders the standard `SprkModal` header (title + `ModalWindowControls` with the FullScreen glyph) and standard footer tokens, sized to the named `wizard` size, while keeping the WizardShell Dialog envelope, `embedded` mode, and stepper intact; all consuming wizards and the iframe web-resource builds compile green under `@types/react` 18 and React 19.</goal>
+
+  <context>
+    <background>Design §6.4 + spec FR-17 lock a LIGHT-FIRST wizard re-base: align WizardShell's header/footer/size tokens and window controls to the canonical `SprkModal` standard without dismantling the wizard-specific envelope. The owner chose this depth explicitly (Decisions Confirmed §11-G, 2026-08-01) — a deeper internal re-base is deferred as a separate decision. `WizardShell` today is a Fluent `Dialog` + 200px stepper + `embedded` mode with a Fluent sizing-clamp fix (default maxWidth 95vw / height 70vh); this task retargets it to the shared header/footer tokens and the `wizard` named size so the ~13-dialog family shares one chrome. It depends on 003 (the reconciled `FullScreenMaximize/Minimize` glyph) and 008 (the `SprkModal` base + `WizardModal` preset that supply the canonical header/footer/size tokens).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/WizardModal.tsx</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/sizes.ts</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/ModalWindowControls/ModalWindowControls.tsx</file>
+      <file role="reference">c:/code_files/spaarke-prototype/projects/2026-07-sprk-modal-system/src/components/presets.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">Reconciled `ModalWindowControls` FullScreenMaximize/Minimize glyph.</dependency>
+      <dependency task="008" status="pending">`SprkModal` base + `WizardModal` preset supplying the canonical header/footer/size tokens.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Change stays in the single shared `@spaarke/ui-components` copy of `WizardShell`; MUST NOT fork it or clone the shell per solution (CLAUDE.md §11 — compose, don't fork).</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only for the re-based header/footer chrome; MUST NOT introduce hex, `'1px'` literals, or inline color styles (strengthens ADR-021 / NFR-03).</constraint>
+    <constraint source="project">LIGHT-FIRST scope: RETAIN the WizardShell Dialog envelope + `embedded` mode + the 200px stepper. Align only header/footer/size tokens + window controls to the `SprkModal` standard and the `wizard` named size. MUST NOT re-base the wizard internals onto `SprkModal` this pass (owner §11-G).</constraint>
+    <constraint source="project">Keep OOB `navigateTo` untouched for full main-form editing; this task changes only the custom WizardShell chrome (NFR-05, client-only).</constraint>
+    <constraint source="project">MUST compile clean under `@types/react` 18 (PCF) and React 19 (Code Pages) (NFR-04); the iframe web-resource builds MUST remain green.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Light-first re-base of a shared-lib wizard shell onto SprkModal chrome tokens</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Shared-lib chrome/token conventions.</pattern>
+      <pattern name="fluent-v9-react-version-boundaries" location=".claude/patterns/ui/fluent-v9-react-version-boundaries.md">Dual-React (18/19) safety.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load `WizardShell.tsx`, the `WizardModal` preset, `SprkModal/sizes.ts`, and the reconciled `ModalWindowControls`. Declare RIGOR: FULL.</step>
+    <step order="1">Re-base the WizardShell header to the `SprkModal` standard header: title (ellipsized) on the left, `ModalWindowControls` (FullScreen glyph from task 003 + ×) on the right, standard bottom border tokens (`strokeWidthThin` / `colorNeutralStroke2`).</step>
+    <step order="2">Re-base the footer to the standard footer tokens (Cancel always left via `footerStart`; Skip · Back · Next on the right) using semantic tokens only.</step>
+    <step order="3">Align the shell to the named `wizard` size from `sizes.ts` (replace the ad-hoc 95vw/70vh defaults); keep the Fluent sizing-clamp fix. RETAIN the Dialog envelope, `embedded` mode, and the 200px stepper unchanged.</step>
+    <step order="4">Build the shared lib; build/run every consuming `Create*`/direct wizard and confirm the aligned chrome renders and the stepper + `embedded` mode still work.</step>
+    <step order="5">Rebuild the iframe web-resource bundles that embed WizardShell and confirm they are unaffected (still compile + package).</step>
+    <step order="6">Confirm dual-React clean (build under `@types/react` 18 and React 19).</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set 080 status to ✅.</step>
+    <step order="8">Document any deviation (e.g. a wizard that needed a size other than `wizard`, or an `embedded`-mode edge case) in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If aligning the header/footer/size tokens forces breaking the `embedded` envelope or forces a change inside any `Create*`/direct wizard's internals, STOP and surface it per CLAUDE.md §6 / §6.5 — light-first is the owner-chosen depth (§11-G); a deeper internal re-base is a separate decision, not something to do silently.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Wizard chrome matches the standard">
+      <steps>
+        <step>Open a representative `Create*` wizard (e.g. Create New Matter) through WizardShell.</step>
+        <step>Inspect the header (title + FullScreen maximize/restore + ×) and footer (Cancel left; Skip · Back · Next right).</step>
+      </steps>
+      <expected>Header + footer match the canonical `SprkModal` standard; window controls show the FullScreen glyph; the wizard is sized to the `wizard` named size.</expected>
+    </test>
+    <test name="Embedded mode + stepper intact">
+      <steps>
+        <step>Render WizardShell in `embedded` mode with the 200px stepper populated.</step>
+        <step>Step forward/back through the wizard.</step>
+      </steps>
+      <expected>`embedded` mode renders without the Dialog envelope regressions; the 200px stepper still tracks steps; no clipping.</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Render WizardShell under a dark FluentProvider theme.</step>
+      </steps>
+      <expected>Header/footer chrome uses semantic tokens and reads correctly in dark mode; no hardcoded color.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test shared lib and consuming wizards (build:prod for PCF/web-resource bundles)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a wizard opened via WizardShell, the header uses the standard `SprkModal` header (ellipsized title + `ModalWindowControls` FullScreen glyph + ×) and the footer uses the standard footer tokens (Cancel left; nav/actions right).</criterion>
+    <criterion testable="true">The shell is sized to the named `wizard` size from `sizes.ts` (no ad-hoc 95vw/70vh literal).</criterion>
+    <criterion testable="true">The WizardShell envelope, `embedded` mode, and the 200px stepper are retained and functional (no full internal re-base performed).</criterion>
+    <criterion testable="true">All consuming `Create*`/direct wizards and the iframe web-resource builds compile and package green under `@types/react` 18 and React 19.</criterion>
+    <criterion testable="true">No hex, `'1px'` literals, or inline color styles are introduced in the re-based chrome (ADR-021 / NFR-03).</criterion>
+  </acceptance-criteria>
+
+  <notes>Modify-only — no `&lt;justification&gt;` (`WizardShell` already exists; this edits it). Depth is owner-locked to light-first (§11-G): tokens + size + window controls only, envelope/embedded/stepper preserved. Depends on 003 (glyph) and 008 (`SprkModal` base + `WizardModal` preset tokens). The `WizardModal` preset is the canonical reference for the target header/footer/size.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="spaarke-modal-system">
+  <metadata>
+    <title>Presets: ConfirmModal + ChoiceModal (ADR-023) — FR-09</title>
+    <phase>0 Build</phase>
+    <gate>blocked until 004</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New preset surface (two components) that must preserve the ADR-023 choice-dialog contract; modifies `.tsx`; depends on the base shell.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>ConfirmModal is fully specified by the prototype; ChoiceModal is a thin config bounded by an existing behavior reference (`ChoiceDialog`) — no open-ended design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>004</deps>
+    <tags>react, typescript, fluent-ui, frontend</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author two presets as thin configurations of `SprkModal`. (1) Port `ConfirmModal` from the prototype `presets.tsx`: size `xs`, `dismiss="alert"`, non-maximizable, Cancel in `footerStart` (left) / Confirm in `footer` (right); the optional `destructive` variant applies a danger appearance via a TOKEN class (`tokens.colorStatusDangerBackground3` in a `makeStyles` rule), NOT an inline color style. (2) BUILD `ChoiceModal` FRESH — it is NOT in the prototype — as a thin `SprkModal` config that preserves the ADR-023 `ChoiceDialog` behavior (2-4 rich, described choices the user picks between). Study the existing `ChoiceDialog/ChoiceDialog.tsx` for the behavior/contract to preserve; do not fork it — re-base its behavior onto `SprkModal`.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 preset composition and ADR-023 choice-dialog UX. Follow ADRs strictly.</role>
+  <goal>`SprkModal/presets/ConfirmModal.tsx` and `SprkModal/presets/ChoiceModal.tsx` exist as thin `SprkModal` configs with exported prop types; `ConfirmModal` is xs/alert/non-maximizable with a token-class destructive variant; `ChoiceModal` preserves the ADR-023 2-4-rich-choice contract; tests green.</goal>
+
+  <context>
+    <background>Design §6.1 lists `ConfirmModal` (+destructive) and `ChoiceModal` (ADR-023 preserved) as presets; spec FR-09 requires each be a thin config of `SprkModal`. The prototype ships `ConfirmModal` in `presets.tsx` but NOT `ChoiceModal` (project CLAUDE.md: "ChoiceModal is NOT in the prototype — build fresh"). ADR-023 is preserved by re-basing the existing `ChoiceDialog` onto the shell rather than replacing its pattern. These presets feed P2 conversion (ChoiceDialog, ComposeConflictDialog, PinnedMemory×2, CloseProjectDialog re-base; ActionConfirmationDialog overlay retired).</background>
+    <relevant-files>
+      <file role="canonical-reference">c:/code_files/spaarke-prototype/projects/2026-07-sprk-modal-system/src/components/presets.tsx</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/ChoiceDialog/ChoiceDialog.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/ConfirmModal.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/ChoiceModal.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/__tests__/ConfirmModal.test.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/__tests__/ChoiceModal.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="004" status="pending">`SprkModal` base shell + public prop contract.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Presets live in `@spaarke/ui-components` under `components/SprkModal/presets/`; not duplicated per solution.</constraint>
+    <constraint source="ADR-021">Semantic tokens only — the destructive variant uses a `makeStyles` TOKEN class (e.g. `tokens.colorStatusDangerBackground3`), MUST NOT use an inline `backgroundColor` style (the `CloseProjectDialog` anti-pattern). ZERO hex / `'1px'` literals (NFR-03).</constraint>
+    <constraint source="ADR-023">`ChoiceModal` MUST preserve the `ChoiceDialog` contract: present 2-4 rich (labelled + described) choices the user selects between; keyboard-operable; do not degrade to a plain Confirm.</constraint>
+    <constraint source="ADR-028">Pass callbacks (`onConfirm`, per-choice `onSelect`) as functions; MUST NOT snapshot tokens/auth in preset props.</constraint>
+    <constraint source="project">Each preset is a THIN config of `SprkModal` (no re-declared Dialog/header/footer). MUST compile under `@types/react` 18 and React 19 (NFR-04).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Fluent v9 confirm/choice presets over SprkModal (ADR-023 preserved)</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-023-choice-dialog-pattern.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/ui/choice-dialog-pattern.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="choice-dialog-pattern" location=".claude/patterns/ui/choice-dialog-pattern.md">ADR-023 rich-choice behavior to preserve in ChoiceModal.</pattern>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Preset/slot conventions + token-class danger styling.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Confirm 004 landed. Load the prototype `presets.tsx` (ConfirmModal), `ChoiceDialog.tsx`, ADR-023 + choice-dialog-pattern. Declare RIGOR: FULL.</step>
+    <step order="1">Create `components/SprkModal/presets/`. Port `ConfirmModal.tsx`: `SprkModal size="xs" dismiss="alert" maximizable={false}`; `footerStart` = secondary Cancel; `footer` = primary Confirm; a `makeStyles` `danger` class (token background + hover/active via `filter`, no inline color) applied to the Confirm button when `destructive`.</step>
+    <step order="2">Author `ChoiceModal.tsx`: a thin `SprkModal` config (size `xs`/`sm`, `dismiss="explicit"` or per ADR-023) whose body renders 2-4 rich choice items (label + description) each firing an `onSelect(choiceId)`; preserve `ChoiceDialog`'s selection/keyboard behavior. Cancel in `footerStart`.</step>
+    <step order="3">Export prop types (`ConfirmModalProps`, `ChoiceModalProps`) alongside the components.</step>
+    <step order="4">Write `__tests__/ConfirmModal.test.tsx`: xs/alert (no ESC close), Cancel-left/Confirm-right, destructive applies the token class (assert class, not inline color).</step>
+    <step order="5">Write `__tests__/ChoiceModal.test.tsx`: renders 2-4 choices with descriptions, selecting a choice fires its callback, keyboard-operable (ADR-023 preserved).</step>
+    <step order="6">Build under both React versions + run tests; confirm green.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set 005 status to ✅.</step>
+    <step order="8">Document any deviation (e.g. ChoiceModal prop-shape choice) in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If preserving the ADR-023 `ChoiceDialog` contract cannot be expressed as a thin `SprkModal` config without changing observable choice behavior (selection model, keyboard nav, or the 2-4 rich-choice presentation), STOP and surface per CLAUDE.md §6.5 (ADR-023 is "preserved", not "revised") rather than silently altering the pattern.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`ChoiceDialog/ChoiceDialog.tsx` embodies ADR-023 but owns its own Dialog envelope; ad-hoc confirms (ActionConfirmationDialog, ComposeConflictDialog, PinnedMemoryDeleteConfirmation) each re-hand-roll a confirm surface.</existing>
+    <extension>They ARE the extension seam: `ConfirmModal`/`ChoiceModal` are thin configs of `SprkModal` that these bespoke confirms re-base onto (P2), so net component count drops. `ChoiceDialog`'s behavior is re-based, not duplicated.</extension>
+    <cost-of-doing-nothing>Without the two presets, FR-09 fails and P2 has nothing to re-base onto — the ad-hoc confirms (including the hand-rolled `ActionConfirmationDialog` overlay) keep diverging on close-rules and destructive styling (inline-color anti-pattern).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="ConfirmModal destructive uses a token class (not inline color)">
+      <steps>
+        <step>Render `ConfirmModal destructive title="Delete?" ...`.</step>
+        <step>Inspect the Confirm button.</step>
+      </steps>
+      <expected>Danger styling comes from a `makeStyles` token class (`colorStatusDangerBackground3`); no inline `style={{ backgroundColor }}`; xs size; ESC does not dismiss (alert).</expected>
+    </test>
+    <test name="ChoiceModal preserves ADR-023">
+      <steps>
+        <step>Render `ChoiceModal` with 3 rich choices.</step>
+        <step>Select the second choice via keyboard.</step>
+      </steps>
+      <expected>All 3 choices show label + description; keyboard selection fires the correct callback; behavior matches `ChoiceDialog` (ADR-023).</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Render both presets under a dark FluentProvider theme.</step>
+      </steps>
+      <expected>Danger token + choice items read correctly in dark mode; no hardcoded color; no `'1px'` literal.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test shared lib (both React versions)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/ConfirmModal.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/ChoiceModal.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/__tests__/ConfirmModal.test.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/__tests__/ChoiceModal.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `ConfirmModal`, when it renders, then it is size `xs`, `dismiss="alert"`, non-maximizable, with Cancel left and Confirm right.</criterion>
+    <criterion testable="true">Given `destructive`, the Confirm button's danger styling comes from a `makeStyles` token class, not an inline color style.</criterion>
+    <criterion testable="true">Given `ChoiceModal` with 2-4 rich choices, it preserves the ADR-023 contract (labelled + described choices, keyboard-operable selection).</criterion>
+    <criterion testable="true">Both presets are thin `SprkModal` configs (no re-declared Dialog/header/footer); compile under `@types/react` 18 and 19; tests pass; build green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Prototype `ConfirmModal` danger class: token background + `filter: brightness(...)` on hover/active — port verbatim. `ChoiceModal` has no prototype; keep its API aligned with `ChoiceDialog` so P2 re-base is mechanical. Both feed P2 (confirms &amp; choices).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

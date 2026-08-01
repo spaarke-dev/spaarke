@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="spaarke-modal-system">
+  <metadata>
+    <title>P5 — Replace hand-rolled ConversationModal with SprkModal (md) — FR-16</title>
+    <phase>5 Messages overlay</phase>
+    <gate>blocked until 004</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Brownfield replacement of a hand-rolled `createPortal`+`position:fixed` overlay in a PCF consumer; validates the shell's transform-robust centering invariant (design §4.6 / FR-08) — the hardest conversion, with a real portal-correctness judgment boundary.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified but the transform-robust-centering validation is a subtle brownfield root-cause task; `xhigh` effort is warranted for the empirical portal verification, but no architectural authorship is required.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>004</deps>
+    <tags>react, typescript, fluent-ui, frontend, pcf</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Replace the hand-rolled `ConversationModal.tsx` (a `createPortal` + `position:fixed` overlay in the CommunicationConversationPanel PCF) with `SprkModal` at size `md` (FR-16). This is the HARDEST conversion: the hand-roll exists BECAUSE the Fluent `Dialog` mis-centered under a transformed ancestor, so the deliberate value of this task is to VALIDATE the shell's transform-robust centering (design §4.6 / FR-08 invariant) in this exact PCF. Preserve the modal's existing `ModalWindowControls` usage, its Esc/backdrop dismiss, native body scroll, and its `min(1040px,95vw)×72vh` surface intent. Do NOT keep the hand-roll and do NOT re-hand-roll a workaround.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 portals, transform-ancestor centering, and PCF (React 18) consumers. Follow ADRs strictly.</role>
+  <goal>`ConversationModal.tsx` renders via `SprkModal` at `md` — centered correctly even under a CSS-transformed ancestor — with `ModalWindowControls`, Esc/backdrop dismiss, and native scroll preserved; the `position:fixed`/`createPortal` hand-roll is removed; the PCF builds (`build:prod`) and tests pass under `@types/react` 18.</goal>
+
+  <context>
+    <background>Discovery (project CLAUDE.md Key Facts) confirmed `ConversationModal` is a hand-rolled overlay: `createPortal` + `position:fixed`, which ALREADY consumes `ModalWindowControls` but deliberately DROPPED the Fluent `Dialog` envelope to work around a centering bug when an ancestor has a CSS transform. FR-16 replaces it with `SprkModal` (`md`) and treats this surface as the VALIDATION that the shell's Fluent portal is transform-robust (design §4.6 / FR-08 — the Fluent portal mounts above transformed ancestors, so it should center correctly where the old raw `position:fixed` did not). This lives in the CommunicationConversationPanel PCF, so it compiles against the project's `@types/react` 18 target.</background>
+    <relevant-files>
+      <file role="modify">src/client/pcf/CommunicationConversationPanel/CommunicationConversationPanel/ConversationModal.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/SprkModal.tsx</file>
+      <file role="canonical-reference">.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="004" status="pending">Ships the base `SprkModal` shell (Fluent `Dialog` envelope + transform-robust portal + `size="md"`) this modal replaces its hand-roll with.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Any `authenticatedFetch`/service the conversation surface uses MUST be passed through as a FUNCTION — never snapshotted; the host owns auth identity.</constraint>
+    <constraint source="ADR-021">Semantic tokens only: no hex, `'1px'` literals, or inline color in the replacement; dark/light parity via inherited host theme (NFR-03).</constraint>
+    <constraint source="ADR-012">Replace by COMPOSING `SprkModal` (which already composes `ModalWindowControls`) — MUST NOT fork the shell and MUST NOT keep or re-introduce the hand-rolled `position:fixed`/`createPortal` overlay.</constraint>
+    <constraint source="project">Keep the Fluent `Dialog` envelope (transform-robust portal) — that is the whole point of this task. Body scrolls natively (thin scrollbar); MUST NOT add a chevron scroll overlay. Preserve the existing `ModalWindowControls`, Esc/backdrop dismiss, and the `min(1040px,95vw)×72vh` surface intent (map onto `md`; note any cap difference in notes).</constraint>
+    <constraint source="project">This is a PCF consumer — MUST compile clean under the project's `@types/react` 18 target (NFR-04); build with `npm run build:prod` (never `npm run build`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Replacing a hand-rolled portal overlay with the transform-robust SprkModal in a PCF</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-portal-gotcha" location=".claude/patterns/ui/fluent-v9-portal-gotcha.md">Why the Fluent `Dialog` portal centers correctly above transformed ancestors where a raw `position:fixed` overlay does not — the exact failure the hand-roll worked around.</pattern>
+      <pattern name="fluent-v9-react-version-boundaries" location=".claude/patterns/ui/fluent-v9-react-version-boundaries.md">Dual-React safety; this PCF targets `@types/react` 18.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-16, design §4.6 (transform-robust centering invariant), the base `SprkModal`, the portal-gotcha pattern, and the current `ConversationModal.tsx`. Inventory its `createPortal`/`position:fixed` overlay, `ModalWindowControls` usage, dismiss handling, scroll, and surface size. Declare RIGOR: FULL.</step>
+    <step order="1">Replace the hand-rolled overlay with `SprkModal` at `size="md"`: move the conversation content into the shell body, map the header (`ModalWindowControls` already present) + footer, wire Esc/backdrop dismiss via the appropriate `dismiss` mode, and rely on the shell's native scroll.</step>
+    <step order="2">Remove the `createPortal` call and all `position:fixed` overlay CSS/inline styles; ensure no hand-rolled centering logic remains.</step>
+    <step order="3">VALIDATE transform-robust centering: reproduce the original failure condition — render the PCF with a CSS-transformed ancestor — and confirm `SprkModal` centers correctly (the Fluent portal mounts above the transform). This is the load-bearing verification.</step>
+    <step order="4">If centering is correct, confirm native scroll, Esc/backdrop dismiss, and window controls all still work; build the PCF with `npm run build:prod` and run its tests.</step>
+    <step order="5">If `SprkModal` MIS-centers under the transformed ancestor, STOP and invoke the escalation trigger below — do NOT re-hand-roll a `position:fixed` workaround.</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: set 070 status to ✅.</step>
+    <step order="7">Document the centering-validation result (and any surface-size mapping note, e.g. the 95vw→92vw `md` cap difference) in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>REQUIRED: If `SprkModal` mis-centers under a transformed ancestor in this PCF, STOP and escalate per CLAUDE.md §6 — the shell's transform-robust portal invariant (design §4.6 / FR-08) would be WRONG, which is a shell-level defect, not a consumer problem. Do NOT re-hand-roll a `position:fixed`/`createPortal` workaround to force this task green; the failure must be surfaced and fixed in the shell.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Centered under a CSS-transformed ancestor (the FR-08 validation)">
+      <steps>
+        <step>Render the CommunicationConversationPanel PCF inside a container that has a CSS `transform` (e.g. `translate`/`scale`) — the original failure condition.</step>
+        <step>Open the conversation modal.</step>
+      </steps>
+      <expected>The modal is centered in the viewport (not offset by the ancestor transform); the Fluent portal mounts above the transformed ancestor; this reproduces where the old `position:fixed` hand-roll failed and confirms `SprkModal` fixes it.</expected>
+    </test>
+    <test name="Native scroll + dismiss + window controls parity">
+      <steps>
+        <step>Open a long conversation; scroll the body with wheel/keyboard/touch.</step>
+        <step>Use maximize/restore + ×; press Esc and click the backdrop.</step>
+      </steps>
+      <expected>Body scrolls natively (thin scrollbar, no chevron overlay); `ModalWindowControls` maximize/restore + × work; Esc/backdrop dismiss behaves as before.</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Render the replaced ConversationModal under the host dark theme.</step>
+      </steps>
+      <expected>Dark palette correct; no hardcoded light-mode color leak; only host semantic tokens used.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build the PCF with `npm run build:prod` (never `npm run build`) + run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/CommunicationConversationPanel/CommunicationConversationPanel/ConversationModal.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the Messages surface, `ConversationModal` renders via `SprkModal` at `size="md"`, preserving the `min(1040px,95vw)×72vh` surface intent (mapped onto `md`; any cap difference documented in notes).</criterion>
+    <criterion testable="true">Given a CSS-transformed ancestor, the modal centers correctly in the viewport (validates the design §4.6 / FR-08 transform-robust portal invariant).</criterion>
+    <criterion testable="true">The existing `ModalWindowControls` usage, Esc/backdrop dismiss, and native body scroll are preserved (no chevron overlay).</criterion>
+    <criterion testable="true">The `position:fixed`/`createPortal` hand-roll is removed — a grep of `ConversationModal.tsx` for `createPortal` / `position:fixed` overlay code returns none.</criterion>
+    <criterion testable="true">Negative/escalation: if `SprkModal` mis-centers under a transform, the task STOPS and escalates (no re-hand-rolled workaround); otherwise the PCF builds via `build:prod`, compiles under `@types/react` 18, and tests are green.</criterion>
+  </acceptance-criteria>
+
+  <notes>The hand-roll dropped the Fluent `Dialog` envelope on purpose to dodge a transform-ancestor centering bug — so treat centering under a transform as the primary acceptance signal, not an afterthought. `md` is `min(1040px,92vw) × min(72vh,720px)`; the existing surface used `95vw` — the 95→92 vw cap is an acceptable unification (document it), not a blocker. This is the parallel-group `none` task (run standalone, not in a wave) because it is the highest-risk conversion. Completion summary appended here when done.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

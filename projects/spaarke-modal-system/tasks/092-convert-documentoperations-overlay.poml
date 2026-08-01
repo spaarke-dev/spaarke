@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="092" project="spaarke-modal-system">
+  <metadata>
+    <title>P7 — Convert sprk_DocumentOperations.js DOM overlay to a supported path — FR-18</title>
+    <phase>7 OOB consolidation</phase>
+    <gate>blocked until 090</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Converts a hand-rolled DOM overlay in a ribbon web resource to a supported `navigateTo` path across two byte-consistent copies; bounded blast radius (one ribbon command), no new architecture.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully-specified replacement of a known anti-pattern (`window.top.document` DOM build) with a supported launcher; clear before/after and a single command surface.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P7</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>090</deps>
+    <tags>javascript, webresource, frontend</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>The ribbon web resource `sprk_DocumentOperations.js` hand-rolls a `showChoiceDialog` by building DOM directly in `window.top.document`. Convert it to a SUPPORTED path (`Xrm.Navigation.navigateTo` dialog, or a sanctioned launcher) that reproduces the choice UX. Handle BOTH copies — `src/client/webresources/js/sprk_DocumentOperations.js` and `infrastructure/dataverse/ribbon/DocumentRibbons/WebResources/sprk_DocumentOperations.js` — and keep them byte-consistent (FR-18).</prompt>
+  <role>SPAARKE platform developer. Expert in Dataverse ribbon web-resource JavaScript, `Xrm.Navigation.navigateTo` dialogs, and supported-vs-unsupported client APIs. Follow ADRs strictly.</role>
+  <goal>Neither `sprk_DocumentOperations.js` copy hand-rolls a DOM overlay in `window.top.document`; the `showChoiceDialog` behavior is served by a supported `Xrm.Navigation.navigateTo` dialog / sanctioned launcher; both copies are converted identically (byte-consistent); the ribbon command works end-to-end.</goal>
+
+  <context>
+    <background>Discovery (project CLAUDE.md, 2026-08-01) confirmed `sprk_DocumentOperations.js` exists in two copies (`src/client/webresources/js/` and `infrastructure/dataverse/ribbon/DocumentRibbons/WebResources/`) and hand-rolls a `showChoiceDialog` by constructing DOM directly in `window.top.document` — an unsupported overlay. Spec FR-18 mandates converting the DOM overlay to a supported path. ADR-006 (PCF-over-web-resources) governs ribbon JS; this ribbon command is an acknowledged web-resource exception, so the fix is to move it onto a SUPPORTED client API, not to rewrite it as PCF. Depends on task 090 so any record/dialog launch it performs uses the sanctioned hub/size scale.</background>
+    <relevant-files>
+      <file role="modify">src/client/webresources/js/sprk_DocumentOperations.js</file>
+      <file role="modify">infrastructure/dataverse/ribbon/DocumentRibbons/WebResources/sprk_DocumentOperations.js</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/utils/adapters/xrmNavigationServiceAdapter.ts</file>
+      <file role="reference">.claude/patterns/ui/record-modal-selection.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="090" status="pending">Sanctioned OOB hub + size scale for any record/dialog launch the ribbon performs.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST NOT hand-roll a `position:fixed`/`createElement` DOM overlay in `window.top.document`; the choice UX MUST be served by a supported `Xrm.Navigation.navigateTo` dialog or a sanctioned launcher (FR-18; strengthens the "no hand-rolled overlays" MUST NOT).</constraint>
+    <constraint source="ADR-006">This ribbon command is an acknowledged web-resource exception to PCF-over-web-resources; the conversion stays JavaScript on a supported API and MUST NOT reintroduce an unsupported DOM build.</constraint>
+    <constraint source="project">Both copies (`src/client/webresources/js/` and `infrastructure/dataverse/ribbon/DocumentRibbons/WebResources/`) MUST be converted identically and kept byte-consistent — do not fix one and leave the other.</constraint>
+    <constraint source="ADR-021">If the supported path surfaces any Spaarke-owned chrome, use semantic tokens only; no hex / inline color (client-only; NFR-05).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Converting a hand-rolled ribbon DOM overlay to a supported navigateTo dialog</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="record-modal-selection" location=".claude/patterns/ui/record-modal-selection.md">Supported OOB `navigateTo` dialog/record open, no hand-rolled overlay.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Read both `sprk_DocumentOperations.js` copies; locate the hand-rolled `showChoiceDialog` DOM build in `window.top.document`. Declare RIGOR: STANDARD.</step>
+    <step order="1">Design the supported replacement: map the choice UX (options + selection callback) onto an `Xrm.Navigation.navigateTo` dialog (or a sanctioned launcher) that reproduces the same command behavior.</step>
+    <step order="2">Replace `showChoiceDialog` in the first copy (`src/client/webresources/js/`) with the supported path; remove the `window.top.document` DOM construction entirely.</step>
+    <step order="3">Apply the identical change to the second copy (`infrastructure/dataverse/ribbon/DocumentRibbons/WebResources/`); diff the two files to confirm byte-consistency.</step>
+    <step order="4">Verify the ribbon command works end-to-end (manual ribbon check) — the choice dialog opens, a selection routes to the correct document operation.</step>
+    <step order="5">Grep both copies to confirm no `createElement`/`position:fixed` overlay code remains.</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: set 092 status to ✅.</step>
+    <step order="7">Document any deviation in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a supported `Xrm.Navigation.navigateTo` path (or a sanctioned launcher) cannot reproduce the specific choice UX the ribbon command needs, STOP and surface it per CLAUDE.md §6 rather than leaving the hand-rolled DOM overlay in place as a workaround.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Ribbon command opens a supported dialog (manual ribbon check)">
+      <steps>
+        <step>Load the DocumentRibbons command in a model-driven app.</step>
+        <step>Invoke the command that previously called `showChoiceDialog`.</step>
+        <step>Select an option and confirm the document operation proceeds.</step>
+      </steps>
+      <expected>A supported dialog opens (no `window.top.document` DOM build); selecting an option routes to the correct operation; behavior matches the prior UX.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Lint/build the web-resource bundle if applicable</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/webresources/js/sprk_DocumentOperations.js</output>
+    <output type="code">infrastructure/dataverse/ribbon/DocumentRibbons/WebResources/sprk_DocumentOperations.js</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Neither copy of `sprk_DocumentOperations.js` builds DOM in `window.top.document`; a grep for `createElement`/`position:fixed` overlay patterns in both files returns none.</criterion>
+    <criterion testable="true">`showChoiceDialog` is served by a supported `Xrm.Navigation.navigateTo` dialog or sanctioned launcher.</criterion>
+    <criterion testable="true">Both copies are converted identically and are byte-consistent (diff clean).</criterion>
+    <criterion testable="true">The ribbon command works end-to-end: the choice dialog opens and a selection routes to the correct document operation.</criterion>
+  </acceptance-criteria>
+
+  <notes>Modify-only — no `&lt;justification&gt;` (converts an existing web resource; net overlay count decreases per NFR-06 / Success Criterion §5). ADR-006 ribbon-JS exception acknowledged — stays JS on a supported API, not a PCF rewrite. Runs in parallel group P7 with 091. Depends on 090 for the sanctioned hub/size scale.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

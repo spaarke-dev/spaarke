@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="spaarke-modal-system">
+  <metadata>
+    <title>Presets: PreviewModal + BrowseModal (compose RecordNavigationModalShell) — FR-09</title>
+    <phase>0 Build</phase>
+    <gate>blocked until 004</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New preset surface (two components) that must COMPOSE the existing `RecordNavigationModalShell` (no forked nav chrome) + preserve its cross-frame dirty-check; modifies `.tsx`; depends on the base shell.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>PreviewModal is specified by the prototype; BrowseModal is PreviewModal + the shell `nav` prop composing an existing primitive — bounded, no open-ended design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>004</deps>
+    <tags>react, typescript, fluent-ui, frontend</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author two presets. (1) Port `PreviewModal` from the prototype `presets.tsx`: size `lg`, `layout="landscape"`, unpadded (`padded={false}`), body is a `1fr 320px` stage+meta grid, a single Close primary in `footer`. (2) `BrowseModal` = `PreviewModal` + a `nav={{index,total,onNavigate}}` prop which activates the header "N of M" counter + prev/next in `SprkModal`. For the browse-across-a-record-set case, COMPOSE the existing `RecordNavigationModalShell` for its browse chrome AND its cross-frame dirty-check (discard-confirm when navigating away from an edited record) — do NOT fork or re-implement the nav chrome. Reference the existing `RichFilePreview` renderer for the preview stage.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 preview surfaces and record-navigation/browse chrome composition. Follow ADRs strictly.</role>
+  <goal>`SprkModal/presets/PreviewModal.tsx` and `SprkModal/presets/BrowseModal.tsx` exist as thin `SprkModal` configs; `PreviewModal` is lg/landscape/unpadded with a stage+meta grid; `BrowseModal` shows the N-of-M counter via the shell `nav` prop and composes `RecordNavigationModalShell` (nav chrome + dirty-check) for browsed record sets without forking it; tests green.</goal>
+
+  <context>
+    <background>Design §6.1 lists `PreviewModal` (RichFilePreview re-based) and `BrowseModal` (`SprkModal` + `RecordNavigationModalShell`, N-of-M, Layout 2); spec FR-09 requires thin configs. The prototype ships `PreviewModal` (BrowseModal is the same component with `nav` supplied). `RecordNavigationModalShell` already owns the browse header (ellipsized title + `‹`/`›` + tabular-nums counter + `actionBar` + built-in discard-confirm + cross-frame dirty-check protocol) — CLAUDE.md §11 requires composing it, not forking. These presets feed P4 (RichFilePreviewDialog → PreviewModal/BrowseModal; @deprecated FilePreviewDialog retired; FindSimilarDialog re-based).</background>
+    <relevant-files>
+      <file role="canonical-reference">c:/code_files/spaarke-prototype/projects/2026-07-sprk-modal-system/src/components/presets.tsx</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/RecordNavigationModalShell.tsx</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreview.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/PreviewModal.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/BrowseModal.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/__tests__/PreviewModal.test.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/__tests__/BrowseModal.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="004" status="pending">`SprkModal` base shell + the `nav` prop (header N-of-M counter + prev/next).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Presets live in `@spaarke/ui-components` under `components/SprkModal/presets/`; not duplicated per solution.</constraint>
+    <constraint source="ADR-021">Semantic tokens only — the `1fr 320px` grid + meta border use `tokens.strokeWidthThin`/`colorNeutralStroke2`; ZERO hex / `'1px'` literals / inline color (NFR-03).</constraint>
+    <constraint source="ADR-028">Pass `onNavigate`/`onClose`/any `authenticatedFetch` as functions; MUST NOT snapshot tokens/auth in preset props.</constraint>
+    <constraint source="project">BrowseModal MUST COMPOSE `RecordNavigationModalShell` for browse chrome + the cross-frame dirty-check — MUST NOT fork or re-implement the nav header/counter/discard-confirm (CLAUDE.md §11; net component count ↓).</constraint>
+    <constraint source="project">Thin configs of `SprkModal` (no re-declared Dialog/header/footer). MUST compile under `@types/react` 18 and React 19 (NFR-04).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Fluent v9 preview/browse presets composing RecordNavigationModalShell</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="record-modal-selection" location=".claude/patterns/ui/record-modal-selection.md">Browse "1 of N" pattern + RecordNavigationModalShell composition.</pattern>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Preset/slot conventions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Confirm 004 landed. Load the prototype `PreviewModal`, `RecordNavigationModalShell.tsx` + its README, and `RichFilePreview.tsx`. Declare RIGOR: FULL.</step>
+    <step order="1">Author `PreviewModal.tsx`: `SprkModal size="lg" layout="landscape" padded={false}`; body = a `makeStyles` `previewGrid` (`1fr 320px`) with a stage cell (mounts the renderer/`RichFilePreview`) + a meta column (border-left token, metadata rows); `footer` = primary Close.</step>
+    <step order="2">Author `BrowseModal.tsx`: accept `nav={{index,total,onNavigate}}` and forward it to `SprkModal` (activating the header N-of-M counter + prev/next). For browsed record SETS, compose `RecordNavigationModalShell` (its nav chrome + built-in discard-confirm/cross-frame dirty-check) inside the body rather than forking — wire its navigate callbacks to the same `onNavigate`.</step>
+    <step order="3">Export `PreviewModalProps` + `BrowseModalProps` (incl. `nav`, `metadata`).</step>
+    <step order="4">Write `__tests__/PreviewModal.test.tsx`: lg/landscape/unpadded, stage+meta grid, Close in footer.</step>
+    <step order="5">Write `__tests__/BrowseModal.test.tsx`: N-of-M counter + prev/next appear (via shell `nav`); prev disabled at index 0 / next at last; the browse path composes `RecordNavigationModalShell` (assert no forked nav header) and its dirty-check fires when navigating an edited record.</step>
+    <step order="6">Build under both React versions + run tests; confirm green.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set 007 status to ✅.</step>
+    <step order="8">Document any deviation (e.g. how the RecordNavigationModalShell dirty-check integrates) in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If composing `RecordNavigationModalShell` inside `BrowseModal` produces a DOUBLE header (both the shell nav and the SprkModal nav render a counter/title), STOP and surface per CLAUDE.md §6 to settle the title-source rule (design §6.4) rather than forking or hiding chrome ad hoc — the "who renders the title/counter" contract is load-bearing.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`RichFilePreviewDialog` (1280×85vh) + `@deprecated FilePreviewDialog` (880×85vh, `'1px'` literals) each own a preview envelope; `RecordNavigationModalShell` owns browse chrome but not the envelope.</existing>
+    <extension>`PreviewModal`/`BrowseModal` are the extension seam: thin `SprkModal` configs that COMPOSE `RecordNavigationModalShell` (no new nav abstraction) and re-base the two preview dialogs onto one surface in P4 (net component count ↓).</extension>
+    <cost-of-doing-nothing>Without them, FR-09 fails and P4 has two divergent preview rectangles + the deprecated dialog's `'1px'` literals persist; browse "1 of N" would be re-hand-rolled instead of reusing the dirty-check-bearing shell.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Browse N-of-M + prev/next">
+      <steps>
+        <step>Render `BrowseModal nav={{index:0,total:3,onNavigate}}`.</step>
+        <step>Click next twice.</step>
+      </steps>
+      <expected>Header shows "1 of 3" → "3 of 3"; prev disabled at index 0, next disabled at the last; the browse path uses `RecordNavigationModalShell` (no forked nav chrome); dirty-check prompts on navigating away from an edited record.</expected>
+    </test>
+    <test name="PreviewModal layout">
+      <steps>
+        <step>Render `PreviewModal size="lg"` with metadata.</step>
+      </steps>
+      <expected>lg/landscape/unpadded; `1fr 320px` stage+meta grid; single Close in the footer.</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Render both presets under a dark FluentProvider theme.</step>
+      </steps>
+      <expected>Grid + meta border read correctly in dark mode; no hardcoded color; no `'1px'` literal.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test shared lib (both React versions)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/PreviewModal.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/BrowseModal.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/__tests__/PreviewModal.test.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/__tests__/BrowseModal.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `PreviewModal size="lg"`, when it renders, then it is landscape + unpadded with a `1fr 320px` stage+meta grid and a Close in the footer.</criterion>
+    <criterion testable="true">Given `BrowseModal` with `nav={{index,total,onNavigate}}`, the header shows the "N of M" counter via `SprkModal` and prev/next disable at the set bounds.</criterion>
+    <criterion testable="true">The browse-record-set path composes `RecordNavigationModalShell` (nav chrome + cross-frame dirty-check) — no forked nav chrome; the discard-confirm fires when navigating away from an edited record.</criterion>
+    <criterion testable="true">Both presets are thin `SprkModal` configs; compile under `@types/react` 18 and 19; tests pass; build green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Prototype treats BrowseModal as `PreviewModal` + `nav`; the SprkModal `nav` prop drives the header counter. Composition of `RecordNavigationModalShell` is the §11-mandated no-fork path and brings its built-in discard-confirm + cross-frame dirty-check for free. Feeds P4 (preview &amp; browse).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>
