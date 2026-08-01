@@ -4,7 +4,7 @@
     <title>Barrel exports + shell/preset a11y snapshot + dual-React verify — FR-01/NFR-04</title>
     <phase>0 Build</phase>
     <gate>blocked until 005-008</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Test-modifying + public-API surface: adds the barrel that makes the whole shell/preset family importable and the a11y gate; modifies the shared-lib `components/index.ts`; a regression here breaks every consumer's import.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -114,7 +114,9 @@
     <criterion testable="true">Grep of the `SprkModal/` tree returns zero hex, `'1px'` literals, and inline color styles; shared-lib build green.</criterion>
   </acceptance-criteria>
 
-  <notes>Modify-only barrel + added tests — no `&lt;justification&gt;` (adds exports/tests to existing surface, not a new component). The line-213 precedent in `components/index.ts` is an explicit `export { SendEmailDialog, type ISendEmailDialogProps } from './EmailComposer'` shadowing two `export *` sources — mirror that only if a preset name collides. Closes P0; P0.5 + P1-P7 conversion follow in later waves.</notes>
+  <notes>Modify-only barrel + added tests — no `&lt;justification&gt;` (adds exports/tests to existing surface, not a new component). The line-213 precedent in `components/index.ts` is an explicit `export { SendEmailDialog, type ISendEmailDialogProps } from './EmailComposer'` shadowing two `export *` sources — mirror that only if a preset name collides. Closes P0; P0.5 + P1-P7 conversion follow in later waves.
+
+**COMPLETED 2026-08-01.** Added `SprkModal/index.ts` (re-exports shell + 6 presets + sizes/scaledTheme/ModalScrollArea + all public types) and a plain `export * from './SprkModal'` in `components/index.ts` — **NO collision** (grep of all `export const|function|class|interface|type` for the 7 names outside `SprkModal/` returned none), so the line-213 override was NOT needed. Verified all 7 names (`SprkModal` + 6 presets) emit declarations under `dist/components/SprkModal/**` and the family resolves from the barrel. Added `__tests__/a11y.test.tsx` (5 tests): `aria-modal` + keyboard-operable window controls; **ESC honored per dismiss** (light closes, alert + explicit do NOT — real `fireEvent.keyDown` on the Fluent surface, not a role proxy); BrowseModal "N of M" + focusable nav; dark parity. Full sweep: **86/86** tests across 11 suites; `tsc` build green; eslint clean; `SprkModal/` tree greps ZERO hex/`'1px'`/inline-color (the one grep hit is the JSDoc line documenting the ban). **Dual-React (NFR-04)**: React-19 side verified by the authoritative build (lib is typed under `@types/react` 19); React-16/17/18 side verified STRUCTURALLY — zero React-18-only APIs (`react-dom/client`/`createRoot`/`hydrateRoot`/`useSyncExternalStore`/`useTransition`/`useDeferredValue`/`useInsertionEffect` grep clean), type-only `react` imports (`CSSProperties`/`ReactNode`, stable across @types/react 16–19), and the same `React.FC`+hooks pattern every dual-shipping shared-lib component uses. A full standalone `@types/react`-18 PCF-consumer compile was NOT executed in this session (deferred to CI / a PCF build) — flagged honestly rather than overclaimed. **P0 functional build (001–009) COMPLETE**; docs closeout (010–013) + conversions (P0.5, P1–P7) remain.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

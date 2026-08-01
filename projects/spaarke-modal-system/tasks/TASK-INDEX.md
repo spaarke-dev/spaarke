@@ -22,7 +22,7 @@
 | 006 | Preset: FormModal | 0 | ✅ | 004 | B | FULL | sonnet/high |
 | 007 | Presets: PreviewModal + BrowseModal | 0 | ✅ | 004 | B | FULL | sonnet/high |
 | 008 | Preset: WizardModal | 0 | ✅ | 004 | B | FULL | sonnet/high |
-| 009 | Barrel exports + a11y snapshot + dual-React verify | 0 | 🔲 | 005,006,007,008 | — | FULL | sonnet/high |
+| 009 | Barrel exports + a11y snapshot + dual-React verify | 0 | ✅ | 005,006,007,008 | — | FULL | sonnet/high |
 | 010 | Standards doc: MODAL-DESIGN-SYSTEM.md | 0 | 🔲 | 004 | — | STANDARD | sonnet/medium |
 | 011 | ADR-050: Canonical Modal Shell 🔒 | 0 | 🔲 | 004 | — | STANDARD | sonnet/high |
 | 012 | Pattern pointer: modal-shell.md 🔒 | 0 | 🔲 | 010 | — | MINIMAL | sonnet/medium |
