@@ -4,7 +4,7 @@
     <title>SprkModal base shell (envelope + header + body + footer) — FR-01/03/04/05/07/08</title>
     <phase>0 Build</phase>
     <gate>blocked until 001,002,003</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Core architectural join point — the envelope every preset and the whole conversion depend on; owns a11y (focus trap, aria-modal, dismiss), sizing, and transform-robust centering; modifies `.tsx` with 6+ steps and deps on 3 tasks.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -147,7 +147,9 @@
     <criterion testable="true">Compiles under `@types/react` 18 and React 19; unit tests pass; shared-lib build green.</criterion>
   </acceptance-criteria>
 
-  <notes>Port the prototype `SprkModal.tsx` behavior: `effectiveSize = maximized ? 'full' : size`; `effectiveLayout = layout ?? SIZE_SPEC[size].layout`; `modalType = dismiss==='alert' ? 'alert' : 'modal'`; footer renders only when `footer||footerStart`. The `bodyScroll="arrows"` path reuses the prototype's `ModalScrollArea` (port it if not already present) — it is NOT a new chevron overlay for vertical content, it is the opt-in the prototype carries. This shell is the sole join point for tasks 005-008.</notes>
+  <notes>Port the prototype `SprkModal.tsx` behavior: `effectiveSize = maximized ? 'full' : size`; `effectiveLayout = layout ?? SIZE_SPEC[size].layout`; `modalType = dismiss==='alert' ? 'alert' : 'modal'`; footer renders only when `footer||footerStart`. The `bodyScroll="arrows"` path reuses the prototype's `ModalScrollArea` (port it if not already present) — it is NOT a new chevron overlay for vertical content, it is the opt-in the prototype carries. This shell is the sole join point for tasks 005-008.
+
+**COMPLETED 2026-08-01.** Ported 4 files: `SprkModal.tsx` (Dialog envelope + header/body/footer per prototype), `SprkModal.types.ts` (extracted `SprkModalProps`/`SprkModalDismiss`/`SprkModalBodyScroll`/`SprkModalNav`, re-exported from `SprkModal.tsx`), `ModalScrollArea.tsx` (ported — the `arrows` opt-in), `__tests__/SprkModal.test.tsx` (10 tests). Import adapted: `ModalWindowControls` from `../ModalWindowControls/ModalWindowControls` (shared-lib layout differs from prototype's flat folder). Shared-lib `tsc` build green; **30/30** tests pass; eslint clean. **Transform-robust portal VERIFIED** — a test asserts the Fluent portal mounts OUTSIDE a `transform:scale(.9)` ancestor (escalation trigger not fired). Dismiss modes verified structurally via role (`alert`→`alertdialog`, `light`→`dialog`). Deviation (notes/wave-a-completion.md +): built the header nav INLINE per the prototype/POML (does NOT compose `RecordNavigationModalShell` — the spec's "composes RecordNavigationModalShell" framing is reconciled the other direction in later conversion phases; net component count still ↓ per NFR-06). No ADR conflict. jsdom limitation: pixel-centering + focus-cycling are runtime/visual props (P5 task 070 validates against the hardest live case); tests assert the structural portal-escape + `aria-modal` proxies.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

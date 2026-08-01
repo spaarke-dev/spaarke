@@ -17,7 +17,7 @@
 | 001 | Size scale + layout tokens (sizes.ts) | 0 | ✅ | none | A | FULL | sonnet/high |
 | 002 | Scaled Fluent theme builder (scaleTheme) | 0 | ✅ | none | A | FULL | sonnet/high |
 | 003 | Reconcile ModalWindowControls glyph | 0 | ✅ | none | A | FULL | sonnet/high |
-| 004 | SprkModal base shell | 0 | 🔲 | 001,002,003 | — | FULL | sonnet/high |
+| 004 | SprkModal base shell | 0 | ✅ | 001,002,003 | — | FULL | sonnet/high |
 | 005 | Presets: ConfirmModal + ChoiceModal (ADR-023) | 0 | 🔲 | 004 | B | FULL | sonnet/high |
 | 006 | Preset: FormModal | 0 | 🔲 | 004 | B | FULL | sonnet/high |
 | 007 | Presets: PreviewModal + BrowseModal | 0 | 🔲 | 004 | B | FULL | sonnet/high |
@@ -122,8 +122,8 @@ P0 is the gate for everything. P0.5 (020) needs only 002. P7 (090) is independen
 
 ## Next Action
 
-Group **A** (001·002·003) ✅ complete (2026-08-01) — shared-lib build green, 20/20 tests pass. **004 is now unblocked.**
+Group **A** (001·002·003) ✅ + **004** (SprkModal base shell) ✅ complete (2026-08-01) — shared-lib build green, 30/30 tests pass, transform-robust portal verified. **Group B is now unblocked.**
 
-Execute task **004** (SprkModal base shell) — serial/solo core join (deps 001,002,003 all ✅; `parallel-safe=false`). It consumes `sizes.ts` + `scaledTheme.ts` + the reconciled `ModalWindowControls`, and unblocks Group **B** (005·006·007·008 presets).
+Execute Group **B** (005·006·007·008 presets) — parallel-safe, prereq 004 ✅. Each is a thin config of `SprkModal` under `SprkModal/presets/`. Then 009 (barrel + a11y snapshot) joins them.
 
-Run: `/task-execute projects/spaarke-modal-system/tasks/004-sprkmodal-base.poml`, or say "work on task 004" / "continue".
+Run three/four `task-execute` calls in one message (005/006/007/008), or say "continue".
