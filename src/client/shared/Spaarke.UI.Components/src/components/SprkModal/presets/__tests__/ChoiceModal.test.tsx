@@ -56,6 +56,21 @@ describe('ChoiceModal (preset — choice-dialog-pattern preserved)', () => {
     expect(screen.getByText('This analysis has existing history.')).toBeInTheDocument();
   });
 
+  it('renders a custom cancelLabel when provided (mirrors ConfirmModal — P2 consolidation)', () => {
+    renderWithProviders(
+      <ChoiceModal
+        open
+        onClose={noop}
+        title="Choose"
+        choices={choices}
+        onSelect={noop}
+        cancelLabel="Not now"
+      />,
+    );
+    expect(screen.getByRole('button', { name: /^not now$/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^cancel$/i })).toBeNull();
+  });
+
   it('clicking a choice fires onSelect with exactly that choice id', () => {
     const onSelect = jest.fn();
     renderWithProviders(

@@ -101,6 +101,35 @@ describe('ConfirmModal (preset — FR-09)', () => {
     expect(destructiveConfirm.className).not.toBe(plainConfirm.className);
   });
 
+  it('busy disables both buttons and shows a spinner on Confirm (P2 consolidation)', () => {
+    const onConfirm = jest.fn();
+    const onClose = jest.fn();
+    renderWithProviders(
+      <ConfirmModal
+        open
+        onClose={onClose}
+        onConfirm={onConfirm}
+        title="Delete pin?"
+        message="Removing…"
+        confirmLabel="Deleting…"
+        destructive
+        busy
+      />,
+    );
+    const dialog = screen.getByRole('alertdialog');
+    const cancel = within(dialog).getByRole('button', { name: /^cancel$/i });
+    const confirm = within(dialog).getByRole('button', { name: /deleting/i });
+    expect(cancel).toBeDisabled();
+    expect(confirm).toBeDisabled();
+    // Disabled buttons swallow clicks — no re-entrant confirm/cancel.
+    fireEvent.click(confirm);
+    fireEvent.click(cancel);
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    // The in-flight spinner renders inside the Confirm button's icon slot.
+    expect(confirm.querySelector('.fui-Spinner')).not.toBeNull();
+  });
+
   it('does not apply the danger class when destructive is omitted/false', () => {
     renderWithProviders(
       <ConfirmModal open onClose={noop} onConfirm={noop} title="Save?" message="Save changes?" />,

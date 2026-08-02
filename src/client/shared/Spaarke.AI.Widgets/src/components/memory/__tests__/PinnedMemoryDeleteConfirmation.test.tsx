@@ -65,7 +65,9 @@ describe('PinnedMemoryDeleteConfirmation', () => {
     renderWithTheme(
       <PinnedMemoryDeleteConfirmation open={true} pinTitle="X" onConfirm={onConfirm} onCancel={() => undefined} />
     );
-    await user.click(screen.getByTestId('pinned-memory-delete-confirm'));
+    // Re-pointed onto the literal ConfirmModal preset (P2 consolidation) — the
+    // preset owns the buttons, so queries are accessible-name-based now.
+    await user.click(screen.getByRole('button', { name: 'Delete pin' }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
@@ -75,7 +77,7 @@ describe('PinnedMemoryDeleteConfirmation', () => {
     renderWithTheme(
       <PinnedMemoryDeleteConfirmation open={true} pinTitle="X" onConfirm={() => undefined} onCancel={onCancel} />
     );
-    await user.click(screen.getByTestId('pinned-memory-delete-cancel'));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
@@ -89,8 +91,10 @@ describe('PinnedMemoryDeleteConfirmation', () => {
         onCancel={() => undefined}
       />
     );
-    expect(screen.getByTestId('pinned-memory-delete-confirm')).toBeDisabled();
-    expect(screen.getByTestId('pinned-memory-delete-cancel')).toBeDisabled();
+    // `busy={isDeleting}` (ConfirmModal preset) disables both buttons; the
+    // confirm label swaps to "Deleting…" while in flight.
+    expect(screen.getByRole('button', { name: /Deleting/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
     expect(screen.getByText(/Deleting…/i)).toBeInTheDocument();
   });
 });

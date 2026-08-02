@@ -41,6 +41,10 @@ export type {
  * design.md §6.1 (architecture) · §6.2 (sizes) · §6.4 (header) · §6.5 (footer)
  * · §6.7 (dismiss) · §6.9 (scale).
  */
+// Monotonic id source for the title's `aria-labelledby` wiring. NOT `React.useId`
+// — that is React 18+; this shell must stay React-16/17-safe (NFR-04).
+let sprkModalTitleIdCounter = 0;
+
 const useStyles = makeStyles({
   surface: {
     padding: 0,
@@ -148,6 +152,10 @@ export const SprkModal: React.FC<SprkModalProps> = ({
 }) => {
   const styles = useStyles();
   const [maximized, setMaximized] = React.useState(false);
+  // Stable per-instance title id so the surface announces its accessible name
+  // (aria-labelledby) — we render a custom header, not Fluent's DialogTitle,
+  // so the auto-wiring DialogTitle provides must be supplied here explicitly.
+  const [titleId] = React.useState(() => `sprk-modal-title-${++sprkModalTitleIdCounter}`);
 
   React.useEffect(() => {
     if (!open) setMaximized(false);
@@ -172,6 +180,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
       <DialogSurface
         className={mergeClasses(styles.surface, effectiveSize === 'full' && styles.surfaceFull)}
         style={surfaceStyle}
+        aria-labelledby={titleId}
       >
         <div className={styles.header}>
           <div className={styles.headerLeft}>
@@ -202,7 +211,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
                 </Tooltip>
               </div>
             )}
-            <span className={styles.title} title={title}>
+            <span className={styles.title} title={title} id={titleId}>
               {title}
             </span>
           </div>

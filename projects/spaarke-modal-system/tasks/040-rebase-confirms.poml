@@ -4,7 +4,7 @@
     <title>P2 — Re-base confirms onto ConfirmModal — FR-13</title>
     <phase>2 Confirms &amp; choices</phase>
     <gate>blocked until 005</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Re-bases blocking/destructive confirm dialogs onto the new `ConfirmModal` preset — changes dismiss semantics + button chrome across three surfaces (Compose lib, AI.Widgets, both CloseProjectDialog copies); behavior-preservation is load-bearing.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -120,7 +120,7 @@
     <criterion testable="true">`Spaarke.Compose.Components`, `Spaarke.AI.Widgets`, `Spaarke.UI.Components`, and the LegalWorkspace consumer build green; no consumer call site regressed.</criterion>
   </acceptance-criteria>
 
-  <notes>Design §3.3 flags `CloseProjectDialog` "inline button color styles" and §6.5 mandates the danger token class over inline color. These dialogs receive window controls in P1 (task 030/031); this task supersedes that interim wiring by re-basing them onto `ConfirmModal`. Completion summary appended here when done.</notes>
+  <notes>Design §3.3 flags `CloseProjectDialog` "inline button color styles" and §6.5 mandates the danger token class over inline color. These dialogs receive window controls in P1 (task 030/031); this task supersedes that interim wiring by re-basing them onto `ConfirmModal`. COMPLETED 2026-08-02 (parallel sub-agent + main-session consolidation): all 4 re-based, zero escalations. Agent composed SprkModal directly (3-button/busy/phase-dependent footers exceed ConfirmModalProps); consolidation then added `busy` to ConfirmModal → PinnedMemoryDeleteConfirmation re-pointed onto the LITERAL preset, and exported `useDangerButtonClassName` → both CloseProjectDialog copies import (not copy) the danger class. ComposeConflictDialog (3-way) + CloseProjectDialogs stay SprkModal-direct, documented in-file. Inline-color anti-pattern removed both copies (grep-clean). Cancel-left standardization + string-title fold are deliberate per design §6.4/§6.5. Builds/tests green (LW via scoped tsc, #712). Detail: notes/task-040-completion.md + wave-p2-completion.md.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

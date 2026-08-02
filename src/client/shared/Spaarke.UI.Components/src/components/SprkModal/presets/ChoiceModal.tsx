@@ -87,6 +87,8 @@ export interface ChoiceModalProps {
   choices: ChoiceModalChoice[];
   /** Invoked with the picked choice's `id`. */
   onSelect: (choiceId: string) => void;
+  /** Cancel button label (default `"Cancel"`) — mirrors `ConfirmModal.cancelLabel`. */
+  cancelLabel?: string;
   /** The `--sprk-ui-scale` factor for sizing (default 1). */
   uiScale?: number;
 }
@@ -98,6 +100,7 @@ export const ChoiceModal: React.FC<ChoiceModalProps> = ({
   message,
   choices,
   onSelect,
+  cancelLabel = 'Cancel',
   uiScale,
 }) => {
   const styles = useStyles();
@@ -112,7 +115,7 @@ export const ChoiceModal: React.FC<ChoiceModalProps> = ({
       uiScale={uiScale}
       footerStart={
         <Button appearance="secondary" onClick={onClose}>
-          Cancel
+          {cancelLabel}
         </Button>
       }
     >

@@ -1794,8 +1794,10 @@ export type IDocumentStreamSseEvent =
 
 /**
  * Pending action awaiting user confirmation (HITL — requiresConfirmation=true).
- * Shown in the ActionConfirmationDialog. On Confirm, the action is dispatched
- * to the BFF; on Cancel, the pending action is cleared without side effects.
+ * Shown via the ConfirmModal preset (spaarke-modal-system task 042 — the retired
+ * hand-rolled ActionConfirmationDialog overlay used to render this). On Confirm,
+ * the action is dispatched to the BFF; on Cancel, the pending action is cleared
+ * without side effects.
  *
  * @see spec-FR-07 — HITL confirmation dialog
  * @see ADR-021 — Fluent v9 Dialog component
