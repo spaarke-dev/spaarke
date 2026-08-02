@@ -194,7 +194,7 @@ Each preset is a *thin* configuration of `ModalShell`, not a fork. `RecordNaviga
 | `lg` | `min(1280px, 94vw)` | `min(85vh, 880px)` | landscape | rich content + sidebar (preview) | RichFilePreviewDialog |
 | `xl` | `92vw` (near-full) | `88vh` | landscape | near-full iframe / app host (content self-lays-out) | FindSimilarDialog |
 | `full` | `100vw` | `100vh` | — | maximized state of any size | (via `ModalWindowControls`) |
-| `wizard` | 60% × 70% (OOB dialog dim) | — | landscape | iframe-deployed wizard web resources | all `sprk_*wizard` launches |
+| `wizard` | `62vw` | `min(74vh, 760px)` | landscape | in-app wizard (stepper sidebar + content) — the SprkModal `wizard` size; **mirrors** the OOB wizard dim (≈ 60% × 70%, §6.3) but is a distinct **in-app Fluent** size (matches shipped `sizes.ts`) | `WizardModal` preset / `WizardShell` re-base (P6) |
 
 On the `1280` floor: `md`=1040 (81% width, comfortable), `lg`=1203 (94vw, ~38px side margins), `xl`=1178 — all fit with the footer visible at `≤88vh`. On the `2560` 27": `md`/`lg` hold their px cap (not stretched); `xl`/iframe hosts stay near-full because their content re-lays-out internally. **The `min(N·vh, maxPx)` height cap on `md`/`lg` is load-bearing** — without it, `72vh`/`85vh` on a 1440p/2560 panel grows tall enough to make the fixed-width modal read *square* (prototype-verified 2026-07-31). `portrait` vs `landscape` is an explicit prop driving aspect + the body's internal grid (e.g. preview's `1fr 320px`); `OrientationToggle` is the user affordance where a surface supports both.
 
