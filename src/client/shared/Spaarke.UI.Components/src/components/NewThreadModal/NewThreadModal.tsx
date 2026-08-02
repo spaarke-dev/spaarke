@@ -37,9 +37,11 @@ import {
   MessageBar,
   MessageBarBody,
   makeStyles,
+  mergeClasses,
   tokens,
 } from '@fluentui/react-components';
 
+import { ModalWindowControls } from '../ModalWindowControls';
 import { AssociateToStep } from '../AssociateToStep';
 import type { AssociationResult, EntityTypeOption } from '../AssociateToStep';
 import type { INavigationService } from '../../types/serviceInterfaces';
@@ -129,6 +131,13 @@ const useStyles = makeStyles({
     height: '72vh',
     display: 'flex',
     flexDirection: 'column',
+  },
+  // Maximize target (task 030, FR-12) — swaps the 1040px/72vh default to a
+  // full-viewport target; restore returns to `surface` above.
+  surfaceMaximized: {
+    width: '100vw',
+    maxWidth: '100vw',
+    height: '100vh',
   },
   body: {
     display: 'flex',
@@ -260,6 +269,13 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
 }) => {
   const styles = useStyles();
 
+  // Maximize/restore (task 030, FR-12) — local to this dialog; always starts
+  // restored on (re)open, matching the established EmailComposer wrapper pattern.
+  const [isMaximized, setIsMaximized] = React.useState(false);
+  React.useEffect(() => {
+    if (!open) setIsMaximized(false);
+  }, [open]);
+
   const [name, setName] = React.useState('');
   const [association, setAssociation] = React.useState<AssociationResult | null>(() => seedAssociation(regarding));
   const [body, setBody] = React.useState('');
@@ -387,9 +403,23 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={handleDialogOpenChange} modalType="modal">
-      <DialogSurface className={styles.surface} aria-label={title}>
+      <DialogSurface
+        className={mergeClasses(styles.surface, isMaximized && styles.surfaceMaximized)}
+        aria-label={title}
+      >
         <DialogBody className={styles.body}>
-          <DialogTitle className={styles.title}>{title}</DialogTitle>
+          <DialogTitle
+            className={styles.title}
+            action={
+              <ModalWindowControls
+                isMaximized={isMaximized}
+                onToggleMaximize={() => setIsMaximized(m => !m)}
+                onClose={handleCancel}
+              />
+            }
+          >
+            {title}
+          </DialogTitle>
           <DialogContent className={styles.content}>
             {/* Section 1 — New Thread: name + associate-to-record. The header rule
                 + indented body make the fields read as subordinate to the section. */}

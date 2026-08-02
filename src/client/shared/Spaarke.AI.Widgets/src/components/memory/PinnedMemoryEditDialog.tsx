@@ -50,6 +50,9 @@ import {
   Textarea,
   tokens,
 } from '@fluentui/react-components';
+// Shared, standardized modal window-controls (maximize/restore + close ×) — owner UAT 2026-07-31
+// item 4 "standardize on all modals" (FR-12, P1 window-controls rollout, task 031).
+import { ModalWindowControls } from '@spaarke/ui-components';
 import type { PinDto, PinType, PinUpsertRequest } from './pinned-memory-contracts';
 import { MAX_PIN_CONTENT_LENGTH, MAX_PIN_TITLE_LENGTH, PIN_TYPES } from './pinned-memory-contracts';
 
@@ -151,6 +154,15 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteRedForeground1,
     lineHeight: tokens.lineHeightBase200,
   },
+  // Maximize/restore target (FR-12 P1 window-controls rollout, task 031). No prior
+  // maximize mechanism existed for this dialog — this is a NEW local capability, the
+  // default (unset) size is governed by Fluent's own DialogSurface sizing and is
+  // unchanged. Dimension-only overrides (no color/hex) — ADR-021/NFR-03 safe.
+  surfaceMaximized: {
+    width: '100%',
+    height: '100%',
+    maxWidth: '100%',
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -239,6 +251,16 @@ export const PinnedMemoryEditDialog: React.FC<PinnedMemoryEditDialogProps> = ({
   const [state, setState] = useState<FormState>(() => buildInitialState(mode, initial));
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState<boolean>(false);
+
+  // Maximize/restore (FR-12 P1 window-controls rollout, task 031, owner UAT 2026-07-31
+  // item 4). Local to this dialog — no prior maximize mechanism existed. Always resets
+  // to the default size when the dialog transitions closed (mirrors the shipped
+  // SendEmailDialog convention — the one other Fluent Dialog already wired to
+  // ModalWindowControls).
+  const [isMaximized, setIsMaximized] = useState<boolean>(false);
+  useEffect(() => {
+    if (!open) setIsMaximized(false);
+  }, [open]);
 
   // Reset form state when the dialog TRANSITIONS from closed → open. We
   // intentionally avoid resetting on every re-render while open: a parent that
@@ -342,9 +364,25 @@ export const PinnedMemoryEditDialog: React.FC<PinnedMemoryEditDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange} modalType="modal">
-      <DialogSurface data-testid="pinned-memory-edit-dialog">
+      <DialogSurface
+        data-testid="pinned-memory-edit-dialog"
+        className={isMaximized ? styles.surfaceMaximized : undefined}
+      >
         <DialogBody>
-          <DialogTitle>{titleLabel}</DialogTitle>
+          <DialogTitle
+            // Standard Spaarke window-controls cluster (FR-12). Close (×) routes to the
+            // SAME guarded handler the "Cancel" button uses (isSubmitting-safe) — no new
+            // close path is introduced.
+            action={
+              <ModalWindowControls
+                isMaximized={isMaximized}
+                onToggleMaximize={() => setIsMaximized(v => !v)}
+                onClose={handleCancel}
+              />
+            }
+          >
+            {titleLabel}
+          </DialogTitle>
           <DialogContent>
             <form
               className={styles.form}

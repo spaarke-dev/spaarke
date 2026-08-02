@@ -43,6 +43,7 @@ import {
 } from '@fluentui/react-components';
 import { ChevronLeft20Regular, ChevronRight20Regular } from '@fluentui/react-icons';
 import { DocumentRowMenu, type DocumentRowAction, type IDocumentRowMenuTarget } from '../DocumentRowMenu';
+import { ModalWindowControls } from '../ModalWindowControls';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -141,6 +142,22 @@ export interface IRichFilePreviewProps {
    * The title-bar row (3-dot `DocumentRowMenu` + any actions) still renders.
    */
   showTitle?: boolean;
+  /**
+   * Standard window-controls cluster (task 030, FR-12) — `ModalWindowControls`
+   * rendered at the trailing end of the title bar. All three are optional and
+   * additive: non-modal consumers (Context-pane widget, Workspace viewer
+   * widget) omit them and render identically to before this addition (the
+   * cluster renders nothing when both `onClose` and `onToggleMaximize` are
+   * undefined). Only the modal wrapper (`RichFilePreviewDialog`) supplies
+   * these — and only on the non-navigation render path; the navigation path
+   * renders the cluster via `RecordNavigationModalShell`'s `actionBar` slot
+   * instead, so these are omitted there to avoid a duplicate cluster.
+   */
+  onClose?: () => void;
+  /** @see onClose */
+  isMaximized?: boolean;
+  /** @see onClose */
+  onToggleMaximize?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -406,6 +423,9 @@ export const RichFilePreview: React.FC<IRichFilePreviewProps> = ({
   onNavigate,
   disabledActions: disabledActionsOverride,
   showTitle = true,
+  onClose,
+  isMaximized,
+  onToggleMaximize,
 }) => {
   const styles = useStyles();
 
@@ -732,6 +752,11 @@ export const RichFilePreview: React.FC<IRichFilePreviewProps> = ({
             </>
           )}
           <DocumentRowMenu document={target} onAction={handleRowAction} disabledActions={effectiveDisabledActions} />
+          {/* Standard window-controls cluster (task 030, FR-12) — additive; renders
+              nothing when the modal wrapper omits onClose/onToggleMaximize (i.e. for
+              non-modal consumers, and for the nav-mode path where the shell's own
+              actionBar slot carries the cluster instead). */}
+          <ModalWindowControls isMaximized={isMaximized} onToggleMaximize={onToggleMaximize} onClose={onClose} />
         </div>
       </div>
 

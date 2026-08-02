@@ -77,6 +77,9 @@ import {
   launchSurface,
   launchPlaybookIntent,
   SprkAnalysisWorkType,
+  // Shared, standardized modal window-controls (maximize/restore + close ×) — owner
+  // UAT 2026-07-31 item 4 "standardize on all modals" (FR-12, P1 rollout, task 031).
+  ModalWindowControls,
 } from '@spaarke/ui-components';
 import { getBffBaseUrl } from '../../config/runtimeConfig';
 
@@ -203,6 +206,16 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({
     if (open) setSelectedTab(initialTab);
   }, [open, initialTab]);
 
+  // Maximize/restore (FR-12 P1 window-controls rollout, task 031, owner UAT 2026-07-31
+  // item 4). Local to this dialog — no prior maximize mechanism existed. Always resets
+  // to the default rectangle when the dialog transitions closed (mirrors the shipped
+  // SendEmailDialog convention — the one other Fluent Dialog already wired to
+  // ModalWindowControls).
+  const [isMaximized, setIsMaximized] = React.useState(false);
+  React.useEffect(() => {
+    if (!open) setIsMaximized(false);
+  }, [open]);
+
   const handleTabSelect = React.useCallback((_ev: SelectTabEvent, data: SelectTabData) => {
     setSelectedTab(data.value);
   }, []);
@@ -313,9 +326,32 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({
       }}
       modalType="modal"
     >
-      <DialogSurface className={styles.surface} style={{ maxWidth: '720px', width: '720px' }} data-testid="quick-start-modal">
+      <DialogSurface
+        className={styles.surface}
+        // Non-maximized size is UNCHANGED (720x720, same as before); maximized swaps to a
+        // full-viewport target. Inline dimension styles only — no new hex/color literals
+        // (ADR-021/NFR-03).
+        style={
+          isMaximized ? { maxWidth: '100%', width: '100%', height: '100%' } : { maxWidth: '720px', width: '720px' }
+        }
+        data-testid="quick-start-modal"
+      >
         <DialogBody>
-          <DialogTitle className={styles.title}>Quick Start</DialogTitle>
+          <DialogTitle
+            className={styles.title}
+            // Standard Spaarke window-controls cluster (FR-12). Close (×) routes to the
+            // SAME onClose this modal's backdrop/Escape dismissal already uses (modalType
+            // is "modal", i.e. normally dismissible) — no new close semantics introduced.
+            action={
+              <ModalWindowControls
+                isMaximized={isMaximized}
+                onToggleMaximize={() => setIsMaximized(v => !v)}
+                onClose={onClose}
+              />
+            }
+          >
+            Quick Start
+          </DialogTitle>
           <DialogContent className={styles.content}>
             <TabList
               className={styles.tabList}

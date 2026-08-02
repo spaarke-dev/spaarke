@@ -55,12 +55,14 @@ import {
   DialogActions,
   Button,
   makeStyles,
+  mergeClasses,
   shorthands,
   tokens,
 } from '@fluentui/react-components';
 import { RichFilePreview, type IFilePreviewDialogSummary } from './RichFilePreview';
 import { RecordNavigationModalShell } from '../RecordNavigationModalShell';
 import type { RecordNavigationDirection } from '../RecordNavigationModalShell';
+import { ModalWindowControls } from '../ModalWindowControls';
 
 // ---------------------------------------------------------------------------
 // Types — re-exported from the renderer to preserve back-compat for any
@@ -171,6 +173,14 @@ const useStyles = makeStyles({
     ...shorthands.overflow('hidden'),
     ...shorthands.borderRadius(tokens.borderRadiusXLarge),
   },
+  // Maximize target (task 030, FR-12) — swaps the 1280px/85vh default to a
+  // full-viewport target; restore returns to `surface` above.
+  surfaceMaximized: {
+    width: '100vw',
+    maxWidth: '100vw',
+    height: '100vh',
+    maxHeight: '100vh',
+  },
   // Wrapper around the shell so it consumes the available height inside the
   // DialogSurface flex column. The shell itself is height-agnostic; this
   // wrapper gives it a flex context to grow into.
@@ -228,6 +238,14 @@ export const RichFilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
 }) => {
   const styles = useStyles();
 
+  // Maximize/restore (task 030, FR-12) — local to this dialog; always starts
+  // restored on (re)open, matching the established EmailComposer wrapper pattern.
+  const [isMaximized, setIsMaximized] = React.useState(false);
+  React.useEffect(() => {
+    if (!open) setIsMaximized(false);
+  }, [open]);
+  const handleToggleMaximize = React.useCallback(() => setIsMaximized(m => !m), []);
+
   // -----------------------------------------------------------------------
   // Navigation enablement + direction → index-delta adapter (R4 task 011)
   //
@@ -258,7 +276,7 @@ export const RichFilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
         if (!data.open) onClose();
       }}
     >
-      <DialogSurface className={styles.surface}>
+      <DialogSurface className={mergeClasses(styles.surface, isMaximized && styles.surfaceMaximized)}>
         {/* Renderer is conditionally mounted only while `open` is true so the
             iframe-load state resets naturally on close (back-compat with the
             pre-extraction reset-on-close behavior).
@@ -281,6 +299,13 @@ export const RichFilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
               onNavigate={handleShellNavigate}
               title={documentName}
               dirtyCheckTargetWindow={undefined}
+              actionBar={
+                <ModalWindowControls
+                  isMaximized={isMaximized}
+                  onToggleMaximize={handleToggleMaximize}
+                  onClose={onClose}
+                />
+              }
             >
               <RichFilePreview
                 documentName={documentName}
@@ -330,6 +355,12 @@ export const RichFilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
             onToggleWorkspace={onToggleWorkspace}
             isInWorkspace={isInWorkspace}
             onFindSimilar={onFindSimilar}
+            /* Standard window-controls cluster (task 030, FR-12) — only wired on this
+               (non-nav) path; the nav path supplies the cluster via the shell's
+               actionBar slot above instead, to avoid a duplicate cluster. */
+            onClose={onClose}
+            isMaximized={isMaximized}
+            onToggleMaximize={handleToggleMaximize}
           />
         )}
 

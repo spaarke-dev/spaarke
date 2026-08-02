@@ -20,6 +20,7 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
+import { ModalWindowControls } from '../ModalWindowControls';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -66,6 +67,15 @@ export interface IChoiceDialogProps {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const useStyles = makeStyles({
+  // Maximize target (task 030, FR-12 window-controls rollout) — swaps the
+  // default content-sized surface to a full-viewport target. Restore returns
+  // to the default (no className override) so the original sizing is exact.
+  surfaceMaximized: {
+    width: '100vw',
+    maxWidth: '100vw',
+    height: '100vh',
+    maxHeight: '100vh',
+  },
   content: {
     display: 'flex',
     flexDirection: 'column',
@@ -144,6 +154,13 @@ export const ChoiceDialog: React.FC<IChoiceDialogProps> = ({
 }) => {
   const styles = useStyles();
 
+  // Maximize/restore (task 030, FR-12) — local to this dialog; always starts
+  // restored on (re)open, matching the established EmailComposer wrapper pattern.
+  const [isMaximized, setIsMaximized] = React.useState(false);
+  React.useEffect(() => {
+    if (!open) setIsMaximized(false);
+  }, [open]);
+
   const handleOptionClick = React.useCallback(
     (optionId: string) => {
       onSelect(optionId);
@@ -153,9 +170,19 @@ export const ChoiceDialog: React.FC<IChoiceDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={(_, data) => !data.open && onDismiss()}>
-      <DialogSurface>
+      <DialogSurface className={isMaximized ? styles.surfaceMaximized : undefined}>
         <DialogBody>
-          <DialogTitle>{title}</DialogTitle>
+          <DialogTitle
+            action={
+              <ModalWindowControls
+                isMaximized={isMaximized}
+                onToggleMaximize={() => setIsMaximized(m => !m)}
+                onClose={onDismiss}
+              />
+            }
+          >
+            {title}
+          </DialogTitle>
           <DialogContent className={styles.content}>
             {typeof message === 'string' ? <Text>{message}</Text> : message}
 

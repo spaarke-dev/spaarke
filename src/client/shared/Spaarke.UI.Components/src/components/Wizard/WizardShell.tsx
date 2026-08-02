@@ -45,8 +45,8 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { Dismiss24Regular } from '@fluentui/react-icons';
 
+import { ModalWindowControls } from '../ModalWindowControls';
 import { WizardStepper } from './WizardStepper';
 import { WizardSuccessScreen } from './WizardSuccessScreen';
 import { wizardShellReducer, buildInitialShellState } from './wizardShellReducer';
@@ -121,9 +121,6 @@ const useStyles = makeStyles({
   },
   titleText: {
     color: tokens.colorNeutralForeground1,
-  },
-  closeButton: {
-    color: tokens.colorNeutralForeground3,
   },
   // Main body: sidebar + content side by side
   mainArea: {
@@ -202,6 +199,24 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
   } = props;
 
   const styles = useStyles();
+
+  // ── Maximize/restore (task 030, FR-12) ─────────────────────────────────
+  // Local to this shell; always starts restored on (re)open (matches the
+  // established EmailComposer wrapper pattern). Reuses the EXISTING
+  // consumer-driven sizing mechanism (inline style bypass of the makeStyles
+  // cascade, v1.1.63) rather than introducing a parallel one: when maximized,
+  // the effective maxWidth/height swap to a full-viewport target; restored,
+  // they fall back to the consumer's `maxWidth`/`height` props unchanged.
+  // Only offered in standard (non-embedded) mode — an `embedded` mount has no
+  // independent viewport to expand into (it already fills its host
+  // container), so the toggle is omitted there and only the close (×)
+  // affordance renders, preserving the pre-existing embedded-mode behavior.
+  const [isMaximized, setIsMaximized] = React.useState(false);
+  React.useEffect(() => {
+    if (!open) setIsMaximized(false);
+  }, [open]);
+  const effectiveMaxWidth = isMaximized ? '100vw' : maxWidth;
+  const effectiveHeight = isMaximized ? '100vh' : height;
 
   // ── Navigation state via reducer ───────────────────────────────────────
   // R2 UAT §3.1 (2026-07-03): pass `initialStepId` through the lazy-init
@@ -400,13 +415,14 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
           <Text as="h1" size={500} weight="semibold" className={styles.titleText}>
             {title}
           </Text>
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={<Dismiss24Regular />}
-            className={styles.closeButton}
-            onClick={onClose}
-            aria-label="Close dialog"
+          {/* Standardized window-controls cluster (task 030, FR-12) — replaces the
+              former ad hoc Close-only button. Maximize is omitted in embedded mode
+              (see the state comment above); close is wired to the same unchanged
+              onClose handler. */}
+          <ModalWindowControls
+            isMaximized={isMaximized}
+            onToggleMaximize={embedded ? undefined : () => setIsMaximized(m => !m)}
+            onClose={onClose}
           />
         </div>
       )}
@@ -510,7 +526,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     >
       <DialogSurface
         className={styles.surface}
-        style={{ maxWidth, height, minHeight: height }}
+        style={{ maxWidth: effectiveMaxWidth, height: effectiveHeight, minHeight: effectiveHeight }}
         aria-label={ariaLabel ?? title}
       >
         <DialogBody className={styles.body}>{innerContent}</DialogBody>

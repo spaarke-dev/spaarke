@@ -62,7 +62,14 @@ describe('RichFilePreviewDialog (back-compat)', () => {
     const onClose = jest.fn();
     const props = defaultProps({ onClose });
     renderWithProviders(<RichFilePreviewDialog {...props} />);
-    await user.click(screen.getByRole('button', { name: 'Close' }));
+    // Task 030 (FR-12) added the standard `ModalWindowControls` × to the title
+    // bar, so there are now TWO "Close"-named buttons: the header × (first in
+    // DOM order) and the footer's explicit "Close" button (last). Both call
+    // the same `onClose` — this test targets the footer one specifically to
+    // preserve its original assertion intent.
+    const closeButtons = screen.getAllByRole('button', { name: 'Close' });
+    expect(closeButtons).toHaveLength(2);
+    await user.click(closeButtons[closeButtons.length - 1]);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

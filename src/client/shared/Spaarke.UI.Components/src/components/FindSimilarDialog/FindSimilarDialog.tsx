@@ -24,6 +24,7 @@
 import * as React from 'react';
 import {
   makeStyles,
+  mergeClasses,
   tokens,
   Dialog,
   DialogSurface,
@@ -33,8 +34,9 @@ import {
   Tooltip,
   shorthands,
 } from '@fluentui/react-components';
-import { DismissRegular, ArrowExpandRegular } from '@fluentui/react-icons';
+import { ArrowExpandRegular } from '@fluentui/react-icons';
 
+import { ModalWindowControls } from '../ModalWindowControls';
 import type { IDataService } from '../../types/serviceInterfaces';
 
 // ---------------------------------------------------------------------------
@@ -89,6 +91,14 @@ const useStyles = makeStyles({
     ...shorthands.overflow('hidden'),
     ...shorthands.borderRadius(tokens.borderRadiusXLarge),
   },
+  // Maximize target (task 030, FR-12) — swaps the 85vw/85vh default to a
+  // full-viewport target; restore returns to `surface` above.
+  surfaceMaximized: {
+    width: '100vw',
+    maxWidth: '100vw',
+    height: '100vh',
+    maxHeight: '100vh',
+  },
   titleBar: {
     display: 'flex',
     alignItems: 'center',
@@ -126,6 +136,13 @@ const useStyles = makeStyles({
 export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({ open, onClose, url, embedded = false }) => {
   const styles = useStyles();
 
+  // Maximize/restore (task 030, FR-12) — local to this dialog; always starts
+  // restored on (re)open, matching the established EmailComposer wrapper pattern.
+  const [isMaximized, setIsMaximized] = React.useState(false);
+  React.useEffect(() => {
+    if (!open) setIsMaximized(false);
+  }, [open]);
+
   const handleExpand = React.useCallback(() => {
     if (url) {
       window.open(url, '_blank', 'noopener,noreferrer');
@@ -139,7 +156,7 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({ open, onC
         if (!data.open) onClose();
       }}
     >
-      <DialogSurface className={styles.surface}>
+      <DialogSurface className={mergeClasses(styles.surface, isMaximized && styles.surfaceMaximized)}>
         {!embedded && (
           <div className={styles.titleBar}>
             <Text weight="semibold" size={400}>
@@ -155,15 +172,14 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({ open, onC
                   aria-label="Open in new tab"
                 />
               </Tooltip>
-              <Tooltip content="Close" relationship="label">
-                <Button
-                  appearance="subtle"
-                  icon={<DismissRegular />}
-                  size="small"
-                  onClick={onClose}
-                  aria-label="Close"
-                />
-              </Tooltip>
+              {/* Standardized window-controls cluster (task 030, FR-12) — replaces the
+                  former ad hoc Close-only button with maximize/restore + ×, both wired
+                  to the same behaviors (close → onClose, unchanged). */}
+              <ModalWindowControls
+                isMaximized={isMaximized}
+                onToggleMaximize={() => setIsMaximized(m => !m)}
+                onClose={onClose}
+              />
             </div>
           </div>
         )}

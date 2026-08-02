@@ -24,7 +24,7 @@
  * Task: R6-070 (D-C-24 / D-C-25, Pillar 7, Q7 scope expansion) — PART B.
  */
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Button,
   Dialog,
@@ -38,6 +38,9 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { WarningRegular } from '@fluentui/react-icons';
+// Shared, standardized modal window-controls (maximize/restore + close ×) — owner UAT 2026-07-31
+// item 4 "standardize on all modals" (FR-12, P1 window-controls rollout, task 031).
+import { ModalWindowControls } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -129,6 +132,15 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     lineHeight: tokens.lineHeightBase200,
   },
+  // Maximize/restore target (FR-12 P1 window-controls rollout, task 031). No prior
+  // maximize mechanism existed for this dialog — this is a NEW local capability, the
+  // default (unset) size is governed by Fluent's own DialogSurface sizing and is
+  // unchanged. Dimension-only overrides (no color/hex) — ADR-021/NFR-03 safe.
+  surfaceMaximized: {
+    width: '100%',
+    height: '100%',
+    maxWidth: '100%',
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -148,6 +160,16 @@ export const PinnedMemoryDeleteConfirmation: React.FC<PinnedMemoryDeleteConfirma
   onCancel,
 }) => {
   const styles = useStyles();
+
+  // Maximize/restore (FR-12 P1 window-controls rollout, task 031, owner UAT 2026-07-31
+  // item 4). Local to this dialog — no prior maximize mechanism existed. Always resets
+  // to the default size when the dialog transitions closed (mirrors the shipped
+  // SendEmailDialog convention — the one other Fluent Dialog already wired to
+  // ModalWindowControls).
+  const [isMaximized, setIsMaximized] = useState<boolean>(false);
+  useEffect(() => {
+    if (!open) setIsMaximized(false);
+  }, [open]);
 
   // Fluent v9 Dialog calls onOpenChange with the new open state; we treat any
   // transition from open -> closed as a cancel unless a confirm is in flight.
@@ -172,9 +194,25 @@ export const PinnedMemoryDeleteConfirmation: React.FC<PinnedMemoryDeleteConfirma
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange} modalType="alert">
-      <DialogSurface data-testid="pinned-memory-delete-confirmation">
+      <DialogSurface
+        data-testid="pinned-memory-delete-confirmation"
+        className={isMaximized ? styles.surfaceMaximized : undefined}
+      >
         <DialogBody>
-          <DialogTitle>
+          <DialogTitle
+            // Standard Spaarke window-controls cluster (FR-12). Close (×) routes to the
+            // SAME guarded handler the "Cancel" button uses (isDeleting-safe) — this
+            // dialog's non-dismissible alert semantics are unchanged (× is a deliberate
+            // click on the one existing cancel-equivalent action, not a new Escape/
+            // backdrop path).
+            action={
+              <ModalWindowControls
+                isMaximized={isMaximized}
+                onToggleMaximize={() => setIsMaximized(v => !v)}
+                onClose={handleCancel}
+              />
+            }
+          >
             <div className={styles.headerRow}>
               <WarningRegular className={styles.warningIcon} aria-hidden="true" />
               <span>Delete pinned memory?</span>

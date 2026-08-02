@@ -4,7 +4,7 @@
     <title>P1 — Window controls into Spaarke.UI.Components dialogs — FR-12</title>
     <phase>1 Window-controls rollout</phase>
     <gate>blocked until 003</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Modify-only rollout across existing `.tsx` dialogs (no new public surface); each dialog keeps its behavior — only the maximize/restore + × cluster is standardized. High file count but mechanical + constrained.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -119,7 +119,7 @@
     <criterion testable="true">Shared-lib build, one PCF consumer (`@types/react` 18), and one Code Page consumer (React 19) all build green.</criterion>
   </acceptance-criteria>
 
-  <notes>Design §3.3 inventory + CLAUDE.md "Key Facts" list the exact copies. Known duplicates folded here: `FindSimilarDialog` (3 copies), `CloseProjectDialog` (2 copies). This is an interim adapter step — later phases (P2+) re-base these onto `SprkModal`/presets, which will supersede the interim wiring. Completion summary appended here when done.</notes>
+  <notes>Design §3.3 inventory + CLAUDE.md "Key Facts" list the exact copies. Known duplicates folded here: `FindSimilarDialog` (3 copies), `CloseProjectDialog` (2 copies). This is an interim adapter step — later phases (P2+) re-base these onto `SprkModal`/presets, which will supersede the interim wiring. COMPLETED 2026-08-01 (parallel sub-agent, STANDARD rigor): 9 files wired via `DialogTitle action` slot adapter; both FindSimilar wizard copies inherit via WizardShell (zero-edit); EmailComposer wrapper verified already-consuming; legacy SendEmailDialog SKIPPED per escalation trigger (in-file "v1.1.59 no-X" UAT decision — owner review, resolves at P3/051); collateral edit to FilePreview/RichFilePreview.tsx (actual title-bar owner). Builds: UI.Components + PCF SemanticSearchControl build:prod green; LegalWorkspace fails pre-existing master defect (Issue #712). Tests: P0 gate 86/86; suite 2444/2466 (failures pre-existing); 1 assertion updated (two "Close" buttons). ADR-021 diff gate clean. Detail: notes/task-030-completion.md.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

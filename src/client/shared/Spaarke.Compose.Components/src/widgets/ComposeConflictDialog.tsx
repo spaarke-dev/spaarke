@@ -97,6 +97,9 @@ import {
   tokens,
   Text,
 } from '@fluentui/react-components';
+// Shared, standardized modal window-controls (maximize/restore + close ×) — owner UAT 2026-07-31
+// item 4 "standardize on all modals" (FR-12, P1 window-controls rollout, task 031).
+import { ModalWindowControls } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 semantic tokens only (ADR-021)
@@ -122,6 +125,15 @@ const useStyles = makeStyles({
     flexDirection: 'row',
     columnGap: tokens.spacingHorizontalS,
     flexWrap: 'wrap',
+  },
+  // Maximize/restore target (FR-12 P1 window-controls rollout, task 031). No prior
+  // maximize mechanism existed for this dialog — this is a NEW local capability, the
+  // default (unset) rectangle is governed by Fluent's own DialogSurface sizing and is
+  // unchanged. Dimension-only overrides (no color/hex) — ADR-021/NFR-03 safe.
+  surfaceMaximized: {
+    width: '100%',
+    height: '100%',
+    maxWidth: '100%',
   },
 });
 
@@ -241,6 +253,16 @@ export function ComposeConflictDialog(props: ComposeConflictDialogProps): React.
 
   const styles = useStyles();
 
+  // Maximize/restore (FR-12 P1 window-controls rollout, task 031, owner UAT 2026-07-31
+  // item 4). Local to this dialog — no prior maximize mechanism existed. Always resets
+  // to the default rectangle when the dialog transitions closed (mirrors the shipped
+  // SendEmailDialog convention — the one other Fluent Dialog already wired to
+  // ModalWindowControls).
+  const [isMaximized, setIsMaximized] = React.useState(false);
+  React.useEffect(() => {
+    if (!open) setIsMaximized(false);
+  }, [open]);
+
   // Locale-format the timestamp once per render (cheap; Date.parse is sub-
   // millisecond). Defer the format until needed so we don't crash on a bad
   // ISO string (defensive: server should always provide a valid one).
@@ -271,9 +293,25 @@ export function ComposeConflictDialog(props: ComposeConflictDialogProps): React.
         data-testid="compose-conflict-dialog"
         aria-labelledby="compose-conflict-dialog-title"
         aria-describedby="compose-conflict-dialog-content"
+        className={isMaximized ? styles.surfaceMaximized : undefined}
       >
         <DialogBody>
-          <DialogTitle id="compose-conflict-dialog-title">This document is open in another Compose session</DialogTitle>
+          <DialogTitle
+            id="compose-conflict-dialog-title"
+            // Standard Spaarke window-controls cluster (FR-12). Close (×) routes to the
+            // SAME onCancel the "Cancel — close this tab" button uses — this dialog's
+            // non-dismissible alert semantics are unchanged (× is a deliberate click on
+            // the one existing cancel-equivalent action, not a new Escape/backdrop path).
+            action={
+              <ModalWindowControls
+                isMaximized={isMaximized}
+                onToggleMaximize={() => setIsMaximized(v => !v)}
+                onClose={onCancel}
+              />
+            }
+          >
+            This document is open in another Compose session
+          </DialogTitle>
           <DialogContent id="compose-conflict-dialog-content" className={styles.content}>
             <Text className={styles.paragraph}>
               You already have {documentDisplayName ? <strong>{documentDisplayName}</strong> : 'this document'} open in

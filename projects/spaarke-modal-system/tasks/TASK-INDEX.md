@@ -28,8 +28,8 @@
 | 012 | Pattern pointer: modal-shell.md 🔒 | 0 | ✅ | 010 | — | MINIMAL | sonnet/medium |
 | 013 | Cross-links: DECISION-CRITERIA + root CLAUDE.md §17 🔒 | 0 | ✅ | 010,011 | — | STANDARD | sonnet/high |
 | 020 | P0.5 — App-shell `--sprk-ui-scale` control | 0.5 | 🔲 | 002 | — | FULL | sonnet/high |
-| 030 | P1 — Window controls into UI.Components dialogs | 1 | 🔲 | 003 | P1 | STANDARD | sonnet/high |
-| 031 | P1 — Window controls into Compose/AI.Widgets/SpaarkeAi | 1 | 🔲 | 003 | P1 | STANDARD | sonnet/high |
+| 030 | P1 — Window controls into UI.Components dialogs | 1 | ✅ | 003 | P1 | STANDARD | sonnet/high |
+| 031 | P1 — Window controls into Compose/AI.Widgets/SpaarkeAi | 1 | ✅ | 003 | P1 | STANDARD | sonnet/high |
 | 040 | P2 — Re-base confirms onto ConfirmModal | 2 | 🔲 | 005 | P2 | FULL | sonnet/high |
 | 041 | P2 — Re-base ChoiceDialog onto ChoiceModal | 2 | 🔲 | 005 | P2 | FULL | sonnet/high |
 | 042 | P2 — Retire ActionConfirmationDialog overlay | 2 | 🔲 | 005 | P2 | FULL | sonnet/high |
@@ -101,7 +101,7 @@ P0 is the gate for everything. P0.5 (020) needs only 002. P7 (090) is independen
 |-------|-------|--------------|
 | 0 Build ✅ | 001–013 (13) — **DONE 2026-08-01** | SprkModal base + 6 presets + size scale + scaled theme + reconciled window controls + barrel/tests (86 tests) + standards doc + ADR-050 + pattern pointer + cross-links |
 | 0.5 App-shell scale | 020 (1) | `--sprk-ui-scale` control (auto breakpoint + Display-size setting) |
-| 1 Window-controls | 030–031 (2) | Standard controls on all ~13 dialogs (owner mandate) |
+| 1 Window-controls ✅ | 030–031 (2) — **DONE 2026-08-01** | Interim `DialogTitle action` adapter: 13 dialogs wired/inherited/verified; 1 owner escalation (legacy SendEmailDialog "v1.1.59 no-X" — resolves at P3/051); LegalWorkspace pre-existing build defect → Issue #712 / DEF-001 |
 | 2 Confirms & choices | 040–042 (3) | ConfirmModal/ChoiceModal re-base; ActionConfirmationDialog retired |
 | 3 Forms & compose | 050–051 (2) | FormModal re-base (md); legacy SendEmailDialog retired |
 | 4 Preview & browse | 060–061 (2) | Preview/Browse re-base; @deprecated FilePreviewDialog retired |
@@ -124,9 +124,10 @@ P0 is the gate for everything. P0.5 (020) needs only 002. P7 (090) is independen
 
 **🎉 PHASE 0 (Build) COMPLETE — all 13 tasks (001–013) ✅ (2026-08-01).** The `SprkModal` shell + 6 presets ship in `@spaarke/ui-components` (86 tests, tsc build green, eslint clean, zero hex/`'1px'`); standards doc + ADR-050 + pattern pointer + crosslinks + CHANGELOG all landed. 6 commits.
 
-**Next phases (conversions — higher blast radius, not yet started):**
-- **P0.5** — task **020** (app-shell `--sprk-ui-scale` control; needs 002 ✅; touches SpaarkeAi hot-path — run `/conflict-check` first).
-- **P1** — **030/031** (window-controls rollout to ~13 dialogs; needs 003 ✅).
+**P1 (030/031) ✅ DONE 2026-08-01** — interim window-controls adapter across all custom dialogs; 1 owner escalation (legacy SendEmailDialog) + Issue #712 recorded in `notes/`.
+
+**Next phases (conversions — higher blast radius):**
+- **P0.5** — task **020** (app-shell `--sprk-ui-scale` control; needs 002 ✅; touches SpaarkeAi hot-path — run `/conflict-check` first). **← NEXT**
 - **P2–P6** — **040/041/042 · 050/051 · 060/061 · 070 · 080** (re-base confirms/forms/preview/messages/wizards onto the presets; each gated on its preset ✅).
 - **P7** — **090 → 091/092** (OOB size scale + navigation.ts dedup + DocumentOperations overlay; independent of the shell).
 - **P8** — **100** wrap-up (code-review + adr-check + test-diet + repo-cleanup; main-session).

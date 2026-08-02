@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-01 (🎉 PHASE 0 COMPLETE — tasks 001–013)
+> **Last Updated**: 2026-08-01 (P1 wave complete — 030 + 031 ✅)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,15 +10,19 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — **Phase 0 (Build) complete**; conversions (P0.5/P1–P7) not started |
+| **Task** | none active — **P0 ✅ + P1 ✅**; next wave = P0.5 (020) then P2 (040/041/042) |
 | **Step** | — |
 | **Status** | phase-boundary |
-| **Next Action** | Start conversions. Recommended next: **P1 window-controls rollout (030, 031)** or **P0.5 app-shell scale (020, SpaarkeAi hot-path — `/conflict-check` first)**. Or say "continue" / "work on 030, 031". |
+| **Next Action** | Execute **020** (P0.5 app-shell `--sprk-ui-scale`, solo, FULL rigor, SpaarkeAi hot-path — conflict-check first) → then P2 wave (040/041/042, parallel, needs 005 ✅) |
 
 ### Critical Context
-**PHASE 0 (Build) is COMPLETE (001–013, 2026-08-01).** The canonical modal system ships in `@spaarke/ui-components`: `SprkModal/` = `sizes.ts`, `scaledTheme.ts`, `SprkModal.tsx` (+`.types.ts`), `ModalScrollArea.tsx`, `presets/{Confirm,Choice,Form,Preview,Browse,Wizard}Modal.tsx`, `index.ts` (barrel), + tests. Consolidated `tsc` build **green**, **86/86** tests (11 suites), eslint clean, zero hex/`'1px'`/inline-color. **React scoping**: the modal family is **Code-Page-only by construction** — exported from the main barrel (`src/index.ts`) and ABSENT from the curated `src/pcf-safe.ts` allow-list, so NFR-04's PCF arm is satisfied by exclusion (no PCF compile needed); the family is also structurally React-16/17-safe, so a specific preset can be added to `pcf-safe.ts` later at low cost if a PCF ever needs one. One open discoverability check: grep that PCF controls import from `pcf-safe` (not the main barrel). Importable: `import { SprkModal, ConfirmModal, ChoiceModal, FormModal, PreviewModal, BrowseModal, WizardModal } from '@spaarke/ui-components'`. Docs: `docs/standards/MODAL-DESIGN-SYSTEM.md` + `.claude/adr/ADR-050` + `.claude/patterns/ui/modal-shell.md` + crosslinks + root CLAUDE.md §17 row + CHANGELOG. **6 commits** (dc27660→…→docs). Notes: [`wave-a-completion.md`](./notes/wave-a-completion.md), [`wave-b-completion.md`](./notes/wave-b-completion.md) (⚠️ 007 BrowseModal single-header decision for owner review).
+**P0 (Build, 001–013) ✅** — `SprkModal` + 6 presets ship in `@spaarke/ui-components` (main barrel only; ABSENT from `pcf-safe.ts` → Code-Page-scoped by construction). 86 P0 tests green. Docs: `MODAL-DESIGN-SYSTEM.md` + ADR-050 + pattern pointer + §17 row.
 
-**Conversions NOT started** (each modifies EXISTING dialogs across `src/` + solutions — read target files carefully; higher blast radius). Order: P0.5 (020) · P1 (030/031) · P2 (040/041/042) · P3 (050/051) · P4 (060/061) · P5 (070) · P6 (080) · P7 (090→091/092) · P8 wrap-up (100). Preset→conversion map + escalation triggers are in each POML. **Env**: fresh worktree — `npm install` done in `Spaarke.UI.Components` + siblings `Spaarke.SdapClient`/`Spaarke.Auth` built.
+**P1 (Window-controls, 030–031) ✅ 2026-08-01** — `ModalWindowControls` cluster (FullScreen glyph + ×) rolled out via interim `DialogTitle action` slot adapter: 13 dialogs wired/inherited/verified across UI.Components, LegalWorkspace copies, Compose.Components, AI.Widgets, SpaarkeAi. **1 escalation**: legacy `SendEmailDialog` skipped (in-file "v1.1.59 no-X" UAT decision; resolves at P3/051 retirement). See `notes/wave-p1-completion.md` + per-task notes. **Known env issue**: LegalWorkspace `npm run build` broken on master in fresh worktrees (missing `@spaarke/ai-outputs` dep) — **Issue #712 / DEF-001**; use scoped `tsc --noEmit` for LegalWorkspace verification in later waves.
+
+**Conversions remaining**: 020 (P0.5) · P2 040/041/042 · P3 050/051 · P4 060/061 · P5 070 (sonnet/**xhigh**) · P6 080 · P7 090→091/092 · P8 100 (main-session wrap-up). Each POML carries preset→conversion map + escalation triggers. Conversion waves modify EXISTING dialogs — read target files before rewriting.
+
+**Env**: fresh worktree; node_modules + dists built for UI.Components, SdapClient, Auth, Compose.Components, AI.Widgets, AI.Outputs, AI.Context, DocumentOperations, SpaarkeAi, LegalWorkspace (build broken per #712), SemanticSearchControl.
 
 ---
 
@@ -26,62 +30,44 @@
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none (phase boundary — P0 done) |
-| **Task File** | — (next: tasks/030-* / 031-* for P1, or 020-* for P0.5) |
-| **Title** | — |
-| **Phase** | 0 Build ✅ → conversions pending |
+| **Task ID** | none (wave boundary — P1 done) |
+| **Task File** | next: tasks/020-app-shell-ui-scale-control.poml |
+| **Phase** | 0 ✅ · 0.5 pending · 1 ✅ · 2–8 pending |
 | **Status** | none |
-| **Started** | — |
 
 ---
 
 ## Progress
 
-### Completed Steps
-*Task 004 not started. (Group A — 001/002/003 — complete; see TASK-INDEX.md + notes/wave-a-completion.md.)*
-
-### Files Modified (All Task)
-*None for task 004 yet.*
-
-### Decisions Made
-- 2026-08-01: Executed Group A consolidated in the main session (≤5 small files, shared build target) rather than 3 sub-agents.
-- 2026-08-01: Task 001 width uses spec FR-02's pre-multiplied `min(cap·uiScale px, N·vw)` form (numeric `uiScale` arg the host threads to both `getSurfaceStyle` and `scaleTheme`), NOT `calc(var(--sprk-ui-scale))`. No escalation — md/lg caps match spec §6.2.
+### Decisions Made (this session)
+- 2026-08-01: P1 executed as 2 parallel Sonnet sub-agents (task-execute Step 0.3); main session did conflict-check (soft-pass), wave build verification, ADR-021 diff gate, tracking + commit.
+- 2026-08-01: Interim adapter = `DialogTitle action` slot + local `isMaximized` → 100%/100% (SendEmailDialog precedent). P2+ re-bases supersede.
+- 2026-08-01: Legacy `SendEmailDialog` escalation recorded, not overridden (owner decision; moot at P3/051).
+- 2026-08-01: LegalWorkspace build defect = master issue, filed #712, NOT fixed in this project (out of scope).
 
 ---
 
 ## Next Action
 
-**Next Step**: Execute task 004 — SprkModal base shell.
+**Next Step**: Task 020 — P0.5 app-shell `--sprk-ui-scale` control (FULL rigor, solo). Needs 002 ✅ (satisfied). Touches SpaarkeAi app shell → run conflict-check first, cite in notes.
 
-**Pre-conditions**: 001, 002, 003 ✅ (all satisfied).
-
-**Key Context**:
-- Compose the Fluent `Dialog` envelope (transform-robust portal) + `RecordNavigationModalShell` chrome + `ModalWindowControls`; do NOT hand-roll overlays.
-- Consume `getSurfaceStyle(size, uiScale)` (sizes.ts) for the surface and `scaleTheme(base, scale)` (scaledTheme.ts) for `--sprk-ui-scale`.
-- Cancel-always-left footer; native thin scrollbar; semantic tokens only.
-- Prototype reference: `c:/code_files/spaarke-prototype/projects/2026-07-sprk-modal-system/src/components/SprkModal.tsx` (+ `ModalScrollArea.tsx`).
-
-**Expected Output**: `src/client/shared/Spaarke.UI.Components/src/components/SprkModal/SprkModal.tsx` (+ tests). Unblocks Group B presets (005–008).
+Then P2 wave (040/041/042 parallel — confirms/choices re-base onto ConfirmModal/ChoiceModal + retire ActionConfirmationDialog overlay).
 
 ---
 
 ## Blockers
 
-**Status**: None
+**Status**: None (2 open flags for owner, non-blocking: SendEmailDialog no-X escalation; interim maximize-on-confirms tension — both in `notes/wave-p1-completion.md`)
 
 ---
 
 ## Session Notes
 
-### Current Session
-- Started: 2026-08-01
-- Focus: Group A (001/002/003) executed + verified. Ready for task 004.
-
 ### Key Learnings
-- Prototype has all presets in ONE `presets.tsx`; `ChoiceModal` must be built fresh; `BrowseModal` = `PreviewModal` + `nav`.
-- Shipped `ModalWindowControls` now uses `FullScreenMaximize/Minimize` (was `ArrowMaximize`) — reconciled in task 003.
-- Jest + ts-jest is the shared-lib test runner (`**/__tests__/**/*.test.ts(x)`); tsconfig excludes tests from the `tsc` build.
-- `SprkModal/wizard` size (62vw × min(74vh,760px)) ≠ the OOB `wizard` 60%×70% (FR-11) — different mechanisms; keep distinct when task 010 documents them.
+- `FindSimilar` wizard copies own no header — inherit window controls via `WizardShell` (zero-edit).
+- `RichFilePreview.tsx` (not the Dialog file) owns the title bar in the dominant non-nav path.
+- Fluent `DialogTitle` `action` slot renders top-right and is excluded from `aria-labelledby` — safe for existing `getByRole(name:)` assertions.
+- Existing suites: 11 UI.Components + 15 Compose + 1 AI.Widgets failures are all PRE-EXISTING (A/B-proven) — don't chase them in later waves.
 
 ---
 
@@ -93,10 +79,7 @@
 - **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
 
 ### Applicable ADRs
-- ADR-012: shared components in `@spaarke/ui-components`
-- ADR-021: Fluent v9 semantic tokens only (strengthened)
-- ADR-023: ChoiceDialog preserved via ChoiceModal
-- ADR-028: pass `authenticatedFetch` as a function
+- ADR-012 (shared components) · ADR-021 (tokens only — strengthened) · ADR-023 (ChoiceDialog preserved) · ADR-028 (authenticatedFetch as function) · ADR-050 (canonical modal shell)
 
 ---
 

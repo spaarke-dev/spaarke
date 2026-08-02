@@ -35,17 +35,12 @@ import {
   Spinner,
   Text,
   makeStyles,
+  mergeClasses,
   shorthands,
   tokens,
 } from '@fluentui/react-components';
-import {
-  Dismiss24Regular,
-  Open24Regular,
-  OpenRegular,
-  LinkRegular,
-  StarRegular,
-  StarFilled,
-} from '@fluentui/react-icons';
+import { Open24Regular, OpenRegular, LinkRegular, StarRegular, StarFilled } from '@fluentui/react-icons';
+import { ModalWindowControls } from '../ModalWindowControls';
 import type { IFilePreviewServices } from './filePreviewTypes';
 
 // ---------------------------------------------------------------------------
@@ -80,6 +75,14 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     ...shorthands.overflow('hidden'),
     ...shorthands.borderRadius(tokens.borderRadiusXLarge),
+  },
+  // Maximize target (task 030, FR-12) — swaps the 85vw/880px default to a
+  // full-viewport target; restore returns to `surface` above.
+  surfaceMaximized: {
+    width: '100vw',
+    maxWidth: '100vw',
+    height: '100vh',
+    maxHeight: '100vh',
   },
   titleBar: {
     display: 'flex',
@@ -163,6 +166,13 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   React.useEffect(() => {
     setInWorkspace(isInWorkspace ?? false);
   }, [isInWorkspace]);
+
+  // Maximize/restore (task 030, FR-12) — local to this dialog; always starts
+  // restored on (re)open, matching the established EmailComposer wrapper pattern.
+  const [isMaximized, setIsMaximized] = React.useState(false);
+  React.useEffect(() => {
+    if (!open) setIsMaximized(false);
+  }, [open]);
 
   // Fetch preview URL when dialog opens
   React.useEffect(() => {
@@ -261,15 +271,20 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
         if (!data.open) onClose();
       }}
     >
-      <DialogSurface className={styles.surface}>
+      <DialogSurface className={mergeClasses(styles.surface, isMaximized && styles.surfaceMaximized)}>
         {/* Title bar */}
         <div className={styles.titleBar}>
           <DialogTitle action={null} className={styles.titleText}>
             {documentName || 'Document Preview'}
           </DialogTitle>
-          <Tooltip content="Close" relationship="label">
-            <Button appearance="subtle" icon={<Dismiss24Regular />} aria-label="Close" onClick={onClose} />
-          </Tooltip>
+          {/* Standardized window-controls cluster (task 030, FR-12) — replaces the
+              former ad hoc Close-only button with maximize/restore + ×; close is
+              wired to the same unchanged onClose handler. */}
+          <ModalWindowControls
+            isMaximized={isMaximized}
+            onToggleMaximize={() => setIsMaximized(m => !m)}
+            onClose={onClose}
+          />
         </div>
 
         {/* Toolbar */}

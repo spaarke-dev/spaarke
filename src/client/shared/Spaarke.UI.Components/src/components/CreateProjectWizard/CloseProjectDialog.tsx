@@ -42,10 +42,10 @@ import {
   Spinner,
   Text,
   makeStyles,
+  mergeClasses,
   tokens,
 } from '@fluentui/react-components';
 import {
-  DismissRegular,
   LockClosedFilled,
   PersonDeleteRegular,
   StorageRegular,
@@ -53,6 +53,7 @@ import {
   CheckmarkCircleFilled,
   DismissCircleFilled,
 } from '@fluentui/react-icons';
+import { ModalWindowControls } from '../ModalWindowControls';
 import { closeSecureProject, type ICloseProjectResponse } from './closureService';
 
 // ---------------------------------------------------------------------------
@@ -98,6 +99,13 @@ const useStyles = makeStyles({
   dialogSurface: {
     maxWidth: '520px',
     width: '90vw',
+  },
+  // Maximize target (task 030, FR-12) — swaps the 520px/90vw default to a
+  // full-viewport target; restore returns to `dialogSurface` above.
+  dialogSurfaceMaximized: {
+    maxWidth: '100vw',
+    width: '100vw',
+    height: '100vh',
   },
 
   // ── Title row ──────────────────────────────────────────────────────────────
@@ -281,6 +289,8 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
   const [phase, setPhase] = React.useState<DialogPhase>('confirm');
   const [errorMessage, setErrorMessage] = React.useState<string | undefined>(undefined);
   const [closureResult, setClosureResult] = React.useState<ICloseProjectResponse | undefined>(undefined);
+  // Maximize/restore (task 030, FR-12) — local to this dialog.
+  const [isMaximized, setIsMaximized] = React.useState(false);
 
   // Reset state when dialog opens
   React.useEffect(() => {
@@ -288,6 +298,7 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
       setPhase('confirm');
       setErrorMessage(undefined);
       setClosureResult(undefined);
+      setIsMaximized(false);
     }
   }, [open]);
 
@@ -340,18 +351,16 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
         }
       }}
     >
-      <DialogSurface className={styles.dialogSurface}>
+      <DialogSurface className={mergeClasses(styles.dialogSurface, isMaximized && styles.dialogSurfaceMaximized)}>
         <DialogBody>
           {/* ── Title ───────────────────────────────────────────────────── */}
           <DialogTitle
             action={
               phase !== 'closing' ? (
-                <Button
-                  appearance="subtle"
-                  aria-label="Close dialog"
-                  size="small"
-                  icon={<DismissRegular aria-hidden="true" />}
-                  onClick={handleClose}
+                <ModalWindowControls
+                  isMaximized={isMaximized}
+                  onToggleMaximize={() => setIsMaximized(m => !m)}
+                  onClose={handleClose}
                 />
               ) : undefined
             }
