@@ -10,17 +10,19 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — **P0 ✅ + P1 ✅**; next wave = P0.5 (020) then P2 (040/041/042) |
+| **Task** | none active — **P0 ✅ + P0.5 ✅ + P1 ✅**; next wave = P2 (040/041/042 parallel) |
 | **Step** | — |
 | **Status** | phase-boundary |
-| **Next Action** | Execute **020** (P0.5 app-shell `--sprk-ui-scale`, solo, FULL rigor, SpaarkeAi hot-path — conflict-check first) → then P2 wave (040/041/042, parallel, needs 005 ✅) |
+| **Next Action** | P2 wave (040/041/042, parallel, needs 005 ✅) → P3 (050/051) → P4 (060/061) → P5 070 → P6 080 → P7 090→091/092 → P8 100 |
 
 ### Critical Context
 **P0 (Build, 001–013) ✅** — `SprkModal` + 6 presets ship in `@spaarke/ui-components` (main barrel only; ABSENT from `pcf-safe.ts` → Code-Page-scoped by construction). 86 P0 tests green. Docs: `MODAL-DESIGN-SYSTEM.md` + ADR-050 + pattern pointer + §17 row.
 
 **P1 (Window-controls, 030–031) ✅ 2026-08-01** — `ModalWindowControls` cluster (FullScreen glyph + ×) rolled out via interim `DialogTitle action` slot adapter: 13 dialogs wired/inherited/verified across UI.Components, LegalWorkspace copies, Compose.Components, AI.Widgets, SpaarkeAi. **1 escalation**: legacy `SendEmailDialog` skipped (in-file "v1.1.59 no-X" UAT decision; resolves at P3/051 retirement). See `notes/wave-p1-completion.md` + per-task notes. **Known env issue**: LegalWorkspace `npm run build` broken on master in fresh worktrees (missing `@spaarke/ai-outputs` dep) — **Issue #712 / DEF-001**; use scoped `tsc --noEmit` for LegalWorkspace verification in later waves.
 
-**Conversions remaining**: 020 (P0.5) · P2 040/041/042 · P3 050/051 · P4 060/061 · P5 070 (sonnet/**xhigh**) · P6 080 · P7 090→091/092 · P8 100 (main-session wrap-up). Each POML carries preset→conversion map + escalation triggers. Conversion waves modify EXISTING dialogs — read target files before rewriting.
+**P0.5 (020) ✅ 2026-08-01** — `uiScale = max(setting, ≥2560→1.15)` bounded {1.0,1.15,1.25,1.5}; **`useUiScale()` from `@spaarke/ui-components` is the seam conversion tasks thread into `SprkModal uiScale`**; `DisplaySizeMenu` in SpaarkeAi strip + LW PageHeader; themeStorage extended in place. See `notes/task-020-completion.md`.
+
+**Conversions remaining**: P2 040/041/042 · P3 050/051 · P4 060/061 · P5 070 (sonnet/**xhigh**) · P6 080 · P7 090→091/092 · P8 100 (main-session wrap-up). Each POML carries preset→conversion map + escalation triggers. Conversion waves modify EXISTING dialogs — read target files before rewriting.
 
 **Env**: fresh worktree; node_modules + dists built for UI.Components, SdapClient, Auth, Compose.Components, AI.Widgets, AI.Outputs, AI.Context, DocumentOperations, SpaarkeAi, LegalWorkspace (build broken per #712), SemanticSearchControl.
 

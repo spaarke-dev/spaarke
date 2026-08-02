@@ -121,6 +121,10 @@ export * from './TodoDetail';
 // ThemeToggle - Sun/moon toggle button for dark mode switching
 export * from './ThemeToggle';
 
+// DisplaySizeMenu - App-shell "Display size" (Default/Large/Extra-large) menu
+// driving the P0.5 uiScale control (spec FR-06 / design §6.9)
+export * from './DisplaySizeMenu';
+
 // RecordCardShell - Shared card shell for all entity record cards (Documents, Matters, Todos, etc.)
 export * from './RecordCardShell';
 

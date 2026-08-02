@@ -4,7 +4,7 @@
     <title>P0.5 — App-shell --sprk-ui-scale control (auto breakpoint + Display size) — FR-06</title>
     <phase>0.5 App-shell UI-scale</phase>
     <gate>blocked until 002</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Code implementation touching frontend app shells (incl. SpaarkeAi hot-path), new persisted setting + scaled-theme wiring; tags include fluent-ui/react; code-review + adr-check at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -137,7 +137,7 @@
     <criterion testable="true">All unit tests pass; both PCF and Code Page consumer builds are green; `/conflict-check` was run before the SpaarkeAi PR.</criterion>
   </acceptance-criteria>
 
-  <notes>Design §6.9 (the scale reframe) + spec FR-06 / §11-I. One `uiScale` value drives BOTH layers (scaled theme + `--sprk-ui-scale`). Mechanism is locked to the scaled theme (zoom rejected at 4K). SpaarkeAi hot-path coordination per plan §5. The modal shell (tasks 001–009) is already scale-compatible; this task only supplies the value from the app shell. Completion summary appended here when done.</notes>
+  <notes>Design §6.9 (the scale reframe) + spec FR-06 / §11-I. One `uiScale` value drives BOTH layers (scaled theme + `--sprk-ui-scale`). Mechanism is locked to the scaled theme (zoom rejected at 4K). SpaarkeAi hot-path coordination per plan §5. The modal shell (tasks 001–009) is already scale-compatible; this task only supplies the value from the app shell. COMPLETED 2026-08-01 (solo sub-agent, FULL rigor): `uiScale = max(settingMultiplier, breakpoint)` — Default 1.0 / Large 1.25 / Extra-large 1.5 / ≥2560px auto 1.15, bounded {1.0,1.15,1.25,1.5}. New `SprkModal/uiScale.ts` (derivation) + `hooks/useUiScale.ts` (the conversion-task seam: `{uiScale, displaySize, setDisplaySize}`) + `DisplaySizeMenu` (reuses Menu/MenuItemRadio idiom). themeStorage extended IN PLACE (same event/listener). Wired: SpaarkeAi App.tsx (new slim strip above ThreePaneShell — verified NO pre-existing settings surface existed) + LegalWorkspace PageHeader beside ThemeToggle. 21 new tests; P0 gate 107/107; suite zero new failures; all builds green (LW via scoped tsc per Issue #712); Step 9.5 code-review + adr-check PASS. AC 5/6 full pass; AC-3 modal-scaling leg mechanism-verified, end-to-end deferred to P2+ conversions by design. Detail: notes/task-020-completion.md.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

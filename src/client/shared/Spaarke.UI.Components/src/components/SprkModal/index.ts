@@ -15,6 +15,11 @@ export * from './sizes';
 // Scaled Fluent theme for `--sprk-ui-scale` (scaleTheme, baseTheme)
 export * from './scaledTheme';
 
+// App-shell uiScale derivation (P0.5, FR-06/design §6.9): auto ≥2560 breakpoint
+// + persisted "Display size" setting → one effective uiScale. Consumed via
+// hooks/useUiScale.ts by the app shells (SpaarkeAi, LegalWorkspace).
+export * from './uiScale';
+
 // Opt-in chevron-pager body variant (`bodyScroll="arrows"`)
 export * from './ModalScrollArea';
 
