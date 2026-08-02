@@ -15,120 +15,80 @@
  * The shared widget is reused AS-IS — this file mounts it and passes props; it
  * reimplements no thread-list / bubbles / quick-view (NFR-06).
  *
- * ── CENTERING (R3 UAT round 5, 2026-07-23) ────────────────────────────────────
- * Earlier rounds used a Fluent `<Dialog modalType="modal">` and then tried to fix
- * its top-anchoring inside the model-driven form by portaling to `document.body`.
- * That did NOT hold: Fluent's `<Dialog>` already portals its `DialogSurface` to
- * `document.body`, and the top-anchoring is caused by a CSS `transform` on an
- * app-shell ancestor (`html`/`body`/a wrapper) that redefines the containing
- * block for `position:fixed` — which portaling to `body` cannot escape when the
- * transform sits AT/above `body`. The repo has no proven recipe to viewport-center
- * a fixed-size Fluent Dialog in that context.
+ * ── ENVELOPE (spaarke-modal-system P5, task 070 / FR-16) ──────────────────────
+ * This modal now composes the canonical `<SprkModal size="md">` shell (imported
+ * from `@spaarke/ui-components/pcf-safe`) INSTEAD of a hand-rolled
+ * `createPortal` + `position:fixed` overlay. The hand-roll existed BECAUSE an
+ * earlier round hit a centering bug: a CSS `transform` on an app-shell ancestor
+ * (`html`/`body`/a wrapper) redefines the containing block for `position:fixed`,
+ * so a raw fixed overlay top-anchored inside the model-driven form. The shell's
+ * Fluent `Dialog` portal mounts ABOVE the transformed ancestor (design §4.6 /
+ * FR-08), so it centers correctly where the raw overlay did not — this PCF is the
+ * VALIDATION of that transform-robust invariant (structural proof in
+ * `__tests__/ConversationModal.transform.test.tsx`).
  *
- * So we drop the Fluent Dialog envelope and use the transform-ROBUST pattern the
- * `DocumentRelationshipViewer` PCF already ships: a full-viewport
- * `position:fixed; inset:0` flex overlay that CENTERS the fixed-size surface. A
- * near-full-viewport overlay renders the same regardless of a residual ancestor
- * offset, so the surface reads as centered. We keep the `createPortal` to
- * `document.body` + a re-wrapped `FluentProvider` purely for THEMING the portaled
- * subtree (fluent-v9-portal-gotcha), and implement Esc/backdrop-dismiss ourselves
- * (the Fluent Dialog used to give us those).
+ * What the shell now owns (all previously hand-rolled here): the dimmed backdrop,
+ * the centered fixed-size surface, the "Messages" header, the maximize/restore + ×
+ * window controls (`ModalWindowControls`, composed INSIDE the shell — no longer
+ * imported by this file), Esc + backdrop dismiss (`dismiss="light"`), the focus
+ * trap, and the native thin-scrollbar body. `padded={false}` lets the two-pane
+ * workspace fill the body edge-to-edge and manage its own internal scroll.
+ * Maximize replaces the old `expanded` toggle — the shell's `full` size (a
+ * viewport-fill) supersedes the old 96vw×94vh "expand".
+ *
+ * Theme: the shell renders NO `FluentProvider`; it inherits the host provider
+ * (`CommunicationConversationPanelHost`'s light/dark-aware
+ * `resolveThemeWithUserPreference`) and — being a React descendant of it — the
+ * Fluent Dialog portal is themed via `applyStylesToPortals` (same document;
+ * fluent-v9-portal-gotcha). This also RETIRES the hand-roll's hard-coded
+ * `webLightTheme`, which had pinned the modal to light regardless of the host
+ * theme (ADR-021 dark parity / NFR-03).
  *
  * `<ConversationView/>`'s FR-12 header seam is wired: `title` (the selected
  * thread's name), `regarding` (the host record), and `onOpenRecord` — the last
  * delegated up to the host, which opens the record via the sanctioned OOB
  * `Xrm.Navigation.navigateTo` modal (Layout 1). All BFF reads flow through the
- * injected `authenticatedFetch` (ADR-028). Fluent v9 semantic tokens only —
- * dark mode passes through the re-wrapped `FluentProvider` (ADR-021).
+ * injected `authenticatedFetch` (ADR-028 — passed through as a FUNCTION, never
+ * snapshotted). Fluent v9 semantic tokens only (ADR-021).
  */
 
 import * as React from 'react';
-import * as ReactDOM from 'react-dom';
-import { FluentProvider, webLightTheme, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { makeStyles } from '@fluentui/react-components';
 import {
   ConversationWorkspace,
   ConversationView,
-  ModalWindowControls,
   createXrmNavigationService,
   type ConversationWorkspaceProps,
   type ConversationViewProps,
   type IConversationRendererProps,
-  type IModalWindowControlsProps,
   type AuthenticatedFetchFn,
 } from '@spaarke/ui-components';
+// PCF deep-import of the PCF-safe entry (ADR-012 PCF import pattern): webpack
+// node-resolves `dist/pcf-safe.js`; the `/dist/` form matches this control's
+// existing `@spaarke/ui-components/dist/utils/themeStorage` import. (The
+// pcf-safe.ts header's `src/pcf-safe` form is for source-consuming PCFs; this one
+// consumes the built dist per its tsconfig `@spaarke/ui-components/*` → `dist/*`.)
+import { SprkModal, type SprkModalProps } from '@spaarke/ui-components/dist/pcf-safe';
 
-// React 16 type seam — cast the shared components at the boundary (same pattern
-// as the sibling CommunicationTimelineRegarding control). Runtime is unaffected.
+// React 16 type seam — cast the shared components at the boundary (the shared lib
+// carries @types/react 19; importing its emitted types into this React-16 PCF
+// otherwise trips the ADR-022 ReactNode drift). Same pattern as the sibling
+// CommunicationTimelineRegarding control. Runtime is unaffected.
 const ConversationWorkspaceR16 = ConversationWorkspace as unknown as React.ComponentType<ConversationWorkspaceProps>;
 const ConversationViewR16 = ConversationView as unknown as React.ComponentType<ConversationViewProps>;
-// Shared, standardized modal chrome (maximize/restore + close) — owner UAT 2026-07-31 "standardize on all modals".
-const ModalWindowControlsR16 = ModalWindowControls as unknown as React.ComponentType<IModalWindowControlsProps>;
+// The canonical modal shell, re-cast at the same React-16 boundary. `children` is
+// retyped to this control's React-16 `ReactNode` so the workspace element assigns
+// cleanly (the shared lib's props carry @types/react 19 ReactNode — ADR-022 drift).
+const SprkModalR16 = SprkModal as unknown as React.ComponentType<
+  Omit<SprkModalProps, 'children'> & { children?: React.ReactNode }
+>;
 
 const useStyles = makeStyles({
-  // Full-viewport dimmed overlay that CENTERS the surface (round 5) — copied from
-  // the DocumentRelationshipViewer PCF's transform-robust modal. `position:fixed;
-  // inset:0` + flex-center means a transformed ancestor can no longer top-anchor
-  // the surface: the overlay fills whatever box `fixed` resolves to and centers
-  // its child within it. High z-index for Dataverse form stacking.
-  overlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: tokens.colorBackgroundOverlay,
-    zIndex: 10000,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  // "Our modal" size (round 3 items 13-15): 1040 × 72vh, centered by the overlay.
-  // maxHeight caps it on short viewports so the footer/compose never clips.
-  surface: {
-    position: 'relative',
-    width: 'min(1040px, 95vw)',
-    maxWidth: 'min(1040px, 95vw)',
-    height: '72vh',
-    maxHeight: '90vh',
-    backgroundColor: tokens.colorNeutralBackground1,
-    borderRadius: tokens.borderRadiusLarge,
-    boxShadow: tokens.shadow64,
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-  },
-  // Round-7 item 10: "expand" fills the app CONTAINER (not OS-fullscreen). The
-  // overlay is `position:fixed; inset:0`, so 96vw × 94vh fills the visible app
-  // area with a thin margin, matching the OOB `navigateTo` Layout-1 footprint —
-  // never a literal 100vw/100vh takeover.
-  surfaceExpanded: {
-    width: '96vw',
-    maxWidth: '96vw',
-    height: '94vh',
-    maxHeight: '94vh',
-  },
-  // Shared maximize/restore + close cluster pinned to the modal's upper-right corner (round-8.4 standardization).
-  windowControls: {
-    position: 'absolute',
-    top: tokens.spacingVerticalM,
-    right: tokens.spacingHorizontalM,
-    zIndex: 1,
-  },
-  title: {
-    display: 'flex',
-    alignItems: 'center',
-    paddingInlineStart: tokens.spacingHorizontalL,
-    // Leave room so the "Messages" title never runs under the corner close button.
-    paddingInlineEnd: tokens.spacingHorizontalXXL,
-    paddingBlock: tokens.spacingVerticalM,
-    margin: 0,
-    fontSize: tokens.fontSizeBase500,
-    lineHeight: tokens.lineHeightBase500,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-  },
-  content: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' },
-  workspaceHost: { flex: 1, minHeight: 0, minWidth: 0, display: 'flex' },
+  // The two-pane ConversationWorkspace fills the shell body (padded={false}) and
+  // owns its own internal scrolling. `height:100%` resolves against the shell's
+  // definite `md` height; flex lays the two panes out horizontally. Layout only —
+  // no color/spacing literals (ADR-021 / NFR-03).
+  workspaceHost: { display: 'flex', minHeight: 0, minWidth: 0, height: '100%', width: '100%' },
 });
 
 export interface IConversationModalProps {
@@ -162,35 +122,10 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
 }) => {
   const s = useStyles();
 
-  // Round-7 item 10: expand the modal to fill the app container (toggle).
-  const [expanded, setExpanded] = React.useState(false);
-
   // Record-lookup service for the shell's built-in New-conversation modal (round
   // 4 PCF item 3 — the ＋ was inert because the PCF host never wired it). The
   // create modal opens record-scoped (regarding = the host record, locked).
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
-
-  const surfaceRef = React.useRef<HTMLDivElement | null>(null);
-
-  // Esc-to-dismiss (the Fluent Dialog gave us this for free before). Bound only
-  // while open. Keyed on `open`/`onClose` so it re-binds if the handler changes.
-  React.useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape') {
-        ev.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', onKeyDown, true);
-    return () => document.removeEventListener('keydown', onKeyDown, true);
-  }, [open, onClose]);
-
-  // Move focus into the surface when it opens so keyboard users land inside the
-  // modal (crude focus management — the surface is focusable via tabIndex=-1).
-  React.useEffect(() => {
-    if (open) surfaceRef.current?.focus();
-  }, [open]);
 
   const renderConversation = React.useCallback(
     (props: IConversationRendererProps) => (
@@ -217,53 +152,23 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
     // component casts above). Runtime is unaffected.
   ) as unknown as ConversationWorkspaceProps['renderConversation'];
 
-  if (!open) return null;
-
-  // Backdrop click (on the overlay itself, not a descendant) dismisses.
-  const handleOverlayMouseDown = (ev: React.MouseEvent<HTMLDivElement>) => {
-    if (ev.target === ev.currentTarget) onClose();
-  };
-
-  const overlay = (
-    <div className={s.overlay} onMouseDown={handleOverlayMouseDown}>
-      <div
-        ref={surfaceRef}
-        className={mergeClasses(s.surface, expanded && s.surfaceExpanded)}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Messages"
-        tabIndex={-1}
-      >
-        {/* Standardized modal chrome (round-8.4): the shared maximize/restore + close cluster, pinned to the upper-
-            right corner. Expand fills the app container (Round-7 item 10). Single source of truth = ModalWindowControls. */}
-        <div className={s.windowControls}>
-          <ModalWindowControlsR16
-            isMaximized={expanded}
-            onToggleMaximize={() => setExpanded(v => !v)}
-            onClose={onClose}
-          />
-        </div>
-        {/* §B2 (UAT): modal title = "Messages". */}
-        <div className={s.title}>Messages</div>
-        <div className={s.content}>
-          <div className={s.workspaceHost}>
-            <ConversationWorkspaceR16
-              authenticatedFetch={authenticatedFetch}
-              bffBaseUrl={bffBaseUrl}
-              regarding={{ entityType, id }}
-              renderConversation={renderConversation}
-              navigationService={navigationService}
-              initialThreadId={initialThreadId}
-            />
-          </div>
-        </div>
+  // The shell owns the envelope, header ("Messages"), maximize/restore + ×,
+  // Esc/backdrop dismiss (`light`), focus trap, and the native thin-scrollbar
+  // body. Centering survives a transformed ancestor because the Fluent Dialog
+  // portal mounts above it (FR-08). `padded={false}` → the workspace fills the
+  // body edge-to-edge and manages its own scrolling.
+  return (
+    <SprkModalR16 open={open} onClose={onClose} title="Messages" size="md" dismiss="light" padded={false}>
+      <div className={s.workspaceHost}>
+        <ConversationWorkspaceR16
+          authenticatedFetch={authenticatedFetch}
+          bffBaseUrl={bffBaseUrl}
+          regarding={{ entityType, id }}
+          renderConversation={renderConversation}
+          navigationService={navigationService}
+          initialThreadId={initialThreadId}
+        />
       </div>
-    </div>
+    </SprkModalR16>
   );
-
-  // Portal to document.body + re-wrap FluentProvider so the portaled subtree stays
-  // themed (fluent-v9-portal-gotcha). Centering no longer depends on the portal —
-  // the overlay's flex-center does that — but body-level mounting keeps the modal
-  // above the form's own stacking contexts.
-  return ReactDOM.createPortal(<FluentProvider theme={webLightTheme}>{overlay}</FluentProvider>, document.body);
 };

@@ -4,7 +4,7 @@
     <title>P5 — Replace hand-rolled ConversationModal with SprkModal (md) — FR-16</title>
     <phase>5 Messages overlay</phase>
     <gate>blocked until 004</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Brownfield replacement of a hand-rolled `createPortal`+`position:fixed` overlay in a PCF consumer; validates the shell's transform-robust centering invariant (design §4.6 / FR-08) — the hardest conversion, with a real portal-correctness judgment boundary.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -114,7 +114,7 @@
     <criterion testable="true">Negative/escalation: if `SprkModal` mis-centers under a transform, the task STOPS and escalates (no re-hand-rolled workaround); otherwise the PCF builds via `build:prod`, compiles under `@types/react` 18, and tests are green.</criterion>
   </acceptance-criteria>
 
-  <notes>The hand-roll dropped the Fluent `Dialog` envelope on purpose to dodge a transform-ancestor centering bug — so treat centering under a transform as the primary acceptance signal, not an afterthought. `md` is `min(1040px,92vw) × min(72vh,720px)`; the existing surface used `95vw` — the 95→92 vw cap is an acceptable unification (document it), not a blocker. This is the parallel-group `none` task (run standalone, not in a wave) because it is the highest-risk conversion. Completion summary appended here when done.</notes>
+  <notes>The hand-roll dropped the Fluent `Dialog` envelope on purpose to dodge a transform-ancestor centering bug — so treat centering under a transform as the primary acceptance signal, not an afterthought. `md` is `min(1040px,92vw) × min(72vh,720px)`; the existing surface used `95vw` — the 95→92 vw cap is an acceptable unification (document it), not a blocker. This is the parallel-group `none` task (run standalone, not in a wave) because it is the highest-risk conversion. COMPLETED 2026-08-02 (solo opus sub-agent ≈ authored sonnet/xhigh; main session pre-extended pcf-safe.ts with SprkModal + ModalWindowControls exports): hand-roll DELETED (269→174 lines), `<SprkModal size="md" dismiss="light" padded={false}>` via `@spaarke/ui-components/dist/pcf-safe` (dist-path specifier empirically required by webpack; ADR-012-sanctioned, matches the control's existing dist imports). **FR-08 VALIDATED**: new structural test renders under `transform:scale(0.9)` and proves the Dialog surface mounts OUTSIDE the transformed subtree — under real React 16, also proving SprkModal genuinely PCF-safe. Escalation did NOT fire. expanded→maximize; Esc/backdrop→light; 95vw→92vw + new 720px cap documented; theme now inherits host (dark-parity FIX — hand-roll pinned webLightTheme). PCF jest 36→38 (zero regressions), build:prod + lint green; SprkModal suite 106/106. Visual dark/transform pass recommended pre-merge. Detail: notes/task-070-completion.md.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

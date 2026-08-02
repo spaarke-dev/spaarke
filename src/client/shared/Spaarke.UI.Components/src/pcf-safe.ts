@@ -21,6 +21,23 @@
  */
 
 // ─── Components (PCF-safe) ─────────────────────────────────────────────────
+// SprkModal + ModalWindowControls (spaarke-modal-system P5, task 070): the
+// canonical modal shell is structurally React-16/17-safe (useState/useEffect/
+// useCallback only — NO useId; the aria-labelledby id comes from a module
+// counter for exactly this reason) and is added here per the P0 decision that
+// "a specific preset can be added to pcf-safe later at low cost if a PCF ever
+// needs one" — CommunicationConversationPanel's ConversationModal is that
+// consumer. ModalWindowControls was already PCF-consumed via the MAIN barrel
+// (a pre-existing deviation this export retires).
+export { SprkModal } from './components/SprkModal/SprkModal';
+export type {
+  SprkModalProps,
+  SprkModalDismiss,
+  SprkModalBodyScroll,
+  SprkModalNav,
+} from './components/SprkModal/SprkModal';
+export { ModalWindowControls } from './components/ModalWindowControls/ModalWindowControls';
+export type { IModalWindowControlsProps } from './components/ModalWindowControls/ModalWindowControls';
 export { RelationshipCountCard } from './components/RelationshipCountCard';
 export { FindSimilarDialog } from './components/FindSimilar/FindSimilarDialog';
 export { MiniGraph } from './components/MiniGraph';

@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — **P0 ✅ P0.5 ✅ P1 ✅ P2 ✅ P3 ✅/⏸️ P4 ✅** |
+| **Task** | none active — **P0 ✅ P0.5 ✅ P1 ✅ P2 ✅ P3 ✅/⏸️ P4 ✅ P5 ✅** |
 | **Step** | — |
 | **Status** | phase-boundary |
-| **Next Action** | P5 070 (ConversationModal replacement, solo, sonnet/**xhigh**) → P6 080 (WizardShell) → P7 090→091/092 → P8 100 (main-session wrap-up) |
+| **Next Action** | P6 080 (WizardShell light-first re-base, solo) → P7 090→091/092 → P8 100 (main-session wrap-up) |
 
 ### Critical Context
 **P0 (Build, 001–013) ✅** — `SprkModal` + 6 presets ship in `@spaarke/ui-components` (main barrel only; ABSENT from `pcf-safe.ts` → Code-Page-scoped by construction). 86 P0 tests green. Docs: `MODAL-DESIGN-SYSTEM.md` + ADR-050 + pattern pointer + §17 row.
@@ -28,7 +28,9 @@
 
 **P4 ✅ 2026-08-02** — RichFilePreviewDialog → PreviewModal/BrowseModal (public contract byte-identical; @deprecated FilePreviewDialog DELETED + sole consumer migrated); FindSimilarDialog ×3 → xl per-copy (literal on the viewer; WizardShell-prop alignment on the wizard copies; consolidation → Issue #714/DEF-003); `headerActions` passthrough added to Preview/Browse presets. See `notes/wave-p4-completion.md`.
 
-**Conversions remaining**: P5 070 (sonnet/**xhigh**) · P6 080 · P7 090→091/092 · P8 100 (main-session wrap-up). Each POML carries preset→conversion map + escalation triggers. Conversion waves modify EXISTING dialogs — read target files before rewriting.
+**P5 ✅ 2026-08-02** — ConversationModal hand-roll (overlay 2 of 3) DELETED → `SprkModal md/light` via NEW pcf-safe exports (SprkModal + ModalWindowControls added to the allow-list — the P0 "add when a PCF needs one" case); **FR-08 transform-centering VALIDATED by structural test under real React 16**; dark parity improved. `@spaarke/ui-components/dist/pcf-safe` is the working PCF import specifier (webpack node-resolution). See `notes/task-070-completion.md`.
+
+**Conversions remaining**: P6 080 · P7 090→091/092 · P8 100 (main-session wrap-up). Each POML carries preset→conversion map + escalation triggers. Conversion waves modify EXISTING dialogs — read target files before rewriting.
 
 **Env**: fresh worktree; node_modules + dists built for UI.Components, SdapClient, Auth, Compose.Components, AI.Widgets, AI.Outputs, AI.Context, DocumentOperations, SpaarkeAi, LegalWorkspace (build broken per #712), SemanticSearchControl.
 
