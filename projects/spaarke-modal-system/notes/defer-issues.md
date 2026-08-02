@@ -42,6 +42,18 @@
 
 ---
 
+## DEF-004 — LegalWorkspace `WorkAssignmentWizardDialog` forks the canonical WizardShell (pre-existing)
+
+| Field | Value |
+|---|---|
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/715 |
+| **Discovered** | 2026-08-02, P6 — task 080 consumer-inventory adr-check (not caused/modified by this project) |
+| **Ownership** | LegalWorkspace surface owner; follow-on task |
+| **Concrete failing behavior** | The fork silently missed task 080's chrome standardization and will miss every future WizardShell improvement (ADR-012 compose-don't-fork violation); it also carries a pre-existing undefined `navigationService` reference (~line 360, part of the LW tsc baseline / #712 noise) |
+| **Suggested follow-on** | Replace the fork with the canonical `WizardShell` import (prop-map), or document the divergence requirement and extend the canonical shell; fix/remove the dead reference either way |
+
+---
+
 ## Decision-pending (not deferred work — resolves inside this project)
 
 - **030 escalation — legacy `SendEmailDialog` "v1.1.59 no-X" decision**: in-file comments document a 2026-07 UAT decision deliberately removing the title-bar × from `components/SendEmailDialog/SendEmailDialog.tsx`. Conflicts with the 2026-07-31 FR-12 mandate. Cluster NOT added (escalation per POML). **UPDATE 2026-08-02**: the planned resolver (P3/051 retirement) is itself DEFERRED (DEF-002 / Issue #713 — live DailyBriefingApp consumer), so this escalation **remains OPEN**: the legacy dialog stays live without the window-controls cluster until the follow-on retires it. Owner options unchanged: accept the interim gap (recommended — dialog is retirement-bound via #713) or direct the cluster be added to the legacy dialog despite v1.1.59. Evidence: `notes/task-030-completion.md` + `task-051-completion.md`.

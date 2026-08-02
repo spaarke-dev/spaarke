@@ -4,7 +4,7 @@
     <title>P6 — WizardShell light-first re-base on SprkModal tokens + window controls — FR-17</title>
     <phase>6 Wizards</phase>
     <gate>blocked until 003,008</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies a shipped shared-lib `.tsx` (`WizardShell`) consumed by every `Create*`/direct wizard plus the iframe web-resource builds — high blast radius, so correctness + consumer/build verification are load-bearing (FULL trigger: modifying `.tsx`, tags include `fluent-ui`).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -119,7 +119,7 @@
     <criterion testable="true">No hex, `'1px'` literals, or inline color styles are introduced in the re-based chrome (ADR-021 / NFR-03).</criterion>
   </acceptance-criteria>
 
-  <notes>Modify-only — no `&lt;justification&gt;` (`WizardShell` already exists; this edits it). Depth is owner-locked to light-first (§11-G): tokens + size + window controls only, envelope/embedded/stepper preserved. Depends on 003 (glyph) and 008 (`SprkModal` base + `WizardModal` preset tokens). The `WizardModal` preset is the canonical reference for the target header/footer/size.</notes>
+  <notes>Modify-only — no `&lt;justification&gt;` (`WizardShell` already exists; this edits it). Depth is owner-locked to light-first (§11-G): tokens + size + window controls only, envelope/embedded/stepper preserved. Depends on 003 (glyph) and 008 (`SprkModal` base + `WizardModal` preset tokens). The `WizardModal` preset is the canonical reference for the target header/footer/size. COMPLETED 2026-08-02 (solo sub-agent, FULL): header/footer aligned to SprkModal tokens (ellipsized title, strokeWidthThin/colorNeutralStroke2 borders, spacing S/L); footer reordered Skip·Back·Next w/ transparent Skip (matches WizardModal); default size = getSurfaceStyle('wizard') (95vw/70vh literals gone); maxWidth/height override contract + embedded + 200px stepper + envelope 100% unchanged (061's FindSimilar xl overrides proven intact). 9-consumer matrix green across React 16/18/19: UI.Components (full suite at exact baseline), AI.Widgets, SemanticSearchControl build:prod (transitively bundles WizardShell via DocumentEmailWizard — non-obvious blast-radius finding), SpaarkeAi, DocumentUploadWizard, SpeAdminApp, external-spa (React 18); LW via scoped tsc (#712). Zero consumer-file changes needed; zero escalations. Discovered pre-existing LW WorkAssignmentWizardDialog FORK → Issue #715 / DEF-004. Detail: notes/task-080-completion.md.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

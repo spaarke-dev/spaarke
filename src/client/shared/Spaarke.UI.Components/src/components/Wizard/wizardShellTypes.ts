@@ -277,26 +277,32 @@ export interface IWizardShellProps {
    */
   footerLeftExtra?: React.ReactNode;
   /**
-   * Optional override for the dialog surface `max-width`. Defaults to
-   * `'95vw'` (preserves existing consumers — DocumentRelationshipViewer
-   * sizing is unchanged).
+   * Optional override for the dialog surface `max-width`. Defaults to the
+   * named `wizard` size from `SprkModal/sizes` (`SIZE_SPEC.wizard.widthVw`
+   * = `'62vw'`) as of task 080 (spec FR-17) — previously the ad-hoc
+   * `'95vw'` literal (v1.1.63).
    *
    * Pass an explicit pixel value (e.g. `'1280px'`) to match a sibling
    * host dialog like the SemanticSearchControl FilePreviewDialog so the
-   * wizard footprint mirrors the preview surface when stacked.
+   * wizard footprint mirrors the preview surface when stacked, or a
+   * named-size value (e.g. FindSimilarDialog's `xl` override) sourced
+   * from `SIZE_SPEC` so it can't drift from the canonical scale.
    *
    * Applied as an inline style on `DialogSurface` so Fluent v9's
    * makeStyles cascade cannot override it (same pattern as
    * SendEmailDialog `maxWidth` since v1.1.52).
    *
    * @since v1.1.63 (SemanticSearchControl UAT polish round — wizard
-   *   sizing to match FilePreviewDialog footprint)
+   *   sizing to match FilePreviewDialog footprint); default swapped to
+   *   the named `wizard` size at task 080 (spec FR-17, 2026-08-02).
    */
   maxWidth?: string;
   /**
    * Optional override for the dialog surface `height` (and
-   * `min-height`). Defaults to `'70vh'` (preserves existing
-   * consumers — current WizardShell `body` style hard-codes `70vh`).
+   * `min-height`). Defaults to the named `wizard` size from
+   * `SprkModal/sizes` (`min(74vh, 760px)`, `SIZE_SPEC.wizard`) as of
+   * task 080 (spec FR-17) — previously the ad-hoc `'70vh'` literal
+   * (v1.1.63).
    *
    * Pass a viewport-relative value (e.g. `'85vh'`) to give the wizard
    * a tall presence matching a sibling host dialog. Applied to both
@@ -304,7 +310,8 @@ export interface IWizardShellProps {
    * so Fluent v9's content-sizing cannot collapse the surface below
    * the requested size.
    *
-   * @since v1.1.63
+   * @since v1.1.63; default swapped to the named `wizard` size at
+   *   task 080 (spec FR-17, 2026-08-02).
    */
   height?: string;
   /**
