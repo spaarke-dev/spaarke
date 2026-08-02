@@ -1,27 +1,34 @@
 /**
- * RichFilePreviewDialog — back-compat smoke tests + shell-adapter tests.
+ * RichFilePreviewDialog — back-compat smoke tests + preset-composition tests.
  *
- * Verifies the dialog wrapper preserves the pre-extraction external behavior
- * (R5 task 013 D2-08 renderer extraction) AND that R4 task 011's adoption of
- * the `<RecordNavigationModalShell>` correctly adapts the legacy
- * `onNavigate(nextIndex)` callback shape to the shell's
- * `onNavigate(direction)` shape.
+ * Verifies the dialog wrapper preserves its external `IFilePreviewDialogProps`
+ * behavior (unchanged since the R5 task 013 D2-08 renderer extraction) AND
+ * that the spaarke-modal-system task 060 re-base — composing the
+ * `PreviewModal`/`BrowseModal` `SprkModal` presets instead of a hand-rolled
+ * `Dialog` + `RecordNavigationModalShell` — correctly adapts the legacy
+ * `onNavigate(nextIndex)` callback shape to `BrowseModal`'s
+ * `nav.onNavigate(direction)` shape.
  *
  * Covered:
  *   - Dialog surface mounts when `open` is true; renderer subtree appears
- *   - Document name appears in the renderer's title bar
+ *   - Document name appears in the preset's header title (the renderer's own
+ *     title is suppressed via `showTitle={false}` — no double header)
  *   - Close button dispatches `onClose`
  *   - Renderer is conditionally unmounted when `open` becomes false
- *     (preserves the original reset-on-close lifecycle)
+ *     (preserves the original reset-on-close lifecycle — now via Fluent's
+ *     own `Dialog` not-rendering-when-closed behavior, composed inside
+ *     `SprkModal`)
  *   - Non-nav path (no `navigationTotal`/`currentIndex`/`onNavigate`) renders
- *     the renderer directly without shell chrome — back-compat for the
- *     dominant consumer (LegalWorkspace FilePreviewDialog).
- *   - Nav path mounts the shell and forwards `direction` → `nextIndex` via
- *     the adapter: `next` → `currentIndex + 1`, `prev` → `currentIndex - 1`.
+ *     via `PreviewModal` — back-compat for the dominant consumer
+ *     (LegalWorkspace FilePreviewDialog)
+ *   - Nav path renders via `BrowseModal` and forwards `direction` →
+ *     `nextIndex` via the adapter: `next` → `currentIndex + 1`, `prev` →
+ *     `currentIndex - 1`
  *
+ * @see ADR-012 - Shared component library (compose presets, don't fork)
  * @see ADR-021 - Fluent UI v9
  * @see ADR-022 - React 19 compatible
- * @see spec.md (smart-todo-r4) FR-15 — regression-safety check
+ * @see spec.md (spaarke-modal-system) FR-15 — task 060 preset re-base
  */
 
 import * as React from 'react';
@@ -105,28 +112,32 @@ describe('RichFilePreviewDialog (back-compat)', () => {
       onNavigate: jest.fn(),
     };
     renderWithProviders(<RichFilePreviewDialog {...props} />);
-    // R4 task 011 known finding: when nav props are supplied, the title
-    // text appears in BOTH the shell's header AND the renderer's internal
-    // title bar (the renderer's title is rendered unconditionally). This is
-    // the documented title-bar duplication that should be addressed in a
-    // follow-up shell-API iteration (see task 011 completion report:
-    // "Shell-API feedback"). For now we assert the title is rendered at
-    // least once and that the wider prop shape compiles.
-    expect(screen.getAllByText('BackCompat.pdf').length).toBeGreaterThanOrEqual(1);
+    // Task 060 fix: the pre-re-base R4 task 011 shell adapter rendered the
+    // title in BOTH the shell's header AND the renderer's internal title
+    // bar (a known "double header" finding). The preset composition always
+    // passes `showTitle={false}` to the renderer, so the title now renders
+    // EXACTLY once (via BrowseModal/SprkModal's own header) — this also
+    // proves the wider prop shape still compiles.
+    expect(screen.getAllByText('BackCompat.pdf')).toHaveLength(1);
   });
 
-  describe('shell adapter (R4 task 011)', () => {
-    it('does not mount the shell when nav props are absent', () => {
+  describe('preset composition (task 060 re-base)', () => {
+    it('renders via PreviewModal (no nav group) when nav props are absent', () => {
       // LegalWorkspace pattern — single document, no cross-record nav.
       const props = defaultProps();
       renderWithProviders(<RichFilePreviewDialog {...props} />);
-      // The shell's verbose aria-label ("Record N of M") is unique to its
-      // counter and is NOT rendered by RichFilePreview's own counter.
-      // Its absence confirms the shell is not in the tree.
-      expect(screen.queryByLabelText(/^Record \d+ of \d+$/)).toBeNull();
+      // PreviewModal never forwards a `nav` prop to SprkModal, so no nav
+      // group renders at all — proof the single-document path is taken.
+      expect(screen.queryByRole('group', { name: 'Record navigation' })).toBeNull();
+      // lg size (record-modal-selection.md Layout 2 — content-driven, NOT
+      // the OOB 85%×85% record-open rectangle).
+      expect(screen.getByRole('dialog')).toHaveStyle({
+        width: 'min(1280px, 94vw)',
+        height: 'min(85vh, 880px)',
+      });
     });
 
-    it('mounts the shell when nav props are present', () => {
+    it('renders via BrowseModal (nav group + counter) when nav props are present', () => {
       // SemanticSearchControl / DocumentRelationshipViewer pattern —
       // cross-record nav across a result set.
       const onNavigate = jest.fn();
@@ -136,11 +147,14 @@ describe('RichFilePreviewDialog (back-compat)', () => {
         onNavigate,
       });
       renderWithProviders(<RichFilePreviewDialog {...props} />);
-      // Shell's counter announces position via aria-label "Record N of M".
-      expect(screen.getByLabelText('Record 3 of 5')).toBeInTheDocument();
+      // SprkModal's nav counter is plain visible text (no per-instance
+      // aria-label of its own — the group carries `aria-label="Record
+      // navigation"` + `aria-live="polite"` instead).
+      expect(screen.getByRole('group', { name: 'Record navigation' })).toBeInTheDocument();
+      expect(screen.getByText('3 of 5')).toBeInTheDocument();
     });
 
-    it('adapts shell direction="next" to onNavigate(currentIndex + 1)', async () => {
+    it('adapts BrowseModal nav("next") to onNavigate(currentIndex + 1)', async () => {
       const user = userEvent.setup();
       const onNavigate = jest.fn();
       const props = defaultProps({
@@ -149,9 +163,9 @@ describe('RichFilePreviewDialog (back-compat)', () => {
         onNavigate,
       });
       renderWithProviders(<RichFilePreviewDialog {...props} />);
-      // The shell's "Next record" button (aria-label distinct from the
-      // renderer's "Next document" button, which is suppressed here since
-      // nav props are not forwarded into the renderer).
+      // SprkModal's own "Next record" nav button (aria-label unchanged from
+      // the pre-re-base shell convention) — proves BrowseModal's direction
+      // callback correctly adapts to the legacy index-based `onNavigate`.
       const nextBtn = screen.getByRole('button', { name: 'Next record' });
       await user.click(nextBtn);
       await waitFor(() => {
@@ -159,7 +173,7 @@ describe('RichFilePreviewDialog (back-compat)', () => {
       });
     });
 
-    it('adapts shell direction="prev" to onNavigate(currentIndex - 1)', async () => {
+    it('adapts BrowseModal nav("prev") to onNavigate(currentIndex - 1)', async () => {
       const user = userEvent.setup();
       const onNavigate = jest.fn();
       const props = defaultProps({
@@ -175,7 +189,7 @@ describe('RichFilePreviewDialog (back-compat)', () => {
       });
     });
 
-    it('disables the shell prev button at index 0', () => {
+    it("disables BrowseModal's prev nav button at index 0", () => {
       const props = defaultProps({
         navigationTotal: 3,
         currentIndex: 0,
@@ -186,7 +200,7 @@ describe('RichFilePreviewDialog (back-compat)', () => {
       expect(prevBtn).toBeDisabled();
     });
 
-    it('disables the shell next button at the last index', () => {
+    it("disables BrowseModal's next nav button at the last index", () => {
       const props = defaultProps({
         navigationTotal: 3,
         currentIndex: 2,

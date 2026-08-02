@@ -85,6 +85,12 @@ export interface PreviewModalProps {
   uiScale?: number;
   /** Metadata rows rendered in the meta column. */
   metadata?: PreviewModalMetadataItem[];
+  /**
+   * Header actions rendered left of the window controls (forwarded to the
+   * shell's `headerActions` slot) — e.g. an overflow "…" menu or an
+   * open-in-new-tab button (P4 consolidation, task-060 gap report).
+   */
+  headerActions?: React.ReactNode;
   /** Stage content — e.g. a `RichFilePreview` renderer. Defaults to a placeholder. */
   children?: React.ReactNode;
 }
@@ -95,6 +101,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
   title,
   uiScale,
   metadata = [],
+  headerActions,
   children,
 }) => {
   return (
@@ -106,6 +113,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
       layout="landscape"
       padded={false}
       uiScale={uiScale}
+      headerActions={headerActions}
       footer={
         <Button appearance="primary" onClick={onClose}>
           Close

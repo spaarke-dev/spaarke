@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — **P0 ✅ P0.5 ✅ P1 ✅ P2 ✅ P3 ✅/⏸️** (050 done; 051 deferred → Issue #713) |
+| **Task** | none active — **P0 ✅ P0.5 ✅ P1 ✅ P2 ✅ P3 ✅/⏸️ P4 ✅** |
 | **Step** | — |
 | **Status** | phase-boundary |
-| **Next Action** | P4 wave (060/061 parallel, needs 007/004 ✅) → P5 070 (sonnet/**xhigh**) → P6 080 → P7 090→091/092 → P8 100 |
+| **Next Action** | P5 070 (ConversationModal replacement, solo, sonnet/**xhigh**) → P6 080 (WizardShell) → P7 090→091/092 → P8 100 (main-session wrap-up) |
 
 ### Critical Context
 **P0 (Build, 001–013) ✅** — `SprkModal` + 6 presets ship in `@spaarke/ui-components` (main barrel only; ABSENT from `pcf-safe.ts` → Code-Page-scoped by construction). 86 P0 tests green. Docs: `MODAL-DESIGN-SYSTEM.md` + ADR-050 + pattern pointer + §17 row.
@@ -26,7 +26,9 @@
 
 **P3 (2026-08-02)** — 050 ✅: three forms compose the LITERAL FormModal/md (preset pre-extended by main session: `submitDisabled`/`busy`/`cancelLabel`/`dismiss:alert`); QuickStartModal is the first `useUiScale()` consumer. **051 ⏸️ DEFERRED (Issue #713 / DEF-002)**: EmailComposer self-chromed + two live legacy consumers (pcf-safe export [dead], DailyBriefingApp `onSend`); interim `maxHeight:720px` cap → wrapper numerically = `md`; FR-14 satisfied in substance; P1 no-X escalation on the legacy dialog stays OPEN. See `notes/wave-p3-completion.md`.
 
-**Conversions remaining**: P4 060/061 · P5 070 (sonnet/**xhigh**) · P6 080 · P7 090→091/092 · P8 100 (main-session wrap-up). Each POML carries preset→conversion map + escalation triggers. Conversion waves modify EXISTING dialogs — read target files before rewriting.
+**P4 ✅ 2026-08-02** — RichFilePreviewDialog → PreviewModal/BrowseModal (public contract byte-identical; @deprecated FilePreviewDialog DELETED + sole consumer migrated); FindSimilarDialog ×3 → xl per-copy (literal on the viewer; WizardShell-prop alignment on the wizard copies; consolidation → Issue #714/DEF-003); `headerActions` passthrough added to Preview/Browse presets. See `notes/wave-p4-completion.md`.
+
+**Conversions remaining**: P5 070 (sonnet/**xhigh**) · P6 080 · P7 090→091/092 · P8 100 (main-session wrap-up). Each POML carries preset→conversion map + escalation triggers. Conversion waves modify EXISTING dialogs — read target files before rewriting.
 
 **Env**: fresh worktree; node_modules + dists built for UI.Components, SdapClient, Auth, Compose.Components, AI.Widgets, AI.Outputs, AI.Context, DocumentOperations, SpaarkeAi, LegalWorkspace (build broken per #712), SemanticSearchControl.
 

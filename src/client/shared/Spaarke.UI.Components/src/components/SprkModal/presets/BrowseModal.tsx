@@ -29,6 +29,11 @@ export interface BrowseModalProps {
   uiScale?: number;
   /** Metadata rows rendered in the meta column. */
   metadata?: PreviewModalMetadataItem[];
+  /**
+   * Header actions rendered left of the window controls (forwarded to the
+   * shell's `headerActions` slot) — mirrors `PreviewModal.headerActions`.
+   */
+  headerActions?: React.ReactNode;
   /** Stage content — e.g. a `RichFilePreview` renderer. Defaults to a placeholder. */
   children?: React.ReactNode;
   /** Browse ("N of M") navigation — forwarded to `SprkModal`'s header nav group. */
@@ -49,6 +54,7 @@ export const BrowseModal: React.FC<BrowseModalProps> = ({
   title,
   uiScale,
   metadata = [],
+  headerActions,
   children,
   nav,
   onBeforeNavigate,
@@ -78,6 +84,7 @@ export const BrowseModal: React.FC<BrowseModalProps> = ({
       layout="landscape"
       padded={false}
       uiScale={uiScale}
+      headerActions={headerActions}
       nav={effectiveNav}
       footer={
         <Button appearance="primary" onClick={onClose}>

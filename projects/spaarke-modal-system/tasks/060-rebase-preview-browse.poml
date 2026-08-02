@@ -4,7 +4,7 @@
     <title>P4 — RichFilePreviewDialog → PreviewModal/BrowseModal; retire @deprecated FilePreviewDialog — FR-15</title>
     <phase>4 Preview &amp; browse</phase>
     <gate>blocked until 007</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Re-bases the preview/browse `.tsx` onto TWO presets, composes `RecordNavigationModalShell` for N-of-M nav, AND retires a `@deprecated` file with a live consumer to migrate; record-set navigation + content-driven sizing are load-bearing.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -111,7 +111,7 @@
     <criterion testable="true">`RecordNavigationModalShell` is composed (not forked); no hex/`'1px'`/inline color; dark parity holds; shared-lib build green under `@types/react` 18 and React 19.</criterion>
   </acceptance-criteria>
 
-  <notes>Verified: `FindSimilarResultsStep.tsx` imports `FilePreviewDialog` from `'../FilePreview'` (line 37, used line 487) and is the sole consumer of the deprecated dialog. Prototype `BrowseModal = PreviewModal + nav` (project CLAUDE.md Key Facts). Note there are separate `FilePreviewDialog.tsx` files under DocumentRelationshipViewer / SemanticSearchControl / LegalWorkspace — those are OUT of scope here (this task retires only the shared `Spaarke.UI.Components/.../FilePreview/FilePreviewDialog.tsx`). Completion summary appended here when done.</notes>
+  <notes>Verified: `FindSimilarResultsStep.tsx` imports `FilePreviewDialog` from `'../FilePreview'` (line 37, used line 487) and is the sole consumer of the deprecated dialog. Prototype `BrowseModal = PreviewModal + nav` (project CLAUDE.md Key Facts). Note there are separate `FilePreviewDialog.tsx` files under DocumentRelationshipViewer / SemanticSearchControl / LegalWorkspace — those are OUT of scope here (this task retires only the shared `Spaarke.UI.Components/.../FilePreview/FilePreviewDialog.tsx`). COMPLETED 2026-08-02 (parallel sub-agent + main-session consolidation): single-doc → PreviewModal, record-set → BrowseModal (SprkModal nav + onBeforeNavigate seam per the shipped 007 single-header decision; POML's "via RecordNavigationModalShell" wording predates it — delta documented). All hand-rolled chrome removed (382→~245 lines); public IFilePreviewDialogProps byte-identical (~8 consumers zero-change). RichFilePreview gained `showMetadataPane` (default true) to avoid double side-panels; P1 interim props removed (zero other callers, grep-proven). @deprecated FilePreviewDialog DELETED; FindSimilarResultsStep migrated (escalation assessed, not fired — 1:1 service-callback mapping; onEmailDocument no-op per EmailReadingAttachments precedent); grep proof zero dangling imports. Preset gap reported (headerActions) → closed by main session on Preview/Browse presets. Detail: notes/task-060-completion.md.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

@@ -30,6 +30,18 @@
 
 ---
 
+## DEF-003 — FindSimilarDialog 3-copy consolidation deferred (name collision, 2 UX patterns, dead `embedded` prop)
+
+| Field | Value |
+|---|---|
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/714 |
+| **Discovered** | 2026-08-02, P4 wave — task 061 (per its POML's explicit done-or-deferred criterion) |
+| **Ownership** | Follow-on task; touches pcf-safe deep-import consumers (SemanticSearchControl, RelatedDocumentCount) |
+| **Concrete failing behavior (drift risk)** | One name covers two unrelated UX patterns (iframe result-viewer vs WizardShell upload+search wizard) with no shared base/tests — task 061 itself needed 2 different re-basing techniques across 3 files for one visual goal. The viewer copy's `embedded` prop is dead code (zero live callers, grep-verified). |
+| **Suggested follow-on** | Rename viewer → `FindSimilarViewerDialog` (+ consumer updates); audit the wizard copy's single-consumer shared-lib layer; wire-or-remove `embedded` |
+
+---
+
 ## Decision-pending (not deferred work — resolves inside this project)
 
 - **030 escalation — legacy `SendEmailDialog` "v1.1.59 no-X" decision**: in-file comments document a 2026-07 UAT decision deliberately removing the title-bar × from `components/SendEmailDialog/SendEmailDialog.tsx`. Conflicts with the 2026-07-31 FR-12 mandate. Cluster NOT added (escalation per POML). **UPDATE 2026-08-02**: the planned resolver (P3/051 retirement) is itself DEFERRED (DEF-002 / Issue #713 — live DailyBriefingApp consumer), so this escalation **remains OPEN**: the legacy dialog stays live without the window-controls cluster until the follow-on retires it. Owner options unchanged: accept the interim gap (recommended — dialog is retirement-bound via #713) or direct the cluster be added to the legacy dialog despite v1.1.59. Evidence: `notes/task-030-completion.md` + `task-051-completion.md`.

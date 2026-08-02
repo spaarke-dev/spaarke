@@ -24,6 +24,22 @@
  * outer container's width/height (the modal dialog clamps to 1280px × 85vh;
  * non-modal hosts pick their own dimensions).
  *
+ * spaarke-modal-system task 060 (P4 re-base): `RichFilePreviewDialog` now
+ * mounts this renderer INSIDE the `PreviewModal`/`BrowseModal` presets
+ * instead of a hand-rolled `Dialog` + `RecordNavigationModalShell`. Those
+ * presets own ALL chrome (title, nav "N of M", `ModalWindowControls`,
+ * maximize/restore, footer) via `SprkModal`'s header/footer, so:
+ *  - the former `onClose`/`isMaximized`/`onToggleMaximize` props (added by
+ *    P1 task 030 as an INTERIM measure before the presets existed) are
+ *    REMOVED — they had exactly one caller (`RichFilePreviewDialog`'s
+ *    non-nav path) and are now fully superseded by the preset's own
+ *    `ModalWindowControls` instance.
+ *  - a new optional `showMetadataPane` prop (default `true`, unchanged for
+ *    every existing non-modal consumer) lets the modal wrapper suppress
+ *    this renderer's OWN Tags+Details pane, since the presets render their
+ *    OWN `metadata` column (`PreviewGridBody`) alongside the renderer's
+ *    stage content — avoiding a duplicate/nested 320px side panel.
+ *
  * @see ADR-012 - Shared component library boundary
  * @see ADR-021 - Fluent UI v9 (semantic tokens, dark-mode parity)
  * @see ADR-022 - React 19 (no React 18-only APIs)
@@ -43,7 +59,6 @@ import {
 } from '@fluentui/react-components';
 import { ChevronLeft20Regular, ChevronRight20Regular } from '@fluentui/react-icons';
 import { DocumentRowMenu, type DocumentRowAction, type IDocumentRowMenuTarget } from '../DocumentRowMenu';
-import { ModalWindowControls } from '../ModalWindowControls';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -137,27 +152,24 @@ export interface IRichFilePreviewProps {
   /**
    * Whether the renderer draws its own title text. Defaults to `true`. Set to
    * `false` when a wrapper already supplies the document title (e.g.
-   * `RichFilePreviewDialog` in navigation mode, where `RecordNavigationModalShell`
-   * owns the title chrome) — this avoids a duplicate ("double header") title.
-   * The title-bar row (3-dot `DocumentRowMenu` + any actions) still renders.
+   * `RichFilePreviewDialog`, where the `PreviewModal`/`BrowseModal` preset's
+   * `SprkModal` header owns the title chrome) — this avoids a duplicate
+   * ("double header") title. The title-bar row (3-dot `DocumentRowMenu` +
+   * any actions) still renders.
    */
   showTitle?: boolean;
   /**
-   * Standard window-controls cluster (task 030, FR-12) — `ModalWindowControls`
-   * rendered at the trailing end of the title bar. All three are optional and
-   * additive: non-modal consumers (Context-pane widget, Workspace viewer
-   * widget) omit them and render identically to before this addition (the
-   * cluster renders nothing when both `onClose` and `onToggleMaximize` are
-   * undefined). Only the modal wrapper (`RichFilePreviewDialog`) supplies
-   * these — and only on the non-navigation render path; the navigation path
-   * renders the cluster via `RecordNavigationModalShell`'s `actionBar` slot
-   * instead, so these are omitted there to avoid a duplicate cluster.
+   * Whether the renderer draws its own 2-column body (stage | Tags+Details
+   * metadata pane). Defaults to `true` (unchanged for every non-modal
+   * consumer). Set to `false` when a wrapper already renders its OWN meta
+   * column alongside this renderer's stage content (e.g.
+   * `RichFilePreviewDialog`, which mounts this renderer inside the
+   * `PreviewModal`/`BrowseModal` preset's `PreviewGridBody` — that preset
+   * supplies the 320px `metadata` column, so this renderer must render ONLY
+   * its stage (iframe/loading/error), full width, to avoid a nested
+   * duplicate side panel).
    */
-  onClose?: () => void;
-  /** @see onClose */
-  isMaximized?: boolean;
-  /** @see onClose */
-  onToggleMaximize?: () => void;
+  showMetadataPane?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +255,18 @@ const useStyles = makeStyles({
     gridTemplateColumns: `1fr ${METADATA_COLUMN_WIDTH}`,
     gridTemplateRows: '1fr',
     gridAutoFlow: 'column' as const,
+    width: '100%',
+    ...shorthands.overflow('hidden'),
+  },
+  // Stage-only body (task 060) — used when `showMetadataPane={false}` (the
+  // modal wrapper supplies its OWN meta column via the preset's
+  // `PreviewGridBody`, so this renderer occupies the full width with no
+  // internal grid split, avoiding a nested duplicate 320px panel).
+  bodyStageOnly: {
+    ...shorthands.padding('0px'),
+    flex: 1,
+    minHeight: 0,
+    display: 'flex',
     width: '100%',
     ...shorthands.overflow('hidden'),
   },
@@ -341,7 +365,7 @@ const useStyles = makeStyles({
 // Helpers
 // ---------------------------------------------------------------------------
 
-function formatDate(iso: string | null | undefined): string {
+export function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—';
   try {
     const d = new Date(iso);
@@ -356,7 +380,7 @@ function formatDate(iso: string | null | undefined): string {
   }
 }
 
-function formatFileSize(bytes: number | null | undefined): string {
+export function formatFileSize(bytes: number | null | undefined): string {
   if (bytes === null || bytes === undefined || isNaN(bytes) || bytes < 0) return '—';
   if (bytes === 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -370,7 +394,7 @@ function formatFileSize(bytes: number | null | undefined): string {
   return `${formatted} ${units[unitIdx]}`;
 }
 
-function nonEmpty(value: string | null | undefined): string {
+export function nonEmpty(value: string | null | undefined): string {
   return value && value.trim().length > 0 ? value : '—';
 }
 
@@ -423,9 +447,7 @@ export const RichFilePreview: React.FC<IRichFilePreviewProps> = ({
   onNavigate,
   disabledActions: disabledActionsOverride,
   showTitle = true,
-  onClose,
-  isMaximized,
-  onToggleMaximize,
+  showMetadataPane = true,
 }) => {
   const styles = useStyles();
 
@@ -752,34 +774,36 @@ export const RichFilePreview: React.FC<IRichFilePreviewProps> = ({
             </>
           )}
           <DocumentRowMenu document={target} onAction={handleRowAction} disabledActions={effectiveDisabledActions} />
-          {/* Standard window-controls cluster (task 030, FR-12) — additive; renders
-              nothing when the modal wrapper omits onClose/onToggleMaximize (i.e. for
-              non-modal consumers, and for the nav-mode path where the shell's own
-              actionBar slot carries the cluster instead). */}
-          <ModalWindowControls isMaximized={isMaximized} onToggleMaximize={onToggleMaximize} onClose={onClose} />
         </div>
       </div>
 
-      {/* 2-column body — iframe (left) | metadata pane (right). */}
-      <div className={styles.body} role="group" aria-label="Document preview body">
+      {/* Body — iframe stage (+ Tags/Details metadata pane, unless the
+          wrapper's preset already supplies its own meta column). */}
+      <div
+        className={showMetadataPane ? styles.body : styles.bodyStageOnly}
+        role="group"
+        aria-label="Document preview body"
+      >
         <div className={styles.thumbnailCell}>{renderPreviewArea()}</div>
-        <div className={styles.metadataPane}>
-          {/* Section 1: Tags */}
-          <section className={styles.section} aria-labelledby="rfp-tags-heading">
-            <Text id="rfp-tags-heading" className={styles.sectionHeader} size={300}>
-              Tags
-            </Text>
-            {renderTagSection()}
-          </section>
+        {showMetadataPane && (
+          <div className={styles.metadataPane}>
+            {/* Section 1: Tags */}
+            <section className={styles.section} aria-labelledby="rfp-tags-heading">
+              <Text id="rfp-tags-heading" className={styles.sectionHeader} size={300}>
+                Tags
+              </Text>
+              {renderTagSection()}
+            </section>
 
-          {/* Section 2: Details */}
-          <section className={styles.section} aria-labelledby="rfp-details-heading">
-            <Text id="rfp-details-heading" className={styles.sectionHeader} size={300}>
-              Details
-            </Text>
-            {renderDetailsSection()}
-          </section>
-        </div>
+            {/* Section 2: Details */}
+            <section className={styles.section} aria-labelledby="rfp-details-heading">
+              <Text id="rfp-details-heading" className={styles.sectionHeader} size={300}>
+                Details
+              </Text>
+              {renderDetailsSection()}
+            </section>
+          </div>
+        )}
       </div>
     </div>
   );

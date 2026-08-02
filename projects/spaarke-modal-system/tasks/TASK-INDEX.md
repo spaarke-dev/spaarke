@@ -35,8 +35,8 @@
 | 042 | P2 — Retire ActionConfirmationDialog overlay | 2 | ✅ | 005 | P2 | FULL | sonnet/high |
 | 050 | P3 — Re-base forms onto FormModal (md) | 3 | ✅ | 006 | P3 | FULL | sonnet/high |
 | 051 | P3 — EmailComposer → FormModal; retire legacy SendEmailDialog | 3 | ⏸️ | 006 | P3 | FULL | sonnet/high |
-| 060 | P4 — RichFilePreviewDialog → Preview/Browse; retire FilePreviewDialog | 4 | 🔲 | 007 | P4 | FULL | sonnet/high |
-| 061 | P4 — Re-base FindSimilarDialog onto xl | 4 | 🔲 | 004 | P4 | STANDARD | sonnet/high |
+| 060 | P4 — RichFilePreviewDialog → Preview/Browse; retire FilePreviewDialog | 4 | ✅ | 007 | P4 | FULL | sonnet/high |
+| 061 | P4 — Re-base FindSimilarDialog onto xl | 4 | ✅ | 004 | P4 | STANDARD→FULL | sonnet/high |
 | 070 | P5 — Replace hand-rolled ConversationModal | 5 | 🔲 | 004 | — | FULL | sonnet/**xhigh** |
 | 080 | P6 — WizardShell light-first re-base | 6 | 🔲 | 003,008 | — | FULL | sonnet/high |
 | 090 | P7 — OOB size scale constants + route via hubs | 7 | 🔲 | none | — | FULL | sonnet/high |
@@ -104,7 +104,7 @@ P0 is the gate for everything. P0.5 (020) needs only 002. P7 (090) is independen
 | 1 Window-controls ✅ | 030–031 (2) — **DONE 2026-08-01** | Interim `DialogTitle action` adapter: 13 dialogs wired/inherited/verified; 1 owner escalation (legacy SendEmailDialog "v1.1.59 no-X" — resolves at P3/051); LegalWorkspace pre-existing build defect → Issue #712 / DEF-001 |
 | 2 Confirms & choices ✅ | 040–042 (3) — **DONE 2026-08-02** | Confirms re-based (danger token class, inline-color anti-pattern removed); ChoiceDialog → thin ChoiceModal adapter (ADR-023 preserved, 12 tests); hand-rolled ActionConfirmationDialog DELETED (overlay 1 of 3). + Main-session consolidation: ConfirmModal `busy` + exported `useDangerButtonClassName` (3 verbatim copies eliminated), ChoiceModal `cancelLabel`, SprkModal aria-labelledby |
 | 3 Forms & compose | 050 ✅ · 051 ⏸️ — **2026-08-02** | 050: NewThreadModal + QuickStartModal + PinnedMemoryEditDialog → literal FormModal/md (preset extended first: `submitDisabled`/`busy`/`cancelLabel`/`dismiss:alert`). 051 DEFERRED (Issue #713 / DEF-002): EmailComposer self-chromed + 2 live legacy consumers; interim `maxHeight:720px` cap shipped → wrapper numerically = `md`; FR-14 satisfied in substance |
-| 4 Preview & browse | 060–061 (2) | Preview/Browse re-base; @deprecated FilePreviewDialog retired |
+| 4 Preview & browse ✅ | 060–061 (2) — **DONE 2026-08-02** | RichFilePreviewDialog → PreviewModal (single) / BrowseModal+`onBeforeNavigate` seam (set); @deprecated FilePreviewDialog DELETED, sole consumer migrated (public contract byte-identical, ~8 consumers untouched). FindSimilarDialog ×3 → xl per-copy (literal SprkModal on the self-enveloped viewer; WizardShell-prop alignment on the wizard copies); consolidation deferred → Issue #714 / DEF-003. + Consolidation: `headerActions` passthrough added to Preview/Browse presets (060 gap report) |
 | 5 Messages overlay | 070 (1) | ConversationModal → SprkModal (centering validation) |
 | 6 Wizards | 080 (1) | WizardShell light-first re-base (embedded + stepper retained) |
 | 7 OOB consolidation | 090–092 (3) | OOB size scale + two-hub routing; navigation.ts copies retired; DocumentOperations overlay converted |
