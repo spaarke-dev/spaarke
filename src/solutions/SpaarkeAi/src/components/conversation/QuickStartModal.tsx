@@ -1,17 +1,17 @@
 /**
  * QuickStartModal.tsx — the Assistant "Quick Start" modal (task 041 / FR-F2).
  *
- * Hosts the shared `@spaarke/ai-widgets` card libraries inside a Fluent v9
- * `<Dialog>`, launched from `AssistantToolMenu`'s "Quick Start" entry (task 040)
+ * Hosts the shared `@spaarke/ai-widgets` card libraries inside the shared modal
+ * shell, launched from `AssistantToolMenu`'s "Quick Start" entry (task 040)
  * AND from the Analysis grid's `+ New` toolbar (ai-advanced-capabilities-analysis-hub-r1).
  * Per CLAUDE.md §11 (component justification — default to reuse) this file is a THIN
  * host: no new card grid, no new launch mechanism.
  *
  * Tabbed surface (ai-advanced-capabilities-analysis-hub-r1)
  * ========================================================
- * A single Fluent v9 `TabList` with two tabs (the SAME `Dialog` + `TabList`
- * primitives `PlaybookLibraryShell` composes — there is no generic modal-shell
- * component):
+ * A single Fluent v9 `TabList` with two tabs (the SAME `TabList` primitive
+ * `PlaybookLibraryShell` composes — there is no generic modal-shell
+ * component for tabs):
  *   - **Create**   — the existing `GetStartedCardsWidget` 7-card grid (unchanged).
  *   - **Analysis** — the `AnalysisCardsWidget` 3-card grid (Agreement Review live;
  *                    Legal Research + Patent "coming soon"), identical layout.
@@ -47,9 +47,23 @@
  *     reuse target for those six, not a parallel mechanism.
  *
  * Modal choice (per docs/standards/MODAL-DECISION-CRITERIA.md): Family 2 — a
- * plain Fluent v9 `<Dialog>`. This is a picker/launcher surface (select one of
+ * plain Fluent v9 modal. This is a picker/launcher surface (select one of
  * 7 cards, then close), not a record browse, so Family 3 / `RecordNavigationModalShell`
  * chrome does not apply.
+ *
+ * spaarke-modal-system task 050 (FR-14): re-based onto the shared `FormModal`
+ * preset at `size="md"` — retires the bespoke `Dialog`/`DialogSurface` envelope
+ * + the interim P1 `ModalWindowControls` wiring; the standard SprkModal chrome
+ * (incl. maximize) now comes from the shell, and `uiScale` threads in from the
+ * task-020 `useUiScale()` seam. This surface has no natural "submit" — every
+ * card click launches + closes on its own (`handleCardClick`/
+ * `handleAnalysisCardClick` are UNCHANGED) — so `FormModal`'s Cancel/Save
+ * footer is wired so BOTH close the modal without picking anything: Cancel
+ * (secondary) and the primary button relabeled "Close" (`onSubmit={onClose}`).
+ * This is a deliberate wiring choice for a picker surface with no field/submit
+ * concept, not a `FormModal` gap (see `notes/task-050-completion.md`). Dismiss
+ * also moves to `FormModal`'s `explicit` default (no ESC/backdrop dismiss —
+ * only × or a footer button), matching every other P3 form (FR-05).
  *
  * @see GetStartedCardsWidget — the reused 7-card grid (@spaarke/ai-widgets)
  * @see surfaceHandoff/launchSurface — the 012 hand-off envelope
@@ -59,17 +73,7 @@
  */
 
 import * as React from 'react';
-import {
-  Dialog,
-  DialogSurface,
-  DialogBody,
-  DialogTitle,
-  DialogContent,
-  TabList,
-  Tab,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { TabList, Tab, makeStyles, tokens } from '@fluentui/react-components';
 import type { SelectTabEvent, SelectTabData, TabValue } from '@fluentui/react-components';
 import { GetStartedCardsWidget, AnalysisCardsWidget } from '@spaarke/ai-widgets';
 import type { GetStartedCardId, AnalysisCardId } from '@spaarke/ai-widgets';
@@ -77,9 +81,12 @@ import {
   launchSurface,
   launchPlaybookIntent,
   SprkAnalysisWorkType,
-  // Shared, standardized modal window-controls (maximize/restore + close ×) — owner
-  // UAT 2026-07-31 item 4 "standardize on all modals" (FR-12, P1 rollout, task 031).
-  ModalWindowControls,
+  // spaarke-modal-system task 050 (FR-14): the shared modal shell preset — replaces
+  // the bespoke Dialog envelope + the interim P1 ModalWindowControls wiring.
+  FormModal,
+  // task-020 seam: the app-shell `--sprk-ui-scale` derivation, threaded into the
+  // FormModal shell so Quick Start scales in lock-step with the rest of the app.
+  useUiScale,
 } from '@spaarke/ui-components';
 import { getBffBaseUrl } from '../../config/runtimeConfig';
 
@@ -144,19 +151,17 @@ export interface QuickStartModalProps {
 }
 
 // ---------------------------------------------------------------------------
-// Styles — Fluent v9 tokens only (ADR-021)
+// Styles — Fluent v9 tokens only (ADR-021). The overall surface size/chrome now
+// comes from the shared `FormModal`/`SprkModal` shell (task 050 re-base) — only
+// the internal tab-content layout remains here.
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  // FIXED-size surface (ai-advanced-capabilities-analysis-hub-r1 UAT #1): the modal
-  // must NOT resize when switching tabs (Create has 7 cards, Analysis has 3). The
-  // width lives on the SURFACE (Fluent's DialogSurface defaults to ~600px max, which
-  // is narrower than the 3-column card grid → the cards used to overflow the modal).
-  // A fixed 720px surface fully contains the grid; the content fills it.
-  surface: {
-    width: '720px',
-    maxWidth: '720px',
-  },
+  // FIXED-size content area (ai-advanced-capabilities-analysis-hub-r1 UAT #1): the
+  // modal must NOT resize when switching tabs (Create has 7 cards, Analysis has 3).
+  // The overall SURFACE is now the shared `md` (a single fixed named size that
+  // already doesn't vary with content); this inner fixed height additionally keeps
+  // the two tab panels visually consistent with each other (no jump switching tabs).
   content: {
     display: 'flex',
     flexDirection: 'column',
@@ -164,9 +169,6 @@ const useStyles = makeStyles({
     height: '460px',
     padding: 0,
     overflow: 'hidden',
-  },
-  title: {
-    color: tokens.colorNeutralForeground1,
   },
   tabList: {
     marginBottom: tokens.spacingVerticalS,
@@ -185,8 +187,8 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 /**
- * `QuickStartModal` — Fluent v9 Dialog hosting `GetStartedCardsWidget`.
- * Launched from `AssistantToolMenu`'s "Quick Start" entry.
+ * `QuickStartModal` — the shared `FormModal` shell hosting `GetStartedCardsWidget`
+ * / `AnalysisCardsWidget`. Launched from `AssistantToolMenu`'s "Quick Start" entry.
  */
 export const QuickStartModal: React.FC<QuickStartModalProps> = ({
   open,
@@ -198,6 +200,7 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({
   onCreateAnalysis,
 }) => {
   const styles = useStyles();
+  const { uiScale } = useUiScale();
 
   // Active tab. Re-seeded from `initialTab` every time the modal (re)opens so the
   // grid `+ New` lands on Analysis and the Assistant menu lands on Create.
@@ -205,16 +208,6 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({
   React.useEffect(() => {
     if (open) setSelectedTab(initialTab);
   }, [open, initialTab]);
-
-  // Maximize/restore (FR-12 P1 window-controls rollout, task 031, owner UAT 2026-07-31
-  // item 4). Local to this dialog — no prior maximize mechanism existed. Always resets
-  // to the default rectangle when the dialog transitions closed (mirrors the shipped
-  // SendEmailDialog convention — the one other Fluent Dialog already wired to
-  // ModalWindowControls).
-  const [isMaximized, setIsMaximized] = React.useState(false);
-  React.useEffect(() => {
-    if (!open) setIsMaximized(false);
-  }, [open]);
 
   const handleTabSelect = React.useCallback((_ev: SelectTabEvent, data: SelectTabData) => {
     setSelectedTab(data.value);
@@ -319,68 +312,45 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({
   );
 
   return (
-    <Dialog
+    <FormModal
       open={open}
-      onOpenChange={(_ev, data) => {
-        if (!data.open) onClose();
-      }}
-      modalType="modal"
+      onClose={onClose}
+      // No natural "submit" for a card-picker surface (every card click launches +
+      // closes on its own) — Save is relabeled "Close" and wired to the same onClose
+      // as Cancel/× (see file header). Both close without picking anything.
+      onSubmit={onClose}
+      title="Quick Start"
+      size="md"
+      submitLabel="Close"
+      uiScale={uiScale}
     >
-      <DialogSurface
-        className={styles.surface}
-        // Non-maximized size is UNCHANGED (720x720, same as before); maximized swaps to a
-        // full-viewport target. Inline dimension styles only — no new hex/color literals
-        // (ADR-021/NFR-03).
-        style={
-          isMaximized ? { maxWidth: '100%', width: '100%', height: '100%' } : { maxWidth: '720px', width: '720px' }
-        }
-        data-testid="quick-start-modal"
-      >
-        <DialogBody>
-          <DialogTitle
-            className={styles.title}
-            // Standard Spaarke window-controls cluster (FR-12). Close (×) routes to the
-            // SAME onClose this modal's backdrop/Escape dismissal already uses (modalType
-            // is "modal", i.e. normally dismissible) — no new close semantics introduced.
-            action={
-              <ModalWindowControls
-                isMaximized={isMaximized}
-                onToggleMaximize={() => setIsMaximized(v => !v)}
-                onClose={onClose}
-              />
-            }
-          >
-            Quick Start
-          </DialogTitle>
-          <DialogContent className={styles.content}>
-            <TabList
-              className={styles.tabList}
-              selectedValue={selectedTab}
-              onTabSelect={handleTabSelect}
-              appearance="subtle"
-              data-testid="quick-start-tablist"
-            >
-              <Tab value="create" data-testid="quick-start-tab-create">
-                Create
-              </Tab>
-              <Tab value="analysis" data-testid="quick-start-tab-analysis">
-                Analysis
-              </Tab>
-            </TabList>
+      <div className={styles.content} data-testid="quick-start-modal">
+        <TabList
+          className={styles.tabList}
+          selectedValue={selectedTab}
+          onTabSelect={handleTabSelect}
+          appearance="subtle"
+          data-testid="quick-start-tablist"
+        >
+          <Tab value="create" data-testid="quick-start-tab-create">
+            Create
+          </Tab>
+          <Tab value="analysis" data-testid="quick-start-tab-analysis">
+            Analysis
+          </Tab>
+        </TabList>
 
-            {selectedTab === 'create' ? (
-              <div className={styles.tabPanel} role="tabpanel" aria-label="Create">
-                <GetStartedCardsWidget onCardClick={handleCardClick} />
-              </div>
-            ) : (
-              <div className={styles.tabPanel} role="tabpanel" aria-label="Analysis">
-                <AnalysisCardsWidget onCardClick={handleAnalysisCardClick} />
-              </div>
-            )}
-          </DialogContent>
-        </DialogBody>
-      </DialogSurface>
-    </Dialog>
+        {selectedTab === 'create' ? (
+          <div className={styles.tabPanel} role="tabpanel" aria-label="Create">
+            <GetStartedCardsWidget onCardClick={handleCardClick} />
+          </div>
+        ) : (
+          <div className={styles.tabPanel} role="tabpanel" aria-label="Analysis">
+            <AnalysisCardsWidget onCardClick={handleAnalysisCardClick} />
+          </div>
+        )}
+      </div>
+    </FormModal>
   );
 };
 

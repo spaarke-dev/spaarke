@@ -65,6 +65,12 @@ const useDialogStyles = makeStyles({
     maxWidth: '1040px',
     width: '92vw',
     height: '72vh',
+    // spaarke-modal-system P3 (FR-14 alignment, 2026-08-02): cap the 72vh height at
+    // 720px so this surface is numerically identical to the SprkModal `md` size
+    // (`min(1040px, 92vw) × min(72vh, 720px)`) — the cap fixes the square-on-tall-
+    // monitor failure `md` exists for. The literal FormModal re-base is deferred:
+    // EmailComposer is self-chromed (see notes/task-051-completion.md + DEF-002).
+    maxHeight: '720px',
     display: 'flex',
     flexDirection: 'column',
     // Surface itself never scrolls — the body owns the scroll region below.

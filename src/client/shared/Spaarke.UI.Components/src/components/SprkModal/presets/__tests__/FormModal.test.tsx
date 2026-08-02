@@ -35,6 +35,43 @@ describe('FormModal (preset — FR-09)', () => {
     expect(screen.getByText('Email field')).toBeInTheDocument();
   });
 
+  it('submitDisabled disables Save only; busy disables both with a spinner; dismiss="alert" renders an alertdialog (P3 consolidation)', () => {
+    const onSubmit = jest.fn();
+    const onClose = jest.fn();
+    const { unmount } = renderWithProviders(
+      <FormModal open onClose={onClose} onSubmit={onSubmit} title="Edit" submitDisabled>
+        <div>x</div>
+      </FormModal>,
+    );
+    expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^cancel$/i })).not.toBeDisabled();
+    unmount();
+
+    const second = renderWithProviders(
+      <FormModal open onClose={onClose} onSubmit={onSubmit} title="Edit" busy submitLabel="Saving…">
+        <div>x</div>
+      </FormModal>,
+    );
+    const save = screen.getByRole('button', { name: /saving/i });
+    const cancel = screen.getByRole('button', { name: /^cancel$/i });
+    expect(save).toBeDisabled();
+    expect(cancel).toBeDisabled();
+    expect(save.querySelector('.fui-Spinner')).not.toBeNull();
+    fireEvent.click(save);
+    fireEvent.click(cancel);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    second.unmount();
+
+    renderWithProviders(
+      <FormModal open onClose={noop} onSubmit={noop} title="Compose" dismiss="alert">
+        <div>x</div>
+      </FormModal>,
+    );
+    // alert dismiss maps to Fluent modalType="alert" → role=alertdialog.
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+  });
+
   it('Cancel invokes onClose', () => {
     const onClose = jest.fn();
     renderWithProviders(

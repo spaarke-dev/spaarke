@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — **P0 ✅ + P0.5 ✅ + P1 ✅ + P2 ✅** (2026-08-02; commit pending one test-determinism fix in flight) |
+| **Task** | none active — **P0 ✅ P0.5 ✅ P1 ✅ P2 ✅ P3 ✅/⏸️** (050 done; 051 deferred → Issue #713) |
 | **Step** | — |
 | **Status** | phase-boundary |
-| **Next Action** | Commit P2 once agent-042's actionConfirmationIntegration determinism fix lands → P3 (050/051) → P4 (060/061) → P5 070 → P6 080 → P7 090→091/092 → P8 100 |
+| **Next Action** | P4 wave (060/061 parallel, needs 007/004 ✅) → P5 070 (sonnet/**xhigh**) → P6 080 → P7 090→091/092 → P8 100 |
 
 ### Critical Context
 **P0 (Build, 001–013) ✅** — `SprkModal` + 6 presets ship in `@spaarke/ui-components` (main barrel only; ABSENT from `pcf-safe.ts` → Code-Page-scoped by construction). 86 P0 tests green. Docs: `MODAL-DESIGN-SYSTEM.md` + ADR-050 + pattern pointer + §17 row.
@@ -24,7 +24,9 @@
 
 **P2 (040/041/042) ✅ 2026-08-02** — confirms/ChoiceDialog re-based, ActionConfirmationDialog overlay DELETED (1 of 3 overlays retired). Main-session consolidation: ConfirmModal gained `busy` + exported `useDangerButtonClassName` (killed 3 verbatim danger-class copies); ChoiceModal gained `cancelLabel`; SprkModal gained aria-labelledby; PinnedMemoryDeleteConfirmation re-pointed onto literal ConfirmModal. ComposeConflictDialog + CloseProjectDialogs legitimately SprkModal-direct (3-way / phase-dependent footers), documented in-file. See `notes/wave-p2-completion.md`. **Known baseline**: 11 pre-existing failing UI.Components suites (incl. both ConversationView suites — A/B-proven on HEAD); don't chase.
 
-**Conversions remaining**: P3 050/051 · P4 060/061 · P5 070 (sonnet/**xhigh**) · P6 080 · P7 090→091/092 · P8 100 (main-session wrap-up). Each POML carries preset→conversion map + escalation triggers. Conversion waves modify EXISTING dialogs — read target files before rewriting.
+**P3 (2026-08-02)** — 050 ✅: three forms compose the LITERAL FormModal/md (preset pre-extended by main session: `submitDisabled`/`busy`/`cancelLabel`/`dismiss:alert`); QuickStartModal is the first `useUiScale()` consumer. **051 ⏸️ DEFERRED (Issue #713 / DEF-002)**: EmailComposer self-chromed + two live legacy consumers (pcf-safe export [dead], DailyBriefingApp `onSend`); interim `maxHeight:720px` cap → wrapper numerically = `md`; FR-14 satisfied in substance; P1 no-X escalation on the legacy dialog stays OPEN. See `notes/wave-p3-completion.md`.
+
+**Conversions remaining**: P4 060/061 · P5 070 (sonnet/**xhigh**) · P6 080 · P7 090→091/092 · P8 100 (main-session wrap-up). Each POML carries preset→conversion map + escalation triggers. Conversion waves modify EXISTING dialogs — read target files before rewriting.
 
 **Env**: fresh worktree; node_modules + dists built for UI.Components, SdapClient, Auth, Compose.Components, AI.Widgets, AI.Outputs, AI.Context, DocumentOperations, SpaarkeAi, LegalWorkspace (build broken per #712), SemanticSearchControl.
 

@@ -257,7 +257,9 @@ describe('PinnedMemoryListWidget — create flow (POML test #4)', () => {
     fireEvent.change(screen.getByTestId('pinned-memory-edit-content'), {
       target: { value: newPin.content },
     });
-    await user.click(screen.getByTestId('pinned-memory-edit-submit'));
+    // task 050 re-base: Save is now FormModal's own footer button (no data-testid
+    // exposed by the shared preset) — query by its accessible name instead.
+    await user.click(screen.getByRole('button', { name: 'Create pin' }));
 
     // Wait for the new pin to appear in the list.
     await screen.findByText(newPin.title);
@@ -302,7 +304,8 @@ describe('PinnedMemoryListWidget — edit flow (POML test #5)', () => {
     // Edit the title.
     const title = screen.getByTestId('pinned-memory-edit-title') as HTMLInputElement;
     fireEvent.change(title, { target: { value: updated.title } });
-    await user.click(screen.getByTestId('pinned-memory-edit-submit'));
+    // task 050 re-base: Save is now FormModal's own footer button — query by role/name.
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await screen.findByText(updated.title);
 
@@ -336,7 +339,8 @@ describe('PinnedMemoryListWidget — delete flow (POML test #6)', () => {
     // Stage the DELETE 204.
     mockAuthenticatedFetch.mockResolvedValueOnce(noContentResponse());
 
-    await user.click(screen.getByTestId('pinned-memory-delete-confirm'));
+    // ConfirmModal preset owns the buttons (P2 re-point) — accessible-name query.
+    await user.click(screen.getByRole('button', { name: 'Delete pin' }));
 
     // The deleted pin disappears.
     await waitFor(() => {

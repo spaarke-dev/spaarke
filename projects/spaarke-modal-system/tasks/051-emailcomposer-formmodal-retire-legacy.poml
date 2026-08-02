@@ -4,7 +4,7 @@
     <title>P3 — EmailComposer SendEmailDialog → FormModal/md; retire legacy SendEmailDialog — FR-14</title>
     <phase>3 Forms &amp; compose</phase>
     <gate>blocked until 006</gate>
-    <status>not-started</status>
+    <status>deferred</status>
     <rigor>FULL</rigor>
     <rigor-reason>Re-bases the canonical email-compose dialog `.tsx` AND retires a shipped component (folder delete + barrel edit) with import-graph blast radius; `alert` dismiss semantics + name-resolution correctness are load-bearing.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -109,7 +109,7 @@
     <criterion testable="true">`authenticatedFetch` passed as a function; no hex/`'1px'`/inline color; dark parity holds; shared-lib build green under `@types/react` 18 and React 19; EmailComposer tests pass.</criterion>
   </acceptance-criteria>
 
-  <notes>Index.ts context (verified): line 42 = legacy `export * from './SendEmailDialog';`; lines 203–213 = the name-collision disambiguation comment + the canonical override `export { SendEmailDialog, type ISendEmailDialogProps } from './EmailComposer';`. The line-210 comment references a separate FilePreviewDialog migration; that is task 060's concern, not this task. Completion summary appended here when done.</notes>
+  <notes>Index.ts context (verified): line 42 = legacy `export * from './SendEmailDialog';`; lines 203–213 = the name-collision disambiguation comment + the canonical override `export { SendEmailDialog, type ISendEmailDialogProps } from './EmailComposer';`. The line-210 comment references a separate FilePreviewDialog migration; that is task 060's concern, not this task. DEFERRED 2026-08-02 (sub-agent escalated per the POML trigger + CLAUDE.md §6, zero source changes; orchestrator disposition): (1) re-base blocked — EmailComposer mount="dialog" is SELF-CHROMED (own header incl. ModalWindowControls + own ComposerActionBar footer, no suppression prop; mount="inline" nulls the action bar; forking forbidden); (2) retirement blocked — two LIVE legacy consumers: pcf-safe.ts:27-28 deep-export (zero actual PCF imports — dead surface) + DailyBriefingApp.tsx legacy onSend API with two bespoke send flows (the POML's named escalation trigger). Both need surface-owner coordination → Issue #713 / DEF-002. INTERIM shipped by main session: maxHeight:720px cap on the wrapper → numerically identical to md (wrapper already had modalType="alert" + ModalWindowControls) — FR-14 satisfied in substance. P1 no-X escalation on the legacy dialog remains OPEN (defer-issues.md). Evidence: notes/task-051-completion.md.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

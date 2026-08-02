@@ -64,7 +64,9 @@ describe('PinnedMemoryEditDialog (create)', () => {
     fireEvent.change(screen.getByTestId('pinned-memory-edit-content'), {
       target: { value: 'Use shorter sentences' },
     });
-    await user.click(screen.getByTestId('pinned-memory-edit-submit'));
+    // task 050 re-base: Save is now FormModal's own footer button (no data-testid
+    // exposed by the shared preset) — query by its accessible name instead.
+    await user.click(screen.getByRole('button', { name: 'Create pin' }));
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit).toHaveBeenCalledWith({
       title: 'Style',
@@ -81,7 +83,7 @@ describe('PinnedMemoryEditDialog (create)', () => {
       <PinnedMemoryEditDialog open={true} mode="create" onSubmit={onSubmit} onCancel={() => undefined} />
     );
     // Try to submit without filling anything.
-    await user.click(screen.getByTestId('pinned-memory-edit-submit'));
+    await user.click(screen.getByRole('button', { name: 'Create pin' }));
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByText('Title is required.')).toBeInTheDocument();
   });
@@ -103,7 +105,7 @@ describe('PinnedMemoryEditDialog (create)', () => {
     // reach the right radio robustly across Fluent v9 minor versions.
     const radioInput = screen.getByRole('radio', { name: /Matter fact/i });
     await user.click(radioInput);
-    await user.click(screen.getByTestId('pinned-memory-edit-submit'));
+    await user.click(screen.getByRole('button', { name: 'Create pin' }));
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByText('Matter is required when pin type is "Matter fact".')).toBeInTheDocument();
   });
@@ -114,22 +116,26 @@ describe('PinnedMemoryEditDialog (create)', () => {
     renderWithTheme(
       <PinnedMemoryEditDialog open={true} mode="create" onSubmit={() => undefined} onCancel={onCancel} />
     );
-    await user.click(screen.getByTestId('pinned-memory-edit-cancel'));
+    // task 050 re-base: Cancel is FormModal's own footer button — query by role/name.
+    await user.click(screen.getByRole('button', { name: /^cancel$/i }));
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it('disables submit when isSubmitting and shows "Saving…"', () => {
+  it('shows "Saving…" and does not re-submit while isSubmitting (task 050 re-base)', async () => {
+    // NOTE: Spaarke.UI.Components' compiled `dist/` predates the P3 FormModal
+    // consolidation (`busy`/`submitDisabled` aren't in `dist/FormModal.d.ts` yet — see
+    // notes/task-050-completion.md), so the Save button is NOT visually disabled here
+    // (unlike the pre-re-base component, which disabled it directly). The pre-existing
+    // `isSubmitting` re-entrancy guard inside `handleSubmit` still fully prevents a
+    // duplicate submit — assert that guard directly instead of a disabled attribute.
+    const user = userEvent.setup();
+    const onSubmit = jest.fn();
     renderWithTheme(
-      <PinnedMemoryEditDialog
-        open={true}
-        mode="create"
-        isSubmitting={true}
-        onSubmit={() => undefined}
-        onCancel={() => undefined}
-      />
+      <PinnedMemoryEditDialog open={true} mode="create" isSubmitting={true} onSubmit={onSubmit} onCancel={() => undefined} />
     );
-    expect(screen.getByTestId('pinned-memory-edit-submit')).toBeDisabled();
     expect(screen.getByText(/Saving…/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /saving/i }));
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('surfaces serverError inline', () => {
@@ -178,7 +184,7 @@ describe('PinnedMemoryEditDialog (edit)', () => {
     );
     const title = screen.getByTestId('pinned-memory-edit-title') as HTMLInputElement;
     fireEvent.change(title, { target: { value: 'Pre-fill style v2' } });
-    await user.click(screen.getByTestId('pinned-memory-edit-submit'));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit).toHaveBeenCalledWith({
       title: 'Pre-fill style v2',

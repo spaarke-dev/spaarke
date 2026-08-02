@@ -14,8 +14,10 @@
  * `onCancel` are required props. The dialog does NOT call the BFF itself;
  * the parent {@link PinnedMemoryListWidget} owns the BFF round-trip and the
  * optimistic list update. Submission is therefore async-safe: when the
- * parent is mid-flight, it passes `isSubmitting=true` and the Save button
- * disables to prevent double-submit.
+ * parent is mid-flight, it passes `isSubmitting=true`; the Save label swaps
+ * to "Saving…" and the pre-existing `isSubmitting` re-entrancy guards in
+ * `handleCancel`/`handleSubmit` prevent a double-submit (see the render's
+ * inline note on why `FormModal`'s `busy` isn't wired here yet).
  *
  * Validation (sync, on Save click):
  *   - title:   required; ≤200 characters (matches PART A backend cap)
@@ -28,31 +30,22 @@
  *   - ADR-021: zero hardcoded colors; Fluent v9 semantic tokens only.
  *   - ADR-022: React 19 functional component + hooks.
  *
+ * spaarke-modal-system task 050 (FR-14): re-based onto the shared `FormModal`
+ * preset at `size="md"` — retires the bespoke `Dialog`/`DialogSurface` envelope
+ * + the interim P1 `ModalWindowControls` wiring; the standard SprkModal chrome
+ * (incl. maximize) now comes from the shell. Fields, validation, and the
+ * create/edit submit contract above are UNCHANGED — this is a frame/wiring
+ * re-base only. Dismiss also moves to `FormModal`'s `explicit` default (no
+ * ESC/backdrop dismiss — only × or Cancel), matching every other P3 form (FR-05).
+ *
  * Task: R6-070 (D-C-24 / D-C-25, Pillar 7, Q7 scope expansion) — PART B.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Button,
-  Dialog,
-  DialogActions,
-  DialogBody,
-  DialogContent,
-  DialogSurface,
-  DialogTitle,
-  Field,
-  Input,
-  Label,
-  makeStyles,
-  Radio,
-  RadioGroup,
-  Text,
-  Textarea,
-  tokens,
-} from '@fluentui/react-components';
-// Shared, standardized modal window-controls (maximize/restore + close ×) — owner UAT 2026-07-31
-// item 4 "standardize on all modals" (FR-12, P1 window-controls rollout, task 031).
-import { ModalWindowControls } from '@spaarke/ui-components';
+import { Field, Input, Label, makeStyles, Radio, RadioGroup, Text, Textarea, tokens } from '@fluentui/react-components';
+// spaarke-modal-system task 050 (FR-14): the shared modal shell preset — replaces
+// the bespoke Dialog envelope + the interim P1 ModalWindowControls wiring.
+import { FormModal } from '@spaarke/ui-components';
 import type { PinDto, PinType, PinUpsertRequest } from './pinned-memory-contracts';
 import { MAX_PIN_CONTENT_LENGTH, MAX_PIN_TITLE_LENGTH, PIN_TYPES } from './pinned-memory-contracts';
 
@@ -89,10 +82,19 @@ export interface PinnedMemoryEditDialogProps {
   onSubmit: (req: PinUpsertRequest) => void;
   /** Invoked when the user cancels or closes the dialog. */
   onCancel: () => void;
+  /**
+   * The `--sprk-ui-scale` factor (spec FR-06 / task-020 seam), forwarded to
+   * the `FormModal` shell. Optional, backward-compatible passthrough — omit
+   * to use the shell's own default (1); existing hosts need no changes.
+   */
+  uiScale?: number;
 }
 
 // ---------------------------------------------------------------------------
-// Styles — Fluent v9 semantic tokens only (ADR-021)
+// Styles — Fluent v9 semantic tokens only (ADR-021). The overall envelope
+// (surface size, header, maximize, footer) now comes from the shared
+// `FormModal`/`SprkModal` shell (task 050 re-base) — only the FORM CONTENT
+// styles remain here.
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
@@ -153,15 +155,6 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorPaletteRedForeground1,
     lineHeight: tokens.lineHeightBase200,
-  },
-  // Maximize/restore target (FR-12 P1 window-controls rollout, task 031). No prior
-  // maximize mechanism existed for this dialog — this is a NEW local capability, the
-  // default (unset) size is governed by Fluent's own DialogSurface sizing and is
-  // unchanged. Dimension-only overrides (no color/hex) — ADR-021/NFR-03 safe.
-  surfaceMaximized: {
-    width: '100%',
-    height: '100%',
-    maxWidth: '100%',
   },
 });
 
@@ -245,22 +238,13 @@ export const PinnedMemoryEditDialog: React.FC<PinnedMemoryEditDialogProps> = ({
   serverError = null,
   onSubmit,
   onCancel,
+  uiScale,
 }) => {
   const styles = useStyles();
 
   const [state, setState] = useState<FormState>(() => buildInitialState(mode, initial));
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState<boolean>(false);
-
-  // Maximize/restore (FR-12 P1 window-controls rollout, task 031, owner UAT 2026-07-31
-  // item 4). Local to this dialog — no prior maximize mechanism existed. Always resets
-  // to the default size when the dialog transitions closed (mirrors the shipped
-  // SendEmailDialog convention — the one other Fluent Dialog already wired to
-  // ModalWindowControls).
-  const [isMaximized, setIsMaximized] = useState<boolean>(false);
-  useEffect(() => {
-    if (!open) setIsMaximized(false);
-  }, [open]);
 
   // Reset form state when the dialog TRANSITIONS from closed → open. We
   // intentionally avoid resetting on every re-render while open: a parent that
@@ -334,19 +318,11 @@ export const PinnedMemoryEditDialog: React.FC<PinnedMemoryEditDialogProps> = ({
     onSubmit(req);
   }, [isSubmitting, onSubmit, state]);
 
+  // Wired to both the × and the Cancel button (FormModal's `onClose`) — in-flight guard preserved verbatim.
   const handleCancel = useCallback(() => {
     if (isSubmitting) return;
     onCancel();
   }, [isSubmitting, onCancel]);
-
-  const handleOpenChange = useCallback(
-    (_e: unknown, data: { open: boolean }) => {
-      if (!data.open && !isSubmitting) {
-        onCancel();
-      }
-    },
-    [isSubmitting, onCancel]
-  );
 
   // ── Derived render state ────────────────────────────────────────────────
   const titleRemaining = MAX_PIN_TITLE_LENGTH - state.title.length;
@@ -363,163 +339,129 @@ export const PinnedMemoryEditDialog: React.FC<PinnedMemoryEditDialogProps> = ({
   const titleLabel = mode === 'create' ? 'New pinned memory' : 'Edit pinned memory';
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange} modalType="modal">
-      <DialogSurface
+    <FormModal
+      open={open}
+      onClose={handleCancel}
+      onSubmit={handleSubmit}
+      title={titleLabel}
+      size="md"
+      submitLabel={isSubmitting ? 'Saving…' : submitLabel}
+      // `busy` disables both buttons + shows the in-flight spinner (P3 FormModal
+      // consolidation; dist rebuilt by the main session). The pre-existing
+      // `isSubmitting` re-entrancy guards in `handleCancel`/`handleSubmit` below
+      // remain as defense-in-depth (the × routes through the same guarded path).
+      busy={isSubmitting}
+      uiScale={uiScale}
+    >
+      <form
         data-testid="pinned-memory-edit-dialog"
-        className={isMaximized ? styles.surfaceMaximized : undefined}
+        className={styles.form}
+        onSubmit={e => {
+          e.preventDefault();
+          handleSubmit();
+        }}
+        noValidate
       >
-        <DialogBody>
-          <DialogTitle
-            // Standard Spaarke window-controls cluster (FR-12). Close (×) routes to the
-            // SAME guarded handler the "Cancel" button uses (isSubmitting-safe) — no new
-            // close path is introduced.
-            action={
-              <ModalWindowControls
-                isMaximized={isMaximized}
-                onToggleMaximize={() => setIsMaximized(v => !v)}
-                onClose={handleCancel}
-              />
-            }
+        {/* Title */}
+        <Field label="Title" required validationState={errors.title ? 'error' : 'none'} validationMessage={errors.title}>
+          <Input
+            id={titleId}
+            value={state.title}
+            onChange={handleTitleChange}
+            disabled={isSubmitting}
+            maxLength={MAX_PIN_TITLE_LENGTH}
+            placeholder="Short, descriptive label"
+            data-testid="pinned-memory-edit-title"
+          />
+        </Field>
+        <Text
+          className={styles.characterCount + (titleNearLimit ? ' ' + styles.characterCountWarning : '')}
+          aria-live="polite"
+        >
+          {titleRemaining} characters remaining
+        </Text>
+
+        {/* Content */}
+        <Field
+          label="Content"
+          required
+          validationState={errors.content ? 'error' : 'none'}
+          validationMessage={errors.content}
+          hint="What should the assistant remember about this preference, rule, or fact?"
+        >
+          <Textarea
+            id={contentId}
+            className={styles.contentTextarea}
+            value={state.content}
+            onChange={handleContentChange}
+            disabled={isSubmitting}
+            maxLength={MAX_PIN_CONTENT_LENGTH}
+            data-testid="pinned-memory-edit-content"
+          />
+        </Field>
+        <Text
+          className={styles.characterCount + (contentNearLimit ? ' ' + styles.characterCountWarning : '')}
+          aria-live="polite"
+        >
+          {contentRemaining} characters remaining
+        </Text>
+
+        {/* Pin type */}
+        <div className={styles.pinTypeRow}>
+          <Label id={pinTypeLabelId} className={styles.pinTypeLabel} required>
+            Pin type
+          </Label>
+          <RadioGroup
+            className={styles.radioGroup}
+            value={state.pinType}
+            onChange={handlePinTypeChange}
+            disabled={isSubmitting}
+            aria-labelledby={pinTypeLabelId}
+            data-testid="pinned-memory-edit-pintype"
           >
-            {titleLabel}
-          </DialogTitle>
-          <DialogContent>
-            <form
-              className={styles.form}
-              onSubmit={e => {
-                e.preventDefault();
-                handleSubmit();
-              }}
-              noValidate
-            >
-              {/* Title */}
-              <Field
-                label="Title"
-                required
-                validationState={errors.title ? 'error' : 'none'}
-                validationMessage={errors.title}
-              >
-                <Input
-                  id={titleId}
-                  value={state.title}
-                  onChange={handleTitleChange}
-                  disabled={isSubmitting}
-                  maxLength={MAX_PIN_TITLE_LENGTH}
-                  placeholder="Short, descriptive label"
-                  data-testid="pinned-memory-edit-title"
+            {PIN_TYPES.map(pt => (
+              <React.Fragment key={pt.value}>
+                <Radio
+                  value={pt.value}
+                  label={<span className={styles.radioLabel}>{pt.label}</span>}
+                  data-testid={`pinned-memory-edit-pintype-${pt.value}`}
                 />
-              </Field>
-              <Text
-                className={styles.characterCount + (titleNearLimit ? ' ' + styles.characterCountWarning : '')}
-                aria-live="polite"
-              >
-                {titleRemaining} characters remaining
-              </Text>
+                <Text className={styles.radioHint}>{pt.hint}</Text>
+              </React.Fragment>
+            ))}
+          </RadioGroup>
+        </div>
 
-              {/* Content */}
-              <Field
-                label="Content"
-                required
-                validationState={errors.content ? 'error' : 'none'}
-                validationMessage={errors.content}
-                hint="What should the assistant remember about this preference, rule, or fact?"
-              >
-                <Textarea
-                  id={contentId}
-                  className={styles.contentTextarea}
-                  value={state.content}
-                  onChange={handleContentChange}
-                  disabled={isSubmitting}
-                  maxLength={MAX_PIN_CONTENT_LENGTH}
-                  data-testid="pinned-memory-edit-content"
-                />
-              </Field>
-              <Text
-                className={styles.characterCount + (contentNearLimit ? ' ' + styles.characterCountWarning : '')}
-                aria-live="polite"
-              >
-                {contentRemaining} characters remaining
-              </Text>
-
-              {/* Pin type */}
-              <div className={styles.pinTypeRow}>
-                <Label id={pinTypeLabelId} className={styles.pinTypeLabel} required>
-                  Pin type
-                </Label>
-                <RadioGroup
-                  className={styles.radioGroup}
-                  value={state.pinType}
-                  onChange={handlePinTypeChange}
-                  disabled={isSubmitting}
-                  aria-labelledby={pinTypeLabelId}
-                  data-testid="pinned-memory-edit-pintype"
-                >
-                  {PIN_TYPES.map(pt => (
-                    <React.Fragment key={pt.value}>
-                      <Radio
-                        value={pt.value}
-                        label={<span className={styles.radioLabel}>{pt.label}</span>}
-                        data-testid={`pinned-memory-edit-pintype-${pt.value}`}
-                      />
-                      <Text className={styles.radioHint}>{pt.hint}</Text>
-                    </React.Fragment>
-                  ))}
-                </RadioGroup>
-              </div>
-
-              {/* Matter id — only when matter-fact selected */}
-              {state.pinType === 'matter-fact' && (
-                <div className={styles.matterFieldRow}>
-                  <Field
-                    label="Matter"
-                    required
-                    validationState={errors.matterId ? 'error' : 'none'}
-                    validationMessage={errors.matterId}
-                    hint="The matter this fact applies to. Required for matter-scoped pins."
-                  >
-                    <Input
-                      id={matterIdId}
-                      value={state.matterId}
-                      onChange={handleMatterIdChange}
-                      disabled={isSubmitting}
-                      placeholder="Matter ID"
-                      data-testid="pinned-memory-edit-matterid"
-                    />
-                  </Field>
-                </div>
-              )}
-
-              {/* Server error */}
-              {serverError && (
-                <Text className={styles.serverError} role="alert" data-testid="pinned-memory-edit-server-error">
-                  {serverError}
-                </Text>
-              )}
-            </form>
-          </DialogContent>
-          <DialogActions>
-            {/* See PinnedMemoryDeleteConfirmation for the no-DialogTrigger
-                rationale: avoids double-firing onCancel. */}
-            <Button
-              appearance="secondary"
-              onClick={handleCancel}
-              disabled={isSubmitting}
-              data-testid="pinned-memory-edit-cancel"
+        {/* Matter id — only when matter-fact selected */}
+        {state.pinType === 'matter-fact' && (
+          <div className={styles.matterFieldRow}>
+            <Field
+              label="Matter"
+              required
+              validationState={errors.matterId ? 'error' : 'none'}
+              validationMessage={errors.matterId}
+              hint="The matter this fact applies to. Required for matter-scoped pins."
             >
-              Cancel
-            </Button>
-            <Button
-              appearance="primary"
-              onClick={handleSubmit}
-              disabled={isSubmitting}
-              data-testid="pinned-memory-edit-submit"
-            >
-              {isSubmitting ? 'Saving…' : submitLabel}
-            </Button>
-          </DialogActions>
-        </DialogBody>
-      </DialogSurface>
-    </Dialog>
+              <Input
+                id={matterIdId}
+                value={state.matterId}
+                onChange={handleMatterIdChange}
+                disabled={isSubmitting}
+                placeholder="Matter ID"
+                data-testid="pinned-memory-edit-matterid"
+              />
+            </Field>
+          </div>
+        )}
+
+        {/* Server error */}
+        {serverError && (
+          <Text className={styles.serverError} role="alert" data-testid="pinned-memory-edit-server-error">
+            {serverError}
+          </Text>
+        )}
+      </form>
+    </FormModal>
   );
 };
 
