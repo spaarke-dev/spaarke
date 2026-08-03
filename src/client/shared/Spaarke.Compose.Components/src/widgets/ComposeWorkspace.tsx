@@ -115,6 +115,8 @@ import {
 import {
   buildReviewMemoEmailBody,
   buildReviewMemoEmailSubject,
+  selectMemoNegativeMessage,
+  MEMO_NO_MEMO_MESSAGE,
   type ReviewMemoReadResponse,
 } from './reviewMemoFormatting';
 
@@ -1808,27 +1810,45 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const [memoEmailSubject, setMemoEmailSubject] = React.useState('');
   const [memoEmailBody, setMemoEmailBody] = React.useState('');
 
-  const NO_MEMO_MESSAGE = 'Generate the review memo first — no summary memo has been created for this review yet.';
+  /**
+   * Reads the ProblemDetails `code` extension from a non-OK memo response (agreements-r1 UAT round-1 #2)
+   * so the toolbar can tell "session not bound to an Analysis" (promote first — the review is NOT lost)
+   * apart from "no memo persisted yet" (generate first). Never throws — a missing/unparseable body
+   * yields `null`, so a genuine transport/server error still falls through to generic handling.
+   */
+  const readMemoProblemCode = React.useCallback(async (response: Response): Promise<string | null> => {
+    try {
+      const body = (await response.clone().json()) as { code?: unknown } | null;
+      return typeof body?.code === 'string' ? body.code : null;
+    } catch {
+      return null;
+    }
+  }, []);
 
   /**
    * Shared READ of the persisted review-memo record (render-from-persisted, the project's binding FR-14
    * constraint: both the .docx download and the email prefill derive from the SAME server-persisted
-   * `sprk_analysisoutput` row task 050's POST assembled — never a client-side re-derivation). `null`
-   * means no memo has been generated yet for this session's bound Analysis (404) — the caller surfaces
-   * the honest negative state.
+   * `sprk_analysisoutput` row task 050's POST assembled — never a client-side re-derivation).
+   * Returns a discriminated outcome so the two distinct negative states are surfaced accurately
+   * (agreements-r1 UAT round-1 #2): `no-memo` (nothing generated yet for the bound Analysis) vs.
+   * `session-not-bound` (the direct-Compose door — promote to an Analysis first). Throws only on a
+   * genuine transport/server failure.
    */
-  const fetchReviewMemo = React.useCallback(async (): Promise<ReviewMemoReadResponse | null> => {
-    if (!bffBaseUrl || !state.sessionId) return null;
+  const fetchReviewMemo = React.useCallback(async (): Promise<
+    { kind: 'ok'; memo: ReviewMemoReadResponse } | { kind: 'negative'; message: string }
+  > => {
+    if (!bffBaseUrl || !state.sessionId) return { kind: 'negative', message: MEMO_NO_MEMO_MESSAGE };
     const response = await authenticatedFetch(
       `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(state.sessionId)}/review-memo`,
       { method: 'GET' }
     );
-    if (response.status === 404) return null;
-    if (!response.ok) {
-      throw new ApiError(`Failed to read the review memo (${response.status})`, response.status);
+    if (response.ok) {
+      return { kind: 'ok', memo: (await response.json()) as ReviewMemoReadResponse };
     }
-    return (await response.json()) as ReviewMemoReadResponse;
-  }, [bffBaseUrl, state.sessionId]);
+    const negative = selectMemoNegativeMessage(response.status, await readMemoProblemCode(response));
+    if (negative) return { kind: 'negative', message: negative };
+    throw new ApiError(`Failed to read the review memo (${response.status})`, response.status);
+  }, [bffBaseUrl, state.sessionId, readMemoProblemCode]);
 
   /**
    * "Generate memo" — downloads the SERVER-RENDERED .docx (title, doc/analysis metadata, per-section
@@ -1844,11 +1864,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(state.sessionId)}/review-memo/docx`,
         { method: 'GET' }
       );
-      if (response.status === 404) {
-        setMemoActionMessage(NO_MEMO_MESSAGE);
-        return;
-      }
       if (!response.ok) {
+        // Split negatives (agreements-r1 UAT round-1 #2): 404/no-memo → "generate first";
+        // 400/session-not-bound → "promote to an Analysis first" (never a dead-end "Failed (400)").
+        const negative = selectMemoNegativeMessage(response.status, await readMemoProblemCode(response));
+        if (negative) {
+          setMemoActionMessage(negative);
+          return;
+        }
         throw new ApiError(`Failed to generate the review memo (${response.status})`, response.status);
       }
 
@@ -1873,7 +1896,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     } finally {
       setMemoActionInFlight(false);
     }
-  }, [bffBaseUrl, state.sessionId, memoActionInFlight]);
+  }, [bffBaseUrl, state.sessionId, memoActionInFlight, readMemoProblemCode]);
 
   /**
    * "Email memo" — reads the persisted memo (JSON) and opens the canonical `<EmailComposer />`
@@ -1885,13 +1908,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     setMemoActionInFlight(true);
     setMemoActionMessage(null);
     try {
-      const memo = await fetchReviewMemo();
-      if (!memo) {
-        setMemoActionMessage(NO_MEMO_MESSAGE);
+      const outcome = await fetchReviewMemo();
+      if (outcome.kind === 'negative') {
+        // 'no-memo' → generate first; 'session-not-bound' → promote to an Analysis first
+        // (agreements-r1 UAT round-1 #2). Never opens the composer with blank content.
+        setMemoActionMessage(outcome.message);
         return;
       }
-      setMemoEmailSubject(buildReviewMemoEmailSubject(memo));
-      setMemoEmailBody(buildReviewMemoEmailBody(memo));
+      setMemoEmailSubject(buildReviewMemoEmailSubject(outcome.memo));
+      setMemoEmailBody(buildReviewMemoEmailBody(outcome.memo));
       setMemoEmailOpen(true);
     } catch (err) {
       setMemoActionMessage(err instanceof ApiError ? err.message : 'Could not load the review memo.');

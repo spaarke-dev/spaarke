@@ -23,9 +23,20 @@
  *                 command bar (rendered by ComposeWorkspace). The host now binds the
  *                 handlers (`onOpenInWord` / `onOpenInWordDesktop`)
  *                 and threads them here via ComposeEditor. The dropdown is omitted
- *                 when the host wires no Word handlers.
- *   - Save      — icon button (right-aligned); rendered only when `onSave` is wired.
+ *                 when the host wires no Word handlers. UAT round-1 #6 (2026-08-03):
+ *                 relocated OUT of this format-menus row to the action side (right,
+ *                 near Save) as an icon-only dropdown (`DocumentWordRegular`); the
+ *                 popover content (Open web / Open desktop) is unchanged.
+ *   - Save      — icon-only button (right-aligned); rendered only when `onSave` is
+ *                 wired. UAT round-1 #5 (2026-08-03): the visible "Save Version" text
+ *                 was dropped (restoring the icon-only intent this header already
+ *                 documented) — the accessible name lives on `aria-label` + a Tooltip.
  *   - Undo/Redo — icon buttons (right-aligned).
+ *
+ * UAT round-1 #3 (2026-08-03): "Create Summary Memo" (see the FR-14 group below) is now an
+ * icon-only dropdown trigger (`DocumentBulletList24Regular`, same glyph as before) repositioned
+ * to the FAR LEFT of the toolbar — the very first control, ahead of Body/Paragraph/Font/Table.
+ * The dropdown's two menu items (Generate memo / Email memo) are unchanged.
  *
  * The inline character-format controls (Bold / Italic / Underline / Strikethrough /
  * Link) were RELOCATED here from the TipTap selection BubbleMenu at task 111 (the
@@ -110,6 +121,7 @@ import {
   DocumentBulletList24Regular,
   ArrowDownload24Regular,
   Mail24Regular,
+  DocumentWordRegular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -542,6 +554,54 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
       aria-label="Document formatting"
       data-testid="compose-format-toolbar"
     >
+      {/* ---- Create Summary Memo (FR-14, task 051; UAT round-1 #3 2026-08-03: icon-only,
+             repositioned to the FAR LEFT of the toolbar, ahead of every format-menu group) — a
+             dropdown of two READ-and-render actions, rendered ONLY when a review is present AND
+             at least one handler is threaded. The trigger shows a spinner + disables both items
+             while a memo fetch is in flight; the host's click handler surfaces the "generate the
+             review/memo first" negative state when no memo has been persisted yet — never a
+             silent empty export. The accessible NAME lives on `aria-label` (icon-only); a
+             Tooltip carries the full label on hover (ADR-021/a11y — icon-only needs both). ---- */}
+      {hasReview && (onGenerateMemo || onEmailMemo) ? (
+        <Menu positioning="below-start">
+          <MenuTrigger disableButtonEnhancement>
+            {(triggerProps: MenuButtonProps) => (
+              <Tooltip content="Create Summary Memo" relationship="label" withArrow>
+                <Button
+                  {...triggerProps}
+                  appearance="subtle"
+                  size="small"
+                  icon={isMemoActionInFlight ? <Spinner size="tiny" /> : <DocumentBulletList24Regular />}
+                  aria-label="Create Summary Memo"
+                  disabled={controlDisabled || isMemoActionInFlight}
+                  data-testid="compose-format-memo-menu"
+                />
+              </Tooltip>
+            )}
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              <MenuItem
+                icon={<ArrowDownload24Regular />}
+                disabled={!onGenerateMemo || controlDisabled || isMemoActionInFlight}
+                onClick={() => onGenerateMemo?.()}
+                data-testid="compose-format-memo-generate"
+              >
+                Generate memo (.docx)
+              </MenuItem>
+              <MenuItem
+                icon={<Mail24Regular />}
+                disabled={!onEmailMemo || controlDisabled || isMemoActionInFlight}
+                onClick={() => onEmailMemo?.()}
+                data-testid="compose-format-memo-email"
+              >
+                Email memo
+              </MenuItem>
+            </MenuList>
+          </MenuPopover>
+        </Menu>
+      ) : null}
+
       {/* ---- Body (block/heading style) ---- */}
       {/* R5 task 011 (G3 heading/list): the heading menu is RE-ENABLED on loaded docs — the engine now applies
           a setBlockAttr Style op as a tracked w:pPrChange. Gated only by the read-only `controlDisabled`. */}
@@ -735,84 +795,11 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         </MenuPopover>
       </Menu>
 
-      {/* ---- Word (Open web / Open desktop handoff) ----
-             task 039 P3: rendered as a VERTICAL, labelled dropdown (icon + text row per action).
-             task 039 P4: there is NO "Push to Word" control here — the DocxAnnotationWriter push-to-Word
-             surface was fully retired in task 036, so the only Word items are the Open-in-Web/Desktop
-             SPE launch handoff (+ the deliberate Save duplicate). Nothing to remove. */}
-      {showWordMenu ? (
-        <Menu positioning="below-start">
-          <MenuTrigger disableButtonEnhancement>
-            <DropdownButton label="Word" disabled={controlDisabled} testId="compose-format-word-menu" />
-          </MenuTrigger>
-          <MenuPopover>
-            <div className={styles.wordMenuColumn} role="group" aria-label="Word document actions">
-              {/* UX-1 (UAT 2026-07-19): a deliberate DUPLICATE of the right-aligned Save
-                  button — users instinctively look in the Word menu to save. Same handler
-                  (`onSave`) + same enable predicate (`saveDisabled`); rendered only when
-                  the host wires Save. G7 (task 022): the Word-menu "Save" is the Save-Version
-                  (replace/dedup) instinct; the fork lives on the main split-button's "Save New
-                  Document" item + is mirrored here for parity. */}
-              {onSave ? (
-                <>
-                  <Button
-                    appearance="subtle"
-                    size="small"
-                    className={styles.wordMenuItem}
-                    icon={<SaveRegular />}
-                    disabled={saveDisabled}
-                    onClick={() => onSave('version')}
-                    data-testid="compose-format-word-save"
-                  >
-                    {isSaving ? 'Saving…' : 'Save Version'}
-                  </Button>
-                  <Button
-                    appearance="subtle"
-                    size="small"
-                    className={styles.wordMenuItem}
-                    icon={<SaveRegular />}
-                    disabled={saveDisabled}
-                    onClick={() => onSave('new')}
-                    data-testid="compose-format-word-save-new"
-                  >
-                    Save New Document
-                  </Button>
-                </>
-              ) : null}
-              {onOpenInWord ? (
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  className={styles.wordMenuItem}
-                  icon={<OpenRegular />}
-                  aria-label="Open in Word for the Web"
-                  disabled={openInWordDisabled}
-                  onClick={onOpenInWord}
-                  data-testid="compose-format-open-word-web"
-                >
-                  Open web
-                </Button>
-              ) : null}
-              {onOpenInWordDesktop ? (
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  className={styles.wordMenuItem}
-                  icon={<DesktopRegular />}
-                  aria-label="Open in the Word desktop app"
-                  disabled={openInWordDisabled}
-                  onClick={onOpenInWordDesktop}
-                  data-testid="compose-format-open-word-desktop"
-                >
-                  Open desktop
-                </Button>
-              ) : null}
-            </div>
-          </MenuPopover>
-        </Menu>
-      ) : null}
+      {/* ---- Word — RELOCATED (UAT round-1 #6, 2026-08-03) out of this format-menus row to the
+             action side (right, near Save) as an icon-only dropdown. See below, after Refresh
+             Profile / before the Save split-button. ---- */}
 
-      {/* Spacer — pushes Review + Track Changes + Save + Undo/Redo to the right edge. */}
+      {/* Spacer — pushes Review + Track Changes + Word + Save + Undo/Redo to the right edge. */}
       <div className={styles.spacer} />
 
       {/* ---- Review Summary + Review Notes (UAT round-7 #5) — TWO SEPARATE icon toggles (the former
@@ -850,47 +837,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         </Tooltip>
       ) : null}
 
-      {/* ---- Create Summary Memo (FR-14, task 051) — a dropdown of two READ-and-render actions,
-             rendered ONLY when a review is present (same `hasReview` gate as the Review Summary/Notes
-             toggles). The trigger shows a spinner + disables both items while a memo fetch is in
-             flight; the host's click handler surfaces the "generate the review/memo first" negative
-             state when no memo has been persisted yet — never a silent empty export. ---- */}
-      {hasReview && (onGenerateMemo || onEmailMemo) ? (
-        <Menu positioning="below-end">
-          <MenuTrigger disableButtonEnhancement>
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={isMemoActionInFlight ? <Spinner size="tiny" /> : <DocumentBulletList24Regular />}
-              iconPosition="before"
-              disabled={controlDisabled || isMemoActionInFlight}
-              data-testid="compose-format-memo-menu"
-            >
-              Create Summary Memo
-            </Button>
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList>
-              <MenuItem
-                icon={<ArrowDownload24Regular />}
-                disabled={!onGenerateMemo || controlDisabled || isMemoActionInFlight}
-                onClick={() => onGenerateMemo?.()}
-                data-testid="compose-format-memo-generate"
-              >
-                Generate memo (.docx)
-              </MenuItem>
-              <MenuItem
-                icon={<Mail24Regular />}
-                disabled={!onEmailMemo || controlDisabled || isMemoActionInFlight}
-                onClick={() => onEmailMemo?.()}
-                data-testid="compose-format-memo-email"
-              >
-                Email memo
-              </MenuItem>
-            </MenuList>
-          </MenuPopover>
-        </Menu>
-      ) : null}
+      {/* ---- Create Summary Memo — RELOCATED (UAT round-1 #3, 2026-08-03) to the far left of the
+             toolbar (the very first control). See above, right after the opening <Toolbar> tag. ---- */}
 
       {/* ---- Track Changes toggle (item 4, UAT round-4) — task 039 P1: ICON-ONLY, right-aligned.
              The visible "Track changes" text label was dropped for an icon-only toggle; the accessible
@@ -969,27 +917,124 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         </Tooltip>
       ) : null}
 
-      {/* ---- Save split-button (G7 task 022) — right-aligned ---- */}
-      {/* Primary action = "Save Version" (replace in place / transient-key dedup); the caret menu
-          carries "Save New Document" (a deliberate fork). Fluent v9 SplitButton, theme tokens only
-          (ADR-021 dark-mode). Mirrors the blessed ComposerActionBar Send split-button pattern. */}
+      {/* ---- Word (Open web / Open desktop handoff) — UAT round-1 #6 (2026-08-03): RELOCATED from
+             the format-menus row to the action side (right, near Save), rendered as an ICON-ONLY
+             dropdown (`DocumentWordRegular` — the Fluent "Word file type" glyph, matching the
+             Document*-family icons already used across this toolbar). The popover content is
+             UNCHANGED from task 039 P3/P4: a VERTICAL, labelled list (icon + text row per action).
+             There is NO "Push to Word" control here — the DocxAnnotationWriter push-to-Word surface
+             was fully retired in task 036, so the only Word items are the Open-in-Web/Desktop SPE
+             launch handoff (+ the deliberate Save duplicate). Nothing to remove. The accessible NAME
+             lives on `aria-label="Word"` (icon-only); a Tooltip carries the full label on hover. ---- */}
+      {showWordMenu ? (
+        <Menu positioning="below-end">
+          <MenuTrigger disableButtonEnhancement>
+            {(triggerProps: MenuButtonProps) => (
+              <Tooltip content="Word" relationship="label" withArrow>
+                <Button
+                  {...triggerProps}
+                  appearance="subtle"
+                  size="small"
+                  icon={<DocumentWordRegular />}
+                  aria-label="Word"
+                  disabled={controlDisabled}
+                  data-testid="compose-format-word-menu"
+                />
+              </Tooltip>
+            )}
+          </MenuTrigger>
+          <MenuPopover>
+            <div className={styles.wordMenuColumn} role="group" aria-label="Word document actions">
+              {/* UX-1 (UAT 2026-07-19): a deliberate DUPLICATE of the right-aligned Save
+                  button — users instinctively look in the Word menu to save. Same handler
+                  (`onSave`) + same enable predicate (`saveDisabled`); rendered only when
+                  the host wires Save. G7 (task 022): the Word-menu "Save" is the Save-Version
+                  (replace/dedup) instinct; the fork lives on the main split-button's "Save New
+                  Document" item + is mirrored here for parity. */}
+              {onSave ? (
+                <>
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    className={styles.wordMenuItem}
+                    icon={<SaveRegular />}
+                    disabled={saveDisabled}
+                    onClick={() => onSave('version')}
+                    data-testid="compose-format-word-save"
+                  >
+                    {isSaving ? 'Saving…' : 'Save Version'}
+                  </Button>
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    className={styles.wordMenuItem}
+                    icon={<SaveRegular />}
+                    disabled={saveDisabled}
+                    onClick={() => onSave('new')}
+                    data-testid="compose-format-word-save-new"
+                  >
+                    Save New Document
+                  </Button>
+                </>
+              ) : null}
+              {onOpenInWord ? (
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  className={styles.wordMenuItem}
+                  icon={<OpenRegular />}
+                  aria-label="Open in Word for the Web"
+                  disabled={openInWordDisabled}
+                  onClick={onOpenInWord}
+                  data-testid="compose-format-open-word-web"
+                >
+                  Open web
+                </Button>
+              ) : null}
+              {onOpenInWordDesktop ? (
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  className={styles.wordMenuItem}
+                  icon={<DesktopRegular />}
+                  aria-label="Open in the Word desktop app"
+                  disabled={openInWordDisabled}
+                  onClick={onOpenInWordDesktop}
+                  data-testid="compose-format-open-word-desktop"
+                >
+                  Open desktop
+                </Button>
+              ) : null}
+            </div>
+          </MenuPopover>
+        </Menu>
+      ) : null}
+
+      {/* ---- Save split-button (G7 task 022) — right-aligned. UAT round-1 #5 (2026-08-03):
+             ICON-ONLY (restoring the icon-only intent this file's header always documented) — the
+             visible "Save Version" text was dropped. Primary action = "Save Version" (replace in
+             place / transient-key dedup); the caret menu carries "Save New Document" (a deliberate
+             fork). Fluent v9 SplitButton, theme tokens only (ADR-021 dark-mode). Mirrors the
+             blessed ComposerActionBar Send split-button pattern. The accessible NAME survives via
+             the primaryActionButton's `aria-label`; a Tooltip carries the full label on hover
+             (icon-only buttons need both — ADR-021/a11y). ---- */}
       {onSave ? (
         <Menu positioning="below-end">
           <MenuTrigger disableButtonEnhancement>
             {(triggerProps: MenuButtonProps) => (
-              <SplitButton
-                appearance="subtle"
-                data-testid="compose-format-save"
-                menuButton={{ ...triggerProps, 'aria-label': 'Save options' }}
-                primaryActionButton={{
-                  onClick: () => onSave('version'),
-                  disabled: saveDisabled,
-                  icon: <SaveRegular />,
-                  'aria-label': isSaving ? 'Saving' : 'Save version',
-                }}
-              >
-                {isSaving ? 'Saving…' : 'Save Version'}
-              </SplitButton>
+              <Tooltip content={isSaving ? 'Saving…' : 'Save Version'} relationship="label" withArrow>
+                <SplitButton
+                  appearance="subtle"
+                  data-testid="compose-format-save"
+                  menuButton={{ ...triggerProps, 'aria-label': 'Save options' }}
+                  primaryActionButton={{
+                    onClick: () => onSave('version'),
+                    disabled: saveDisabled,
+                    icon: <SaveRegular />,
+                    'aria-label': isSaving ? 'Saving' : 'Save version',
+                  }}
+                />
+              </Tooltip>
             )}
           </MenuTrigger>
           <MenuPopover>

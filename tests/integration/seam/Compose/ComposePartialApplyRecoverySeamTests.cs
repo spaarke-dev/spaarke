@@ -289,6 +289,185 @@ public sealed class ComposePartialApplyRecoverySeamTests : IClassFixture<Compose
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 4. COMMENTS-ONLY review save (agreements-r1 UAT round-1 #4) — one comment anchors, one does NOT.
+    //    A review places advisory comments but no text edits, so the op-log is EMPTY. Pre-fix, the
+    //    best-effort recovery counted only OPS toward `appliedCount`, so even a fully-bakeable comment
+    //    contributed 0 → `appliedCount == 0` → the guard RE-THREW the anchor refusal → 422, discarding
+    //    the comment that DID anchor. A comment is NON-DESTRUCTIVE: it must degrade gracefully
+    //    (skip-with-report), never fail the WHOLE save. Expect 200, the resolvable comment baked as a
+    //    native w:comment, and the unbakeable comment surfaced on `partialApply` (never silently dropped).
+    //    This test FAILS before the fix (the save is a 422 with no body).
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Save_CommentsOnly_OneCommentUnanchorable_BakesResolvable_SurfacesUnbakeable_ThroughTheWire()
+    {
+        const string speId = "spe-item-agr-comments-only";
+        const string driveId = "drive-agr-comments-only";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+        var original = BuildDocxWithParaIds(Paragraphs, ParaIds);
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v1-etag\""));
+
+        byte[]? persisted = null;
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+            {
+                using var ms = new MemoryStream();
+                stream.CopyTo(ms);
+                persisted = ms.ToArray();
+            })
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v2-etag\""));
+
+        // NO operationLog — a pure review save. comment1 → paragraph 00000001 (resolves). comment2 →
+        // DEADBEEF (absent → ParagraphNotFound). The empty-op-log Apply throws on comment2 first.
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            comments = new object[]
+            {
+                new
+                {
+                    paraId = ParaIds[0],
+                    range = new { start = new { runIndex = 0, offset = 0 }, end = new { runIndex = 0, offset = 8 } },
+                    commentText = "RESOLVABLE-COMMENT",
+                    author = "AI Advisory Review",
+                    date = "2026-08-03T00:00:00Z",
+                },
+                new
+                {
+                    paraId = "DEADBEEF",
+                    range = new { start = new { runIndex = 0, offset = 0 }, end = new { runIndex = 0, offset = 8 } },
+                    commentText = "UNANCHORABLE-COMMENT",
+                    author = "AI Advisory Review",
+                    date = "2026-08-03T00:00:00Z",
+                },
+            },
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"a non-destructive comment that can't anchor must NOT fail the whole review save — body: {body}");
+
+        var saveResult = await response.Content.ReadFromJsonAsync<SaveComposeDocumentResponse>();
+        saveResult!.PartialApply.Should().NotBeNull("the unbakeable comment is surfaced, never silently dropped");
+        saveResult.PartialApply!.AppliedCount.Should().Be(1, "the resolvable comment baked (comments count toward applied)");
+        saveResult.PartialApply.UnresolvedCount.Should().Be(1, "the absent-paraId comment is surfaced");
+        var unresolved = saveResult.PartialApply.Unresolved.Single();
+        unresolved.ParaId.Should().Be("DEADBEEF");
+        unresolved.OpType.Should().Be("AdvisoryComment", "a skipped comment is reported as a comment, not an edit op");
+        unresolved.Kind.Should().Be(nameof(ComposePatchErrorKind.ParagraphNotFound));
+
+        persisted.Should().NotBeNull("the SPE facade must have captured the best-effort patched bytes");
+        using var patchedDoc = WordprocessingDocument.Open(new MemoryStream(persisted!, writable: false), isEditable: false);
+        var commentsPart = patchedDoc.MainDocumentPart!.WordprocessingCommentsPart;
+        commentsPart.Should().NotBeNull("the resolvable advisory comment must bake as a native w:comment");
+        var commentTexts = commentsPart!.Comments!.Descendants<Comment>()
+            .SelectMany(c => c.Descendants<Text>()).Select(t => t.Text).ToList();
+        commentTexts.Should().Contain(t => t.Contains("RESOLVABLE-COMMENT", StringComparison.Ordinal),
+            "the comment that anchored MUST be baked, not lost with the whole save");
+        commentTexts.Should().NotContain(t => t.Contains("UNANCHORABLE-COMMENT", StringComparison.Ordinal),
+            "the comment that could not anchor must NEVER be silently placed on a wrong paragraph");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 5. TEXT edit + an unanchorable COMMENT (agreements-r1 UAT round-1 #4) — the text edit resolves and
+    //    is preserved; the dropped comment is SURFACED (not silently dropped). Pre-fix the recovery
+    //    counted only ops, so the save returned 200 but with unresolvedCount 0 — the reviewer never saw
+    //    that their comment was lost. Post-fix the comment shows on `partialApply.unresolved`. The
+    //    honest-failure contract for TEXT is unchanged (a text op that fails still surfaces / hard-fails).
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Save_TextEditPlusUnanchorableComment_PreservesEdit_SurfacesDroppedComment_ThroughTheWire()
+    {
+        const string speId = "spe-item-agr-edit-plus-comment";
+        const string driveId = "drive-agr-edit-plus-comment";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+        var original = BuildDocxWithParaIds(Paragraphs, ParaIds);
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v1-etag\""));
+
+        byte[]? persisted = null;
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+            {
+                using var ms = new MemoryStream();
+                stream.CopyTo(ms);
+                persisted = ms.ToArray();
+            })
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v2-etag\""));
+
+        var operationLog = new
+        {
+            schemaVersion = "compose-ops-v2",
+            operations = new object[]
+            {
+                new { type = "insertText", paraId = ParaIds[0], at = new { runIndex = 0, offset = 0 }, text = "[EDIT-KEPT]" },
+            },
+        };
+
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog,
+            comments = new object[]
+            {
+                new
+                {
+                    paraId = "DEADBEEF",
+                    range = new { start = new { runIndex = 0, offset = 0 }, end = new { runIndex = 0, offset = 8 } },
+                    commentText = "DROPPED-COMMENT",
+                    author = "AI Advisory Review",
+                    date = "2026-08-03T00:00:00Z",
+                },
+            },
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, $"the text edit resolves, so the save succeeds — body: {body}");
+
+        var saveResult = await response.Content.ReadFromJsonAsync<SaveComposeDocumentResponse>();
+        saveResult!.PartialApply.Should().NotBeNull();
+        saveResult.PartialApply!.AppliedCount.Should().Be(1, "the text edit applied");
+        saveResult.PartialApply.UnresolvedCount.Should().Be(1,
+            "the dropped comment is now surfaced — pre-fix it was silently dropped (unresolvedCount 0)");
+        saveResult.PartialApply.Unresolved.Single().OpType.Should().Be("AdvisoryComment");
+
+        persisted.Should().NotBeNull();
+        using var patchedDoc = WordprocessingDocument.Open(new MemoryStream(persisted!, writable: false), isEditable: false);
+        patchedDoc.MainDocumentPart!.Document!.Body!.Descendants<Text>().Select(t => t.Text)
+            .Should().Contain(t => t.Contains("[EDIT-KEPT]", StringComparison.Ordinal),
+                "the resolvable text edit MUST be preserved even though a comment could not anchor");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
     // Shared arrange + OOXML helpers (per-file-local, consistent with this suite's convention).
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
 

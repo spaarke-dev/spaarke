@@ -101,3 +101,33 @@ describe('composeSessionCommentThreadsToAnchoredComments — cross-paragraph cla
     expect(result).toHaveLength(0);
   });
 });
+
+/**
+ * Agreements-r1 UAT round-1 #4 (agent-C, 2026-08-03) — the anchor-drift TRIGGER for the
+ * "Save error: A change could not be anchored in the document" 422.
+ *
+ * `resolveRunAnchor` already threads the ROBUST task-055 `paraOffset` (the paragraph-relative
+ * char offset) onto every anchor it returns, and every OP the interceptor emits carries it — so a
+ * text edit resolves server-side across the TipTap↔OOXML run-merge boundary. Advisory comment ranges
+ * did NOT: the serializer projected only the legacy `(runIndex, offset)`, dropping `paraOffset`, so a
+ * comment on a multi-run paragraph (TipTap merges same-format runs, so its runIndex disagrees with
+ * OOXML's fine-grained runs) refused with an anchor error on save. Carrying `paraOffset` through makes
+ * a comment anchor as robust as a text-edit anchor — still purely numeric (never a text match, I-7).
+ */
+describe('composeSessionCommentThreadsToAnchoredComments — robust paraOffset anchor (agreements-r1 UAT #4)', () => {
+  it('carries the paragraph-relative paraOffset on both range endpoints (parity with text-edit ops)', () => {
+    const mark = schema.marks.commentAnchor.create({ commentId: 'c2' });
+    const p1 = schema.nodes.paragraph.create({ paraId: '0B000001' }, [
+      schema.text('Alpha ', []), // paragraph offsets 0..6
+      schema.text('flagged clause', [mark]), // marked span: paragraph offsets 6..20
+      schema.text(' omega', []),
+    ]);
+    const doc = schema.nodes.doc.create(null, [p1]);
+
+    const result = composeSessionCommentThreadsToAnchoredComments(doc, [thread('c2')], new Set());
+    expect(result).toHaveLength(1);
+    // The marked span "flagged clause" begins at paragraph char-offset 6 and ends at 20.
+    expect(result[0].range.start.paraOffset).toBe(6);
+    expect(result[0].range.end.paraOffset).toBe(20);
+  });
+});
