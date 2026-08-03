@@ -1,8 +1,7 @@
-# Current Task State
+# Current Task State - spaarke-modal-system
 
-> **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-01 (P1 wave complete — 030 + 031 ✅)
-> **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+> **Last Updated**: 2026-08-02 (by context-handoff — pre-compact checkpoint)
+> **Recovery**: Read "Quick Recovery" section first
 
 ---
 
@@ -10,91 +9,51 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **PROJECT COMPLETE (2026-08-02)** — 28/29 ✅, 051 ⏸️ → Issue #713 |
-| **Step** | — |
-| **Status** | complete |
-| **Next Action** | **Owner items only**: (1) one-time visual review (checklist: `notes/success-criteria-verification.md` bottom); (2) MUST-before-deploy: rebuild+repack the stale `CommunicationConversationPanel` Solution `bundle.js` (predates the P5 source fix); (3) merge via `/merge-to-master` when ready; (4) follow-ons #712–#717 |
+| **Task** | none — **PROJECT COMPLETE (2026-08-02)**: 28/29 tasks ✅, 051 ⏸️ deferred → Issue #713 |
+| **Step** | Post-completion. Branch `work/spaarke-modal-system` = **16 commits, ALL PUSHED to origin. NOT merged to master. NOT deployed anywhere.** No PR exists. |
+| **Status** | awaiting-owner-decision |
+| **Next Action** | The user asked "has everything been deployed and merged?" → answered NO+NO and offered three follow-ups, **awaiting their pick**: (a) run the merge flow (re-run conflict-check vs current master [master is +2 commits past our merge-base — earlier checks showed zero file overlap but re-verify], create PR citing #712–#717, watch CI, hand over the merge button); (b) go further via `/merge-to-master` (push branch:master + sync main repo); (c) prep the **MUST-before-deploy** rebuild+repack of the stale `CommunicationConversationPanel` Solution `bundle.js` (it predates the P5 source fix — still contains ArrowMaximize bytes). Recommended sequencing: owner's one-time visual review before deploy (checklist at bottom of `notes/success-criteria-verification.md`). |
+
+### Files Modified This Session
+All committed + pushed (`b0ff3c0bc..0139b9c77`). Working tree clean except the pre-existing, unrelated `projects/spaarke-iframe-wizard-pattern-enhancement/design.md` (NOT ours — never stage it). Wave commits: P1 `4e3d11f62` · P0.5 · P2 `8301197fd` · P3 `422fa7cce` · P4 `f68b55d65` · P5 `0c0a0a40b` · P6 `2e925c831` · P7 `7c8b4108b` · P8 wrap-up `0139b9c77`.
 
 ### Critical Context
-**P0 (Build, 001–013) ✅** — `SprkModal` + 6 presets ship in `@spaarke/ui-components` (main barrel only; ABSENT from `pcf-safe.ts` → Code-Page-scoped by construction). 86 P0 tests green. Docs: `MODAL-DESIGN-SYSTEM.md` + ADR-050 + pattern pointer + §17 row.
-
-**P1 (Window-controls, 030–031) ✅ 2026-08-01** — `ModalWindowControls` cluster (FullScreen glyph + ×) rolled out via interim `DialogTitle action` slot adapter: 13 dialogs wired/inherited/verified across UI.Components, LegalWorkspace copies, Compose.Components, AI.Widgets, SpaarkeAi. **1 escalation**: legacy `SendEmailDialog` skipped (in-file "v1.1.59 no-X" UAT decision; resolves at P3/051 retirement). See `notes/wave-p1-completion.md` + per-task notes. **Known env issue**: LegalWorkspace `npm run build` broken on master in fresh worktrees (missing `@spaarke/ai-outputs` dep) — **Issue #712 / DEF-001**; use scoped `tsc --noEmit` for LegalWorkspace verification in later waves.
-
-**P0.5 (020) ✅ 2026-08-01** — `uiScale = max(setting, ≥2560→1.15)` bounded {1.0,1.15,1.25,1.5}; **`useUiScale()` from `@spaarke/ui-components` is the seam conversion tasks thread into `SprkModal uiScale`**; `DisplaySizeMenu` in SpaarkeAi strip + LW PageHeader; themeStorage extended in place. See `notes/task-020-completion.md`.
-
-**P2 (040/041/042) ✅ 2026-08-02** — confirms/ChoiceDialog re-based, ActionConfirmationDialog overlay DELETED (1 of 3 overlays retired). Main-session consolidation: ConfirmModal gained `busy` + exported `useDangerButtonClassName` (killed 3 verbatim danger-class copies); ChoiceModal gained `cancelLabel`; SprkModal gained aria-labelledby; PinnedMemoryDeleteConfirmation re-pointed onto literal ConfirmModal. ComposeConflictDialog + CloseProjectDialogs legitimately SprkModal-direct (3-way / phase-dependent footers), documented in-file. See `notes/wave-p2-completion.md`. **Known baseline**: 11 pre-existing failing UI.Components suites (incl. both ConversationView suites — A/B-proven on HEAD); don't chase.
-
-**P3 (2026-08-02)** — 050 ✅: three forms compose the LITERAL FormModal/md (preset pre-extended by main session: `submitDisabled`/`busy`/`cancelLabel`/`dismiss:alert`); QuickStartModal is the first `useUiScale()` consumer. **051 ⏸️ DEFERRED (Issue #713 / DEF-002)**: EmailComposer self-chromed + two live legacy consumers (pcf-safe export [dead], DailyBriefingApp `onSend`); interim `maxHeight:720px` cap → wrapper numerically = `md`; FR-14 satisfied in substance; P1 no-X escalation on the legacy dialog stays OPEN. See `notes/wave-p3-completion.md`.
-
-**P4 ✅ 2026-08-02** — RichFilePreviewDialog → PreviewModal/BrowseModal (public contract byte-identical; @deprecated FilePreviewDialog DELETED + sole consumer migrated); FindSimilarDialog ×3 → xl per-copy (literal on the viewer; WizardShell-prop alignment on the wizard copies; consolidation → Issue #714/DEF-003); `headerActions` passthrough added to Preview/Browse presets. See `notes/wave-p4-completion.md`.
-
-**P5 ✅ 2026-08-02** — ConversationModal hand-roll (overlay 2 of 3) DELETED → `SprkModal md/light` via NEW pcf-safe exports (SprkModal + ModalWindowControls added to the allow-list — the P0 "add when a PCF needs one" case); **FR-08 transform-centering VALIDATED by structural test under real React 16**; dark parity improved. `@spaarke/ui-components/dist/pcf-safe` is the working PCF import specifier (webpack node-resolution). See `notes/task-070-completion.md`.
-
-**P6 ✅ 2026-08-02** — WizardShell light-first (§11-G): standard tokens/order/named `wizard` size; envelope/embedded/stepper + 061 override plumbing retained; 9-consumer matrix green (incl. transitive SemanticSearchControl). Pre-existing LW WizardShell fork discovered → Issue #715 / DEF-004. See `notes/task-080-completion.md`.
-
-**P7 ✅ 2026-08-02** — `oobModalSizes.ts` one-source-of-truth + both hubs; 89-site inventory (45 repointed; 10 flagged for the one-time visual review at `notes/oob-navigateto-inventory.md`); both `navigation.ts` copies DELETED (26 real callers, incl. the openForm shape 090's grep missed; SmartTodo copy was dead code); **overlay 3 of 3 DELETED** (`showChoiceDialog` → chained openConfirmDialog, both copies, zero new asymmetry) — **spec Success Criterion 5 complete**. Stale `.claude/patterns/webresource/custom-dialogs-in-dataverse.md` rewritten to supported paths. New discoveries → Issue #716/DEF-005. See task notes 090/091/092.
-
-**Remaining**: P8 100 wrap-up ONLY (main-session; /test-diet gate binding per root CLAUDE.md §7). Each POML carries preset→conversion map + escalation triggers. Conversion waves modify EXISTING dialogs — read target files before rewriting.
-
-**Env**: fresh worktree; node_modules + dists built for UI.Components, SdapClient, Auth, Compose.Components, AI.Widgets, AI.Outputs, AI.Context, DocumentOperations, SpaarkeAi, LegalWorkspace (build broken per #712), SemanticSearchControl.
+All 9 phases done in this session via parallel task-execute sub-agents + main-session consolidation passes. Wrap-up gates ALL passed: adr-check 9/9 compliant + code-review (4 passes, 213 files) both ZERO Critical, every gate recommendation applied; test-diet 38 files 0-scaffolding (`notes/test-diet-report.md`); Success Criteria §1–10 evidenced (`notes/success-criteria-verification.md` — incl. the appended Quality-Gate Results section listing accepted/deferred items). `projects/INDEX.md` row = COMPLETE; README = Complete; `notes/lessons-learned.md` written.
 
 ---
 
-## Active Task (Full Details)
+## Full State (Detailed)
 
-| Field | Value |
-|-------|-------|
-| **Task ID** | none (wave boundary — P1 done) |
-| **Task File** | next: tasks/020-app-shell-ui-scale-control.poml |
-| **Phase** | 0 ✅ · 0.5 pending · 1 ✅ · 2–8 pending |
-| **Status** | none |
+### What shipped (one paragraph)
+`SprkModal` + 6 presets in `@spaarke/ui-components` (main barrel; `SprkModal`+`ModalWindowControls` also in `pcf-safe.ts` since P5 — PCFs import via `@spaarke/ui-components/dist/pcf-safe`); `useUiScale()` app-shell scale (SpaarkeAi + LW); window-controls on all custom dialogs; conversions: confirms/choices (P2), forms (P3), preview/browse (P4), Messages PCF overlay (P5 — FR-08 transform-centering PROVEN by structural test under real React 16), WizardShell light-first (P6, owner §11-G); OOB consolidation (P7): `oobModalSizes.ts` + both hubs, 89-site inventory (`notes/oob-navigateto-inventory.md`), both `navigation.ts` copies DELETED, `showChoiceDialog` DOM overlay DELETED (overlay 3/3). Net bespoke envelope owners 16 → 3 (WizardShell by design; 2 email surfaces deferred #713).
 
----
+### Merge readiness facts
+- No PR (verified `gh pr list --head work/spaarke-modal-system --state all` → empty).
+- Branch 16 ahead; master +2 past merge-base (re-check overlap at merge; all session-time checks were clean).
+- SpaarkeAi hot-path: many active worktrees share it (projects/INDEX.md) — cite the session's conflict-check soft-passes in the PR; re-run at merge time.
+- PR body should cite: Issues #712–#717, the deferral (#713 = task 051), `notes/success-criteria-verification.md`, and the client-only/no-BFF declaration (NFR-05 — §10 not triggered).
 
-## Progress
+### Deploy readiness facts (NOTHING deployed)
+- **MUST first**: rebuild+repack `CommunicationConversationPanel` Solution `bundle.js` (stale, pre-P5). PCF deploy flow per `docs/guides/PCF-DEPLOYMENT-GUIDE.md` + pcf version-bump skills.
+- Surfaces needing redeploy post-merge: SpaarkeAi code page, SmartTodo, DocumentUploadWizard, SpeAdminApp, PCFs (SemanticSearchControl, CommunicationConversationPanel, VisualHost, RegardingResolver, CommunicationConnections), `sprk_DocumentOperations.js` web resource (solution import; keep BOTH copies byte-consistent).
+- LegalWorkspace code-page build broken on master in fresh worktrees (#712) — fix before ITS redeploy.
+- Owner visual review recommended pre-deploy: consolidated checklist = bottom of `notes/success-criteria-verification.md` (sizes at 3 widths, scale demo, keyboard pass, 10 flagged OOB outliers, 091's behavior deltas, 070/060 dark/transform passes, 092 manual ribbon script).
 
-### Decisions Made (this session)
-- 2026-08-01: P1 executed as 2 parallel Sonnet sub-agents (task-execute Step 0.3); main session did conflict-check (soft-pass), wave build verification, ADR-021 diff gate, tracking + commit.
-- 2026-08-01: Interim adapter = `DialogTitle action` slot + local `isMaximized` → 100%/100% (SendEmailDialog precedent). P2+ re-bases supersede.
-- 2026-08-01: Legacy `SendEmailDialog` escalation recorded, not overridden (owner decision; moot at P3/051).
-- 2026-08-01: LegalWorkspace build defect = master issue, filed #712, NOT fixed in this project (out of scope).
+### Open items ledger (all two-write tracked in `notes/defer-issues.md`)
+#712 LW fresh-worktree build defect (pre-existing) · #713 task-051 deferral (EmailComposer self-chromed + legacy SendEmailDialog live consumers; ALSO carries the open P1 "v1.1.59 no-X" escalation) · #714 FindSimilarDialog 3-copy collision + dead `embedded` prop · #715 WorkAssignmentWizardDialog WRAPPER duplication (NOT a shell fork — corrected wording; shell import is canonical) · #716 web-resource copy drift ×3 regions · #717 091 behavior deltas (FilePreviewDialog same-tab; orphaned openView postMessages).
 
----
+### Environment facts (for continuation)
+- Session model: claude-fable-5[1m]; sub-agents sonnet (070 ran opus ≈ authored sonnet/xhigh).
+- Fresh-worktree installs use `npm install --legacy-peer-deps --no-audit --no-fund` (NEVER npm ci). node_modules + dists exist for: UI.Components, SdapClient, Auth, Compose.Components, AI.Widgets, AI.Outputs, AI.Context, DocumentOperations, SpaarkeAi, LegalWorkspace, SmartTodo, DocumentUploadWizard, SpeAdminApp, external-spa, SemanticSearchControl, CommunicationConversationPanel (+ 3 more PCFs from 090).
+- UI.Components full-suite pre-existing failing baseline: **11 suites / 22 tests** (incl. both ConversationView suites + SendEmailDialog.characterize) — A/B-proven, do NOT chase. `actionConfirmationIntegration` is determinism-hardened (MessageChannel polyfill + in-act release + retryTimes(2)) — history in `notes/task-042-completion.md`.
+- ADR-021 diff-gate one-liner used every wave: grep added lines for hex/`'1px'`/inline color.
 
-## Next Action
-
-**Next Step**: Task 020 — P0.5 app-shell `--sprk-ui-scale` control (FULL rigor, solo). Needs 002 ✅ (satisfied). Touches SpaarkeAi app shell → run conflict-check first, cite in notes.
-
-Then P2 wave (040/041/042 parallel — confirms/choices re-base onto ConfirmModal/ChoiceModal + retire ActionConfirmationDialog overlay).
-
----
-
-## Blockers
-
-**Status**: None (2 open flags for owner, non-blocking: SendEmailDialog no-X escalation; interim maximize-on-confirms tension — both in `notes/wave-p1-completion.md`)
-
----
-
-## Session Notes
-
-### Key Learnings
-- `FindSimilar` wizard copies own no header — inherit window controls via `WizardShell` (zero-edit).
-- `RichFilePreview.tsx` (not the Dialog file) owns the title bar in the dominant non-nav path.
-- Fluent `DialogTitle` `action` slot renders top-right and is excluded from `aria-labelledby` — safe for existing `getByRole(name:)` assertions.
-- Existing suites: 11 UI.Components + 15 Compose + 1 AI.Widgets failures are all PRE-EXISTING (A/B-proven) — don't chase them in later waves.
+### Decisions made this session (post-completion window)
+- Answered merge/deploy status honestly (NO+NO) with readiness breakdown; offered (a)/(b)/(c) above — no action taken pending user choice.
+- ⚠️ Portfolio hook (`/devops-project-sync`) NOT yet run for the completion state — degraded-warn per the skill contract; run it in the continuation (board: github.com/users/spaarke-dev/projects/2).
 
 ---
 
 ## Quick Reference
-
-### Project Context
-- **Project**: spaarke-modal-system
-- **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
-- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
-
-### Applicable ADRs
-- ADR-012 (shared components) · ADR-021 (tokens only — strengthened) · ADR-023 (ChoiceDialog preserved) · ADR-028 (authenticatedFetch as function) · ADR-050 (canonical modal shell)
-
----
-
-*This file is the primary source of truth for active work state. Keep it updated.*
+- **Project docs**: `README.md` (Status: Complete) · `notes/success-criteria-verification.md` · `notes/test-diet-report.md` · `notes/lessons-learned.md` · `notes/defer-issues.md` · `tasks/TASK-INDEX.md` (all rows ✅/⏸️)
+- **ADRs**: 012 · 021 (strengthened) · 022 · 023 (preserved via ChoiceModal) · 028 · **050 (authored + Path-B amended this branch)**
