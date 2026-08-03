@@ -4,8 +4,10 @@
  * Full-width action toolbar for the reading-pane shell (email-communication-
  * solution-r5, reading-pane MAIN-AREA redesign, section #2). Spans the
  * reading-pane width, rendered BELOW the title bar. Layout:
- *   - LEFT — the email verbs Reply / Reply All / Forward / New as icon+text,
- *     left-aligned (unchanged intent; opens the ONE canonical composer).
+ *   - LEFT — the email verbs Reply / Reply All / Forward as icon+text,
+ *     left-aligned (unchanged intent; opens the ONE canonical composer). "New"
+ *     was moved to the email LIST pane's toolbar (`EmailCardList`) per owner UAT
+ *     (2026-08-03) so composing never stacks a modal on an opened email record.
  *   - RIGHT — a right-aligned group of ICON-ONLY buttons with tooltips:
  *     Save to SharePoint, Create Event, Create To Do, Link Invoice, and the
  *     demoted Open full form. The create/save actions operate on the email's
@@ -32,7 +34,6 @@ import {
   ArrowReply20Regular,
   ArrowReplyAll20Regular,
   ArrowForward20Regular,
-  Mail20Regular,
   CloudArrowUp20Regular,
   CalendarLtr20Regular,
   CheckmarkCircle20Regular,
@@ -93,11 +94,6 @@ export const EmailToolbar: React.FC<EmailToolbarProps> = ({ selectedId, actions 
     [selectedId]
   );
 
-  const handleNew = React.useCallback(() => {
-    if (actions?.onNew) actions.onNew();
-    else warnPendingIntegration('New');
-  }, [actions]);
-
   return (
     <div className={s.root}>
       <Toolbar size="small" className={s.bar} aria-label="Email actions">
@@ -122,9 +118,6 @@ export const EmailToolbar: React.FC<EmailToolbarProps> = ({ selectedId, actions 
           onClick={() => dispatch('Forward', actions?.onForward)}
         >
           Forward
-        </ToolbarButton>
-        <ToolbarButton icon={<Mail20Regular />} onClick={handleNew}>
-          New
         </ToolbarButton>
 
         {/* Divider + icon-only cluster pushed to the far right. */}

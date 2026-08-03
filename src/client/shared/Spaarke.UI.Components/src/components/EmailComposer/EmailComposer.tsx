@@ -91,6 +91,7 @@ import { BodyEditor } from './subcomponents/BodyEditor';
 import { AttachmentList } from './subcomponents/AttachmentList';
 import { AssociationChips } from './subcomponents/AssociationChips';
 import { ComposerActionBar } from './subcomponents/ComposerActionBar';
+import { ComposerSendButton } from './subcomponents/ComposerSendButton';
 
 // The Dataverse logical name for a governed Document — the paperclip's "Link documents"
 // picks this type and ATTACHES it, so it's intentionally excluded from the record-search
@@ -992,10 +993,23 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
 
       {/* From: — Outlook-style sender line ABOVE To/Cc (owner UAT 2026-07-30, item 3). Shows the
           current sender; a dropdown switches between the user's mailbox and the Spaarke shared
-          mailbox. Wired to the engine's existing `sendMode` state (same store the bottom Send
-          selector reads). Hidden in read-only (view) mode — there is nothing to send. */}
+          mailbox. Wired to the engine's existing `sendMode` state. Hidden in read-only (view)
+          mode — there is nothing to send. The primary Send control lives HERE, left of "From:"
+          (owner UAT 2026-08-03 item 1 — Outlook-style Send in the address section, not a bottom bar). */}
       {!state.readOnly && (
         <div className={styles.fromRow} role="group" aria-label="From">
+          <ComposerSendButton
+            isSending={state.isSending}
+            canSend={canSend}
+            sendMode={state.sendMode}
+            showSendModeChoice={showSendModeRadio && !state.readOnly}
+            onSendModeChange={value => dispatch({ type: 'SET_SEND_MODE', value })}
+            onSend={() => {
+              send().catch(() => {
+                /* onError already notified; swallow so the click doesn't reject. */
+              });
+            }}
+          />
           {/* "From:" as plain semibold text, not a boxed label (owner UAT 2026-07-30 R2 item 9);
               the mailbox value beside it stays a subtle switcher (user ↔ Spaarke shared mailbox). */}
           <span className={styles.fromLabel} aria-hidden="true">
@@ -1302,17 +1316,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         mode={state.mode}
         isSending={state.isSending}
         isSavingDraft={state.isSavingDraft}
-        canSend={canSend}
         isDraftRecord={props.isDraftRecord}
-        sendMode={state.sendMode}
-        showSendModeChoice={showSendModeRadio && !state.readOnly}
-        onSendModeChange={value => dispatch({ type: 'SET_SEND_MODE', value })}
-        onSend={() => {
-          send().catch(() => {
-            /* onError callback already notified; swallow here so the button
-               click doesn't produce an unhandled promise rejection. */
-          });
-        }}
         onSaveDraft={() => {
           saveDraft().catch(() => {
             /* surfaced via onSaveDraft/props.onError-equivalent is not
