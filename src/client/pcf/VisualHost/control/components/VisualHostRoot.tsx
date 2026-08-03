@@ -26,6 +26,10 @@ import {
   type IAiSummaryPopoverProps,
   type ISummaryData,
 } from '../../../../shared/Spaarke.UI.Components/src/components/AiSummaryPopover';
+// spaarke-modal-system P7 task 090 (FR-11/FR-18) — single OOB size source of
+// truth. React-free module; relative-source import matches this file's own
+// AiSummaryPopover precedent above.
+import { OOB_MODAL_SIZES } from '../../../../shared/Spaarke.UI.Components/src/utils/adapters/oobModalSizes';
 
 // React 18/19 types-version drift workaround: see CardChrome.tsx for rationale.
 const AiSummaryPopover = RawAiSummaryPopover as unknown as React.ComponentType<IAiSummaryPopoverProps>;
@@ -420,8 +424,8 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
     const navOptions = {
       target: 2 as const,
       position: 1 as const,
-      width: { value: 60, unit: '%' as const },
-      height: { value: 70, unit: '%' as const },
+      width: OOB_MODAL_SIZES.wizard.width,
+      height: OOB_MODAL_SIZES.wizard.height,
     };
 
     try {

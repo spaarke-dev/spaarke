@@ -28,6 +28,7 @@
  *   `data` → `id` → host form, in that order).
  */
 import { getXrm } from '../../services/xrmGlobal';
+import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
 
 /**
  * Deployed web-resource name for the Email code page. Type Webpage/HTML,
@@ -98,8 +99,11 @@ export async function openEmailRecord(communicationId: string, options?: OpenEma
       {
         target: 2, // modal dialog
         position: 1, // centered
-        width: { value: 80, unit: '%' },
-        height: { value: 80, unit: '%' },
+        // `record` OOB size (85%×85%) — this webresource proxies an existing
+        // sprk_communication "record" view (record-modal-selection.md
+        // invariant; spec FR-11/FR-18, task 090); was ad-hoc 80%×80%.
+        width: OOB_MODAL_SIZES.record.width,
+        height: OOB_MODAL_SIZES.record.height,
       }
     );
   } catch (err) {

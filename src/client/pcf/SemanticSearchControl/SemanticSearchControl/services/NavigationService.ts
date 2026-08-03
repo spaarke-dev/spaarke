@@ -10,6 +10,10 @@
 import { SearchResult, SearchFilters, SearchScope, SearchMode } from '../types';
 import { resolveTenantIdSync } from '@spaarke/auth';
 import { getEffectiveDarkMode } from './ThemeService';
+// PCF deep-dist import (ADR-012 "PCF Import Pattern") — oobModalSizes.ts is
+// React-free, so this is safe under React 16/17. spaarke-modal-system P7
+// task 090 (FR-11/FR-18): single source of truth for OOB dialog dimensions.
+import { OOB_MODAL_SIZES } from '@spaarke/ui-components/dist/utils/adapters/oobModalSizes';
 
 /**
  * Envelope literal type for `searchMode`. MUST stay aligned with the
@@ -412,8 +416,8 @@ export class NavigationService {
         } as Xrm.Navigation.PageInputHtmlWebResource,
         {
           target: 2,
-          width: { value: 60, unit: '%' },
-          height: { value: 70, unit: '%' },
+          width: OOB_MODAL_SIZES.wizard.width,
+          height: OOB_MODAL_SIZES.wizard.height,
         }
       );
       // Dialog closed successfully
@@ -568,17 +572,21 @@ export class NavigationService {
         entityId: recordId,
       };
 
+      // Default to the `record` OOB size (85%×85%, oobModalSizes.ts — spec
+      // FR-11/FR-18, task 090): this opens an EXISTING record as a modal, the
+      // record-modal-selection.md invariant. `modalOptions` still lets a
+      // caller override explicitly; only the implicit default moved (was 80).
       const navigationOptions: Xrm.Navigation.NavigationOptions =
         target === NavigationTarget.Modal
           ? {
               target: 2,
               width: {
-                value: modalOptions?.width ?? 80,
-                unit: modalOptions?.unit ?? '%',
+                value: modalOptions?.width ?? OOB_MODAL_SIZES.record.width.value,
+                unit: modalOptions?.unit ?? OOB_MODAL_SIZES.record.width.unit,
               },
               height: {
-                value: modalOptions?.height ?? 80,
-                unit: modalOptions?.unit ?? '%',
+                value: modalOptions?.height ?? OOB_MODAL_SIZES.record.height.value,
+                unit: modalOptions?.unit ?? OOB_MODAL_SIZES.record.height.unit,
               },
             }
           : {

@@ -457,10 +457,12 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
       entityName: 'sprk_matter',
       entityId: '11111111-1111-1111-1111-111111111111',
     });
+    // `record` OOB size (85%×85%) — spaarke-modal-system P7 task 090
+    // (FR-11/FR-18); was 80%×80%.
     expect(navOptions).toMatchObject({
       target: 2,
-      width: { value: 80, unit: '%' },
-      height: { value: 80, unit: '%' },
+      width: { value: 85, unit: '%' },
+      height: { value: 85, unit: '%' },
     });
   });
 });
@@ -564,11 +566,12 @@ describe('NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)', 
       entityName: 'contact',
       entityId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
     });
-    // Modal dialog options (target 2 + 80/80) per the SubRowLink contract.
+    // Modal dialog options (target 2 + `record` OOB size 85%×85%) per the
+    // SubRowLink contract — spaarke-modal-system P7 task 090; was 80/80.
     expect(navOptions).toMatchObject({
       target: 2,
-      width: { value: 80, unit: '%' },
-      height: { value: 80, unit: '%' },
+      width: { value: 85, unit: '%' },
+      height: { value: 85, unit: '%' },
     });
   });
 

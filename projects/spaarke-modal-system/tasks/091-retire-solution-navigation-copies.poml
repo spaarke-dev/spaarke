@@ -4,7 +4,7 @@
     <title>P7 — Retire solution-local navigation.ts copies (LegalWorkspace ≡ SmartTodo) — FR-18</title>
     <phase>7 OOB consolidation</phase>
     <gate>blocked until 090</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Modify-then-delete of duplicated helper files with a clear consuming pattern (the shared hub from task 090); bounded blast radius (two solutions), no new architecture.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -103,7 +103,7 @@
     <criterion testable="true">Any caller genuinely needing the old 80% size is recorded for the P7 visual review rather than silently forced to 85%.</criterion>
   </acceptance-criteria>
 
-  <notes>Modify-then-delete — no `&lt;justification&gt;` (retires duplicated existing files onto the shared hub; net component count decreases per NFR-06). Depends on 090 (constants + hubs). Runs in parallel group P7 with 092. The 80%→85/70-80 collapse is a spec-acknowledged accepted change pending the one-time P7 visual review.</notes>
+  <notes>Modify-then-delete — no `&lt;justification&gt;` (retires duplicated existing files onto the shared hub; net component count decreases per NFR-06). Depends on 090 (constants + hubs). Runs in parallel group P7 with 092. The 80%→85/70-80 collapse is a spec-acknowledged accepted change pending the one-time P7 visual review. COMPLETED 2026-08-02 (parallel sub-agent, FULL): BOTH files DELETED, zero remaining imports (grep-proven). Real scope = 26 call sites across 17 LW files (090's `.navigateTo(`-grep missed the `navigateToEntity`/openForm shape's 13 extra callers); SmartTodo copy was DEAD CODE (zero callers). Mapping: 5 record-dialog opens → hub openRecordModal (85²); 14 openForm full-page opens → hub openRecord (no size — openForm has none); 4 entitylist → record-size navigateTo (nearest fit, flagged); 3 orphaned openView postMessages preserved verbatim (no receiver exists — flagged). Caught own optional-chaining bug via tsc-baseline diff (LW back to exactly 238). Flags for visual review: FilePreviewDialog lost openInNewWindow (adapter lacks the option); orphaned postMessage receivers; entitylist size mapping. SmartTodo build+tests green. Detail: notes/task-091-completion.md.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

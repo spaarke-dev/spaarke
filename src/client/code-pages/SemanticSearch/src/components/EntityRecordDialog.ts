@@ -7,6 +7,10 @@
  * @see ADR-006: Xrm.Navigation.navigateTo for record dialogs
  */
 
+// Deep import (not the main barrel) — avoids pulling in the barrel's
+// `useForceSimulation`/`d3-force` (ESM-only, breaks ts-jest without extra
+// transform config). oobModalSizes.ts has zero other dependencies.
+import { OOB_MODAL_SIZES } from '@spaarke/ui-components/utils/adapters/oobModalSizes';
 import type { SearchDomain } from '../types';
 
 // =============================================
@@ -49,8 +53,11 @@ export function openEntityRecord(recordId: string, domain: SearchDomain): void {
       },
       {
         target: 2,
-        width: { value: 70, unit: '%' },
-        height: { value: 80, unit: '%' },
+        // `record` OOB size (85%×85%) — opening an EXISTING entity record
+        // (record-modal-selection.md invariant; spec FR-11/FR-18, task 090);
+        // was an ad-hoc 70%×80% literal.
+        width: OOB_MODAL_SIZES.record.width,
+        height: OOB_MODAL_SIZES.record.height,
       }
     );
   } catch (err) {

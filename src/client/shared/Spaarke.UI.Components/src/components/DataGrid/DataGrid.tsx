@@ -47,6 +47,7 @@ import {
 
 import type { IDataverseClient, EntityMetadata, SavedQueryResult } from '../../services/IDataverseClient';
 import { XrmDataverseClient } from '../../services/XrmDataverseClient';
+import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
 import type { DataGridConfiguration, MembershipFilter } from '../../types/DataGridConfiguration';
 import { isValidDataGridConfiguration } from '../../types/DataGridConfiguration';
 import {
@@ -510,12 +511,16 @@ const useStyles = makeStyles({
  * Layout 1 modal size — binding standard per ai-spaarke-ai-workspace-UI-r2 FR-20.
  * Every row-open from a Spaarke DataGrid uses this exact geometry regardless of
  * entity or `rowOpen.type`. See `projects/ai-spaarke-ai-workspace-UI-r2/spec.md`.
+ *
+ * Sourced from `oobModalSizes.ts`'s `record` size (spec FR-11/FR-18, task 090) —
+ * this constant previously duplicated the 85%×85% literal independently; it now
+ * defers to the single OOB size-constants module so the two can never drift.
  */
 const LAYOUT_1_NAV_OPTIONS = Object.freeze({
   target: 2,
   position: 1,
-  width: Object.freeze({ value: 85, unit: '%' as const }),
-  height: Object.freeze({ value: 85, unit: '%' as const }),
+  width: OOB_MODAL_SIZES.record.width,
+  height: OOB_MODAL_SIZES.record.height,
 });
 
 /**

@@ -41,7 +41,7 @@ import { EntityCreationService } from '../../services/EntityCreationService';
 import { getBffBaseUrl } from '../../config/runtimeConfig';
 import { authenticatedFetch } from '../../services/authInit';
 import { getSpeContainerIdFromBusinessUnit } from '../../services/xrmProvider';
-import { navigateToEntity } from '../../utils/navigation';
+import { createXrmNavigationService } from '@spaarke/ui-components';
 import type { IWebApi } from '../../types/xrm';
 import { provisionSecureProject } from './provisioningService';
 
@@ -247,10 +247,8 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
         const hasWarnings = warnings.length > 0;
 
         const viewProject = () => {
-          navigateToEntity({
-            action: 'openRecord',
-            entityName: 'sprk_project',
-            entityId: projectId,
+          createXrmNavigationService().openRecord('sprk_project', projectId).catch((err) => {
+            console.error('[ProjectWizardDialog] openRecord failed:', err);
           });
           onClose();
         };

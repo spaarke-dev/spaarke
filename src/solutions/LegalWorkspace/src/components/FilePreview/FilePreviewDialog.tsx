@@ -13,7 +13,7 @@ import * as React from 'react';
 import { SendEmailDialog } from '@spaarke/ui-components';
 import { RichFilePreviewDialog } from '@spaarke/ui-components/components/FilePreview/RichFilePreviewDialog';
 import { getDocumentPreviewUrl, getDocumentOpenLinks } from '../../services/DocumentApiService';
-import { navigateToEntity } from '../../utils/navigation';
+import { createXrmNavigationService } from '@spaarke/ui-components';
 import { copyDocumentLink, setWorkspaceFlag } from './filePreviewService';
 import { searchUsersAsLookup } from '../CreateMatter/matterService';
 import { getXrm } from '../../services/xrmProvider';
@@ -110,11 +110,14 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   }, [documentId, documentName]);
 
   const handleOpenRecord = React.useCallback(() => {
-    navigateToEntity({
-      action: 'openRecord',
-      entityName: 'sprk_document',
-      entityId: documentId,
-      openInNewWindow: true,
+    // NOTE (task 091): the retired local `navigateToEntity` passed
+    // `openInNewWindow: true` here. The shared xrmNavigationServiceAdapter's
+    // `openRecord()` has no equivalent option (adapter is out of scope for
+    // this task's edits) — flagged for the P7 visual review; this now opens
+    // in the same window/tab rather than a new one. See
+    // projects/spaarke-modal-system/notes/task-091-completion.md.
+    createXrmNavigationService().openRecord('sprk_document', documentId).catch((err) => {
+      console.error('[FilePreviewDialog] openRecord failed:', err);
     });
   }, [documentId]);
 

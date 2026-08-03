@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — **P0 ✅ P0.5 ✅ P1 ✅ P2 ✅ P3 ✅/⏸️ P4 ✅ P5 ✅ P6 ✅** |
+| **Task** | none active — **P0 ✅ P0.5 ✅ P1 ✅ P2 ✅ P3 ✅/⏸️ P4 ✅ P5 ✅ P6 ✅ P7 ✅** — ALL CONVERSIONS DONE |
 | **Step** | — |
-| **Status** | phase-boundary |
-| **Next Action** | P7: 090 (OOB size scale + hub routing, solo) → then 091/092 parallel → P8 100 (main-session wrap-up incl. /test-diet) |
+| **Status** | phase-boundary (final) |
+| **Next Action** | P8 task 100 — project wrap-up, MAIN SESSION ONLY (writes .claude/): code-review + adr-check + **/test-diet gate (root CLAUDE.md §7)** + lessons-learned + INDEX updates + repo-cleanup |
 
 ### Critical Context
 **P0 (Build, 001–013) ✅** — `SprkModal` + 6 presets ship in `@spaarke/ui-components` (main barrel only; ABSENT from `pcf-safe.ts` → Code-Page-scoped by construction). 86 P0 tests green. Docs: `MODAL-DESIGN-SYSTEM.md` + ADR-050 + pattern pointer + §17 row.
@@ -32,7 +32,9 @@
 
 **P6 ✅ 2026-08-02** — WizardShell light-first (§11-G): standard tokens/order/named `wizard` size; envelope/embedded/stepper + 061 override plumbing retained; 9-consumer matrix green (incl. transitive SemanticSearchControl). Pre-existing LW WizardShell fork discovered → Issue #715 / DEF-004. See `notes/task-080-completion.md`.
 
-**Conversions remaining**: P7 090→091/092 · P8 100 (main-session wrap-up incl. /test-diet). Each POML carries preset→conversion map + escalation triggers. Conversion waves modify EXISTING dialogs — read target files before rewriting.
+**P7 ✅ 2026-08-02** — `oobModalSizes.ts` one-source-of-truth + both hubs; 89-site inventory (45 repointed; 10 flagged for the one-time visual review at `notes/oob-navigateto-inventory.md`); both `navigation.ts` copies DELETED (26 real callers, incl. the openForm shape 090's grep missed; SmartTodo copy was dead code); **overlay 3 of 3 DELETED** (`showChoiceDialog` → chained openConfirmDialog, both copies, zero new asymmetry) — **spec Success Criterion 5 complete**. Stale `.claude/patterns/webresource/custom-dialogs-in-dataverse.md` rewritten to supported paths. New discoveries → Issue #716/DEF-005. See task notes 090/091/092.
+
+**Remaining**: P8 100 wrap-up ONLY (main-session; /test-diet gate binding per root CLAUDE.md §7). Each POML carries preset→conversion map + escalation triggers. Conversion waves modify EXISTING dialogs — read target files before rewriting.
 
 **Env**: fresh worktree; node_modules + dists built for UI.Components, SdapClient, Auth, Compose.Components, AI.Widgets, AI.Outputs, AI.Context, DocumentOperations, SpaarkeAi, LegalWorkspace (build broken per #712), SemanticSearchControl.
 

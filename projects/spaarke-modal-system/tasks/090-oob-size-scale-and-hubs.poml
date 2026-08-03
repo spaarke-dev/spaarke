@@ -4,7 +4,7 @@
     <title>P7 — OOB size scale constants + route navigateTo through the two hubs — FR-11/FR-18</title>
     <phase>7 OOB consolidation</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New typed shared surface (OOB size constants) plus a repoint of ~85–100 `navigateTo` call sites across PCF/solutions/ribbon — high blast radius on how every OOB modal opens; correctness + build verification are load-bearing (FULL trigger: new surface, modifying `.ts`, `pcf` consumers).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -112,7 +112,7 @@
     <criterion testable="true">All affected surfaces build green under `@types/react` 18 and React 19; the constants module imports no React.</criterion>
   </acceptance-criteria>
 
-  <notes>NEW-surface task — `&lt;justification&gt;` included (the named-size constants module is new; existing = scattered 85/80/70/60 literals across ≥4 hubs). This task unblocks 091 (retire solution `navigation.ts`) and 092 (convert the ribbon DOM overlay), both of which consume the constants + hubs. The 80%→85/70-80 collapse is confirmed acceptable pending the one-time P7 visual review (spec "remaining assumption").</notes>
+  <notes>NEW-surface task — `&lt;justification&gt;` included (the named-size constants module is new; existing = scattered 85/80/70/60 literals across ≥4 hubs). This task unblocks 091 (retire solution `navigation.ts`) and 092 (convert the ribbon DOM overlay), both of which consume the constants + hubs. The 80%→85/70-80 collapse is confirmed acceptable pending the one-time P7 visual review (spec "remaining assumption"). COMPLETED 2026-08-02 (solo sub-agent, FULL): `oobModalSizes.ts` shipped (React-free, tested); both hubs consume it; 89-site inventory at notes/oob-navigateto-inventory.md (5 hub defs · 45 repointed [23 record / 3 createForm / 19 wizard incl. a 4-way resolveXrmNavigation dedup + the previously-undiscovered toolbarLaunchDefaults duplicate-constants module] · 4 ribbon literal+comment · 10 flagged for visual review [95², 3×90×85, 5×80-class, 60×80] · 8 page-nav intentionally-left · 4→091 · 16→092). 11 packages verified green (4 PCFs build:prod, SpaarkeAi, 5 libs/pages, LW scoped tsc). Deliberate change: entity-create hand-off wizard→createForm size (sole caller verified). Detail: notes/task-090-completion.md.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

@@ -414,7 +414,10 @@ async function openAnalysisBuilderDialog(params, formContext) {
             data: buildQueryString(dataPayload)
         };
 
-        // Dialog options for Analysis Builder - percentage-based for responsive sizing
+        // Dialog options for Analysis Builder - percentage-based for responsive sizing.
+        // Matches the `wizard` OOB size in oobModalSizes.ts (spec FR-11/FR-18,
+        // task 090). Plain Dataverse web resource (no bundler) - cannot import
+        // that module; keep this literal in sync with it manually.
         const navigationOptions = {
             target: 2,      // Dialog
             position: 1,    // Center

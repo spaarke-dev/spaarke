@@ -40,6 +40,30 @@ export interface ISendEmailPayload {
 export const SendEmailDialog: React.FC<any> = () => null;
 
 // ---------------------------------------------------------------------------
+// spaarke-modal-system P7 task 090 (FR-11/FR-18): SubRowLink.tsx,
+// NarrativeBullet.tsx, and DailyBriefingApp.tsx import OOB_MODAL_SIZES from
+// `@spaarke/ui-components` (the single OOB size-constants module) so their
+// navigateTo record-opens can't drift from the shared `record` (85%×85%)
+// size. Mirror the real module's values exactly — see
+// utils/adapters/oobModalSizes.ts.
+// ---------------------------------------------------------------------------
+
+export const OOB_MODAL_SIZES = {
+  record: {
+    width: { value: 85, unit: '%' as const },
+    height: { value: 85, unit: '%' as const },
+  },
+  createForm: {
+    width: { value: 70, unit: '%' as const },
+    height: { value: 80, unit: '%' as const },
+  },
+  wizard: {
+    width: { value: 60, unit: '%' as const },
+    height: { value: 70, unit: '%' as const },
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Types referenced by the LegalWorkspace registry factory under test
 // (`createLegalWorkspaceSectionRegistry`, R2 Option D).
 // ---------------------------------------------------------------------------
