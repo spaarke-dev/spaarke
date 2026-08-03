@@ -1012,7 +1012,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
         ))}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
-      {showVersion && <span className={styles.versionBadge}>v1.4.37 • 2026-07-12</span>}
+      {showVersion && <span className={styles.versionBadge}>v1.4.38 • 2026-08-02</span>}
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>
