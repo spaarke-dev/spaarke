@@ -817,7 +817,12 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           submitDisabled={!briefingRecipient}
         >
           <Text>Choose a colleague — the server sends them your full Daily Briefing.</Text>
-          <LookupField label="Send to" value={briefingRecipient} onChange={setBriefingRecipient} onSearch={handleSearchUsers} />
+          <LookupField
+            label="Send to"
+            value={briefingRecipient}
+            onChange={setBriefingRecipient}
+            onSearch={handleSearchUsers}
+          />
         </FormModal>
       )}
       {emailDialog?.mode === 'item' && (
