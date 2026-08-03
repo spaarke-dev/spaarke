@@ -237,10 +237,19 @@ export interface ISendEmailDialogProps {
    * `initialState`).
    */
   communicationId?: string;
+  /**
+   * UAT 2026-08-02: render at the maximized geometry (100% of the host
+   * viewport) from the start, with the maximize toggle hidden. Used by hosts
+   * that open the composer while ANOTHER modal is already on screen (e.g.
+   * Reply/Forward from the OOB email-record modal) so the composer fully
+   * covers the underlying modal instead of floating inside it. Additive;
+   * omitted → the default mid-size rectangle + toggle, unchanged.
+   */
+  fullBleed?: boolean;
 }
 
 export function SendEmailDialog(props: ISendEmailDialogProps) {
-  const { open, onClose, mode, onSent, onError, regarding, associations, ...composerProps } = props;
+  const { open, onClose, mode, onSent, onError, regarding, associations, fullBleed, ...composerProps } = props;
   const dialogStyles = useDialogStyles();
 
   // Maximize/restore (owner UAT 2026-07-30, item 11). The surface size is owned here (the
@@ -279,15 +288,17 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
         if (!data.open) onClose();
       }}
     >
-      <DialogSurface className={mergeClasses(dialogStyles.surface, maximized && dialogStyles.surfaceMaximized)}>
+      <DialogSurface
+        className={mergeClasses(dialogStyles.surface, (fullBleed || maximized) && dialogStyles.surfaceMaximized)}
+      >
         <DialogBody className={dialogStyles.body}>
           <EmailComposer
             {...composerProps}
             associations={mergedAssociations}
             mount="dialog"
             mode={mode ?? 'compose'}
-            isMaximized={maximized}
-            onToggleMaximize={() => setMaximized(m => !m)}
+            isMaximized={fullBleed || maximized}
+            onToggleMaximize={fullBleed ? undefined : () => setMaximized(m => !m)}
             onSent={result => {
               onSent?.(result.communicationId);
               onClose();

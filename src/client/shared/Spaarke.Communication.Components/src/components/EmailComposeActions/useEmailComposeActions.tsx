@@ -201,6 +201,10 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
     <SendEmailDialog
       open={isOpen}
       onClose={handleClose}
+      // UAT 2026-08-02: Reply/ReplyAll/Forward/New open while the OOB email-record
+      // modal is already on screen — render the composer full-bleed so it fully
+      // covers the underlying modal instead of floating inside it.
+      fullBleed
       mode={engineMode}
       communicationId={isRecordScoped ? dialogState?.communicationId : undefined}
       authenticatedFetch={authenticatedFetch}

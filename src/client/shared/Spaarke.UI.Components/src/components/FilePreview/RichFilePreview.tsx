@@ -54,6 +54,7 @@ import {
   Text,
   Tag,
   makeStyles,
+  mergeClasses,
   shorthands,
   tokens,
 } from '@fluentui/react-components';
@@ -273,6 +274,13 @@ const useStyles = makeStyles({
   // Iframe container — fills the left column.
   // `minWidth: 0` is the Grid-collapse fix.
   // Visible vertical scrollbar HIDDEN (iframe content renders its own).
+  // Stage-only mode mounts the cell in the `bodyStageOnly` FLEX row (not the
+  // grid), where a flex item with only absolutely-positioned content (the
+  // iframe) collapses to 0 width — `flex: 1` makes it fill the row (UAT
+  // 2026-08-02: blank preview stage in PreviewModal/BrowseModal).
+  thumbnailCellStageOnly: {
+    flex: 1,
+  },
   thumbnailCell: {
     position: 'relative' as const,
     minWidth: 0,
@@ -784,7 +792,11 @@ export const RichFilePreview: React.FC<IRichFilePreviewProps> = ({
         role="group"
         aria-label="Document preview body"
       >
-        <div className={styles.thumbnailCell}>{renderPreviewArea()}</div>
+        <div
+          className={mergeClasses(styles.thumbnailCell, !showMetadataPane && styles.thumbnailCellStageOnly)}
+        >
+          {renderPreviewArea()}
+        </div>
         {showMetadataPane && (
           <div className={styles.metadataPane}>
             {/* Section 1: Tags */}

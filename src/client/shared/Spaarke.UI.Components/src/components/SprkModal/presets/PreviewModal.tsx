@@ -27,6 +27,10 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground3,
     color: tokens.colorNeutralForeground3,
     minWidth: 0,
+    // UAT 2026-08-02 hardening: clamp the stage to its grid cell so a
+    // taller-than-cell renderer can never push the preview below the fold.
+    minHeight: 0,
+    overflow: 'hidden',
   },
   previewMeta: {
     display: 'flex',

@@ -73,7 +73,7 @@
  */
 
 import * as React from 'react';
-import { TabList, Tab, makeStyles, tokens } from '@fluentui/react-components';
+import { Button, TabList, Tab, makeStyles, tokens } from '@fluentui/react-components';
 import type { SelectTabEvent, SelectTabData, TabValue } from '@fluentui/react-components';
 import { GetStartedCardsWidget, AnalysisCardsWidget } from '@spaarke/ai-widgets';
 import type { GetStartedCardId, AnalysisCardId } from '@spaarke/ai-widgets';
@@ -81,11 +81,14 @@ import {
   launchSurface,
   launchPlaybookIntent,
   SprkAnalysisWorkType,
-  // spaarke-modal-system task 050 (FR-14): the shared modal shell preset — replaces
-  // the bespoke Dialog envelope + the interim P1 ModalWindowControls wiring.
-  FormModal,
+  // spaarke-modal-system task 050 (FR-14): the shared modal shell — replaces the
+  // bespoke Dialog envelope + the interim P1 ModalWindowControls wiring. UAT
+  // 2026-08-02: raw SprkModal (not FormModal) — a picker surface has no submit,
+  // and FormModal's Cancel + relabeled-"Close" primary read as duplicate close
+  // buttons. Single Cancel, left-aligned (footerStart), per the footer contract.
+  SprkModal,
   // task-020 seam: the app-shell `--sprk-ui-scale` derivation, threaded into the
-  // FormModal shell so Quick Start scales in lock-step with the rest of the app.
+  // shell so Quick Start scales in lock-step with the rest of the app.
   useUiScale,
 } from '@spaarke/ui-components';
 import { getBffBaseUrl } from '../../config/runtimeConfig';
@@ -312,17 +315,22 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({
   );
 
   return (
-    <FormModal
+    <SprkModal
       open={open}
       onClose={onClose}
-      // No natural "submit" for a card-picker surface (every card click launches +
-      // closes on its own) — Save is relabeled "Close" and wired to the same onClose
-      // as Cancel/× (see file header). Both close without picking anything.
-      onSubmit={onClose}
       title="Quick Start"
       size="md"
-      submitLabel="Close"
+      // Match the P3 form-family dismiss (FR-05): no ESC/backdrop close — only
+      // the × or the footer Cancel.
+      dismiss="explicit"
       uiScale={uiScale}
+      // UAT 2026-08-02: a picker has no submit — exactly ONE footer close
+      // affordance, the left-aligned Cancel (footer contract: Cancel-left).
+      footerStart={
+        <Button appearance="secondary" onClick={onClose} data-testid="quick-start-cancel">
+          Cancel
+        </Button>
+      }
     >
       <div className={styles.content} data-testid="quick-start-modal">
         <TabList
@@ -350,7 +358,7 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({
           </div>
         )}
       </div>
-    </FormModal>
+    </SprkModal>
   );
 };
 

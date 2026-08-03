@@ -81,3 +81,26 @@
 ## Decision-pending (not deferred work — resolves inside this project)
 
 - **030 escalation — legacy `SendEmailDialog` "v1.1.59 no-X" decision**: in-file comments document a 2026-07 UAT decision deliberately removing the title-bar × from `components/SendEmailDialog/SendEmailDialog.tsx`. Conflicts with the 2026-07-31 FR-12 mandate. Cluster NOT added (escalation per POML). **UPDATE 2026-08-02**: the planned resolver (P3/051 retirement) is itself DEFERRED (DEF-002 / Issue #713 — live DailyBriefingApp consumer), so this escalation **remains OPEN**: the legacy dialog stays live without the window-controls cluster until the follow-on retires it. Owner options unchanged: accept the interim gap (recommended — dialog is retirement-bound via #713) or direct the cluster be added to the legacy dialog despite v1.1.59. Evidence: `notes/task-030-completion.md` + `task-051-completion.md`.
+
+---
+
+## DEF-007 — Dataset grid footer missing/inconsistent in modal-hosted grids (UAT 2026-08-02, pre-existing)
+
+| Field | Value |
+|---|---|
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/719 |
+| **Discovered** | 2026-08-02 owner UAT (Event Page Index modal screenshot) |
+| **Ownership** | Grid/host surface owners — NOT a modal-system regression (branch's only DataGrid diff re-sources the identical record-open size constant; zero footer code touched) |
+| **Concrete behavior** | Modal-hosted dataset grids show a bare "Rows: N" (or none) instead of the standard DataGrid framework footer |
+| **Next step** | Owner names exact surfaces → trace host-page footer suppression vs grid config |
+
+## DEF-008 — Semantic Search page "An unexpected error occurred" on dev (UAT 2026-08-02)
+
+| Field | Value |
+|---|---|
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/720 |
+| **Discovered** | 2026-08-02 owner UAT screenshot |
+| **Ownership** | Semantic search page owner; likely data/results-layer, not modal-related |
+| **Concrete behavior** | Red error MessageBar in the results region of sprk_semanticsearch (OOB navigateTo host — intentional per inventory outlier row D; owner input may still convert it later) |
+| **Interim shipped** | Web resource displayname renamed "Semantic Search Page HTML" → "Semantic Search" (live+published 2026-08-02) so the OOB dialog title reads correctly |
+| **Next step** | Retest after hard refresh; if persisting, console + network trace |
