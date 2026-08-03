@@ -82,6 +82,7 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
     onSent,
     onError,
     onClose,
+    composerFullBleed,
   } = deps;
 
   const [dialogState, setDialogState] = React.useState<DialogState | null>(null);
@@ -201,6 +202,11 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
     <SendEmailDialog
       open={isOpen}
       onClose={handleClose}
+      // UAT 2026-08-03 (scoped from the 08-02 blanket flag): full-bleed only when
+      // the HOST says so — record-single mode (composer must cover the OOB
+      // email-record modal) and the dedicated compose window. List-mode reading
+      // page keeps the standard floating rectangle.
+      fullBleed={composerFullBleed}
       mode={engineMode}
       communicationId={isRecordScoped ? dialogState?.communicationId : undefined}
       authenticatedFetch={authenticatedFetch}

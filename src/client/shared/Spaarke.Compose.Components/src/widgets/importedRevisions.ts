@@ -191,8 +191,7 @@ export function resolveBlock(blocks: readonly BlockInfo[], target: AnchorHint): 
       // genuine empty slot) or a same-round-trip target with no id to disambiguate is still honest; a hint
       // block carrying its OWN different present paraId is refused (return null → surfaced as a review
       // placeholder, never guessed onto the wrong paragraph — invariant I-7 "never text-search / never guess").
-      const hintIsDistinctIdentifiedParagraph =
-        !!target.paraId && !!atHint.paraId && atHint.paraId !== target.paraId;
+      const hintIsDistinctIdentifiedParagraph = !!target.paraId && !!atHint.paraId && atHint.paraId !== target.paraId;
       if (!hintIsDistinctIdentifiedParagraph) {
         return atHint;
       }

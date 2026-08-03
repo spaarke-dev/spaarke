@@ -362,7 +362,10 @@ function openDocumentUploadDialog(params, selectedControl) {
         data: encodeURIComponent(dataString)
     };
 
-    // Configure dialog display options — sized to match Create New Matter dialog
+    // Configure dialog display options — sized to match Create New Matter dialog.
+    // Matches the `wizard` OOB size in oobModalSizes.ts (spec FR-11/FR-18, task
+    // 090). Plain Dataverse web resource (no bundler) — cannot import that
+    // module; keep this literal in sync with it manually.
     const navigationOptions = {
         target: 2,      // Dialog
         width: { value: 60, unit: "%" },
@@ -503,7 +506,9 @@ function Spaarke_UploadDocumentsStandalone() {
         // Ignore theme detection failures
     }
 
-    // Only pass theme — no parent context triggers standalone mode in the wizard
+    // Only pass theme — no parent context triggers standalone mode in the wizard.
+    // `wizard` OOB size (60%x70%, oobModalSizes.ts) — plain web resource, no
+    // bundler, so this literal is kept in sync with that module manually.
     var dataString = "theme=" + theme;
 
     Xrm.Navigation.navigateTo(

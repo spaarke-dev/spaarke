@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="spaarke-modal-system">
+  <metadata>
+    <title>Preset: WizardModal (stepper sidebar) — FR-09</title>
+    <phase>0 Build</phase>
+    <gate>blocked until 004</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New preset surface consumed by P6 wizard re-base; must be a thin `SprkModal` config (NOT a fork of `WizardShell`); modifies `.tsx`; depends on the base shell.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified by the prototype `presets.tsx` `WizardModal`; a thin config with a fixed stepper + multi-button footer.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>004</deps>
+    <tags>react, typescript, fluent-ui, frontend</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Port `WizardModal` from the prototype `presets.tsx` as a thin configuration of `SprkModal`: size `wizard`, `dismiss="explicit"`, unpadded, body is a `200px 1fr` grid (a left stepper sidebar listing the steps with done/active/pending icons + a scrollable content column), and a footer with Cancel in `footerStart` (left) and Skip · Back · Next (Finish on the last step) in `footer` (right). It is a THIN config of `SprkModal` — NOT a fork of the existing `WizardShell` (P6 re-bases `WizardShell` internals separately, keeping its `embedded` mode + stepper). Use `WizardShell` only as a behavior reference for the stepper/footer contract.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 wizard chrome + stepper composition. Follow ADRs strictly.</role>
+  <goal>`SprkModal/presets/WizardModal.tsx` exists as a thin `SprkModal` config exporting `WizardModal` + `WizardModalProps`; renders the `wizard` size, a 200px stepper sidebar, and a Cancel · Skip · Back · Next(/Finish) footer; test green.</goal>
+
+  <context>
+    <background>Design §6.1 lists `WizardModal` (WizardShell re-based on SprkModal header/footer/size tokens + ModalWindowControls + retained `embedded` mode). Spec FR-09 requires a thin config; the prototype ships `WizardModal` in `presets.tsx` matching the production "Create New Matter" chrome (left stepper + Cancel-left / Skip·Back·Next-right). This task authors the PRESET only; the P6 conversion (a separate task, ~080) is the "light-first" re-base of `WizardShell` internals per owner decision §11-G — do not fork `WizardShell` here. The `wizard` size maps to the OOB dialog dimension (60%×70%) per the size scale.</background>
+    <relevant-files>
+      <file role="canonical-reference">c:/code_files/spaarke-prototype/projects/2026-07-sprk-modal-system/src/components/presets.tsx</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/WizardModal.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/__tests__/WizardModal.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="004" status="pending">`SprkModal` base shell + `footerStart`/`footer` slots + `wizard` size.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Preset lives in `@spaarke/ui-components` under `components/SprkModal/presets/`; not duplicated per solution.</constraint>
+    <constraint source="ADR-021">Semantic tokens only — stepper sidebar border/background + step icon colors use tokens (`colorNeutralStroke2`, `colorNeutralBackground2`, `colorBrandForeground1`); ZERO hex / `'1px'` literals / inline color (NFR-03).</constraint>
+    <constraint source="ADR-028">Pass `onBack`/`onNext`/`onSkip`/`onClose` as functions; MUST NOT snapshot tokens/auth in props.</constraint>
+    <constraint source="project">Thin config of `SprkModal` — MUST NOT fork `WizardShell` (compose/re-base only; CLAUDE.md §11). MUST compile under `@types/react` 18 and React 19 (NFR-04).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Fluent v9 wizard-modal preset over SprkModal</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Preset/slot + stepper conventions.</pattern>
+      <pattern name="fluent-v9-react-version-boundaries" location=".claude/patterns/ui/fluent-v9-react-version-boundaries.md">Dual-React (18/19) safety.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Confirm 004 landed. Load the prototype `WizardModal` in `presets.tsx`; skim `WizardShell.tsx` for the stepper/footer contract only. Declare RIGOR: FULL.</step>
+    <step order="1">Author `WizardModal.tsx`: `SprkModal size="wizard" dismiss="explicit" padded={false}`; body = a `makeStyles` `wizardGrid` (`200px 1fr`) with a stepper sidebar (steps list, done→`CheckmarkCircle20Filled` / active→`Circle20Filled` / pending→`Circle20Regular`, active bolded) + a scrollable content column.</step>
+    <step order="2">Footer: `footerStart` = secondary Cancel; `footer` = Skip (when `onSkip` and not last) · Back (disabled at step 0) · Next primary (label "Finish" on the last step).</step>
+    <step order="3">Export `WizardModalProps` (`open`, `onClose`, `title`, `steps: string[]`, `active: number`, `onBack`, `onNext`, `onSkip?`, `uiScale?`, `children`).</step>
+    <step order="4">Write `__tests__/WizardModal.test.tsx`: `wizard` size, stepper renders the step list with correct done/active/pending icons, footer shows Cancel · Skip · Back · Next, Next shows "Finish" on the last step, Back disabled at step 0.</step>
+    <step order="5">Build under both React versions + run tests; confirm green.</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: set 008 status to ✅.</step>
+    <step order="7">Document any deviation from the prototype in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the `wizard` preset cannot express the "Create New Matter" stepper + Skip·Back·Next footer as a thin `SprkModal` config without pulling in `WizardShell` internals (reducer, success screen, embedded mode), STOP and surface per CLAUDE.md §6 — that is the P6 re-base scope (§11-G "light-first"), not this preset task; do not fork `WizardShell` to force it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`WizardShell` owns the only wizard envelope today (Dialog + title bar + 200px stepper + footer nav + success screen + `embedded` mode).</existing>
+    <extension>`WizardModal` is the thin `SprkModal`-config extension seam that P6 re-bases the `WizardShell` chrome onto (keeping `embedded` + stepper) — it does NOT fork `WizardShell`; it is the standard-chrome target the wizards inherit (net component count ↓).</extension>
+    <cost-of-doing-nothing>Without `WizardModal`, FR-09 is incomplete and P6 has no standard wizard chrome to re-base onto; wizard headers/footers keep diverging from the SprkModal standard (and `WizardShell`'s `'1px'` literals persist).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Stepper sidebar + multi-button footer">
+      <steps>
+        <step>Render `WizardModal steps={["A","B","C"]} active={1}`.</step>
+      </steps>
+      <expected>`wizard` size; left 200px stepper shows A=done, B=active(bold), C=pending; footer shows Cancel (left) · Skip · Back · Next (right); Back enabled at step 1.</expected>
+    </test>
+    <test name="Finish on last step">
+      <steps>
+        <step>Set `active` to the last step index.</step>
+      </steps>
+      <expected>Next primary reads "Finish"; Skip is hidden on the last step.</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Render `WizardModal` under a dark FluentProvider theme.</step>
+      </steps>
+      <expected>Stepper sidebar border/background + step icons read correctly in dark mode; no hardcoded color; no `'1px'` literal.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test shared lib (both React versions)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/WizardModal.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/__tests__/WizardModal.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `WizardModal steps active`, when it renders, then it is the `wizard` size with a 200px left stepper reflecting done/active/pending state.</criterion>
+    <criterion testable="true">The footer shows Cancel (left) and Skip · Back · Next (right); Back is disabled at step 0; Next reads "Finish" on the last step; Skip is hidden on the last step.</criterion>
+    <criterion testable="true">It is a thin `SprkModal` config and does NOT fork `WizardShell` (no WizardShell internals imported).</criterion>
+    <criterion testable="true">Compiles under `@types/react` 18 and 19; test passes; build green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Prototype `WizardModal`: `wizardGrid` `200px 1fr`, `isLast = active >= steps.length - 1`, Skip only when `onSkip &amp;&amp; !isLast`, Next label `isLast ? 'Finish' : 'Next'`. P6 (task ~080) is the separate "light-first" `WizardShell` re-base (§11-G) — this task is the preset only.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

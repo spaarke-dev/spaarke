@@ -6,6 +6,8 @@
 ## When
 Use whenever a task opens a record, document, form, wizard, confirm, or preview **as a modal** from any Spaarke client surface (Code Pages, PCF, ribbon, SPAs, workspace widgets).
 
+> **Component layer**: once you've decided the family here, BUILD it with the canonical shell — see [`modal-shell.md`](modal-shell.md) → `SprkModal` + presets + [`docs/standards/MODAL-DESIGN-SYSTEM.md`](../../../docs/standards/MODAL-DESIGN-SYSTEM.md) (ADR-050). This file is the DECISION layer (which family); that is the COMPONENT layer (how to build it).
+
 ## Read These Files
 1. `docs/standards/MODAL-DECISION-CRITERIA.md` — binding standard: two-layout framing (Layout 1 canonical / Layout 2 justified exception), TL;DR decision tree, anti-patterns, verbatim MS Learn 2025-05-07 quote
 2. `src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/README.md` — Layout 2 shell reference: props, dirty-check protocol, origin allow-list

@@ -22,22 +22,28 @@
  *   - ADR-022: React 19 functional component + hooks.
  *
  * Task: R6-070 (D-C-24 / D-C-25, Pillar 7, Q7 scope expansion) — PART B.
+ *
+ * P2 re-base (spaarke-modal-system, task 040 + P2 consolidation — supersedes
+ * the task-031 interim `ModalWindowControls`/local-`isMaximized` wiring):
+ *   - Now the literal `ConfirmModal` preset (`size="xs"`, `dismiss="alert"`,
+ *     non-maximizable, danger Confirm). The initial task-040 re-base composed
+ *     `SprkModal` directly because `ConfirmModalProps` had no way to disable
+ *     the buttons mid-flight; the P2 consolidation added `busy` to the preset
+ *     for exactly this case, so the direct composition (and its verbatim copy
+ *     of the danger token class) is retired in favor of the preset.
+ *   - `busy={isDeleting}` disables Cancel + Delete and shows the in-flight
+ *     spinner; the guarded handlers additionally no-op re-entrant calls
+ *     (including the header ×, which routes through `onClose`).
+ *   - The header's inline `WarningRegular` icon remains dropped — `SprkModal`'s
+ *     `title` is a plain string (design §6.4 one-header contract); the warning
+ *     intent is conveyed by the `role="alert"` impact callout in the body.
  */
 
 import React, { useCallback } from 'react';
-import {
-  Button,
-  Dialog,
-  DialogActions,
-  DialogBody,
-  DialogContent,
-  DialogSurface,
-  DialogTitle,
-  makeStyles,
-  Text,
-  tokens,
-} from '@fluentui/react-components';
-import { WarningRegular } from '@fluentui/react-icons';
+import { makeStyles, Text, tokens } from '@fluentui/react-components';
+// Shared canonical modal preset (spaarke-modal-system): the literal confirm
+// family member — danger styling + alert dismiss + busy handled by the preset.
+import { ConfirmModal } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -61,10 +67,15 @@ export interface PinnedMemoryDeleteConfirmationProps {
   /** Invoked when the user confirms the delete. */
   onConfirm: () => void;
   /**
-   * Invoked when the user cancels (Cancel button OR Dialog close via Escape /
-   * backdrop click). The parent should clear its "pending delete" state.
+   * Invoked when the user cancels (Cancel button OR the header ×). The parent
+   * should clear its "pending delete" state.
    */
   onCancel: () => void;
+  /**
+   * The `--sprk-ui-scale` factor forwarded to the modal shell (design §6.9).
+   * Optional, backward-compatible; hosts thread this via `useUiScale()`.
+   */
+  uiScale?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,17 +87,6 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
-  },
-  headerRow: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  warningIcon: {
-    color: tokens.colorPaletteRedForeground1,
-    fontSize: tokens.fontSizeBase600,
-    flexShrink: 0,
   },
   pinTitleQuoted: {
     fontWeight: tokens.fontWeightSemibold,
@@ -146,19 +146,9 @@ export const PinnedMemoryDeleteConfirmation: React.FC<PinnedMemoryDeleteConfirma
   isDeleting = false,
   onConfirm,
   onCancel,
+  uiScale,
 }) => {
   const styles = useStyles();
-
-  // Fluent v9 Dialog calls onOpenChange with the new open state; we treat any
-  // transition from open -> closed as a cancel unless a confirm is in flight.
-  const handleOpenChange = useCallback(
-    (_e: unknown, data: { open: boolean }) => {
-      if (!data.open && !isDeleting) {
-        onCancel();
-      }
-    },
-    [isDeleting, onCancel]
-  );
 
   const handleConfirm = useCallback(() => {
     if (isDeleting) return;
@@ -171,61 +161,40 @@ export const PinnedMemoryDeleteConfirmation: React.FC<PinnedMemoryDeleteConfirma
   }, [isDeleting, onCancel]);
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange} modalType="alert">
-      <DialogSurface data-testid="pinned-memory-delete-confirmation">
-        <DialogBody>
-          <DialogTitle>
-            <div className={styles.headerRow}>
-              <WarningRegular className={styles.warningIcon} aria-hidden="true" />
-              <span>Delete pinned memory?</span>
-            </div>
-          </DialogTitle>
-          <DialogContent>
-            <div className={styles.body}>
-              <Text className={styles.bodyText}>
-                You are about to delete{' '}
-                <span className={styles.pinTitleQuoted} title={pinTitle}>
-                  &ldquo;{pinTitle}&rdquo;
-                </span>
-                .
-              </Text>
+    <ConfirmModal
+      open={open}
+      // × routes through the SAME guarded handler the Cancel button uses
+      // (isDeleting-safe) — `dismiss="alert"` (the preset's fixed contract)
+      // also blocks ESC/backdrop, so the non-dismissible semantics hold.
+      onClose={handleCancel}
+      onConfirm={handleConfirm}
+      title="Delete pinned memory?"
+      confirmLabel={isDeleting ? 'Deleting…' : 'Delete pin'}
+      cancelLabel="Cancel"
+      destructive
+      busy={isDeleting}
+      uiScale={uiScale}
+      message={
+        <div className={styles.body} data-testid="pinned-memory-delete-confirmation">
+          <Text className={styles.bodyText}>
+            You are about to delete{' '}
+            <span className={styles.pinTitleQuoted} title={pinTitle}>
+              &ldquo;{pinTitle}&rdquo;
+            </span>
+            .
+          </Text>
 
-              {/* Cross-session impact callout — emphasised per POML acceptance. */}
-              <div className={styles.impactCallout} role="alert" data-testid="pinned-memory-delete-impact">
-                <Text className={styles.calloutTitle}>This action affects every chat session.</Text>
-                <Text className={styles.calloutBody}>
-                  This pin is shared across all your chat sessions and will be removed permanently. The assistant will
-                  stop using it the next time you start a conversation.
-                </Text>
-              </div>
-            </div>
-          </DialogContent>
-          <DialogActions>
-            {/* Cancel button uses an explicit onClick rather than DialogTrigger
-                so the parent's onCancel fires exactly once. The DialogTrigger
-                wrapper would close the Dialog → trigger onOpenChange →
-                fire onCancel a SECOND time. Letting onClick own the close
-                path keeps the contract single-fire. */}
-            <Button
-              appearance="secondary"
-              onClick={handleCancel}
-              disabled={isDeleting}
-              data-testid="pinned-memory-delete-cancel"
-            >
-              Cancel
-            </Button>
-            <Button
-              appearance="primary"
-              onClick={handleConfirm}
-              disabled={isDeleting}
-              data-testid="pinned-memory-delete-confirm"
-            >
-              {isDeleting ? 'Deleting…' : 'Delete pin'}
-            </Button>
-          </DialogActions>
-        </DialogBody>
-      </DialogSurface>
-    </Dialog>
+          {/* Cross-session impact callout — emphasised per POML acceptance. */}
+          <div className={styles.impactCallout} role="alert" data-testid="pinned-memory-delete-impact">
+            <Text className={styles.calloutTitle}>This action affects every chat session.</Text>
+            <Text className={styles.calloutBody}>
+              This pin is shared across all your chat sessions and will be removed permanently. The assistant will stop
+              using it the next time you start a conversation.
+            </Text>
+          </div>
+        </div>
+      }
+    />
   );
 };
 

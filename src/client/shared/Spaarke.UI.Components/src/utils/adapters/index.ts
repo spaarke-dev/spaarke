@@ -51,3 +51,8 @@ export { createBffUploadService } from './bffUploadServiceAdapter';
 export type { GetBearerToken } from './bffUploadServiceAdapter';
 export { createBffNavigationService } from './bffNavigationServiceAdapter';
 export type { NavigateFunction, DialogRenderer, DialogCloser } from './bffNavigationServiceAdapter';
+
+// OOB modal size scale (spaarke-modal-system P7 task 090 — FR-11/FR-18).
+// Single source of truth for Xrm.Navigation.navigateTo dialog dimensions.
+export { OOB_MODAL_SIZES, getOobModalSize } from './oobModalSizes';
+export type { OobModalSize, OobModalSizeName, OobSizeDimension } from './oobModalSizes';

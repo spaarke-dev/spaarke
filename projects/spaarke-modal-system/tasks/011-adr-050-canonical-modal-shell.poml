@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-modal-system">
+  <metadata>
+    <title>ADR-050: Canonical Modal Shell — FR-10</title>
+    <phase>0 Build</phase>
+    <gate>blocked until 004</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New file creation (ADR) with project constraints; no code, no quality gate at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Concise ADR authoring from a settled owner decision (spec §11-C); constraints already enumerated in spec/design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes `.claude/adr/` (new ADR-050 + INDEX.md) — sub-agents cannot write there per CLAUDE.md §3; main-session only.</parallel-reason>
+    <deps>004</deps>
+    <tags>documentation, adr, skill-directives</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author `.claude/adr/ADR-050-canonical-modal-shell.md` — a CONCISE ADR (Decision + MUST / MUST NOT constraints + brief rationale) for the canonical modal shell, referencing ADR-021 and ADR-023. The owner chose a NEW focused ADR over extending ADR-021 (spec Decisions §11-C: greppable, self-contained). Then add an index row to `.claude/adr/INDEX.md`. This is FR-10 and MUST run in the main session (the write boundary in CLAUDE.md §3 blocks sub-agents from `.claude/`). Documentation only — no code.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9, ADR authoring, and Spaarke architecture governance. Follow ADRs strictly.</role>
+  <goal>`.claude/adr/ADR-050-canonical-modal-shell.md` exists as a concise ADR with explicit MUST / MUST NOT constraints and references to ADR-021 + ADR-023; `.claude/adr/INDEX.md` carries a new ADR-050 row with title + key constraint + status.</goal>
+
+  <context>
+    <background>Design §7 deliverable #4 / spec Decisions §11-C: the owner resolved "extend ADR-021 vs new focused ADR" in favor of a NEW concise ADR titled "Canonical Modal Shell" that references ADR-021/023 so the decision is greppable and self-contained. The project strengthens ADR-021 (bans `'1px'`/inline colors in modals) and preserves ADR-023 (`ChoiceModal` re-base) — there are no ADR tensions to resolve, only constraints to codify. The next-free ADR number is ADR-050 (ADR-049 is the current highest — verified in `.claude/adr/INDEX.md`).</background>
+    <relevant-files>
+      <file role="new">.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file role="modify">.claude/adr/INDEX.md</file>
+      <file role="reference">.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file role="reference">.claude/adr/ADR-023-choice-dialog-pattern.md</file>
+      <file role="canonical-reference">projects/spaarke-modal-system/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="004" status="pending">The `SprkModal` base shell whose composition + constraints this ADR codifies.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">ADR MUST rules to codify: compose `RecordNavigationModalShell` + `ModalWindowControls` (do not fork or parallel-abstract them); keep the Fluent `Dialog`/`DialogSurface` envelope (transform-robust portal); realize `--sprk-ui-scale` via a scaled Fluent theme (multiply px tokens); use semantic tokens only (no hex, no `'1px'` literals, no inline color styles); scroll the body natively with a thin scrollbar.</constraint>
+    <constraint source="project">ADR MUST NOT rules to codify: hand-rolled `position:fixed`/`createElement` overlays; CSS `zoom` for scaling; per-surface bespoke chrome (each surface's modal is a thin config of `SprkModal`, never a new envelope).</constraint>
+    <constraint source="ADR-021">The ADR references ADR-021 (Fluent v9, semantic tokens) as the parent it strengthens — state the strengthening (bans `'1px'` + inline color in modal components) rather than restating ADR-021 in full.</constraint>
+    <constraint source="ADR-023">The ADR references ADR-023 (Choice Dialog Pattern) as preserved via the `ChoiceModal` re-base — do NOT supersede or contradict it.</constraint>
+    <constraint source="project">Use ADR-050 (next-free number — ADR-049 is highest). Match the concise-ADR house style in `.claude/adr/` (Decision / Constraints / Key patterns / Rationale, ~100-150 lines). Add exactly one INDEX.md row. NEW ADR + INDEX edit are both under `.claude/` — main session only (§3).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Canonical modal shell ADR</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-023-choice-dialog-pattern.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <patterns>
+      <pattern name="record-modal-selection" location=".claude/patterns/ui/record-modal-selection.md">The modal decision layer this ADR sits beneath.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec Decisions §11-C, design §10, ADR-021, ADR-023, and confirm in `.claude/adr/INDEX.md` that ADR-050 is the next-free number. Declare RIGOR: STANDARD.</step>
+    <step order="1">Author `.claude/adr/ADR-050-canonical-modal-shell.md` in the concise-ADR house style: Title "Canonical Modal Shell", Status, Decision (one canonical `SprkModal` shell + thin presets, composing existing primitives).</step>
+    <step order="2">Write the MUST constraints (compose primitives; Fluent `Dialog` envelope; scaled-theme `--sprk-ui-scale`; semantic tokens only; native thin scrollbar).</step>
+    <step order="3">Write the MUST NOT constraints (hand-rolled overlays; CSS zoom; per-surface bespoke chrome) and a References section citing ADR-021 (strengthened) + ADR-023 (preserved) + ADR-012.</step>
+    <step order="4">Add a brief Rationale (1-2 sentences) tying to the design's "compose, don't create" principle and the 4K scaled-theme decision.</step>
+    <step order="5">Add one ADR-050 row to `.claude/adr/INDEX.md` (ADR | Title | Key Constraint | Status).</step>
+    <step order="6">Re-read both files for house-style + reference accuracy; confirm ADR-050 does not collide with an existing number.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set 011 status to ✅.</step>
+    <step order="8">Document any deviation in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="adr-aware">Load applicable ADRs for house-style + reference accuracy</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">.claude/adr/ADR-050-canonical-modal-shell.md</output>
+    <output type="doc">.claude/adr/INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`.claude/adr/ADR-050-canonical-modal-shell.md` exists with explicit MUST and MUST NOT sections covering: compose primitives, Fluent `Dialog` envelope, scaled-theme `--sprk-ui-scale`, semantic tokens only, native thin scrollbar (MUST); hand-rolled overlays, CSS zoom, per-surface bespoke chrome (MUST NOT).</criterion>
+    <criterion testable="true">The ADR references ADR-021 (strengthened) and ADR-023 (preserved) and does not contradict either.</criterion>
+    <criterion testable="true">`.claude/adr/INDEX.md` has a new ADR-050 row with title, key constraint, and status; the number does not collide with an existing ADR.</criterion>
+    <criterion testable="true">No source code is modified (documentation only); both writes are under `.claude/` and were made in the main session.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design §7 deliverable #4 + spec §11-C. Concise-ADR examples to mirror: any recent row's file in `.claude/adr/` (e.g. ADR-030/ADR-032). CLAUDE.md §18 requires a `.claude/CHANGELOG.md` entry for `.claude/` changes — task 013 owns the consolidated CHANGELOG entry for the FR-10 doc/ADR/pattern set, so coordinate rather than double-entering. Completion summary appended here when done.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute. Main session only (§3 write boundary).</protocol>
+  </execution>
+</task>

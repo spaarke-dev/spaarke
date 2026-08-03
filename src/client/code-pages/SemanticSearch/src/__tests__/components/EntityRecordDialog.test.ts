@@ -4,7 +4,8 @@
  * Covers:
  *   - Domain-to-entity mapping (documents, matters, projects, invoices)
  *   - Xrm.Navigation.navigateTo called with correct parameters
- *   - Dialog dimensions (70% width, 80% height, target: 2)
+ *   - Dialog dimensions (`record` OOB size — 85% width, 85% height, target: 2;
+ *     spaarke-modal-system P7 task 090, FR-11/FR-18; was 70%/80%)
  *   - Graceful handling when Xrm is not available
  *   - Error handling when navigateTo throws
  */
@@ -108,7 +109,7 @@ describe('EntityRecordDialog', () => {
       );
     });
 
-    it('sets dialog width to 70%', () => {
+    it('sets dialog width to 85% (record OOB size)', () => {
       const mockXrm = createMockXrm();
       (window as any).Xrm = mockXrm;
 
@@ -117,12 +118,12 @@ describe('EntityRecordDialog', () => {
       expect(mockXrm.Navigation.navigateTo).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          width: { value: 70, unit: '%' },
+          width: { value: 85, unit: '%' },
         })
       );
     });
 
-    it('sets dialog height to 80%', () => {
+    it('sets dialog height to 85% (record OOB size)', () => {
       const mockXrm = createMockXrm();
       (window as any).Xrm = mockXrm;
 
@@ -131,7 +132,7 @@ describe('EntityRecordDialog', () => {
       expect(mockXrm.Navigation.navigateTo).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          height: { value: 80, unit: '%' },
+          height: { value: 85, unit: '%' },
         })
       );
     });
@@ -150,8 +151,10 @@ describe('EntityRecordDialog', () => {
         },
         {
           target: 2,
-          width: { value: 70, unit: '%' },
-          height: { value: 80, unit: '%' },
+          // `record` OOB size (85%×85%) — spaarke-modal-system P7 task 090
+          // (FR-11/FR-18); was 70%×80%.
+          width: { value: 85, unit: '%' },
+          height: { value: 85, unit: '%' },
         }
       );
     });

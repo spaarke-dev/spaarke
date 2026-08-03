@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="spaarke-modal-system">
+  <metadata>
+    <title>Preset: FormModal — FR-09</title>
+    <phase>0 Build</phase>
+    <gate>blocked until 004</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New preset surface consumed by P3 (forms &amp; compose re-base); modifies `.tsx`; depends on the base shell.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified by the prototype `presets.tsx` `FormModal`; a thin config with a fixed footer contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>004</deps>
+    <tags>react, typescript, fluent-ui, frontend</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Port `FormModal` from the prototype `presets.tsx` as a thin configuration of `SprkModal`: `size` `sm|md` defaulting to `md`, `dismiss="explicit"`, standard footer with Cancel in `footerStart` (left) and a Save primary in `footer` (right) driven by `onSubmit`/`submitLabel` (default "Save"); forward `bodyScroll` to the shell; wrap children in a column form-body layout (gap `spacingVerticalL`). The consumer supplies only the fields.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 form-modal composition. Follow ADRs strictly.</role>
+  <goal>`SprkModal/presets/FormModal.tsx` exists as a thin `SprkModal` config exporting `FormModal` + `FormModalProps`; renders a standard Cancel/Save footer, defaults to `md`, uses `explicit` dismiss, forwards `bodyScroll`; test green.</goal>
+
+  <context>
+    <background>Design §6.1/§6.8 lists `FormModal` as the light-edit form preset (title + fields + Cancel/Save); spec FR-09 requires each preset be a thin config of `SprkModal`. The prototype ships `FormModal` in `presets.tsx`. It feeds P3, which re-bases `NewThreadModal`, both `SendEmailDialog`s, `PinnedMemoryEditDialog`, and `QuickStartModal` onto `FormModal`/`md`, unifying the contested mid-size to `md` (1040×72vh) and retiring the legacy `SendEmailDialog`.</background>
+    <relevant-files>
+      <file role="canonical-reference">c:/code_files/spaarke-prototype/projects/2026-07-sprk-modal-system/src/components/presets.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/FormModal.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/__tests__/FormModal.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="004" status="pending">`SprkModal` base shell + `footerStart`/`footer`/`bodyScroll` props.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Preset lives in `@spaarke/ui-components` under `components/SprkModal/presets/`; not duplicated per solution.</constraint>
+    <constraint source="ADR-021">Semantic tokens only for the form-body layout (gap via `tokens.spacingVerticalL`); ZERO hex / `'1px'` literals / inline color (NFR-03).</constraint>
+    <constraint source="ADR-028">Pass `onSubmit`/`onClose` as functions; MUST NOT snapshot tokens/auth in props.</constraint>
+    <constraint source="project">Thin config of `SprkModal` (no re-declared Dialog/header/footer); `dismiss="explicit"` (forms don't light-dismiss); default size `md`. MUST compile under `@types/react` 18 and React 19 (NFR-04).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Fluent v9 form-modal preset over SprkModal</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Preset/slot conventions.</pattern>
+      <pattern name="fluent-v9-react-version-boundaries" location=".claude/patterns/ui/fluent-v9-react-version-boundaries.md">Dual-React (18/19) safety.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Confirm 004 landed. Load the prototype `FormModal` in `presets.tsx`. Declare RIGOR: FULL.</step>
+    <step order="1">Author `FormModal.tsx`: `SprkModal size={size ?? 'md'} dismiss="explicit"` forwarding `uiScale`/`bodyScroll`; `footerStart` = secondary Cancel; `footer` = primary Save (`onSubmit`, label `submitLabel ?? 'Save'`); children wrapped in a `makeStyles` `formBody` column (gap `spacingVerticalL`).</step>
+    <step order="2">Export `FormModalProps` (`open`, `onClose`, `onSubmit`, `title`, `size?: 'sm'|'md'`, `submitLabel?`, `uiScale?`, `bodyScroll?`, `children`).</step>
+    <step order="3">Write `__tests__/FormModal.test.tsx`: renders Cancel/Save footer, defaults to `md`, `dismiss="explicit"` (no light-dismiss), Save fires `onSubmit`, `bodyScroll` forwarded.</step>
+    <step order="4">Build under both React versions + run tests; confirm green.</step>
+    <step order="5">Update `tasks/TASK-INDEX.md`: set 006 status to ✅.</step>
+    <step order="6">Document any deviation from the prototype in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <justification>
+    <existing>Light-edit forms today each own a Dialog (`PinnedMemoryEditDialog` minWidth 420, `NewThreadModal` 1040×72vh, `SendEmailDialog` 520/1040) with their own footer.</existing>
+    <extension>`FormModal` IS the extension seam — a thin `SprkModal` config these dialogs re-base onto in P3 (net component count ↓). No existing single component can be extended to cover all of them.</extension>
+    <cost-of-doing-nothing>Without `FormModal`, FR-09 fails and P3 has nothing to unify the two contested mid-sizes onto; each form keeps re-hand-rolling its Cancel/Save footer + rectangle.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Standard Cancel/Save footer">
+      <steps>
+        <step>Render `FormModal title="Edit" onSubmit={save}` with fields.</step>
+        <step>Click Save.</step>
+      </steps>
+      <expected>Cancel is left, Save is right; `md` size; `onSubmit` fires; ESC/backdrop do not dismiss (explicit).</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Render `FormModal` under a dark FluentProvider theme.</step>
+      </steps>
+      <expected>Form body + footer read correctly in dark mode; no hardcoded color; no `'1px'` literal.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test shared lib (both React versions)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/FormModal.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/__tests__/FormModal.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `FormModal` with no `size`, when it renders, then it uses `md`; given `size="sm"`, it uses `sm`.</criterion>
+    <criterion testable="true">The footer renders Cancel (left) and Save (right); Save fires `onSubmit`; `submitLabel` overrides the label.</criterion>
+    <criterion testable="true">`dismiss="explicit"` — ESC/backdrop do not close; `bodyScroll` is forwarded to the shell.</criterion>
+    <criterion testable="true">Thin `SprkModal` config (no re-declared Dialog/header/footer); compiles under `@types/react` 18 and 19; test passes; build green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Prototype `FormModal` defaults `size="md"`, `submitLabel="Save"`, wraps children in a `formBody` column (gap `spacingVerticalL`). Feeds P3 (forms &amp; compose); the `md` default is the resolution of the 720-vs-1040 mid-size conflict.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

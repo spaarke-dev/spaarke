@@ -241,10 +241,7 @@ function subItemTokenOrdinals(token: string): number[] {
 }
 
 /** Cartesian-product expansion of the running candidate paths with a new token's candidates. */
-function expandPaths(
-  paths: ReadonlyArray<readonly number[]>,
-  candidates: readonly number[]
-): Array<readonly number[]> {
+function expandPaths(paths: ReadonlyArray<readonly number[]>, candidates: readonly number[]): Array<readonly number[]> {
   const out: Array<readonly number[]> = [];
   for (const path of paths) {
     for (const candidate of candidates) {

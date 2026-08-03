@@ -1049,10 +1049,7 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
                         appearance="subtle"
                         size="small"
                         data-title-edit
-                        className={mergeClasses(
-                          styles.titleEditButton,
-                          renameOpen && styles.titleEditButtonVisible
-                        )}
+                        className={mergeClasses(styles.titleEditButton, renameOpen && styles.titleEditButtonVisible)}
                         icon={<EditRegular />}
                         aria-label="Rename thread"
                         onClick={openRename}

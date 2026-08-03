@@ -614,9 +614,7 @@ describe('FR-16 task 030: ComposeWorkspace re-materializes a durable review flag
 
     // A findings payload is NOT an edit — it must NOT fall into the edits / single-edit redline branch.
     // (The placed comment anchor is `data-compose-mark="comment-anchor"`; a REDLINE is insertion/deletion.)
-    expect(
-      document.querySelectorAll('[data-compose-mark="insertion"], [data-compose-mark="deletion"]').length
-    ).toBe(0);
+    expect(document.querySelectorAll('[data-compose-mark="insertion"], [data-compose-mark="deletion"]').length).toBe(0);
 
     // ZERO dispatch / ZERO LLM re-run: reopening only READ the stored ledger (compose-outputs) + the
     // document Load. Every network call is a GET — there is NO POST/dispatch of any kind (the point of FR-16).
@@ -671,10 +669,7 @@ describe('FR-16 task 030: ComposeWorkspace re-materializes a durable review flag
       // The editor still mounts (no crash); the FR-04 effect logs + skips.
       await screen.findByRole('textbox', undefined, { timeout: 5000 });
       await waitFor(() =>
-        expect(warnSpy).toHaveBeenCalledWith(
-          expect.stringContaining('no usable flagged sections'),
-          REVIEW_LEDGER_REF
-        )
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('no usable flagged sections'), REVIEW_LEDGER_REF)
       );
       // Nothing placed, no redline — a malformed payload is a graceful skip, not a partial placement.
       expect(document.querySelectorAll('span[data-comment-id]').length).toBe(0);
@@ -780,7 +775,9 @@ describe('FR-16 task 032: 128KB payload budget (Leg B — explicit degraded-rest
         disposition: 'compose',
         payload: {
           overallRisk: 'Medium',
-          flaggedSections: [{ quotedText: 'Sample document body.', explanation: 'A finding.', sectionRef: '1.1', riskLevel: 'Medium' }],
+          flaggedSections: [
+            { quotedText: 'Sample document body.', explanation: 'A finding.', sectionRef: '1.1', riskLevel: 'Medium' },
+          ],
         },
       },
     ];
@@ -812,7 +809,7 @@ describe('FR-16 task 032: 128KB payload budget (Leg B — explicit degraded-rest
   });
 });
 
-describe('FR-16 task 032: findings + edit coexistence — a later edit no longer evicts an earlier review\'s durability', () => {
+describe("FR-16 task 032: findings + edit coexistence — a later edit no longer evicts an earlier review's durability", () => {
   it('a findings output (turn 1) and a LATER edit output (turn 2, higher turn) BOTH restore on reopen', async () => {
     composeOutputsBySession[DOC_SESSION] = [
       {
@@ -822,7 +819,9 @@ describe('FR-16 task 032: findings + edit coexistence — a later edit no longer
         disposition: 'compose',
         payload: {
           overallRisk: 'High',
-          flaggedSections: [{ quotedText: 'Sample document body.', explanation: 'A finding.', sectionRef: '1.1', riskLevel: 'High' }],
+          flaggedSections: [
+            { quotedText: 'Sample document body.', explanation: 'A finding.', sectionRef: '1.1', riskLevel: 'High' },
+          ],
         },
       },
       {
@@ -846,9 +845,7 @@ describe('FR-16 task 032: findings + edit coexistence — a later edit no longer
       expect(document.querySelectorAll('span[data-comment-id]').length).toBe(1);
     });
     await waitFor(() => {
-      expect(
-        document.querySelector(`[data-compose-mark="insertion"][data-ledger-ref="${LEDGER_REF}"]`)
-      ).not.toBeNull();
+      expect(document.querySelector(`[data-compose-mark="insertion"][data-ledger-ref="${LEDGER_REF}"]`)).not.toBeNull();
     });
 
     const nonReadCalls = authenticatedFetchMock.mock.calls.filter(
@@ -858,7 +855,7 @@ describe('FR-16 task 032: findings + edit coexistence — a later edit no longer
   });
 });
 
-describe('FR-16 task 032: supersede protection — an edit bindingId\'s own turn progression never retracts a findings output', () => {
+describe("FR-16 task 032: supersede protection — an edit bindingId's own turn progression never retracts a findings output", () => {
   it('an edit output that has been superseded (a later same-bindingId turn) leaves a DIFFERENT-bindingId findings output fully intact', async () => {
     // Server-side supersede (ChatEndpoints.SupersedeComposeOutput) is scoped to ONE bindingId
     // (`ComposeDisposition.ResolveCurrent(outputs, prior.BindingId)` — verified by reading the
@@ -875,13 +872,27 @@ describe('FR-16 task 032: supersede protection — an edit bindingId\'s own turn
         disposition: 'compose',
         payload: {
           overallRisk: 'Medium',
-          flaggedSections: [{ quotedText: 'Sample document body.', explanation: 'A finding.', sectionRef: '1.1', riskLevel: 'Medium' }],
+          flaggedSections: [
+            { quotedText: 'Sample document body.', explanation: 'A finding.', sectionRef: '1.1', riskLevel: 'Medium' },
+          ],
         },
       },
       // v1 of the edit (the ORIGINAL suggestion) — now superseded.
-      { key: `${DRAFT_BINDING}@t2`, bindingId: DRAFT_BINDING, turn: 2, disposition: 'compose', payload: { new_text: 'draft v1 — superseded' } },
+      {
+        key: `${DRAFT_BINDING}@t2`,
+        bindingId: DRAFT_BINDING,
+        turn: 2,
+        disposition: 'compose',
+        payload: { new_text: 'draft v1 — superseded' },
+      },
       // v2 (the CURRENT head after "Try another" / supersede) — the SAME bindingId, a later turn.
-      { key: `${DRAFT_BINDING}@t3`, bindingId: DRAFT_BINDING, turn: 3, disposition: 'compose', payload: { new_text: 'draft v2 — current' } },
+      {
+        key: `${DRAFT_BINDING}@t3`,
+        bindingId: DRAFT_BINDING,
+        turn: 3,
+        disposition: 'compose',
+        payload: { new_text: 'draft v2 — current' },
+      },
     ];
 
     const bus = new PaneEventBus();
@@ -941,7 +952,9 @@ describe('FR-16 task 032: 031-residual dedupe guard — a same-mount status-cycl
         disposition: 'compose',
         payload: {
           overallRisk: 'Medium',
-          flaggedSections: [{ quotedText: 'Sample document body.', explanation: 'A finding.', sectionRef: '1.1', riskLevel: 'Medium' }],
+          flaggedSections: [
+            { quotedText: 'Sample document body.', explanation: 'A finding.', sectionRef: '1.1', riskLevel: 'Medium' },
+          ],
         },
       },
     ];

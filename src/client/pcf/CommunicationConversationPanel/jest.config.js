@@ -33,6 +33,13 @@ module.exports = {
     // MessageQuickView) is exercised via ts-jest (NFR-06 — no behavioral mock).
     '^@spaarke/ui-components$':
       '<rootDir>/CommunicationConversationPanel/__tests__/uiComponentsShim.ts',
+    // The pcf-safe entry (`@spaarke/ui-components/dist/pcf-safe` — the ADR-012 PCF
+    // deep-import form; webpack node-resolves the built `dist/pcf-safe.js`). Jest
+    // has no tsconfig-paths support, so map it to a thin source shim that
+    // re-exports the REAL SprkModal — the ConversationModal transform test
+    // (task 070 / FR-08) exercises the actual Fluent Dialog envelope.
+    '^@spaarke/ui-components/dist/pcf-safe$':
+      '<rootDir>/CommunicationConversationPanel/__tests__/pcfSafeShim.ts',
   },
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
   transform: {

@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarke-modal-system">
+  <metadata>
+    <title>Reconcile ModalWindowControls to Dataverse FullScreen glyph — FR-03/FR-12</title>
+    <phase>0 Build</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies a shipped shared-lib `.tsx` consumed across surfaces (blast radius); the glyph is a P1 rollout prerequisite, so correctness + test update are load-bearing.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, fully-specified icon swap on an existing component with a clear reference (native OOB dialog + prototype).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>react, typescript, fluent-ui, frontend</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>The shipped `ModalWindowControls/ModalWindowControls.tsx` currently renders `ArrowMaximize20Regular`/`ArrowMinimize20Regular` for its maximize/restore toggle. Change the two icons to `FullScreenMaximize20Regular`/`FullScreenMinimize20Regular` to match the native OOB Dataverse dialog glyph and the prototype (owner review 2026-07-31: "use the Dataverse expand/collapse glyph, not four-corners ArrowMaximize"). Keep the component's public API and optional-handler behavior exactly (renders nothing when neither handler is supplied); update its snapshot/tests; verify the sole existing consumer `EmailComposer` still renders.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 icons and shared-lib component maintenance. Follow ADRs strictly.</role>
+  <goal>`ModalWindowControls.tsx` renders `FullScreenMaximize20Regular` when not maximized and `FullScreenMinimize20Regular` when maximized; `IModalWindowControlsProps` and the both-handlers-optional / renders-nothing behavior are unchanged; tests updated and green; `EmailComposer` unaffected.</goal>
+
+  <context>
+    <background>Owner UAT 2026-07-31 mandated the Dataverse `FullScreenMaximize/Minimize` glyph on all modals; the same-day shipped `ModalWindowControls` landed on `ArrowMaximize` (four-corners) before that refinement. Design §6.4 + spec FR-03/FR-12 lock the reconciliation. This is a cosmetic same-owner refinement, NOT an ADR conflict (per project CLAUDE.md). Reconciling the icon here unblocks the P1 window-controls rollout to all ~13 dialogs (tasks 030/031) so they all adopt the corrected glyph from the start. Independent of the base shell, so it is authored first (parallel with 001/002).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/ModalWindowControls/ModalWindowControls.tsx</file>
+      <file role="canonical-reference">c:/code_files/spaarke-prototype/projects/2026-07-sprk-modal-system/src/components/ModalWindowControls.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/ModalWindowControls/__tests__</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Change stays in the single shared `@spaarke/ui-components` copy of `ModalWindowControls`; MUST NOT fork the component (CLAUDE.md §11 — compose, don't fork).</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; the swap is icon-only. MUST NOT introduce hex, `'1px'` literals, or inline color styles.</constraint>
+    <constraint source="project">Public API (`IModalWindowControlsProps`: `isMaximized`, `onToggleMaximize`, `onClose`, `className`) MUST NOT change; the both-handlers-optional / renders-nothing-when-both-absent behavior MUST be preserved; `aria-label`s stay meaningful (Maximize/Restore).</constraint>
+    <constraint source="project">MUST compile clean under `@types/react` 18 (PCF) and React 19 (Code Pages) (NFR-04).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Fluent v9 icon reconciliation on a shipped shared component</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Shared-lib icon + JSDoc conventions.</pattern>
+      <pattern name="fluent-v9-react-version-boundaries" location=".claude/patterns/ui/fluent-v9-react-version-boundaries.md">Dual-React (18/19) safety.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the shipped `ModalWindowControls.tsx` + the prototype file + design §6.4. Declare RIGOR: FULL.</step>
+    <step order="1">Change the icon import from `ArrowMaximize20Regular, ArrowMinimize20Regular` to `FullScreenMaximize20Regular, FullScreenMinimize20Regular` (keep `Dismiss20Regular`); update the two `icon={…}` uses in the toggle button so not-maximized → `FullScreenMaximize20Regular`, maximized → `FullScreenMinimize20Regular`.</step>
+    <step order="2">Update the component JSDoc if it names the old glyph; leave the API + optional-handler logic untouched.</step>
+    <step order="3">Update the component's snapshot/tests to expect the FullScreen icons; verify the both-handlers-absent → `null` case still passes.</step>
+    <step order="4">Build the shared lib; verify the sole consumer `EmailComposer` compiles/renders unchanged (its test `EmailComposer/__tests__/uatR2Chrome.test.tsx` stays green).</step>
+    <step order="5">Confirm dual-React clean (build under both `@types/react` 18 and React 19).</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: set 003 status to ✅.</step>
+    <step order="7">Document any deviation (e.g. icon name unavailable in the installed `@fluentui/react-icons` version) in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `FullScreenMaximize20Regular`/`FullScreenMinimize20Regular` do not exist in the installed `@fluentui/react-icons`, STOP and surface it per CLAUDE.md §6 (pick the nearest Dataverse-matching glyph only after human confirmation) rather than reverting to `ArrowMaximize` — the glyph is owner-mandated.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Glyph reconciliation">
+      <steps>
+        <step>Render `ModalWindowControls` with `onToggleMaximize` + `onClose`, `isMaximized=false`.</step>
+        <step>Toggle `isMaximized=true`.</step>
+      </steps>
+      <expected>Shows `FullScreenMaximize` when not maximized and `FullScreenMinimize` when maximized; the × (Dismiss) button is unchanged; with neither handler supplied the cluster renders nothing.</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Render the cluster under a dark FluentProvider theme.</step>
+      </steps>
+      <expected>Subtle buttons + icons use semantic tokens and read correctly in dark mode; no hardcoded color.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test shared lib</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ModalWindowControls/ModalWindowControls.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/ModalWindowControls/__tests__</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `isMaximized=false`, when `ModalWindowControls` renders with `onToggleMaximize`, then the toggle shows `FullScreenMaximize20Regular`.</criterion>
+    <criterion testable="true">Given `isMaximized=true`, the toggle shows `FullScreenMinimize20Regular`.</criterion>
+    <criterion testable="true">Negative: given neither `onToggleMaximize` nor `onClose`, the component renders nothing (returns null) — behavior unchanged.</criterion>
+    <criterion testable="true">`IModalWindowControlsProps` is unchanged; `EmailComposer` compiles and its chrome test stays green.</criterion>
+    <criterion testable="true">Tests updated to the new glyph pass; shared-lib build green under `@types/react` 18 and 19.</criterion>
+  </acceptance-criteria>
+
+  <notes>Modify-only — no `&lt;justification&gt;` (the component already exists; this edits it, per §11 "modification does not require justification"). The reconciliation is cosmetic and same-owner (2026-07-31), not an ADR-023/021 conflict. Unblocks P1 tasks 030/031 (window-controls rollout to the remaining ~12 dialogs).
+
+**COMPLETED 2026-08-01.** Swapped `ArrowMaximize20Regular/ArrowMinimize20Regular` → `FullScreenMaximize20Regular/FullScreenMinimize20Regular` (import + toggle JSX) + added a JSDoc glyph note; `Dismiss20Regular`, `IModalWindowControlsProps`, and the both-handlers-optional / renders-nothing logic unchanged. Existing `ModalWindowControls.test.tsx` (aria-label based) stays green — no snapshot to update, so no test edit was required (see notes/wave-a-completion.md deviation 4). `FullScreen*` icons resolve in `@fluentui/react-icons ^2.0.320`; sole consumer `EmailComposer` compiles; shared-lib build green; eslint clean. No escalation.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

@@ -360,6 +360,10 @@ Spaarke.SmartTodo.RegardingRecordNumberHyperlink = Spaarke.SmartTodo.RegardingRe
                 evt.preventDefault();
                 try {
                     if (typeof Xrm !== "undefined" && Xrm.Navigation && Xrm.Navigation.navigateTo) {
+                        // `record` OOB size (85%x85%) - record-modal-selection.md
+                        // invariant (spec FR-11/FR-18, task 090); was 80%x80%.
+                        // Plain Dataverse web resource (no bundler) - cannot import
+                        // oobModalSizes.ts; keep this literal in sync manually.
                         Xrm.Navigation.navigateTo(
                             {
                                 pageType: "entityrecord",
@@ -368,8 +372,8 @@ Spaarke.SmartTodo.RegardingRecordNumberHyperlink = Spaarke.SmartTodo.RegardingRe
                             },
                             {
                                 target: 2,
-                                width: { value: 80, unit: "%" },
-                                height: { value: 80, unit: "%" }
+                                width: { value: 85, unit: "%" },
+                                height: { value: 85, unit: "%" }
                             }
                         ).then(
                             function () { /* navigated ok */ },

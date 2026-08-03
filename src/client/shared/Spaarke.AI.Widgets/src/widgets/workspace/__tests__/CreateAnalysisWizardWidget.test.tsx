@@ -226,7 +226,12 @@ describe('CreateAnalysisWizardWidget', () => {
       entityName === 'sprk_agreementtype'
         ? {
             entities: [
-              { sprk_agreementtypeid: 'nda-type-id', sprk_key: 'nda', sprk_name: 'NDA / Confidentiality', sprk_isfallback: false },
+              {
+                sprk_agreementtypeid: 'nda-type-id',
+                sprk_key: 'nda',
+                sprk_name: 'NDA / Confidentiality',
+                sprk_isfallback: false,
+              },
             ],
           }
         : { entities: [] }
@@ -402,7 +407,12 @@ describe('CreateAnalysisWizardWidget', () => {
         entityName === 'sprk_agreementtype'
           ? {
               entities: [
-                { sprk_agreementtypeid: 'nda-type-id', sprk_key: 'nda', sprk_name: 'NDA / Confidentiality', sprk_isfallback: false },
+                {
+                  sprk_agreementtypeid: 'nda-type-id',
+                  sprk_key: 'nda',
+                  sprk_name: 'NDA / Confidentiality',
+                  sprk_isfallback: false,
+                },
               ],
             }
           : { entities: [] }
@@ -567,9 +577,7 @@ describe('CreateAnalysisWizardWidget', () => {
       expect(composeEvent.widgetData.compose.autoRunReview).toBeUndefined();
 
       // … and the DISTINCT bind-failure warning is surfaced on the wizard success panel.
-      expect(
-        await screen.findByText(/The review could not be started automatically/)
-      ).toBeInTheDocument();
+      expect(await screen.findByText(/The review could not be started automatically/)).toBeInTheDocument();
     });
   });
 });

@@ -10,49 +10,72 @@
  *   - All external members removed from the SPE document container
  *   - Redis participation cache invalidated for all affected contacts
  *
- * Three states:
- *   1. Confirmation — warning list + "Close Project" (danger) / "Cancel" buttons
- *   2. Closing      — Spinner with progress label
- *   3. Result       — Success summary or error MessageBar
+ * Four phases, each rendered as `SprkModal` header/footer/body content:
+ *   1. Confirm  — warning list + "Close Project" (danger) / "Cancel" buttons
+ *   2. Closing  — Spinner with progress label
+ *   3. Success  — Success summary
+ *   4. Error    — Error MessageBar + "Try Again" / "Cancel" buttons
  *
  * Dependencies are injected via props (no solution-specific imports):
  *   - authenticatedFetch: MSAL-backed fetch function
  *   - bffBaseUrl: BFF API base URL
  *
  * Constraints:
- *   - Fluent v9 only: Dialog, DialogSurface, DialogBody, DialogTitle,
- *     DialogContent, DialogActions, Button, Spinner, Text, MessageBar,
- *     MessageBarBody, makeStyles, tokens (ADR-021)
+ *   - Fluent v9 only: Button, MessageBar, MessageBarBody, Spinner, Text,
+ *     makeStyles, tokens (ADR-021)
  *   - makeStyles with semantic tokens — ZERO hard-coded colours
  *   - Supports light, dark, and high-contrast modes (ADR-021)
  *   - Default export enables React.lazy() dynamic import
+ *
+ * P2 re-base (spaarke-modal-system, task 040 — supersedes the task-030 interim
+ * `ModalWindowControls`/local-`isMaximized` wiring):
+ *   - Envelope is now the shared `SprkModal` shell (`size="sm"`, `dismiss="alert"`,
+ *     `maximizable={false}`) — the size design §6.2 names for this dialog
+ *     ("simple form / single choice", 560px cap, close to the original
+ *     520px/90vw). `SprkModal` is composed DIRECTLY (rather than the literal
+ *     `<ConfirmModal>` wrapper) because the footer is PHASE-DEPENDENT (0–2
+ *     buttons with different labels/handlers across confirm/closing/success/
+ *     error), which `ConfirmModalProps`'s fixed Cancel+Confirm shape cannot
+ *     express. Composing the footer via `SprkModal`'s public
+ *     `footerStart`/`footer` slots per phase is legitimate (NOT forking) —
+ *     `ConfirmModal` itself is only a thin config of the same shell, and both
+ *     `SprkModal`/`ConfirmModal` are unmodified by this change. Cancel (when
+ *     present) now renders in `footerStart` (left), matching the "Cancel is
+ *     ALWAYS left-aligned" standard footer contract (design §6.5) — this
+ *     swaps the confirm/error phases' prior left-to-right order (danger/retry
+ *     action first, Cancel second) to Cancel-left/action-right, which is the
+ *     INTENDED effect of standardizing onto the shared footer contract, not
+ *     an incidental behavior change.
+ *   - The destructive "Close Project" primary now gets its danger styling from
+ *     the preset's exported `useDangerButtonClassName` (single source shared
+ *     with `ConfirmModal`; P2 consolidation) instead of the inline
+ *     `style={{ backgroundColor, color, borderColor }}` override — the exact
+ *     anti-pattern called out in design §3.3 / §6.5 and removed here.
+ *   - The custom title row (warning icon + two-line title/subtitle) is folded
+ *     into a single string title (`Close Secure Project — {projectName}`) —
+ *     `SprkModal`'s `title` is a plain string with no icon/subtitle slot, the
+ *     standard "one header contract" every re-based dialog now shares (design
+ *     §6.4). The warning intent is unaffected: it is still fully conveyed by
+ *     the in-body warning `MessageBar` and the consequence list (unchanged).
+ *   - Maximize/restore is retired (the `ConfirmModal` contract is
+ *     non-maximizable) — the local `isMaximized` state + `dialogSurface`/
+ *     `dialogSurfaceMaximized` styles from the task-030 interim wiring are
+ *     removed as dead code. The shell's own `ModalWindowControls` (×) is
+ *     always present per the header standard, routed to the same
+ *     phase-guarded `handleClose` as before — clicking it during the
+ *     "closing" phase remains a deliberate no-op (unchanged guard logic).
  */
 
 import * as React from 'react';
+import { Button, MessageBar, MessageBarBody, Spinner, Text, makeStyles, tokens } from '@fluentui/react-components';
 import {
-  Button,
-  Dialog,
-  DialogActions,
-  DialogBody,
-  DialogContent,
-  DialogSurface,
-  DialogTitle,
-  MessageBar,
-  MessageBarBody,
-  Spinner,
-  Text,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
-import {
-  DismissRegular,
   LockClosedFilled,
   PersonDeleteRegular,
   StorageRegular,
-  WarningFilled,
   CheckmarkCircleFilled,
   DismissCircleFilled,
 } from '@fluentui/react-icons';
+import { SprkModal, useDangerButtonClassName } from '../SprkModal';
 import { closeSecureProject, type ICloseProjectResponse } from './closureService';
 
 // ---------------------------------------------------------------------------
@@ -82,6 +105,12 @@ export interface ICloseProjectDialogProps {
   authenticatedFetch: typeof fetch;
   /** BFF API base URL. */
   bffBaseUrl: string;
+  /**
+   * The `--sprk-ui-scale` factor forwarded to the `SprkModal` shell (design
+   * §6.9). Optional, backward-compatible; hosts thread this via `useUiScale()`
+   * (spaarke-modal-system task 040 low-cost passthrough).
+   */
+  uiScale?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -95,35 +124,11 @@ type DialogPhase = 'confirm' | 'closing' | 'success' | 'error';
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  dialogSurface: {
-    maxWidth: '520px',
-    width: '90vw',
-  },
-
-  // ── Title row ──────────────────────────────────────────────────────────────
-  titleRow: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    flex: '1 1 0',
-  },
-  titleIcon: {
-    color: tokens.colorPaletteRedForeground1,
-    fontSize: '20px',
-    flexShrink: 0,
-  },
-  titleText: {
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-  },
-  titleSubtext: {
-    color: tokens.colorNeutralForeground3,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    marginTop: tokens.spacingVerticalXXS,
-  },
+  // Destructive primary styling comes from the preset's exported
+  // `useDangerButtonClassName` (P2 consolidation) — a single source shared with
+  // `ConfirmModal`, replacing the verbatim copy of its recipe (and, before
+  // that, the removed inline `style={{ backgroundColor, ... }}` anti-pattern
+  // called out in design §3.3 / §6.5).
 
   // ── Content ────────────────────────────────────────────────────────────────
   contentArea: {
@@ -179,6 +184,14 @@ const useStyles = makeStyles({
     paddingTop: tokens.spacingVerticalXL,
     paddingBottom: tokens.spacingVerticalXL,
     gap: tokens.spacingVerticalS,
+  },
+  // task-100 gate fix: former inline `style={{ color: tokens.* }}` on the
+  // closing-phase labels moved into token classes (ADR-050 zero-inline-color).
+  spinnerLabel: {
+    color: tokens.colorNeutralForeground3,
+  },
+  spinnerSubLabel: {
+    color: tokens.colorNeutralForeground4,
   },
 
   // ── Success / error states ─────────────────────────────────────────────────
@@ -246,7 +259,7 @@ const CLOSURE_CONSEQUENCES: IConsequenceItem[] = [
     icon: <PersonDeleteRegular fontSize={16} />,
     title: 'All external access revoked',
     description:
-      'Every external user\u2019s participation record will be deactivated immediately. They will no longer be able to access this project.',
+      'Every external user’s participation record will be deactivated immediately. They will no longer be able to access this project.',
   },
   {
     icon: <StorageRegular fontSize={16} />,
@@ -275,8 +288,10 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
   onClosed,
   authenticatedFetch: authFetch,
   bffBaseUrl,
+  uiScale,
 }) => {
   const styles = useStyles();
+  const dangerClassName = useDangerButtonClassName();
 
   const [phase, setPhase] = React.useState<DialogPhase>('confirm');
   const [errorMessage, setErrorMessage] = React.useState<string | undefined>(undefined);
@@ -332,211 +347,167 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <Dialog
+    <SprkModal
       open={open}
-      onOpenChange={(_event, data) => {
-        if (!data.open) {
-          handleClose();
-        }
-      }}
-    >
-      <DialogSurface className={styles.dialogSurface}>
-        <DialogBody>
-          {/* ── Title ───────────────────────────────────────────────────── */}
-          <DialogTitle
-            action={
-              phase !== 'closing' ? (
-                <Button
-                  appearance="subtle"
-                  aria-label="Close dialog"
-                  size="small"
-                  icon={<DismissRegular aria-hidden="true" />}
-                  onClick={handleClose}
-                />
-              ) : undefined
-            }
+      onClose={handleClose}
+      title={`Close Secure Project — ${projectName}`}
+      size="sm"
+      dismiss="alert"
+      maximizable={false}
+      uiScale={uiScale}
+      footerStart={
+        phase === 'confirm' ? (
+          <Button appearance="secondary" onClick={handleClose} aria-label="Cancel and keep the project open">
+            Cancel
+          </Button>
+        ) : phase === 'error' ? (
+          <Button appearance="secondary" onClick={handleClose} aria-label="Cancel and dismiss this dialog">
+            Cancel
+          </Button>
+        ) : undefined
+      }
+      footer={
+        phase === 'confirm' ? (
+          <Button
+            appearance="primary"
+            className={dangerClassName}
+            onClick={handleConfirmClosure}
+            aria-label="Confirm and close this secure project"
+            icon={<LockClosedFilled aria-hidden="true" />}
           >
-            <div className={styles.titleRow}>
-              <WarningFilled className={styles.titleIcon} aria-hidden="true" />
-              <div>
-                <Text size={400} className={styles.titleText} as="span" block>
-                  Close Secure Project
+            Close Project
+          </Button>
+        ) : phase === 'closing' ? (
+          <Button appearance="secondary" disabled>
+            Closing…
+          </Button>
+        ) : phase === 'success' ? (
+          <Button appearance="primary" onClick={handleClose} aria-label="Close this dialog">
+            Done
+          </Button>
+        ) : (
+          <Button appearance="primary" onClick={handleRetry} aria-label="Try closing the project again">
+            Try Again
+          </Button>
+        )
+      }
+    >
+      <div className={styles.contentArea}>
+        {/* ── Confirm phase ── */}
+        {phase === 'confirm' && (
+          <>
+            <Text size={300} className={styles.warningIntro}>
+              Closing this project will permanently revoke all external access. Please review the consequences before
+              proceeding.
+            </Text>
+
+            <div className={styles.consequenceList} role="list" aria-label="Closure consequences">
+              {CLOSURE_CONSEQUENCES.map(item => (
+                <div key={item.title} className={styles.consequenceItem} role="listitem">
+                  <span className={styles.consequenceIcon} aria-hidden="true">
+                    {item.icon}
+                  </span>
+                  <div className={styles.consequenceText}>
+                    <Text size={300} weight="semibold" className={styles.consequenceItemTitle}>
+                      {item.title}
+                    </Text>
+                    <Text size={200} className={styles.consequenceItemDesc}>
+                      {item.description}
+                    </Text>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <MessageBar intent="warning">
+              <MessageBarBody>
+                <Text size={200}>
+                  This action is{' '}
+                  <Text size={200} weight="semibold">
+                    irreversible
+                  </Text>
+                  . Confirm that you want to close this project and revoke all external access.
                 </Text>
-                <Text size={200} className={styles.titleSubtext} block title={projectName}>
-                  {projectName}
+              </MessageBarBody>
+            </MessageBar>
+          </>
+        )}
+
+        {/* ── Closing phase (spinner) ── */}
+        {phase === 'closing' && (
+          <div className={styles.spinnerContainer} aria-live="polite" aria-busy="true">
+            <Spinner size="large" />
+            <Text size={300} className={styles.spinnerLabel}>
+              Closing project and revoking all external access…
+            </Text>
+            <Text size={200} className={styles.spinnerSubLabel}>
+              This may take a few seconds.
+            </Text>
+          </div>
+        )}
+
+        {/* ── Success phase ── */}
+        {phase === 'success' && closureResult && (
+          <div className={styles.resultContainer}>
+            <CheckmarkCircleFilled className={styles.resultIconSuccess} aria-hidden="true" />
+            <Text size={500} weight="semibold" className={styles.resultTitle}>
+              Project closed
+            </Text>
+            <Text size={300} className={styles.resultSubtitle}>
+              All external access has been revoked and the project has been closed.
+            </Text>
+
+            {/* Summary card */}
+            <div className={styles.summaryCard}>
+              <div className={styles.summaryRow}>
+                <Text size={200} className={styles.summaryLabel}>
+                  Access records revoked
+                </Text>
+                <Text size={200} className={styles.summaryValue}>
+                  {closureResult.accessRecordsRevoked}
+                </Text>
+              </div>
+              <div className={styles.summaryRow}>
+                <Text size={200} className={styles.summaryLabel}>
+                  SPE container members removed
+                </Text>
+                <Text size={200} className={styles.summaryValue}>
+                  {closureResult.speContainerMembersRemoved}
+                </Text>
+              </div>
+              <div className={styles.summaryRow}>
+                <Text size={200} className={styles.summaryLabel}>
+                  Cache entries invalidated
+                </Text>
+                <Text size={200} className={styles.summaryValue}>
+                  {closureResult.affectedContactIds.length}
                 </Text>
               </div>
             </div>
-          </DialogTitle>
+          </div>
+        )}
 
-          {/* ── Content ─────────────────────────────────────────────────── */}
-          <DialogContent>
-            <div className={styles.contentArea}>
-              {/* ── Confirm phase ── */}
-              {phase === 'confirm' && (
-                <>
-                  <Text size={300} className={styles.warningIntro}>
-                    Closing this project will permanently revoke all external access. Please review the consequences
-                    before proceeding.
-                  </Text>
-
-                  <div className={styles.consequenceList} role="list" aria-label="Closure consequences">
-                    {CLOSURE_CONSEQUENCES.map(item => (
-                      <div key={item.title} className={styles.consequenceItem} role="listitem">
-                        <span className={styles.consequenceIcon} aria-hidden="true">
-                          {item.icon}
-                        </span>
-                        <div className={styles.consequenceText}>
-                          <Text size={300} weight="semibold" className={styles.consequenceItemTitle}>
-                            {item.title}
-                          </Text>
-                          <Text size={200} className={styles.consequenceItemDesc}>
-                            {item.description}
-                          </Text>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <MessageBar intent="warning">
-                    <MessageBarBody>
-                      <Text size={200}>
-                        This action is{' '}
-                        <Text size={200} weight="semibold">
-                          irreversible
-                        </Text>
-                        . Confirm that you want to close this project and revoke all external access.
-                      </Text>
-                    </MessageBarBody>
-                  </MessageBar>
-                </>
-              )}
-
-              {/* ── Closing phase (spinner) ── */}
-              {phase === 'closing' && (
-                <div className={styles.spinnerContainer} aria-live="polite" aria-busy="true">
-                  <Spinner size="large" />
-                  <Text size={300} style={{ color: tokens.colorNeutralForeground3 }}>
-                    Closing project and revoking all external access\u2026
-                  </Text>
-                  <Text size={200} style={{ color: tokens.colorNeutralForeground4 }}>
-                    This may take a few seconds.
-                  </Text>
-                </div>
-              )}
-
-              {/* ── Success phase ── */}
-              {phase === 'success' && closureResult && (
-                <div className={styles.resultContainer}>
-                  <CheckmarkCircleFilled className={styles.resultIconSuccess} aria-hidden="true" />
-                  <Text size={500} weight="semibold" className={styles.resultTitle}>
-                    Project closed
-                  </Text>
-                  <Text size={300} className={styles.resultSubtitle}>
-                    All external access has been revoked and the project has been closed.
-                  </Text>
-
-                  {/* Summary card */}
-                  <div className={styles.summaryCard}>
-                    <div className={styles.summaryRow}>
-                      <Text size={200} className={styles.summaryLabel}>
-                        Access records revoked
-                      </Text>
-                      <Text size={200} className={styles.summaryValue}>
-                        {closureResult.accessRecordsRevoked}
-                      </Text>
-                    </div>
-                    <div className={styles.summaryRow}>
-                      <Text size={200} className={styles.summaryLabel}>
-                        SPE container members removed
-                      </Text>
-                      <Text size={200} className={styles.summaryValue}>
-                        {closureResult.speContainerMembersRemoved}
-                      </Text>
-                    </div>
-                    <div className={styles.summaryRow}>
-                      <Text size={200} className={styles.summaryLabel}>
-                        Cache entries invalidated
-                      </Text>
-                      <Text size={200} className={styles.summaryValue}>
-                        {closureResult.affectedContactIds.length}
-                      </Text>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Error phase ── */}
-              {phase === 'error' && (
-                <div className={styles.resultContainer}>
-                  <DismissCircleFilled className={styles.resultIconError} aria-hidden="true" />
-                  <Text size={500} weight="semibold" className={styles.resultTitle}>
-                    Closure failed
-                  </Text>
-                  {errorMessage && (
-                    <MessageBar intent="error" style={{ textAlign: 'left', width: '100%' }}>
-                      <MessageBarBody>
-                        <Text size={200}>{errorMessage}</Text>
-                      </MessageBarBody>
-                    </MessageBar>
-                  )}
-                  <Text size={300} className={styles.resultSubtitle}>
-                    The project was not closed. You can retry or contact your administrator if the issue persists.
-                  </Text>
-                </div>
-              )}
-            </div>
-          </DialogContent>
-
-          {/* ── Actions ─────────────────────────────────────────────────── */}
-          <DialogActions>
-            {phase === 'confirm' && (
-              <>
-                <Button
-                  appearance="primary"
-                  style={{
-                    backgroundColor: tokens.colorPaletteRedBackground3,
-                    color: tokens.colorNeutralForegroundOnBrand,
-                    borderColor: tokens.colorPaletteRedBorder2,
-                  }}
-                  onClick={handleConfirmClosure}
-                  aria-label="Confirm and close this secure project"
-                  icon={<LockClosedFilled aria-hidden="true" />}
-                >
-                  Close Project
-                </Button>
-                <Button appearance="secondary" onClick={handleClose} aria-label="Cancel and keep the project open">
-                  Cancel
-                </Button>
-              </>
+        {/* ── Error phase ── */}
+        {phase === 'error' && (
+          <div className={styles.resultContainer}>
+            <DismissCircleFilled className={styles.resultIconError} aria-hidden="true" />
+            <Text size={500} weight="semibold" className={styles.resultTitle}>
+              Closure failed
+            </Text>
+            {errorMessage && (
+              <MessageBar intent="error" style={{ textAlign: 'left', width: '100%' }}>
+                <MessageBarBody>
+                  <Text size={200}>{errorMessage}</Text>
+                </MessageBarBody>
+              </MessageBar>
             )}
-
-            {phase === 'closing' && (
-              <Button appearance="secondary" disabled>
-                Closing\u2026
-              </Button>
-            )}
-
-            {phase === 'success' && (
-              <Button appearance="primary" onClick={handleClose} aria-label="Close this dialog">
-                Done
-              </Button>
-            )}
-
-            {phase === 'error' && (
-              <>
-                <Button appearance="primary" onClick={handleRetry} aria-label="Try closing the project again">
-                  Try Again
-                </Button>
-                <Button appearance="secondary" onClick={handleClose} aria-label="Cancel and dismiss this dialog">
-                  Cancel
-                </Button>
-              </>
-            )}
-          </DialogActions>
-        </DialogBody>
-      </DialogSurface>
-    </Dialog>
+            <Text size={300} className={styles.resultSubtitle}>
+              The project was not closed. You can retry or contact your administrator if the issue persists.
+            </Text>
+          </div>
+        )}
+      </div>
+    </SprkModal>
   );
 };
 

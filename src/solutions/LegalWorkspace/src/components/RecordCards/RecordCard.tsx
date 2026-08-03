@@ -27,8 +27,7 @@ import {
   EditRegular,
 } from "@fluentui/react-icons";
 import type { FluentIcon } from "@fluentui/react-icons";
-import { RecordCardShell, CardIcon } from "@spaarke/ui-components";
-import { openRecordDialog } from "../../utils/navigation";
+import { RecordCardShell, CardIcon, createXrmNavigationService } from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // Badge sub-components
@@ -143,11 +142,15 @@ export const RecordCard: React.FC<IRecordCardProps> = React.memo(
     description,
   }) => {
     const handleClick = React.useCallback(() => {
-      openRecordDialog(entityName, entityId);
+      createXrmNavigationService().openRecordModal?.(entityName, entityId).catch((err) => {
+        console.error("[RecordCard] openRecordModal failed:", err);
+      });
     }, [entityName, entityId]);
 
     const handleEdit = React.useCallback(() => {
-      openRecordDialog(entityName, entityId);
+      createXrmNavigationService().openRecordModal?.(entityName, entityId).catch((err) => {
+        console.error("[RecordCard] openRecordModal failed:", err);
+      });
     }, [entityName, entityId]);
 
     const handleEmail = React.useCallback(() => {

@@ -5,11 +5,7 @@
  */
 
 import type { Editor } from '@tiptap/react';
-import {
-  pickActiveThreadId,
-  scrollEditorToThreadAnchor,
-  type ThreadAnchorPosition,
-} from './commentScrollSync';
+import { pickActiveThreadId, scrollEditorToThreadAnchor, type ThreadAnchorPosition } from './commentScrollSync';
 
 describe('pickActiveThreadId (doc→pane active-tracking core)', () => {
   const positions: ThreadAnchorPosition[] = [
@@ -71,7 +67,9 @@ describe('scrollEditorToThreadAnchor (pane→doc jump)', () => {
 
     expect(scrolled).toBe(true);
     expect(chain).toHaveBeenCalledTimes(1);
-    expect(setTextSelection).toHaveBeenCalledWith(expect.objectContaining({ from: expect.any(Number), to: expect.any(Number) }));
+    expect(setTextSelection).toHaveBeenCalledWith(
+      expect.objectContaining({ from: expect.any(Number), to: expect.any(Number) })
+    );
     expect(scrollIntoView).toHaveBeenCalledTimes(1);
     expect(run).toHaveBeenCalledTimes(1);
   });

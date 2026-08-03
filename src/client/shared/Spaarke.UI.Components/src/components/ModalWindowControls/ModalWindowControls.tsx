@@ -9,10 +9,19 @@
  * two affordances and calls back. Either handler may be omitted — a modal that
  * cannot be maximized passes only `onClose`, and vice-versa; when both are absent
  * the cluster renders nothing. Fluent v9 semantic tokens only (ADR-021).
+ *
+ * Glyph (owner UAT 2026-08-03, supersedes the 2026-07-31 pick): the
+ * maximize/restore toggle uses `ExpandUpRight`/`ContractDownLeft` — the glyph
+ * the MDA `navigateTo` dialog header actually renders (box with the arrow
+ * escaping top-right; empirically verified against the live OOB dialog — the
+ * earlier `FullScreenMaximize` four-corners pick did NOT match it). One expand
+ * vocabulary across both modal families, even though the scopes differ:
+ * OOB expands to the whole app surface, ours fills the Spaarke container (an
+ * iframe cannot escape its boundary).
  */
 import * as React from 'react';
 import { Button, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { ArrowMaximize20Regular, ArrowMinimize20Regular, Dismiss20Regular } from '@fluentui/react-icons';
+import { ExpandUpRight20Regular, ContractDownLeft20Regular, Dismiss20Regular } from '@fluentui/react-icons';
 
 export interface IModalWindowControlsProps {
   /** Current maximized state — flips the toggle icon + label between maximize and restore. */
@@ -53,7 +62,7 @@ export const ModalWindowControls: React.FC<IModalWindowControlsProps> = ({
         <Button
           appearance="subtle"
           size="small"
-          icon={isMaximized ? <ArrowMinimize20Regular /> : <ArrowMaximize20Regular />}
+          icon={isMaximized ? <ContractDownLeft20Regular /> : <ExpandUpRight20Regular />}
           aria-label={isMaximized ? 'Restore dialog size' : 'Maximize dialog'}
           onClick={() => onToggleMaximize()}
         />

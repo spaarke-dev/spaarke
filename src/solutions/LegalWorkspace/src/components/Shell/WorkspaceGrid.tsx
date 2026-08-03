@@ -9,7 +9,7 @@ import type {
 } from "@spaarke/ui-components";
 import { useDataverseService } from "../../hooks/useDataverseService";
 import { useWorkspaceLayouts } from "../../hooks/useWorkspaceLayouts";
-import { navigateToEntityList } from "../../utils/navigation";
+import { OOB_MODAL_SIZES } from "@spaarke/ui-components";
 import {
   createPlaybookHandlers,
 } from "../GetStarted/ActionCardHandlers";
@@ -221,8 +221,24 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   }, []);
 
   // Open all updates → navigates to sprk_event entity list dialog
+  // NOTE (task 091): entitylist opens don't literally fit any of the 3 named
+  // OOB sizes (record/createForm/wizard); mapped onto `record` (85%x85%,
+  // nearest fit — browsing existing data, not a create flow) and flagged for
+  // the P7 visual review. See notes/task-091-completion.md.
   const handleOpenAllUpdates = React.useCallback(() => {
-    navigateToEntityList("sprk_event", "9399ba21-2e17-f111-8343-7c1e520aa4df");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm: any =
+      (window as any)?.Xrm ??
+      (window.parent as any)?.Xrm ??
+      (window.top as any)?.Xrm;
+    if (!xrm?.Navigation?.navigateTo) {
+      console.warn("[WorkspaceGrid] Xrm.Navigation.navigateTo is not available");
+      return;
+    }
+    xrm.Navigation.navigateTo(
+      { pageType: "entitylist", entityName: "sprk_event", viewId: "9399ba21-2e17-f111-8343-7c1e520aa4df" },
+      { target: 2, width: OOB_MODAL_SIZES.record.width, height: OOB_MODAL_SIZES.record.height }
+    );
   }, []);
 
   // -------------------------------------------------------------------------
@@ -282,8 +298,8 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         },
         {
           target: 2,
-          width: { value: 60, unit: "%" },
-          height: { value: 70, unit: "%" },
+          width: OOB_MODAL_SIZES.wizard.width,
+          height: OOB_MODAL_SIZES.wizard.height,
           title: "Create New Matter",
         }
       );
@@ -313,8 +329,8 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         },
         {
           target: 2,
-          width: { value: 60, unit: "%" },
-          height: { value: 70, unit: "%" },
+          width: OOB_MODAL_SIZES.wizard.width,
+          height: OOB_MODAL_SIZES.wizard.height,
           title: "Create New Project",
         }
       );
@@ -333,7 +349,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       const data = documentIds ? `documentIds=${documentIds.join(",")}&${bffParam}` : bffParam;
       await (window as any).Xrm?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_summarizefileswizard", data },
-        { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" }, title: "Summarize Files" }
+        { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Summarize Files" }
       );
       docRefetchRef.current?.();
     } catch {
@@ -350,7 +366,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       const data = `documentId=${documentId || ""}&containerId=${containerId || ""}&bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`;
       await (window as any).Xrm?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_findsimilar", data },
-        { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" }, title: "Find Similar Documents" }
+        { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Find Similar Documents" }
       );
       docRefetchRef.current?.();
     } catch {
@@ -366,7 +382,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     try {
       await (window as any).Xrm?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_createeventwizard", data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}` },
-        { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" }, title: "Create New Event" }
+        { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Create New Event" }
       );
       feedRefetchRef.current?.();
     } catch {
@@ -382,7 +398,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     try {
       await (window as any).Xrm?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_createtodowizard", data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}` },
-        { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" }, title: "Create New To Do" }
+        { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Create New To Do" }
       );
       todoRefetchRef.current?.();
     } catch {
@@ -398,7 +414,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     try {
       await (window as any).Xrm?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_createworkassignmentwizard", data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}` },
-        { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" }, title: "Create Work Assignment" }
+        { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Create Work Assignment" }
       );
     } catch {
       // User cancelled or dialog error — ignore
@@ -474,8 +490,23 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     setIsTodoDialogOpen(true);
   }, []);
 
+  // NOTE (task 091): entitylist opens don't literally fit any of the 3 named
+  // OOB sizes; mapped onto `record` (85%x85%, nearest fit) and flagged for
+  // the P7 visual review. See notes/task-091-completion.md.
   const handleOpenDocumentsDialog = React.useCallback((viewId?: string) => {
-    navigateToEntityList("sprk_document", viewId ?? DEFAULT_DOCUMENTS_VIEW_ID);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm: any =
+      (window as any)?.Xrm ??
+      (window.parent as any)?.Xrm ??
+      (window.top as any)?.Xrm;
+    if (!xrm?.Navigation?.navigateTo) {
+      console.warn("[WorkspaceGrid] Xrm.Navigation.navigateTo is not available");
+      return;
+    }
+    xrm.Navigation.navigateTo(
+      { pageType: "entitylist", entityName: "sprk_document", viewId: viewId ?? DEFAULT_DOCUMENTS_VIEW_ID },
+      { target: 2, width: OOB_MODAL_SIZES.record.width, height: OOB_MODAL_SIZES.record.height }
+    );
   }, []);
 
   // Open DocumentUploadWizard Code Page dialog (Integration Pattern C — frame-walking)
@@ -544,8 +575,8 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         },
         {
           target: 2,
-          width: { value: 60, unit: "%" },
-          height: { value: 70, unit: "%" },
+          width: OOB_MODAL_SIZES.wizard.width,
+          height: OOB_MODAL_SIZES.wizard.height,
         }
       );
     } catch (error: any) {
@@ -590,8 +621,8 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
           },
           {
             target: 2,
-            width: options?.width ?? { value: 60, unit: "%" },
-            height: options?.height ?? { value: 70, unit: "%" },
+            width: options?.width ?? OOB_MODAL_SIZES.wizard.width,
+            height: options?.height ?? OOB_MODAL_SIZES.wizard.height,
           },
         );
       } catch {
@@ -652,8 +683,13 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       (window.parent as any)?.Xrm ??
       (window.top as any)?.Xrm;
 
-    if (target.type === "view" && target.viewId) {
-      navigateToEntityList(target.entity, target.viewId);
+    if (target.type === "view" && target.viewId && xrm?.Navigation?.navigateTo) {
+      // NOTE (task 091): mapped onto `record` (85%x85%) — nearest named OOB
+      // size for an entitylist open; flagged for the P7 visual review.
+      xrm.Navigation.navigateTo(
+        { pageType: "entitylist", entityName: target.entity, viewId: target.viewId },
+        { target: 2, width: OOB_MODAL_SIZES.record.width, height: OOB_MODAL_SIZES.record.height }
+      );
     } else if (target.type === "record" && xrm?.Navigation?.openForm) {
       xrm.Navigation.openForm({
         entityName: target.entity,
@@ -815,8 +851,8 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         },
         {
           target: 2,
-          width: { value: 60, unit: "%" },
-          height: { value: 70, unit: "%" },
+          width: OOB_MODAL_SIZES.wizard.width,
+          height: OOB_MODAL_SIZES.wizard.height,
           title: mode === "saveAs" ? "Save As New Workspace" : "Edit Workspace",
         },
       ).then(() => {
@@ -845,8 +881,8 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         },
         {
           target: 2,
-          width: { value: 60, unit: "%" },
-          height: { value: 70, unit: "%" },
+          width: OOB_MODAL_SIZES.wizard.width,
+          height: OOB_MODAL_SIZES.wizard.height,
           title: "Create New Workspace",
         },
       ).then(() => {

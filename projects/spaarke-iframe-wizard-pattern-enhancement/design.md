@@ -1,5 +1,7 @@
 # Iframe-Wizard Pattern Enhancement — Design Document
 
+> **⛔ SUPERSEDED / CLOSED (owner decision 2026-08-01).** This project's flagship surfaces are now covered by shipped mechanisms: **Surface 1 (wizard → mount/return)** by the Assistant surfaceHandoff ([`ASSISTANT-SURFACE-LAUNCH-MECHANISM.md`](../../docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md)); **Surface 3 (background-job push)** by the Notification & Action Spine ([ADR-047](../../.claude/adr/ADR-047-notification-action-spine.md)), which explicitly forbids a second push channel — exactly the BFF mount-pending queue proposed here (Phases 3/6). The remaining niche gaps (MDA cross-tab, external SPA, Office add-in "Open in Workspace") should, if ever built, ride the Notification Spine + `BroadcastChannel` — not this transport layer. Assessment: [`projects/spaarke-modal-system/design.md`](../spaarke-modal-system/design.md) §9. Not a dependency of the modal-system project.
+>
 > **Created**: 2026-05-27
 > **Source**: R4 task 043 (W-5) discovery + operator decision 2026-05-27
 > **Status**: Design (pre-planning)

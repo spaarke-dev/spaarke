@@ -33,8 +33,7 @@ import { IEvent } from "../../types/entities";
 import { PriorityLevel } from "../../types/enums";
 import { formatRelativeTime } from "../../utils/formatRelativeTime";
 import { getTypeIcon, getTypeIconLabel } from "../../utils/typeIconMap";
-import { navigateToEntity, openRecordDialog } from "../../utils/navigation";
-import { RecordCardShell, CardIcon } from "@spaarke/ui-components";
+import { RecordCardShell, CardIcon, createXrmNavigationService } from "@spaarke/ui-components";
 
 // R3 FR-14 / OS-1 note:
 //   The legacy "Flag as To Do" button on the FeedItemCard wrote
@@ -210,12 +209,20 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
     const handleRegardingClick = React.useCallback(() => {
       const entityName = resolveRegardingEntityName(event.regardingRecordTypeName);
       if (entityName && event.sprk_regardingrecordid) {
-        navigateToEntity({ action: "openRecord", entityName, entityId: event.sprk_regardingrecordid });
+        createXrmNavigationService().openRecord(entityName, event.sprk_regardingrecordid).catch((err) => {
+          console.error("[FeedItemCard] openRecord failed:", err);
+        });
       }
     }, [event.regardingRecordTypeName, event.sprk_regardingrecordid]);
 
     const handleEdit = React.useCallback(() => {
-      onEdit ? onEdit(event.sprk_eventid) : openRecordDialog("sprk_event", event.sprk_eventid);
+      if (onEdit) {
+        onEdit(event.sprk_eventid);
+      } else {
+        createXrmNavigationService().openRecordModal?.("sprk_event", event.sprk_eventid).catch((err) => {
+          console.error("[FeedItemCard] openRecordModal failed:", err);
+        });
+      }
     }, [onEdit, event.sprk_eventid]);
 
     const handleCardClick = React.useCallback((e: React.MouseEvent | React.KeyboardEvent) => {

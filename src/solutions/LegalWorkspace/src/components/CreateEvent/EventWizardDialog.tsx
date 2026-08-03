@@ -31,7 +31,7 @@ import { EntityCreationService } from '../../services/EntityCreationService';
 import { getBffBaseUrl } from '../../config/runtimeConfig';
 import { authenticatedFetch } from '../../services/authInit';
 import { getSpeContainerIdFromBusinessUnit } from '../../services/xrmProvider';
-import { navigateToEntity } from '../../utils/navigation';
+import { createXrmNavigationService } from '@spaarke/ui-components';
 import type { IWebApi } from '../../types/xrm';
 
 // ---------------------------------------------------------------------------
@@ -141,10 +141,8 @@ const EventWizardDialog: React.FC<IEventWizardDialogProps> = ({ open, onClose, w
         const hasWarnings = warnings.length > 0;
 
         const viewEvent = () => {
-          navigateToEntity({
-            action: 'openRecord',
-            entityName: 'sprk_event',
-            entityId: eventId,
+          createXrmNavigationService().openRecord('sprk_event', eventId).catch((err) => {
+            console.error('[EventWizardDialog] openRecord failed:', err);
           });
           onClose();
         };

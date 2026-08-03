@@ -27,6 +27,7 @@
  */
 import { getXrm } from '../../services/xrmGlobal';
 import { EMAIL_PAGE_WEBRESOURCE_NAME } from './openEmailRecord';
+import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
 
 /** Compose entry points. `new` needs no source; the rest require a source communication. */
 export type OpenEmailComposeMode = 'new' | 'reply' | 'replyAll' | 'forward';
@@ -83,8 +84,10 @@ export async function openEmailCompose(options?: OpenEmailComposeOptions): Promi
       {
         target: 2, // modal dialog
         position: 1, // centered
-        width: { value: 60, unit: '%' },
-        height: { value: 80, unit: '%' },
+        // `createForm` OOB size (70%×80%) — composing = creating a new email
+        // (spec FR-11/FR-18, task 090); was an ad-hoc 60%×80% literal.
+        width: OOB_MODAL_SIZES.createForm.width,
+        height: OOB_MODAL_SIZES.createForm.height,
       }
     );
   } catch (err) {

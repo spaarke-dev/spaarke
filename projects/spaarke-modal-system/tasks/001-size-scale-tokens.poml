@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-modal-system">
+  <metadata>
+    <title>Size scale + layout tokens (sizes.ts) — FR-02</title>
+    <phase>0 Build</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New typed shared-lib surface with unit tests; foundation the whole shell depends on.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard shared-lib component work, fully specified by an existing prototype file.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>react, typescript, fluent-ui, frontend</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Port the modal size scale from the prototype into `@spaarke/ui-components` as `SprkModal/sizes.ts`: the 7 named sizes (xs/sm/md/lg/xl/full/wizard) with `min(calc(px * var(--sprk-ui-scale,1)), vw)` widths and `min(N·vh, maxPx·scale)` height caps, plus the `getSurfaceStyle(size, uiScale)` builder and the `SprkModalSize`/`SprkModalLayout` types. This module is the sizing foundation every preset and the base shell consume (FR-02).</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9, TypeScript, and scale-aware CSS sizing. Follow ADRs strictly.</role>
+  <goal>`src/client/shared/Spaarke.UI.Components/src/components/SprkModal/sizes.ts` exists exporting `SIZE_SPEC`, `SIZE_ORDER`, `getSurfaceStyle`, `widthLabel`, and types `SprkModalSize` (`xs|sm|md|lg|xl|full|wizard`) + `SprkModalLayout` (`portrait|landscape`); a unit test verifies the exact width/height math per spec §6.2; build green.</goal>
+
+  <context>
+    <background>Design §6.2 + spec FR-02 lock the size scale. The prototype `sizes.ts` is the visual contract — the exact numbers were owner-verified 2026-07-31 (md cap 720, lg cap 880 so landscape aspect holds on tall monitors). This module has no dependency on the base shell, so it is authored first (parallel with 002/003).</background>
+    <relevant-files>
+      <file role="canonical-reference">c:/code_files/spaarke-prototype/projects/2026-07-sprk-modal-system/src/components/sizes.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/sizes.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/__tests__/sizes.test.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Lives in `@spaarke/ui-components` under `components/SprkModal/`; not duplicated per solution.</constraint>
+    <constraint source="ADR-021">Sizing uses semantic patterns only; no hardcoded color; no `'1px'` literals in this module (numeric px inside `min()`/`calc()` size math is the size scale itself and is expected).</constraint>
+    <constraint source="project">Every dimension MUST be `min(calc(px * var(--sprk-ui-scale, 1)), N·vw)` for width and `min(N·vh, maxPx·scale)` for capped heights — NO fixed device-pixel assumptions (FR-06). Copy the exact numbers from the prototype `SIZE_SPEC`.</constraint>
+    <constraint source="project">Type-only + pure-function module — no React import, no JSX. Must compile under `@types/react` 18 and React 19 (NFR-04).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Fluent v9 scale-aware modal sizing</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Shared-lib authoring conventions.</pattern>
+      <pattern name="fluent-v9-react-version-boundaries" location=".claude/patterns/ui/fluent-v9-react-version-boundaries.md">Dual-React (18/19) safety.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec §6.2 + the prototype `sizes.ts`. Declare RIGOR: FULL.</step>
+    <step order="1">Create `components/SprkModal/` folder. Author `sizes.ts` porting `SIZE_SPEC` (all 7 sizes with exact prototype numbers), `SIZE_ORDER`, `SprkModalSize`, `SprkModalLayout`.</step>
+    <step order="2">Implement `getSurfaceStyle(size, uiScale=1)` returning the `React.CSSProperties`/style object (width `min(calc(cap*scale px), N·vw)`, height cap where applicable, `maxWidth: 96vw`/`maxHeight: 92vh`, `100vw`/`100vh` for `full`).</step>
+    <step order="3">Implement `widthLabel(size, uiScale)` helper (used by tests/harness to assert computed caps).</step>
+    <step order="4">Write `__tests__/sizes.test.ts`: assert md = `min(1040·scale,92vw) × min(72vh,720·scale)`, lg cap 880, xl uncapped 92vw×88vh, full 100vw×100vh; assert scale 1.0/1.25/1.5 multiply the px caps.</step>
+    <step order="5">Run the shared-lib build + tests; confirm green and dual-React-clean (no React import needed here).</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: set 001 status to ✅.</step>
+    <step order="7">Document any numeric deviation from the prototype in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the prototype `SIZE_SPEC` numbers differ from spec §6.2 in any load-bearing way (e.g. a cap value), STOP and surface the discrepancy per CLAUDE.md §6 rather than picking one silently — the numbers are owner-locked.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No standalone modal size-scale module exists today. Grep: sizes are inline-hardcoded per dialog (`RichFilePreviewDialog` 1280×85vh, `WizardShell` 95vw×70vh, EmailComposer 1040×70vh) — the fragmentation this project fixes.</existing>
+    <extension>No — there is nothing to extend; this is the single source of truth that the ~13 inline sizes collapse into.</extension>
+    <cost-of-doing-nothing>Without one size module, every preset re-hardcodes a rectangle and the "≥6 conflicting large-modal sizes / square-on-4K" failure recurs. FR-02 acceptance (fits + holds landscape at 1280/1440/2560) is unachievable piecemeal.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Size math at three widths (conceptual)">
+      <steps>
+        <step>In a harness, render a box styled by `getSurfaceStyle('md', 1)` at viewport widths 1280/1440/2560.</step>
+        <step>Verify width is capped at 1040px on the 2560 monitor and ~92vw at 1280.</step>
+      </steps>
+      <expected>md holds landscape aspect (height capped 720) at all three widths; no square-on-tall.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test shared lib</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/sizes.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/__tests__/sizes.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given size `md` and uiScale 1.5, when `getSurfaceStyle` runs, then width is `min(calc(1040px*1.5), 92vw)` and height cap is `min(72vh, 1080px)`.</criterion>
+    <criterion testable="true">Given size `full`, then width/height are `100vw`/`100vh` and maxWidth/maxHeight are `100vw`/`100vh`.</criterion>
+    <criterion testable="true">All 7 sizes match the prototype `SIZE_SPEC` numbers exactly; unit tests pass; shared-lib build green.</criterion>
+    <criterion testable="true">Module imports no React and compiles under `@types/react` 18 and 19.</criterion>
+  </acceptance-criteria>
+
+  <notes>Prototype `SIZE_ORDER = ["xs","sm","md","lg","xl","wizard","full"]`. `getSurfaceStyle` also sets maxWidth 96vw / maxHeight 92vh (100vw/100vh when full). This module is consumed by task 004 (base shell) and every preset.
+
+**COMPLETED 2026-08-01.** Ported `sizes.ts` verbatim from the prototype (7-size `SIZE_SPEC`, `SIZE_ORDER`, `getSurfaceStyle`, `widthLabel`, `SprkModalSize`/`SprkModalLayout` types). 10 Jest assertions green; shared-lib `tsc` build green; eslint clean. `import type { CSSProperties }` (type-only, dual-React safe). Deviations (per notes/wave-a-completion.md): added `uiScale=1` default to both fns; width uses spec FR-02's pre-multiplied `min(cap·uiScale px, N·vw)` form (NOT `calc(var())`), confirmed against spec §6.2. No escalation — md/lg caps match spec exactly.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>
