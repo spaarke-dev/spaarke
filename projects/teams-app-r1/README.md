@@ -1,5 +1,7 @@
 # Spaarke Teams App (R1)
 
+> **Portfolio**: [Project #724](https://github.com/spaarke-dev/spaarke/issues/724) · Epic [#431 EMAIL & MESSAGING](https://github.com/spaarke-dev/spaarke/issues/431) · [Board #2](https://github.com/users/spaarke-dev/projects/2)
+>
 > **Last Updated**: 2026-08-03
 >
 > **Status**: In Progress (initialized — tasks generated, execution not started)
