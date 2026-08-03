@@ -42,7 +42,7 @@
 | 090 | P7 — OOB size scale constants + route via hubs | 7 | ✅ | none | — | FULL | sonnet/high |
 | 091 | P7 — Retire solution-local navigation.ts copies | 7 | ✅ | 090 | P7 | STANDARD→FULL | sonnet/high |
 | 092 | P7 — Convert sprk_DocumentOperations.js DOM overlay | 7 | ✅ | 090 | P7 | STANDARD→FULL | sonnet/high |
-| 100 | Project wrap-up (MANDATORY) 🔒 | 8 | 🔲 | all | — | FULL | sonnet/high |
+| 100 | Project wrap-up (MANDATORY) 🔒 | 8 | ✅ | all | — | FULL | main-session |
 
 🔒 = **main-session only** (writes `.claude/` — sub-agents cannot per CLAUDE.md §3).
 
@@ -108,7 +108,7 @@ P0 is the gate for everything. P0.5 (020) needs only 002. P7 (090) is independen
 | 5 Messages overlay ✅ | 070 (1) — **DONE 2026-08-02** | ConversationModal (PCF hand-roll, overlay 2 of 3) → `SprkModal md/light` via NEW pcf-safe exports; **FR-08 transform-robust centering VALIDATED** (structural test, React 16); dark parity improved (hard-coded webLightTheme removed); 269→174 lines; build:prod green |
 | 6 Wizards ✅ | 080 (1) — **DONE 2026-08-02** | Light-first (§11-G): standard header/footer tokens + Skip·Back·Next order + named `wizard` size via getSurfaceStyle (95vw/70vh literals gone); envelope/embedded/stepper retained; 061 xl-override plumbing preserved. 9-consumer build matrix green (React 16/18/19 incl. transitive SemanticSearchControl finding). Discovered pre-existing LW WizardShell fork → Issue #715 / DEF-004 |
 | 7 OOB consolidation ✅ | 090–092 (3) — **DONE 2026-08-02** | `oobModalSizes.ts` (record 85² / createForm 70×80 / wizard 60×70) + both hubs consume it; 89-site navigateTo inventory, 45 repointed, 10 flagged for the one-time visual review; both `navigation.ts` copies DELETED (26 real callers repointed — 090's grep missed the openForm shape); `sprk_DocumentOperations.js` DOM overlay (3 of 3!) → chained openConfirmDialog, both copies, zero new asymmetry. Stale `.claude/patterns/webresource/custom-dialogs-in-dataverse.md` rewritten to supported paths. Discoveries → Issues #716 (copy drift/DEF-005) |
-| 8 Wrap-up | 100 (1) | code-review + adr-check + test-diet + lessons-learned + INDEX + repo-cleanup |
+| 8 Wrap-up ✅ | 100 (1) — **DONE 2026-08-02** | Branch gates: adr-check 9/9 compliant + code-review 4-pass, ZERO Critical; all recommended fixes applied (uiScale threading, SIZE_SPEC sourcing, doc corrections, inline-color cleanup, ADR-050 Path-B amendment). test-diet: 38 files, 0 SCAFFOLDING (`notes/test-diet-report.md`). Criteria §1–10 evidenced (`notes/success-criteria-verification.md`). lessons-learned + INDEX row + repo-cleanup done. **PROJECT COMPLETE** (051 → #713; visual review + stale-PCF-bundle-repack outstanding for owner) |
 
 ---
 

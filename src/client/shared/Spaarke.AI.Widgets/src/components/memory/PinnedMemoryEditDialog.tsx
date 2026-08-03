@@ -15,9 +15,9 @@
  * the parent {@link PinnedMemoryListWidget} owns the BFF round-trip and the
  * optimistic list update. Submission is therefore async-safe: when the
  * parent is mid-flight, it passes `isSubmitting=true`; the Save label swaps
- * to "Saving…" and the pre-existing `isSubmitting` re-entrancy guards in
- * `handleCancel`/`handleSubmit` prevent a double-submit (see the render's
- * inline note on why `FormModal`'s `busy` isn't wired here yet).
+ * to "Saving…", `FormModal`'s `busy={isSubmitting}` disables both buttons and
+ * shows the in-flight spinner, and the pre-existing `isSubmitting` re-entrancy
+ * guards in `handleCancel`/`handleSubmit` remain as defense-in-depth.
  *
  * Validation (sync, on Save click):
  *   - title:   required; ≤200 characters (matches PART A backend cap)

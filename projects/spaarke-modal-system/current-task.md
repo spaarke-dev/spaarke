@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — **P0 ✅ P0.5 ✅ P1 ✅ P2 ✅ P3 ✅/⏸️ P4 ✅ P5 ✅ P6 ✅ P7 ✅** — ALL CONVERSIONS DONE |
+| **Task** | **PROJECT COMPLETE (2026-08-02)** — 28/29 ✅, 051 ⏸️ → Issue #713 |
 | **Step** | — |
-| **Status** | phase-boundary (final) |
-| **Next Action** | P8 task 100 — project wrap-up, MAIN SESSION ONLY (writes .claude/): code-review + adr-check + **/test-diet gate (root CLAUDE.md §7)** + lessons-learned + INDEX updates + repo-cleanup |
+| **Status** | complete |
+| **Next Action** | **Owner items only**: (1) one-time visual review (checklist: `notes/success-criteria-verification.md` bottom); (2) MUST-before-deploy: rebuild+repack the stale `CommunicationConversationPanel` Solution `bundle.js` (predates the P5 source fix); (3) merge via `/merge-to-master` when ready; (4) follow-ons #712–#717 |
 
 ### Critical Context
 **P0 (Build, 001–013) ✅** — `SprkModal` + 6 presets ship in `@spaarke/ui-components` (main barrel only; ABSENT from `pcf-safe.ts` → Code-Page-scoped by construction). 86 P0 tests green. Docs: `MODAL-DESIGN-SYSTEM.md` + ADR-050 + pattern pointer + §17 row.

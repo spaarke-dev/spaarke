@@ -16,6 +16,7 @@
  */
 import * as React from 'react';
 import { Dialog, DialogSurface, DialogBody, makeStyles, mergeClasses } from '@fluentui/react-components';
+import { SIZE_SPEC } from '../../SprkModal/sizes';
 
 import { EmailComposer } from '../EmailComposer';
 import type {
@@ -66,11 +67,13 @@ const useDialogStyles = makeStyles({
     width: '92vw',
     height: '72vh',
     // spaarke-modal-system P3 (FR-14 alignment, 2026-08-02): cap the 72vh height at
-    // 720px so this surface is numerically identical to the SprkModal `md` size
-    // (`min(1040px, 92vw) × min(72vh, 720px)`) — the cap fixes the square-on-tall-
-    // monitor failure `md` exists for. The literal FormModal re-base is deferred:
-    // EmailComposer is self-chromed (see notes/task-051-completion.md + DEF-002).
-    maxHeight: '720px',
+    // the `md` heightMax so this surface is numerically identical to the SprkModal
+    // `md` size (`min(1040px, 92vw) × min(72vh, 720px)`) — the cap fixes the
+    // square-on-tall-monitor failure `md` exists for. Sourced from SIZE_SPEC (not a
+    // literal) so a future `md` retune propagates here (task-100 gate fix). The
+    // literal FormModal re-base is deferred: EmailComposer is self-chromed (see
+    // notes/task-051-completion.md + DEF-002 / Issue #713).
+    maxHeight: `${SIZE_SPEC.md.heightMax}px`,
     display: 'flex',
     flexDirection: 'column',
     // Surface itself never scrolls — the body owns the scroll region below.

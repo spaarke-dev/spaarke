@@ -110,7 +110,7 @@ const useStyles = makeStyles({
     padding: '0px',
     resize: 'both',
     overflow: 'auto',
-    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke1}`,
     // v1.1.63 — the surface must be a flex column so DialogBody can
     // flex-grow to fill the surface height. Fluent DialogSurface is
     // already display:flex by default; we just ensure direction.

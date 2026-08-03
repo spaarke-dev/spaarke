@@ -1,6 +1,6 @@
 # Spaarke Modal System
 
-> **Status**: Planning complete (2026-08-01) — 29 tasks across 8 phases (P0–P7 + P0.5). Ready to execute Phase 0.
+> **Status**: **Complete (2026-08-02)** — 28 of 29 tasks ✅, 1 deferred with owner-visible follow-on (051 → [Issue #713](https://github.com/spaarke-dev/spaarke/issues/713)). Success Criteria verified with evidence: [`notes/success-criteria-verification.md`](notes/success-criteria-verification.md); test-diet gate: [`notes/test-diet-report.md`](notes/test-diet-report.md); one-time visual review outstanding (consolidated list in the criteria doc).
 > **Created**: 2026-07-31
 
 ## Graduation Criteria

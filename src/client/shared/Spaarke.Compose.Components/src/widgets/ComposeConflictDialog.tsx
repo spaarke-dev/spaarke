@@ -98,12 +98,11 @@
  *   - Maximize/restore is retired for this dialog (the `ConfirmModal` contract
  *     is non-maximizable) — the local `isMaximized` state + `surfaceMaximized`
  *     style from the task-031 interim wiring are removed as dead code.
- *   - Known gap (reported, not fixed here — preset limitation, not a
- *     task-040 defect): `SprkModal`'s header renders `title` as plain text, not
- *     via Fluent's `DialogTitle`, so there is no `aria-labelledby` wiring the
- *     dialog's accessible name to the title (same limitation already shipped
- *     in the `ConfirmModal`/`SprkModal` test suites from task 005/009). The
- *     `alertdialog` role and focus-trap/ESC-blocking behavior are unaffected.
+ *   - (Historical note, resolved: the task-040 report flagged that `SprkModal`
+ *     had no `aria-labelledby` wiring; the P2 consolidation added it — the
+ *     shell stamps a stable id on its title span and points the
+ *     `DialogSurface`'s `aria-labelledby` at it, so this dialog's accessible
+ *     name IS wired to its title.)
  *
  * @see projects/spaarkeai-compose-r1/tasks/051-spe-multi-tab-conflict-ux.poml
  * @see projects/spaarkeai-compose-r1/notes/spikes/spike-3-spe-checkout-promotion.md §1 + §9

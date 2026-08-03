@@ -49,7 +49,7 @@
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/715 |
 | **Discovered** | 2026-08-02, P6 — task 080 consumer-inventory adr-check (not caused/modified by this project) |
 | **Ownership** | LegalWorkspace surface owner; follow-on task |
-| **Concrete failing behavior** | The fork silently missed task 080's chrome standardization and will miss every future WizardShell improvement (ADR-012 compose-don't-fork violation); it also carries a pre-existing undefined `navigationService` reference (~line 360, part of the LW tsc baseline / #712 noise) |
+| **Concrete failing behavior** | **(Wording corrected at task 100 per the branch review gate)**: the file imports the CANONICAL `WizardShell` (verified — chrome updates DO reach it); what is duplicated is the `WorkAssignmentWizardDialog` ORCHESTRATOR/WRAPPER (business logic) vs the shared-lib equivalent — still an ADR-012 duplication risk, at the wrapper layer not the shell layer. It also carries a pre-existing undefined `navigationService` reference (~line 360, part of the LW tsc baseline / #712 noise) |
 | **Suggested follow-on** | Replace the fork with the canonical `WizardShell` import (prop-map), or document the divergence requirement and extend the canonical shell; fix/remove the dead reference either way |
 
 ---
@@ -63,6 +63,18 @@
 | **Ownership** | DocumentRibbons surface owner; follow-on |
 | **Concrete failing behavior** | 3 drift regions between the "byte-identical" copies (env-var fallback, BFF URL `/api`-suffix stripping, `sendToIndex` GUID-casing/error fields) — whichever copy deploys wins silently; any future one-way sync flips behaviors |
 | **Suggested follow-on** | Reconcile the 3 regions to one intended behavior; add a sync check or single-source at build time |
+
+---
+
+## DEF-006 — Task-091 behavior deltas promoted at wrap-up (adr-check recommendation)
+
+| Field | Value |
+|---|---|
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/717 |
+| **Discovered** | 2026-08-02, P7 task 091 (disclosed in `task-091-completion.md`); promoted to the ledger at task 100 per the branch adr-check gate |
+| **Ownership** | LegalWorkspace surface owner + one-time visual review |
+| **Concrete failing behavior** | (1) `FilePreviewDialog.tsx` record-open lost `openInNewWindow: true` (shared adapter has no such option) — now same-tab; (2) `MyPortfolioWidget.tsx` ×3 `openView` postMessages have NO receiver anywhere in the repo (orphaned dead affordance, preserved verbatim) |
+| **Suggested follow-on** | If new-window is required, extend the shared adapter (no local helper re-pin); wire-or-remove the orphaned postMessages |
 
 ---
 

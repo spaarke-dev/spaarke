@@ -128,3 +128,9 @@ Not met. Folder not deleted; line 42 not removed; line-213-equivalent override u
 - **Escalation 2 (Finding 2)**: Two live consumers block legacy-folder deletion (`pcf-safe.ts`, `DailyBriefingApp.tsx`). `pcf-safe.ts` cannot be touched by this task per its own hard boundary. `DailyBriefingApp.tsx`'s `onSend` usage represents two send flows (`emailBriefingToColleague` BFF call; raw Dataverse `email` activity + OOB `SendEmail` action) that the canonical engine cannot express without new capability — not half-ported per instruction. Recommend a follow-on task (scoped explicitly, with the owner's input on whether `DailyBriefingApp`'s send flows should gain first-class engine support, keep a narrowly-scoped legacy-shim component, or be redesigned) before the legacy folder can be safely deleted.
 - **P1 escalation** (`defer-issues.md` "030 escalation... no-X decision"): remains **open** — not closed by this task, since the retirement it depended on did not happen. See "P1 escalation status" section above.
 - No git add/commit performed (per hard boundary — also moot, nothing to commit). `TASK-INDEX.md`/`current-task.md`/`.claude/**`/`pcf-safe.ts`/`FormModal`/`SprkModal`/presets — none touched.
+
+---
+
+## Correction (task 100 wrap-up gate, 2026-08-02)
+
+The "Files modified: None / zero source files were edited" statement above is accurate for THE AGENT RUN ONLY. After this escalation report, the MAIN SESSION shipped the interim mitigation in the same P3 commit (`422fa7cce`): `EmailComposer/wrappers/SendEmailDialog.tsx` +6 lines — the `maxHeight` cap aligning the wrapper numerically to `md` (later re-sourced to `SIZE_SPEC.md.heightMax` at the task-100 gate). `defer-issues.md` DEF-002 carries the authoritative narrative. Flagged by the branch code-review gate (finding #3) and corrected here so the two documents agree.

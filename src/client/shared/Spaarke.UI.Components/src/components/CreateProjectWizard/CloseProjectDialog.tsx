@@ -193,6 +193,14 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalXL,
     gap: tokens.spacingVerticalS,
   },
+  // task-100 gate fix: former inline `style={{ color: tokens.* }}` on the
+  // closing-phase labels moved into token classes (ADR-050 zero-inline-color).
+  spinnerLabel: {
+    color: tokens.colorNeutralForeground3,
+  },
+  spinnerSubLabel: {
+    color: tokens.colorNeutralForeground4,
+  },
 
   // ── Success / error states ─────────────────────────────────────────────────
   resultContainer: {
@@ -437,10 +445,10 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
         {phase === 'closing' && (
           <div className={styles.spinnerContainer} aria-live="polite" aria-busy="true">
             <Spinner size="large" />
-            <Text size={300} style={{ color: tokens.colorNeutralForeground3 }}>
+            <Text size={300} className={styles.spinnerLabel}>
               Closing project and revoking all external access…
             </Text>
-            <Text size={200} style={{ color: tokens.colorNeutralForeground4 }}>
+            <Text size={200} className={styles.spinnerSubLabel}>
               This may take a few seconds.
             </Text>
           </div>

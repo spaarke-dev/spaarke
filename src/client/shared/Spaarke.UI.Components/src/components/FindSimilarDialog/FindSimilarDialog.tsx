@@ -108,6 +108,12 @@ export interface IFindSimilarDialogProps {
    * consumers that may extend this component.
    */
   dataService?: IDataService;
+  /**
+   * The `--sprk-ui-scale` factor forwarded to the `SprkModal` shell (design
+   * §6.9). Optional, backward-compatible; hosts thread this via `useUiScale()`
+   * (task-100 gate fix — the one re-based dialog that missed the passthrough).
+   */
+  uiScale?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,7 +161,7 @@ const useStyles = makeStyles({
 // Component
 // ---------------------------------------------------------------------------
 
-export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({ open, onClose, url, embedded = false }) => {
+export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({ open, onClose, url, embedded = false, uiScale }) => {
   const styles = useStyles();
 
   const handleExpand = React.useCallback(() => {
@@ -197,6 +203,7 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({ open, onC
       title="Similar Documents"
       size="xl"
       padded={false}
+      uiScale={uiScale}
       headerActions={
         <Tooltip content="Open in new tab" relationship="label">
           <Button

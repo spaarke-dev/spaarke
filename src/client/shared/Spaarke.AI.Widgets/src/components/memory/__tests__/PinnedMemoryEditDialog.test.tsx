@@ -121,20 +121,22 @@ describe('PinnedMemoryEditDialog (create)', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it('shows "Saving…" and does not re-submit while isSubmitting (task 050 re-base)', async () => {
-    // NOTE: Spaarke.UI.Components' compiled `dist/` predates the P3 FormModal
-    // consolidation (`busy`/`submitDisabled` aren't in `dist/FormModal.d.ts` yet — see
-    // notes/task-050-completion.md), so the Save button is NOT visually disabled here
-    // (unlike the pre-re-base component, which disabled it directly). The pre-existing
-    // `isSubmitting` re-entrancy guard inside `handleSubmit` still fully prevents a
-    // duplicate submit — assert that guard directly instead of a disabled attribute.
+  it('shows "Saving…", disables both buttons (FormModal busy), and does not re-submit while isSubmitting', async () => {
+    // `busy={isSubmitting}` (FormModal, P3 consolidation — jest resolves
+    // `@spaarke/ui-components` from SOURCE, so the earlier "stale dist" caveat never
+    // applied here) disables Save + Cancel and renders the in-flight spinner; the
+    // pre-existing `isSubmitting` re-entrancy guard remains as defense-in-depth.
     const user = userEvent.setup();
     const onSubmit = jest.fn();
     renderWithTheme(
       <PinnedMemoryEditDialog open={true} mode="create" isSubmitting={true} onSubmit={onSubmit} onCancel={() => undefined} />
     );
     expect(screen.getByText(/Saving…/i)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /saving/i }));
+    const save = screen.getByRole('button', { name: /saving/i });
+    expect(save).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^cancel$/i })).toBeDisabled();
+    expect(save.querySelector('.fui-Spinner')).not.toBeNull();
+    await user.click(save);
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
