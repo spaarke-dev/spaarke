@@ -46,6 +46,14 @@ public sealed class CommunicationThreadReadService
     private const string ThreadTypeField = "sprk_threadtype"; // Record-Anchored=100000000, Direct 1:1=100000001
     private const string PinnedField = "sprk_ispinned"; // R3 task 040/041 / FR-24 — null on pre-existing rows, normalized to false below
 
+    // round-8.4 item 3 (fix): sprk_communicationthread carries the same typed ADR-024 regarding lookups as
+    // sprk_communication EXCEPT sprk_regardingreportcard, which does NOT exist on the thread entity. Selecting a
+    // non-existent column 400s the whole OData query (surfaced client-side as an HttpRequestException / blank thread
+    // list), so the thread projection uses only the lookups the thread actually has. Verified against the
+    // sprk_communicationthread metadata 2026-08-03.
+    private static readonly IReadOnlyList<(string EntityLogicalName, string RegardingField)> ThreadRegardingFields =
+        RegardingFieldMap.All.Where(x => x.RegardingField != "sprk_regardingreportcard").ToArray();
+
     // sprk_communication columns (as-built, notes/messaging-schema-spec.md).
     private const string ThreadLookupValue = "_sprk_communicationthread_value"; // message → thread lookup
     private const string PkField = "sprk_communicationid";
@@ -370,7 +378,7 @@ public sealed class CommunicationThreadReadService
         // PinnedField added (task 041 / FR-24) so the all-mode thread list can mark/sort pinned threads.
         // round-8.4 item 3: also project the typed regarding lookups (RegardingFieldMap) so each row can carry its
         // associated record for the message-pane "open record" affordance. Lookups read back as `_{field}_value`.
-        var regardingValueCols = RegardingFieldMap.All.Select(x => $"_{x.RegardingField}_value");
+        var regardingValueCols = ThreadRegardingFields.Select(x => $"_{x.RegardingField}_value");
         var select = string.Join(
             ',',
             new[] { ThreadPkField, ThreadNameField, ThreadTypeField, CreatedOnField, PinnedField }.Concat(regardingValueCols));
@@ -943,7 +951,7 @@ public sealed class CommunicationThreadReadService
     // Direct thread. Mirrors CommunicationArrivedProducer.ResolveTypedRegarding, but over the raw OData row shape.
     private static (string? EntityType, Guid? Id) ResolveRegardingFromRow(Dictionary<string, JsonElement> row)
     {
-        foreach (var (entityLogicalName, field) in RegardingFieldMap.All)
+        foreach (var (entityLogicalName, field) in ThreadRegardingFields)
         {
             if (TryGuid(row, $"_{field}_value") is { } id && id != Guid.Empty)
             {
