@@ -45,6 +45,7 @@ import {
   MessageBar,
   MessageBarBody,
   MessageBarTitle,
+  Text,
 } from '@fluentui/react-components';
 import { DigestHeader } from './DigestHeader';
 import { EmptyState } from './EmptyState';
@@ -57,11 +58,17 @@ import { HighPrioritySection } from './HighPrioritySection';
 import { StatTiles, type StatTile } from './StatTiles';
 import {
   SendEmailDialog,
-  type ISendEmailPayload,
+  FormModal,
+  LookupField,
   RichFilePreviewDialog,
   OOB_MODAL_SIZES,
 } from '@spaarke/ui-components';
+import type { ILookupItem } from '@spaarke/ui-components/types/LookupTypes';
 import { extractEmailKey } from '@spaarke/ui-components/services';
+// #713 (2026-08-03): the canonical SendEmailDialog engine sends via the BFF; this
+// package's convention (briefingService) is @spaarke/auth's authenticatedFetch
+// with relative /api paths, so the wrapper gets that fetch + an empty base.
+import { authenticatedFetch } from '@spaarke/auth';
 import { useBriefingRender, useInlineTodoCreate, useBriefingPreferences } from '../hooks';
 import { TOASTER_ID } from '../utils/toastUtils';
 import { timeWindowToHours } from '../types/notifications';
@@ -126,9 +133,12 @@ export interface DailyBriefingAppProps {
 }
 
 /**
- * r5 email-share (2026-07-09) — open-dialog state for the shared SendEmailDialog.
- * `briefing` shares the whole briefing (server renders + sends via /email);
- * `item` shares one high-priority record (client-composed draft email activity).
+ * r5 email-share (2026-07-09; #713 re-shape 2026-08-03) — open-dialog state.
+ * `briefing` shares the whole briefing: the SERVER composes + sends
+ * (emailBriefingToColleague), so the UI is a FormModal recipient picker.
+ * `item` shares one high-priority record through the CANONICAL SendEmailDialog
+ * engine (standard communication pipeline) — the legacy client-composed
+ * draft-email-activity path is retired.
  */
 type EmailDialogState =
   | { mode: 'briefing' }
@@ -145,30 +155,6 @@ export function buildRecordDeepLink(clientUrl: string, entityType: string, entit
   if (!clientUrl || !entityType || !entityId) return '';
   const id = entityId.replace(/[{}]/g, '');
   return `${clientUrl}/main.aspx?pagetype=entityrecord&etn=${encodeURIComponent(entityType)}&id=${encodeURIComponent(id)}`;
-}
-
-/**
- * r5 email-share #3 — build the Xrm.WebApi `email` (draft activity) record for a
- * single-item share. Pure + exported so the party payload (the runtime-risky
- * surface) is unit-testable without a live Dataverse. The From party is bound to
- * the caller's systemuser (participationtypemask 1) and the To party to the
- * picked internal user (mask 2). From is omitted when the caller's id is unknown
- * (Dataverse defaults it to the current user).
- */
-export function buildEmailActivityRecord(
-  senderSystemUserId: string,
-  payload: { to: { id: string }; subject: string; body: string }
-): Record<string, unknown> {
-  const parties: Record<string, unknown>[] = [];
-  if (senderSystemUserId) {
-    parties.push({ 'partyid_systemuser@odata.bind': `/systemusers(${senderSystemUserId})`, participationtypemask: 1 });
-  }
-  parties.push({ 'partyid_systemuser@odata.bind': `/systemusers(${payload.to.id})`, participationtypemask: 2 });
-  return {
-    subject: payload.subject,
-    description: payload.body,
-    email_activity_parties: parties,
-  };
 }
 
 /**
@@ -571,7 +557,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   // server-side egress guard, which requires an active systemuser). Formats each
   // result as "Full Name (email)" so SendEmailDialog's extractEmailKey resolves it.
   const handleSearchUsers = React.useCallback(
-    async (query: string): Promise<ISendEmailPayload['to'][]> => {
+    async (query: string): Promise<ILookupItem[]> => {
       if (!webApi || !query || query.trim().length < 2) return [];
       const safe = query.trim().replace(/'/g, "''");
       const options =
@@ -604,76 +590,57 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     [clientUrl]
   );
 
-  // Single onSend for both modes. Throwing keeps SendEmailDialog open + shows the
-  // error; resolving closes it. Success dispatches a confirmation toast.
-  const handleEmailSend = React.useCallback(
-    async (payload: ISendEmailPayload): Promise<void> => {
-      if (!emailDialog) return;
+  // #713 (2026-08-03): briefing share = server-composed send, so the dialog's only
+  // job is picking the recipient — a standard FormModal + LookupField (the legacy
+  // composer-as-picker is retired). Item share sends through the canonical
+  // SendEmailDialog engine in the render below — no host-owned send remains.
+  const [briefingRecipient, setBriefingRecipient] = React.useState<ILookupItem | null>(null);
+  const [briefingSending, setBriefingSending] = React.useState(false);
 
-      if (emailDialog.mode === 'briefing') {
-        const recipientEmail = extractEmailKey(payload.to.name);
-        if (!recipientEmail) {
-          throw new Error("Could not resolve the selected user's email address.");
-        }
-        const result = await emailBriefingToColleague(recipientEmail);
-        if (result.status !== 'success') {
-          throw new Error(result.message);
-        }
-        dispatchToast(
-          <Toast>
-            <ToastTitle>Briefing sent</ToastTitle>
-            <ToastBody>Your Daily Briefing was emailed to {payload.to.name}.</ToastBody>
-          </Toast>,
-          { intent: 'success', timeout: 6000 }
-        );
-        return;
-      }
+  const closeEmailDialog = React.useCallback(() => {
+    setEmailDialog(null);
+    setBriefingRecipient(null);
+    setBriefingSending(false);
+  }, []);
 
-      // mode === 'item' — create the email activity, then SEND it so the user is
-      // done after the dialog (UAT 2026-07-09: no "open from activities" step). If
-      // the send action fails (e.g. the sender mailbox isn't approved to send in
-      // this environment), the created activity remains a draft and we say so.
-      if (!webApi) {
-        throw new Error('Dataverse is not available.');
-      }
-      const created = await webApi.createRecord('email', buildEmailActivityRecord(userId, payload));
-      let sent = false;
-      try {
-        // Same-origin Dataverse Web API (the code page is served from the org URL);
-        // cookie auth via credentials:'include' — mirrors the EntityDefinitions fetch
-        // in useInlineTodoCreate. SendEmail is the bound action that delivers it.
-        const resp = await fetch(`/api/data/v9.2/emails(${created.id})/Microsoft.Dynamics.CRM.SendEmail`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-            'OData-MaxVersion': '4.0',
-            'OData-Version': '4.0',
-            Accept: 'application/json',
-          },
-          body: JSON.stringify({ IssueSend: true }),
-        });
-        sent = resp.ok;
-        if (!resp.ok) {
-          console.warn('[DailyBriefing] SendEmail action failed:', resp.status, await resp.text().catch(() => ''));
-        }
-      } catch (sendErr) {
-        console.warn('[DailyBriefing] SendEmail action threw:', sendErr);
+  const handleBriefingSubmit = React.useCallback(async () => {
+    if (!briefingRecipient || briefingSending) return;
+    const recipientEmail = extractEmailKey(briefingRecipient.name);
+    if (!recipientEmail) {
+      dispatchToast(
+        <Toast>
+          <ToastTitle>Could not send</ToastTitle>
+          <ToastBody>Could not resolve the selected user&apos;s email address.</ToastBody>
+        </Toast>,
+        { intent: 'error', timeout: 6000 }
+      );
+      return;
+    }
+    setBriefingSending(true);
+    try {
+      const result = await emailBriefingToColleague(recipientEmail);
+      if (result.status !== 'success') {
+        throw new Error(result.message);
       }
       dispatchToast(
         <Toast>
-          <ToastTitle>{sent ? 'Email sent' : 'Draft email created'}</ToastTitle>
-          <ToastBody>
-            {sent
-              ? `Your email to ${payload.to.name} was sent.`
-              : `A draft to ${payload.to.name} was saved — open it from your activities to send.`}
-          </ToastBody>
+          <ToastTitle>Briefing sent</ToastTitle>
+          <ToastBody>Your Daily Briefing was emailed to {briefingRecipient.name}.</ToastBody>
         </Toast>,
-        { intent: 'success', timeout: 8000 }
+        { intent: 'success', timeout: 6000 }
       );
-    },
-    [emailDialog, webApi, userId, dispatchToast]
-  );
+      closeEmailDialog();
+    } catch (err) {
+      dispatchToast(
+        <Toast>
+          <ToastTitle>Send failed</ToastTitle>
+          <ToastBody>{err instanceof Error ? err.message : 'The briefing could not be sent.'}</ToastBody>
+        </Toast>,
+        { intent: 'error', timeout: 8000 }
+      );
+      setBriefingSending(false);
+    }
+  }, [briefingRecipient, briefingSending, dispatchToast, closeEmailDialog]);
 
   // ---------------------------------------------------------------------------
   // Render
@@ -837,25 +804,52 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
         </div>
         <CaughtUpFooter channelLabels={[]} />
       </div>
-      {emailDialog && (
+      {emailDialog?.mode === 'briefing' && (
+        <FormModal
+          open={true}
+          onClose={closeEmailDialog}
+          onSubmit={() => {
+            void handleBriefingSubmit();
+          }}
+          title="Email Briefing"
+          submitLabel="Send"
+          busy={briefingSending}
+          submitDisabled={!briefingRecipient}
+        >
+          <Text>Choose a colleague — the server sends them your full Daily Briefing.</Text>
+          <LookupField label="Send to" value={briefingRecipient} onChange={setBriefingRecipient} onSearch={handleSearchUsers} />
+        </FormModal>
+      )}
+      {emailDialog?.mode === 'item' && (
         <SendEmailDialog
           open={true}
-          onClose={() => setEmailDialog(null)}
-          title={emailDialog.mode === 'briefing' ? 'Email Briefing' : 'Email Item'}
-          defaultSubject={
-            emailDialog.mode === 'briefing'
-              ? `Daily Briefing — ${new Date().toLocaleDateString()}`
-              : emailDialog.defaultSubject
-          }
-          defaultBody={
-            emailDialog.mode === 'briefing'
-              ? 'Sharing my Daily Briefing with you — the full briefing is included in this email.'
-              : emailDialog.defaultBody
-          }
-          onSearchUsers={handleSearchUsers}
-          onSend={handleEmailSend}
-          maxWidth="720px"
-          height="70vh"
+          onClose={closeEmailDialog}
+          titleOverride="Email Item"
+          initialSubject={emailDialog.defaultSubject}
+          initialBody={emailDialog.defaultBody}
+          initialBodyFormat="PlainText"
+          onSearchRecipients={handleSearchUsers}
+          authenticatedFetch={authenticatedFetch}
+          bffBaseUrl=""
+          onSent={() => {
+            dispatchToast(
+              <Toast>
+                <ToastTitle>Email sent</ToastTitle>
+                <ToastBody>Your email was sent.</ToastBody>
+              </Toast>,
+              { intent: 'success', timeout: 6000 }
+            );
+            closeEmailDialog();
+          }}
+          onError={err => {
+            dispatchToast(
+              <Toast>
+                <ToastTitle>Send failed</ToastTitle>
+                <ToastBody>{err.detail ?? 'The email could not be sent.'}</ToastBody>
+              </Toast>,
+              { intent: 'error', timeout: 8000 }
+            );
+          }}
         />
       )}
       {previewDoc && (
