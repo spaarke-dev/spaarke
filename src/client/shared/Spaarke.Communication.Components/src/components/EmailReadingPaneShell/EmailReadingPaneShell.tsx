@@ -19,10 +19,13 @@
  * recipients + collapsible Attachments/Related-to sections + body region,
  * rendered BELOW the toolbar) — see `EmailReadingPaneShell.types.ts` for the
  * full slot contract. The full-width `<EmailToolbar/>` spans the reading-pane width and
- * dispatches Reply/Reply All/Forward/New plus the icon-only Save-to-SharePoint/
+ * dispatches Reply/Reply All/Forward plus the icon-only Save-to-SharePoint/
  * Create-Event/Create-To-Do/Link-Invoice/Open-full-form actions through the
  * host-supplied `actions` handlers — the shell never re-implements action-bar/
- * compose logic itself (the host wires the real dispatch).
+ * compose logic itself (the host wires the real dispatch). "New" now lives in
+ * the LEFT email-list toolbar (`EmailCardList`'s `onCreateNew`, wired to the
+ * same `actions.onNew`) so composing never stacks a modal on an opened email
+ * record (owner UAT 2026-08-03).
  *
  * When nothing is selected, the right pane shows the "Select an email"
  * placeholder (FR-19 empty state).
@@ -241,7 +244,13 @@ const EmailReadingPaneShellInner: React.FC<EmailReadingPaneShellProps> = ({
             style={{ width: primaryWidth, minWidth: minListWidth }}
             data-testid="email-list-pane"
           >
-            <EmailCardList items={items} isLoading={isLoading} selectedId={selectedId} onSelect={handleSelect} />
+            <EmailCardList
+              items={items}
+              isLoading={isLoading}
+              selectedId={selectedId}
+              onSelect={handleSelect}
+              onCreateNew={actions?.onNew}
+            />
           </div>
 
           <PanelSplitter

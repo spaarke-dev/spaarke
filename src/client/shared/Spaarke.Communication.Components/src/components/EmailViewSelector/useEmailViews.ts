@@ -9,8 +9,11 @@
  * surface, works under both the Xrm host-context adapter and the BFF
  * `authenticatedFetch` adapter), defaults the selection to the "Email —
  * Inbox" saved view (falling back to the entity's default view when absent),
- * and re-runs the selected view's FetchXML — UNMODIFIED — whenever the
- * selection changes.
+ * and re-runs the selected view's FetchXML whenever the selection changes —
+ * preserving the maker's filter/sort/columns verbatim but INJECTING the
+ * association columns the left-list status dot depends on (via
+ * `ensureAssociationColumns`), so the dot always resolves regardless of the
+ * maker's column set.
  *
  * The Email filter lives entirely in each maker-authored view's FetchXML
  * (`sprk_communicationtype = Email`) — this hook does NOT add its own Email
@@ -33,6 +36,7 @@
  */
 import * as React from 'react';
 import type { IDataverseClient, SavedView } from '@spaarke/ui-components';
+import { ensureAssociationColumns } from './ensureAssociationColumns';
 
 /** Entity this surface's view picker is scoped to. */
 const COMMUNICATION_ENTITY = 'sprk_communication';
@@ -122,8 +126,14 @@ export function useEmailViews<T = Record<string, unknown>>(client: IDataverseCli
     };
   }, [client]);
 
-  // Re-run the selected view's FetchXML — UNMODIFIED — whenever the
-  // selection changes (initial resolution included).
+  // Re-run the selected view's FetchXML whenever the selection changes (initial
+  // resolution included). The view's own Email filter/sort/columns are preserved
+  // verbatim — we only INJECT the association columns the left-list status dot
+  // depends on (via `ensureAssociationColumns`) so the dot always resolves
+  // regardless of the maker's column set. A maker inbox view commonly omits the
+  // association status/provenance/typed-lookup columns, which previously left the
+  // dot undefined; augmenting here restores it without forcing makers to edit
+  // every view.
   React.useEffect(() => {
     if (!selectedViewId) return;
     let cancelled = false;
@@ -132,7 +142,12 @@ export function useEmailViews<T = Record<string, unknown>>(client: IDataverseCli
 
     client
       .retrieveSavedQuery(selectedViewId)
-      .then(view => client.retrieveMultipleRecords<T>(view.entityName || COMMUNICATION_ENTITY, view.fetchXml))
+      .then(view =>
+        client.retrieveMultipleRecords<T>(
+          view.entityName || COMMUNICATION_ENTITY,
+          ensureAssociationColumns(view.fetchXml)
+        )
+      )
       .then(result => {
         if (cancelled) return;
         setRows(result.entities);
