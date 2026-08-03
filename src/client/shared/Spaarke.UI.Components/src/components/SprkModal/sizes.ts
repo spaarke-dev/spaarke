@@ -36,8 +36,22 @@ interface SizeSpec {
 export const SIZE_SPEC: Record<SprkModalSize, SizeSpec> = {
   xs: { cap: 480, widthVw: 92, layout: 'portrait', note: 'confirms · deletes · HITL' },
   sm: { cap: 560, widthVw: 92, layout: 'portrait', note: 'simple form · single choice' },
-  md: { cap: 1040, widthVw: 92, height: '72vh', heightMax: 720, layout: 'landscape', note: 'forms · compose · quick-start' },
-  lg: { cap: 1280, widthVw: 94, height: '85vh', heightMax: 880, layout: 'landscape', note: 'rich content + sidebar (preview)' },
+  md: {
+    cap: 1040,
+    widthVw: 92,
+    height: '72vh',
+    heightMax: 720,
+    layout: 'landscape',
+    note: 'forms · compose · quick-start',
+  },
+  lg: {
+    cap: 1280,
+    widthVw: 94,
+    height: '85vh',
+    heightMax: 880,
+    layout: 'landscape',
+    note: 'rich content + sidebar (preview)',
+  },
   // xl width is viewport-relative, so it grows WIDE with the viewport and stays
   // landscape on its own — no height cap needed.
   xl: { widthVw: 92, height: '88vh', layout: 'landscape', note: 'near-full iframe / app host' },
@@ -61,10 +75,7 @@ function heightExpr(s: SizeSpec, uiScale: number): string | undefined {
  */
 export function getSurfaceStyle(size: SprkModalSize, uiScale = 1): CSSProperties {
   const s = SIZE_SPEC[size];
-  const width =
-    s.cap !== undefined
-      ? `min(${Math.round(s.cap * uiScale)}px, ${s.widthVw}vw)`
-      : `${s.widthVw}vw`;
+  const width = s.cap !== undefined ? `min(${Math.round(s.cap * uiScale)}px, ${s.widthVw}vw)` : `${s.widthVw}vw`;
   const isFull = size === 'full';
   return {
     width,
@@ -80,9 +91,6 @@ export function getSurfaceStyle(size: SprkModalSize, uiScale = 1): CSSProperties
  */
 export function widthLabel(size: SprkModalSize, uiScale = 1): string {
   const s = SIZE_SPEC[size];
-  const w =
-    s.cap !== undefined
-      ? `min(${Math.round(s.cap * uiScale)}px, ${s.widthVw}vw)`
-      : `${s.widthVw}vw`;
+  const w = s.cap !== undefined ? `min(${Math.round(s.cap * uiScale)}px, ${s.widthVw}vw)` : `${s.widthVw}vw`;
   return `${w} × ${heightExpr(s, uiScale) ?? 'auto'}`;
 }

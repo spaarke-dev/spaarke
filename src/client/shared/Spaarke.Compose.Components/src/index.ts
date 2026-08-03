@@ -167,10 +167,7 @@ export {
   /** @deprecated Use `AgreementReviewSummaryPanel` instead. */
   NdaReviewSummaryPanel,
 } from './widgets/AgreementReviewSummaryPanel';
-export type {
-  AgreementReviewSummaryPanelProps,
-  NdaReviewFindingSummary,
-} from './widgets/AgreementReviewSummaryPanel';
+export type { AgreementReviewSummaryPanelProps, NdaReviewFindingSummary } from './widgets/AgreementReviewSummaryPanel';
 /** @deprecated Use `AgreementReviewSummaryPanelProps` instead. */
 export type { NdaReviewSummaryPanelProps } from './widgets/AgreementReviewSummaryPanel';
 

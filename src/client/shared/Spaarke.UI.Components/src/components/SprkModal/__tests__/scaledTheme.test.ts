@@ -36,7 +36,7 @@ describe('scaleTheme (FR-06 / design §6.9)', () => {
     const scaled = scaleTheme(webDarkTheme, 1.25);
     expect(scaled.colorNeutralForeground1).toBe(webDarkTheme.colorNeutralForeground1);
     expect(scaled.spacingHorizontalM).toBe(
-      `${Math.round(parseFloat(webDarkTheme.spacingHorizontalM) * 1.25 * 100) / 100}px`,
+      `${Math.round(parseFloat(webDarkTheme.spacingHorizontalM) * 1.25 * 100) / 100}px`
     );
   });
 

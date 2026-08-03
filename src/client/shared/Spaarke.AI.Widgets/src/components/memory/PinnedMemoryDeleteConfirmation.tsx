@@ -188,8 +188,8 @@ export const PinnedMemoryDeleteConfirmation: React.FC<PinnedMemoryDeleteConfirma
           <div className={styles.impactCallout} role="alert" data-testid="pinned-memory-delete-impact">
             <Text className={styles.calloutTitle}>This action affects every chat session.</Text>
             <Text className={styles.calloutBody}>
-              This pin is shared across all your chat sessions and will be removed permanently. The assistant will
-              stop using it the next time you start a conversation.
+              This pin is shared across all your chat sessions and will be removed permanently. The assistant will stop
+              using it the next time you start a conversation.
             </Text>
           </div>
         </div>

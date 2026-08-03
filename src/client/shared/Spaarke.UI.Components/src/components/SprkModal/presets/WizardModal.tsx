@@ -1,10 +1,6 @@
 import * as React from 'react';
 import { Button, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import {
-  CheckmarkCircle20Filled,
-  Circle20Regular,
-  Circle20Filled,
-} from '@fluentui/react-icons';
+import { CheckmarkCircle20Filled, Circle20Regular, Circle20Filled } from '@fluentui/react-icons';
 import { SprkModal } from '../SprkModal';
 
 /**
@@ -119,16 +115,9 @@ export const WizardModal: React.FC<WizardModalProps> = ({
             const done = i < active;
             const isActive = i === active;
             const Icon = done ? CheckmarkCircle20Filled : isActive ? Circle20Filled : Circle20Regular;
-            const iconClass = done
-              ? styles.stepIconDone
-              : isActive
-                ? styles.stepIconActive
-                : styles.stepIconPending;
+            const iconClass = done ? styles.stepIconDone : isActive ? styles.stepIconActive : styles.stepIconPending;
             return (
-              <div
-                key={label}
-                className={mergeClasses(styles.step, isActive && styles.stepActive)}
-              >
+              <div key={label} className={mergeClasses(styles.step, isActive && styles.stepActive)}>
                 <Icon className={iconClass} />
                 <Text>{label}</Text>
               </div>

@@ -60,15 +60,7 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  tokens,
-  Dialog,
-  DialogSurface,
-  DialogBody,
-  Button,
-  Tooltip,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Dialog, DialogSurface, DialogBody, Button, Tooltip } from '@fluentui/react-components';
 import { ArrowExpandRegular } from '@fluentui/react-icons';
 
 import { SprkModal, getSurfaceStyle } from '../SprkModal';
@@ -161,7 +153,13 @@ const useStyles = makeStyles({
 // Component
 // ---------------------------------------------------------------------------
 
-export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({ open, onClose, url, embedded = false, uiScale }) => {
+export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
+  open,
+  onClose,
+  url,
+  embedded = false,
+  uiScale,
+}) => {
   const styles = useStyles();
 
   const handleExpand = React.useCallback(() => {
@@ -185,11 +183,7 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({ open, onC
           if (!data.open) onClose();
         }}
       >
-        <DialogSurface
-          className={styles.embeddedSurface}
-          style={getSurfaceStyle('xl')}
-          aria-label="Similar Documents"
-        >
+        <DialogSurface className={styles.embeddedSurface} style={getSurfaceStyle('xl')} aria-label="Similar Documents">
           <DialogBody className={styles.frameWrap}>{frame}</DialogBody>
         </DialogSurface>
       </Dialog>

@@ -67,15 +67,7 @@
  */
 
 import * as React from 'react';
-import {
-  Button,
-  MessageBar,
-  MessageBarBody,
-  Spinner,
-  Text,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Button, MessageBar, MessageBarBody, Spinner, Text, makeStyles, tokens } from '@fluentui/react-components';
 import {
   LockClosedFilled,
   PersonDeleteRegular,
@@ -405,8 +397,8 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
         {phase === 'confirm' && (
           <>
             <Text size={300} className={styles.warningIntro}>
-              Closing this project will permanently revoke all external access. Please review the consequences
-              before proceeding.
+              Closing this project will permanently revoke all external access. Please review the consequences before
+              proceeding.
             </Text>
 
             <div className={styles.consequenceList} role="list" aria-label="Closure consequences">

@@ -945,7 +945,11 @@ describe('classifyStep — accept/reject an imported tracked change (G12 / task 
   it('an id-less imported revision (`imported:<paraId>#<i>` fallback) is not emitted as a revision op', () => {
     // No native w:id to reconcile by → never emit an op the server could only RevisionNotFound.
     const doc = importedRevisionDoc('insertion', 'imported:0A1B2C3D#0');
-    const step = new RemoveMarkStep(abs(0), abs(5), schema.marks.insertion.create({ ledgerRef: 'imported:0A1B2C3D#0' }));
+    const step = new RemoveMarkStep(
+      abs(0),
+      abs(5),
+      schema.marks.insertion.create({ ledgerRef: 'imported:0A1B2C3D#0' })
+    );
     const cls = classifyStep(step, doc, {});
     expect(cls.kind).not.toBe('ops');
   });
@@ -956,7 +960,9 @@ describe('RebasedOperationLog — imported-revision ops are captured + deduped (
     const doc = importedRevisionDoc('insertion', 'imported:9');
     const log = new RebasedOperationLog();
     const state = EditorState.create({ doc });
-    const tr = state.tr.step(new RemoveMarkStep(abs(0), abs(5), schema.marks.insertion.create({ ledgerRef: 'imported:9' })));
+    const tr = state.tr.step(
+      new RemoveMarkStep(abs(0), abs(5), schema.marks.insertion.create({ ledgerRef: 'imported:9' }))
+    );
 
     const appended = log.recordTransaction(tr);
     expect(appended).toEqual([{ type: 'acceptRevision', paraId: PARA_ID, scope: 'Single', revisionId: '9' }]);
@@ -988,7 +994,10 @@ describe('RebasedOperationLog — imported-revision ops are captured + deduped (
       .step(new RemoveMarkStep(abs(8), abs(11), ins)); // CCC
 
     log.recordTransaction(tr);
-    const revOps = log.serialize(tr.doc).orderedOps.map(o => o.operation).filter(o => o.type === 'acceptRevision');
+    const revOps = log
+      .serialize(tr.doc)
+      .orderedOps.map(o => o.operation)
+      .filter(o => o.type === 'acceptRevision');
     expect(revOps).toHaveLength(1);
     expect(revOps[0]).toMatchObject({ type: 'acceptRevision', revisionId: '5' });
   });

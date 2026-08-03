@@ -63,7 +63,7 @@ export const PreviewGridBody: React.FC<{
       </div>
       <div className={styles.previewMeta} data-testid="preview-meta">
         <Text weight="semibold">Details</Text>
-        {metadata.map((m) => (
+        {metadata.map(m => (
           <div key={m.label} className={styles.metaRow}>
             <span className={styles.metaLabel}>{m.label}</span>
             <Text>{m.value}</Text>

@@ -21,7 +21,7 @@ describe('SprkModal family — a11y + dismiss semantics (NFR-02)', () => {
     renderWithProviders(
       <SprkModal open onClose={noop} title="A11y">
         <div>x</div>
-      </SprkModal>,
+      </SprkModal>
     );
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveAttribute('aria-modal', 'true');
@@ -37,16 +37,14 @@ describe('SprkModal family — a11y + dismiss semantics (NFR-02)', () => {
     const { unmount } = renderWithProviders(
       <SprkModal open onClose={onCloseLight} title="Light" dismiss="light">
         <div>x</div>
-      </SprkModal>,
+      </SprkModal>
     );
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape', code: 'Escape' });
     expect(onCloseLight).toHaveBeenCalledTimes(1);
     unmount();
 
     const onCloseAlert = jest.fn();
-    renderWithProviders(
-      <ConfirmModal open onClose={onCloseAlert} onConfirm={noop} title="Delete?" message="Sure?" />,
-    );
+    renderWithProviders(<ConfirmModal open onClose={onCloseAlert} onConfirm={noop} title="Delete?" message="Sure?" />);
     fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape', code: 'Escape' });
     expect(onCloseAlert).not.toHaveBeenCalled();
   });
@@ -56,7 +54,7 @@ describe('SprkModal family — a11y + dismiss semantics (NFR-02)', () => {
     const { unmount } = renderWithProviders(
       <FormModal open onClose={onCloseForm} onSubmit={noop} title="Form">
         <div>f</div>
-      </FormModal>,
+      </FormModal>
     );
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape', code: 'Escape' });
     expect(onCloseForm).not.toHaveBeenCalled();
@@ -64,17 +62,9 @@ describe('SprkModal family — a11y + dismiss semantics (NFR-02)', () => {
 
     const onCloseWiz = jest.fn();
     renderWithProviders(
-      <WizardModal
-        open
-        onClose={onCloseWiz}
-        title="Wiz"
-        steps={['A', 'B']}
-        active={0}
-        onBack={noop}
-        onNext={noop}
-      >
+      <WizardModal open onClose={onCloseWiz} title="Wiz" steps={['A', 'B']} active={0} onBack={noop} onNext={noop}>
         <div>w</div>
-      </WizardModal>,
+      </WizardModal>
     );
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape', code: 'Escape' });
     expect(onCloseWiz).not.toHaveBeenCalled();
@@ -82,9 +72,7 @@ describe('SprkModal family — a11y + dismiss semantics (NFR-02)', () => {
 
   it('BrowseModal announces "N of M" and its nav controls are keyboard-operable', () => {
     const onNavigate = jest.fn();
-    renderWithProviders(
-      <BrowseModal open onClose={noop} title="Doc" nav={{ index: 1, total: 3, onNavigate }} />,
-    );
+    renderWithProviders(<BrowseModal open onClose={noop} title="Doc" nav={{ index: 1, total: 3, onNavigate }} />);
     expect(screen.getByText('2 of 3')).toBeInTheDocument();
     const next = screen.getByRole('button', { name: /next record/i });
     next.focus();
@@ -97,7 +85,7 @@ describe('SprkModal family — a11y + dismiss semantics (NFR-02)', () => {
     render(
       <FluentProvider theme={webDarkTheme}>
         <ConfirmModal open onClose={noop} onConfirm={noop} title="Dark" message="m" />
-      </FluentProvider>,
+      </FluentProvider>
     );
     expect(screen.getByRole('alertdialog')).toBeInTheDocument();
   });

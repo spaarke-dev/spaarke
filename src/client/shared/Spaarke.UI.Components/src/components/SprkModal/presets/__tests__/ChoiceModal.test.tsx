@@ -21,9 +21,7 @@ const choices: ChoiceModalChoice[] = [
 
 describe('ChoiceModal (preset — choice-dialog-pattern preserved)', () => {
   it('renders 2-4 rich choices (label + description) and a left-aligned Cancel', () => {
-    renderWithProviders(
-      <ChoiceModal open onClose={noop} title="Resume session?" choices={choices} onSelect={noop} />,
-    );
+    renderWithProviders(<ChoiceModal open onClose={noop} title="Resume session?" choices={choices} onSelect={noop} />);
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText('Resume session?')).toBeInTheDocument();
     for (const choice of choices) {
@@ -34,9 +32,7 @@ describe('ChoiceModal (preset — choice-dialog-pattern preserved)', () => {
   });
 
   it('is size xs and non-maximizable (small decision surface)', () => {
-    renderWithProviders(
-      <ChoiceModal open onClose={noop} title="Choose" choices={choices} onSelect={noop} />,
-    );
+    renderWithProviders(<ChoiceModal open onClose={noop} title="Choose" choices={choices} onSelect={noop} />);
     const dialog = screen.getByRole('dialog');
     expect(dialog.style.width).toContain('480px');
     expect(screen.queryByRole('button', { name: /maximize dialog/i })).toBeNull();
@@ -51,21 +47,14 @@ describe('ChoiceModal (preset — choice-dialog-pattern preserved)', () => {
         message="This analysis has existing history."
         choices={choices}
         onSelect={noop}
-      />,
+      />
     );
     expect(screen.getByText('This analysis has existing history.')).toBeInTheDocument();
   });
 
   it('renders a custom cancelLabel when provided (mirrors ConfirmModal — P2 consolidation)', () => {
     renderWithProviders(
-      <ChoiceModal
-        open
-        onClose={noop}
-        title="Choose"
-        choices={choices}
-        onSelect={noop}
-        cancelLabel="Not now"
-      />,
+      <ChoiceModal open onClose={noop} title="Choose" choices={choices} onSelect={noop} cancelLabel="Not now" />
     );
     expect(screen.getByRole('button', { name: /^not now$/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^cancel$/i })).toBeNull();
@@ -74,7 +63,7 @@ describe('ChoiceModal (preset — choice-dialog-pattern preserved)', () => {
   it('clicking a choice fires onSelect with exactly that choice id', () => {
     const onSelect = jest.fn();
     renderWithProviders(
-      <ChoiceModal open onClose={noop} title="Resume session?" choices={choices} onSelect={onSelect} />,
+      <ChoiceModal open onClose={noop} title="Resume session?" choices={choices} onSelect={onSelect} />
     );
     fireEvent.click(screen.getByRole('button', { name: /start fresh/i }));
     expect(onSelect).toHaveBeenCalledTimes(1);
@@ -85,7 +74,7 @@ describe('ChoiceModal (preset — choice-dialog-pattern preserved)', () => {
     const user = userEvent.setup();
     const onSelect = jest.fn();
     renderWithProviders(
-      <ChoiceModal open onClose={noop} title="Resume session?" choices={choices} onSelect={onSelect} />,
+      <ChoiceModal open onClose={noop} title="Resume session?" choices={choices} onSelect={onSelect} />
     );
     const secondChoice = screen.getByRole('button', { name: /start fresh/i });
     secondChoice.focus();
@@ -99,7 +88,7 @@ describe('ChoiceModal (preset — choice-dialog-pattern preserved)', () => {
     const user = userEvent.setup();
     const onSelect = jest.fn();
     renderWithProviders(
-      <ChoiceModal open onClose={noop} title="Resume session?" choices={choices} onSelect={onSelect} />,
+      <ChoiceModal open onClose={noop} title="Resume session?" choices={choices} onSelect={onSelect} />
     );
     const thirdChoice = screen.getByRole('button', { name: /discard/i });
     thirdChoice.focus();
@@ -114,7 +103,7 @@ describe('ChoiceModal (preset — choice-dialog-pattern preserved)', () => {
       { id: 'discard', label: 'Discard', description: 'Delete the existing draft.', disabled: true },
     ];
     renderWithProviders(
-      <ChoiceModal open onClose={noop} title="Resume session?" choices={withDisabled} onSelect={onSelect} />,
+      <ChoiceModal open onClose={noop} title="Resume session?" choices={withDisabled} onSelect={onSelect} />
     );
     const disabledChoice = screen.getByRole('button', { name: /discard/i });
     expect(disabledChoice).toBeDisabled();
@@ -126,7 +115,7 @@ describe('ChoiceModal (preset — choice-dialog-pattern preserved)', () => {
     const onClose = jest.fn();
     const onSelect = jest.fn();
     renderWithProviders(
-      <ChoiceModal open onClose={onClose} title="Resume session?" choices={choices} onSelect={onSelect} />,
+      <ChoiceModal open onClose={onClose} title="Resume session?" choices={choices} onSelect={onSelect} />
     );
     fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -137,7 +126,7 @@ describe('ChoiceModal (preset — choice-dialog-pattern preserved)', () => {
     render(
       <FluentProvider theme={webDarkTheme}>
         <ChoiceModal open onClose={noop} title="Resume session?" choices={choices} onSelect={noop} />
-      </FluentProvider>,
+      </FluentProvider>
     );
     expect(screen.getByText('Resume session?')).toBeInTheDocument();
     expect(screen.getByText('Start Fresh')).toBeInTheDocument();

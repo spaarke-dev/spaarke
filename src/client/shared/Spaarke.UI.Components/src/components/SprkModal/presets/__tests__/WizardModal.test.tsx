@@ -24,7 +24,7 @@ describe('WizardModal (preset — FR-09)', () => {
         onNext={noop}
       >
         <div>step content</div>
-      </WizardModal>,
+      </WizardModal>
     );
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText('Details')).toBeInTheDocument();
@@ -44,7 +44,7 @@ describe('WizardModal (preset — FR-09)', () => {
         onNext={noop}
       >
         <div>step content</div>
-      </WizardModal>,
+      </WizardModal>
     );
     const dialog = screen.getByRole('dialog');
     // Each step row wraps its label in a `<div>` carrying the step/stepActive classes;
@@ -68,7 +68,7 @@ describe('WizardModal (preset — FR-09)', () => {
         onNext={noop}
       >
         <div>step content</div>
-      </WizardModal>,
+      </WizardModal>
     );
     // `wizard` size is a fixed 62vw/74vh spec (sizes.ts) — smoke-check the dialog rendered.
     expect(screen.getByRole('dialog')).toBeInTheDocument();
@@ -86,7 +86,7 @@ describe('WizardModal (preset — FR-09)', () => {
         onNext={noop}
       >
         <div>step content</div>
-      </WizardModal>,
+      </WizardModal>
     );
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('button', { name: /^cancel$/i })).toBeInTheDocument();
@@ -108,7 +108,7 @@ describe('WizardModal (preset — FR-09)', () => {
         onSkip={noop}
       >
         <div>step content</div>
-      </WizardModal>,
+      </WizardModal>
     );
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('button', { name: /^skip$/i })).toBeInTheDocument();
@@ -127,7 +127,7 @@ describe('WizardModal (preset — FR-09)', () => {
         onSkip={noop}
       >
         <div>step content</div>
-      </WizardModal>,
+      </WizardModal>
     );
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).queryByRole('button', { name: /^skip$/i })).toBeNull();
@@ -145,7 +145,7 @@ describe('WizardModal (preset — FR-09)', () => {
         onNext={noop}
       >
         <div>step content</div>
-      </WizardModal>,
+      </WizardModal>
     );
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('button', { name: /^back$/i })).toBeDisabled();
@@ -163,7 +163,7 @@ describe('WizardModal (preset — FR-09)', () => {
         onNext={noop}
       >
         <div>step content</div>
-      </WizardModal>,
+      </WizardModal>
     );
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('button', { name: /^back$/i })).toBeEnabled();
@@ -181,7 +181,7 @@ describe('WizardModal (preset — FR-09)', () => {
         onNext={noop}
       >
         <div>step content</div>
-      </WizardModal>,
+      </WizardModal>
     );
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('button', { name: /^finish$/i })).toBeInTheDocument();
@@ -200,7 +200,7 @@ describe('WizardModal (preset — FR-09)', () => {
         onNext={noop}
       >
         <div>step content</div>
-      </WizardModal>,
+      </WizardModal>
     );
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('button', { name: /^next$/i })).toBeInTheDocument();
@@ -219,7 +219,7 @@ describe('WizardModal (preset — FR-09)', () => {
         onNext={noop}
       >
         <div>step content</div>
-      </WizardModal>,
+      </WizardModal>
     );
     fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
     expect(onBack).toHaveBeenCalledTimes(1);
@@ -238,7 +238,7 @@ describe('WizardModal (preset — FR-09)', () => {
         onNext={onNext}
       >
         <div>step content</div>
-      </WizardModal>,
+      </WizardModal>
     );
     fireEvent.click(screen.getByRole('button', { name: /^next$/i }));
     expect(onNext).toHaveBeenCalledTimes(1);
@@ -258,7 +258,7 @@ describe('WizardModal (preset — FR-09)', () => {
         onSkip={onSkip}
       >
         <div>step content</div>
-      </WizardModal>,
+      </WizardModal>
     );
     fireEvent.click(screen.getByRole('button', { name: /^skip$/i }));
     expect(onSkip).toHaveBeenCalledTimes(1);
@@ -277,7 +277,7 @@ describe('WizardModal (preset — FR-09)', () => {
         onNext={noop}
       >
         <div>step content</div>
-      </WizardModal>,
+      </WizardModal>
     );
     fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
     expect(onClose).toHaveBeenCalledTimes(1);

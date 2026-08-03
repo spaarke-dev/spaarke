@@ -363,7 +363,12 @@ export const PinnedMemoryEditDialog: React.FC<PinnedMemoryEditDialogProps> = ({
         noValidate
       >
         {/* Title */}
-        <Field label="Title" required validationState={errors.title ? 'error' : 'none'} validationMessage={errors.title}>
+        <Field
+          label="Title"
+          required
+          validationState={errors.title ? 'error' : 'none'}
+          validationMessage={errors.title}
+        >
           <Input
             id={titleId}
             value={state.title}

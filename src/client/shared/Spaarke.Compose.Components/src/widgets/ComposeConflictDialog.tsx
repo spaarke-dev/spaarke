@@ -310,11 +310,7 @@ export function ComposeConflictDialog(props: ComposeConflictDialogProps): React.
             {/* FR-16 verbatim — do not change wording. */}
             Force-close other session and open here
           </Button>
-          <Button
-            appearance="secondary"
-            onClick={onGoToOtherSession}
-            data-testid="compose-conflict-go-to-other-button"
-          >
+          <Button appearance="secondary" onClick={onGoToOtherSession} data-testid="compose-conflict-go-to-other-button">
             {/* FR-16 verbatim — do not change wording. */}
             Go to that session
           </Button>

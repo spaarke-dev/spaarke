@@ -66,7 +66,7 @@ export const BrowseModal: React.FC<BrowseModalProps> = ({
         if (allowed) nav.onNavigate(dir);
       })();
     },
-    [nav, onBeforeNavigate],
+    [nav, onBeforeNavigate]
   );
 
   const effectiveNav: SprkModalNav = {

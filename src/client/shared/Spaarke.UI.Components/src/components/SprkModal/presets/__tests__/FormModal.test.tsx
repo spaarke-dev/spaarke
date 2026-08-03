@@ -16,7 +16,7 @@ describe('FormModal (preset — FR-09)', () => {
     renderWithProviders(
       <FormModal open onClose={noop} onSubmit={noop} title="Edit Matter">
         <div>field</div>
-      </FormModal>,
+      </FormModal>
     );
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText('Edit Matter')).toBeInTheDocument();
@@ -29,7 +29,7 @@ describe('FormModal (preset — FR-09)', () => {
       <FormModal open onClose={noop} onSubmit={noop} title="Edit">
         <div>Name field</div>
         <div>Email field</div>
-      </FormModal>,
+      </FormModal>
     );
     expect(screen.getByText('Name field')).toBeInTheDocument();
     expect(screen.getByText('Email field')).toBeInTheDocument();
@@ -41,7 +41,7 @@ describe('FormModal (preset — FR-09)', () => {
     const { unmount } = renderWithProviders(
       <FormModal open onClose={onClose} onSubmit={onSubmit} title="Edit" submitDisabled>
         <div>x</div>
-      </FormModal>,
+      </FormModal>
     );
     expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /^cancel$/i })).not.toBeDisabled();
@@ -50,7 +50,7 @@ describe('FormModal (preset — FR-09)', () => {
     const second = renderWithProviders(
       <FormModal open onClose={onClose} onSubmit={onSubmit} title="Edit" busy submitLabel="Saving…">
         <div>x</div>
-      </FormModal>,
+      </FormModal>
     );
     const save = screen.getByRole('button', { name: /saving/i });
     const cancel = screen.getByRole('button', { name: /^cancel$/i });
@@ -66,7 +66,7 @@ describe('FormModal (preset — FR-09)', () => {
     renderWithProviders(
       <FormModal open onClose={noop} onSubmit={noop} title="Compose" dismiss="alert">
         <div>x</div>
-      </FormModal>,
+      </FormModal>
     );
     // alert dismiss maps to Fluent modalType="alert" → role=alertdialog.
     expect(screen.getByRole('alertdialog')).toBeInTheDocument();
@@ -77,7 +77,7 @@ describe('FormModal (preset — FR-09)', () => {
     renderWithProviders(
       <FormModal open onClose={onClose} onSubmit={noop} title="Edit">
         <div>x</div>
-      </FormModal>,
+      </FormModal>
     );
     fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -88,7 +88,7 @@ describe('FormModal (preset — FR-09)', () => {
     const { unmount } = renderWithProviders(
       <FormModal open onClose={noop} onSubmit={onSubmit} title="Edit">
         <div>x</div>
-      </FormModal>,
+      </FormModal>
     );
     fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
     expect(onSubmit).toHaveBeenCalledTimes(1);
@@ -97,7 +97,7 @@ describe('FormModal (preset — FR-09)', () => {
     renderWithProviders(
       <FormModal open onClose={noop} onSubmit={noop} title="Edit" submitLabel="Send">
         <div>x</div>
-      </FormModal>,
+      </FormModal>
     );
     expect(screen.getByRole('button', { name: /^send$/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^save$/i })).toBeNull();
@@ -107,7 +107,7 @@ describe('FormModal (preset — FR-09)', () => {
     const { unmount } = renderWithProviders(
       <FormModal open onClose={noop} onSubmit={noop} title="Default size">
         <div>x</div>
-      </FormModal>,
+      </FormModal>
     );
     expect(screen.getByRole('dialog')).toHaveStyle({ width: 'min(1040px, 92vw)' });
     unmount();
@@ -115,7 +115,7 @@ describe('FormModal (preset — FR-09)', () => {
     renderWithProviders(
       <FormModal open onClose={noop} onSubmit={noop} title="Small" size="sm">
         <div>x</div>
-      </FormModal>,
+      </FormModal>
     );
     expect(screen.getByRole('dialog')).toHaveStyle({ width: 'min(560px, 92vw)' });
   });
@@ -125,7 +125,7 @@ describe('FormModal (preset — FR-09)', () => {
     renderWithProviders(
       <FormModal open onClose={onClose} onSubmit={noop} title="Explicit dismiss">
         <div>x</div>
-      </FormModal>,
+      </FormModal>
     );
     const dialog = screen.getByRole('dialog');
     fireEvent.keyDown(dialog, { key: 'Escape', code: 'Escape' });
@@ -141,7 +141,7 @@ describe('FormModal (preset — FR-09)', () => {
     const { baseElement } = renderWithProviders(
       <FormModal open onClose={noop} onSubmit={noop} title="Scrollable" bodyScroll="arrows">
         <div>field</div>
-      </FormModal>,
+      </FormModal>
     );
     // The Dialog surface portals to `document.body`, so query `baseElement` (not
     // `container`) for the `ModalScrollArea` scroll pane — its `tabIndex={0}` div

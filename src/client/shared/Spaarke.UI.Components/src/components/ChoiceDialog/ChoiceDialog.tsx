@@ -106,7 +106,7 @@ export const ChoiceDialog: React.FC<IChoiceDialogProps> = ({
   // Map the original {id, icon, title, description, disabled} option shape onto
   // ChoiceModal's {id, icon, label, description, disabled} choice shape (title → label
   // is the only rename; everything else is a direct passthrough — see task-041 notes).
-  const choices: ChoiceModalChoice[] = options.map((option) => ({
+  const choices: ChoiceModalChoice[] = options.map(option => ({
     id: option.id,
     label: option.title,
     description: option.description,

@@ -82,7 +82,7 @@ export const DisplaySizeMenu: React.FC = () => {
       <MenuPopover data-testid="display-size-menu-popover">
         <MenuList>
           <MenuGroupHeader>Display size</MenuGroupHeader>
-          {DISPLAY_SIZE_ORDER.map((size) => (
+          {DISPLAY_SIZE_ORDER.map(size => (
             <MenuItemRadio key={size} name="displaySize" value={size} data-testid={`display-size-${size}`}>
               {DISPLAY_SIZE_LABELS[size]}
             </MenuItemRadio>

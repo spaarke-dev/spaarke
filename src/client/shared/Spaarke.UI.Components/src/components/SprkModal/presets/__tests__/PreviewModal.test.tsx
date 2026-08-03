@@ -15,14 +15,9 @@ const noop = () => {};
 describe('PreviewModal (thin SprkModal preset — FR-09)', () => {
   it('renders lg/landscape/unpadded with a 1fr 320px stage+meta grid', () => {
     renderWithProviders(
-      <PreviewModal
-        open
-        onClose={noop}
-        title="Contract.pdf"
-        metadata={[{ label: 'Size', value: '2.1 MB' }]}
-      >
+      <PreviewModal open onClose={noop} title="Contract.pdf" metadata={[{ label: 'Size', value: '2.1 MB' }]}>
         <span>stage content</span>
-      </PreviewModal>,
+      </PreviewModal>
     );
 
     const dialog = screen.getByRole('dialog');
@@ -58,7 +53,7 @@ describe('PreviewModal (thin SprkModal preset — FR-09)', () => {
     // button is icon-only (no text node), the footer button renders "Close".
     const closeButtons = within(dialog).getAllByRole('button', { name: /^close$/i });
     expect(closeButtons).toHaveLength(2);
-    const footerClose = closeButtons.filter((b) => b.textContent === 'Close');
+    const footerClose = closeButtons.filter(b => b.textContent === 'Close');
     expect(footerClose).toHaveLength(1);
   });
 
@@ -72,7 +67,7 @@ describe('PreviewModal (thin SprkModal preset — FR-09)', () => {
     renderWithProviders(<PreviewModal open onClose={onClose} title="Doc" />);
     const footerClose = screen
       .getAllByRole('button', { name: /^close$/i })
-      .find((b) => b.textContent === 'Close') as HTMLElement;
+      .find(b => b.textContent === 'Close') as HTMLElement;
     fireEvent.click(footerClose);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -80,13 +75,8 @@ describe('PreviewModal (thin SprkModal preset — FR-09)', () => {
   it('renders under a dark theme without hardcoded color (ADR-021 parity smoke)', () => {
     render(
       <FluentProvider theme={webDarkTheme}>
-        <PreviewModal
-          open
-          onClose={noop}
-          title="Dark"
-          metadata={[{ label: 'Type', value: 'PDF' }]}
-        />
-      </FluentProvider>,
+        <PreviewModal open onClose={noop} title="Dark" metadata={[{ label: 'Type', value: 'PDF' }]} />
+      </FluentProvider>
     );
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByText('Type')).toBeInTheDocument();

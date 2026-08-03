@@ -21,7 +21,7 @@ describe('ConfirmModal (preset — FR-09)', () => {
         onConfirm={noop}
         title="Discard changes?"
         message="Your changes will be lost."
-      />,
+      />
     );
     const dialog = screen.getByRole('alertdialog');
     expect(within(dialog).getByText('Discard changes?')).toBeInTheDocument();
@@ -33,14 +33,12 @@ describe('ConfirmModal (preset — FR-09)', () => {
     expect(cancel).toBeInTheDocument();
     expect(confirm).toBeInTheDocument();
     // Cancel (footerStart) precedes Confirm (footer) in DOM/visual order.
-     
+
     expect(cancel.compareDocumentPosition(confirm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('is non-maximizable (no maximize control present)', () => {
-    renderWithProviders(
-      <ConfirmModal open onClose={noop} onConfirm={noop} title="Delete?" message="Sure?" />,
-    );
+    renderWithProviders(<ConfirmModal open onClose={noop} onConfirm={noop} title="Delete?" message="Sure?" />);
     expect(screen.queryByRole('button', { name: /maximize dialog/i })).toBeNull();
   });
 
@@ -56,7 +54,7 @@ describe('ConfirmModal (preset — FR-09)', () => {
         message="Proceed?"
         confirmLabel="Delete"
         cancelLabel="Keep"
-      />,
+      />
     );
     fireEvent.click(screen.getByRole('button', { name: /^keep$/i }));
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -76,7 +74,7 @@ describe('ConfirmModal (preset — FR-09)', () => {
         message="This cannot be undone."
         confirmLabel="Delete"
         destructive
-      />,
+      />
     );
     const destructiveConfirm = screen.getByRole('button', { name: /^delete$/i });
     // No inline color/background style — styling must come from a CSS class.
@@ -85,14 +83,7 @@ describe('ConfirmModal (preset — FR-09)', () => {
     unmount();
 
     renderWithProviders(
-      <ConfirmModal
-        open
-        onClose={noop}
-        onConfirm={noop}
-        title="Save?"
-        message="Save changes?"
-        confirmLabel="Delete"
-      />,
+      <ConfirmModal open onClose={noop} onConfirm={noop} title="Save?" message="Save changes?" confirmLabel="Delete" />
     );
     const plainConfirm = screen.getByRole('button', { name: /^delete$/i });
     expect(plainConfirm.getAttribute('style') ?? '').not.toMatch(/background-color|color/i);
@@ -114,7 +105,7 @@ describe('ConfirmModal (preset — FR-09)', () => {
         confirmLabel="Deleting…"
         destructive
         busy
-      />,
+      />
     );
     const dialog = screen.getByRole('alertdialog');
     const cancel = within(dialog).getByRole('button', { name: /^cancel$/i });
@@ -131,9 +122,7 @@ describe('ConfirmModal (preset — FR-09)', () => {
   });
 
   it('does not apply the danger class when destructive is omitted/false', () => {
-    renderWithProviders(
-      <ConfirmModal open onClose={noop} onConfirm={noop} title="Save?" message="Save changes?" />,
-    );
+    renderWithProviders(<ConfirmModal open onClose={noop} onConfirm={noop} title="Save?" message="Save changes?" />);
     const confirm = screen.getByRole('button', { name: /^confirm$/i });
     expect(confirm.getAttribute('style') ?? '').not.toMatch(/background-color/i);
   });
@@ -149,7 +138,7 @@ describe('ConfirmModal (preset — FR-09)', () => {
           message="This cannot be undone."
           destructive
         />
-      </FluentProvider>,
+      </FluentProvider>
     );
     expect(screen.getByRole('alertdialog')).toBeInTheDocument();
     expect(screen.getByText('This cannot be undone.')).toBeInTheDocument();

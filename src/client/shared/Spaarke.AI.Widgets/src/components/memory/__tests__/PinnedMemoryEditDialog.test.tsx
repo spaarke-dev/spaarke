@@ -129,7 +129,13 @@ describe('PinnedMemoryEditDialog (create)', () => {
     const user = userEvent.setup();
     const onSubmit = jest.fn();
     renderWithTheme(
-      <PinnedMemoryEditDialog open={true} mode="create" isSubmitting={true} onSubmit={onSubmit} onCancel={() => undefined} />
+      <PinnedMemoryEditDialog
+        open={true}
+        mode="create"
+        isSubmitting={true}
+        onSubmit={onSubmit}
+        onCancel={() => undefined}
+      />
     );
     expect(screen.getByText(/Saving…/i)).toBeInTheDocument();
     const save = screen.getByRole('button', { name: /saving/i });

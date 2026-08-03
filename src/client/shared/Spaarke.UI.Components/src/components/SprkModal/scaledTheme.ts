@@ -21,11 +21,7 @@ export function scaleTheme(base: Theme, scale: number): Theme {
   if (scale === 1) return base;
   const out: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(base)) {
-    if (
-      typeof value === 'string' &&
-      value.endsWith('px') &&
-      SCALED_TOKEN_PREFIXES.some((p) => key.startsWith(p))
-    ) {
+    if (typeof value === 'string' && value.endsWith('px') && SCALED_TOKEN_PREFIXES.some(p => key.startsWith(p))) {
       const n = parseFloat(value);
       if (!Number.isNaN(n)) {
         out[key] = `${Math.round(n * scale * 100) / 100}px`;

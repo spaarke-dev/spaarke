@@ -1,25 +1,12 @@
 import * as React from 'react';
-import {
-  Dialog,
-  DialogSurface,
-  Button,
-  Tooltip,
-  makeStyles,
-  mergeClasses,
-  tokens,
-} from '@fluentui/react-components';
+import { Dialog, DialogSurface, Button, Tooltip, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { ChevronLeft20Regular, ChevronRight20Regular } from '@fluentui/react-icons';
 import { ModalWindowControls } from '../ModalWindowControls/ModalWindowControls';
 import { ModalScrollArea } from './ModalScrollArea';
 import { getSurfaceStyle, SIZE_SPEC, type SprkModalSize, type SprkModalLayout } from './sizes';
 import type { SprkModalProps } from './SprkModal.types';
 
-export type {
-  SprkModalDismiss,
-  SprkModalBodyScroll,
-  SprkModalNav,
-  SprkModalProps,
-} from './SprkModal.types';
+export type { SprkModalDismiss, SprkModalBodyScroll, SprkModalNav, SprkModalProps } from './SprkModal.types';
 
 /**
  * SprkModal — the canonical Spaarke modal shell (spec FR-01/03/04/05/07/08). Owns
@@ -219,7 +206,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
             {headerActions}
             <ModalWindowControls
               isMaximized={maximized}
-              onToggleMaximize={maximizable ? () => setMaximized((m) => !m) : undefined}
+              onToggleMaximize={maximizable ? () => setMaximized(m => !m) : undefined}
               onClose={onClose}
             />
           </div>
@@ -228,21 +215,13 @@ export const SprkModal: React.FC<SprkModalProps> = ({
         {bodyScroll === 'arrows' ? (
           <ModalScrollArea padded={padded}>{children}</ModalScrollArea>
         ) : (
-          <div
-            className={mergeClasses(styles.body, padded && styles.bodyPadded)}
-            data-layout={effectiveLayout}
-          >
+          <div className={mergeClasses(styles.body, padded && styles.bodyPadded)} data-layout={effectiveLayout}>
             {children}
           </div>
         )}
 
         {hasFooter && (
-          <div
-            className={mergeClasses(
-              styles.footer,
-              footerStart ? styles.footerBetween : styles.footerEnd,
-            )}
-          >
+          <div className={mergeClasses(styles.footer, footerStart ? styles.footerBetween : styles.footerEnd)}>
             {footerStart && <div className={styles.footerSlot}>{footerStart}</div>}
             {footer && <div className={styles.footerSlot}>{footer}</div>}
           </div>

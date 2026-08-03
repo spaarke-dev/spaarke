@@ -52,7 +52,7 @@ function renderModal() {
           onOpenRecord={noop}
         />
       </div>
-    </FluentProvider>,
+    </FluentProvider>
   );
 }
 

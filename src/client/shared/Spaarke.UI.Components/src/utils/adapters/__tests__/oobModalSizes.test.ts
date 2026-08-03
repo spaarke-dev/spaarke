@@ -41,7 +41,7 @@ describe('oobModalSizes', () => {
   });
 
   it('getOobModalSize(name) returns the same entry as the OOB_MODAL_SIZES map', () => {
-    (Object.keys(OOB_MODAL_SIZES) as OobModalSizeName[]).forEach((name) => {
+    (Object.keys(OOB_MODAL_SIZES) as OobModalSizeName[]).forEach(name => {
       expect(getOobModalSize(name)).toBe(OOB_MODAL_SIZES[name]);
     });
   });

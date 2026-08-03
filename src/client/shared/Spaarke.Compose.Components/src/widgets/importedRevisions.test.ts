@@ -160,7 +160,14 @@ describe('applyImportedRevisions (FR-24, task 050)', () => {
       ]);
 
       const result = applyImportedRevisions(editor, [
-        revision({ kind: 'deletion', id: 'r7', text: 'entire deleted sentence', anchorText: '', paragraphHint: 1, paraId: 'CCCC0003' }),
+        revision({
+          kind: 'deletion',
+          id: 'r7',
+          text: 'entire deleted sentence',
+          anchorText: '',
+          paragraphHint: 1,
+          paraId: 'CCCC0003',
+        }),
       ]);
 
       expect(result).toEqual({ applied: 1, unresolved: 0, unresolvedItems: [] });
@@ -183,7 +190,12 @@ describe('applyImportedRevisions (FR-24, task 050)', () => {
       ]);
 
       const boundarySpanning = revision({
-        kind: 'deletion', id: 'r8', text: 'was a whole clause', anchorText: '', paragraphHint: 1, paraId: 'DEADDEAD',
+        kind: 'deletion',
+        id: 'r8',
+        text: 'was a whole clause',
+        anchorText: '',
+        paragraphHint: 1,
+        paraId: 'DEADDEAD',
       });
 
       const result = applyImportedRevisions(editor, [boundarySpanning]);

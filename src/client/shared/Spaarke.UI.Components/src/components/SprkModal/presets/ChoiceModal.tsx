@@ -128,7 +128,7 @@ export const ChoiceModal: React.FC<ChoiceModalProps> = ({
           message
         ))}
       <div className={styles.choices}>
-        {choices.map((choice) => (
+        {choices.map(choice => (
           <Button
             key={choice.id}
             appearance="outline"

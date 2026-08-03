@@ -55,7 +55,12 @@ import { CaughtUpFooter } from './CaughtUpFooter';
 import { PreferencesDropdown } from './PreferencesDropdown';
 import { HighPrioritySection } from './HighPrioritySection';
 import { StatTiles, type StatTile } from './StatTiles';
-import { SendEmailDialog, type ISendEmailPayload, RichFilePreviewDialog, OOB_MODAL_SIZES } from '@spaarke/ui-components';
+import {
+  SendEmailDialog,
+  type ISendEmailPayload,
+  RichFilePreviewDialog,
+  OOB_MODAL_SIZES,
+} from '@spaarke/ui-components';
 import { extractEmailKey } from '@spaarke/ui-components/services';
 import { useBriefingRender, useInlineTodoCreate, useBriefingPreferences } from '../hooks';
 import { TOASTER_ID } from '../utils/toastUtils';

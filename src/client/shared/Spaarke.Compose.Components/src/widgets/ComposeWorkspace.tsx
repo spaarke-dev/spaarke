@@ -375,9 +375,7 @@ interface ComposeReviewPayload extends ComposeDraftPayload {
  * usable `quotedText`, or carries NONE of `explanation`/`flaggedClause`/`assessment`, is skipped
  * (never thrown) — the caller sees fewer items, never a crash, never a partial mid-loop placement.
  */
-export function projectLedgerFindingsToAdvisoryComments(
-  flaggedSections: readonly unknown[]
-): AdvisoryCommentInput[] {
+export function projectLedgerFindingsToAdvisoryComments(flaggedSections: readonly unknown[]): AdvisoryCommentInput[] {
   const asNonEmptyString = (value: unknown): string | undefined =>
     typeof value === 'string' && value.trim().length > 0 ? value : undefined;
   const items: AdvisoryCommentInput[] = [];
@@ -392,8 +390,7 @@ export function projectLedgerFindingsToAdvisoryComments(
     // Legacy vintage: use `explanation` verbatim. Post-split vintage (no `explanation`): compose the
     // thread text / legacy-degrade source from the discrete fields (mirrors the bridge), AND carry the
     // discrete fields through so gutter/export render the structured form with no string-parsing (task 052).
-    const explanation =
-      legacyExplanation ?? [flaggedClause, assessment].filter(Boolean).join('\n\n');
+    const explanation = legacyExplanation ?? [flaggedClause, assessment].filter(Boolean).join('\n\n');
     if (!explanation) continue;
     items.push({
       targetText,
@@ -1250,377 +1247,377 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // -------------------------------------------------------------------------
   // BFF Save — POST /api/compose/documents/{speId}/save
   // -------------------------------------------------------------------------
-  const triggerSave = React.useCallback(async (saveMode: ComposeSaveMode = 'version'): Promise<void> => {
-    if (state.status !== 'loaded') return;
-    if (!state.documentRef || !editorRef.current) return;
+  const triggerSave = React.useCallback(
+    async (saveMode: ComposeSaveMode = 'version'): Promise<void> => {
+      if (state.status !== 'loaded') return;
+      if (!state.documentRef || !editorRef.current) return;
 
-    // G7 (FR-06, task 022): "Save New Document" (fork) forces the create-on-save path — a brand-new
-    // sprk_document record — EVEN when the doc already has a real SPE item. A fresh transient key is
-    // minted so the fork gets its OWN dedup identity, and `forkNew` tells the server to SKIP the
-    // transient-key dedup lookup for this call (a deliberate new document, not a new version).
-    const forkNew = saveMode === 'new';
-    // FR-05 (task 100): a TRANSIENT (Browse/Upload) draft has NO SPE drive-item — it persists via
-    // create-on-save into the client-resolved BU container, not the replace path. Branch on the
-    // absence of a real speDriveItemId (mountTransient sets it to ''), OR on a deliberate Save-New fork.
-    const isTransientCreate = forkNew || !state.documentRef.speDriveItemId;
-    // G7: the dedup key to send on a create-on-save. A fork mints a fresh key (its own identity going
-    // forward); a normal transient save reuses the mount-time key so repeated saves dedup to ONE record.
-    const effectiveTransientKey = forkNew ? mintTransientKey() : state.documentRef.transientKey;
-    const saveContainerId = state.documentRef.containerId ?? containerIdRef.current;
-    // UAT 2026-07-19 P2: prefer the drive the document actually lives in (captured from the save
-    // response after a create-on-save — the born-in-editor doc lands in the BU container's drive,
-    // which the host `driveId` prop does NOT identify) over the host default. This is the drive the
-    // replace-path save + baseline re-fetch must target.
-    const saveDriveId = state.documentRef.driveId ?? effectiveDriveId;
+      // G7 (FR-06, task 022): "Save New Document" (fork) forces the create-on-save path — a brand-new
+      // sprk_document record — EVEN when the doc already has a real SPE item. A fresh transient key is
+      // minted so the fork gets its OWN dedup identity, and `forkNew` tells the server to SKIP the
+      // transient-key dedup lookup for this call (a deliberate new document, not a new version).
+      const forkNew = saveMode === 'new';
+      // FR-05 (task 100): a TRANSIENT (Browse/Upload) draft has NO SPE drive-item — it persists via
+      // create-on-save into the client-resolved BU container, not the replace path. Branch on the
+      // absence of a real speDriveItemId (mountTransient sets it to ''), OR on a deliberate Save-New fork.
+      const isTransientCreate = forkNew || !state.documentRef.speDriveItemId;
+      // G7: the dedup key to send on a create-on-save. A fork mints a fresh key (its own identity going
+      // forward); a normal transient save reuses the mount-time key so repeated saves dedup to ONE record.
+      const effectiveTransientKey = forkNew ? mintTransientKey() : state.documentRef.transientKey;
+      const saveContainerId = state.documentRef.containerId ?? containerIdRef.current;
+      // UAT 2026-07-19 P2: prefer the drive the document actually lives in (captured from the save
+      // response after a create-on-save — the born-in-editor doc lands in the BU container's drive,
+      // which the host `driveId` prop does NOT identify) over the host default. This is the drive the
+      // replace-path save + baseline re-fetch must target.
+      const saveDriveId = state.documentRef.driveId ?? effectiveDriveId;
 
-    if (!bffBaseUrl || !tenantId) {
-      dispatch({
-        kind: 'saveFailed',
-        errorMessage: 'Cannot save — BFF base URL or tenant configuration missing.',
-      });
-      return;
-    }
-    if (isTransientCreate) {
-      if (!saveContainerId) {
-        // gap 1.4: don't abort silently as the pre-100 code did — surface an honest, actionable
-        // banner. The container resolves from the user's Business Unit; if it's missing the BU is
-        // unconfigured (or we're in a non-Dataverse host).
+      if (!bffBaseUrl || !tenantId) {
         dispatch({
           kind: 'saveFailed',
-          errorMessage:
-            'Cannot save this new document — your Business Unit has no storage container configured. ' +
-            'Contact an administrator to set the container on your Business Unit.',
+          errorMessage: 'Cannot save — BFF base URL or tenant configuration missing.',
         });
         return;
       }
-    } else if (!saveDriveId) {
-      dispatch({
-        kind: 'saveFailed',
-        errorMessage: 'Cannot save — SPE drive configuration missing.',
-      });
-      return;
-    }
-
-    dispatch({ kind: 'requestSave' });
-    try {
-      // R3 FR-01 (task 027): the client STOPS authoring `.docx` bytes. It sends a STRUCTURED, paraId-
-      // keyed payload and the SERVER authors the bytes — delta-onto-original for a loaded doc, full
-      // render for a born-in-editor doc. `editorRef.current.isDirty()` is the editor's OWN authoritative
-      // dirty flag (ComposeEditor's internal `dirtyRef`), read fresh at Save time (NOT the local `isDirty`
-      // React state, which only gates the toolbar button and can lag an in-flight import). `state.docxBytes`
-      // is the retained ORIGINAL mount bytes — the ONLY bytes the client ever sends (byte-identical
-      // passthrough of the RETAINED original; never a reconstruction).
-      const editorIsDirty = editorRef.current.isDirty();
-
-      // R4 FR-06 (task 032, the write-path cutover; task 023 retired the paragraph-diff export this replaced):
-      // a dirty save of a LOADED doc sends the ordered, rebased task-003 OPERATION LOG (ID-anchored
-      // (paraId, runIndex, run-local-offset) ops) the server applies via ComposeShadowPatchEngine — the ONLY
-      // dirty-save capture path. Read ONCE here (serializing resets the log + the editor dirty flag). Ops whose
-      // anchor landed in later-deleted content (`deletedContentFlag`) are surfaced by the snapshot and EXCLUDED
-      // from what we apply — never-silently-dropped, but not re-applied onto content a later edit removed. The
-      // born-in-editor create-on-save path authors the whole document via `contentModel`, so it sends no op-log.
-      // UAT #1A fix (task 050): an IMPORTED transient mount (Browse/upload — `state.docxBytes` present) that is
-      // dirty ALSO captures the op-log, so its create-on-save applies TRACKED redlines via the engine (not the
-      // renderer). Only a true born-in-editor doc (`!state.docxBytes`) skips the op-log on the transient path.
-      const opLogSnapshot =
-        editorIsDirty && (!isTransientCreate || !!state.docxBytes)
-          ? editorRef.current.serializeOperationLog()
-          : null;
-      const operationLog = opLogSnapshot
-        ? {
-            schemaVersion: COMPOSE_OPERATION_SCHEMA_VERSION,
-            operations: opLogSnapshot.orderedOps
-              .filter(entry => !entry.deletedContentFlag)
-              .map(entry => entry.operation),
-          }
-        : undefined;
-
-      // C2 fix (UAT 2026-07-20): the load-time paraId map — sent on every save so the server can stamp
-      // MINTED ids physically onto the retained-original baseline's id-less paragraphs before the
-      // synthesizer resolves (a redline accept / edit on an originally-id-less paragraph, or ANY paragraph
-      // of an uploaded doc whose ids are all client-minted, otherwise fails with "w14:paraId matches no
-      // paragraph in the retained original"). Read-only (no dirty-flag side effect); empty for a
-      // born-in-editor doc (no snapshot). The server only applies it when an editedParagraphs delta is
-      // present (see ComposeService), so sending it on a clean/born-in-editor save is harmless.
-      const paraIdMap = editorRef.current.getBaselineParaIdMap?.() ?? [];
-
-      // Task 040 (comment-export wiring fix): pending AI/user REDLINES persist through the
-      // ID-ANCHORED op-log (`operationLog` below) — the interceptor captures the underlying
-      // `insertText`/`deleteRange`/`replaceRange` steps as granular, paraId+offset-anchored
-      // operations, and `ComposeShadowPatchEngine` applies them to emit `w:ins`/`w:del`. Comments
-      // (BOTH the FR-23 session Comments-panel threads AND the NDA-REVIEW advisory threads, task
-      // 031's `getAdvisoryCommentThreads()`) ride a SEPARATE, paraId+run-range-anchored path:
-      // `ComposeEditorHandle.getAnchoredComments()` resolves each thread's live `commentAnchor` mark
-      // span to a durable `(paraId, run-local range)` (D2) and returns `ComposeAnchoredComment[]`,
-      // sent below in the `comments` field — `ComposeShadowPatchEngine.ApplyComment` bakes each as a
-      // native `w:comment` (ADR-049). This REPLACES the retired `annotations` field
-      // (`DocxAnnotationInput`, text-anchored via `targetText`): the server's `SaveComposeDocumentBody`
-      // never deserialized an `annotations` property, so every comment previously sent that way was
-      // silently dropped (session comments AND advisory comments alike). `?.()` guards an older
-      // editor build without the handle.
-      const anchoredComments: ComposeAnchoredComment[] =
-        typeof editorRef.current.getAnchoredComments === 'function' ? editorRef.current.getAnchoredComments() : [];
-
-      // Base64-encode the RETAINED ORIGINAL bytes via the shared module-level encoder (see
-      // `arrayBufferToBase64` above — also used by the FR-03/task 011 browse->project round-trip).
-      const encodeRetained = arrayBufferToBase64;
-
-      // FR-05 (task 100): the create-on-save route carries no id in the path (the draft has no drive-item
-      // yet) and sends `containerId`; the replace route carries the SPE id + driveId. Both hit
-      // ComposeService.SaveAsync — the server branches on DocumentSpeId presence.
-      const url = isTransientCreate
-        ? `${bffBaseUrl}/api/compose/documents/create-on-save`
-        : `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(state.documentRef.speDriveItemId)}/save`;
-
-      // Four structured cases (the client authors NO bytes):
-      //  1. Loaded + dirty       → { editedParagraphs, baselineVersionId, content?(retained fast-path) }
-      //  2. Loaded + clean       → { content: retained byte-identical } (FR-06a)
-      //  3. Born-in-editor        → { contentModel } (AI-draft/blank/edited-browse-local → server renders)
-      //  4. Unedited browse-local → { content: retained byte-identical } (FR-06a)
-      // Task 040: session + advisory comments ride `comments` (ComposeAnchoredComment[]) in every case;
-      // redlines ride the ID-anchored `operationLog` (case 1 only — see below).
-      let requestBody: Record<string, unknown>;
       if (isTransientCreate) {
-        // UAT #1A fix (task 050): the born-in-editor discriminant is retained-bytes presence ONLY — the SAME
-        // signal the replace path uses (`bornInEditor = !state.docxBytes`). Previously this ALSO OR'd in
-        // `editorIsDirty`, so a DIRTY imported transient (Browse/upload mount WITH original bytes) rendered from
-        // the content model → plain untracked runs → NO redline in Word, and the server stamped it Authored
-        // (which then forced every later reopen-save onto the clean branch). Now an imported transient (has
-        // bytes) sends its retained original + the tracked op-log so the engine applies w:ins/w:del
-        // (create-on-save carries no DocumentRecordId → cleanApply is false → trackChanges true). Only a TRUE
-        // born-in-editor doc (no retained bytes) renders from the content model.
-        const bornInEditorRender = !state.docxBytes;
-        requestBody = {
-          containerId: saveContainerId,
-          tenantId,
-          sessionId: state.sessionId,
-          displayName: state.documentRef.fileName ?? null,
-          comments: anchoredComments,
-          // C2: the baseline paraId map — needed on the imported-transient op-log branch so the server can stamp
-          // client-minted ids onto the retained baseline before the engine resolves anchors (harmless on the
-          // born-in-editor render branch — the server skips the stamp when ContentModel is present).
-          paraIdMap,
-          // G7 (task 022): the transient dedup key (repeated create-on-save → ONE record) + the Save-New
-          // fork flag (forkNew=true skips dedup → a deliberately new record). effectiveTransientKey is the
-          // mount-time key for a normal transient save, or a freshly-minted one for a fork.
-          transientKey: effectiveTransientKey,
-          forkNew,
-          ...(bornInEditorRender
-            ? { contentModel: editorRef.current.buildContentModel() }
-            : {
-                // Imported transient (Browse/upload-mounted, has original bytes): send the retained ORIGINAL
-                // bytes as the baseline + the tracked op-log so the server applies redlines via
-                // ComposeShadowPatchEngine — NOT the renderer. operationLog is undefined on a clean mount →
-                // the server persists the retained bytes byte-identical (FR-06a).
-                content: encodeRetained(state.docxBytes!),
-                operationLog,
-              }),
-        };
-      } else {
-        // task 039 (UAT round 1+2, born-in-editor 2nd-save fix): a BORN-IN-EDITOR doc (blank page / AI-draft)
-        // holds NO retained original bytes (`!state.docxBytes`, the SAME discriminant the create path's
-        // `bornInEditorRender` uses) and its create-on-save returned the drive-ITEM id as VersionId — there is
-        // no real SPE baseline version to re-fetch. So on EVERY in-session replace save it RE-AUTHORS via
-        // `contentModel` (mirroring the create path), never entering the baseline-less op-log path that 400s.
-        // The server renders the .docx and ReplaceFileContentAsUserAsync's it onto the EXISTING item (same
-        // speDriveItemId) — updating in place, no duplicate record. A LOADED/imported doc (docxBytes present)
-        // keeps the op-log + baseline path below EXACTLY as-is → tracked changes (REQ-2 not regressed).
-        //
-        // G1/G2 (FR-01/FR-02, tasks 020/021 — Candidate A): a REOPENED AUTHORED doc (persisted
-        // sprk_composeorigin=authored, `state.docxBytes` present) now takes the SAME op-log path as an
-        // imported doc — it sends its retained baseline + operation log, and the SERVER applies the ops
-        // CLEAN (plain runs, physical deletes, no redlines) by reading the durable marker (engine
-        // trackChanges:false). This is the highest-fidelity path: only document.xml is re-serialized, every
-        // other package part + untouched subtree stays byte-identical — NOT a re-author-from-content-model
-        // (which drops headers/footers/styles on rich docs and violates ADR-049 I-1/I-2/I-4). The client no
-        // longer branches on origin here; the durable marker drives clean-vs-tracked server-side (NFR-02 —
-        // never inferred). See notes/g2-clean-apply-decision.md (operator resolution 2026-07-29).
-        //
-        // The ONLY contentModel case that remains on the replace route is an in-session BORN-IN-EDITOR
-        // re-save (`!state.docxBytes`): a blank/AI-draft doc holds NO retained baseline (its create-on-save
-        // returned the drive-ITEM id as VersionId, not a real SPE version), so the baseline-less op-log path
-        // 400s (task 039). It re-authors via contentModel, mirroring the create path — this is authored
-        // ORIGINATION through the renderer (the two-byte-author split), never authored EDITING through the op
-        // log; both stay clean.
-        const bornInEditor = !state.docxBytes;
-        requestBody = {
-          // UAT 2026-07-19 P2: the drive the doc lives in (documentRef.driveId after a create-on-save),
-          // falling back to the host default — so a born-in-editor doc's second save + baseline re-fetch
-          // target the correct drive.
-          driveId: saveDriveId,
-          tenantId,
-          sessionId: state.sessionId,
-          // G2: the server reads the durable sprk_composeorigin marker for THIS record to pick clean-vs-
-          // tracked apply — so documentRecordId MUST ride every reopened-doc save (already sent since G1).
-          documentRecordId: state.documentRef.sprkDocumentId ?? null,
-          displayName: state.documentRef.fileName ?? null,
-          comments: anchoredComments,
-          // C2: the baseline paraId map so the server can stamp minted ids before the engine resolves anchors
-          // (harmless on the contentModel branch — the server skips the stamp when ContentModel is present).
-          paraIdMap,
-          ...(bornInEditor
-            ? // In-session born-in-editor re-save: re-author from the content model (no retained baseline to
-              // delta onto — task 039). The renderer authors clean bytes; no op-log.
-              { contentModel: editorRef.current.buildContentModel() }
-            : {
-                // Loaded/imported OR reopened-authored dirty save. The load-time version id = the op-log's BASE
-                // VERSION; lets the server re-fetch the baseline even without the client bytes. The server
-                // applies the op-log tracked (imported) or CLEAN (authored, per the durable marker) — REQ-1/REQ-2.
-                baselineVersionId: state.versionId ?? undefined,
-                // Same-session fast-path: still holding the retained original → send it (byte-identical).
-                content: state.docxBytes ? encodeRetained(state.docxBytes) : undefined,
-                // R4 FR-06 (task 032): the ordered, rebased operation log the server applies via the Patch
-                // Engine onto the resolved baseline (undefined on a clean save → baseline persists byte-identical).
-                operationLog,
-              }),
-        };
-      }
-
-      const response = await authenticatedFetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        // Try to extract ProblemDetails.detail so the banner surfaces the
-        // actual server-side reason (BFF puts exception name + message +
-        // TraceId in `detail`). Fall back to a generic message if the body
-        // isn't JSON.
-        let detail = '';
-        try {
-          const problem = (await response.clone().json()) as {
-            detail?: string;
-            title?: string;
-          };
-          detail = problem.detail ?? problem.title ?? '';
-        } catch {
-          detail = (await response.text().catch(() => '')).slice(0, 400);
-        }
-        // UAT #10/#11 (task 052): a 423 means the doc is held by a Word-for-web CO-AUTHORING lock (Spaarke
-        // never does a formal checkout, so a 423 is ALWAYS co-authoring). There is no programmatic unlock —
-        // flag it so the banner shows the honest "Open in Word" bar with Retry + Reload-from-Word (not a fake
-        // Unlock, and not the old misleading "checked out — check it in" copy). The server detail already
-        // carries the honest message.
-        if (response.status === 423) {
+        if (!saveContainerId) {
+          // gap 1.4: don't abort silently as the pre-100 code did — surface an honest, actionable
+          // banner. The container resolves from the user's Business Unit; if it's missing the BU is
+          // unconfigured (or we're in a non-Dataverse host).
           dispatch({
             kind: 'saveFailed',
             errorMessage:
-              detail ||
-              'This document is open in Word — close it there, then Retry. It also releases automatically within a few minutes. Your Compose changes are safe and still pending.',
-            isLock: true,
+              'Cannot save this new document — your Business Unit has no storage container configured. ' +
+              'Contact an administrator to set the container on your Business Unit.',
           });
           return;
         }
-        const msg =
-          response.status === 403
-            ? `You do not have permission to save this document. ${detail}`.trim()
-            : `Failed to save document (HTTP ${response.status})${detail ? `: ${detail}` : ''}.`;
-        dispatch({ kind: 'saveFailed', errorMessage: msg });
+      } else if (!saveDriveId) {
+        dispatch({
+          kind: 'saveFailed',
+          errorMessage: 'Cannot save — SPE drive configuration missing.',
+        });
         return;
       }
 
-      const payload = (await response.json()) as {
-        documentSpeId: string;
-        documentRecordId?: string;
-        // #1(b): the create-on-save response's new-document id. `documentRecordId` is the
-        // established field (the `sprk_documentid`); `documentId` is read defensively in case the
-        // sibling BFF change names it that. Either drives the Saved ✓ banner's "Open preview" link.
-        documentId?: string;
-        // UAT 2026-07-19 P2: driveId + versionId of the just-saved SPE version. Retained via
-        // saveSucceeded so a subsequent replace-path save of a born-in-editor doc (no retained
-        // bytes) resolves its baseline by re-fetching this version. Optional (older BFF omits them).
-        driveId?: string;
-        versionId?: string;
-        eTag?: string;
-        size: number;
-        wasPromotedThisSave: boolean;
-        // Prong 1 (task 055): best-effort partial-apply summary — present only when some ops couldn't be
-        // anchored server-side (the save still succeeded with the resolvable edits). Absent on the common
-        // clean-batch path. Drives the honest "N edits couldn't be saved — please redo them" banner.
-        partialApply?: {
-          total: number;
-          appliedCount: number;
-          unresolvedCount: number;
-        } | null;
-      };
+      dispatch({ kind: 'requestSave' });
+      try {
+        // R3 FR-01 (task 027): the client STOPS authoring `.docx` bytes. It sends a STRUCTURED, paraId-
+        // keyed payload and the SERVER authors the bytes — delta-onto-original for a loaded doc, full
+        // render for a born-in-editor doc. `editorRef.current.isDirty()` is the editor's OWN authoritative
+        // dirty flag (ComposeEditor's internal `dirtyRef`), read fresh at Save time (NOT the local `isDirty`
+        // React state, which only gates the toolbar button and can lag an in-flight import). `state.docxBytes`
+        // is the retained ORIGINAL mount bytes — the ONLY bytes the client ever sends (byte-identical
+        // passthrough of the RETAINED original; never a reconstruction).
+        const editorIsDirty = editorRef.current.isDirty();
 
-      // #1(b): the persisted document id drives the Assistant's persistent "Saved to the DMS" chat
-      // affordance (FIX #7a below).
-      const savedDocumentId = payload.documentRecordId ?? payload.documentId;
-      if (savedDocumentId) {
-        // FIX #7a: report the completed Save to the Assistant so it posts a PERSISTENT confirmation
-        // + "Open preview" chat message. No-op (null delegate) on a standalone mount. The transient
-        // in-editor banner's preview link is dropped (below) now that the persistent affordance lives
-        // in chat; the banner's success signal is unaffected.
-        notifyComposeSaveCompletedRef.current?.({
-          documentRecordId: savedDocumentId,
-          fileName: state.documentRef.fileName,
-        });
-      }
+        // R4 FR-06 (task 032, the write-path cutover; task 023 retired the paragraph-diff export this replaced):
+        // a dirty save of a LOADED doc sends the ordered, rebased task-003 OPERATION LOG (ID-anchored
+        // (paraId, runIndex, run-local-offset) ops) the server applies via ComposeShadowPatchEngine — the ONLY
+        // dirty-save capture path. Read ONCE here (serializing resets the log + the editor dirty flag). Ops whose
+        // anchor landed in later-deleted content (`deletedContentFlag`) are surfaced by the snapshot and EXCLUDED
+        // from what we apply — never-silently-dropped, but not re-applied onto content a later edit removed. The
+        // born-in-editor create-on-save path authors the whole document via `contentModel`, so it sends no op-log.
+        // UAT #1A fix (task 050): an IMPORTED transient mount (Browse/upload — `state.docxBytes` present) that is
+        // dirty ALSO captures the op-log, so its create-on-save applies TRACKED redlines via the engine (not the
+        // renderer). Only a true born-in-editor doc (`!state.docxBytes`) skips the op-log on the transient path.
+        const opLogSnapshot =
+          editorIsDirty && (!isTransientCreate || !!state.docxBytes) ? editorRef.current.serializeOperationLog() : null;
+        const operationLog = opLogSnapshot
+          ? {
+              schemaVersion: COMPOSE_OPERATION_SCHEMA_VERSION,
+              operations: opLogSnapshot.orderedOps
+                .filter(entry => !entry.deletedContentFlag)
+                .map(entry => entry.operation),
+            }
+          : undefined;
 
-      dispatch({
-        kind: 'saveSucceeded',
-        sprkDocumentId: payload.documentRecordId,
-        // gap 1.7: carry the server-minted SPE id back into documentRef.speDriveItemId so a second
-        // Save on this mount takes the replace path (no longer transient).
-        documentSpeId: payload.documentSpeId,
-        etag: payload.eTag ?? null,
-        // UAT 2026-07-19 P2: retain the just-saved drive id + version id so the replace-path second
-        // save of a born-in-editor doc can resolve its baseline (server re-fetch by versionId).
-        driveId: payload.driveId,
-        versionId: payload.versionId,
-        // Prong 1 (task 055): surface a best-effort partial-apply outcome (some ops couldn't be anchored)
-        // so the banner prompts the user to redo just those edits. Only carried when the server actually
-        // recovered — a clean batch omits it (→ null → clears any prior partial-apply banner).
-        partialApply:
-          payload.partialApply && payload.partialApply.unresolvedCount > 0 ? payload.partialApply : null,
-      });
-      // Clear the local dirty flag so the Save button disables until the
-      // next edit. ComposeEditor's internal dirtyRef also resets on the
-      // next load; here we mirror that for post-save.
-      setIsDirty(false);
+        // C2 fix (UAT 2026-07-20): the load-time paraId map — sent on every save so the server can stamp
+        // MINTED ids physically onto the retained-original baseline's id-less paragraphs before the
+        // synthesizer resolves (a redline accept / edit on an originally-id-less paragraph, or ANY paragraph
+        // of an uploaded doc whose ids are all client-minted, otherwise fails with "w14:paraId matches no
+        // paragraph in the retained original"). Read-only (no dirty-flag side effect); empty for a
+        // born-in-editor doc (no snapshot). The server only applies it when an editedParagraphs delta is
+        // present (see ComposeService), so sending it on a clean/born-in-editor save is harmless.
+        const paraIdMap = editorRef.current.getBaselineParaIdMap?.() ?? [];
 
-      // task 038 (zero-error guardrails): NOW that the save is confirmed (200), commit the persisted
-      // op-log batch + recompute the editor's dirty flag. `serializeOperationLog()` no longer resets on
-      // read (that was the data-loss bug — a 422 emptied the log BEFORE the POST, so a retry re-sent an
-      // empty log and lost every valid text edit in the batch); this post-200 commit is what finally drops
-      // the batch, and ONLY on success. A rejected save returned at the `!response.ok` guard above, so it
-      // never reaches here — the op-log + dirty flag survive for a retry that re-sends the same edits.
-      // Called AFTER setIsDirty(false) so `commitSaved`'s onDirtyChange (true iff concurrent edits arrived
-      // during the in-flight save) is the last writer and leaves the Save state correct. Gated on having
-      // actually SENT an op-log: the born-in-editor create-on-save path re-derives its whole content model
-      // each save (buildContentModel), so it needs no op-log commit.
-      if (operationLog) {
-        editorRef.current?.commitSaved?.();
-      }
+        // Task 040 (comment-export wiring fix): pending AI/user REDLINES persist through the
+        // ID-ANCHORED op-log (`operationLog` below) — the interceptor captures the underlying
+        // `insertText`/`deleteRange`/`replaceRange` steps as granular, paraId+offset-anchored
+        // operations, and `ComposeShadowPatchEngine` applies them to emit `w:ins`/`w:del`. Comments
+        // (BOTH the FR-23 session Comments-panel threads AND the NDA-REVIEW advisory threads, task
+        // 031's `getAdvisoryCommentThreads()`) ride a SEPARATE, paraId+run-range-anchored path:
+        // `ComposeEditorHandle.getAnchoredComments()` resolves each thread's live `commentAnchor` mark
+        // span to a durable `(paraId, run-local range)` (D2) and returns `ComposeAnchoredComment[]`,
+        // sent below in the `comments` field — `ComposeShadowPatchEngine.ApplyComment` bakes each as a
+        // native `w:comment` (ADR-049). This REPLACES the retired `annotations` field
+        // (`DocxAnnotationInput`, text-anchored via `targetText`): the server's `SaveComposeDocumentBody`
+        // never deserialized an `annotations` property, so every comment previously sent that way was
+        // silently dropped (session comments AND advisory comments alike). `?.()` guards an older
+        // editor build without the handle.
+        const anchoredComments: ComposeAnchoredComment[] =
+          typeof editorRef.current.getAnchoredComments === 'function' ? editorRef.current.getAnchoredComments() : [];
 
-      // FR-05 (task 100, gap 1.8): once a transient draft is persisted as a NEW sprk_document,
-      // let the host write any chosen parent association (associate() no-ops on "none"). The
-      // document already exists, so an association failure is non-fatal — do not surface it as a
-      // save failure.
-      if (isTransientCreate && onCreateOnSaveComplete && payload.documentRecordId) {
-        try {
-          await onCreateOnSaveComplete(payload.documentRecordId);
-        } catch (assocErr) {
-          // eslint-disable-next-line no-console
-          console.warn('[ComposeWorkspace] create-on-save association write failed (non-fatal):', assocErr);
+        // Base64-encode the RETAINED ORIGINAL bytes via the shared module-level encoder (see
+        // `arrayBufferToBase64` above — also used by the FR-03/task 011 browse->project round-trip).
+        const encodeRetained = arrayBufferToBase64;
+
+        // FR-05 (task 100): the create-on-save route carries no id in the path (the draft has no drive-item
+        // yet) and sends `containerId`; the replace route carries the SPE id + driveId. Both hit
+        // ComposeService.SaveAsync — the server branches on DocumentSpeId presence.
+        const url = isTransientCreate
+          ? `${bffBaseUrl}/api/compose/documents/create-on-save`
+          : `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(state.documentRef.speDriveItemId)}/save`;
+
+        // Four structured cases (the client authors NO bytes):
+        //  1. Loaded + dirty       → { editedParagraphs, baselineVersionId, content?(retained fast-path) }
+        //  2. Loaded + clean       → { content: retained byte-identical } (FR-06a)
+        //  3. Born-in-editor        → { contentModel } (AI-draft/blank/edited-browse-local → server renders)
+        //  4. Unedited browse-local → { content: retained byte-identical } (FR-06a)
+        // Task 040: session + advisory comments ride `comments` (ComposeAnchoredComment[]) in every case;
+        // redlines ride the ID-anchored `operationLog` (case 1 only — see below).
+        let requestBody: Record<string, unknown>;
+        if (isTransientCreate) {
+          // UAT #1A fix (task 050): the born-in-editor discriminant is retained-bytes presence ONLY — the SAME
+          // signal the replace path uses (`bornInEditor = !state.docxBytes`). Previously this ALSO OR'd in
+          // `editorIsDirty`, so a DIRTY imported transient (Browse/upload mount WITH original bytes) rendered from
+          // the content model → plain untracked runs → NO redline in Word, and the server stamped it Authored
+          // (which then forced every later reopen-save onto the clean branch). Now an imported transient (has
+          // bytes) sends its retained original + the tracked op-log so the engine applies w:ins/w:del
+          // (create-on-save carries no DocumentRecordId → cleanApply is false → trackChanges true). Only a TRUE
+          // born-in-editor doc (no retained bytes) renders from the content model.
+          const bornInEditorRender = !state.docxBytes;
+          requestBody = {
+            containerId: saveContainerId,
+            tenantId,
+            sessionId: state.sessionId,
+            displayName: state.documentRef.fileName ?? null,
+            comments: anchoredComments,
+            // C2: the baseline paraId map — needed on the imported-transient op-log branch so the server can stamp
+            // client-minted ids onto the retained baseline before the engine resolves anchors (harmless on the
+            // born-in-editor render branch — the server skips the stamp when ContentModel is present).
+            paraIdMap,
+            // G7 (task 022): the transient dedup key (repeated create-on-save → ONE record) + the Save-New
+            // fork flag (forkNew=true skips dedup → a deliberately new record). effectiveTransientKey is the
+            // mount-time key for a normal transient save, or a freshly-minted one for a fork.
+            transientKey: effectiveTransientKey,
+            forkNew,
+            ...(bornInEditorRender
+              ? { contentModel: editorRef.current.buildContentModel() }
+              : {
+                  // Imported transient (Browse/upload-mounted, has original bytes): send the retained ORIGINAL
+                  // bytes as the baseline + the tracked op-log so the server applies redlines via
+                  // ComposeShadowPatchEngine — NOT the renderer. operationLog is undefined on a clean mount →
+                  // the server persists the retained bytes byte-identical (FR-06a).
+                  content: encodeRetained(state.docxBytes!),
+                  operationLog,
+                }),
+          };
+        } else {
+          // task 039 (UAT round 1+2, born-in-editor 2nd-save fix): a BORN-IN-EDITOR doc (blank page / AI-draft)
+          // holds NO retained original bytes (`!state.docxBytes`, the SAME discriminant the create path's
+          // `bornInEditorRender` uses) and its create-on-save returned the drive-ITEM id as VersionId — there is
+          // no real SPE baseline version to re-fetch. So on EVERY in-session replace save it RE-AUTHORS via
+          // `contentModel` (mirroring the create path), never entering the baseline-less op-log path that 400s.
+          // The server renders the .docx and ReplaceFileContentAsUserAsync's it onto the EXISTING item (same
+          // speDriveItemId) — updating in place, no duplicate record. A LOADED/imported doc (docxBytes present)
+          // keeps the op-log + baseline path below EXACTLY as-is → tracked changes (REQ-2 not regressed).
+          //
+          // G1/G2 (FR-01/FR-02, tasks 020/021 — Candidate A): a REOPENED AUTHORED doc (persisted
+          // sprk_composeorigin=authored, `state.docxBytes` present) now takes the SAME op-log path as an
+          // imported doc — it sends its retained baseline + operation log, and the SERVER applies the ops
+          // CLEAN (plain runs, physical deletes, no redlines) by reading the durable marker (engine
+          // trackChanges:false). This is the highest-fidelity path: only document.xml is re-serialized, every
+          // other package part + untouched subtree stays byte-identical — NOT a re-author-from-content-model
+          // (which drops headers/footers/styles on rich docs and violates ADR-049 I-1/I-2/I-4). The client no
+          // longer branches on origin here; the durable marker drives clean-vs-tracked server-side (NFR-02 —
+          // never inferred). See notes/g2-clean-apply-decision.md (operator resolution 2026-07-29).
+          //
+          // The ONLY contentModel case that remains on the replace route is an in-session BORN-IN-EDITOR
+          // re-save (`!state.docxBytes`): a blank/AI-draft doc holds NO retained baseline (its create-on-save
+          // returned the drive-ITEM id as VersionId, not a real SPE version), so the baseline-less op-log path
+          // 400s (task 039). It re-authors via contentModel, mirroring the create path — this is authored
+          // ORIGINATION through the renderer (the two-byte-author split), never authored EDITING through the op
+          // log; both stay clean.
+          const bornInEditor = !state.docxBytes;
+          requestBody = {
+            // UAT 2026-07-19 P2: the drive the doc lives in (documentRef.driveId after a create-on-save),
+            // falling back to the host default — so a born-in-editor doc's second save + baseline re-fetch
+            // target the correct drive.
+            driveId: saveDriveId,
+            tenantId,
+            sessionId: state.sessionId,
+            // G2: the server reads the durable sprk_composeorigin marker for THIS record to pick clean-vs-
+            // tracked apply — so documentRecordId MUST ride every reopened-doc save (already sent since G1).
+            documentRecordId: state.documentRef.sprkDocumentId ?? null,
+            displayName: state.documentRef.fileName ?? null,
+            comments: anchoredComments,
+            // C2: the baseline paraId map so the server can stamp minted ids before the engine resolves anchors
+            // (harmless on the contentModel branch — the server skips the stamp when ContentModel is present).
+            paraIdMap,
+            ...(bornInEditor
+              ? // In-session born-in-editor re-save: re-author from the content model (no retained baseline to
+                // delta onto — task 039). The renderer authors clean bytes; no op-log.
+                { contentModel: editorRef.current.buildContentModel() }
+              : {
+                  // Loaded/imported OR reopened-authored dirty save. The load-time version id = the op-log's BASE
+                  // VERSION; lets the server re-fetch the baseline even without the client bytes. The server
+                  // applies the op-log tracked (imported) or CLEAN (authored, per the durable marker) — REQ-1/REQ-2.
+                  baselineVersionId: state.versionId ?? undefined,
+                  // Same-session fast-path: still holding the retained original → send it (byte-identical).
+                  content: state.docxBytes ? encodeRetained(state.docxBytes) : undefined,
+                  // R4 FR-06 (task 032): the ordered, rebased operation log the server applies via the Patch
+                  // Engine onto the resolved baseline (undefined on a clean save → baseline persists byte-identical).
+                  operationLog,
+                }),
+          };
         }
+
+        const response = await authenticatedFetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+          // Try to extract ProblemDetails.detail so the banner surfaces the
+          // actual server-side reason (BFF puts exception name + message +
+          // TraceId in `detail`). Fall back to a generic message if the body
+          // isn't JSON.
+          let detail = '';
+          try {
+            const problem = (await response.clone().json()) as {
+              detail?: string;
+              title?: string;
+            };
+            detail = problem.detail ?? problem.title ?? '';
+          } catch {
+            detail = (await response.text().catch(() => '')).slice(0, 400);
+          }
+          // UAT #10/#11 (task 052): a 423 means the doc is held by a Word-for-web CO-AUTHORING lock (Spaarke
+          // never does a formal checkout, so a 423 is ALWAYS co-authoring). There is no programmatic unlock —
+          // flag it so the banner shows the honest "Open in Word" bar with Retry + Reload-from-Word (not a fake
+          // Unlock, and not the old misleading "checked out — check it in" copy). The server detail already
+          // carries the honest message.
+          if (response.status === 423) {
+            dispatch({
+              kind: 'saveFailed',
+              errorMessage:
+                detail ||
+                'This document is open in Word — close it there, then Retry. It also releases automatically within a few minutes. Your Compose changes are safe and still pending.',
+              isLock: true,
+            });
+            return;
+          }
+          const msg =
+            response.status === 403
+              ? `You do not have permission to save this document. ${detail}`.trim()
+              : `Failed to save document (HTTP ${response.status})${detail ? `: ${detail}` : ''}.`;
+          dispatch({ kind: 'saveFailed', errorMessage: msg });
+          return;
+        }
+
+        const payload = (await response.json()) as {
+          documentSpeId: string;
+          documentRecordId?: string;
+          // #1(b): the create-on-save response's new-document id. `documentRecordId` is the
+          // established field (the `sprk_documentid`); `documentId` is read defensively in case the
+          // sibling BFF change names it that. Either drives the Saved ✓ banner's "Open preview" link.
+          documentId?: string;
+          // UAT 2026-07-19 P2: driveId + versionId of the just-saved SPE version. Retained via
+          // saveSucceeded so a subsequent replace-path save of a born-in-editor doc (no retained
+          // bytes) resolves its baseline by re-fetching this version. Optional (older BFF omits them).
+          driveId?: string;
+          versionId?: string;
+          eTag?: string;
+          size: number;
+          wasPromotedThisSave: boolean;
+          // Prong 1 (task 055): best-effort partial-apply summary — present only when some ops couldn't be
+          // anchored server-side (the save still succeeded with the resolvable edits). Absent on the common
+          // clean-batch path. Drives the honest "N edits couldn't be saved — please redo them" banner.
+          partialApply?: {
+            total: number;
+            appliedCount: number;
+            unresolvedCount: number;
+          } | null;
+        };
+
+        // #1(b): the persisted document id drives the Assistant's persistent "Saved to the DMS" chat
+        // affordance (FIX #7a below).
+        const savedDocumentId = payload.documentRecordId ?? payload.documentId;
+        if (savedDocumentId) {
+          // FIX #7a: report the completed Save to the Assistant so it posts a PERSISTENT confirmation
+          // + "Open preview" chat message. No-op (null delegate) on a standalone mount. The transient
+          // in-editor banner's preview link is dropped (below) now that the persistent affordance lives
+          // in chat; the banner's success signal is unaffected.
+          notifyComposeSaveCompletedRef.current?.({
+            documentRecordId: savedDocumentId,
+            fileName: state.documentRef.fileName,
+          });
+        }
+
+        dispatch({
+          kind: 'saveSucceeded',
+          sprkDocumentId: payload.documentRecordId,
+          // gap 1.7: carry the server-minted SPE id back into documentRef.speDriveItemId so a second
+          // Save on this mount takes the replace path (no longer transient).
+          documentSpeId: payload.documentSpeId,
+          etag: payload.eTag ?? null,
+          // UAT 2026-07-19 P2: retain the just-saved drive id + version id so the replace-path second
+          // save of a born-in-editor doc can resolve its baseline (server re-fetch by versionId).
+          driveId: payload.driveId,
+          versionId: payload.versionId,
+          // Prong 1 (task 055): surface a best-effort partial-apply outcome (some ops couldn't be anchored)
+          // so the banner prompts the user to redo just those edits. Only carried when the server actually
+          // recovered — a clean batch omits it (→ null → clears any prior partial-apply banner).
+          partialApply: payload.partialApply && payload.partialApply.unresolvedCount > 0 ? payload.partialApply : null,
+        });
+        // Clear the local dirty flag so the Save button disables until the
+        // next edit. ComposeEditor's internal dirtyRef also resets on the
+        // next load; here we mirror that for post-save.
+        setIsDirty(false);
+
+        // task 038 (zero-error guardrails): NOW that the save is confirmed (200), commit the persisted
+        // op-log batch + recompute the editor's dirty flag. `serializeOperationLog()` no longer resets on
+        // read (that was the data-loss bug — a 422 emptied the log BEFORE the POST, so a retry re-sent an
+        // empty log and lost every valid text edit in the batch); this post-200 commit is what finally drops
+        // the batch, and ONLY on success. A rejected save returned at the `!response.ok` guard above, so it
+        // never reaches here — the op-log + dirty flag survive for a retry that re-sends the same edits.
+        // Called AFTER setIsDirty(false) so `commitSaved`'s onDirtyChange (true iff concurrent edits arrived
+        // during the in-flight save) is the last writer and leaves the Save state correct. Gated on having
+        // actually SENT an op-log: the born-in-editor create-on-save path re-derives its whole content model
+        // each save (buildContentModel), so it needs no op-log commit.
+        if (operationLog) {
+          editorRef.current?.commitSaved?.();
+        }
+
+        // FR-05 (task 100, gap 1.8): once a transient draft is persisted as a NEW sprk_document,
+        // let the host write any chosen parent association (associate() no-ops on "none"). The
+        // document already exists, so an association failure is non-fatal — do not surface it as a
+        // save failure.
+        if (isTransientCreate && onCreateOnSaveComplete && payload.documentRecordId) {
+          try {
+            await onCreateOnSaveComplete(payload.documentRecordId);
+          } catch (assocErr) {
+            // eslint-disable-next-line no-console
+            console.warn('[ComposeWorkspace] create-on-save association write failed (non-fatal):', assocErr);
+          }
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        dispatch({ kind: 'saveFailed', errorMessage: `Save failed: ${message}` });
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      dispatch({ kind: 'saveFailed', errorMessage: `Save failed: ${message}` });
-    }
-  }, [
-    state.status,
-    state.documentRef,
-    state.docxBytes,
-    state.sessionId,
-    bffBaseUrl,
-    effectiveDriveId,
-    tenantId,
-    onCreateOnSaveComplete,
-  ]);
+    },
+    [
+      state.status,
+      state.documentRef,
+      state.docxBytes,
+      state.sessionId,
+      bffBaseUrl,
+      effectiveDriveId,
+      tenantId,
+      onCreateOnSaveComplete,
+    ]
+  );
 
   // G10 (FR-09, task 040): manual "Refresh Profile" — re-run the Document Profile on demand for a PROMOTED
   // doc (it has a sprk_document record to profile). Fire-and-forget on the server (202); best-effort here —
@@ -1636,18 +1633,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     // complaint was that neither the automatic re-trigger nor the manual button gave any visible signal).
     setIsRefreshingProfile(true);
     try {
-      await authenticatedFetch(
-        `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(recordId)}/refresh-profile`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tenantId,
-            documentSpeId: state.documentRef?.speDriveItemId || undefined,
-            eTag: state.etag || undefined,
-          }),
-        }
-      );
+      await authenticatedFetch(`${bffBaseUrl}/api/compose/documents/${encodeURIComponent(recordId)}/refresh-profile`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenantId,
+          documentSpeId: state.documentRef?.speDriveItemId || undefined,
+          eTag: state.etag || undefined,
+        }),
+      });
       // Keep the spinner visible briefly so a fast 202 still registers as a deliberate action.
       window.setTimeout(() => setIsRefreshingProfile(false), 1500);
     } catch (err) {
@@ -3295,7 +3289,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               wordActionsDisabled={wordActionsDisabled}
               // G7 (task 022): the toolbar Save split-button threads its choice ('version' default /
               // 'new' fork) into triggerSave. Ctrl+S / the cross-pane bridge call triggerSave() → 'version'.
-              onSave={(mode) => {
+              onSave={mode => {
                 void triggerSave(mode ?? 'version');
               }}
               canSave={canSaveNow}

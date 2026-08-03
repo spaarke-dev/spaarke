@@ -16,9 +16,7 @@ const noop = () => {};
 describe('BrowseModal (PreviewModal + SprkModal nav — FR-09)', () => {
   it('shows the "N of M" counter via the shell nav group; prev disabled at index 0', () => {
     const onNavigate = jest.fn();
-    renderWithProviders(
-      <BrowseModal open onClose={noop} title="Rec" nav={{ index: 0, total: 3, onNavigate }} />,
-    );
+    renderWithProviders(<BrowseModal open onClose={noop} title="Rec" nav={{ index: 0, total: 3, onNavigate }} />);
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText('1 of 3')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: /previous record/i })).toBeDisabled();
@@ -27,9 +25,7 @@ describe('BrowseModal (PreviewModal + SprkModal nav — FR-09)', () => {
 
   it('disables next at the last index', () => {
     const onNavigate = jest.fn();
-    renderWithProviders(
-      <BrowseModal open onClose={noop} title="Rec" nav={{ index: 2, total: 3, onNavigate }} />,
-    );
+    renderWithProviders(<BrowseModal open onClose={noop} title="Rec" nav={{ index: 2, total: 3, onNavigate }} />);
     expect(screen.getByText('3 of 3')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /next record/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /previous record/i })).not.toBeDisabled();
@@ -37,18 +33,14 @@ describe('BrowseModal (PreviewModal + SprkModal nav — FR-09)', () => {
 
   it('clicking next fires onNavigate("next") when no guard is supplied', async () => {
     const onNavigate = jest.fn();
-    renderWithProviders(
-      <BrowseModal open onClose={noop} title="Rec" nav={{ index: 0, total: 3, onNavigate }} />,
-    );
+    renderWithProviders(<BrowseModal open onClose={noop} title="Rec" nav={{ index: 0, total: 3, onNavigate }} />);
     fireEvent.click(screen.getByRole('button', { name: /next record/i }));
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('next'));
   });
 
   it('clicking prev fires onNavigate("prev") when no guard is supplied', async () => {
     const onNavigate = jest.fn();
-    renderWithProviders(
-      <BrowseModal open onClose={noop} title="Rec" nav={{ index: 1, total: 3, onNavigate }} />,
-    );
+    renderWithProviders(<BrowseModal open onClose={noop} title="Rec" nav={{ index: 1, total: 3, onNavigate }} />);
     fireEvent.click(screen.getByRole('button', { name: /previous record/i }));
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('prev'));
   });
@@ -63,7 +55,7 @@ describe('BrowseModal (PreviewModal + SprkModal nav — FR-09)', () => {
         title="Rec"
         nav={{ index: 0, total: 3, onNavigate }}
         onBeforeNavigate={onBeforeNavigate}
-      />,
+      />
     );
     fireEvent.click(screen.getByRole('button', { name: /next record/i }));
     await waitFor(() => expect(onBeforeNavigate).toHaveBeenCalledWith('next'));
@@ -80,7 +72,7 @@ describe('BrowseModal (PreviewModal + SprkModal nav — FR-09)', () => {
         title="Rec"
         nav={{ index: 0, total: 3, onNavigate }}
         onBeforeNavigate={onBeforeNavigate}
-      />,
+      />
     );
     fireEvent.click(screen.getByRole('button', { name: /next record/i }));
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('next'));
@@ -96,7 +88,7 @@ describe('BrowseModal (PreviewModal + SprkModal nav — FR-09)', () => {
         title="Rec"
         nav={{ index: 1, total: 3, onNavigate }}
         onBeforeNavigate={onBeforeNavigate}
-      />,
+      />
     );
     fireEvent.click(screen.getByRole('button', { name: /previous record/i }));
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('prev'));
@@ -104,9 +96,7 @@ describe('BrowseModal (PreviewModal + SprkModal nav — FR-09)', () => {
 
   it('does not render a forked nav chrome — exactly one "N of M" counter (single header source, design §6.4)', () => {
     const onNavigate = jest.fn();
-    renderWithProviders(
-      <BrowseModal open onClose={noop} title="Rec" nav={{ index: 0, total: 3, onNavigate }} />,
-    );
+    renderWithProviders(<BrowseModal open onClose={noop} title="Rec" nav={{ index: 0, total: 3, onNavigate }} />);
     expect(screen.getAllByText('1 of 3')).toHaveLength(1);
     expect(screen.getAllByRole('group', { name: /record navigation/i })).toHaveLength(1);
     // RecordNavigationModalShell's own discard-confirmation dialog never
@@ -124,7 +114,7 @@ describe('BrowseModal (PreviewModal + SprkModal nav — FR-09)', () => {
         metadata={[{ label: 'Author', value: 'J. Doe' }]}
       >
         <span>browsed stage</span>
-      </BrowseModal>,
+      </BrowseModal>
     );
     expect(screen.getByTestId('preview-stage')).toHaveTextContent('browsed stage');
     expect(screen.getByText('Author')).toBeInTheDocument();
@@ -134,17 +124,10 @@ describe('BrowseModal (PreviewModal + SprkModal nav — FR-09)', () => {
   it('clicking the footer Close invokes onClose', () => {
     const onClose = jest.fn();
     const onNavigate = jest.fn();
-    renderWithProviders(
-      <BrowseModal
-        open
-        onClose={onClose}
-        title="Rec"
-        nav={{ index: 0, total: 3, onNavigate }}
-      />,
-    );
+    renderWithProviders(<BrowseModal open onClose={onClose} title="Rec" nav={{ index: 0, total: 3, onNavigate }} />);
     const footerClose = screen
       .getAllByRole('button', { name: /^close$/i })
-      .find((b) => b.textContent === 'Close') as HTMLElement;
+      .find(b => b.textContent === 'Close') as HTMLElement;
     fireEvent.click(footerClose);
     expect(onClose).toHaveBeenCalledTimes(1);
   });

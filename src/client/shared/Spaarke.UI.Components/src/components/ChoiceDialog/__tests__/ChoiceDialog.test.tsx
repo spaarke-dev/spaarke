@@ -98,10 +98,23 @@ describe('ChoiceDialog (re-based onto ChoiceModal — choice-dialog-pattern pres
     const onSelect = jest.fn();
     const withDisabled: IChoiceDialogOption[] = [
       ...twoOptions,
-      { id: 'discard', icon: <DeleteRegular />, title: 'Discard', description: 'Delete the existing draft.', disabled: true },
+      {
+        id: 'discard',
+        icon: <DeleteRegular />,
+        title: 'Discard',
+        description: 'Delete the existing draft.',
+        disabled: true,
+      },
     ];
     renderWithProviders(
-      <ChoiceDialog open title="Choose" message="Pick one." options={withDisabled} onSelect={onSelect} onDismiss={noop} />
+      <ChoiceDialog
+        open
+        title="Choose"
+        message="Pick one."
+        options={withDisabled}
+        onSelect={onSelect}
+        onDismiss={noop}
+      />
     );
     const disabledOption = screen.getByRole('button', { name: /discard/i });
     expect(disabledOption).toBeDisabled();
@@ -142,7 +155,14 @@ describe('ChoiceDialog (re-based onto ChoiceModal — choice-dialog-pattern pres
 
   it('chrome (window controls) comes from ChoiceModal/SprkModal, not a local Dialog', () => {
     renderWithProviders(
-      <ChoiceDialog open title="Resume session?" message="Has history." options={twoOptions} onSelect={noop} onDismiss={noop} />
+      <ChoiceDialog
+        open
+        title="Resume session?"
+        message="Has history."
+        options={twoOptions}
+        onSelect={noop}
+        onDismiss={noop}
+      />
     );
     // The standard Spaarke close (×) affordance is distinct from the footer Cancel button —
     // proof the header cluster is supplied by ModalWindowControls via ChoiceModal/SprkModal,
@@ -154,7 +174,14 @@ describe('ChoiceDialog (re-based onto ChoiceModal — choice-dialog-pattern pres
   it('the × close control invokes onDismiss (same handler as Cancel)', () => {
     const onDismiss = jest.fn();
     renderWithProviders(
-      <ChoiceDialog open title="Resume session?" message="Has history." options={twoOptions} onSelect={noop} onDismiss={onDismiss} />
+      <ChoiceDialog
+        open
+        title="Resume session?"
+        message="Has history."
+        options={twoOptions}
+        onSelect={noop}
+        onDismiss={onDismiss}
+      />
     );
     fireEvent.click(screen.getByRole('button', { name: /^close$/i }));
     expect(onDismiss).toHaveBeenCalledTimes(1);

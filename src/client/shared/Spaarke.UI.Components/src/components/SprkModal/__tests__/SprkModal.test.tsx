@@ -23,7 +23,7 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
         footer={<button>Save</button>}
       >
         <div>Body content here</div>
-      </SprkModal>,
+      </SprkModal>
     );
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText('Matter Details')).toBeInTheDocument();
@@ -39,7 +39,7 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
     renderWithProviders(
       <SprkModal open={false} onClose={noop} title="Hidden">
         <div>secret</div>
-      </SprkModal>,
+      </SprkModal>
     );
     expect(screen.queryByText('secret')).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -49,7 +49,7 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
     renderWithProviders(
       <SprkModal open onClose={noop} title="Sizeable">
         <div>x</div>
-      </SprkModal>,
+      </SprkModal>
     );
     fireEvent.click(screen.getByRole('button', { name: /maximize dialog/i }));
     expect(screen.getByRole('button', { name: /restore dialog size/i })).toBeInTheDocument();
@@ -61,7 +61,7 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
     renderWithProviders(
       <SprkModal open onClose={noop} title="No max" maximizable={false}>
         <div>x</div>
-      </SprkModal>,
+      </SprkModal>
     );
     expect(screen.queryByRole('button', { name: /maximize dialog/i })).toBeNull();
     expect(screen.getByRole('button', { name: /^close$/i })).toBeInTheDocument();
@@ -71,7 +71,7 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
     renderWithProviders(
       <SprkModal open onClose={noop} title="No footer">
         <div>only body</div>
-      </SprkModal>,
+      </SprkModal>
     );
     expect(screen.queryByRole('button', { name: /^save$/i })).toBeNull();
     expect(screen.getByText('only body')).toBeInTheDocument();
@@ -82,7 +82,7 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
     renderWithProviders(
       <SprkModal open onClose={onClose} title="Closable">
         <div>x</div>
-      </SprkModal>,
+      </SprkModal>
     );
     fireEvent.click(screen.getByRole('button', { name: /^close$/i }));
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -93,7 +93,7 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
     renderWithProviders(
       <SprkModal open onClose={noop} title="Rec" nav={{ index: 0, total: 3, onNavigate }}>
         <div>x</div>
-      </SprkModal>,
+      </SprkModal>
     );
     expect(screen.getByText('1 of 3')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /previous record/i })).toBeDisabled();
@@ -106,14 +106,14 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
     const { unmount } = renderWithProviders(
       <SprkModal open onClose={noop} title="Alert" dismiss="alert">
         <div>x</div>
-      </SprkModal>,
+      </SprkModal>
     );
     expect(screen.getByRole('alertdialog')).toBeInTheDocument();
     unmount();
     renderWithProviders(
       <SprkModal open onClose={noop} title="Light" dismiss="light">
         <div>x</div>
-      </SprkModal>,
+      </SprkModal>
     );
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
@@ -124,7 +124,7 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
         <SprkModal open onClose={noop} title="Centered">
           <div>x</div>
         </SprkModal>
-      </div>,
+      </div>
     );
     const transformed = container.querySelector('[data-testid="xf"]') as HTMLElement;
     const dialog = screen.getByRole('dialog');
@@ -139,7 +139,7 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
         <SprkModal open onClose={noop} title="Dark">
           <div>dark body</div>
         </SprkModal>
-      </FluentProvider>,
+      </FluentProvider>
     );
     expect(screen.getByText('dark body')).toBeInTheDocument();
   });

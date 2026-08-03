@@ -401,59 +401,67 @@ describe('SprkChat - action_confirmation Integration (spaarke-modal-system task 
   // preserving the retired overlay's title/summary/parameters body copy.
   // ─────────────────────────────────────────────────────────────────────
 
-  it('sseFlow_ActionConfirmationEvent_RendersConfirmModalWithSummaryAndParameters', async () => {
-    const user = await renderChatWithSession();
+  it(
+    'sseFlow_ActionConfirmationEvent_RendersConfirmModalWithSummaryAndParameters',
+    async () => {
+      const user = await renderChatWithSession();
 
-    await sendMessageAndStream(user, TYPED_MESSAGE, ACTION_CONFIRMATION_EVENTS);
+      await sendMessageAndStream(user, TYPED_MESSAGE, ACTION_CONFIRMATION_EVENTS);
 
-    // ConfirmModal (dismiss="alert") renders as an alertdialog — a real Fluent Dialog,
-    // unlike the retired overlay's plain `role="dialog"` div.
-    const dialog = await findAlertDialogWithFlush();
-    expect(dialog).toHaveTextContent('Confirm Action: Send Email');
-    expect(dialog).toHaveTextContent('Send an email to the matter contact.');
+      // ConfirmModal (dismiss="alert") renders as an alertdialog — a real Fluent Dialog,
+      // unlike the retired overlay's plain `role="dialog"` div.
+      const dialog = await findAlertDialogWithFlush();
+      expect(dialog).toHaveTextContent('Confirm Action: Send Email');
+      expect(dialog).toHaveTextContent('Send an email to the matter contact.');
 
-    // Parameters box — body copy the user needs before confirming a side-effecting
-    // action; preserved from the retired overlay rather than dropped.
-    expect(screen.getByTestId('action-parameters')).toBeInTheDocument();
-    expect(dialog).toHaveTextContent('Recipient:');
-    expect(dialog).toHaveTextContent('john@example.com');
-    expect(dialog).toHaveTextContent('Subject:');
-    expect(dialog).toHaveTextContent('Status update');
+      // Parameters box — body copy the user needs before confirming a side-effecting
+      // action; preserved from the retired overlay rather than dropped.
+      expect(screen.getByTestId('action-parameters')).toBeInTheDocument();
+      expect(dialog).toHaveTextContent('Recipient:');
+      expect(dialog).toHaveTextContent('john@example.com');
+      expect(dialog).toHaveTextContent('Subject:');
+      expect(dialog).toHaveTextContent('Status update');
 
-    // Standard Cancel/Confirm footer.
-    expect(screen.getByRole('button', { name: /^cancel$/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^confirm$/i })).toBeInTheDocument();
-  }, TEST_TIMEOUT_MS);
+      // Standard Cancel/Confirm footer.
+      expect(screen.getByRole('button', { name: /^cancel$/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^confirm$/i })).toBeInTheDocument();
+    },
+    TEST_TIMEOUT_MS
+  );
 
   // ─────────────────────────────────────────────────────────────────────
   // Test 2: Confirm dispatches the approved gate-resolve call, closes the
   // dialog, and renders the completion message in the transcript.
   // ─────────────────────────────────────────────────────────────────────
 
-  it('confirmClick_DispatchesApprovedGateResolveAndClosesDialog', async () => {
-    const user = await renderChatWithSession();
-    await sendMessageAndStream(user, TYPED_MESSAGE, ACTION_CONFIRMATION_EVENTS);
-    await findAlertDialogWithFlush();
+  it(
+    'confirmClick_DispatchesApprovedGateResolveAndClosesDialog',
+    async () => {
+      const user = await renderChatWithSession();
+      await sendMessageAndStream(user, TYPED_MESSAGE, ACTION_CONFIRMATION_EVENTS);
+      await findAlertDialogWithFlush();
 
-    pendingGateResolveResponses.push(createFetchResponse({ summary: 'Email sent.' }));
-    await user.click(screen.getByRole('button', { name: /^confirm$/i }));
-    // The confirm dispatch (gate-resolve fetch -> transcript message -> dialog
-    // close) is the same async class as the send stream — release its parked
-    // response inside act() (see flushPendingWork).
-    await flushPendingWork();
+      pendingGateResolveResponses.push(createFetchResponse({ summary: 'Email sent.' }));
+      await user.click(screen.getByRole('button', { name: /^confirm$/i }));
+      // The confirm dispatch (gate-resolve fetch -> transcript message -> dialog
+      // close) is the same async class as the send stream — release its parked
+      // response inside act() (see flushPendingWork).
+      await flushPendingWork();
 
-    await waitForWithFlush(() => {
-      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-    });
+      await waitForWithFlush(() => {
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      });
 
-    expect(gateResolveCalls).toHaveLength(1);
-    expect(gateResolveCalls[0].url).toContain('/sessions/session-042/gates/gate-001/resolve');
-    expect(gateResolveCalls[0].body).toEqual({ approved: true });
+      expect(gateResolveCalls).toHaveLength(1);
+      expect(gateResolveCalls[0].url).toContain('/sessions/session-042/gates/gate-001/resolve');
+      expect(gateResolveCalls[0].body).toEqual({ approved: true });
 
-    await waitForWithFlush(() => {
-      expect(screen.getByText(/Send Email completed\. Email sent\./)).toBeInTheDocument();
-    });
-  }, TEST_TIMEOUT_MS);
+      await waitForWithFlush(() => {
+        expect(screen.getByText(/Send Email completed\. Email sent\./)).toBeInTheDocument();
+      });
+    },
+    TEST_TIMEOUT_MS
+  );
 
   // ─────────────────────────────────────────────────────────────────────
   // Test 3: Cancel dispatches the rejected gate-resolve call and closes the
@@ -462,28 +470,32 @@ describe('SprkChat - action_confirmation Integration (spaarke-modal-system task 
   // server reject call is fire-and-forget).
   // ─────────────────────────────────────────────────────────────────────
 
-  it('cancelClick_DispatchesRejectedGateResolveAndClosesDialogWithoutExecuting', async () => {
-    const user = await renderChatWithSession();
-    await sendMessageAndStream(user, TYPED_MESSAGE, ACTION_CONFIRMATION_EVENTS);
-    await findAlertDialogWithFlush();
+  it(
+    'cancelClick_DispatchesRejectedGateResolveAndClosesDialogWithoutExecuting',
+    async () => {
+      const user = await renderChatWithSession();
+      await sendMessageAndStream(user, TYPED_MESSAGE, ACTION_CONFIRMATION_EVENTS);
+      await findAlertDialogWithFlush();
 
-    await user.click(screen.getByRole('button', { name: /^cancel$/i }));
+      await user.click(screen.getByRole('button', { name: /^cancel$/i }));
 
-    // Cancel clears local state synchronously — the dialog must already be gone
-    // BEFORE any async drain (that is the assertion of the retired overlay's
-    // fire-and-forget cancel semantics).
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      // Cancel clears local state synchronously — the dialog must already be gone
+      // BEFORE any async drain (that is the assertion of the retired overlay's
+      // fire-and-forget cancel semantics).
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
 
-    // Release + drive the fire-and-forget reject POST through deterministically.
-    await flushPendingWork();
+      // Release + drive the fire-and-forget reject POST through deterministically.
+      await flushPendingWork();
 
-    await waitForWithFlush(() => {
-      expect(gateResolveCalls).toHaveLength(1);
-    });
-    expect(gateResolveCalls[0].body).toEqual({ approved: false });
+      await waitForWithFlush(() => {
+        expect(gateResolveCalls).toHaveLength(1);
+      });
+      expect(gateResolveCalls[0].body).toEqual({ approved: false });
 
-    expect(screen.queryByText(/completed/i)).not.toBeInTheDocument();
-  }, TEST_TIMEOUT_MS);
+      expect(screen.queryByText(/completed/i)).not.toBeInTheDocument();
+    },
+    TEST_TIMEOUT_MS
+  );
 
   // ─────────────────────────────────────────────────────────────────────
   // Test 4: ESC does not dismiss — dismiss="alert" (ConfirmModal's fixed
@@ -493,52 +505,60 @@ describe('SprkChat - action_confirmation Integration (spaarke-modal-system task 
   // dismiss guarantee, so this is a11y parity, not a regression.
   // ─────────────────────────────────────────────────────────────────────
 
-  it('escapeKey_DoesNotDismiss_AlertModalBlocksLightDismiss', async () => {
-    const user = await renderChatWithSession();
-    await sendMessageAndStream(user, TYPED_MESSAGE, ACTION_CONFIRMATION_EVENTS);
-    const dialog = await findAlertDialogWithFlush();
+  it(
+    'escapeKey_DoesNotDismiss_AlertModalBlocksLightDismiss',
+    async () => {
+      const user = await renderChatWithSession();
+      await sendMessageAndStream(user, TYPED_MESSAGE, ACTION_CONFIRMATION_EVENTS);
+      const dialog = await findAlertDialogWithFlush();
 
-    fireEvent.keyDown(dialog, { key: 'Escape', code: 'Escape' });
+      fireEvent.keyDown(dialog, { key: 'Escape', code: 'Escape' });
 
-    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
-    expect(gateResolveCalls).toHaveLength(0);
-  }, TEST_TIMEOUT_MS);
+      expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+      expect(gateResolveCalls).toHaveLength(0);
+    },
+    TEST_TIMEOUT_MS
+  );
 
   // ─────────────────────────────────────────────────────────────────────
   // Test 5: dark-theme parity (ADR-021) — semantic tokens only, renders
   // correctly under webDarkTheme with no crash.
   // ─────────────────────────────────────────────────────────────────────
 
-  it('darkTheme_RendersActionConfirmationWithSummaryAndParameters', async () => {
-    const user = userEvent.setup();
+  it(
+    'darkTheme_RendersActionConfirmationWithSummaryAndParameters',
+    async () => {
+      const user = userEvent.setup();
 
-    await act(async () => {
-      render(
-        <FluentProvider theme={webDarkTheme}>
-          <SprkChat {...defaultProps} />
-        </FluentProvider>
+      await act(async () => {
+        render(
+          <FluentProvider theme={webDarkTheme}>
+            <SprkChat {...defaultProps} />
+          </FluentProvider>
+        );
+        // Same held-open mount act as renderChatWithSession: let the session-create
+        // chain settle while the act queue is open (header comment, root cause 2).
+        await new Promise(resolve => setTimeout(resolve, 0));
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+
+      await waitFor(
+        () => {
+          const textarea = screen.getByTestId('chat-input-textarea');
+          const nativeTextarea = textarea.querySelector('textarea') || textarea;
+          expect(nativeTextarea).not.toBeDisabled();
+        },
+        // Generous timeout — full-suite parallel workers can lag well past the 1s
+        // default (matches actionOutcomeIntegration's convention).
+        { timeout: 3000 }
       );
-      // Same held-open mount act as renderChatWithSession: let the session-create
-      // chain settle while the act queue is open (header comment, root cause 2).
-      await new Promise(resolve => setTimeout(resolve, 0));
-      await new Promise(resolve => setTimeout(resolve, 0));
-    });
 
-    await waitFor(
-      () => {
-        const textarea = screen.getByTestId('chat-input-textarea');
-        const nativeTextarea = textarea.querySelector('textarea') || textarea;
-        expect(nativeTextarea).not.toBeDisabled();
-      },
-      // Generous timeout — full-suite parallel workers can lag well past the 1s
-      // default (matches actionOutcomeIntegration's convention).
-      { timeout: 3000 }
-    );
+      await sendMessageAndStream(user, TYPED_MESSAGE, ACTION_CONFIRMATION_EVENTS);
 
-    await sendMessageAndStream(user, TYPED_MESSAGE, ACTION_CONFIRMATION_EVENTS);
-
-    const dialog = await findAlertDialogWithFlush();
-    expect(dialog).toHaveTextContent('Confirm Action: Send Email');
-    expect(screen.getByTestId('action-parameters')).toBeInTheDocument();
-  }, TEST_TIMEOUT_MS);
+      const dialog = await findAlertDialogWithFlush();
+      expect(dialog).toHaveTextContent('Confirm Action: Send Email');
+      expect(screen.getByTestId('action-parameters')).toBeInTheDocument();
+    },
+    TEST_TIMEOUT_MS
+  );
 });
