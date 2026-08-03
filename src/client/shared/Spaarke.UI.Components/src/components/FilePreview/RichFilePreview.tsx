@@ -792,9 +792,7 @@ export const RichFilePreview: React.FC<IRichFilePreviewProps> = ({
         role="group"
         aria-label="Document preview body"
       >
-        <div
-          className={mergeClasses(styles.thumbnailCell, !showMetadataPane && styles.thumbnailCellStageOnly)}
-        >
+        <div className={mergeClasses(styles.thumbnailCell, !showMetadataPane && styles.thumbnailCellStageOnly)}>
           {renderPreviewArea()}
         </div>
         {showMetadataPane && (
