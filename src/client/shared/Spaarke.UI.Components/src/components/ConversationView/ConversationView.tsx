@@ -64,7 +64,6 @@ import {
   DeleteRegular,
   EditRegular,
   MailRegular,
-  OpenRegular,
   SearchRegular,
   SendRegular,
 } from '@fluentui/react-icons';
@@ -1108,19 +1107,8 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
               )}
             </div>
           )}
-          {/* round-8.4 UAT item 3: open the thread's associated record (square-arrow). Shown when the host wired a
-              regarding record + onOpenRecord; delegates navigation to the host (ConversationView holds no Xrm — ADR-012). */}
-          {regarding && onOpenRecord && (
-            <Tooltip content="Open associated record" relationship="label">
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<OpenRegular />}
-                aria-label="Open associated record"
-                onClick={() => onOpenRecord(regarding.entityType, regarding.id)}
-              />
-            </Tooltip>
-          )}
+          {/* round-8.4 UAT item 3: opening the associated record is offered by the title hyperlink itself (which uses the
+              same regarding + onOpenRecord wiring); a separate toolbar icon would be redundant, so it was removed. */}
           {timeline.length > 0 && (
             <>
               <ToggleButton
