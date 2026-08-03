@@ -368,7 +368,12 @@ public sealed class CommunicationThreadReadService
         }
 
         // PinnedField added (task 041 / FR-24) so the all-mode thread list can mark/sort pinned threads.
-        var select = string.Join(',', new[] { ThreadPkField, ThreadNameField, ThreadTypeField, CreatedOnField, PinnedField });
+        // round-8.4 item 3: also project the typed regarding lookups (RegardingFieldMap) so each row can carry its
+        // associated record for the message-pane "open record" affordance. Lookups read back as `_{field}_value`.
+        var regardingValueCols = RegardingFieldMap.All.Select(x => $"_{x.RegardingField}_value");
+        var select = string.Join(
+            ',',
+            new[] { ThreadPkField, ThreadNameField, ThreadTypeField, CreatedOnField, PinnedField }.Concat(regardingValueCols));
         var filterPart = clauses.Count > 0 ? $"&$filter={string.Join(" and ", clauses)}" : string.Empty;
         // Deterministic total order on the composite key so paging is stable + non-overlapping; over-fetch one row
         // to detect whether a further page exists without a second COUNT query.
@@ -378,14 +383,20 @@ public sealed class CommunicationThreadReadService
         var rows = await _query.QueryAsync(ThreadSet, odata, callerSystemUserId, ct);
 
         var items = rows
-            .Select(r => new ThreadListItem(
-                ThreadId: TryGuid(r, ThreadPkField) ?? Guid.Empty,
-                Name: TryString(r, ThreadNameField),
-                ThreadType: TryInt(r, ThreadTypeField),
-                CreatedOn: TryDateTimeOffset(r, CreatedOnField),
-                // Pre-existing rows read sprk_ispinned back as null (task 040 DefaultValue does not backfill) —
-                // TryBool returns null for that case, so the ?? false normalizes it to unpinned (task 041 caveat).
-                IsPinned: TryBool(r, PinnedField) ?? false))
+            .Select(r =>
+            {
+                var (regType, regId) = ResolveRegardingFromRow(r);
+                return new ThreadListItem(
+                    ThreadId: TryGuid(r, ThreadPkField) ?? Guid.Empty,
+                    Name: TryString(r, ThreadNameField),
+                    ThreadType: TryInt(r, ThreadTypeField),
+                    CreatedOn: TryDateTimeOffset(r, CreatedOnField),
+                    // Pre-existing rows read sprk_ispinned back as null (task 040 DefaultValue does not backfill) —
+                    // TryBool returns null for that case, so the ?? false normalizes it to unpinned (task 041 caveat).
+                    IsPinned: TryBool(r, PinnedField) ?? false,
+                    RegardingEntityType: regType,
+                    RegardingId: regId);
+            })
             .Where(t => t.ThreadId != Guid.Empty)
             .ToList();
 
@@ -926,4 +937,20 @@ public sealed class CommunicationThreadReadService
 
     private static DateTimeOffset? TryDateTimeOffset(Dictionary<string, JsonElement> row, string key)
         => row.TryGetValue(key, out var v) && v.ValueKind == JsonValueKind.String && v.TryGetDateTimeOffset(out var dto) ? dto : null;
+
+    // round-8.4 item 3: resolve a thread row's associated ("regarding") record from the typed ADR-024 lookups, in
+    // RegardingFieldMap priority order — the first non-empty `_{field}_value` wins. (null, null) for a record-less
+    // Direct thread. Mirrors CommunicationArrivedProducer.ResolveTypedRegarding, but over the raw OData row shape.
+    private static (string? EntityType, Guid? Id) ResolveRegardingFromRow(Dictionary<string, JsonElement> row)
+    {
+        foreach (var (entityLogicalName, field) in RegardingFieldMap.All)
+        {
+            if (TryGuid(row, $"_{field}_value") is { } id && id != Guid.Empty)
+            {
+                return (entityLogicalName, id);
+            }
+        }
+
+        return (null, null);
+    }
 }

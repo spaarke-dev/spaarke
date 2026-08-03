@@ -100,13 +100,17 @@ describe('ConversationView title header (FR-12)', () => {
     expect(screen.queryByRole('button', { name: /open associated record/i })).toBeNull();
   });
 
-  it('renders NO header when no title is supplied (existing callers unaffected)', async () => {
+  it('renders no title text when no title is supplied, but still offers the open-record TOOL when a record is wired (round-8.4 item 3)', async () => {
     renderView({ regarding: MATTER, onOpenRecord: jest.fn() });
 
     // Let the initial load settle so the assertion is about the header, not timing.
     await waitFor(() => expect(screen.getByRole('log', { name: /conversation messages/i })).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: /open associated record/i })).toBeNull();
+    // No title text/link (the title header itself stays absent — existing callers unaffected there).
     expect(screen.queryByText('Acme v. Beta')).toBeNull();
+    // But the dedicated toolbar "open associated record" affordance now appears whenever a regarding record +
+    // onOpenRecord are wired — it is a record-scoped TOOL, not part of the title. (In practice a record-anchored
+    // thread has a name too, so this nameless case is rare; the tool must still be reachable.)
+    expect(screen.getByRole('button', { name: /^open associated record$/i })).toBeInTheDocument();
   });
 
   it('title link is keyboard-operable (Enter activates onOpenRecord) and ARIA-labeled', async () => {

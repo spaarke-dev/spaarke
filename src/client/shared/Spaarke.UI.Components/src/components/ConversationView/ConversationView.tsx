@@ -64,6 +64,7 @@ import {
   DeleteRegular,
   EditRegular,
   MailRegular,
+  OpenRegular,
   SearchRegular,
   SendRegular,
 } from '@fluentui/react-icons';
@@ -118,7 +119,7 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: tokens.fontSizeBase500,
+    fontSize: '18px', // round-8.4 UAT item 1 (operator spec: 18px; no exact Fluent token between base400=16 and base500=20)
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
@@ -130,7 +131,7 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: tokens.fontSizeBase500,
+    fontSize: '18px', // round-8.4 UAT item 1 (operator spec: 18px)
     fontWeight: tokens.fontWeightSemibold,
     textAlign: 'left',
   },
@@ -335,7 +336,9 @@ const useFilterStyles = makeStyles({
   // 5c) live here now alongside the icon filters.
   bar: {
     display: 'flex',
-    flexWrap: 'wrap',
+    // round-8.4 UAT item 2: keep the tools on ONE line — the (shrinkable, ellipsized) title yields space instead of
+    // the trailing tools wrapping to a second row.
+    flexWrap: 'nowrap',
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: tokens.spacingHorizontalS,
@@ -833,6 +836,10 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
   const [renameDraft, setRenameDraft] = React.useState('');
   const [renameBusy, setRenameBusy] = React.useState(false);
   const effectiveTitle = titleOverride ?? title;
+  // round-8.4 UAT item 2: hard-cap the VISIBLE title at 50 chars with an ellipsis so a very long thread name can't
+  // crowd the trailing tools onto a second line. The full name stays in the aria-label + a native tooltip.
+  const displayTitle =
+    effectiveTitle && effectiveTitle.length > 50 ? `${effectiveTitle.slice(0, 50).trimEnd()}…` : effectiveTitle;
   const canRename = Boolean(onThreadRenamed && threadId);
 
   // Reset any local override when the selected thread changes (the incoming title prop is authoritative again).
@@ -1033,12 +1040,15 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
                   type="button"
                   className={styles.titleLink}
                   aria-label={`${effectiveTitle}, open associated record`}
+                  title={effectiveTitle ?? undefined}
                   onClick={() => onOpenRecord(regarding.entityType, regarding.id)}
                 >
-                  {effectiveTitle}
+                  {displayTitle}
                 </Link>
               ) : (
-                <Text className={styles.titleText}>{effectiveTitle}</Text>
+                <Text className={styles.titleText} title={effectiveTitle ?? undefined}>
+                  {displayTitle}
+                </Text>
               )}
               {/* Inline rename (round-8.4): pencil on hover → small popover with a name input. */}
               {canRename && (
@@ -1097,6 +1107,19 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
                 </Popover>
               )}
             </div>
+          )}
+          {/* round-8.4 UAT item 3: open the thread's associated record (square-arrow). Shown when the host wired a
+              regarding record + onOpenRecord; delegates navigation to the host (ConversationView holds no Xrm — ADR-012). */}
+          {regarding && onOpenRecord && (
+            <Tooltip content="Open associated record" relationship="label">
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<OpenRegular />}
+                aria-label="Open associated record"
+                onClick={() => onOpenRecord(regarding.entityType, regarding.id)}
+              />
+            </Tooltip>
           )}
           {timeline.length > 0 && (
             <>

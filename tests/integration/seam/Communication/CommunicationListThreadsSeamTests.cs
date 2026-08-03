@@ -74,11 +74,51 @@ public class CommunicationListThreadsSeamTests
 
         result.Threads.Should().ContainSingle(t => t.ThreadId == directThreadId)
             .Which.ThreadType.Should().Be(ThreadTypeDirect, "a Direct/record-less thread must be listed like any other");
-        // The impersonated thread query is NOT scoped to any regarding lookup — that is HOW a record-less thread
-        // (which carries no sprk_regarding{type} anchor) is included at all.
+        // The impersonated thread query's FILTER is NOT scoped to any regarding lookup — that is HOW a record-less
+        // thread (which carries no sprk_regarding{type} anchor) is included at all. (round-8.4 item 3: the $SELECT now
+        // DOES project the regarding lookups for the open-record affordance, so the check is filter-scoped, not the
+        // whole query.)
         threadQuery.Should().NotBeNull();
-        threadQuery!.Should().NotContain("_sprk_regarding",
-            "the list-all query must not be scoped to any regarding lookup or record-less threads would be excluded");
+        var filterOnward = threadQuery!.Contains("$filter=", StringComparison.Ordinal)
+            ? threadQuery.Substring(threadQuery.IndexOf("$filter=", StringComparison.Ordinal))
+            : string.Empty;
+        filterOnward.Should().NotContain("_sprk_regarding",
+            "the list-all FILTER must not be scoped to any regarding lookup or record-less threads would be excluded");
+    }
+
+    [Fact]
+    public async Task ListThreadsAsync_RecordAnchoredThread_ResolvesRegardingFromTypedLookup()
+    {
+        // round-8.4 item 3: a record-anchored thread carries a typed ADR-024 regarding lookup; the list projects it so
+        // the message-pane "open associated record" affordance can navigate to it.
+        var threadId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        var row = ThreadRow(threadId, "Acme v. Beta", ThreadTypeRecordAnchored, "2026-07-19T12:00:00.000Z");
+        row["_sprk_regardingmatter_value"] = El(matterId.ToString());
+        _query.Setup(q => q.QueryAsync(ThreadSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new[] { row });
+
+        var result = await Sut().ListThreadsAsync(Caller(), search: null, top: null, pageToken: null, CancellationToken.None);
+
+        var thread = result.Threads.Should().ContainSingle(t => t.ThreadId == threadId).Subject;
+        thread.RegardingEntityType.Should().Be("sprk_matter",
+            "the typed sprk_regardingmatter lookup resolves to its entity logical name (RegardingFieldMap)");
+        thread.RegardingId.Should().Be(matterId);
+    }
+
+    [Fact]
+    public async Task ListThreadsAsync_RecordLessThread_HasNullRegarding()
+    {
+        // A Direct/record-less thread has no typed regarding lookup → both regarding fields stay null (no open-record).
+        var threadId = Guid.NewGuid();
+        _query.Setup(q => q.QueryAsync(ThreadSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new[] { ThreadRow(threadId, "Alice ↔ Bob", ThreadTypeDirect, "2026-07-19T12:00:00.000Z") });
+
+        var result = await Sut().ListThreadsAsync(Caller(), search: null, top: null, pageToken: null, CancellationToken.None);
+
+        var thread = result.Threads.Should().ContainSingle(t => t.ThreadId == threadId).Subject;
+        thread.RegardingEntityType.Should().BeNull();
+        thread.RegardingId.Should().BeNull();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════════
