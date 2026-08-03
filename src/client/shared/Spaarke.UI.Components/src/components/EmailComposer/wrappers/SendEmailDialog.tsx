@@ -87,6 +87,13 @@ const useDialogStyles = makeStyles({
     maxWidth: '100%',
     width: '100%',
     height: '100%',
+    // UAT 2026-08-03: a maximized composer must be a TRUE full-page takeover of
+    // the host surface. Without these, Fluent's DialogSurface defaults leave
+    // auto-margins + a viewport max-height gap, so "expand" still floated with
+    // visible page chrome around it.
+    maxHeight: '100%',
+    margin: 0,
+    borderRadius: 0,
   },
   body: {
     display: 'flex',
