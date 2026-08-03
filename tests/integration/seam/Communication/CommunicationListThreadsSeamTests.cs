@@ -107,6 +107,27 @@ public class CommunicationListThreadsSeamTests
     }
 
     [Fact]
+    public async Task ListThreadsAsync_ThreadRegardingSelect_ExcludesReportCard_WhichIsNotOnTheThreadEntity()
+    {
+        // Regression (round-8.4 fix, 2026-08-03): the thread projection must NOT $select sprk_regardingreportcard —
+        // that lookup exists on sprk_communication but NOT on sprk_communicationthread, so selecting it 400s the whole
+        // OData query and blanks the thread list (client HttpRequestException). It MUST still select a valid regarding
+        // lookup (sprk_regardingmatter) so the open-record affordance keeps working.
+        string? threadQuery = null;
+        _query.Setup(q => q.QueryAsync(ThreadSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => threadQuery = odata)
+              .ReturnsAsync(Array.Empty<Dictionary<string, JsonElement>>());
+
+        await Sut().ListThreadsAsync(Caller(), search: null, top: null, pageToken: null, CancellationToken.None);
+
+        threadQuery.Should().NotBeNull();
+        threadQuery!.Should().NotContain("regardingreportcard",
+            "sprk_regardingreportcard is not a column on sprk_communicationthread — selecting it 400s the query");
+        threadQuery!.Should().Contain("_sprk_regardingmatter_value",
+            "the thread projection must still carry the valid typed regarding lookups for the open-record affordance");
+    }
+
+    [Fact]
     public async Task ListThreadsAsync_RecordLessThread_HasNullRegarding()
     {
         // A Direct/record-less thread has no typed regarding lookup → both regarding fields stay null (no open-record).
