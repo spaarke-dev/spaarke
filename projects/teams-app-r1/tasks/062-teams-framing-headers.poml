@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="teams-app-r1">
+  <metadata>
+    <title>Teams framing headers (CSP frame-ancestors) on the SWA host</title>
+    <phase>6 Enterprise &amp; Routing</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Config change to an existing framing-headers file following the established `external-spa` pattern; no new src/ surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Config change to existing framing headers following the external-spa pattern</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>012</deps>
+    <tags>config, deploy</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Update the SWA framing config to permit Teams hosts — `Content-Security-Policy: frame-ancestors 'self' https://teams.microsoft.com https://*.cloud.microsoft` — and ensure there is NO `X-Frame-Options: DENY` header present. Model the change on `external-spa/staticwebapp.config.json`, which already owns framing headers per design.md §8.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure Static Web Apps configuration, HTTP framing headers (CSP `frame-ancestors`, `X-Frame-Options`), and Teams tab iframe-embedding requirements. Follow ADRs strictly.</role>
+
+  <goal>
+    `src/client/external-spa/staticwebapp.config.json` grants the Teams hosts (`https://teams.microsoft.com`, `https://*.cloud.microsoft`) permission to frame the app via `Content-Security-Policy: frame-ancestors`, alongside the existing `'self'` allowance, with NO `X-Frame-Options: DENY` anywhere in the response headers — so the Teams tab can load in an iframe in both Teams desktop and Teams web.
+  </goal>
+
+  <context>
+    <background>
+      Per design.md §8 (Enterprise posture) and spec NFR-04: `Content-Security-Policy: frame-ancestors 'self' https://teams.microsoft.com https://*.cloud.microsoft`; non-redirect auth (Teams SSO/NAA/popup); tolerant of Conditional Access. The framing config already exists and is owned by `external-spa/staticwebapp.config.json` — this task widens the existing `frame-ancestors` allowlist, it does not introduce new framing infrastructure.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/staticwebapp.config.json</file>
+      <file role="canonical-reference">docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: `staticwebapp.config.json` response headers only. The `frame-ancestors` directive MUST be an exact allowlist — `'self' https://teams.microsoft.com https://*.cloud.microsoft` — per spec NFR-04; do NOT use a wildcard broader than this, and do NOT remove the existing `'self'` entry.</constraint>
+    <constraint source="project">SCOPE: header set. There MUST be NO `X-Frame-Options: DENY` (or any `X-Frame-Options` value) anywhere in the response headers after this change — `X-Frame-Options` and CSP `frame-ancestors` conflict, and a lingering `DENY` would silently block Teams framing even with the correct CSP in place.</constraint>
+    <constraint source="project">Reference `docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` for the embedded-host framing requirement to confirm this change satisfies the same host-contract checklist item used elsewhere for embedded surfaces.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Teams tab framing headers (CSP frame-ancestors)</topic>
+    <files>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="SWA framing headers" location="src/client/external-spa/staticwebapp.config.json">Already owns the CSP `frame-ancestors` header for the standalone SPA (`'self'`); this task adds the Teams host entries to the same directive rather than creating a parallel config file.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Read `src/client/external-spa/staticwebapp.config.json` in full and locate the current `Content-Security-Policy` / `frame-ancestors` and any `X-Frame-Options` header entries.</step>
+    <step order="2">Update `frame-ancestors` to exactly `'self' https://teams.microsoft.com https://*.cloud.microsoft`, preserving every other existing CSP directive unchanged.</step>
+    <step order="3">Remove any `X-Frame-Options: DENY` (or other `X-Frame-Options`) header entry if present; confirm none remains anywhere in the config (including per-route overrides).</step>
+    <step order="4">Cross-check the change against `docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md`'s framing/host-contract checklist item.</step>
+    <step order="5">Deploy/verify the config change reaches the SWA (per the existing `external-spa` deploy path) and manually confirm the tab frames inside Teams desktop and Teams web.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run shell commands; deploy/verify the SWA config</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/client/external-spa/staticwebapp.config.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The Teams tab loads (frames successfully) inside Teams desktop.</criterion>
+    <criterion testable="true">The Teams tab loads (frames successfully) inside Teams web.</criterion>
+    <criterion testable="true">No `X-Frame-Options: DENY` header is present in the deployed response headers.</criterion>
+    <criterion testable="true">A non-allowlisted host (i.e., anything other than `'self'`, `https://teams.microsoft.com`, `https://*.cloud.microsoft`) attempting to frame the app is still refused framing by the CSP.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    No `<justification>` required — this modifies an existing config file only. Depends on task 012 (Teams host adapter seam) so the tab has a Teams-detecting host to frame before this header change is verified end-to-end.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. This is a STANDARD-rigor task (Step 9.5 gates skipped).</protocol>
+  </execution>
+</task>

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="teams-app-r1">
+  <metadata>
+    <title>Standing-grant field on `contact` + Contact-form toggle (Dataverse schema)</title>
+    <phase>5 Standing Grant</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New Dataverse field + form toggle following the standard field-creation pattern (dataverse-create-schema skill); no code-review/adr-check gate required per CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Dataverse schema change following the standard field-creation pattern.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>dataverse, fields, solution, deploy</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Create the per-contact standing-grant field on the `contact` entity — a subject-level policy flag, distinct from the per-record `sprk_externalrecordaccess` grants — plus a Contact-form toggle, writable only by a grant-privileged systemuser. This task creates the DATA + UI surface only; the runtime union that consumes the field to widen a contact's accessible-record set is task 051 (deps this task).
+  </prompt>
+
+  <role>SPAARKE platform developer with Dataverse schema authoring expertise (Boolean/Two-Options columns, form editing, and Field Security Profiles via the dataverse-create-schema skill).</role>
+
+  <goal>
+    The `contact` entity carries a new Two Options (Boolean) column, e.g. `sprk_standinggrant`, defaulted to No/false, protected by a Field Security Profile so only a grant-privileged systemuser (or team/role holding that profile) can set its value. A toggle for the field is added to the Contact main form. The field itself confers no access on its own in this task — it is a durable policy flag that task 051's runtime union reads.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-12 and design.md §5/§5.1: `accessible(principal)` for a contact currently unions `sprk_externalrecordaccess` grants (per-record, materialized by the grant modal) with a planned standing-grant runtime membership term that does not exist yet. In-house counsel today has no mechanism to grant an outside-counsel contact standing access across all of that contact's allowlisted-role records (now and future) without materializing a row per record. This task adds the durable per-contact flag that makes that policy expressible; task 051 wires it into the live accessible-set composition. The existing `ExternalParticipationService` participation cache and the design-only `unified-access-control` concepts are the nearest existing surfaces — neither has a standing-grant column today.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="canonical-reference">docs/data-model/</file>
+      <file role="canonical-reference">projects/teams-app-r1/design.md</file>
+      <file role="new">projects/teams-app-r1/notes/050-standing-grant-field-schema.md</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>`contact` entity fields today (docs/data-model/); the design-only `unified-access-control` concepts (`sprk_accesssubject`/`sprk_accessrole`, not built) and the built `ExternalParticipationService` participation cache. No existing column encodes a per-contact standing-access policy.</existing>
+    <extension>No — this requires a new column plus a new Contact-form toggle. There is no existing field to repurpose: `sprk_externalrecordaccess` is a per-record grant table, not a subject-level policy flag, and the UAC layer that would eventually generalize this is explicitly out of R1 scope (design.md §5 known gaps).</extension>
+    <cost-of-doing-nothing>Without this field, in-house counsel has no way to grant an outside-counsel contact standing access across all of that contact's allowlisted-role records (present and future) — every record would instead require a separate, manually-approved `sprk_externalrecordaccess` row, which does not scale and does not satisfy FR-12's "including future records" requirement.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="project">This is a SUBJECT-LEVEL policy flag, not a record grant. It MUST NOT be confused with or write to `sprk_externalrecordaccess`; it confers no access by itself in this task — the runtime union consuming it is a separate task (051).</constraint>
+    <constraint source="project">The field MUST be writable only by a grant-privileged systemuser. Enforce this with a Dataverse Field Security Profile restricting the Update privilege on the column (native FLS enforcement), not client-side hiding alone; the Contact-form toggle must respect FLS (read-only/hidden when the caller lacks the profile).</constraint>
+    <constraint source="ADR-024">`contact` also participates as a valid polymorphic resolver target entity (e.g. `sprk_event` → Contact). Name and place the new field so it is unambiguously an access-policy attribute, not a regarding/resolver field — do not let it collide with or be misread as part of the resolver-field family.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Standing-grant field authoring (Dataverse schema)</topic>
+    <files>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Field Security Profile write-restriction" location=".claude/skills/dataverse-create-schema/SKILL.md">Restrict Update privilege on a new column to a specific security role/team via a Field Security Profile, enforced natively by Dataverse — not client-side hiding alone.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Load the `dataverse-create-schema` skill and read `docs/data-model/` for `contact` entity conventions (naming, existing Boolean fields) and design.md §5/§5.1 for the FR-12 contract.</step>
+    <step order="2">Draft the exact field spec: logical name (e.g. `sprk_standinggrant`), type Two Options (Boolean), default No/false, on `contact`. Identify or create a Field Security Profile (e.g. reuse/create a "Standing Grant Administrators" profile) that grants Update privilege on this field only to a grant-privileged role/team.</step>
+    <step order="3">Create the column on `contact` per the dataverse-create-schema Web API + PowerShell patterns. Enable field-level security on the column and attach the Field Security Profile with Update granted only to the intended role/team (Read may be broader; confirm with existing FLS conventions in the org).</step>
+    <step order="4">Add the field to the Contact main form as a toggle control, near existing access-related fields; verify the control honors FLS (disabled/hidden for a caller without the profile).</step>
+    <step order="5">Publish the customizations. Verify via a metadata read that the field exists with the expected type/default, FLS is enabled, and the Field Security Profile is attached with Update restricted as intended.</step>
+    <step order="6">Verify manually (or via a scripted check) that a non-privileged test user cannot set the toggle (hidden or read-only), while a user holding the Field Security Profile can.</step>
+    <step order="7">Record the final logical name, type, default, and Field Security Profile name in `projects/teams-app-r1/notes/050-standing-grant-field-schema.md` so task 051 can reference the exact contract.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Web API + PowerShell schema/form creation per dataverse-create-schema.</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">contact.sprk_standinggrant (Two Options/Boolean, default No, FLS-restricted)</output>
+    <output type="ui">Contact main form — standing-grant toggle</output>
+    <output type="docs">projects/teams-app-r1/notes/050-standing-grant-field-schema.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the schema change is applied, when `contact` metadata is read, then a `sprk_standinggrant` (or equivalently named) Two Options field exists with a documented default.</criterion>
+    <criterion testable="true">Given the Contact main form, when opened, then a toggle bound to the standing-grant field is present.</criterion>
+    <criterion testable="true">Given a grant-privileged systemuser (holds the Field Security Profile), when they edit the toggle, then the write succeeds.</criterion>
+    <criterion testable="true">Negative: given a non-privileged systemuser (does not hold the Field Security Profile), when they attempt to set the toggle, then the write is blocked/the control is read-only — Dataverse FLS enforces this, not client-side hiding alone.</criterion>
+    <criterion testable="true">Negative: no existing `contact` field is modified or removed, and no `sprk_externalrecordaccess` row is created by this task — the change is additive schema + UI only.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Phase 5 / Stream D (parallel with Streams P/M/E per plan.md). Blocks task 051 (runtime union), which reads this field. Canonical home of the standing-grant control per design.md §5.1 is the Contact form; the grant modal (task in Phase 4) may offer it inline as a shortcut but this field is the source of truth.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist. Use dataverse-create-schema patterns.</protocol>
+  </execution>
+</task>

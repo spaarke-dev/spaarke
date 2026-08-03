@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="teams-app-r1">
+  <metadata>
+    <title>TrackingFieldTrio governance toolbar — person + email icons</title>
+    <phase>4 Access-Management Surface (PCF)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies a shared production component (both the PCF and its shared core) consumed by multiple hosts (FR-11/FR-13); code-review + adr-check apply.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified UI extension of an existing component; no auth/security-sensitive logic in this task.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared TrackingFieldTrio component files; serialize the toolbar chain (040 → 041/042 → 043 → 045). Stream C runs concurrently with other streams.</parallel-reason>
+    <deps>021</deps>
+    <tags>pcf, react, frontend, fluent-ui</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Extend `TrackingFieldTrio` (the shared core in `@spaarke/ui-components` AND the PCF that hosts it) with a two-icon governance toolbar: a person icon that opens the access-grant modal (built in task 041) and an email icon that opens the email-members action (built in task 042). The toolbar sits alongside the existing Monitor / High-Priority / Access-Permission controls, without breaking any of them. This task builds the toolbar shell and its two click affordances (icons + disabled/hidden states + click handlers wired to caller-supplied callback props); it does NOT build the modal or email-dialog contents themselves — those are tasks 041 and 042.
+  </prompt>
+
+  <role>SPAARKE frontend developer. Expert in Fluent UI v9, PCF (React 16/17) + shared-library (React-16-safe) component authoring, and the entity-agnostic shared-core pattern used by `TrackingFieldTrio`. Follow ADRs strictly.</role>
+
+  <goal>
+    `TrackingFieldTrio` renders a small toolbar with a person icon and an email icon in addition to its existing three controls. The toolbar is entity-agnostic (no hardcoded entity/field values — same discipline as the existing component), Fluent v9 semantic-token styled, dark-mode correct, and each icon invokes a caller-supplied callback (`onOpenGrantModal` / `onOpenEmailMembers`) so tasks 041/042 can wire the actual dialogs without further changes to this component. The PCF version is bumped per the standard 4-location convention (see PCF-DEPLOYMENT-GUIDE.md) since this is a functional change to the control, deferring the deploy itself to task 045.
+  </goal>
+
+  <context>
+    <background>
+      Per design.md §5.1 and spec FR-11/FR-13, the `TrackingFieldTrio` PCF becomes the record's governance card. It already renders Monitor / High Priority / Access-Permission (`src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx`, entity-agnostic per FR-14 of its own originating project — every label/option is prop-injected, no baked-in entity values). R1 adds the two-icon toolbar as the entry point for the access-grant modal (041) and email-members action (042). Task 021 (contact-anchored membership / candidate source) must land first so the toolbar's downstream consumers have data to show, though this task itself only adds the toolbar shell + callback wiring.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/types.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/__tests__/TrackingFieldTrio.test.tsx</file>
+      <file role="modify">src/client/pcf/TrackingFieldTrio/index.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/__tests__/TrackingFieldTrio.toolbar.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>The `TrackingFieldTrio` PCF (`src/client/pcf/TrackingFieldTrio/`) and its shared core (`src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/`) already exist and render the record's governance controls (Monitor / High Priority / Access-Permission).</existing>
+    <extension>Yes — extend the existing shared core + PCF with a toolbar row of two icon buttons, following the exact entity-agnostic, prop-injected, Fluent-v9-token pattern already used by the component's three controls. No new component is created.</extension>
+    <cost-of-doing-nothing>Without this toolbar, there is no record-level UX entry point at all for a user to grant external access or email a record's members — FR-11 and FR-13 have no place to attach in the UI, and tasks 041/042 (the modal and email action) would have nothing to open from.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 semantic tokens exclusively for all new styling (no hardcoded colors); icons MUST use `currentColor` so they inherit theme foreground and remain correct in both light and dark themes. SCOPE: applies to every new style/icon added in this task, not to the pre-existing Monitor/High-Priority/Access-Permission styling (leave that code as-is).</constraint>
+    <constraint source="project">Extend the shared core (`@spaarke/ui-components` `TrackingFieldTrio`) — do NOT create a duplicated toolbar/feature component in the PCF or elsewhere (CLAUDE.md §11 default-to-reuse). SCOPE: applies to where the toolbar's rendering logic lives; the PCF's `index.ts` may only pass PCF-specific wiring (context, privilege checks, callback bindings), never re-implement the toolbar UI.</constraint>
+    <constraint source="project">Bump the PCF version in ALL 4 locations per `docs/guides/PCF-DEPLOYMENT-GUIDE.md` (`ControlManifest.Input.xml`, the UI version footer constant, the Solution `ControlManifest.xml` copy-from-build-output, `pack.ps1`/solution.xml) as part of this task's file changes, since it is a functional change to the control. SCOPE: version-number bump only — this task does NOT run the deploy/import (that is task 045).</constraint>
+    <constraint source="project">Do not regress the existing Monitor / High-Priority / Access-Permission behavior or its existing tests. SCOPE: the existing `TrackingFieldTrio.test.tsx` suite must continue to pass unmodified except for prop additions required by the new toolbar props (e.g., new optional props with safe defaults).</constraint>
+    <constraint source="ADR-045">The email icon's actual send flow is wired in task 042 via the canonical `EmailComposer`/`SendEmailDialog` — this task only exposes the click affordance and callback, it MUST NOT implement any ad hoc email/send logic itself.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>TrackingFieldTrio toolbar extension</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Entity-agnostic prop-injected shared core" location="src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx">No baked-in entity/field values; every label, option, and now icon-visibility/disabled state is passed in via `ITrackingFieldTrioProps` (types.ts) so both the PCF and any future consumer supply their own entity-specific wiring.</pattern>
+      <pattern name="React-16-safe rendering" location="src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx">Plain `React.FC`, no React-18/19-only APIs, so the component renders under the PCF's platform React 16/17 and any React 19 host unchanged — the new toolbar icons MUST follow the same constraint.</pattern>
+      <pattern name="4-location PCF version bump" location="docs/guides/PCF-DEPLOYMENT-GUIDE.md">ControlManifest.Input.xml version=, the UI version-footer constant, the Solution ControlManifest.xml copy (from build output — never hand-edited), and pack.ps1/solution.xml version reference.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `types.ts` and `TrackingFieldTrio.tsx` to understand the existing prop contract and CSS Grid layout; design the toolbar as an additional row/area that does not disturb the existing 3-column grid.</step>
+    <step order="2">Add new optional props to `ITrackingFieldTrioProps` (types.ts): `onOpenGrantModal?`, `onOpenEmailMembers?`, `canGrantAccess?: boolean` (controls disabled/hidden state), plus any icon-visibility flags needed. Keep all additions optional with safe defaults so existing consumers are unaffected.</step>
+    <step order="3">Implement the toolbar in `TrackingFieldTrio.tsx`: two icon buttons (person, email) styled with Fluent v9 tokens (`currentColor` icons, `tokens.*` for spacing/backgrounds), rendered only when the corresponding callback prop is supplied (keeps the component backward-compatible for any other consumer that hasn't wired the toolbar yet).</step>
+    <step order="4">Implement the person-icon disabled/hidden state driven by `canGrantAccess` — when false, the icon is disabled (not merely visually dimmed with an active click handler) so there is no dead click for a user without grant privilege.</step>
+    <step order="5">Wire the PCF (`src/client/pcf/TrackingFieldTrio/index.ts`) to pass real callbacks (initially stubs that will be filled by tasks 041/042) and a `canGrantAccess` value sourced from context/privilege check.</step>
+    <step order="6">Add/extend tests: new toolbar renders both icons; existing Monitor/High-Priority/Access-Permission tests still pass; a `canGrantAccess=false` case disables the person icon with no click side-effect; dark-mode Fluent provider render smoke test; no console errors during render.</step>
+    <step order="7">Bump the PCF version in all 4 locations per PCF-DEPLOYMENT-GUIDE.md; update the UI version footer text.</step>
+    <step order="8">Run the shared-lib and PCF test suites; fix any regressions.</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test the shared library and PCF control</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/types.ts</output>
+    <output type="code">src/client/pcf/TrackingFieldTrio/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/__tests__/TrackingFieldTrio.toolbar.test.tsx</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="toolbar-renders">Render `TrackingFieldTrio` with `onOpenGrantModal` and `onOpenEmailMembers` supplied; assert both the person icon and email icon are present in the DOM.</test>
+    <test name="adr-021-dark-mode">Render the component wrapped in `FluentProvider` with `webDarkTheme`; assert the toolbar icons and existing controls render without a broken/invisible state (icon color resolves via `currentColor`/tokens, not a hardcoded light-only value).</test>
+    <test name="console-error-check">Render the full component (toolbar + existing controls) in both light and dark themes and assert zero `console.error`/`console.warn` calls during render.</test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both a person icon and an email icon render in the `TrackingFieldTrio` toolbar when the corresponding callback props are supplied.</criterion>
+    <criterion testable="true">The existing Monitor, High-Priority, and Access-Permission controls continue to render and function exactly as before (existing test suite passes unmodified in behavior).</criterion>
+    <criterion testable="true">A user without grant privilege (`canGrantAccess=false`) sees the person icon disabled (or hidden) with no active click handler — no dead click.</criterion>
+    <criterion testable="true">The PCF version is bumped in all 4 locations per PCF-DEPLOYMENT-GUIDE.md.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task builds the toolbar shell + callback contract only. The grant modal (041) and email-members action (042) implement what happens when each icon is clicked, consuming the `onOpenGrantModal`/`onOpenEmailMembers` props added here. Deploy to Dataverse happens in task 045, after 043 (gating) lands.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. FULL-rigor: code-review + adr-check gates apply at Step 9.5.</protocol>
+  </execution>
+</task>

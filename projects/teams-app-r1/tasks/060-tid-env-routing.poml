@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="teams-app-r1">
+  <metadata>
+    <title>BFF `tid`→environment routing</title>
+    <phase>6 Enterprise &amp; Routing</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Cross-cutting hosting/data-isolation layer on the critical path for enterprise deployment; a routing defect is a data-isolation failure, not a cosmetic bug.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting hosting/data-isolation layer — misroute is a data-isolation failure</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>020</deps>
+    <tags>bff-api, config, auth</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add a BFF layer that routes an authenticated `tid` to the correct Dataverse/BFF environment for the three deployment models (Spaarke-hosted dedicated env / customer-hosted / true SaaS), such that a misroute is impossible by construction: an unmapped `tid` MUST be denied, never defaulted to any environment.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in multitenant Entra token claims, ASP.NET Core minimal API middleware/endpoint filters, and multi-environment Dataverse connection routing. Follow ADRs strictly.</role>
+
+  <goal>
+    A `tid`→environment routing layer that reads the validated workforce token's `tid` claim and resolves it to exactly one target environment/connection for each of the three deployment models (Spaarke-hosted dedicated env, customer-hosted, true SaaS), with an explicit deny path for any `tid` that has no configured mapping — no silent default environment, ever.
+  </goal>
+
+  <context>
+    <background>
+      Per design.md §4 (D6/D7) and spec FR-09: the multitenant workforce Entra app's "supported account types" badge is about where user identity lives (any customer tenant), independent of hosting/data topology. The three deployment models are handled by this new BFF `tid`→environment routing layer, not by the Entra registration. This is net-new — no existing BFF component performs environment selection by tenant today (per spec.md Placement &amp; New Components table: "BFF `tid`→env routing | none | New").
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+      <file role="canonical-reference">projects/teams-app-r1/design.md</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Infrastructure/Routing/TenantEnvironmentRouter.cs</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>No BFF component today resolves a `tid` claim to a target Dataverse/BFF environment — `AuthorizationModule.cs` validates the workforce JwtBearer token but does not branch connection/environment selection on tenant.</existing>
+    <extension>No — this is a new cross-cutting routing layer; there is nothing to extend because environment selection by tenant does not exist anywhere in the BFF today.</extension>
+    <cost-of-doing-nothing>Without this layer, Spaarke-hosted multi-customer / dedicated-env deployments cannot route each customer tenant to its own Dataverse environment — every workforce caller would hit the same (wrong) environment, producing cross-tenant data exposure the moment a second customer tenant is onboarded.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-028">SCOPE: the routing layer only. The multitenant `tid` identifies the customer tenant, independent of hosting topology — do NOT conflate "multitenant app registration" with "single shared environment"; each `tid` MUST resolve through this layer to its own configured environment/connection.</constraint>
+    <constraint source="project">SCOPE: the resolution outcome for every request. Misroute MUST be impossible by construction: an unmapped or ambiguous `tid` MUST be DENIED (401/403), never defaulted to any environment (dedicated, customer-hosted, or SaaS-shared). Apply least-privilege — the routed connection/credential MUST only reach the environment resolved for that `tid`.</constraint>
+    <constraint source="ADR-029">Publish size MUST be measured and reported: run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, report the compressed size against the ~49.63 MB (incl. PDBs) baseline, and confirm no M365 Agents SDK / Bot packages were added. Ceiling ≤60 MB compressed.</constraint>
+    <constraint source="project">Run `/conflict-check` before opening the BFF PR (13+ active worktrees contend on `Sprk.Bff.Api`). Do NOT inject Graph SDK types or AI-internal service types into the router. State the Placement Justification (design.md §12 / spec.md Placement &amp; New Components) explicitly in the PR description.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF `tid`→environment routing for multitenant workforce deployments</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Workforce JwtBearer scheme" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs">The dual JwtBearer schemes (workforce default + Ciam) already validate the token and expose its claims (incl. `tid`) — the router reads `tid` from the already-authenticated principal; it does not re-validate the token.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `AuthorizationModule.cs` to confirm exactly where/how the workforce JwtBearer principal's claims (incl. `tid`) become available to downstream code, and design.md §4 for the three deployment-model shapes this router must serve.</step>
+    <step order="2">Design the `tid`→environment mapping source (configuration-driven — e.g., appsettings/Key Vault-backed map of `tid` → environment/connection identifier) covering all three deployment models: Spaarke-hosted dedicated env (1:1 `tid`→env), customer-hosted (customer's own env), true SaaS (shared env, tenant-scoped data partitioning). If the mapping source is ambiguous or undefined for any of the three models, escalate per the trigger below before implementing.</step>
+    <step order="3">Implement the router (e.g., an endpoint filter or scoped resolver invoked early in the collaboration-endpoint pipeline) that reads `tid`, looks up the mapping, and either attaches the resolved environment/connection context to the request or returns an explicit deny — with no fallback branch that silently proceeds against a default/unscoped environment.</step>
+    <step order="4">Add unit tests: a `tid` for each of the three deployment models resolves to its correct environment; an unmapped `tid` is denied (401/403) with no environment context attached; an ambiguous mapping (if the config format allows one) is treated as a deny, not a best-guess default.</step>
+    <step order="5">Run `dotnet publish -c Release` and report the compressed size vs the ~49.63 MB baseline per ADR-029.</step>
+    <step order="6">Run `/conflict-check` before opening the PR; state the Placement Justification in the PR description.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the `tid`→environment mapping source (where it is configured, who owns it, how a new customer tenant gets added) is ambiguous or undefined for any of the three deployment models, STOP and escalate (root CLAUDE.md §6) before implementing a guess — this is exactly the class of assumption that causes a silent misroute.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test the BFF; run `dotnet publish` for the size check</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Routing/TenantEnvironmentRouter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a workforce request carrying a `tid` mapped under the Spaarke-hosted-dedicated model, when the router runs, then it resolves to that dedicated environment.</criterion>
+    <criterion testable="true">Given a workforce request carrying a `tid` mapped under the customer-hosted model, when the router runs, then it resolves to that customer's own environment.</criterion>
+    <criterion testable="true">Given a workforce request carrying a `tid` mapped under the true-SaaS model, when the router runs, then it resolves to the shared SaaS environment with the correct tenant-scoping context attached.</criterion>
+    <criterion testable="true">Given a workforce request carrying an unknown/unmapped `tid`, when the router runs, then the request is DENIED (401/403) and no environment/connection context is attached — it never silently defaults to any environment.</criterion>
+    <criterion testable="true">BFF publish size is measured and reported (≤60 MB compressed, diff vs ~49.63 MB baseline), and `/conflict-check` is run before the PR with the Placement Justification stated.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This layer is independent of, and composes alongside, the workforce-token→principal resolver (task 020) — task 020 resolves WHO the caller is; this task resolves WHICH environment their tenant's data lives in. Both gate the collaboration endpoints; treat an unmapped `tid` with the same "deny, never default" discipline as an unresolvable principal in task 020.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. This is a FULL-rigor task (Step 9.5 gates apply).</protocol>
+  </execution>
+</task>

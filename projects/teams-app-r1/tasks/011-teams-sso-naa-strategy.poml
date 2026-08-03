@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="teams-app-r1">
+  <metadata>
+    <title>Teams SSO/NAA client auth strategy in the shared standalone-MSAL module</title>
+    <phase>1 Shared Auth Module &amp; Host Adapter</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth, seamless workforce SSO correctness.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth, seamless workforce SSO correctness.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared auth module files from 010, serial.</parallel-reason>
+    <deps>010</deps>
+    <tags>auth, msal, teams</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add the Teams SSO/NAA strategy (Teams JS `getAuthToken` / nested app auth) to the shared standalone-MSAL module so the Teams host silently acquires a BFF-valid workforce token; the host selects the strategy.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Microsoft Teams JS SDK (`app.initialize`, `authentication.getAuthToken`, nested app auth/NAA), MSAL v5, and Microsoft Entra multitenant workforce apps. Follow ADRs strictly.</role>
+
+  <goal>
+    The shared standalone-MSAL module (task 010) exposes a Teams SSO/NAA acquisition path — using Teams JS `getAuthToken`/NAA against the workforce-multitenant authority — that silently yields a BFF-valid workforce token with no visible second login, alongside the unchanged CIAM path. The host (task 012) selects which strategy runs.
+  </goal>
+
+  <context>
+    <background>
+      Task 001's foundation spike already proved Teams SSO/NAA can yield a BFF-valid workforce token end-to-end (systemuser + contact-only planes) and validated desktop/web behavior. This task productionizes that proven path as a selectable strategy inside the shared module from task 010, replacing throwaway spike code with the real implementation.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/auth/msal-auth.ts</file>
+      <file role="canonical-reference">src/client/external-spa/src/auth/msal-config.ts</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>`@spaarke/auth` strategies (Xrm/MSAL v3) and external-spa's CIAM MSAL v5 strategy.</existing>
+    <extension>No — this is a new strategy inside the shared standalone-MSAL module (task 010), not an extension of `@spaarke/auth` or a fork of the CIAM strategy.</extension>
+    <cost-of-doing-nothing>Without this strategy, a Teams user cannot authenticate seamlessly via workforce SSO — they would face a double login or be blocked entirely, defeating D2 (workforce SSO, seamless, no second login).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-028 (Amendment A2)">SCOPE: the Teams SSO/NAA strategy inside `src/client/external-spa/src/auth/**`. Authenticate against the workforce-multitenant app (not CIAM); do NOT attempt CIAM sign-in inside Teams.</constraint>
+    <constraint source="project">SCOPE: token acquisition + BFF handoff only. Broker-only (NFR-02) — the acquired token authenticates to the BFF only and MUST NOT be exchanged downstream.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Teams SSO/NAA workforce token acquisition</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Pluggable-authority module" location="src/client/external-spa/src/auth/msal-config.ts">The workforce-multitenant authority shape added by task 010 — this task wires Teams JS `getAuthToken`/NAA acquisition against it.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Review task 001's spike findings (notes/spikes/foundation-spike-findings.md) for the proven Teams SSO/NAA acquisition sequence and any desktop/web quirks recorded.</step>
+    <step order="2">Implement the Teams SSO/NAA acquisition path in the shared module using Teams JS `app.initialize()` context + `getAuthToken`/NAA against the workforce-multitenant authority from task 010.</step>
+    <step order="3">Verify the acquired token validates against the BFF's workforce default JwtBearer scheme with no second login prompt.</step>
+    <step order="4">Confirm the CIAM strategy path is untouched and still functions (no cross-strategy regression).</step>
+    <step order="5">Test in both Teams desktop and Teams web, noting any behavior difference against the spike's findings.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Teams NAA/getAuthToken cannot yield a BFF-valid token as the task-001 spike expected (e.g., a regression from spike conditions, or new Conditional-Access blocking), STOP and escalate (root CLAUDE.md §6).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build/test the external-spa client</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/auth/msal-auth.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Teams-hosted workforce user, when the Teams SSO/NAA strategy runs, then the Teams host acquires a BFF-valid workforce token with no second login.</criterion>
+    <criterion testable="true">Given the standalone SPA, when a CIAM user signs in, then it still uses the unchanged CIAM strategy (no cross-strategy regression).</criterion>
+    <criterion testable="true">The strategy is verified in both Teams desktop and Teams web.</criterion>
+    <criterion testable="true">Given an unauthenticated or consent-missing Teams caller, when the strategy runs, then the failure is surfaced to the caller (not silently degraded or retried into a broken state).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Builds directly on task 010's pluggable-authority module. Task 012 (host adapter) is the consumer that decides WHEN this strategy runs vs the CIAM strategy — this task only makes the strategy available and correct.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. This is a FULL-rigor task (Step 9.5 gates apply).</protocol>
+  </execution>
+</task>

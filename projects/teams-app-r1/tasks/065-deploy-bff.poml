@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="065" project="teams-app-r1">
+  <metadata>
+    <title>Deploy BFF (resolver, membership, routing, download) to Azure App Service</title>
+    <phase>6 Enterprise &amp; Routing</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment execution following the established `bff-deploy` skill; no new src/ design decisions made in this task.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deployment following the bff-deploy skill</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploy to shared spaarke-bff-dev — coordinate timing (last-deploy-wins)</parallel-reason>
+    <deps>030,051,060</deps>
+    <tags>deploy, bff-api, azure</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Deploy the BFF collaboration changes (workforce→principal resolver, contact-anchored membership, accessible-set enforcement, broker download, `tid`→env routing, standing-grant union) to Azure App Service via the `bff-deploy` skill; measure and report publish size and CVE posture.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in the `bff-deploy` skill, Azure App Service deployment, and BFF publish-hygiene verification (ADR-029). Follow ADRs strictly.</role>
+
+  <goal>
+    The BFF (`Sprk.Bff.Api`), carrying the workforce→principal resolver (020), contact-anchored membership (021), accessible-set enforcement (030), broker download (051), and `tid`→env routing (060), is deployed to Azure App Service; publish size is measured, reported, and within the ≤60 MB ceiling with the diff vs the ~49.63 MB baseline stated; no new HIGH-severity CVE is introduced; the deployed collaboration endpoints respond correctly for the positive and negative access cases.
+  </goal>
+
+  <context>
+    <background>
+      This is the Phase 6 deploy checkpoint for the auth spine landed across tasks 020 (resolver), 030 (accessible-set enforcement — assumed: dependency of this task per the plan), 051 (broker download — assumed: dependency of this task per the plan), and 060 (`tid`→env routing). Per root CLAUDE.md §10, every BFF-touching task must verify publish-size impact and CVE posture; this task performs that verification against the ACCUMULATED Phase 1–6 BFF changes, not just a single task's delta.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">.claude/skills/bff-deploy/SKILL.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-029">Publish size MUST be measured and reported: run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, report the compressed size against the ~49.63 MB (incl. PDBs) baseline, and confirm no M365 Agents SDK / Bot packages are present in the published output. Ceiling ≤60 MB compressed — a HARD STOP if breached.</constraint>
+    <constraint source="project">Run `/conflict-check` before opening the deploy PR (13+ active worktrees contend on `Sprk.Bff.Api`). Verify no new HIGH-severity CVE via `dotnet list package --vulnerable --include-transitive` and report the result explicitly, whether clean or not.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF deployment + publish-hygiene verification (ADR-029)</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="bff-deploy skill" location=".claude/skills/bff-deploy/SKILL.md">Canonical deploy script for `Sprk.Bff.Api` to Azure App Service — use it rather than an ad hoc `az webapp deploy`/`dotnet publish` sequence.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Run `/conflict-check` to confirm no colliding in-flight BFF change before proceeding.</step>
+    <step order="2">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure the compressed output size and record the diff vs the ~49.63 MB (incl. PDBs) baseline. STOP if ≥60 MB (HARD STOP) or escalate if ≥55 MB (architecture-review threshold) per root CLAUDE.md §10.</step>
+    <step order="3">Confirm the published output contains no M365 Agents SDK / Bot packages.</step>
+    <step order="4">Run `dotnet list package --vulnerable --include-transitive` and confirm no new HIGH-severity CVE relative to the pre-deploy baseline; report the result explicitly.</step>
+    <step order="5">Invoke the `bff-deploy` skill to deploy `Sprk.Bff.Api` to Azure App Service (spaarke-bff-dev or the target environment per skill defaults).</step>
+    <step order="6">Smoke-test the deployed collaboration endpoints: a workforce systemuser/contact accessing an authorized record succeeds; an authorized member's document download returns bytes; a non-member document download returns 403 with no bytes; an unmapped `tid` (per task 060) is denied.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If cumulative publish size reaches ≥55 MB, STOP and escalate (architecture-review threshold per root CLAUDE.md §10); if it reaches ≥60 MB, this is a HARD STOP — do not deploy.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Publish, measure size, and run CVE scan</tool>
+    <tool name="terminal">Run shell commands / deploy script</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">Azure App Service (Sprk.Bff.Api)</output>
+    <output type="docs">Publish-size + CVE report (task notes / PR description)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The BFF deploys successfully to Azure App Service via the `bff-deploy` skill.</criterion>
+    <criterion testable="true">Publish size is measured, reported, and ≤60 MB compressed, with the diff vs the ~49.63 MB baseline stated explicitly.</criterion>
+    <criterion testable="true">NO new HIGH-severity CVE is introduced (verified via `dotnet list package --vulnerable --include-transitive` and reported).</criterion>
+    <criterion testable="true">Deployed collaboration endpoints respond correctly for an authorized caller (record access + document download return data).</criterion>
+    <criterion testable="true">A non-member's document download against the deployed environment returns 403 with NO bytes — verified post-deploy, not just in a local/unit test.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    `parallel-safe:false` — this deploys to the shared `spaarke-bff-dev` App Service; coordinate timing with any other in-flight BFF deploy so a later deploy does not silently overwrite this one's changes (last-deploy-wins risk). Depends on tasks 030 and 051 by plan sequencing (accessible-set enforcement and broker download) in addition to 060 (`tid`→env routing) authored in this same batch.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. This is a STANDARD-rigor task (Step 9.5 gates skipped).</protocol>
+  </execution>
+</task>

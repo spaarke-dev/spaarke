@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="teams-app-r1">
+  <metadata>
+    <title>Broker-only document access for all principals via SpeFileStore (authz-before-stream)</title>
+    <phase>3 Broker Document Access</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-sensitive download gate — the last line of defense before document bytes leave the BFF.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive download gate; a mistake here leaks documents or exposes Graph pointers to the client.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Critical-path auth spine on shared BFF authz/membership files; serial chain.</parallel-reason>
+    <deps>022</deps>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Route collaboration document download for ALL principals through app-only `SpeFileStore.DownloadFileAsync` with authz-before-stream against the accessible-set (task 022); never send `driveId`/`itemId` to the client; a non-member gets 403 with no bytes.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in the `SpeFileStore` broker facade, app-only Microsoft Graph access patterns, and authz-before-stream download gating. Follow ADRs strictly.</role>
+
+  <goal>
+    Every collaboration document download — for a systemuser, a contact-with-grant, or a contact-with-standing-grant — is served by app-only `SpeFileStore.DownloadFileAsync`, gated by task 022's composed accessible-set check performed BEFORE any bytes stream, with no `driveId`/`itemId` or other Graph pointer ever reaching the client response, and a non-member request returning 403 with zero bytes.
+  </goal>
+
+  <context>
+    <background>
+      Per design.md §6 and spec FR-07, documents are served identically across hosts and identity types: app-only, authz-before-stream, no Graph pointers to the client — even for workforce Teams users who have their own SPE permissions, because the collaboration path never uses OBO (NFR-02). Task 022 composed and enforced the accessible-record-set for the collaboration endpoints generally; this task wires that same check as the download gate in front of the existing `SpeFileStore.DownloadFileAsync` broker call, for all three principal types.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>`SpeFileStore.DownloadFileAsync` (app-only broker) and the existing external download path already implement authz-before-stream for the CIAM contact plane.</existing>
+    <extension>Yes — gate the existing broker call with task 022's composed accessible-set check for every principal type, rather than building a separate download path per principal.</extension>
+    <cost-of-doing-nothing>Without this gate applied uniformly, either documents leak to a principal outside the accessible set (a security failure), or a workforce user's own SPE permissions would need to be used instead of the broker (an OBO violation of NFR-02), or Graph pointers (`driveId`/`itemId`) could reach the client and let it bypass the broker on a subsequent call.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-007">SCOPE: document download implementation. Use the `SpeFileStore` facade for all SPE operations — do NOT inject Microsoft Graph SDK types into collaboration endpoint code; the broker is the only caller of Graph.</constraint>
+    <constraint source="ADR-028">SCOPE: the download path for all principal types. Broker-only (NFR-02): downstream SPE access is app-only for every principal, including workforce systemusers who have their own Graph/SPE permissions — NO OBO on the collaboration path under any circumstance.</constraint>
+    <constraint source="project">SCOPE: response shape. Authz-before-stream is mandatory — the accessible-set check (task 022) MUST run and pass BEFORE any byte streaming begins; a denied request MUST return 403 with NO bytes (not a partial stream then abort). No `driveId`, `itemId`, or other Graph pointer may appear in ANY client-facing response, error or success.</constraint>
+    <constraint source="ADR-029">Publish size MUST be measured and reported: run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, report the compressed size against the ~49.63 MB (incl. PDBs) baseline, and confirm no M365 Agents SDK / Bot packages were added. Ceiling ≤60 MB compressed.</constraint>
+    <constraint source="project">Run `/conflict-check` before opening the BFF PR (13+ active worktrees contend on `Sprk.Bff.Api`). State the Placement Justification in the PR description.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Broker-only document access, all principals, authz-before-stream</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="App-only broker download" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs">DownloadFileAsync is the sole sanctioned download path — call it only after the accessible-set check passes, and only via this facade (never a raw Graph client).</pattern>
+      <pattern name="Authz-before-stream gate" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs">The existing external download path already gates on HasProjectAccess before streaming — extend this same authz-before-stream shape to use task 022's composed accessible-set check for all principal types.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the existing collaboration download endpoint and `SpeFileStore.DownloadFileAsync` to confirm exactly where authz currently runs relative to streaming, and confirm no `driveId`/`itemId` is currently returned to the client.</step>
+    <step order="2">Wire task 022's composed accessible-set check as the authz gate immediately before the `DownloadFileAsync` call, for all three principal types (systemuser, contact-with-grant, contact-with-standing-grant) — the check MUST complete and pass before any bytes are read from SPE.</step>
+    <step order="3">Confirm the download response never includes `driveId`, `itemId`, or any other Graph pointer, in either the success or the denied-response path.</step>
+    <step order="4">Add positive tests (an authorized member of each principal type receives bytes) and negative tests (a non-member of each principal type receives 403 with zero bytes, and no Graph pointer in the response body).</step>
+    <step order="5">Run `dotnet publish -c Release` and report the compressed size vs the ~49.63 MB baseline per ADR-029.</step>
+    <step order="6">Run `/conflict-check` before opening the PR; state the Placement Justification in the PR description.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the broker path would require OBO for workforce users (e.g., because app-only SPE permissions cannot resolve a document the caller's own Graph identity could reach), STOP and escalate (root CLAUDE.md §6) — this would violate NFR-02 and needs owner input, not a workaround.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test the BFF; run `dotnet publish` for the size check</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an authorized member (any of the three principal types), when they request a document download, then they receive the document bytes via app-only `SpeFileStore.DownloadFileAsync`.</criterion>
+    <criterion testable="true">Given a non-member (any of the three principal types) requesting a document outside their accessible set, when the download is requested, then the response is 403 with NO bytes.</criterion>
+    <criterion testable="true">No `driveId`, `itemId`, or other Graph pointer appears in ANY client-facing response (success or denied), for any principal type.</criterion>
+    <criterion testable="true">The authz-before-stream ordering is verified: the accessible-set check completes and passes before any byte streaming begins — no partial-stream-then-abort behavior.</criterion>
+    <criterion testable="true">Both positive and negative download paths are tested for all three principal types; BFF publish size is measured/reported (≤60 MB), and `/conflict-check` is run before the PR with the Placement Justification stated.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Last task in the Phase 0–3 critical-path serial chain (spike → ADR → resolver → membership → enforcement → broker download gating). Downstream Phase 4+ streams (PCF grant surface, manifest/deploy, standing-grant data, tid routing) can proceed in parallel once this lands.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. This is a FULL-rigor task (Step 9.5 gates apply).</protocol>
+  </execution>
+</task>

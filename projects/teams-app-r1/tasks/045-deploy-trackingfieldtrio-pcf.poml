@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="teams-app-r1">
+  <metadata>
+    <title>Deploy extended TrackingFieldTrio PCF to Dataverse (grant modal + email action live)</title>
+    <phase>4 Access-Management Surface (PCF)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment of an already-built, already-reviewed control (040/041/042/043 each carried FULL rigor); this task is packaging + import, not new logic — code-review/adr-check skipped per the STANDARD default.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deployment is a well-specified, prescriptive mechanical procedure per PCF-DEPLOYMENT-GUIDE.md; no architectural judgment required.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment to the shared Dataverse environment — coordinate with other worktrees before importing (13+ active worktrees contend on the shared org per projects/INDEX.md).</parallel-reason>
+    <deps>043,065</deps>
+    <tags>deploy, pcf, dataverse</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Deploy the extended `TrackingFieldTrio` PCF (toolbar + grant modal + email-members action + Access-Permission gating, tasks 040/041/042/043) to Dataverse via solution import, after bumping the control's version in all 4 locations per `docs/guides/PCF-DEPLOYMENT-GUIDE.md`, so the grant modal and email action function against the deployed BFF (task 065's collaboration endpoints).
+  </prompt>
+
+  <role>SPAARKE platform developer performing a PCF solution deployment. Expert in the Spaarke PCF build/pack/import pipeline (`npm run build:prod`, solution ZIP packaging, `pac solution import`). Follow the PCF-DEPLOYMENT-GUIDE.md procedure exactly.</role>
+
+  <goal>
+    The extended `TrackingFieldTrio` PCF is built in production mode, version-bumped in all 4 locations, packaged into the solution ZIP, and imported cleanly into the target Dataverse environment. Post-import, the deployed control's version footer matches the intended new version, and the grant modal + email action work end-to-end against the deployed BFF.
+  </goal>
+
+  <context>
+    <background>
+      Tasks 040–043 built and reviewed the toolbar, grant modal, email action, and Access-Permission gating in the shared core + PCF, each already bumping intermediate version references during development. This task is the actual deploy: confirm the final version number, rebuild in production mode, and import into Dataverse. Task 065 (BFF collaboration endpoints) must also be deployed/available for the grant modal and email action to function end-to-end, hence the dependency.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/pcf/TrackingFieldTrio/ControlManifest.Input.xml</file>
+      <file role="modify">src/client/pcf/TrackingFieldTrio/index.ts</file>
+      <file role="canonical-reference">docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Bump the PCF version in ALL 4 locations per PCF-DEPLOYMENT-GUIDE.md (`ControlManifest.Input.xml` version=, the UI version-footer constant, the Solution `ControlManifest.xml` — copied from build output, never hand-edited — and `pack.ps1`/solution.xml version reference) before packaging. SCOPE: applies to this deploy's final version number, reconciling any intermediate bumps made in tasks 040-043.</constraint>
+    <constraint source="project">Build with `npm run build:prod` — NOT `npm run build` — per root CLAUDE.md §12 and PCF-DEPLOYMENT-GUIDE.md. SCOPE: the production build step only; using the dev build for this deploy is a hard failure, not a style preference.</constraint>
+    <constraint source="ADR-021">The deployed control must retain its ADR-021 dark-mode behavior post-import — verify visually after import, not just via unit tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>PCF solution deployment</topic>
+    <files>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="4-location version bump + build-output-only ControlManifest.xml" location="docs/guides/PCF-DEPLOYMENT-GUIDE.md">ControlManifest.Input.xml, UI version footer, Solution ControlManifest.xml (copy from build output only), pack.ps1/solution.xml — never hand-edit the Solution folder's ControlManifest.xml.</pattern>
+      <pattern name="Production build required" location="docs/guides/PCF-DEPLOYMENT-GUIDE.md">`npm run build:prod`, not `npm run build` — the dev build produces an unoptimized/incorrectly-configured bundle for deployment (root CLAUDE.md §12, FAILURE-MODES.md AP-1).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm the final version number for this deploy (increment from the last version bumped in task 043) and update `ControlManifest.Input.xml` version= attribute.</step>
+    <step order="2">Update the UI version-footer constant in the control/component code to match.</step>
+    <step order="3">Rebuild the shared library (`Spaarke.UI.Components`) dist output if shared-core source changed in tasks 040-043 (per `.claude/constraints/pcf.md` Shared Library Build Chain — PCF reads `dist/`, not `src/`).</step>
+    <step order="4">Run `npm run build:prod` for the `TrackingFieldTrio` PCF (NOT `npm run build`).</step>
+    <step order="5">Copy the build output `ControlManifest.xml` into the Solution folder's Controls directory — never hand-edit it.</step>
+    <step order="6">Update `pack.ps1` / `solution.xml` version reference to match.</step>
+    <step order="7">Pack the solution ZIP and import it into the target Dataverse environment via `pac solution import` (or the project's standard import script).</step>
+    <step order="8">Verify a clean import (no errors/warnings requiring follow-up) and confirm the deployed control's version footer matches the intended new version.</step>
+    <step order="9">Smoke-test the grant modal (open, approve a candidate, revoke) and the email action (open, verify pre-populated recipients) against the deployed BFF, confirming no console errors and correct dark-mode rendering.</step>
+    <step order="10">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Production build of the PCF and shared library</tool>
+    <tool name="pac">Dataverse solution import (PAC CLI)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/client/pcf/TrackingFieldTrio/ControlManifest.Input.xml</output>
+    <output type="deploy">Solution ZIP imported into the target Dataverse environment</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="post-deploy-render">After import, open a record with `TrackingFieldTrio` on its form and assert the toolbar (person + email icons), Monitor, High-Priority, and Access-Permission controls all render.</test>
+    <test name="adr-021-dark-mode">Toggle the Dataverse theme to dark mode post-import and assert the control renders correctly (no light-only hardcoded colors visible).</test>
+    <test name="console-error-check">Load the form post-import and open both the grant modal and the email dialog; assert zero console errors during the full interaction.</test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">The PCF version is bumped in all 4 locations and the deployed control's footer shows the new version post-import.</criterion>
+    <criterion testable="true">The solution imports cleanly with no unresolved errors.</criterion>
+    <criterion testable="true">The grant modal and email action function correctly against the deployed BFF (grant write + revoke; email dialog pre-population) when smoke-tested post-import.</criterion>
+    <criterion testable="true">A stale or duplicate version does NOT ship — the footer version is explicitly re-verified post-import to differ from the pre-deploy version and match the intended target.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Deploys to the shared Dataverse environment contended by 13+ active worktrees — coordinate timing and re-verify no conflicting solution import is in flight before running this task (per projects/INDEX.md / `/conflict-check` guidance).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Prescriptive steps — follow the exact sequence; do not reorder or skip the build-output-only ControlManifest.xml copy step.</protocol>
+  </execution>
+</task>

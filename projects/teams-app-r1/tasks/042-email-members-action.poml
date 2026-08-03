@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="teams-app-r1">
+  <metadata>
+    <title>Email-members action (email icon) — SendEmailDialog pre-populated with membership contacts</title>
+    <phase>4 Access-Management Surface (PCF)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared production component wiring and feeds a tracked communication pipeline (FR-13); code-review + adr-check apply.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified integration of an existing canonical dialog; no new send/communication logic being designed.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared TrackingFieldTrio component files; serialize the toolbar chain (040 → 041/042 → 043 → 045). Stream C runs concurrently with other streams.</parallel-reason>
+    <deps>040</deps>
+    <tags>pcf, react, frontend, fluent-ui</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Wire the email icon (opened via `TrackingFieldTrio`'s `onOpenEmailMembers` callback from task 040) to open the canonical `SendEmailDialog` (`EmailComposer` engine, ADR-045), pre-populated with the record's membership contacts as recipients, so the send flows through the tracked `sprk_communication` pipeline via `sendCommunication()`.
+  </prompt>
+
+  <role>SPAARKE frontend developer familiar with the ADR-045 communication architecture and `SendEmailDialog`/`sendCommunication` from `@spaarke/ui-components`. Follow ADRs strictly.</role>
+
+  <goal>
+    Clicking the email icon opens `SendEmailDialog` with the record's membership contacts already populated as recipients; sending flows through `sendCommunication()` and produces a tracked `sprk_communication` record, exactly as any other canonical use of the dialog. A record with no membership contacts shows an appropriate empty state and does not attempt to send to an empty recipient list.
+  </goal>
+
+  <context>
+    <background>
+      Per design.md §5.1 and spec FR-13, the email icon is the second half of the R1 toolbar. Unlike the grant modal (041), this is pure integration: `SendEmailDialog` and `sendCommunication()` already exist and are canonical per ADR-045 — this task's only job is to source the record's membership contacts (from the contact-anchored membership resolver, task 021, or the record's existing contact-role fields) and pass them in as pre-populated recipients.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx</file>
+      <file role="modify">src/client/pcf/TrackingFieldTrio/index.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>`SendEmailDialog` and `sendCommunication()` already exist in `@spaarke/ui-components` (ADR-045 canonical `EmailComposer` engine) and are used elsewhere in the product for tracked email composition.</existing>
+    <extension>Yes — reuse the canonical dialog as-is; the only new code is the wiring that pre-populates its recipients with the record's membership contacts and opens it from the new email icon.</extension>
+    <cost-of-doing-nothing>Without this wiring, there is no way to email a record's members through the tracked `sprk_communication` pipeline from the record itself — FR-13 has no UI entry point, and users would resort to an untracked, out-of-band email path.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-045">Use the canonical `EmailComposer`/`SendEmailDialog` and `sendCommunication()` — MUST NOT build a new send path, a new dialog, or bypass the `sprk_communication` tracking pipeline. SCOPE: applies to the entire send flow triggered from the email icon.</constraint>
+    <constraint source="ADR-021">Dark-mode correct for any new wrapper/empty-state UI added around the dialog invocation. SCOPE: only the new code in this task; `SendEmailDialog` itself is already ADR-021-compliant.</constraint>
+    <constraint source="project">Recipients = the record's membership contacts (the same allowlist-filtered contact-role set used elsewhere in R1, e.g. the grant modal's candidate list from task 021) — MUST NOT invent a separate recipient-derivation rule. SCOPE: recipient sourcing only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Email-members action — canonical dialog reuse</topic>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Canonical EmailComposer/SendEmailDialog" location="src/client/shared/Spaarke.UI.Components/src/components">The single, canonical send-email surface per ADR-045; every consumer pre-populates recipients/subject/body via props, never forks the dialog.</pattern>
+      <pattern name="Membership contacts as recipient source" location="projects/teams-app-r1/spec.md">FR-05/FR-13 — the same contact-anchored, role-allowlist-filtered membership set used for the grant modal's candidate list is the recipient source for email-members.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Locate `SendEmailDialog` and `sendCommunication()` exports in `@spaarke/ui-components`; read their prop contract for pre-populated recipients.</step>
+    <step order="2">Source the record's membership contacts (reuse the same data source as the grant modal's candidate list, task 021/041) for the current record context.</step>
+    <step order="3">Wire `TrackingFieldTrio`'s `onOpenEmailMembers` (task 040) to open `SendEmailDialog` with those contacts pre-populated as recipients.</step>
+    <step order="4">Handle the empty-membership case: show an appropriate empty state (e.g., a disabled email icon or an inline message in place of the dialog) and do NOT open the dialog with zero recipients / do NOT allow a send with an empty recipient list.</step>
+    <step order="5">Verify the send flows through `sendCommunication()` and produces a `sprk_communication` record exactly as any other canonical use of the dialog (no custom send logic added).</step>
+    <step order="6">Write tests: email icon opens the dialog pre-populated with membership contacts; empty-membership record shows the empty state and does not send; dark-mode render; no console errors.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test the shared library and PCF control</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/TrackingFieldTrio/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/__tests__/TrackingFieldTrio.emailMembers.test.tsx</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="email-icon-opens-prepopulated-dialog">Simulate the email-icon click and assert `SendEmailDialog` opens with the record's membership contacts as pre-populated recipients.</test>
+    <test name="adr-021-dark-mode">Render the email icon + dialog invocation path in `webDarkTheme` and assert correct rendering.</test>
+    <test name="console-error-check">Render + click the email icon and assert zero console errors/warnings.</test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Clicking the email icon opens `SendEmailDialog` pre-populated with the record's membership contacts as recipients, and sending flows through `sendCommunication()` into `sprk_communication`.</criterion>
+    <criterion testable="true">A record with NO membership contacts shows an appropriate empty state and does not open a sendable dialog with an empty recipient list.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Independent of the grant modal (041) beyond sharing the toolbar (040) and the membership-contact data source — 041 and 042 can be implemented in either order once 040 lands, but both must land before 045 (deploy).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. FULL-rigor: code-review + adr-check gates apply at Step 9.5.</protocol>
+  </execution>
+</task>

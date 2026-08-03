@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="teams-app-r1">
+  <metadata>
+    <title>Shared standalone-MSAL auth module with pluggable authority (CIAM + workforce-multitenant)</title>
+    <phase>1 Shared Auth Module &amp; Host Adapter</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security/auth code both hosts depend on.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive + high blast radius — shared auth module both hosts consume.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Head of serial client-auth chain; shared external-spa/src/auth files that 011/012 build on.</parallel-reason>
+    <deps>001,002</deps>
+    <tags>auth, msal, spa</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Refactor external-spa's MSAL setup into a shared standalone-MSAL module whose authority is config-driven/pluggable, so the SAME module serves CIAM (SPA) and workforce-multitenant (Teams). Preserve every A1 invariant (standalone PublicClientApplication, per-tab sessionStorage, Bearer-to-BFF). Per ADR-028 Amendment A2.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in MSAL v5 (PublicClientApplication, multi-authority configuration), Microsoft Entra External ID (CIAM) and workforce multitenant apps, and the Spaarke BFF broker-only auth invariants. Follow ADRs strictly.</role>
+
+  <goal>
+    external-spa's `msal-config.ts` / `msal-auth.ts` expose a pluggable-authority shape: the SAME standalone-MSAL module can be instantiated against the CIAM authority (existing SPA behavior, unchanged) or a workforce-multitenant authority (new, consumed by task 011's Teams SSO strategy and task 012's host adapter), selected by config — not by forking the module.
+  </goal>
+
+  <context>
+    <background>
+      Per ADR-028 Amendment A2 (task 002, applied before this task starts), the collaboration hosts (external SPA + Teams tab) share one standalone-MSAL module with a pluggable authority, exempted from the `@spaarke/auth`-only rule exactly as A1 exempted the SPA alone. Today `msal-config.ts` hardcodes the CIAM `*.ciamlogin.com` authority; this task generalizes the module's authority resolution to also accept a workforce-multitenant configuration, without altering the CIAM code path's runtime behavior.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/auth/msal-config.ts</file>
+      <file role="modify">src/client/external-spa/src/auth/msal-auth.ts</file>
+      <file role="canonical-reference">src/client/external-spa/src/auth/bff-client.ts</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>external-spa's `msal-config.ts` (CIAM-only standalone MSAL v5 configuration; A1-exempted).</existing>
+    <extension>Yes — widen the existing module into a pluggable-authority module, not a fork or a second auth stack.</extension>
+    <cost-of-doing-nothing>Without a pluggable-authority module, the Teams host cannot obtain a workforce token through a shared module and would require a duplicated auth stack — a direct violation of D8/A2 (one shared standalone-MSAL module, not per-host forks).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-028 (Amendment A2)">SCOPE: `src/client/external-spa/src/auth/**`. The module is the sanctioned standalone-MSAL surface with pluggable authority (CIAM or workforce-multitenant); do NOT route it through `@spaarke/auth` (Xrm-bound + MSAL v3). Preserve ALL A1 invariants: direct `PublicClientApplication`, per-tab `sessionStorage` isolation, Bearer-literal-to-BFF allowlist.</constraint>
+    <constraint source="project">SCOPE: authority selection + token acquisition config. Broker-only per NFR-02 — the module authenticates to the BFF only; it MUST NOT be wired to exchange the acquired token downstream (no OBO). The SPA CIAM sign-in path MUST remain unchanged end-to-end (FR-15) — no behavior regression for existing external-spa users.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Pluggable-authority standalone MSAL for the collaboration hosts</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+      <file>projects/teams-app-r1/adr-028-amendment-draft.md</file>
+    </files>
+    <patterns>
+      <pattern name="Standalone MSAL broker auth" location="src/client/external-spa/src/auth/msal-config.ts">Direct `PublicClientApplication`, `sessionStorage` cache, Bearer-to-BFF; generalize the authority field to be config-driven (CIAM vs workforce-multitenant) rather than hardcoded.</pattern>
+      <pattern name="BFF broker client" location="src/client/external-spa/src/auth/bff-client.ts">Confirms the token is used only to call the BFF (broker-only) — the pattern to preserve when adding the second authority.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `msal-config.ts` and `msal-auth.ts`; identify every place the CIAM authority is hardcoded vs derivable from config.</step>
+    <step order="2">Introduce a config-driven authority shape (e.g., an authority-kind discriminator + per-kind authority URL/tenant) that the module resolves at instantiation time, defaulting to CIAM for the existing SPA entry point so its behavior is unchanged.</step>
+    <step order="3">Add the workforce-multitenant authority shape (login.microsoftonline.com, multitenant) as a second selectable configuration, without wiring a consumer yet (task 011 adds the Teams SSO strategy; task 012 wires host selection).</step>
+    <step order="4">Verify every A1 invariant still holds for the CIAM path: standalone `PublicClientApplication`, per-tab `sessionStorage`, Bearer-to-BFF allowlist.</step>
+    <step order="5">Run the existing external-spa auth tests / manual sign-in smoke check to confirm no CIAM regression.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the CIAM path cannot remain unchanged while adding the workforce authority (e.g., a shared code path forces a behavior change in token acquisition or storage for existing SPA users), STOP and escalate (root CLAUDE.md §6) — this is an FR-15 regression risk.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build/test the external-spa client</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/auth/msal-config.ts</output>
+    <output type="code">src/client/external-spa/src/auth/msal-auth.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the SPA's existing CIAM configuration, when the module is instantiated, then it resolves the CIAM authority exactly as before (no behavior change).</criterion>
+    <criterion testable="true">Given a workforce-multitenant configuration, when the module is instantiated, then it resolves the workforce-multitenant authority (login.microsoftonline.com) instead of CIAM.</criterion>
+    <criterion testable="true">All A1 invariants (direct `PublicClientApplication`, per-tab `sessionStorage`, Bearer-to-BFF allowlist) are preserved for both authorities.</criterion>
+    <criterion testable="true">The SPA CIAM sign-in path is unchanged end-to-end — no regression (FR-15).</criterion>
+    <criterion testable="true">Given a request for an authority kind that is not configured, when the module is instantiated, then it fails safely (throws/rejects with a clear error) and does NOT silently fall back to the wrong authority.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Head of the serial client-auth chain (Phase 1). Tasks 011 (Teams SSO/NAA strategy) and 012 (Teams host adapter) build directly on the pluggable-authority shape this task introduces — do not proceed with 011 until this module's authority selection is stable.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. This is a FULL-rigor task (Step 9.5 gates apply).</protocol>
+  </execution>
+</task>

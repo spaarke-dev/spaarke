@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="teams-app-r1">
+  <metadata>
+    <title>Project wrap-up — gates, cleanup, docs, lessons, test-diet</title>
+    <phase>8 Integration &amp; Wrap-Up</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Project-close gate sequence (code-review, adr-check, repo-cleanup, test-diet) that determines whether the project is marked complete — treated as FULL per root CLAUDE.md §7/§8 wrap-up convention.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard wrap-up gate sequence.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>final task; runs code-review/adr-check/repo-cleanup/test-diet and edits README/plan</parallel-reason>
+    <deps>080</deps>
+    <tags>docs, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Close the project: run /code-review + /adr-check on all project code (fix or file criticals); run
+    /repo-cleanup projects/teams-app-r1; update README.md + plan.md to Complete (Phase=Complete, Progress=100%,
+    Completed Date, all graduation criteria checked); append notes/lessons-learned.md (both corrections and
+    confirmed non-obvious approaches + why); run /test-diet (project-close test-diet gate per root CLAUDE.md §7)
+    and cite notes/test-diet-report.md in the wrap-up PR; verify all tasks are ✅ in TASK-INDEX.md and no critical
+    code-review issues remain. This task only proceeds once 080-integration-verification has confirmed all seven
+    graduation criteria pass — do NOT mark the project complete otherwise.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer acting as project closer. Expert in the Spaarke wrap-up gate sequence (code-review,
+    adr-check, repo-cleanup, test-diet) and the root CLAUDE.md §7 project-close test-diet gate. Follow the prescribed
+    close-out sequence exactly; do not skip a gate silently.
+  </role>
+
+  <goal>
+    The project is closed cleanly: code-review and adr-check are clean (or remaining issues are filed as Issues);
+    repo-cleanup has run; README.md and plan.md report Complete with all graduation criteria checked;
+    notes/lessons-learned.md and notes/test-diet-report.md exist; TASK-INDEX.md shows every task as ✅; the project
+    is NOT marked complete unless 080's graduation-criteria verification passed.
+  </goal>
+
+  <context>
+    <background>
+      Task 080 verified all seven graduation criteria end-to-end. This task is the standard Spaarke project-close
+      sequence: quality gates (code-review + adr-check) over the accumulated project code, repository hygiene
+      (repo-cleanup), documentation state transition (README/plan → Complete), the mandatory project-close
+      test-diet gate (root CLAUDE.md §7, added by ci-cd-unit-test-remediation-r1 per spec FR-B09), and a
+      lessons-learned capture for future projects touching the collaboration-surface / dual-host / workforce-auth
+      pattern.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/teams-app-r1/tasks/080-integration-verification.poml</file>
+      <file role="modify">projects/teams-app-r1/README.md</file>
+      <file role="modify">projects/teams-app-r1/plan.md</file>
+      <file role="modify">projects/teams-app-r1/tasks/TASK-INDEX.md</file>
+      <file role="output">projects/teams-app-r1/notes/lessons-learned.md</file>
+      <file role="output">projects/teams-app-r1/notes/test-diet-report.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">The project-close test-diet gate is BINDING (root CLAUDE.md §7) — the wrap-up PR
+      MUST cite notes/test-diet-report.md, or explicitly document the skip rationale if the gate is skipped; skipping
+      without documentation is a HARD WARNING violation.</constraint>
+    <constraint source="ADR-038">test-diet reconciles tests added/modified during this project against the 17-ban
+      build-vs-maintain classifier in docs/adr/ADR-038-testing-strategy.md §7 — MAINTAIN-class tests stay at their
+      KEEP path, SCAFFOLDING-class tests are deleted, AMBIGUOUS tests are flagged for reviewer judgment (test-diet is
+      read-only; it emits commands, it does not auto-execute them).</constraint>
+    <constraint source="project">Do NOT mark the project Complete in README.md/plan.md unless every one of the seven
+      graduation criteria is checked AND task 080's verification report shows all seven passing; if any criterion is
+      still failing, leave the project status as-is and escalate instead of overriding.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project-close gate sequence (code-review, adr-check, repo-cleanup, test-diet)</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>projects/teams-app-r1/README.md</file>
+      <file>projects/teams-app-r1/plan.md</file>
+    </files>
+    <patterns>
+      <pattern name="Project-close test-diet gate" location=".claude/skills/test-diet/SKILL.md">Invoked BEFORE marking the project complete for any 090-wrapup-* task per root CLAUDE.md §7 (added 2026-06-26 by ci-cd-unit-test-remediation-r1 task CICD-081 / spec FR-B09) — emits git rm / git mv commands for reviewer application, does not auto-execute.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm task 080's verification report shows all seven graduation criteria passing; if not, STOP and escalate rather than proceeding.</step>
+    <step order="2">Run /code-review on all project code (client, BFF, Dataverse) added or modified across the project; fix criticals or file them explicitly as Issues with justification.</step>
+    <step order="3">Run /adr-check on the same code; resolve or formally except (per root CLAUDE.md §6.5 paths A/B/C) any violation.</step>
+    <step order="4">Run /repo-cleanup projects/teams-app-r1 to remove ephemeral files and validate structure compliance.</step>
+    <step order="5">Update README.md: Phase=Complete, Progress=100%, Completed Date set, all seven Graduation Criteria checkboxes checked.</step>
+    <step order="6">Update plan.md's status/next-steps section to reflect project completion.</step>
+    <step order="7">Append projects/teams-app-r1/notes/lessons-learned.md capturing both corrections (things that had to be fixed/re-done) and confirmed non-obvious approaches (with why they worked) from across the project — spike findings, ADR-028 A2 amendment experience, workforce→contact resolution, dual-host adapter seam, tid→env routing, standing grants.</step>
+    <step order="8">Run /test-diet; write projects/teams-app-r1/notes/test-diet-report.md; cite it in the wrap-up PR description (or document the skip rationale if genuinely inapplicable).</step>
+    <step order="9">Verify every task in tasks/TASK-INDEX.md is marked ✅; verify no critical code-review issues remain unresolved.</step>
+    <step order="10">Only after steps 1-9 all succeed, mark this task (090) as ✅ completed in TASK-INDEX.md and set current-task.md to "none" (project complete).</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run /code-review, /adr-check, /repo-cleanup, /test-diet, and shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/teams-app-r1/README.md</output>
+    <output type="docs">projects/teams-app-r1/plan.md</output>
+    <output type="docs">projects/teams-app-r1/tasks/TASK-INDEX.md</output>
+    <output type="docs">projects/teams-app-r1/notes/lessons-learned.md</output>
+    <output type="docs">projects/teams-app-r1/notes/test-diet-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">README.md and plan.md report Phase=Complete, Progress=100%, Completed Date set, and all seven graduation criteria checked.</criterion>
+    <criterion testable="true">notes/lessons-learned.md exists and documents both corrections and confirmed non-obvious approaches with rationale.</criterion>
+    <criterion testable="true">notes/test-diet-report.md exists and is cited in the wrap-up PR description.</criterion>
+    <criterion testable="true">code-review and adr-check are clean, or every remaining issue is filed as a GitHub Issue with an explicit exception rationale.</criterion>
+    <criterion testable="true">tasks/TASK-INDEX.md shows every task as ✅.</criterion>
+    <criterion testable="true">Given any graduation criterion from task 080 is still failing or any critical code-review/adr-check finding is unresolved, the project is NOT marked complete and this task instead escalates per root CLAUDE.md §6.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Prescriptive step order because this is a deploy/close-out sequence, not exploratory work. The test-diet gate is
+    binding per root CLAUDE.md §7 (project-close test diet gate, added by ci-cd-unit-test-remediation-r1 task
+    CICD-081 per spec FR-B09) — do not skip it silently.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Follow task-execute Step 11
+    (project-close test-diet gate) exactly. This is the final task — after completion, current-task.md resets to
+    "none".</protocol>
+  </execution>
+</task>

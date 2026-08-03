@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="teams-app-r1">
+  <metadata>
+    <title>Accessible-record-set composition &amp; enforcement across all principal types</title>
+    <phase>2 BFF Workforce→Principal Resolver &amp; Membership</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security enforcement gate — composes and enforces the accessible-record set for every principal type; an error here means over- or under-exposure of records.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security enforcement — composing three access sources and enforcing them correctly is the core authorization gate of the project.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Critical-path auth spine on shared BFF authz/membership files; serial chain.</parallel-reason>
+    <deps>020,021</deps>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Compose `accessible(principal) = systemuser→ADR-034 membership (auto) ∪ contact→sprk_externalrecordaccess grants ∪ contact→standing-grant runtime membership` and enforce `record ∈ set` on the collaboration endpoints, mirroring `ExternalCallerContext.HasProjectAccess`.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse authorization composition, the Spaarke external-access grant model (`sprk_externalrecordaccess`, `ExternalCallerContext`), and endpoint-filter-based enforcement (ADR-008). Follow ADRs strictly.</role>
+
+  <goal>
+    A single accessible-record-set composition function that, given the principal resolved by task 020, unions the three sources in design.md §5's formula (systemuser ADR-034 membership auto; contact `sprk_externalrecordaccess` grants; contact standing-grant runtime membership from task 021's engine), and a single enforcement point on the collaboration endpoints that denies any record not in that set — for every principal type, with both positive and negative test coverage.
+  </goal>
+
+  <context>
+    <background>
+      Per design.md §5 and spec FR-06, authorization is uniform ("is this record in the principal's accessible-record set?") but the *set* is composed differently per principal plane: a systemuser gets automatic ADR-034 membership; a contact gets only grant-mediated access (`sprk_externalrecordaccess` rows) plus, if applicable, standing-grant runtime membership sourced from task 021's contact-anchored membership entry point. `ExternalCallerContext.HasProjectAccess` already models this accessible-set check for the external (CIAM contact) plane — this task generalizes it to compose all three sources for every principal type task 020 can resolve.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/SpeContainerMembershipService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>`ExternalCallerContext.HasProjectAccess` already implements an accessible-set check for the CIAM contact plane (grants only).</existing>
+    <extension>Yes — generalize the same check to compose all three sources (systemuser membership, contact grants, contact standing-grant runtime membership) rather than building a parallel enforcement mechanism per principal type.</extension>
+    <cost-of-doing-nothing>Without a single composed enforcement point, each principal type would need its own bespoke check (or none), causing either over-exposure (a systemuser or contact seeing records outside their set) or under-exposure (a valid member denied) — and no single place to audit or test the authorization boundary.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-008">SCOPE: collaboration endpoint registration. Enforce the accessible-set check via an endpoint filter, not global middleware — mirror the existing filter-based enforcement pattern on the collaboration endpoints.</constraint>
+    <constraint source="ADR-028">SCOPE: the composition/enforcement logic. Broker-only (NFR-02) — composition reads membership/grant data server-side against the already-resolved principal; it MUST NOT call downstream systems with the caller's own token (no OBO).</constraint>
+    <constraint source="project">SCOPE: composition correctness. Each principal type's set MUST be composed exactly as design.md §5 specifies: systemuser = ADR-034 membership only (automatic); contact = `sprk_externalrecordaccess` grants UNION standing-grant runtime membership (never automatic membership). Enforcement MUST be a positive- AND negative-tested gate (per spec FR-06 acceptance) — a record outside the set MUST be denied, not merely unlisted.</constraint>
+    <constraint source="ADR-029">Publish size MUST be measured and reported: run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, report the compressed size against the ~49.63 MB (incl. PDBs) baseline, and confirm no M365 Agents SDK / Bot packages were added. Ceiling ≤60 MB compressed.</constraint>
+    <constraint source="project">Run `/conflict-check` before opening the BFF PR (13+ active worktrees contend on `Sprk.Bff.Api`). Do NOT inject Graph SDK types or AI-internal types. State the Placement Justification in the PR description.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Accessible-record-set composition and enforcement</topic>
+    <files>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Accessible-set check" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs">HasProjectAccess is the existing record∈set enforcement pattern for CIAM contacts — generalize it to compose all three sources per design.md §5's formula rather than writing a new enforcement mechanism.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `ExternalCallerContext.HasProjectAccess` and `SpeContainerMembershipService` to confirm exactly how the existing accessible-set check is structured and where it currently assumes a CIAM contact only.</step>
+    <step order="2">Implement the composition function: for a systemuser principal (from task 020), source = ADR-034 membership (automatic, existing mechanism); for a contact-only principal, source = `sprk_externalrecordaccess` grants UNION contact-anchored standing-grant runtime membership (task 021's entry point, gated on whether the contact holds a standing grant).</step>
+    <step order="3">Wire the composed accessible-set check into the collaboration endpoints via an ADR-008 endpoint filter, replacing/generalizing the current CIAM-only `HasProjectAccess` call site(s).</step>
+    <step order="4">Add positive tests (each principal type sees exactly its composed set) and negative tests (a record NOT in the composed set is denied) for all three principal types: systemuser, contact-with-grant, contact-with-standing-grant.</step>
+    <step order="5">Run `dotnet publish -c Release` and report the compressed size vs the ~49.63 MB baseline per ADR-029.</step>
+    <step order="6">Run `/conflict-check` before opening the PR; state the Placement Justification in the PR description.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If enforcement cannot reuse the `HasProjectAccess` accessible-set pattern (e.g., it is structurally coupled to CIAM-only assumptions that cannot be generalized without a rewrite), STOP and escalate (root CLAUDE.md §6) — this is a design assumption that needs owner input before proceeding.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test the BFF; run `dotnet publish` for the size check</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a systemuser principal, when the accessible-set check runs, then it sees exactly the records covered by their ADR-034 membership.</criterion>
+    <criterion testable="true">Given a contact principal with one or more `sprk_externalrecordaccess` grants (no standing grant), when the accessible-set check runs, then it sees exactly the granted records.</criterion>
+    <criterion testable="true">Given a contact principal with a standing grant, when the accessible-set check runs, then it sees exactly the records covered by their contact-anchored membership (task 021), unioned with any explicit grants.</criterion>
+    <criterion testable="true">Given a record NOT in a principal's composed accessible set, when the enforcement filter runs, then the request is DENIED (not merely omitted from a list) — verified for all three principal types.</criterion>
+    <criterion testable="true">Both positive and negative paths are covered by tests; BFF publish size is measured/reported (≤60 MB), and `/conflict-check` is run before the PR with the Placement Justification stated.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on task 020 (principal resolution) and task 021 (contact-anchored membership source). Task 030 (broker document access) depends directly on this composed accessible-set check as its authz-before-stream gate — do not change the composition's semantics after 030 starts without re-opening it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. This is a FULL-rigor task (Step 9.5 gates apply).</protocol>
+  </execution>
+</task>

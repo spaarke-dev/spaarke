@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="teams-app-r1">
+  <metadata>
+    <title>Workforce-token → principal resolver for the collaboration endpoints</title>
+    <phase>2 BFF Workforce→Principal Resolver &amp; Membership</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security/auth code on the critical path — every downstream membership and enforcement task composes on this resolver's output.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security/auth-sensitive, critical-path resolver consumed by every collaboration endpoint.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Critical-path auth spine on shared BFF authz/membership files; serial chain.</parallel-reason>
+    <deps>001,002</deps>
+    <tags>bff-api, auth, endpoints</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add a workforce-token→principal resolver used by the collaboration endpoints: AAD `oid` → systemuser (reuse `ResolveSystemUserIdAsync`) with a derived contactId, else → contact (reuse `IdentityNormalizationService`'s verified-email/oid resolution), else deny. Generalize the collaboration endpoints to the workforce plane so they can be called by a workforce-authenticated principal, not only a CIAM contact.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Microsoft Entra workforce tokens, ASP.NET Core minimal API authentication/authorization, and the Spaarke BFF's existing systemuser/contact identity-resolution services. Follow ADRs strictly.</role>
+
+  <goal>
+    A single workforce-principal resolver that, given a validated workforce JwtBearer principal, returns exactly one of: (a) a systemuser principal (systemuserId + derived contactId), (b) a contact-only principal (contactId), or (c) a deny result — with no silent fallback. Wired into the collaboration endpoints so they operate against this resolved principal instead of assuming a CIAM contact.
+  </goal>
+
+  <context>
+    <background>
+      Per design.md §4/§5 and spec FR-04, R1 needs a workforce-token→principal resolver on the collaboration endpoints: a systemuser resolves to ADR-034 membership (task 021/022 compose on top), a contact-only workforce user resolves to the new contact-anchored membership (task 021), and an unresolvable caller must be denied. The AAD-oid→systemuser conversion already exists (`MembershipEndpoints.ResolveSystemUserIdAsync`); the contact-by-verified-email/oid resolution already exists (`IdentityNormalizationService`). This task composes both into one resolver and generalizes the collaboration endpoints (currently CIAM-contact-only) to accept a workforce principal.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Membership/MembershipEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IdentityNormalizationService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>`MembershipEndpoints.ResolveSystemUserIdAsync` (AAD oid → systemuserid) and `IdentityNormalizationService.TryResolveContactIdAsync` (verified-email/oid → contactId) already exist as separate conversions.</existing>
+    <extension>Yes — compose both into one resolver rather than building a new identity-resolution mechanism; no new conversion logic, only orchestration + a deny path.</extension>
+    <cost-of-doing-nothing>Without this resolver, a workforce token arriving at a collaboration endpoint cannot be scoped to the caller's systemuser or contact identity, so every downstream membership/authorization check (tasks 021, 022, 030) has no principal to compose against — the collaboration endpoints stay CIAM-contact-only and a Teams workforce user cannot be authorized at all.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-008">SCOPE: collaboration endpoint registration in `Api/ExternalAccess/**`. Authorize the resolved principal via an endpoint filter, not global middleware — mirror the existing endpoint-filter pattern already used on the collaboration endpoints.</constraint>
+    <constraint source="ADR-028">SCOPE: the resolver itself. Broker-only (NFR-02): the resolver reads claims from the already-validated workforce token to look up systemuser/contact records; it MUST NOT exchange the token downstream (no OBO) and MUST NOT call Microsoft Graph with the caller's token.</constraint>
+    <constraint source="ADR-029">Publish size MUST be measured and reported: run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, report the compressed size against the ~49.63 MB (incl. PDBs) baseline, and confirm no M365 Agents SDK / Bot packages were added. Ceiling ≤60 MB compressed.</constraint>
+    <constraint source="project">Run `/conflict-check` before opening the BFF PR (13+ active worktrees contend on `Sprk.Bff.Api`). Do NOT inject Graph SDK types into the resolver or the collaboration endpoints. Do NOT inject any AI-internal service (`IOpenAiClient`, `IPlaybookService`, etc.) — this resolver has no AI dependency; if one is ever needed, use the `Services/Ai/PublicContracts/` facade, not direct AI-internal types. State the Placement Justification (per design.md §12 / spec.md Placement and New Components) explicitly in the PR description.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Workforce-token→principal resolution for collaboration endpoints</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="AAD oid → systemuser" location="src/server/api/Sprk.Bff.Api/Api/Membership/MembershipEndpoints.cs">ResolveSystemUserIdAsync converts an AAD oid to a systemuserid — reuse for the systemuser branch, then derive the systemuser's contactId.</pattern>
+      <pattern name="oid/verified-email → contact" location="src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IdentityNormalizationService.cs">TryResolveContactIdAsync resolves a contact by AAD oid or verified email — reuse for the contact-only branch when no systemuser match exists.</pattern>
+      <pattern name="Accessible-set gate" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs">HasProjectAccess is the existing per-request accessible-set check the resolved principal will feed into (task 022) — read it to understand the shape the resolver's output must fit.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `MembershipEndpoints.ResolveSystemUserIdAsync`, `IdentityNormalizationService.TryResolveContactIdAsync`, and `ExternalCallerContext` to confirm the exact conversion contracts and the shape the collaboration endpoints currently assume for a CIAM contact.</step>
+    <step order="2">Design and implement a `WorkforcePrincipalResolver` (or equivalent) that: (a) attempts AAD oid → systemuser via the existing conversion; on success, derive the systemuser's contactId and return a systemuser principal; (b) on no systemuser match, attempts oid/verified-email → contact via `IdentityNormalizationService`; on success, return a contact-only principal; (c) on no match, return an explicit deny result — no silent fallback to an unscoped or anonymous principal.</step>
+    <step order="3">Wire the resolver into the collaboration endpoints via an endpoint filter (ADR-008), generalizing them from CIAM-contact-only to accept either principal shape from the resolver.</step>
+    <step order="4">Add unit tests for all three resolver outcomes (systemuser+derived contact, contact-only, deny) plus a test that an unresolvable caller receives 401/403, not silent pass-through.</step>
+    <step order="5">Run `dotnet publish -c Release` and report the compressed size vs the ~49.63 MB baseline per ADR-029.</step>
+    <step order="6">Run `/conflict-check` before opening the PR; state the Placement Justification in the PR description.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the existing AAD-oid→systemuser conversion contract (return shape, null/not-found semantics) differs from what task 001's spike or spec FR-04 assumed, STOP and escalate (root CLAUDE.md §6) before building the resolver on top of an incorrect assumption.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test the BFF; run `dotnet publish` for the size check</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a workforce token for a caller with a matching systemuser, when the resolver runs, then it returns (systemuserId + derived contactId).</criterion>
+    <criterion testable="true">Given a workforce token for a caller with no systemuser but a matching contact (by oid or verified email), when the resolver runs, then it returns (contactId only).</criterion>
+    <criterion testable="true">Given a workforce token for a caller matching neither a systemuser nor a contact, when the resolver runs, then the caller is DENIED (401/403) — not silently allowed through with an unscoped principal.</criterion>
+    <criterion testable="true">The collaboration endpoints are generalized to accept a workforce principal from the resolver via an ADR-008 endpoint filter (not global middleware), with no Graph SDK types or AI-internal types injected.</criterion>
+    <criterion testable="true">BFF publish size is measured and reported (≤60 MB compressed, diff vs ~49.63 MB baseline), and `/conflict-check` is run before the PR with the Placement Justification stated.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Head of the Phase 2 serial chain (resolver → membership → enforcement). Tasks 021 and 022 depend directly on this resolver's principal shape — do not change the shape after 021/022 start without re-opening both.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. This is a FULL-rigor task (Step 9.5 gates apply).</protocol>
+  </execution>
+</task>

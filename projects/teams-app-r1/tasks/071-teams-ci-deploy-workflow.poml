@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="teams-app-r1">
+  <metadata>
+    <title>New Teams-app CI deploy workflow (parallels deploy-external-spa.yml)</title>
+    <phase>7 Teams Package &amp; Deploy</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New CI workflow authoring under `.github/workflows/` — a contended, high-blast-radius hot-path per CLAUDE.md §8 rigor table (tags include ci-workflows-equivalent risk); code-review + adr-check apply.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>New CI workflow authoring — ci-workflows hot-path.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New `.github/workflows` file, but ci-workflows is a contended hot-path — coordinate via `/conflict-check` before the PR (root CLAUDE.md §10 Hot-Path Declaration; project CLAUDE.md ci-workflows=Y).</parallel-reason>
+    <deps>070</deps>
+    <tags>ci-cd, deploy, devops</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add a new GitHub Actions workflow under `.github/workflows/` that builds, packages, and deploys the Teams app (the manifest/appPackage produced by task 070), modeled directly on `.github/workflows/deploy-external-spa.yml` (build → stage → deploy job shape, `workflow_dispatch`-only trigger for now, `npm install --legacy-peer-deps` per root CLAUDE.md §12). A build failure MUST block the deploy step — no partial or broken publish.
+  </prompt>
+
+  <role>SPAARKE DevOps/platform developer. Expert in GitHub Actions workflow authoring, Azure Static Web Apps deploy actions, and the Spaarke CI/CD conventions in `.claude/skills/ci-cd/SKILL.md`. Follow ADRs strictly.</role>
+
+  <goal>
+    A new workflow file (e.g. `.github/workflows/deploy-teams-app.yml`) that installs dependencies, builds the external-spa Teams surface, packages the Teams app (task 070's `appPackage/`), and deploys it, with the deploy step gated strictly behind build success — a failed build/package step MUST prevent the deploy job/step from running (fail-fast, no partial publish). The workflow parallels `deploy-external-spa.yml`'s structure (checkout → setup-node → install → build → stage → deploy) rather than inventing a new shape.
+  </goal>
+
+  <context>
+    <background>
+      Per plan.md Phase 7 (Stream M) and design.md §9, R1 needs its own CI deploy pipeline for the Teams app package — separate from `deploy-external-spa.yml`, which only builds/deploys the standalone SPA bundle and knows nothing about Teams app packaging (manifest zip, appPackage assets). `ci-workflows` is a declared hot-path for this project (project CLAUDE.md `Hot-path: ... CI-Workflows=Y`) because multiple active worktrees may touch `.github/workflows/` concurrently.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">.github/workflows/deploy-external-spa.yml</file>
+      <file role="new">.github/workflows/deploy-teams-app.yml</file>
+      <file role="canonical-reference">src/client/external-spa/appPackage/manifest.json</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>`.github/workflows/deploy-external-spa.yml` already builds and deploys the standalone SPA bundle to Azure Static Web Apps.</existing>
+    <extension>No — the Teams app is a separate deployable artifact (a packaged manifest zip for org-catalog upload, not a static web app content deploy) with its own build/package steps; forcing it into `deploy-external-spa.yml` would conflate two different deploy targets and triggers in one workflow file.</extension>
+    <cost-of-doing-nothing>Without a dedicated workflow, there is no automated build/deploy path for the Teams app package at all — every release would require a manual, undocumented, error-prone local packaging step, and task 072's org-catalog upload would have no reliably-produced artifact to consume.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="project">Model the new workflow directly on `.github/workflows/deploy-external-spa.yml`'s job/step shape (checkout → setup-node → install with `npm install --legacy-peer-deps --no-audit --no-fund` per root CLAUDE.md §12, NOT `npm ci` → build → stage → deploy); do not invent a divergent structure without a concrete reason tied to the Teams-packaging steps.</constraint>
+    <constraint source="project">`ci-workflows` is a contended hot-path for this project — run `/conflict-check` before opening the PR that adds this file, per root CLAUDE.md §10 Hot-Path Declaration and project CLAUDE.md's Hot-path=Y declaration; note the check's result in the PR description.</constraint>
+    <constraint source="project">A build or package failure MUST hard-block the deploy step (fail-fast job/step dependency, e.g. sequential steps in one job or `needs:` between jobs) — the workflow MUST NOT allow a broken/partial package to be uploaded or deployed. SCOPE: applies to the ordering/dependency between the build+package steps and the deploy step only.</constraint>
+    <constraint source="project">Keep the trigger `workflow_dispatch`-only for this task (manual-only), matching `deploy-external-spa.yml`'s current phase-gated trigger discipline; do not add a push/path trigger unless a later task explicitly calls for it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Teams-app CI deploy workflow</topic>
+    <files>
+      <file>.claude/skills/ci-cd/SKILL.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+      <file>projects/teams-app-r1/plan.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Build-stage-deploy workflow shape" location=".github/workflows/deploy-external-spa.yml">checkout → setup-node → npm install (legacy-peer-deps) → build → stage config/artifacts into the build output → deploy via a dedicated Azure action; mirror this shape for the Teams package build/package/deploy sequence.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Read `.github/workflows/deploy-external-spa.yml` in full to confirm the exact job/step shape and env-var conventions to mirror.</step>
+    <step order="2">Create `.github/workflows/deploy-teams-app.yml` with `workflow_dispatch` trigger, `permissions: contents: read`, and a single job (or two jobs with `needs:`) named to build + package + deploy the Teams app.</step>
+    <step order="3">Add checkout + setup-node steps identical in shape to `deploy-external-spa.yml`.</step>
+    <step order="4">Add an install step using `npm install --legacy-peer-deps --no-audit --no-fund` (root CLAUDE.md §12) against the correct working-directory (external-spa or a dedicated Teams-app package location per task 070's output).</step>
+    <step order="5">Add a build step (Vite production build if needed) followed by a package step invoking the M365 Agents Toolkit packaging command against task 070's `appPackage/`.</step>
+    <step order="6">Add a step (or step ordering / `needs:`) that makes the deploy step strictly conditional on build+package success — verify by inspecting the resulting job graph, not just step order, since GitHub Actions continues to later steps by default unless failure stops the job.</step>
+    <step order="7">Add the deploy step (e.g., upload artifact for org-catalog submission, or an Azure/Toolkit publish action) mirroring `deploy-external-spa.yml`'s deploy-action usage where applicable.</step>
+    <step order="8">Run `/conflict-check` against the new file path before opening the PR; record the result.</step>
+    <step order="9">Manually trigger the workflow (workflow_dispatch) in a test run and confirm build → package → deploy succeeds end-to-end.</step>
+    <step order="10">Manually verify the fail-fast behavior: introduce a deliberate build failure (e.g., a broken step in a throwaway branch/test run) and confirm the deploy step does NOT run; revert the deliberate failure.</step>
+    <step order="11">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build the Teams app / external-spa surface locally to validate the workflow's steps</tool>
+    <tool name="terminal">Run gh/Actions commands, trigger workflow_dispatch runs</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.github/workflows/deploy-teams-app.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The new workflow builds, packages, and deploys the Teams app package end-to-end on a manual `workflow_dispatch` trigger.</criterion>
+    <criterion testable="true">The workflow's job/step structure mirrors `deploy-external-spa.yml` (checkout → setup-node → legacy-peer-deps install → build → stage/package → deploy) rather than a divergent shape.</criterion>
+    <criterion testable="true">`/conflict-check` was run before the PR and its result is recorded in the PR description (ci-workflows hot-path coordination).</criterion>
+    <criterion testable="false">Negative: a deliberately-introduced build/package failure blocks the deploy step from running — no partial or broken package is uploaded/deployed — verified by a test run, then the deliberate failure is reverted.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This workflow consumes task 070's `appPackage/` output; it does not itself decide org-catalog admin approval or ACM group assignment (task 072). Keep the trigger manual-only until a later task explicitly graduates it to push/path-triggered, matching the phased trigger discipline already established by `deploy-external-spa.yml`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. FULL-rigor: code-review + adr-check gates apply at Step 9.5. Run `/conflict-check` before the PR per the ci-workflows hot-path declaration.</protocol>
+  </execution>
+</task>

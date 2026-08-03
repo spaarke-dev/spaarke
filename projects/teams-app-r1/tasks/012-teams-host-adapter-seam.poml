@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="teams-app-r1">
+  <metadata>
+    <title>Teams host adapter + host-detection seam (bootstrap, framing, theme, nav)</title>
+    <phase>1 Shared Auth Module &amp; Host Adapter</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New component with a canonical reference to copy — Office IHostAdapter.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>New component with a canonical reference to copy — Office IHostAdapter.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits external-spa bootstrap shared with 010/011, serial.</parallel-reason>
+    <deps>011</deps>
+    <tags>frontend, react, teams, fluent-ui</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add a Teams host adapter (modeled on the Office `IHostAdapter`) plus host-detection wiring, isolating per-host concerns — bootstrap (Teams JS `app.initialize()` + context vs browser MSAL), framing, theme source (Teams-provided vs SPA toggle), and navigation/deep-linking — over the shared collaboration core with NO duplicated feature component.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in the Teams JS SDK (`app.initialize`, context, theme, navigation), the Office add-ins `IHostAdapter` pattern, React 18, and Fluent v9 (ADR-021 semantic tokens incl. dark mode). Follow ADRs strictly.</role>
+
+  <goal>
+    external-spa gains a Teams host adapter modeled on `src/client/office-addins/shared/adapters/IHostAdapter.ts`, plus host-detection wiring at bootstrap, so the SAME collaboration-core feature components render inside a Teams static tab (bootstrap, framing, Teams-provided theme, nav/deep-linking) and continue to render in the standalone browser SPA — with divergence confined entirely to the adapter, per D1/D2/FR-02.
+  </goal>
+
+  <context>
+    <background>
+      Per D1 (shared core + thin host adapter) and D10 (extend external-spa in place), the Teams tab and the standalone SPA must render identical feature components; only host-specific bootstrap/framing/theme/nav concerns may differ, and only inside an adapter seam — never by duplicating a feature component. The Office add-ins' `IHostAdapter` is the proven pattern for this kind of per-host isolation in the Spaarke codebase and is the canonical reference to copy the shape of (not the Office-specific content).
+    </background>
+    <relevant-files>
+      <file role="new">src/client/external-spa/src/host/TeamsHostAdapter.ts</file>
+      <file role="modify">src/client/external-spa/src/main.tsx</file>
+      <file role="canonical-reference">src/client/office-addins/shared/adapters/IHostAdapter.ts</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>Office `IHostAdapter` pattern (no Teams host exists anywhere in the codebase today).</existing>
+    <extension>No — a new Teams adapter modeled on the Office pattern's shape; the pattern itself has no Teams implementation to extend.</extension>
+    <cost-of-doing-nothing>Without this adapter, no Teams tab can bootstrap at all — `app.initialize()`, Teams context resolution, and iframe framing have no implementation, so the collaboration core cannot render inside Teams (FR-01 is unmet).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-028 (Amendment A2)">SCOPE: host-detection + bootstrap wiring only. The adapter selects the Teams SSO/NAA strategy from task 011 when running inside Teams, and the CIAM strategy when running as the standalone SPA; it MUST NOT implement its own auth logic.</constraint>
+    <constraint source="ADR-021">SCOPE: theme wiring in the adapter. Theme MUST use Fluent v9 semantic tokens, including adapting to the Teams-provided dark theme (Teams `theme` context), not hardcoded colors.</constraint>
+    <constraint source="project">SCOPE: adapter + bootstrap files only, not feature components. Shared core + thin adapter (D1) — no duplicated feature component may be introduced without an explicit §11 sign-off; satisfy the `LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` host checklist (§8) for the Teams host.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Teams host adapter seam over the shared collaboration core</topic>
+    <files>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Host adapter interface" location="src/client/office-addins/shared/adapters/IHostAdapter.ts">The per-host isolation shape (bootstrap, context, framing/theme, nav) to model the Teams adapter on — copy the pattern, not the Office-specific implementation.</pattern>
+      <pattern name="Pluggable-authority module + Teams SSO strategy" location="src/client/external-spa/src/auth/msal-auth.ts">Tasks 010/011's strategies — this adapter selects between them at bootstrap based on host detection.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `IHostAdapter.ts` to understand the per-host isolation shape (bootstrap, context, framing/theme, nav) and identify which concerns apply to a Teams static tab.</step>
+    <step order="2">Implement `TeamsHostAdapter` (or equivalent module) covering: bootstrap via Teams JS `app.initialize()` + context retrieval; framing/CSP awareness; theme source resolution from the Teams-provided theme (light/dark/high-contrast) using Fluent v9 semantic tokens; navigation/deep-linking via Teams JS `pages`/`app` APIs.</step>
+    <step order="3">Wire host-detection at the SPA's bootstrap entry point (`main.tsx` or equivalent) so it selects the Teams adapter (and task 011's Teams SSO strategy) when running inside a Teams iframe, and falls back to the existing browser bootstrap + CIAM strategy otherwise.</step>
+    <step order="4">Confirm no feature component is duplicated — the same components render under both adapters; only the adapter differs.</step>
+    <step order="5">Run the render test: render the collaboration core inside a Teams tab context (desktop + web) and confirm no console errors.</step>
+    <step order="6">Run the ADR-021 dark-mode test: simulate the Teams-provided dark theme and confirm colors adapt via semantic tokens (not hardcoded values).</step>
+    <step order="7">Run the host-detection test: confirm the Teams host selects the Teams SSO strategy (task 011) and the non-Teams browser context selects the CIAM strategy (task 010), with no cross-selection.</step>
+    <step order="8">Validate against the `LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` §8 host checklist.</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test the external-spa client</tool>
+    <tool name="ui-test">Browser-based verification of Teams-tab render, dark-mode theming, and host-detection strategy selection</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/host/TeamsHostAdapter.ts</output>
+    <output type="code">src/client/external-spa/src/main.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The same feature components render in both the standalone SPA and the Teams tab, with only the adapter differing (no duplicated feature component).</criterion>
+    <criterion testable="true">The Teams tab renders the collaboration core in both Teams desktop and Teams web with no console errors.</criterion>
+    <criterion testable="true">The Teams-provided dark theme is reflected in the rendered UI via Fluent v9 semantic tokens (ADR-021), matching the existing collaboration-core components' visual language (mirrored, not restyled).</criterion>
+    <criterion testable="true">Host detection correctly selects the Teams SSO strategy inside Teams and the CIAM strategy in the standalone browser, with no cross-selection.</criterion>
+    <criterion testable="true">The Teams tab passes the `LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` §8 embedded-mode host checklist.</criterion>
+    <criterion testable="true">Given the app running OUTSIDE Teams (no Teams JS context detected), when it bootstraps, then it falls back to the standard SPA browser bootstrap with no broken/blank state.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Teams tab renders the collaboration core">
+      <steps>
+        <step>Open the Spaarke personal tab inside Teams (desktop, then web)</step>
+        <step>Verify the collaboration core (projects + documents list) renders</step>
+        <step>Check the browser/console for JavaScript errors</step>
+      </steps>
+      <expected>The tab renders the same feature components as the standalone SPA with no console errors; the layout mirrors the existing external-spa collaboration core (not restyled).</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021) — Teams-provided theme">
+      <steps>
+        <step>Switch the Teams client to dark theme</step>
+        <step>Verify background + text colors adapt via Fluent v9 semantic tokens (no hardcoded white/black)</step>
+        <step>Verify icons use currentColor</step>
+      </steps>
+      <expected>All colors adapt to the Teams-provided dark theme through semantic tokens per ADR-021.</expected>
+    </test>
+    <test name="Host detection selects the correct strategy">
+      <steps>
+        <step>Load inside Teams and confirm the Teams SSO strategy is selected (no CIAM redirect)</step>
+        <step>Load the standalone SPA in a browser and confirm the CIAM strategy is selected</step>
+      </steps>
+      <expected>Host detection selects the Teams SSO strategy inside Teams and the CIAM strategy in the browser, with no cross-selection; outside Teams the SPA browser bootstrap runs with no broken/blank state.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    UI-test anchor: mirror the existing external-spa collaboration-core components visually (do not restyle) — the adapter changes bootstrap/framing/theme-source/nav only. This is the last task in the Phase 1 serial auth/adapter chain (010 → 011 → 012); Phase 2 (workforce→principal resolver) depends on this task's host successfully delivering a token to the BFF.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. This is a FULL-rigor task (Step 9.5 gates apply).</protocol>
+  </execution>
+</task>
