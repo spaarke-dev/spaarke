@@ -729,12 +729,27 @@ export function ConversationPane(): React.JSX.Element {
     () => buildChipPreference(/* statedOrder seam */ null),
     [chipUsageTick]
   );
+  // UAT (2026-08-03): a file registered via the Compose→Assistant ingest path
+  // (`registerComposeActiveDocument`) is a real, actionable session file (its bytes are uploaded as a
+  // ChatSessionFile), but it lands ONLY in `activeSourceDocRef` (+ the `sourceDocReadyToken` bump) —
+  // NOT in the composer `attachmentChips` / `promotedChipIds` that `useAttachments.sessionAttachmentCount`
+  // counts. So the just-classified follow-on cards (Summarize this file / Draft a response / Review an NDA
+  // — all `requiresAttachments`) greyed out even though the Assistant clearly had the file. Fold the active
+  // source document into the attachment-gate count so those cards enable when a source doc is present.
+  // Keyed on `sourceDocReadyToken` (which bumps on every register) so the ref read stays REACTIVE — the
+  // memoized chip slot re-renders when a Compose-registered file becomes available.
+  const composeSourceDocCount = React.useMemo(
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sourceDocReadyToken is the reactive recompute trigger for the ref read
+    () => (activeSourceDocRef.current?.sessionFileId ? 1 : 0),
+    [sourceDocReadyToken]
+  );
   const chips = useConsumerChips({
     bffBaseUrl,
     getAccessToken,
     getSessionId,
     dispatch,
-    sessionAttachmentCount: attachments.sessionAttachmentCount,
+    // Gate on composer attachments UNION the Compose-registered active source doc (see composeSourceDocCount).
+    sessionAttachmentCount: Math.max(attachments.sessionAttachmentCount, composeSourceDocCount),
     enqueueAssistantMessage: injection.enqueue,
     inject: injection.inject,
     openLibraryModal: React.useCallback(() => openLibraryModalRef.current(), []),
