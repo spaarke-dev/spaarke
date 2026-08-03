@@ -262,9 +262,24 @@ export function composeSessionCommentThreadsToAnchoredComments(
     const end = resolveRunAnchor(doc, clampedTo > span.from ? clampedTo : paraEnd);
     if (!end || start.paraId !== end.paraId) continue; // defensive: the clamp must land in the same paragraph
 
+    // agreements-r1 UAT round-1 #4: carry the ROBUST task-055 `paraOffset` (the paragraph-relative char
+    // offset `resolveRunAnchor` already computes) onto BOTH endpoints, exactly as every text-edit op does
+    // (see stepOperationInterceptor's `toAtPoint`). TipTap merges same-format runs, so a comment's
+    // `runIndex` can disagree with OOXML's fine-grained run flatten; without `paraOffset` the server
+    // resolves the anchor by `(runIndex, offset)` only and refuses ("A change could not be anchored…"),
+    // failing the review save. `paraOffset` lets the server realign by numeric offset — still never a text
+    // match (I-7), and omitted-when-absent keeps the server's `(runIndex, offset)` fallback intact.
     const range = {
-      start: { runIndex: start.runIndex, offset: start.offset },
-      end: { runIndex: end.runIndex, offset: end.offset },
+      start: {
+        runIndex: start.runIndex,
+        offset: start.offset,
+        ...(start.paraOffset !== undefined ? { paraOffset: start.paraOffset } : {}),
+      },
+      end: {
+        runIndex: end.runIndex,
+        offset: end.offset,
+        ...(end.paraOffset !== undefined ? { paraOffset: end.paraOffset } : {}),
+      },
     };
 
     result.push({

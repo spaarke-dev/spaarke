@@ -40,6 +40,42 @@ export interface ReviewMemoReadResponse {
   memo: ReviewMemoDocument;
 }
 
+/**
+ * The `code` extension values the memo endpoints stamp on their ProblemDetails responses
+ * (mirrors `Sprk.Bff.Api.Api.Ai.ReviewMemoEndpoints`) — the machine signal the toolbar uses to
+ * pick an honest, actionable banner instead of a dead-end "Failed (400)" message.
+ */
+export type MemoProblemCode = 'session-not-bound' | 'no-completed-review' | 'no-memo';
+
+/** Banner shown when the session's Analysis has no persisted memo yet (404 / `no-memo`). */
+export const MEMO_NO_MEMO_MESSAGE =
+  'Generate the review memo first — no summary memo has been created for this review yet.';
+
+/**
+ * Banner shown when the Compose session is NOT bound to an Analysis (400 / `session-not-bound`) —
+ * the direct-Compose door (agreements-r1 UAT round-1 #2). This is DISTINCT from "no completed
+ * review": a review may well have completed; the memo simply has nowhere durable to be saved until
+ * the session is promoted. Guides the user to the EXISTING promote affordance (Assistant → History →
+ * "Promote to Analysis…", which binds the session durably) — no silent Analysis creation (ADR-041).
+ */
+export const MEMO_SESSION_NOT_BOUND_MESSAGE =
+  'This document isn’t linked to an Analysis yet, so there’s nowhere to save the summary memo. ' +
+  'In the Assistant, open History and choose “Promote to Analysis…” to link this session, ' +
+  'then create the summary memo again. Any completed review is preserved — promoting keeps it.';
+
+/**
+ * Selects the honest banner message for a non-OK memo response from its HTTP status + ProblemDetails
+ * `code`, SPLITTING the two formerly-conflated negatives (agreements-r1 UAT round-1 #2): "no memo
+ * persisted yet" (generate first) vs. "session not bound to an Analysis" (promote first — the review
+ * is not lost). Returns `null` for any other/unknown non-OK response so the caller falls through to a
+ * generic error (never masks a real transport/server failure as one of these guided states).
+ */
+export function selectMemoNegativeMessage(status: number, code?: string | null): string | null {
+  if (status === 404 || code === 'no-memo') return MEMO_NO_MEMO_MESSAGE;
+  if (status === 400 && code === 'session-not-bound') return MEMO_SESSION_NOT_BOUND_MESSAGE;
+  return null;
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')

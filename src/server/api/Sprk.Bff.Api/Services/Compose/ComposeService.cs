@@ -841,11 +841,13 @@ public class ComposeService : IComposeService
 
                 if (partial.AppliedCount == 0)
                 {
-                    // Nothing resolved — there is no partial success to preserve. Fail HARD exactly as before
-                    // prong 1 (a typed ProblemDetails via the endpoint), rather than persist a no-op version +
-                    // a partial-apply banner. Prong 1's value is salvaging a batch where SOME edits are fine;
-                    // a wholly-unanchorable batch stays a hard refusal (the op-log survives client-side for a
-                    // retry). Re-throws the ORIGINAL op-level refusal.
+                    // Nothing resolved — no op applied AND no advisory comment baked (agreements-r1 UAT #4:
+                    // AppliedCount now folds in baked comments, so a comments-only review save where at least
+                    // one note anchored preserves that partial success instead of re-throwing). There is no
+                    // partial success to preserve here. Fail HARD exactly as before prong 1 (a typed
+                    // ProblemDetails via the endpoint), rather than persist a no-op version + a partial-apply
+                    // banner. A wholly-unanchorable batch stays a hard refusal (the op-log + notes survive
+                    // client-side for a retry). Re-throws the ORIGINAL op-level refusal.
                     _logger.LogWarning(
                         "Compose save: best-effort recovery resolved ZERO of {Total} op(s) — re-throwing the original refusal ({Kind}) as a hard failure (session={SessionId}).",
                         partial.Total, ex.Kind, request.SessionId);
@@ -1728,6 +1730,15 @@ public class ComposeService : IComposeService
 
         var unresolved = new List<UnresolvedComposeOp>();
         var appliedCount = 0;
+        // agreements-r1 UAT round-1 #4: a COMMENT is a NON-DESTRUCTIVE change, so a comments-only review
+        // save (empty op-log — a review placed advisory notes but made no text edits) must degrade
+        // gracefully, not lose the WHOLE save when one note can't anchor. Pre-fix the "did anything apply?"
+        // signal counted only OPS, so a fully-bakeable comment contributed 0 and the caller's
+        // `appliedCount == 0` guard re-threw the anchor refusal → 422, discarding even the notes that DID
+        // anchor. Count baked comments as applied work (folded into the summary below) so the guard stays
+        // correct AND surface the unbakeable notes on `unresolved` (skip-with-report, never a silent drop).
+        // A failing TEXT op still lands in `unresolved` exactly as before — its honest contract is unchanged.
+        var bakedCommentCount = 0;
         var current = baseline;
 
         // Inline paragraph units first, then the structural unit LAST.
@@ -1740,13 +1751,21 @@ public class ComposeService : IComposeService
             {
                 current = bytes;
                 appliedCount += unitOps.Count;
+                if (unitComments is not null)
+                    bakedCommentCount += unitComments.Count;
             }
             else
             {
                 foreach (var op in unitOps)
                     unresolved.Add(new UnresolvedComposeOp(op.ParaId, op.GetType().Name, refusal.Kind.ToString(), refusal.Message));
                 if (unitComments is not null)
+                {
                     unbakeableComments += unitComments.Count;
+                    // Surface each un-anchorable advisory note so the client reports it (skip-with-report).
+                    // OpType "AdvisoryComment" distinguishes a non-destructive note from a lost edit op.
+                    foreach (var c in unitComments)
+                        unresolved.Add(new UnresolvedComposeOp(c.ParaId ?? string.Empty, "AdvisoryComment", refusal.Kind.ToString(), refusal.Message));
+                }
             }
         }
 
@@ -1772,9 +1791,13 @@ public class ComposeService : IComposeService
                 unbakeableComments);
         }
 
+        // Comments are first-class items in the partial-apply accounting alongside ops: Total counts every
+        // op + comment, AppliedCount counts applied ops + baked comments, and the invariant
+        // Total == AppliedCount + UnresolvedCount holds. An op-only batch (the existing seam cases) has no
+        // comments, so these reduce to ops.Count / appliedCount exactly as before (no behavior change).
         summary = new PartialApplySummary(
-            Total: ops.Count,
-            AppliedCount: appliedCount,
+            Total: ops.Count + (comments?.Count ?? 0),
+            AppliedCount: appliedCount + bakedCommentCount,
             UnresolvedCount: unresolved.Count,
             Unresolved: unresolved,
             ComputedAtUtc: observedAt);

@@ -178,6 +178,13 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
             s => s.CreateAnalysisOutputAsync(It.IsAny<AnalysisOutputEntity>(), It.IsAny<CancellationToken>()),
             Times.Never,
             "a request with no flagged sections is 'no completed review' — nothing is ever persisted");
+
+        // agreements-r1 UAT round-1 #2 — this is the "no completed review" condition, DISTINCT from
+        // "session not bound": the session IS bound here (Analysis HostContext), so the message must
+        // carry the `no-completed-review` code and must NOT claim the session is unbound.
+        var problem = await response.Content.ReadAsStringAsync();
+        problem.Should().Contain("\"code\":\"no-completed-review\"");
+        problem.Should().NotContain("not bound to an Analysis");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -228,7 +235,17 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
         _fx.AnalysisServiceMock.Verify(
             s => s.CreateAnalysisOutputAsync(It.IsAny<AnalysisOutputEntity>(), It.IsAny<CancellationToken>()),
             Times.Never,
-            "a session with no Analysis-owned HostContext has no completed review to memo-ize");
+            "an unbound session has nowhere to persist the memo");
+
+        // agreements-r1 UAT round-1 #2 — the message must be SPLIT, not conflated: the not-bound
+        // condition must NOT claim "there is no completed review" (a review may well have completed;
+        // the memo is unusable only because there is nowhere durable to save it). It must carry the
+        // machine-detectable `code` and guide the user to the existing promote affordance.
+        var problem = await response.Content.ReadAsStringAsync();
+        problem.Should().Contain("\"code\":\"session-not-bound\"");
+        problem.Should().Contain("Promote to Analysis");
+        problem.Should().NotContain("there is no completed review",
+            "the old conflated message wrongly claimed no review had completed — that claim is removed");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -371,6 +388,34 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         var problem = await response.Content.ReadAsStringAsync();
         problem.Should().Contain("Generate the review memo first");
+    }
+
+    [Fact]
+    public async Task GetReviewMemo_SessionNotBoundToAnalysis_Returns400WithPromoteGuidance()
+    {
+        // The EXACT UAT round-1 #2 repro: the "Create Summary Memo" toolbar (a READ) on a
+        // direct-Compose session that was never promoted/bound to an Analysis. Must be an accurate,
+        // actionable ProblemDetails (promote first) — NOT the old conflated "no completed review".
+        _fx.Reset();
+        var sessionId = Guid.NewGuid().ToString("N");
+        _fx.ChatRepo.SessionsById[sessionId] = new ChatSession(
+            SessionId: sessionId,
+            TenantId: ReviewMemoEndpointTestFixture.TenantId,
+            DocumentId: Guid.NewGuid().ToString(),
+            PlaybookId: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            LastActivity: DateTimeOffset.UtcNow,
+            Messages: Array.Empty<ChatMessage>(),
+            HostContext: null);
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.GetAsync($"/api/ai/chat/sessions/{sessionId}/review-memo");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var problem = await response.Content.ReadAsStringAsync();
+        problem.Should().Contain("\"code\":\"session-not-bound\"");
+        problem.Should().Contain("Promote to Analysis");
+        problem.Should().NotContain("there is no completed review");
     }
 
     [Fact]

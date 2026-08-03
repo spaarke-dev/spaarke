@@ -135,12 +135,18 @@ public static class ReviewMemoEndpoints
         // Negative acceptance criterion (spec FR-13 / task 050): generation with no completed review
         // (no flagged sections supplied) returns a clear error and persists nothing. Checked BEFORE
         // any session lookup so an empty/malformed request never reaches the write path.
+        // NOTE (agreements-r1 UAT round-1 #2): this is the "no completed review" condition — DISTINCT
+        // from the "session not bound to an Analysis" condition below. The two used to share one
+        // conflated message; they are now split (distinct titles + `code` extensions) so a client can
+        // tell "you have no review yet" apart from "promote this session first" (a completed review is
+        // NOT lost — see ResolveBoundAnalysisIdAsync).
         if (request.Sections is null || request.Sections.Count == 0)
         {
             return Problem(
                 StatusCodes.Status400BadRequest,
                 "No Completed Review",
-                "The review has no flagged sections to memo-ize. Generate a memo only after a completed review with at least one flagged section.");
+                "The review has no flagged sections to memo-ize. Generate a memo only after a completed review with at least one flagged section.",
+                code: "no-completed-review");
         }
 
         var (analysisId, resolveError) = await ResolveBoundAnalysisIdAsync(sessionId, tenantId, sessionManager, cancellationToken);
@@ -251,10 +257,21 @@ public static class ReviewMemoEndpoints
             session.HostContext.EntityType != ChatSessionManager.AnalysisHostContextEntityType ||
             !Guid.TryParse(session.HostContext.EntityId, out var analysisId))
         {
+            // agreements-r1 UAT round-1 #2 — SPLIT the two formerly-conflated conditions. This branch is
+            // ONLY "the session is not bound to an Analysis" (the direct-Compose door — a session minted
+            // by ComposeService.LoadAsync / direct-compose has no Analysis-owned HostContext; only the
+            // wizard door binds durably). It is NOT "there is no completed review": the memo endpoint
+            // cannot see review-completion state here (per task 050, disposition lives client-side), so
+            // claiming "no completed review" was inaccurate — a review may well have completed. The memo
+            // is unusable only because there is nowhere durable to persist it. Guide the user to the
+            // EXISTING promote affordance (Assistant → History → "Promote to Analysis…", tasks 023/033),
+            // which binds the session durably; NO silent auto-creation (ADR-041). The distinct `code`
+            // lets the client surface a promote-first affordance instead of a dead-end error.
             return (Guid.Empty, Problem(
                 StatusCodes.Status400BadRequest,
                 "Session Not Bound To Analysis",
-                $"Session {sessionId} is not bound to an Analysis — there is no completed review to memo-ize."));
+                "This session isn't linked to an Analysis, so there's nowhere to save a Review Summary Memo. If a review was completed here it is not lost — promote this session to an Analysis first (in the Assistant, open History and choose \"Promote to Analysis…\"), then generate the memo.",
+                code: "session-not-bound"));
         }
 
         return (analysisId, null);
@@ -265,7 +282,8 @@ public static class ReviewMemoEndpoints
     private static IResult NoMemoProblem() => Problem(
         StatusCodes.Status404NotFound,
         "No Review Memo",
-        "No Review Summary Memo has been generated for this session's Analysis yet. Generate the review memo first.");
+        "No Review Summary Memo has been generated for this session's Analysis yet. Generate the review memo first.",
+        code: "no-memo");
 
     /// <summary>Sanitizes the analysis name into a safe Content-Disposition filename; falls back to a
     /// stable default when the name is blank or sanitizes to empty.</summary>
@@ -282,8 +300,14 @@ public static class ReviewMemoEndpoints
         return sanitized.Length == 0 ? suffix : $"{sanitized} - {suffix}";
     }
 
-    /// <summary>Builds a canonical ProblemDetails result (ADR-019).</summary>
-    private static IResult Problem(int statusCode, string title, string detail) => Results.Problem(
+    /// <summary>
+    /// Builds a canonical ProblemDetails result (ADR-019). The optional <paramref name="code"/> is
+    /// emitted as a machine-readable ProblemDetails extension member (agreements-r1 UAT round-1 #2) so
+    /// a client can tell the split negative conditions apart — <c>session-not-bound</c> (promote first),
+    /// <c>no-completed-review</c> (POST with no flagged sections), <c>no-memo</c> (nothing persisted
+    /// yet) — instead of string-matching the human detail text.
+    /// </summary>
+    private static IResult Problem(int statusCode, string title, string detail, string? code = null) => Results.Problem(
         statusCode: statusCode,
         title: title,
         detail: detail,
@@ -292,7 +316,8 @@ public static class ReviewMemoEndpoints
             StatusCodes.Status400BadRequest => "https://tools.ietf.org/html/rfc7231#section-6.5.1",
             StatusCodes.Status404NotFound => "https://tools.ietf.org/html/rfc7231#section-6.5.4",
             _ => "https://tools.ietf.org/html/rfc7231#section-6.6.1",
-        });
+        },
+        extensions: code is null ? null : new Dictionary<string, object?> { ["code"] = code });
 
     /// <summary>
     /// Extracts the tenant ID from the JWT <c>tid</c> claim (ADR-014) with an <c>X-Tenant-Id</c> header
