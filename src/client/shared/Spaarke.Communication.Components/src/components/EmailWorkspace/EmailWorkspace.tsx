@@ -204,6 +204,9 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
     composerDialog,
     openFullForm,
   } = useEmailComposeActions({
+    // Record-single mode renders inside the OOB email-record modal — the
+    // composer must fully cover it (UAT 2026-08-03). List mode stays floating.
+    composerFullBleed: hideListPane,
     authenticatedFetch,
     bffBaseUrl,
     dataService,

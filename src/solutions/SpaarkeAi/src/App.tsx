@@ -5,8 +5,8 @@
  *   FluentProvider (theme detection — resolveCodePageTheme + setupCodePageThemeListener;
  *     scaled via scaleTheme(theme, uiScale) — P0.5/FR-06, see useUiScale below)
  *     └─ AppWithAuth (gates render on auth-ready, no token snapshot)
- *          ├─ DisplaySizeMenu (P0.5/FR-06 — app-shell "Display size" affordance)
  *          └─ ThreePaneShell (R2 root shell — PaneEventBus + stage lifecycle + ThreePaneLayout)
+ *              (DisplaySizeMenu removed from the embedded surface 2026-08-03 — see render comment)
  *
  * App-shell UI-scale (P0.5, spec FR-06 / design §6.9, spaarke-modal-system project):
  *   `useUiScale()` resolves ONE `uiScale` value from (a) the auto ≥2560 CSS px
@@ -47,7 +47,6 @@ import {
   setupCodePageThemeListener,
   scaleTheme,
   useUiScale,
-  DisplaySizeMenu,
 } from "@spaarke/ui-components";
 import { getAuthProvider } from "@spaarke/auth";
 import { getBffBaseUrl } from "./config/runtimeConfig";
@@ -253,11 +252,14 @@ function AppWithAuth(props: AppProps): React.JSX.Element {
       className={styles.appRoot}
       data-spaarkeai-mode={props.composeMode === "editor" ? "compose" : undefined}
     >
-      {/* P0.5 (FR-06): app-shell "Display size" control. See useStyles.scaleBar
-          docblock above for placement rationale. */}
-      <div className={styles.scaleBar}>
-        <DisplaySizeMenu />
-      </div>
+      {/* P0.5 (FR-06) "Display size" control — REMOVED from the embedded surface
+          (owner UAT 2026-08-03): the manual toggle only scales Spaarke code-page
+          content, not the surrounding OOB MDA chrome/views, which reads as broken
+          when SpaarkeAi runs inside the MDA. The auto ≥2560px breakpoint in
+          useUiScale() still applies (silent, load-bearing for 4K modal sizing).
+          Restore `<div className={styles.scaleBar}><DisplaySizeMenu /></div>`
+          (+ the DisplaySizeMenu import) when the three-pane page ships as a
+          standalone app, where whole-surface scaling is coherent. */}
       <div className={styles.layoutShell}>
         <ThreePaneShell
           bffBaseUrl={bffBaseUrl}
