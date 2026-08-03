@@ -1,12 +1,16 @@
 /**
  * SendEmailDialog.tsx — semantic wrapper for the popup caller (task 021, FR-12).
  *
- * Locks `mount='dialog'` and owns the Fluent `Dialog` open/close lifecycle. The
- * engine renders its own header + action bar for the `dialog` mount, so this
- * wrapper only supplies the `Dialog` chrome and maps callbacks:
+ * #713 re-base (spaarke-modal-system follow-up, 2026-08-03): the wrapper now
+ * composes the canonical `SprkModal` shell instead of a bespoke Fluent
+ * `Dialog`/`DialogSurface` envelope. The shell owns ALL window chrome — title,
+ * maximize/restore (`size='md'` ↔ `full`), close ×, `alert` dismiss — and the
+ * engine mounts with `hostOwnsChrome` so it suppresses its own header (the
+ * pre-seam source of double chrome). The `ComposerActionBar` stays in the body
+ * (Messages-shape: smart body, dumb frame). Callback mapping unchanged:
  *   - engine `onSent(result)` → `props.onSent?.(communicationId)` then `onClose()`
- *   - engine `onCancel`       → `onClose`
- *   - Dialog dismiss (Esc / backdrop) → `onClose`
+ *   - engine `onCancel` / shell × → `onClose`
+ *   - `alert` dismiss: no Esc/backdrop close (owner UAT 2026-07-30 item 12)
  *
  * This is THE canonical dialog wrapper (design §5.1.1) — it supersedes the legacy
  * single-caller `components/SendEmailDialog`; the W6 FilePreviewDialog migration
@@ -15,8 +19,7 @@
  * No `@spaarke/auth` import (ADR-028) — `authenticatedFetch` is injected via props.
  */
 import * as React from 'react';
-import { Dialog, DialogSurface, DialogBody, makeStyles, mergeClasses } from '@fluentui/react-components';
-import { SIZE_SPEC } from '../../SprkModal/sizes';
+import { SprkModal } from '../../SprkModal';
 
 import { EmailComposer } from '../EmailComposer';
 import type {
@@ -53,58 +56,12 @@ export interface ISendEmailDialogRegarding {
   name?: string;
 }
 
-// Standard Spaarke mid-size modal rectangle (owner UAT 2026-07-22): 720px × 70vh — the recurring
-// mid-size across ~6 Spaarke dialogs (QuickStartModal, daily-update email dialog, ContainerTypeConfig).
-// Distinct from the two MODAL-DECISION-CRITERIA layouts (OOB 85%×85% / content-driven preview): the
-// canonical compose/read surface is a fixed mid-size rectangle, not full-height. The surface owns the
-// bounded height; `body` fills it and scrolls internally so the composer content (attachments + body)
-// scrolls while the dialog stays a clean rectangle.
-const useDialogStyles = makeStyles({
-  surface: {
-    // Landscape mid-size rectangle (owner UAT 2026-07-22 #1): the 720px width read as
-    // portrait — widen so the composer is a wider-than-tall rectangle like the mockup.
-    maxWidth: '1040px',
-    width: '92vw',
-    height: '72vh',
-    // spaarke-modal-system P3 (FR-14 alignment, 2026-08-02): cap the 72vh height at
-    // the `md` heightMax so this surface is numerically identical to the SprkModal
-    // `md` size (`min(1040px, 92vw) × min(72vh, 720px)`) — the cap fixes the
-    // square-on-tall-monitor failure `md` exists for. Sourced from SIZE_SPEC (not a
-    // literal) so a future `md` retune propagates here (task-100 gate fix). The
-    // literal FormModal re-base is deferred: EmailComposer is self-chromed (see
-    // notes/task-051-completion.md + DEF-002 / Issue #713).
-    maxHeight: `${SIZE_SPEC.md.heightMax}px`,
-    display: 'flex',
-    flexDirection: 'column',
-    // Surface itself never scrolls — the body owns the scroll region below.
-    overflow: 'hidden',
-  },
-  // Maximized (owner UAT 2026-07-30, item 11): fill the app container / mounted surface —
-  // NOT the physical screen. `100%` resolves against the Dialog's positioning context (the
-  // viewport/host surface the dialog is mounted in); the `maxWidth` cap is lifted so the
-  // surface can span the full width. Toggled back to the default rectangle on restore.
-  surfaceMaximized: {
-    maxWidth: '100%',
-    width: '100%',
-    height: '100%',
-    // UAT 2026-08-03: a maximized composer must be a TRUE full-page takeover of
-    // the host surface. Without these, Fluent's DialogSurface defaults leave
-    // auto-margins + a viewport max-height gap, so "expand" still floated with
-    // visible page chrome around it.
-    maxHeight: '100%',
-    margin: 0,
-    borderRadius: 0,
-  },
-  body: {
-    display: 'flex',
-    flexDirection: 'column',
-    // The composer now owns the scroll region (pinned header/footer + scrollable body,
-    // owner UAT round 3), so the dialog body itself never scrolls.
-    minHeight: 0,
-    flexGrow: 1,
-    overflow: 'hidden',
-  },
-});
+// Surface geometry now comes ENTIRELY from the SprkModal size scale: `md` is
+// `min(1040px·scale, 92vw) × min(72vh, 720px·scale)` — numerically identical to
+// the rectangle this wrapper used to hand-roll (owner UAT 2026-07-22 + the P3
+// FR-14 alignment) — and maximize/full is the shell's own true-takeover state
+// (100vw × 100vh, radius 0), which supersedes the hand-patched surfaceMaximized
+// variant from UAT 2026-08-03. No local surface styles remain by design.
 
 export interface ISendEmailDialogProps {
   open: boolean;
@@ -251,22 +208,37 @@ export interface ISendEmailDialogProps {
    * Reply/Forward from the OOB email-record modal) so the composer fully
    * covers the underlying modal instead of floating inside it. Additive;
    * omitted → the default mid-size rectangle + toggle, unchanged.
+   * (#713 re-base: implemented as the shell's `full` size with the maximize
+   * toggle disabled — same visual contract as before.)
    */
   fullBleed?: boolean;
+  /**
+   * #713 re-base: the `--sprk-ui-scale` factor forwarded to the shell so the
+   * composer surface scales in lock-step with app-shell "Display size"
+   * (SpaarkeAi `useUiScale()` hosts). Omitted → 1 (unchanged for all callers).
+   */
+  uiScale?: number;
 }
 
 export function SendEmailDialog(props: ISendEmailDialogProps) {
-  const { open, onClose, mode, onSent, onError, regarding, associations, fullBleed, ...composerProps } = props;
-  const dialogStyles = useDialogStyles();
+  const { open, onClose, mode, onSent, onError, regarding, associations, fullBleed, uiScale, ...composerProps } = props;
 
-  // Maximize/restore (owner UAT 2026-07-30, item 11). The surface size is owned here (the
-  // engine owns the header where the toggle button lives), so the composer receives an
-  // `onToggleMaximize` callback + the current `isMaximized` flag and renders the button.
-  const [maximized, setMaximized] = React.useState(false);
-  // Always restore to the default rectangle whenever the dialog is (re)opened.
-  React.useEffect(() => {
-    if (!open) setMaximized(false);
-  }, [open]);
+  // Shell title: mirrors the engine's mode-derived header word (which the seam
+  // suppresses), honoring the same `titleOverride` hosts already pass (e.g.
+  // `Reply All: <subject>` from useEmailComposeActions — reply-all arrives as
+  // engine mode 'reply' + an override, so no reply-all branch exists here).
+  const effectiveMode = mode ?? 'compose';
+  const title =
+    props.titleOverride ??
+    (effectiveMode === 'view'
+      ? 'Email'
+      : effectiveMode === 'reply'
+        ? 'Reply'
+        : effectiveMode === 'forward'
+          ? 'Forward'
+          : effectiveMode === 'draft'
+            ? 'Edit Draft'
+            : 'New Email');
 
   // Fold `regarding` into the EXISTING association mechanism (ADR-024) — one
   // more `ICommunicationAssociation`, deduped against any explicit associations.
@@ -284,37 +256,37 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
   }, [associations, regarding]);
 
   return (
-    <Dialog
+    <SprkModal
       open={open}
-      // modalType="alert" disables light-dismiss (backdrop click) AND Escape-to-close so an
-      // accidental click outside can't discard an in-progress draft (owner UAT 2026-07-30,
-      // item 12). The dialog now closes ONLY via the explicit X / Cancel affordances, which
-      // call onClose directly.
-      modalType="alert"
-      onOpenChange={(_event, data) => {
-        if (!data.open) onClose();
-      }}
+      onClose={onClose}
+      title={title}
+      // fullBleed hosts (record-modal reply, dedicated compose window) start —
+      // and stay — at the shell's true-takeover `full` size; everyone else gets
+      // the standard `md` rectangle with the shell's own maximize toggle.
+      size={fullBleed ? 'full' : 'md'}
+      maximizable={!fullBleed}
+      // `alert`: no Esc/backdrop dismiss — an accidental click outside can't
+      // discard an in-progress draft (owner UAT 2026-07-30, item 12). Close is
+      // the shell × or the ComposerActionBar Cancel, both routed to onClose.
+      dismiss="alert"
+      // The composer owns its internal padding + single scroll region.
+      padded={false}
+      uiScale={uiScale}
     >
-      <DialogSurface
-        className={mergeClasses(dialogStyles.surface, (fullBleed || maximized) && dialogStyles.surfaceMaximized)}
-      >
-        <DialogBody className={dialogStyles.body}>
-          <EmailComposer
-            {...composerProps}
-            associations={mergedAssociations}
-            mount="dialog"
-            mode={mode ?? 'compose'}
-            isMaximized={fullBleed || maximized}
-            onToggleMaximize={fullBleed ? undefined : () => setMaximized(m => !m)}
-            onSent={result => {
-              onSent?.(result.communicationId);
-              onClose();
-            }}
-            onCancel={onClose}
-            onError={onError}
-          />
-        </DialogBody>
-      </DialogSurface>
-    </Dialog>
+      <EmailComposer
+        {...composerProps}
+        associations={mergedAssociations}
+        mount="dialog"
+        mode={effectiveMode}
+        // The shell draws title + window controls — suppress the engine's header.
+        hostOwnsChrome
+        onSent={result => {
+          onSent?.(result.communicationId);
+          onClose();
+        }}
+        onCancel={onClose}
+        onError={onError}
+      />
+    </SprkModal>
   );
 }

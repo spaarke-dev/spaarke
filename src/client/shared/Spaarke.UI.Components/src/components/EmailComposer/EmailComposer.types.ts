@@ -577,6 +577,17 @@ export interface IEmailComposerProps {
   isMaximized?: boolean;
 
   /**
+   * #713 chrome seam (spaarke-modal-system follow-up, 2026-08-03): the HOST owns
+   * the window chrome. When true, the engine suppresses its own header (title +
+   * `ModalWindowControls`) so a shell that already draws both — `SprkModal` in
+   * the canonical `SendEmailDialog` wrapper — doesn't double-render chrome. The
+   * body, fields, and `ComposerActionBar` are unchanged. Only meaningful for
+   * chromed mounts (`dialog`/`page`); inline mount never draws chrome anyway.
+   * Omitted (every pre-seam caller) → the engine draws its own header, as before.
+   */
+  hostOwnsChrome?: boolean;
+
+  /**
    * Optional override for the chromed (page/dialog mount) header title. When
    * supplied, it REPLACES the mode-derived word ('Reply'/'Forward'/'New
    * Email'/…) — e.g. a caller can show `Reply: <subject>`. Additive/optional:
