@@ -141,4 +141,24 @@ describe('EmailCardList', () => {
     expect(errorSpy).not.toHaveBeenCalled();
     errorSpy.mockRestore();
   });
+
+  it('renders a "New email" list-toolbar button that fires onCreateNew when the handler is provided (owner UAT 2026-08-03 Item 2)', () => {
+    const onCreateNew = jest.fn();
+    const items: EmailCardItem[] = [makeItem({ id: 'e1' })];
+
+    renderWithProvider(<EmailCardList items={items} onSelect={jest.fn()} onCreateNew={onCreateNew} />);
+
+    const newEmail = screen.getByRole('button', { name: 'New email' });
+    expect(newEmail).toBeInTheDocument();
+    fireEvent.click(newEmail);
+    expect(onCreateNew).toHaveBeenCalledWith();
+  });
+
+  it('omits the "New email" button when no onCreateNew handler is provided', () => {
+    const items: EmailCardItem[] = [makeItem({ id: 'e1' })];
+
+    renderWithProvider(<EmailCardList items={items} onSelect={jest.fn()} />);
+
+    expect(screen.queryByRole('button', { name: 'New email' })).not.toBeInTheDocument();
+  });
 });

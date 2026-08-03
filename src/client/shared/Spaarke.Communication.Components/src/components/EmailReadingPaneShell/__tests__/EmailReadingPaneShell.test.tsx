@@ -175,7 +175,7 @@ describe('EmailReadingPaneShell', () => {
   });
 
   describe('full-width toolbar (FR-08)', () => {
-    it('renders the four email verbs (icon+text) + the right-aligned icon-only action group once a card is selected', () => {
+    it('renders the three email verbs (icon+text) + the right-aligned icon-only action group once a card is selected', () => {
       renderShell();
       fireEvent.click(screen.getByText('Email one'));
 
@@ -184,7 +184,10 @@ describe('EmailReadingPaneShell', () => {
       expect(screen.getByRole('button', { name: 'Reply' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Reply All' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Forward' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'New' })).toBeInTheDocument();
+      // "New" was moved off the reading-pane toolbar to the email LIST toolbar
+      // (owner UAT 2026-08-03) so composing never stacks a modal on the opened
+      // email record — it must NOT be a reading-pane toolbar verb anymore.
+      expect(screen.queryByRole('button', { name: 'New' })).not.toBeInTheDocument();
       // Right group — icon-only (aria-label / tooltip).
       expect(screen.getByRole('button', { name: 'Save to SharePoint' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Create Event' })).toBeInTheDocument();
@@ -211,7 +214,6 @@ describe('EmailReadingPaneShell', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
       fireEvent.click(screen.getByRole('button', { name: 'Reply All' }));
       fireEvent.click(screen.getByRole('button', { name: 'Forward' }));
-      fireEvent.click(screen.getByRole('button', { name: 'New' }));
       fireEvent.click(screen.getByRole('button', { name: 'Save to SharePoint' }));
       fireEvent.click(screen.getByRole('button', { name: 'Create Event' }));
       fireEvent.click(screen.getByRole('button', { name: 'Create To Do' }));
@@ -220,28 +222,32 @@ describe('EmailReadingPaneShell', () => {
       expect(actions.onReply).toHaveBeenCalledWith('e1');
       expect(actions.onReplyAll).toHaveBeenCalledWith('e1');
       expect(actions.onForward).toHaveBeenCalledWith('e1');
-      expect(actions.onNew).toHaveBeenCalledWith();
       expect(actions.onSaveToSharePoint).toHaveBeenCalledWith('e1');
       expect(actions.onCreateEvent).toHaveBeenCalledWith('e1');
       expect(actions.onCreateTodo).toHaveBeenCalledWith('e1');
       expect(actions.onLinkInvoice).toHaveBeenCalledWith('e1');
     });
 
-    it('New is always enabled (not record-scoped); record-scoped buttons enable only once a card is selected', () => {
+    it('places "New email" in the LEFT list toolbar (wired to actions.onNew) — reachable with nothing selected, and never a reading-pane toolbar verb', () => {
       const onNew = jest.fn();
       renderShell({ actions: { onNew } });
 
-      // Nothing selected — the toolbar itself isn't rendered (right pane shows
-      // the placeholder per FR-19), so no button (including New) exists yet.
+      // The compose entry point lives in the LIST toolbar from the start — no
+      // selection needed (the reading-pane toolbar only renders once a card is
+      // selected). This keeps "New" off the opened-email modal (owner UAT
+      // 2026-08-03) so composing never stacks a modal on an opened record.
+      const newEmail = screen.getByRole('button', { name: 'New email' });
+      expect(newEmail).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'New' })).not.toBeInTheDocument();
 
-      fireEvent.click(screen.getByText('Email one'));
-      // Once a card is selected, ALL six buttons — including the record-scoped
-      // ones — are enabled (New always was; Reply/Reply All/Forward/Archive/
-      // Create only disable when selectedId is unset, which can't happen here
-      // since the toolbar itself doesn't render without a selection).
-      expect(screen.getByRole('button', { name: 'Reply' })).toBeEnabled();
-      expect(screen.getByRole('button', { name: 'New' })).toBeEnabled();
+      fireEvent.click(newEmail);
+      expect(onNew).toHaveBeenCalledWith();
+    });
+
+    it('omits the list "New email" button when no onNew handler is wired', () => {
+      renderShell({ actions: {} });
+
+      expect(screen.queryByRole('button', { name: 'New email' })).not.toBeInTheDocument();
     });
 
     it('falls back to a no-op (no throw) when a handler is not wired (pending task-036 integration)', () => {

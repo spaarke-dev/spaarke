@@ -13,37 +13,17 @@
  * (design §5.6.7).
  */
 import * as React from 'react';
-import {
-  Button,
-  SplitButton,
-  Menu,
-  MenuTrigger,
-  MenuPopover,
-  MenuList,
-  MenuItemRadio,
-  Spinner,
-  makeStyles,
-  tokens,
-  type MenuButtonProps,
-} from '@fluentui/react-components';
+import { Button, Spinner, makeStyles, tokens } from '@fluentui/react-components';
 import type { EmailComposerMode, EmailComposerMount } from '../EmailComposer.types';
-import type { CommunicationSendMode } from '../../../services/communicationApi';
 
 export interface IComposerActionBarProps {
   mount: EmailComposerMount;
   mode: EmailComposerMode;
+  /** Drives the busy state that disables Cancel / Save Draft while a send is in flight. */
   isSending: boolean;
   isSavingDraft: boolean;
-  canSend: boolean;
   /** View mode only — whether the underlying record is still a Draft (enables Edit). */
   isDraftRecord?: boolean;
-  /** Current send-from selection (drives the SplitButton caret menu). */
-  sendMode?: CommunicationSendMode;
-  /** True when the host lets the user choose the sender — renders the caret menu. */
-  showSendModeChoice?: boolean;
-  /** Called when the user picks a different sender from the caret menu. */
-  onSendModeChange?: (value: CommunicationSendMode) => void;
-  onSend: () => void;
   onSaveDraft: () => void;
   onCancel: () => void;
   onEdit?: () => void;
@@ -75,22 +55,12 @@ const useStyles = makeStyles({
   },
 });
 
-const SEND_FROM_LABEL: Record<CommunicationSendMode, string> = {
-  sharedMailbox: 'Send from Spaarke',
-  user: 'Send from my mailbox',
-};
-
 export const ComposerActionBar: React.FC<IComposerActionBarProps> = ({
   mount,
   mode,
   isSending,
   isSavingDraft,
-  canSend,
   isDraftRecord,
-  sendMode = 'sharedMailbox',
-  showSendModeChoice,
-  onSendModeChange,
-  onSend,
   onSaveDraft,
   onCancel,
   onEdit,
@@ -102,14 +72,6 @@ export const ComposerActionBar: React.FC<IComposerActionBarProps> = ({
   if (mount === 'inline') return null;
 
   const busy = isSending || isSavingDraft;
-  const sendLabel = isSending ? (
-    <span className={styles.spinnerRow}>
-      <Spinner size="tiny" />
-      Sending...
-    </span>
-  ) : (
-    'Send'
-  );
 
   if (mode === 'view') {
     return (
@@ -138,6 +100,8 @@ export const ComposerActionBar: React.FC<IComposerActionBarProps> = ({
     );
   }
 
+  // Send moved to the compose header's From row (owner UAT 2026-08-03 item 1 —
+  // `ComposerSendButton`). This bar now owns Cancel (left) + Save Draft (right) only.
   return (
     <div className={styles.bar} role="region" aria-label="Composer actions">
       <Button appearance="secondary" onClick={onCancel} disabled={busy}>
@@ -154,44 +118,6 @@ export const ComposerActionBar: React.FC<IComposerActionBarProps> = ({
             'Save Draft'
           )}
         </Button>
-
-        {showSendModeChoice && onSendModeChange ? (
-          <Menu
-            positioning="below-end"
-            checkedValues={{ sendFrom: [sendMode] }}
-            onCheckedValueChange={(_e, data) => {
-              const next = data.checkedItems[0] as CommunicationSendMode | undefined;
-              if (next) onSendModeChange(next);
-            }}
-          >
-            <MenuTrigger disableButtonEnhancement>
-              {(triggerProps: MenuButtonProps) => (
-                <SplitButton
-                  menuButton={{ ...triggerProps, 'aria-label': 'Choose mailbox' }}
-                  primaryActionButton={{ onClick: onSend, disabled: busy || !canSend }}
-                  appearance="primary"
-                  disabled={busy || !canSend}
-                >
-                  {sendLabel}
-                </SplitButton>
-              )}
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                <MenuItemRadio name="sendFrom" value="sharedMailbox">
-                  {SEND_FROM_LABEL.sharedMailbox}
-                </MenuItemRadio>
-                <MenuItemRadio name="sendFrom" value="user">
-                  {SEND_FROM_LABEL.user}
-                </MenuItemRadio>
-              </MenuList>
-            </MenuPopover>
-          </Menu>
-        ) : (
-          <Button appearance="primary" onClick={onSend} disabled={busy || !canSend}>
-            {sendLabel}
-          </Button>
-        )}
       </div>
     </div>
   );

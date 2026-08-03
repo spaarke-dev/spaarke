@@ -20,6 +20,7 @@ import type {
   FetchMultipleResult,
 } from '@spaarke/ui-components';
 import { useEmailViews, EMAIL_INBOX_VIEW_NAME } from '../useEmailViews';
+import { ensureAssociationColumns } from '../ensureAssociationColumns';
 
 /** Builds a stub `IDataverseClient` — only the 3 methods `useEmailViews` calls are exercised. */
 function makeStubClient(overrides: {
@@ -51,7 +52,12 @@ function makeStubClient(overrides: {
     async (_entityName: string, fetchXml: string): Promise<FetchMultipleResult<Record<string, unknown>>> => {
       if (overrides.retrieveMultipleError) throw overrides.retrieveMultipleError;
       // Find which view this fetchXml belongs to so the stub returns matching rows.
-      const viewId = Object.entries(overrides.fetchXmlByViewId ?? {}).find(([, xml]) => xml === fetchXml)?.[0];
+      // The hook injects the association columns via `ensureAssociationColumns`
+      // before running the view, so match the stored FetchXML through the SAME
+      // augmentation (the augmentation is deterministic for a given input).
+      const viewId = Object.entries(overrides.fetchXmlByViewId ?? {}).find(
+        ([, xml]) => ensureAssociationColumns(xml) === fetchXml
+      )?.[0];
       const entities = (viewId && overrides.rowsByViewId?.[viewId]) ?? [];
       return { entities, moreRecords: false };
     }
@@ -97,10 +103,16 @@ describe('useEmailViews', () => {
 
     expect(result.current.error).toBeNull();
     expect(result.current.views.map(v => v.id)).toEqual(expect.arrayContaining([inboxId, sentId]));
-    // Passes the view's FetchXML through UNMODIFIED — no client-added Email predicate.
+    // Preserves the view's own Email predicate — the hook injects the association
+    // columns (for the card status dot) but never adds its own Email filter.
     expect(client.retrieveMultipleRecords).toHaveBeenCalledWith(
       'sprk_communication',
       expect.stringContaining('sprk_communicationtype')
+    );
+    // The association columns the card status dot needs are injected into the run.
+    expect(client.retrieveMultipleRecords).toHaveBeenCalledWith(
+      'sprk_communication',
+      expect.stringContaining('sprk_associationstatus')
     );
   });
 
@@ -152,8 +164,12 @@ describe('useEmailViews', () => {
     await waitFor(() => expect(result.current.selectedViewId).toBe(sentId));
     await waitFor(() => expect(result.current.rows).toEqual([{ sprk_communicationid: 'row-9' }]));
 
-    // The Sent view's FetchXML is passed through unmodified — no extra Email predicate added on top.
-    expect(client.retrieveMultipleRecords).toHaveBeenLastCalledWith('sprk_communication', sentFetchXml);
+    // The Sent view's own filter/sort/columns are preserved — only the association
+    // columns are injected (no extra Email predicate added on top).
+    expect(client.retrieveMultipleRecords).toHaveBeenLastCalledWith(
+      'sprk_communication',
+      ensureAssociationColumns(sentFetchXml)
+    );
   });
 
   it('surfaces a view-list load failure via `error` instead of throwing', async () => {
