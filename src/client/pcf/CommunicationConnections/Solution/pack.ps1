@@ -1,4 +1,4 @@
-$version = "1.6.3"
+$version = "1.6.4"
 $solutionName = "CommunicationConnectionsSolution"
 # Anchor output to the script dir — .NET compression APIs resolve relative paths
 # against the PROCESS cwd (not PowerShell's Set-Location), so use an absolute path.
