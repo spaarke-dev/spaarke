@@ -518,8 +518,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                     <MessageBarBody>
                       <MessageBarTitle>External access is off for this record</MessageBarTitle>
                       This record's Access Permission is set to Restricted, so new external grants (approving a
-                      membership candidate or adding a named contact) are blocked. Existing access can still be
-                      reviewed and revoked below.
+                      membership candidate or adding a named contact) are blocked. Existing access can still be reviewed
+                      and revoked below.
                     </MessageBarBody>
                   </MessageBar>
                 )}
