@@ -41,9 +41,12 @@ import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
 import {
   AGREEMENT_REVIEW_COMPOSITE_MESSAGE,
   AGREEMENT_REVIEW_NON_AGREEMENT_MESSAGE,
+  DEFAULT_REVIEW_DEPTH,
   buildAgreementReviewCompositeChips,
   buildAgreementReviewConfirmChips,
   buildAgreementReviewConfirmMessage,
+  buildAgreementReviewDepthChoiceChips,
+  buildAgreementReviewDepthChoiceMessage,
   buildAgreementReviewNonAgreementChips,
   buildAgreementReviewSanityMismatchMessage,
   displayNameFor,
@@ -55,6 +58,7 @@ import {
   type AgreementClassifyCandidate,
   type AgreementReviewGateDecision,
   type AgreementTypeRegistryEntry,
+  type ReviewDepth,
 } from "./agreementReviewRouting";
 import {
   LOCAL_CHIP,
@@ -113,8 +117,21 @@ export interface AgreementReviewGateController {
    * still runs, but only as a NON-BLOCKING, warn-only sanity check (see module doc + the
    * `resolveAgreementReviewSanityMismatch` pure decision). Callable directly (bypassing the
    * text-detection path entirely) — the seam task 033's wizard auto-run bridge consumes.
+   *
+   * task 070 (UAT2 review-depth selector): `reviewDepth` is an OPTIONAL override.
+   *  - PROVIDED (the wizard auto-run hand-off, which already resolved a depth at finish time) →
+   *    dispatches IMMEDIATELY at that depth — no extra chip turn. Inserting a post-open ask here
+   *    would defeat FR-17's whole point ("no manual re-upload, review auto-runs").
+   *  - OMITTED (the TEXT-path explicit door — the user typed "review this document" on an
+   *    already-oriented session) → inserts ONE depth-choice turn (Quick/Thorough chips) before
+   *    dispatching (CRITICAL UX RULE: exactly one extra turn, never a double-ask).
    */
-  runExplicit: (fileId: string, fileName: string | undefined, subDomainKey: string) => Promise<void>;
+  runExplicit: (
+    fileId: string,
+    fileName: string | undefined,
+    subDomainKey: string,
+    reviewDepth?: ReviewDepth
+  ) => Promise<void>;
   /** Routes a `local:agreement-review-*` chip click back to the pending gate decision. */
   handleGateChipAction: (actionId: string) => void;
   /** True while classification is in flight (optional "Working…" affordance). */
@@ -144,6 +161,36 @@ interface PendingGate {
   readonly fileName: string | undefined;
   readonly decision: AgreementReviewGateDecision;
   readonly registry: readonly AgreementTypeRegistryEntry[];
+}
+
+/**
+ * task 070 (UAT2 review-depth selector) — the pending (unanswered) DEPTH decision, awaiting a
+ * Quick/Thorough chip click. Populated by the three branches whose type is already settled but
+ * still need a depth choice inserted (auto-proceed, the explicit door's text-path ask, composite
+ * once a lens/"Both" is picked) — see `buildAgreementReviewDepthChoiceChips`.
+ */
+type PendingDepthChoiceTarget =
+  | {
+      readonly kind: "single";
+      readonly subDomainKey: string;
+      readonly displayName: string;
+      /**
+       * Whether resolving this depth choice should also update `lastResolvedSubDomainKeyRef`
+       * (task 023's classifier-path lookup-write seam — tracks CLASSIFIER resolutions only, never
+       * an explicit-door bind, which already has a persisted lookup from its own door).
+       */
+      readonly trackAsClassifierResolution: boolean;
+    }
+  | {
+      readonly kind: "both";
+      readonly candidates: readonly AgreementClassifyCandidate[];
+      readonly registry: readonly AgreementTypeRegistryEntry[];
+    };
+
+interface PendingDepthChoice {
+  readonly fileId: string;
+  readonly fileName: string | undefined;
+  readonly target: PendingDepthChoiceTarget;
 }
 
 export function useAgreementReviewGate(deps: AgreementReviewGateDeps): AgreementReviewGateController {
@@ -177,6 +224,10 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
   // The single unanswered gate awaiting a chip click (single dispatch decision per turn, mirrors
   // useConsumerChips' chip-consumption invariant).
   const pendingRef = React.useRef<PendingGate | null>(null);
+  // task 070 — the single unanswered DEPTH choice awaiting a Quick/Thorough chip click. Separate
+  // from `pendingRef` (a different decision shape — no classify decision, just a settled type or
+  // composite candidate set) but the SAME single-pending-decision-per-turn invariant.
+  const pendingDepthRef = React.useRef<PendingDepthChoice | null>(null);
   // Code-review self-check (Step 9.5): `resolvedRef` alone only prevents a double-ask AFTER a gate
   // has settled — it does not prevent a rapid double-invocation (e.g. the user submits "review this
   // document" twice before the first classify round-trip returns) from running the classifier twice
@@ -246,7 +297,13 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
   );
 
   const dispatchReview = React.useCallback(
-    async (fileId: string, fileName: string | undefined, subDomainKey: string, displayName: string): Promise<void> => {
+    async (
+      fileId: string,
+      fileName: string | undefined,
+      subDomainKey: string,
+      displayName: string,
+      reviewDepth: ReviewDepth
+    ): Promise<void> => {
       mountFileInCompose(fileId, fileName, AGREEMENT_ANALYSIS_WORK_TYPE);
       if (!reviewBindingId) {
         inject(
@@ -259,8 +316,11 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
       // ComposeWorkspace reads compose-outputs. Degrades to the bound chat session (undefined
       // override) if it never establishes — never blocks, never drops the review.
       const documentSessionId = await awaitDocumentSessionId(fileId);
+      // task 070 — `reviewDepth` rides the SAME dispatch-args slots the server already reads
+      // `subDomain` off of (SessionDispatchOrchestrator.TryReadReviewDepth); the client never
+      // names a model/deployment (ADR-039), only this closed two-value product intent.
       await dispatchReviewBinding(reviewBindingId, {
-        slots: { fileIds: [fileId], subDomain: subDomainKey },
+        slots: { fileIds: [fileId], subDomain: subDomainKey, reviewDepth },
         resultLabel: displayName,
         sessionIdOverride: documentSessionId ?? undefined,
       });
@@ -274,7 +334,8 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
       fileId: string,
       fileName: string | undefined,
       candidates: readonly AgreementClassifyCandidate[],
-      registry: readonly AgreementTypeRegistryEntry[]
+      registry: readonly AgreementTypeRegistryEntry[],
+      reviewDepth: ReviewDepth
     ): Promise<void> => {
       mountFileInCompose(fileId, fileName, AGREEMENT_ANALYSIS_WORK_TYPE);
       // task 031 (DEF-09 routing): resolved ONCE for the file (not per-candidate) — every sequential
@@ -292,7 +353,7 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
         }
         // eslint-disable-next-line no-await-in-loop -- ADR-016: sequential, never concurrent.
         await dispatchReviewBinding(reviewBindingId, {
-          slots: { fileIds: [fileId], subDomain: candidate.subDomainKey },
+          slots: { fileIds: [fileId], subDomain: candidate.subDomainKey, reviewDepth },
           resultLabel: displayName,
           sessionIdOverride: documentSessionId ?? undefined,
         });
@@ -307,6 +368,10 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
       if (!fileId) return;
 
       // ADR-041 "no double-ask": a file whose gate already resolved re-dispatches directly.
+      // task 070: a REPEAT invocation skips the depth ask entirely (mirrors the pre-070 "no
+      // double-ask" re-dispatch — no NEW question is introduced for a file already resolved) and
+      // defaults to Thorough (the safe, legal-quality default) rather than re-surfacing a chip
+      // turn for an already-settled file.
       const resolved = resolvedRef.current.get(fileId);
       if (resolved) {
         if (resolved.subDomainKey === "both") {
@@ -319,7 +384,7 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
           );
           return;
         }
-        await dispatchReview(fileId, fileName, resolved.subDomainKey, resolved.displayName);
+        await dispatchReview(fileId, fileName, resolved.subDomainKey, resolved.displayName, DEFAULT_REVIEW_DEPTH);
         return;
       }
 
@@ -354,14 +419,26 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
             return;
 
           case "auto-proceed": {
-            // NEVER silent-wrong-grounding: still an explicit orientation + dispatch, just no chat question.
+            // NEVER silent-wrong-grounding: still an explicit orientation, just no TYPE question.
+            // task 070: insert ONE depth-choice turn before dispatching (CRITICAL UX RULE — the
+            // type is settled with high confidence, but the user still picks Quick vs Thorough).
+            // Do NOT set resolvedRef/lastResolvedSubDomainKeyRef yet — mirrors the "confirm"
+            // branch's timing exactly (a question is pending; the resolution is recorded only once
+            // the user actually answers it, in handleGateChipAction below).
             const displayName = displayNameFor(decision.subDomainKey, registry);
-            resolvedRef.current.set(fileId, { subDomainKey: decision.subDomainKey, displayName });
-            // task 023: this is a CLASSIFIER resolution (unlike runExplicit, which already has a
-            // persisted lookup from its own door) — track it for the promote/fork lookup-write seam.
-            lastResolvedSubDomainKeyRef.current = decision.subDomainKey;
             pendingRef.current = null;
-            await dispatchReview(fileId, fileName, decision.subDomainKey, displayName);
+            pendingDepthRef.current = {
+              fileId,
+              fileName,
+              target: {
+                kind: "single",
+                subDomainKey: decision.subDomainKey,
+                displayName,
+                trackAsClassifierResolution: true,
+              },
+            };
+            enqueueAssistantMessage(makeLocalAssistantMessage(buildAgreementReviewDepthChoiceMessage(displayName)));
+            acceptChips(toConsumerChipWire(buildAgreementReviewDepthChoiceChips()));
             return;
           }
 
@@ -389,16 +466,46 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
 
   const handleGateChipAction = React.useCallback(
     (actionId: string): void => {
+      // task 070 — the standalone depth-choice chips (auto-proceed / explicit-door ask / composite
+      // post-pick) are checked FIRST: these fire when `pendingRef` is already null (the type
+      // question, if any, was already answered/skipped) and `pendingDepthRef` holds the settled
+      // target(s) awaiting only a Quick/Thorough pick.
+      if (actionId === LOCAL_CHIP.agreementReviewDepthQuick || actionId === LOCAL_CHIP.agreementReviewDepthThorough) {
+        const pendingDepth = pendingDepthRef.current;
+        if (!pendingDepth) return;
+        pendingDepthRef.current = null;
+        const reviewDepth: ReviewDepth =
+          actionId === LOCAL_CHIP.agreementReviewDepthQuick ? "quick" : "thorough";
+        const { fileId, fileName, target } = pendingDepth;
+
+        if (target.kind === "both") {
+          void dispatchBothSequentially(fileId, fileName, target.candidates, target.registry, reviewDepth);
+          return;
+        }
+
+        resolvedRef.current.set(fileId, { subDomainKey: target.subDomainKey, displayName: target.displayName });
+        if (target.trackAsClassifierResolution) {
+          lastResolvedSubDomainKeyRef.current = target.subDomainKey; // task 023: classifier resolution
+        }
+        void dispatchReview(fileId, fileName, target.subDomainKey, target.displayName, reviewDepth);
+        return;
+      }
+
       const pending = pendingRef.current;
       if (!pending) return;
       const { fileId, fileName, decision, registry } = pending;
 
-      if (actionId === LOCAL_CHIP.agreementReviewConfirm && decision.kind === "confirm") {
+      if (
+        (actionId === LOCAL_CHIP.agreementReviewConfirmQuick || actionId === LOCAL_CHIP.agreementReviewConfirmThorough) &&
+        decision.kind === "confirm"
+      ) {
         pendingRef.current = null;
         const displayName = displayNameFor(decision.subDomainKey, registry);
+        const reviewDepth: ReviewDepth =
+          actionId === LOCAL_CHIP.agreementReviewConfirmQuick ? "quick" : "thorough";
         resolvedRef.current.set(fileId, { subDomainKey: decision.subDomainKey, displayName });
         lastResolvedSubDomainKeyRef.current = decision.subDomainKey; // task 023: classifier resolution
-        void dispatchReview(fileId, fileName, decision.subDomainKey, displayName);
+        void dispatchReview(fileId, fileName, decision.subDomainKey, displayName, reviewDepth);
         return;
       }
 
@@ -408,16 +515,27 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
         const displayName = displayNameFor(fallbackKey, registry);
         resolvedRef.current.set(fileId, { subDomainKey: fallbackKey, displayName });
         lastResolvedSubDomainKeyRef.current = fallbackKey; // task 023: classifier-flow resolution
-        void dispatchReview(fileId, fileName, fallbackKey, displayName);
+        // task 070 — the general-review escape hatch is deliberately NOT depth-split (see
+        // buildAgreementReviewConfirmChips's doc comment); defaults to Thorough.
+        void dispatchReview(fileId, fileName, fallbackKey, displayName, DEFAULT_REVIEW_DEPTH);
         return;
       }
 
       if (actionId === LOCAL_CHIP.agreementReviewBoth && decision.kind === "composite") {
         pendingRef.current = null;
-        // "Both" is ambiguous for a SINGLE-valued sprk_agreementtype lookup — deliberately does NOT
-        // update lastResolvedSubDomainKeyRef (task 023 seam), leaving any prior single-type
-        // resolution (if any) as the last-known value rather than guessing between the two packs.
-        void dispatchBothSequentially(fileId, fileName, decision.candidates, registry);
+        // task 070 — insert ONE depth-choice turn before the sequential dispatch (composite is not
+        // one of the task's two named "insert one turn" branches, but the same rationale applies
+        // more strongly here: combining depth into the lens-choice turn would multiply chips
+        // combinatorially — N lenses x 2 depths + "Both" x 2 — for an already-dense turn).
+        pendingDepthRef.current = {
+          fileId,
+          fileName,
+          target: { kind: "both", candidates: decision.candidates, registry },
+        };
+        enqueueAssistantMessage(
+          makeLocalAssistantMessage(buildAgreementReviewDepthChoiceMessage("both agreement types"))
+        );
+        acceptChips(toConsumerChipWire(buildAgreementReviewDepthChoiceChips()));
         return;
       }
 
@@ -425,27 +543,43 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
       if (lensKey && decision.kind === "composite") {
         pendingRef.current = null;
         const displayName = displayNameFor(lensKey, registry);
-        resolvedRef.current.set(fileId, { subDomainKey: lensKey, displayName });
-        lastResolvedSubDomainKeyRef.current = lensKey; // task 023: classifier-flow resolution
-        void dispatchReview(fileId, fileName, lensKey, displayName);
+        // task 070 — same follow-up depth turn as "Both" above, for a single chosen lens.
+        pendingDepthRef.current = {
+          fileId,
+          fileName,
+          target: { kind: "single", subDomainKey: lensKey, displayName, trackAsClassifierResolution: true },
+        };
+        enqueueAssistantMessage(makeLocalAssistantMessage(buildAgreementReviewDepthChoiceMessage(displayName)));
+        acceptChips(toConsumerChipWire(buildAgreementReviewDepthChoiceChips()));
       }
     },
-    [dispatchReview, dispatchBothSequentially]
+    [dispatchReview, dispatchBothSequentially, enqueueAssistantMessage, acceptChips]
   );
 
   // task 023 (FR-09 explicit door): binds `subDomainKey` DETERMINISTICALLY — no classification
   // gate, no confirm chips, no re-route. Callable directly (the seam task 033's wizard auto-run
   // bridge consumes) or via ConversationPane's text-detection path when the session was launched
   // already-oriented (`explicitComposeLaunch?.subDomain`).
+  //
+  // task 070: `reviewDepth` is OPTIONAL — see the interface doc comment above for the two-mode
+  // contract (provided = wizard auto-run, dispatch immediately; omitted = TEXT door, ask once).
   const runExplicit = React.useCallback(
-    async (fileId: string, fileName: string | undefined, subDomainKey: string): Promise<void> => {
+    async (
+      fileId: string,
+      fileName: string | undefined,
+      subDomainKey: string,
+      reviewDepth?: ReviewDepth
+    ): Promise<void> => {
       if (!fileId) return;
 
       // ADR-041 "no double-ask": a file whose bind already resolved (via either door — a fileId's
       // gate takes exactly one path per session) re-dispatches directly, no re-classify/re-notice.
+      // task 070: an already-resolved repeat call never re-asks depth either — defaults to
+      // Thorough unless this SAME call explicitly supplies one (matches runGate's identical
+      // resolved-cache timing decision above).
       const resolved = resolvedRef.current.get(fileId);
       if (resolved && resolved.subDomainKey !== "both") {
-        await dispatchReview(fileId, fileName, resolved.subDomainKey, resolved.displayName);
+        await dispatchReview(fileId, fileName, resolved.subDomainKey, resolved.displayName, reviewDepth ?? DEFAULT_REVIEW_DEPTH);
         return;
       }
 
@@ -455,14 +589,14 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
       try {
         const registry = await loadRegistry();
         const displayName = displayNameFor(subDomainKey, registry);
-        resolvedRef.current.set(fileId, { subDomainKey, displayName });
-        // Deterministic dispatch — bound to the explicit pack immediately, no gate to clear.
-        const dispatchPromise = dispatchReview(fileId, fileName, subDomainKey, displayName);
-        // Warn-only sanity check (ADR-041): run the classifier NON-BLOCKING alongside the explicit
-        // dispatch. `runClassify` never throws (returns null on any failure/unavailability) and this
-        // `.then()`/`.catch()` pair NEVER surfaces an error or blocks/re-routes the explicit run —
-        // resolveAgreementReviewSanityMismatch's own null-safe contract means a classifier error
-        // silently produces no notice, per the negative acceptance criterion.
+
+        // Warn-only sanity check (ADR-041): run the classifier NON-BLOCKING, fired immediately
+        // regardless of which branch below runs — so if a depth-choice turn is about to be shown,
+        // the wait time for the user's pick is put to use (task 070). `runClassify` never throws
+        // (returns null on any failure/unavailability) and this `.then()`/`.catch()` pair NEVER
+        // surfaces an error or blocks/re-routes the explicit run — resolveAgreementReviewSanityMismatch's
+        // own null-safe contract means a classifier error silently produces no notice, per the
+        // negative acceptance criterion.
         void runClassify(fileId)
           .then((classifyResult) => {
             const mismatch = resolveAgreementReviewSanityMismatch(subDomainKey, classifyResult, registry);
@@ -473,17 +607,39 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
           .catch(() => {
             // Never surfaced — see doc comment above.
           });
-        await dispatchPromise;
+
+        if (reviewDepth) {
+          // Depth already decided (the wizard auto-run hand-off) — dispatch immediately, no ask.
+          // Inserting a chip turn here would defeat FR-17's "no manual re-upload, review
+          // auto-runs" — the whole point of the auto-run bridge is zero further chat interaction.
+          resolvedRef.current.set(fileId, { subDomainKey, displayName });
+          await dispatchReview(fileId, fileName, subDomainKey, displayName, reviewDepth);
+          return;
+        }
+
+        // TEXT-door explicit bind (no depth supplied) — insert ONE depth-choice turn (task 070,
+        // CRITICAL UX RULE). Do NOT set resolvedRef yet — mirrors the ask-then-record timing the
+        // auto-proceed branch (runGate) and the composite post-pick branch (handleGateChipAction)
+        // both use; `trackAsClassifierResolution: false` because an explicit bind already has a
+        // persisted lookup from its OWN door (task 023) — this is not a classifier resolution.
+        pendingDepthRef.current = {
+          fileId,
+          fileName,
+          target: { kind: "single", subDomainKey, displayName, trackAsClassifierResolution: false },
+        };
+        enqueueAssistantMessage(makeLocalAssistantMessage(buildAgreementReviewDepthChoiceMessage(displayName)));
+        acceptChips(toConsumerChipWire(buildAgreementReviewDepthChoiceChips()));
       } finally {
         inFlightRef.current.delete(fileId);
       }
     },
-    [loadRegistry, dispatchReview, runClassify, enqueueAssistantMessage]
+    [loadRegistry, dispatchReview, runClassify, enqueueAssistantMessage, acceptChips]
   );
 
   const resetForSession = React.useCallback((): void => {
     resolvedRef.current = new Map();
     pendingRef.current = null;
+    pendingDepthRef.current = null;
     inFlightRef.current = new Set();
     lastResolvedSubDomainKeyRef.current = null;
     // registryRef is intentionally NOT cleared — the sprk_agreementtype registry is tenant-wide

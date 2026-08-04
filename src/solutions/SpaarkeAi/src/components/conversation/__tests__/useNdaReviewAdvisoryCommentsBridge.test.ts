@@ -139,7 +139,7 @@ describe('useNdaReviewAdvisoryCommentsBridge — shape detection + projection (t
     expect(event.advisoryComments[0]).toMatchObject({ targetText: 'usable text', explanation: 'usable explanation' });
   });
 
-  it('every flagged section unusable: dispatches NOTHING', () => {
+  it('every flagged section unusable: still dispatches (empty items) so completion observers fire', () => {
     const { dispatch, result } = setup();
 
     result.current.emitFromResult({
@@ -147,15 +147,21 @@ describe('useNdaReviewAdvisoryCommentsBridge — shape detection + projection (t
       flaggedSections: [{ sectionRef: '1.1' }, { quotedText: '', explanation: '' }],
     });
 
-    expect(dispatch).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    const [, event] = dispatch.mock.calls[0];
+    expect(event.advisoryComments).toEqual([]);
+    expect(event.overallRisk).toBe('low');
   });
 
-  it('an empty flaggedSections array (clean NDA): dispatches NOTHING', () => {
+  it('an empty flaggedSections array (clean review): dispatches with empty items — the zero-findings completion signal (task 071)', () => {
     const { dispatch, result } = setup();
 
     result.current.emitFromResult({ overallRisk: 'none', flaggedSections: [] });
 
-    expect(dispatch).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    const [, event] = dispatch.mock.calls[0];
+    expect(event.advisoryComments).toEqual([]);
+    expect(event.overallRisk).toBe('none');
   });
 
   it('a DIFFERENT Compose action shape (compose-compare-to-playbook: overallRisk + matches[]) dispatches NOTHING', () => {

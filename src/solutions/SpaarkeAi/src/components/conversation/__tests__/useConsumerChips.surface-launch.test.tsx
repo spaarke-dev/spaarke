@@ -281,3 +281,81 @@ describe('useConsumerChips — task 031(d) gating: NDA-REVIEW findings never att
     expect(message.content).not.toContain('Section 4.2');
   });
 });
+
+describe('useConsumerChips — task 070 (UAT2 review-depth selector): the Quick-scan caveat', () => {
+  it('reviewDepth:"quick" in the dispatch slots renders a visible "Quick scan — not a full advisory review" caveat', async () => {
+    dispatchConsumerMock.mockResolvedValue({
+      streamId: 's',
+      status: 'complete',
+      disposition: 'compose',
+      result: { overallRisk: 'low', flaggedSections: [] },
+    });
+
+    const enqueueAssistantMessage = jest.fn<void, [IChatMessage]>();
+    const { result } = renderHook(() =>
+      useConsumerChips(makeDeps({ enqueueAssistantMessage }))
+    );
+    await act(async () => {
+      result.current.dispatchBinding('review-binding-1', {
+        slots: { fileIds: ['file-1'], reviewDepth: 'quick' },
+        resultLabel: 'NDA',
+      });
+    });
+    await flush();
+
+    const message = enqueueAssistantMessage.mock.calls[0][0];
+    expect(message.content).toContain('Quick scan — not a full advisory review');
+    expect(message.content).toContain('finished reviewing');
+  });
+
+  it('reviewDepth:"thorough" (or absent) renders NO caveat — byte-identical to the pre-070 wording', async () => {
+    dispatchConsumerMock.mockResolvedValue({
+      streamId: 's',
+      status: 'complete',
+      disposition: 'compose',
+      result: { overallRisk: 'low', flaggedSections: [] },
+    });
+
+    const enqueueAssistantMessage = jest.fn<void, [IChatMessage]>();
+    const { result } = renderHook(() =>
+      useConsumerChips(makeDeps({ enqueueAssistantMessage }))
+    );
+    await act(async () => {
+      result.current.dispatchBinding('review-binding-1', {
+        slots: { fileIds: ['file-1'], reviewDepth: 'thorough' },
+        resultLabel: 'NDA',
+      });
+    });
+    await flush();
+
+    const message = enqueueAssistantMessage.mock.calls[0][0];
+    expect(message.content).not.toContain('Quick scan');
+    expect(message.content).toBe(
+      "I've finished reviewing under the **NDA** lens. Open the **Review Summary** and the in-document **Review Notes** in the Compose tab to see the flagged clauses and assessments."
+    );
+  });
+
+  it('a dispatch with NO reviewDepth slot at all (every pre-070 caller) renders NO caveat', async () => {
+    dispatchConsumerMock.mockResolvedValue({
+      streamId: 's',
+      status: 'complete',
+      disposition: 'compose',
+      result: { overallRisk: 'low', flaggedSections: [] },
+    });
+
+    const enqueueAssistantMessage = jest.fn<void, [IChatMessage]>();
+    const { result } = renderHook(() =>
+      useConsumerChips(makeDeps({ enqueueAssistantMessage }))
+    );
+    await act(async () => {
+      result.current.dispatchBinding('review-binding-1', { slots: { fileIds: ['file-1'] } });
+    });
+    await flush();
+
+    const message = enqueueAssistantMessage.mock.calls[0][0];
+    expect(message.content).not.toContain('Quick scan');
+    expect(message.content).toBe(
+      "I've finished reviewing the NDA. Open the **Review Summary** and the in-document **Review Notes** in the Compose tab to see the flagged clauses and assessments."
+    );
+  });
+});

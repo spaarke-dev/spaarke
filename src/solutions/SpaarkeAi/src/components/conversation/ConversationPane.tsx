@@ -114,7 +114,7 @@ import { useCapabilityDiscovery } from "./useCapabilityDiscovery";
 // deep-import rationale (avoids transitively pulling the TipTap editor widgets into the Assistant
 // pane bundle); composeLaunchContext.ts is a READ-ONLY canonical reference this task consumes,
 // never modifies (Spaarke.Compose.Components is off-limits this wave — task 012 owns it).
-import { detectAgreementReviewIntent } from "./agreementReviewRouting";
+import { detectAgreementReviewIntent, normalizeReviewDepth, type ReviewDepth } from "./agreementReviewRouting";
 import { useAgreementReviewGate } from "./useAgreementReviewGate";
 // task 031 (DEF-09 routing): the pure waiter/timeout seam that resolves the reviewed file's
 // REAL document session (backfilled by registerComposeActiveDocument), so the review dispatch's
@@ -571,8 +571,13 @@ export function ConversationPane(): React.JSX.Element {
   // arrives when the session was launched ALREADY oriented (`explicitComposeLaunch?.subDomain`).
   // Carries the bound subDomainKey (captured at detection time, not re-read later) so the buffered
   // effect below calls `agreementReviewGate.runExplicit` directly — no classification gate, ever.
+  // task 070 (UAT2 review-depth selector): `reviewDepth` is OPTIONAL on this buffer — the TEXT-path
+  // trigger (handleDecorateOutboundBodyWithRevise) leaves it undefined (runExplicit then asks ONE
+  // depth-choice turn); the WIZARD hand-off listener below sets it from the finish-time seed (the
+  // wizard already resolved a depth, so no further ask — see runExplicit's two-mode contract).
   const [pendingExplicitAgreementReview, setPendingExplicitAgreementReview] = React.useState<{
     subDomainKey: string;
+    reviewDepth?: ReviewDepth;
   } | null>(null);
   // task 033 (FR-17 wizard→review auto-run bridge) — wizard hand-off state:
   //  - `wizardAutoRunHandledRef`: once-per-Analysis dedupe for the workspace-channel hand-off
@@ -1492,12 +1497,17 @@ export function ConversationPane(): React.JSX.Element {
           // SAME mount-in-Compose + dispatch-nda-review flow the old top-of-pane card used.
           handleReviewNda();
           return;
-        case LOCAL_CHIP.agreementReviewConfirm:
+        case LOCAL_CHIP.agreementReviewConfirmQuick:
+        case LOCAL_CHIP.agreementReviewConfirmThorough:
         case LOCAL_CHIP.agreementReviewGeneral:
         case LOCAL_CHIP.agreementReviewBoth:
-          // task 021 — the confirmation-gate chips (below-threshold confirm / pick-another / non-
-          // agreement general-review escape hatch / composite "Both") all route back to the gate
-          // controller, which resolves the pending decision and dispatches the review.
+        case LOCAL_CHIP.agreementReviewDepthQuick:
+        case LOCAL_CHIP.agreementReviewDepthThorough:
+          // task 021 — the confirmation-gate chips (below-threshold confirm+depth / pick-another /
+          // non-agreement general-review escape hatch / composite "Both") all route back to the
+          // gate controller. task 070 — the standalone depth-choice chips (auto-proceed / explicit-
+          // door ask / composite post-pick) route the SAME way; the controller resolves the pending
+          // decision and dispatches the review.
           agreementReviewGate.handleGateChipAction(actionId);
           return;
         default:
@@ -2107,9 +2117,9 @@ export function ConversationPane(): React.JSX.Element {
     const active = activeSourceDocRef.current;
     if (active?.sessionFileId == null || chatSessionIdRef.current == null) return;
     if (!ndaReviewBindingId) return;
-    const { subDomainKey } = pendingExplicitAgreementReview;
+    const { subDomainKey, reviewDepth } = pendingExplicitAgreementReview;
     setPendingExplicitAgreementReview(null);
-    void runExplicitAgreementReview(active.sessionFileId, active.fileName, subDomainKey);
+    void runExplicitAgreementReview(active.sessionFileId, active.fileName, subDomainKey, reviewDepth);
   }, [sourceDocReadyToken, pendingExplicitAgreementReview, runExplicitAgreementReview, ndaReviewBindingId]);
 
   // task 033 (FR-17) — the wizard auto-run BRIDGE-FAILURE watchdog (ADR-019 distinct surfacing).
@@ -2309,7 +2319,14 @@ export function ConversationPane(): React.JSX.Element {
       // bindingId resolves by the time the buffered effect needs it (never dispatch inline here —
       // the bindingId is virtually never resolved on this synchronous tick).
       setAgreementReviewGateNeeded(true);
-      setPendingExplicitAgreementReview({ subDomainKey: seed.subDomain });
+      // task 070 (UAT2 review-depth selector): the wizard's "Analysis Details" step now carries an
+      // additive `reviewDepth` toggle (defaults to Thorough). Reading it here — normalized, never
+      // trusting the wire value blindly — means `runExplicit` dispatches IMMEDIATELY at the picked
+      // depth instead of inserting a post-open ask (see runExplicit's two-mode contract).
+      setPendingExplicitAgreementReview({
+        subDomainKey: seed.subDomain,
+        reviewDepth: normalizeReviewDepth(seed.reviewDepth),
+      });
       setWizardAutoRunWatchdog({ analysisId });
     }
   });

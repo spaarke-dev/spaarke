@@ -36,7 +36,7 @@ if (typeof (global as any).TextEncoder === 'undefined') (global as any).TextEnco
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 if (typeof (global as any).TextDecoder === 'undefined') (global as any).TextDecoder = NodeTextDecoder;
 import React, { act } from 'react';
-import { render } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 import { PaneEventBus, PaneEventBusProvider } from '@spaarke/ai-widgets';
@@ -260,6 +260,10 @@ jest.mock('@spaarke/ui-components', () => {
 
 // Import AFTER mocks.
 import { ConversationPane } from '../ConversationPane';
+// task 070 (UAT2 review-depth selector): auto-proceed now inserts ONE depth-choice turn before
+// dispatching the review — this harness clicks the real `<ConsumerChips>` button (rendered inside
+// the stubbed SprkChat's `transcriptFooterSlot`).
+import { LOCAL_CHIP } from '../localActionChips';
 
 const workspaceEvents: WorkspacePaneEvent[] = [];
 const registerActiveDocumentRef: { current: ComposeActiveDocumentRegistration | null } = { current: null };
@@ -348,6 +352,15 @@ describe('task 031 DEF-09: agreement-review dispatches to the DOCUMENT session (
     const classifyUrl = dispatchPostUrls.find((u) => dispatchPostBodies[dispatchPostUrls.indexOf(u)]?.bindingId === CLASSIFY_BINDING);
     expect(classifyUrl).toContain(`/sessions/${CHAT_SESSION}/dispatch`);
 
+    // task 070: auto-proceed no longer dispatches the review immediately — it inserts a
+    // depth-choice turn (Quick/Thorough chips) first. Answer it to actually dispatch.
+    expect(dispatchPostBodies.some((b) => b.bindingId === REVIEW_BINDING)).toBe(false);
+    const depthChip = screen.getByTestId(`consumer-chip-${LOCAL_CHIP.agreementReviewDepthThorough}`);
+    await act(async () => {
+      fireEvent.click(depthChip);
+      for (let i = 0; i < 30; i++) await Promise.resolve();
+    });
+
     // (1) THE FIX: the review's /dispatch POST targeted the DOCUMENT session, NOT the chat session.
     const reviewDispatchIndex = dispatchPostBodies.findIndex((b) => b.bindingId === REVIEW_BINDING);
     expect(reviewDispatchIndex).toBeGreaterThanOrEqual(0);
@@ -355,9 +368,10 @@ describe('task 031 DEF-09: agreement-review dispatches to the DOCUMENT session (
     expect(reviewUrl).toContain(`/sessions/${DOC_SESSION}/dispatch`);
     expect(reviewUrl).not.toContain(`/sessions/${CHAT_SESSION}/dispatch`);
 
-    // Pack-binding proof still holds alongside the routing fix.
+    // Pack-binding proof still holds alongside the routing fix, plus the picked reviewDepth (task 070).
     const reviewArgs = dispatchPostBodies[reviewDispatchIndex].args as Record<string, unknown> | undefined;
     expect(reviewArgs?.subDomain).toBe('nda');
+    expect(reviewArgs?.reviewDepth).toBe('thorough');
     expect(reviewArgs?.fileIds).toEqual([SESSION_FILE_ID]);
 
     // (2) Acceptance criterion 1 (spec FR-16(c), literal): GET compose-outputs on the DOCUMENT
