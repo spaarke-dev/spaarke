@@ -37,29 +37,54 @@
  * the host `FluentProvider` in both light and dark mode.
  */
 import * as React from 'react';
-import { makeStyles, tokens, Text, Button } from '@fluentui/react-components';
+import { makeStyles, tokens, Text, Button, type GriffelStyle } from '@fluentui/react-components';
 import { Mail24Regular, ArrowDown20Regular } from '@fluentui/react-icons';
 import { PanelSplitter, useTwoPanelLayout } from '@spaarke/ui-components';
 import { EmailCardList } from '../EmailCardList';
 import { EmailToolbar } from './EmailToolbar';
 import type { EmailReadingPaneShellProps } from './EmailReadingPaneShell.types';
 
-/** Stable default persistence key — the reading-pane's splitter width is shared across sessions for every host that doesn't override it. */
-const DEFAULT_STORAGE_KEY = 'sprk-email-reading-pane-splitter';
+/**
+ * Stable default persistence key — the reading-pane's splitter width is shared
+ * across sessions for every host that doesn't override it. Bumped to `-v2`
+ * (owner UAT 2026-08-03 Item 7) so the new 67/33 default takes effect for
+ * existing users whose old saved ratio would otherwise override it.
+ */
+const DEFAULT_STORAGE_KEY = 'sprk-email-reading-pane-splitter-v2';
 const DEFAULT_READING_PANE_WIDTH_PX = 480;
 const DEFAULT_MIN_LIST_WIDTH_PX = 280;
 const DEFAULT_MIN_READING_PANE_WIDTH_PX = 360;
 /**
- * Default split ratio (owner UAT): the reading (detail) pane fills 80% of the
- * container, leaving a 20% email list — an Outlook-style reading-first layout.
- * The reused `useTwoPanelLayout` hook (a different package — not forked here)
- * only accepts a PIXEL default, so the outer `EmailReadingPaneShell` wrapper
- * measures the actual container width once and derives the 80% pixel default it
- * hands to the inner shell. Hosts where the container can't be measured (e.g.
- * jsdom under test) fall back to `defaultReadingPaneWidth`. The hook clamps to
- * both panes' minimum widths, so the two panes always sum to 100% (no overflow).
+ * Default split ratio (owner UAT 2026-08-03 Item 7): the reading (detail) pane
+ * fills 67% of the container, leaving a 33% email list — an Outlook-style
+ * reading-first layout. The reused `useTwoPanelLayout` hook (a different package
+ * — not forked here) only accepts a PIXEL default, so the outer
+ * `EmailReadingPaneShell` wrapper measures the actual container width once and
+ * derives the 67% pixel default it hands to the inner shell. Hosts where the
+ * container can't be measured (e.g. jsdom under test) fall back to
+ * `defaultReadingPaneWidth`. The hook clamps to both panes' minimum widths, so
+ * the two panes always sum to 100% (no overflow).
  */
-const READING_PANE_DEFAULT_FRACTION = 0.8;
+const READING_PANE_DEFAULT_FRACTION = 0.67;
+
+/**
+ * Modern THIN scrollbar (owner UAT 2026-08-03 Item 1) — a reusable makeStyles
+ * fragment spread into scroll containers that should show a slim, themed
+ * scrollbar (Firefox `scrollbar-*` + WebKit `::-webkit-scrollbar` pseudo-
+ * elements). Semantic tokens only (ADR-021) so the thumb tracks light/dark.
+ * Mirrors the fragment in `EmailCardList` so the list + reading panes match.
+ */
+const thinScrollbar: GriffelStyle = {
+  scrollbarWidth: 'thin', // Firefox
+  scrollbarColor: `${tokens.colorNeutralStroke1} transparent`,
+  '::-webkit-scrollbar': { width: '8px', height: '8px' },
+  '::-webkit-scrollbar-thumb': {
+    backgroundColor: tokens.colorNeutralStroke1,
+    borderRadius: tokens.borderRadiusMedium,
+  },
+  '::-webkit-scrollbar-thumb:hover': { backgroundColor: tokens.colorNeutralStroke1Hover },
+  '::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
+};
 
 const useStyles = makeStyles({
   root: {
@@ -96,11 +121,9 @@ const useStyles = makeStyles({
     overflowX: 'hidden',
     display: 'flex',
     flexDirection: 'column',
-    // Hide the native vertical scrollbar — the circular ↓ FAB is the scroll
-    // affordance (owner UAT; mirrors the Compose editor). Wheel/trackpad/keyboard
-    // scrolling still work.
-    scrollbarWidth: 'none',
-    '::-webkit-scrollbar': { display: 'none' },
+    // Show a modern THIN scrollbar (owner UAT 2026-08-03 Item 1) instead of
+    // hiding it — the circular ↓ FAB below coexists as an extra affordance.
+    ...thinScrollbar,
   },
   // Circular "more below" scroll cue — appears only when the reading pane has
   // content below the fold; mirrors `ComposeEditor`'s scrollDownFab (§11).
@@ -250,6 +273,7 @@ const EmailReadingPaneShellInner: React.FC<EmailReadingPaneShellProps> = ({
               selectedId={selectedId}
               onSelect={handleSelect}
               onCreateNew={actions?.onNew}
+              onRefresh={actions?.onRefresh}
             />
           </div>
 
@@ -303,12 +327,12 @@ const EmailReadingPaneShellInner: React.FC<EmailReadingPaneShellProps> = ({
 EmailReadingPaneShellInner.displayName = 'EmailReadingPaneShellInner';
 
 /**
- * Outer wrapper that establishes the 20%/80% default split (owner UAT #2).
- * Because the reused `useTwoPanelLayout` hook only takes a PIXEL default, this
- * measures the real container width once (before the inner shell mounts) and
- * derives the 80% reading-pane pixel default from it, so the ratio holds at any
- * container size. When the container can't be measured (0-width — e.g. jsdom
- * under test), it falls back to the caller's `defaultReadingPaneWidth`.
+ * Outer wrapper that establishes the 33%/67% default split (owner UAT 2026-08-03
+ * Item 7). Because the reused `useTwoPanelLayout` hook only takes a PIXEL
+ * default, this measures the real container width once (before the inner shell
+ * mounts) and derives the 67% reading-pane pixel default from it, so the ratio
+ * holds at any container size. When the container can't be measured (0-width —
+ * e.g. jsdom under test), it falls back to the caller's `defaultReadingPaneWidth`.
  */
 export const EmailReadingPaneShell: React.FC<EmailReadingPaneShellProps> = props => {
   const { defaultReadingPaneWidth = DEFAULT_READING_PANE_WIDTH_PX } = props;

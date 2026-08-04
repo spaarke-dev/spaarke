@@ -154,11 +154,43 @@ describe('EmailCardList', () => {
     expect(onCreateNew).toHaveBeenCalledWith();
   });
 
+  it('renders the "New email" button ICON-ONLY (no visible text label) but keeps it accessible (owner UAT 2026-08-03 Item 3)', () => {
+    const items: EmailCardItem[] = [makeItem({ id: 'e1' })];
+
+    renderWithProvider(<EmailCardList items={items} onSelect={jest.fn()} onCreateNew={jest.fn()} />);
+
+    // Reachable by its accessible name (aria-label / title)...
+    const newEmail = screen.getByRole('button', { name: 'New email' });
+    expect(newEmail).toBeInTheDocument();
+    // ...but the visible "New email" TEXT child was removed — the button has no text content.
+    expect(newEmail).toHaveTextContent('');
+  });
+
   it('omits the "New email" button when no onCreateNew handler is provided', () => {
     const items: EmailCardItem[] = [makeItem({ id: 'e1' })];
 
     renderWithProvider(<EmailCardList items={items} onSelect={jest.fn()} />);
 
     expect(screen.queryByRole('button', { name: 'New email' })).not.toBeInTheDocument();
+  });
+
+  it('renders a Refresh list-toolbar button that fires onRefresh when the handler is provided (owner UAT 2026-08-03 Item 2)', () => {
+    const onRefresh = jest.fn();
+    const items: EmailCardItem[] = [makeItem({ id: 'e1' })];
+
+    renderWithProvider(<EmailCardList items={items} onSelect={jest.fn()} onRefresh={onRefresh} />);
+
+    const refresh = screen.getByRole('button', { name: 'Refresh' });
+    expect(refresh).toBeInTheDocument();
+    fireEvent.click(refresh);
+    expect(onRefresh).toHaveBeenCalledWith();
+  });
+
+  it('omits the Refresh button when no onRefresh handler is provided', () => {
+    const items: EmailCardItem[] = [makeItem({ id: 'e1' })];
+
+    renderWithProvider(<EmailCardList items={items} onSelect={jest.fn()} />);
+
+    expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
   });
 });

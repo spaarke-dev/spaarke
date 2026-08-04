@@ -158,6 +158,11 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     flex: '1 1 auto',
+    // `minHeight: 0` lets this flex item shrink below its content size so a child
+    // that manages its own internal scroll (e.g. the Email two-pane surface) bounds
+    // and scrolls INTERNALLY instead of growing and pushing an outer scroll. Mirrors
+    // the same fix on the tab-manager `content` wrapper (R4-110). Owner UAT R5 item 1.
+    minHeight: 0,
     overflow: 'hidden',
   },
   contentCollapsed: {
