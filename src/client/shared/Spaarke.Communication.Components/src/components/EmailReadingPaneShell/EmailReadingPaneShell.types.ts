@@ -67,6 +67,8 @@ export interface EmailToolbarActionHandlers {
   onForward?: (selectedId: string) => void;
   /** Opens a blank "+ New" compose — NOT tied to the current selection. */
   onNew?: () => void;
+  /** Re-runs the left-list view fetch (owner UAT 2026-08-03 Item 2). Wired to the list toolbar's Refresh (↻) button; NOT tied to the current selection. Omit → no Refresh button. */
+  onRefresh?: () => void;
   /** Saves the selected email to SharePoint (archive). */
   onSaveToSharePoint?: (selectedId: string) => void;
   /** Launches the "Create Event" flow against the email's resolved association. */

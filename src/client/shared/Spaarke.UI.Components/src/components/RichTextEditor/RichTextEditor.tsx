@@ -84,8 +84,21 @@ export interface IRichTextEditorProps {
 }
 
 export interface RichTextEditorRef {
-  /** Focus the editor */
-  focus: () => void;
+  /**
+   * Focus the editor. Pass `'start'` to place the caret at the very top of the
+   * document (root start) or `'end'` for the document end (the Lexical default
+   * when no position is given). Used by hosts that want the caret ready at the
+   * top on open (e.g. the email composer — the user types immediately).
+   */
+  focus: (position?: 'start' | 'end') => void;
+  /**
+   * Read the currently-selected plain text (empty string when the selection is
+   * collapsed / absent). Lexical retains its selection in editor state across
+   * focus loss, so this stays accurate even after a popover/menu steals DOM
+   * focus — enabling selection-scoped actions (e.g. "make the selected text
+   * concise") to gate on whether the user has a live text selection.
+   */
+  getSelectedText: () => string;
   /** Get current HTML content */
   getHtml: () => string;
   /** Set HTML content programmatically */
@@ -383,8 +396,24 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, IRichTextEditorProps
   useImperativeHandle(
     ref,
     () => ({
-      focus: () => {
-        editorRef.current?.focus();
+      focus: (position?: 'start' | 'end') => {
+        // Lexical's focus() takes an optional defaultSelection; 'rootStart' puts
+        // the caret at the top (owner UAT — email composer opens ready to type).
+        editorRef.current?.focus(undefined, {
+          defaultSelection: position === 'start' ? 'rootStart' : 'rootEnd',
+        });
+      },
+      getSelectedText: () => {
+        let text = '';
+        if (editorRef.current) {
+          editorRef.current.getEditorState().read(() => {
+            const selection = $getSelection();
+            if ($isRangeSelection(selection)) {
+              text = selection.getTextContent();
+            }
+          });
+        }
+        return text;
       },
       getHtml: () => {
         let html = '';

@@ -119,12 +119,14 @@ describe('initialState — per-mode seeding', () => {
     expect(state.attachments).toHaveLength(1);
   });
 
-  it('reply seeds To from the original sender, blanks body, prefixes Re:', () => {
+  it('reply seeds To from the original sender, quotes the thread, prefixes Re:', () => {
     const state = initialState(baseProps({ mode: 'reply', sourceRecord }));
     expect(state.to.map(r => r.email)).toEqual(['sender@example.com']);
     expect(state.cc).toEqual([]);
     expect(state.subject).toBe('Re: Quarterly review');
-    expect(state.body).toBe('');
+    // Reply now quotes the previous thread (owner UAT R5 item 1) and stores it on quotedThread.
+    expect(state.body).toContain('wrote:');
+    expect(state.quotedThread).toBeTruthy();
     expect(state.readOnly).toBe(false);
     expect(state.associations).toHaveLength(1);
   });
