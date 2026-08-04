@@ -409,6 +409,14 @@ export function WorkspacePane(): React.JSX.Element {
   // React state mirrors the manager's snapshot; triggers re-renders.
   const [tabState, setTabState] = React.useState<WorkspaceTabManagerState>(() => managerRef.current.getSnapshot());
 
+  // UAT round-4 (item #10a): true while a review whose progress modal was dismissed ("Continue working
+  // in background") is STILL running server-side. Fed purely by the additive
+  // `nda_review_background_run` broadcast (useNdaReviewRunProgress, Assistant pane); drives the tiny
+  // circular progress indicator on the running Compose tab header (WorkspaceTabManagerComponent). Goes
+  // false when the run reaches a terminal state - completion then flows through the existing
+  // ReviewCompleteToast rules, unchanged.
+  const [composeReviewRunningInBackground, setComposeReviewRunningInBackground] = React.useState(false);
+
   /** Sync React state with the current manager snapshot. */
   const syncState = React.useCallback((): void => {
     setTabState(managerRef.current.getSnapshot());
@@ -1272,6 +1280,15 @@ export function WorkspacePane(): React.JSX.Element {
       return;
     }
 
+    // UAT round-4 (item #10a): a backgrounded review run's liveness lives on the Compose tab now.
+    // Track the latest state so the tab strip can show/hide the tiny circular progress indicator; the
+    // dismissed progress card itself is fully unmounted (useNdaReviewRunProgress `visible=false` →
+    // NdaReviewProgressModal returns null), so this signal is the ONLY remaining liveness surface.
+    if (event.type === 'nda_review_background_run') {
+      setComposeReviewRunningInBackground(event.backgroundRunActive === true);
+      return;
+    }
+
     // FR-34 D-F3 (task 071): the deferred CONTENT-render ack. ComposeWorkspace emits
     // `compose_content_rendered` once a seeded draft actually renders in the editor.
     // If we deferred an ack for this ledgerRef on the originating `workspace_open_tab`
@@ -1924,6 +1941,9 @@ export function WorkspacePane(): React.JSX.Element {
         onTabChange={handleTabChange}
         onTabClose={handleTabClose}
         onTabDataChange={handleTabDataChange}
+        // UAT round-4 (item #10a): a dismissed-but-still-running review shows a tiny circular
+        // progress indicator on the running Compose tab header until completion.
+        composeReviewRunning={composeReviewRunningInBackground}
         // spaarkeai-compose-r1 task 100 — suppress the tab strip in compose
         // mode; the Compose widget renders full-pane. See the block comment
         // above the header definition for rationale + widget-add contract.

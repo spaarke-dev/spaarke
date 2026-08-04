@@ -313,6 +313,19 @@ export function buildAgreementReviewDepthChoiceMessage(displayName: string): str
   return `Ready to review as **${displayName}**. How deep should the review go?`;
 }
 
+/**
+ * UAT round-3 (item #7) — the direct consumer-chip/card click path (ConversationPane.handleReviewNda,
+ * the "Review an NDA" chip) has no classified type to name: it dispatches on `fileIds` alone, no
+ * `subDomain` slot (unchanged pre-070 wire shape) — the chip click itself IS the type commitment, so
+ * there is nothing to re-ask (ADR-041 no-double-ask). This is a plain depth-only prompt that reuses the
+ * SAME {@link buildAgreementReviewDepthChoiceChips} / `pendingDepthRef` / `LOCAL_CHIP.agreementReviewDepthQuick`
+ * `|agreementReviewDepthThorough` machinery every other branch uses — only the message copy differs
+ * (no type display name available to embed).
+ */
+export function buildAgreementReviewDirectDepthChoiceMessage(): string {
+  return "How deep should this review go?";
+}
+
 // ---------------------------------------------------------------------------
 // Chip building (wire shape — fed through the SAME `acceptChips` every server
 // chip carrier uses; ConversationPane's local-chip interceptor routes clicks

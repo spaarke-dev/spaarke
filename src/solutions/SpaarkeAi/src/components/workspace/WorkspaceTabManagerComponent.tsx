@@ -132,6 +132,15 @@ const useStyles = makeStyles({
     maxWidth: "160px",
   },
 
+  // UAT round-4 (item #10a): fixed-size leading slot for the tiny background-review spinner on a
+  // Compose tab, so the label column stays aligned whether or not the spinner is present.
+  reviewSpinnerSlot: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+
   // Tab title — task 098 (2026-05-22): bumped one Fluent v9 step
   // (fontSizeBase200 → fontSizeBase300) per operator feedback. The tab is
   // still visually a tab (TabList size="small") but the label is now slightly
@@ -314,6 +323,18 @@ export interface WorkspaceTabManagerComponentProps {
    * Defaults to `false` so non-compose consumers see no behaviour change.
    */
   hideTabBar?: boolean;
+
+  /**
+   * UAT round-4 (item #10a): true while a review whose progress modal was dismissed ("Continue working
+   * in background") is STILL running server-side. When true, a tiny circular progress indicator (Fluent
+   * `Spinner size="tiny"`) is rendered on every `compose` tab header - the run's liveness after the modal
+   * has been dismissed and fully unmounted. Cleared when the run completes (completion then surfaces via
+   * the existing `ReviewCompleteToast`). Defaults to `false` (no indicator).
+   *
+   * The indicator is scoped to `compose` tabs because an agreement review always runs against a document
+   * open in a Compose tab; a non-compose tab never hosts a review, so it never shows the spinner.
+   */
+  composeReviewRunning?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -402,6 +423,7 @@ export function WorkspaceTabManagerComponent({
   onTabClose,
   onTabDataChange,
   hideTabBar = false,
+  composeReviewRunning = false,
 }: WorkspaceTabManagerComponentProps): React.JSX.Element {
   const styles = useStyles();
 
@@ -599,6 +621,9 @@ export function WorkspaceTabManagerComponent({
             // its close × becomes a filled brand circle so the active
             // workspace is unmistakable.
             const isSelected = tab.id === activeTabId;
+            // UAT round-4 (item #10a): a dismissed-but-still-running review shows a tiny circular
+            // progress indicator on its Compose tab header, until the run completes.
+            const showReviewSpinner = composeReviewRunning && tab.widgetType === "compose";
             return (
               <Tab
                 key={tab.id}
@@ -606,6 +631,17 @@ export function WorkspaceTabManagerComponent({
                 data-testid={`workspace-tab-${tab.id}`}
               >
                 <div className={styles.tabContent}>
+                  {showReviewSpinner ? (
+                    <span
+                      className={styles.reviewSpinnerSlot}
+                      data-testid={`workspace-tab-review-spinner-${tab.id}`}
+                      role="status"
+                      aria-label="Review running in the background"
+                      title="Review running in the background"
+                    >
+                      <Spinner size="extra-tiny" />
+                    </span>
+                  ) : null}
                   {tab.isLoading ? (
                     <span className={styles.tabLoadingBadge}>
                       <Spinner size="extra-tiny" />
