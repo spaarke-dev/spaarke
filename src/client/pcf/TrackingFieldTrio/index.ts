@@ -147,7 +147,9 @@ const CANDIDATE_ROLE_FIELDS: ReadonlyArray<{ attr: string; role: string }> = [
  * Spaarke PCF's `authInit.ts` (e.g. `RelatedDocumentCount`,
  * `CommunicationActions`). Returns `''` when `Xrm` isn't available (harness). */
 function getClientUrl(): string {
-  const xrm = (window as unknown as { Xrm?: { Utility?: { getGlobalContext?: () => { getClientUrl?: () => string } } } }).Xrm;
+  const xrm = (
+    window as unknown as { Xrm?: { Utility?: { getGlobalContext?: () => { getClientUrl?: () => string } } } }
+  ).Xrm;
   return xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '';
 }
 
@@ -206,7 +208,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     ).catch(err => {
       // eslint-disable-next-line no-console
       console.error(
-        '[TrackingFieldTrio] Auth initialization failed — the access-grant modal\'s BFF calls will fail until the page is reloaded.',
+        "[TrackingFieldTrio] Auth initialization failed — the access-grant modal's BFF calls will fail until the page is reloaded.",
         err
       );
     });
@@ -314,7 +316,10 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       GRANT_RECORD_ENTITY,
       recordId,
       `?$select=${select}&$expand=${expand}`
-    )) as unknown as Record<string, { contactid?: string; fullname?: string; emailaddress1?: string } | null | undefined>;
+    )) as unknown as Record<
+      string,
+      { contactid?: string; fullname?: string; emailaddress1?: string } | null | undefined
+    >;
 
     const seen = new Set<string>();
     const candidates: IAccessGrantCandidate[] = [];
@@ -348,7 +353,9 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     return result.entities.map(e => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const row = e as any;
-      const contact = row.sprk_contactid as { contactid?: string; fullname?: string; emailaddress1?: string } | undefined;
+      const contact = row.sprk_contactid as
+        | { contactid?: string; fullname?: string; emailaddress1?: string }
+        | undefined;
       const grantedBy = row.sprk_grantedby as { fullname?: string } | undefined;
       return {
         accessRecordId: row.sprk_externalrecordaccessid as string,

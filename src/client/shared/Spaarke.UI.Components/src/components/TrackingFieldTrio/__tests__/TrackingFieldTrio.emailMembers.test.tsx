@@ -183,9 +183,7 @@ describe('TrackingFieldTrio — email-members action (task 042)', () => {
 
       fireEvent.click(screen.getByRole('button', { name: 'Email members' }));
 
-      await waitFor(() =>
-        expect(screen.getByLabelText('Email members empty state')).toBeInTheDocument()
-      );
+      await waitFor(() => expect(screen.getByLabelText('Email members empty state')).toBeInTheDocument());
       // No sendable composer with zero recipients was opened.
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
       expect(screen.queryByRole('region', COMPOSER_ACTIONS)).not.toBeInTheDocument();
@@ -196,9 +194,7 @@ describe('TrackingFieldTrio — email-members action (task 042)', () => {
 
       fireEvent.click(screen.getByRole('button', { name: 'Email members' }));
 
-      await waitFor(() =>
-        expect(screen.getByLabelText('Email members empty state')).toBeInTheDocument()
-      );
+      await waitFor(() => expect(screen.getByLabelText('Email members empty state')).toBeInTheDocument());
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     });
   });
@@ -243,10 +239,7 @@ describe('TrackingFieldTrio — email-members action (task 042)', () => {
       const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
-      renderWithTheme(
-        <EmailMembersHarness authenticatedFetch={authenticatedFetch} candidates={[]} />,
-        webDarkTheme
-      );
+      renderWithTheme(<EmailMembersHarness authenticatedFetch={authenticatedFetch} candidates={[]} />, webDarkTheme);
       fireEvent.click(screen.getByRole('button', { name: 'Email members' }));
       await waitFor(() => expect(screen.getByLabelText('Email members empty state')).toBeInTheDocument());
 
