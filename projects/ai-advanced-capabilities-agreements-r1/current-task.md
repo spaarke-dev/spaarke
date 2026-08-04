@@ -4,6 +4,11 @@
 
 ## Active task
 
+- **BINDING (owner directive 2026-08-03): EVERY deploy from this project runs the pre-deploy gate FIRST**:
+  (1) /conflict-check vs active worktrees (hot-path BFF/SpaarkeAi); (2) LIVE-ENV DRIFT check — is the live BFF
+  still OUR deployed hash / are our Dataverse rows intact? (other projects deploy whole-package over the shared
+  spaarke-bff-dev + sprk_spaarkeai; if live ≠ ours, COORDINATE, never blind-redeploy over someone's active UAT);
+  (3) prefer merging our fixes to master promptly so other projects' deploys carry our code.
 - **Task**: 061 🔄 BLOCKED-ON-OWNER (21/23 done; 060 ✅ deployed+verified — deploy-report-060.md).
   Run plan READY: notes/e2e-runplan-061.md (5 flows, both themes, negatives, Word checklist, findings protocol).
 - **OWNER PREREQUISITES for 061**: (1) provision Reasoning-tier AOAI deployment — config key

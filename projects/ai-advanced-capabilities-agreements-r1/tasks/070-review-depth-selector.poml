@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>UAT #1 — user-selectable review depth (Quick ~20s / Thorough ~2-3min) with timing labels</title>
+    <phase>7 UAT round 2</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Dispatch-path + BFF tier-resolution change; conversation-surface .tsx.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>UAT2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>060 (deployed baseline)</deps>
+    <tags>ai, spaarkeai, frontend, bff-api</tags>
+  </metadata>
+  <prompt>
+    Owner-approved (UAT round 1, item #1 follow-up): before an agreement review runs, the user chooses depth —
+    Quick (~20 sec, fast model scan) or Thorough (~2–3 min, gpt-5 reasoning; DEFAULT) — with the expected timing
+    shown on the option. The choice is a per-run intent carried in dispatch args as a CLOSED enum
+    reviewDepth: 'quick'|'thorough' (client never names models); the server maps it at tier-resolution time
+    (thorough → the Reasoning deployment; quick → the Standard deployment) with server-side validation.
+    Quick output carries a visible "Quick scan — not a full advisory review" caveat in the findings surface
+    (and threads into the memo content if trivially reachable).
+  </prompt>
+  <goal>User picks depth at review kick-off on the interactive door (and wizard door if a small addition); dispatch honors it; quick results are visibly caveated.</goal>
+  <constraints>
+    <constraint source="ADR-039">Closed enum only; server validates; no client-supplied model/deployment names.</constraint>
+    <constraint source="ADR-016">Catalog tier intent remains the default; the user choice selects between two sanctioned intents — document this as compatible (no amendment).</constraint>
+    <constraint source="project">Default = Thorough (legal-quality default); Quick is opt-in. Timing labels static for now ("~20 sec" / "~2–3 min").</constraint>
+    <constraint source="project">Depth choice must not double-ask when the confirmation gate also fires — one coherent chip flow (depth can ride the same turn as type-confirm).</constraint>
+  </constraints>
+  <acceptance-criteria>
+    <criterion testable="true">Interactive review kick-off offers Quick/Thorough with timing labels; selection flows into dispatch args (assert reviewDepth in the request).</criterion>
+    <criterion testable="true">Server maps thorough→Reasoning deployment, quick→Standard deployment (unit/seam assert on the resolver path); invalid values rejected/defaulted server-side.</criterion>
+    <criterion testable="true">Quick-run findings render the caveat; thorough runs do not.</criterion>
+    <criterion testable="true">Gate + depth compose without double-ask; wizard door has a depth affordance OR documented default-thorough with rationale.</criterion>
+    <criterion testable="true">Suites green (SpaarkeAi + BFF); publish-size note if server touched.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <notes>
+    Completed 2026-08-03. Full design + evidence in
+    projects/ai-advanced-capabilities-agreements-r1/notes/070-execution-notes.md.
+    Summary: reviewDepth ('quick'|'thorough') threads client->server as a dispatch-args slot
+    (mirrors the existing subDomain arg pattern); SessionDispatchOrchestrator.
+    ResolveReviewDepthModelTierOverride maps it to an AiModelTier override composed into the
+    existing task-011 precedence chain (below request.ModelTierOverride, above binding/action
+    defaults). Client: confirm-gate chips split into Quick/Thorough (same turn); auto-proceed,
+    the TEXT-door explicit bind, and composite (post-pick) each insert ONE follow-up
+    depth-choice turn; the wizard door carries a small Review Depth radio (Analysis Details
+    step) so its auto-run dispatches immediately with no ask. Caveat: useConsumerChips.tsx's
+    isNdaReview confirmation message prefixes "Quick scan — not a full advisory review." when
+    reviewDepth==='quick' (reads opts.slots.reviewDepth in closure — no new plumbing). Memo
+    threading NOT trivially reachable (reviewDepth never persists server-side; documented as
+    follow-on). Tests: 4 new BFF seam tests + 3 modified test files (routing/chips/gate) + 4
+    ConversationPane e2e updates + 2 new wizard-widget tests + 3 new caveat tests. All green
+    except 2 confirmed-pre-existing failures (HardSlashExecutor timing flake; live-Dataverse
+    NdaReviewDispatchEvalTests disposition drift) — neither touches this task's files.
+  </notes>
+</task>

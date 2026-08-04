@@ -186,6 +186,16 @@ public sealed class AgreementReviewKnowledgeScopeSeamFixture : WebApplicationFac
     /// <summary>The LinearRunContext captured off the mocked IActionRunner's most recent invocation.</summary>
     public LinearRunContext? CapturedContext { get; private set; }
 
+    /// <summary>
+    /// The AnalysisAction captured off the mocked IActionRunner's most recent invocation — ADDED by
+    /// ai-advanced-capabilities-agreements-r1 task 070 so <c>AgreementReviewDepthModelTierSeamTests</c>
+    /// (a sibling test class reusing THIS fixture, §11 reuse-first — no second WebApplicationFactory
+    /// boilerplate) can assert the effective <see cref="AnalysisAction.ModelTier"/> the
+    /// `reviewDepth` dispatch arg resolves to. Purely additive — the existing capture of
+    /// <see cref="CapturedContext"/> and every existing assertion in this file are unchanged.
+    /// </summary>
+    public AnalysisAction? CapturedAction { get; private set; }
+
     protected override IHost CreateHost(IHostBuilder builder)
     {
         builder.ConfigureHostConfiguration(config =>
@@ -315,7 +325,7 @@ public sealed class AgreementReviewKnowledgeScopeSeamFixture : WebApplicationFac
                 .Setup(r => r.RunAsync(
                     It.IsAny<AnalysisAction>(), It.IsAny<BoundInputs>(), It.IsAny<LinearRunContext>(), It.IsAny<CancellationToken>()))
                 .Callback<AnalysisAction, BoundInputs, LinearRunContext, CancellationToken>(
-                    (_, _, ctx, _) => CapturedContext = ctx)
+                    (action, _, ctx, _) => { CapturedAction = action; CapturedContext = ctx; })
                 .ReturnsAsync(JsonDocument.Parse("""{"overallRisk":"low","flaggedSections":[]}""").RootElement.Clone());
             services.RemoveAll<IActionRunner>();
             services.AddSingleton(ActionRunnerMock.Object);

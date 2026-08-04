@@ -56,7 +56,7 @@
  */
 
 import * as React from "react";
-import { makeStyles, Toaster, useToastController, useId, Toast, ToastTitle } from "@fluentui/react-components";
+import { makeStyles, Toaster, useToastController, Toast, ToastTitle } from "@fluentui/react-components";
 import { ChatRegular, AppsListRegular, DocumentRegular } from "@fluentui/react-icons";
 import { ThreePaneLayout } from "@spaarke/ui-components";
 import type { EntityContext, EntityType } from "@spaarke/ai-context";
@@ -106,6 +106,10 @@ export type { ComposeLaunchContextValue } from "@spaarke/compose-components";
 // parent (the document is persisted before the gate opens).
 import { useCreateOnSaveAssociationGate } from "../compose/useCreateOnSaveAssociationGate";
 import { CreateOnSaveAssociationGateDialog } from "../compose/CreateOnSaveAssociationGateDialog";
+// UAT round-1 follow-on (task 071): "Notify me when completed" — the review-complete toast
+// bridge. Mounted alongside the shell's Toaster below (SPAARKEAI_SHELL_TOASTER_ID) so it shares
+// the SAME portal/stacking order as restore-failure toasts (§11 reuse — no second Toaster).
+import { ReviewCompleteToast } from "./ReviewCompleteToast";
 
 // ---------------------------------------------------------------------------
 // ShellStage — lifecycle state type (four-stage, design.md Section 2.3)
@@ -551,6 +555,15 @@ export function useRestoreContext(): RestoreContextValue | null {
 // SessionRestoreManager — applies restore spec to session + dispatches events
 // ---------------------------------------------------------------------------
 
+/**
+ * The shell's single, shared Toaster id. Was previously minted per-mount via
+ * `useId("restore-toast")` — SessionRestoreManager is a singleton within
+ * ThreePaneShell (mounted exactly once per shell instance), so a fixed string
+ * is safe and lets OTHER shell-level components target the SAME mounted
+ * `<Toaster>` (task 071 `ReviewCompleteToast` — §11 reuse, no second Toaster).
+ */
+export const SPAARKEAI_SHELL_TOASTER_ID = "spaarkeai-shell-toaster";
+
 interface SessionRestoreManagerProps {
   children: React.ReactNode;
   sessionId: string | undefined;
@@ -581,8 +594,9 @@ function SessionRestoreManager({ children, sessionId }: SessionRestoreManagerPro
     isAuthenticated
   );
 
-  // Toast for restore failure
-  const toasterId = useId("restore-toast");
+  // Toast for restore failure — shared Toaster id (task 071 ReviewCompleteToast
+  // targets the SAME id, §11 reuse).
+  const toasterId = SPAARKEAI_SHELL_TOASTER_ID;
   const { dispatchToast } = useToastController(toasterId);
 
   // Track whether we've already applied the restore spec (guard against double-apply).
@@ -663,6 +677,8 @@ function SessionRestoreManager({ children, sessionId }: SessionRestoreManagerPro
   return (
     <RestoreContext.Provider value={restoreContextValue}>
       <Toaster toasterId={toasterId} position="top" />
+      {/* task 071 — review-complete toast bridge; headless, shares this Toaster (§11 reuse). */}
+      <ReviewCompleteToast toasterId={toasterId} />
       {children}
     </RestoreContext.Provider>
   );

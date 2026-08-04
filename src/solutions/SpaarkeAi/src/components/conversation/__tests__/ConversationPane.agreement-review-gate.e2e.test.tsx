@@ -31,7 +31,7 @@ if (typeof (global as any).TextEncoder === 'undefined') (global as any).TextEnco
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 if (typeof (global as any).TextDecoder === 'undefined') (global as any).TextDecoder = NodeTextDecoder;
 import React, { act } from 'react';
-import { render } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 import { PaneEventBus, PaneEventBusProvider } from '@spaarke/ai-widgets';
@@ -225,6 +225,10 @@ jest.mock('@spaarke/ui-components', () => {
 
 // Import AFTER mocks.
 import { ConversationPane } from '../ConversationPane';
+// task 070 (UAT2 review-depth selector): auto-proceed now inserts ONE depth-choice turn before
+// dispatching the review — this harness clicks the real `<ConsumerChips>` button (rendered inside
+// the stubbed SprkChat's `transcriptFooterSlot`) to answer it.
+import { LOCAL_CHIP } from '../localActionChips';
 
 const workspaceEvents: WorkspacePaneEvent[] = [];
 let bus: PaneEventBus;
@@ -293,31 +297,44 @@ beforeEach(() => {
 });
 
 describe('task 021: "review this document" — untyped upload + interactive classify + auto-proceed gate', () => {
-  it('cancels the agent turn, classifies, then auto-proceeds the review bound to the classified pack', async () => {
+  it('cancels the agent turn, classifies, then (task 070) shows a depth-choice turn; answering it dispatches the review bound to the classified pack + picked depth', async () => {
     renderPane();
     await driveChatUpload('acme-nda.pdf');
 
     let decorateResult: unknown;
     await act(async () => {
       decorateResult = await captured.onDecorateOutboundBody!({ message: 'review this document' });
-      // Two REAL sequential SSE round-trips (classify, then the review) each need several
-      // microtask hops (readSseStream -> parseSseEvent -> the runGate/dispatchReview await chain)
-      // — loop generously rather than guess a tight bound.
+      // ONE real SSE round-trip (classify) needs several microtask hops (readSseStream ->
+      // parseSseEvent -> the runGate await chain) before the depth-choice turn renders — loop
+      // generously rather than guess a tight bound.
       for (let i = 0; i < 60; i++) await Promise.resolve();
     });
 
     // The agent turn is CANCELLED (return null) — the gate orchestrates classify -> auto-proceed.
     expect(decorateResult).toBeNull();
 
-    // Two /dispatch calls: the classifier, then the review — both real network POSTs.
+    // ONE /dispatch call so far: the classifier. task 070 — auto-proceed no longer dispatches the
+    // review immediately; it inserts a depth-choice turn (Quick/Thorough chips) first.
+    expect(dispatchPostBodies.map((b) => b.bindingId)).toEqual([CLASSIFY_BINDING]);
+    const depthChip = screen.getByTestId(`consumer-chip-${LOCAL_CHIP.agreementReviewDepthThorough}`);
+    expect(depthChip).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(depthChip);
+      for (let i = 0; i < 30; i++) await Promise.resolve();
+    });
+
+    // Now TWO /dispatch calls: the classifier, then the review — both real network POSTs.
     const bindingIdsDispatched = dispatchPostBodies.map((b) => b.bindingId);
     expect(bindingIdsDispatched).toContain(CLASSIFY_BINDING);
     expect(bindingIdsDispatched).toContain(REVIEW_BINDING);
 
-    // Pack-binding proof: the review dispatch's wire body carries the classified subDomain slot.
+    // Pack-binding proof: the review dispatch's wire body carries the classified subDomain slot +
+    // the picked reviewDepth (task 070).
     const reviewBody = dispatchPostBodies.find((b) => b.bindingId === REVIEW_BINDING)!;
     const args = reviewBody.args as Record<string, unknown> | undefined;
     expect(args?.subDomain).toBe('nda');
+    expect(args?.reviewDepth).toBe('thorough');
     expect(args?.fileIds).toEqual([SESSION_FILE_ID]);
 
     // Orientation proof (FR-07): the Compose mount seed carries activeWorkType='agreement-analysis'
