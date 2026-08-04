@@ -209,6 +209,14 @@ export interface WorkspacePaneEvent {
    *                              adapt their view to the new active context (Round 4 Fix 4 signal
    *                              infrastructure — no consumers yet, just the foundation for future
    *                              pane coordination)
+   * - `nda_review_progress_visibility` — the Assistant's center-screen agreement/NDA-review progress
+   *                              modal changed visibility (opened / dismissed / auto-closed); carries
+   *                              `progressVisible`. Added so ReviewCompleteToast (shell layer) can
+   *                              avoid a double-notification while the modal is still on screen, now
+   *                              that the modal is non-blocking (`modalType="non-modal"`) and the user
+   *                              can switch workspace tabs while it is still open (UAT round-3 item
+   *                              #8, ai-advanced-capabilities-agreements-r1). Same "signal
+   *                              infrastructure" shape as `active_widget_changed` above.
    * - `streaming_started`      — a structured-output streaming run has begun; downstream widgets
    *                              (e.g. StructuredOutputStreamWidget, R5 task 017 / D2-07) mount and
    *                              prepare to receive section events. Carries `streamId` so multiple
@@ -309,6 +317,7 @@ export interface WorkspacePaneEvent {
     | 'entity_resolved'
     | 'session_reset'
     | 'active_widget_changed'
+    | 'nda_review_progress_visibility'
     | 'streaming_started'
     | 'streaming_complete'
     | 'section_started'
@@ -440,6 +449,19 @@ export interface WorkspacePaneEvent {
    * Workspace" without re-querying the tab manager.
    */
   displayName?: string;
+
+  /**
+   * Whether the Assistant's center-screen agreement/NDA-review progress modal is CURRENTLY visible
+   * (shown, not dismissed, not idle). Required when `type === 'nda_review_progress_visibility'`.
+   *
+   * Consumer: `ReviewCompleteToast` (shell layer) tracks the latest value in a ref, alongside the
+   * existing `active_widget_changed` tab-visibility ref, and suppresses its own completion toast
+   * whenever this is `true` — the progress modal itself is already showing the outcome, so a toast at
+   * the same moment would be a double notification (UAT round-3 item #8).
+   *
+   * ADR-015 binding: a plain boolean UI-visibility flag (Tier 1 safe). Not a user-content surface.
+   */
+  progressVisible?: boolean;
 
   // ── selection_changed fields ──────────────────────────────────────────────
 

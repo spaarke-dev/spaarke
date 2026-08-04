@@ -1,6 +1,7 @@
 /**
  * ReviewCompleteToast.test.tsx — UAT round-1 follow-on (task 071): "Notify me
- * when completed" (in-app layer).
+ * when completed" (in-app layer). Extended UAT round-3 item #8 with the
+ * progress-modal-visibility notification matrix.
  *
  * Covers the four acceptance criteria from
  * projects/ai-advanced-capabilities-agreements-r1/tasks/071-review-complete-toast.poml:
@@ -11,6 +12,13 @@
  *                          add-to-DMS / reporting-email flows already use).
  *   4. bounded stacking  — a second completion while the first toast is still showing UPDATES
  *                          the existing toast (fixed toastId) instead of stacking a new one.
+ *
+ * UAT round-3 item #8 (progress-modal notification matrix): the progress modal is now
+ * non-blocking + dismissible, so "review completes while the modal is STILL open, on a
+ * different tab" became reachable for the first time — see the new describe block below,
+ * which exercises the decided matrix: dialog open+visible → no toast (would double-notify);
+ * dismissed+on-tab → no toast (existing Compose-tab suppression, unchanged); dismissed+off-tab
+ * → toast fires (the 071 notify-me case this whole toast exists for).
  *
  * `useToastController` is mocked (not a real mounted `<Toaster>`/portal) so the assertions
  * target the CONTRACT directly — which toast-store calls fire, with what options — mirroring
@@ -186,5 +194,141 @@ describe("ReviewCompleteToast (task 071)", () => {
       });
     });
     expect(dispatchToast).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("ReviewCompleteToast — UAT round-3 item #8 (progress-modal notification matrix)", () => {
+  let dispatchToast: jest.Mock;
+  let updateToast: jest.Mock;
+  let dismissToast: jest.Mock;
+
+  beforeEach(() => {
+    dispatchToast = jest.fn();
+    updateToast = jest.fn();
+    dismissToast = jest.fn();
+    mockedUseToastController.mockReturnValue({ dispatchToast, updateToast, dismissToast });
+  });
+
+  function renderBridge(): { bus: PaneEventBus } {
+    const bus = new PaneEventBus();
+    render(
+      <PaneEventBusProvider bus={bus}>
+        <ReviewCompleteToast toasterId="test-toaster" />
+      </PaneEventBusProvider>
+    );
+    return { bus };
+  }
+
+  it("dialog open+visible: suppresses the toast even while the user is off-tab (no double-notification) — the ONLY reachable case now that the modal is non-blocking", () => {
+    const { bus } = renderBridge();
+
+    act(() => {
+      // Off-tab (a different workspace tab is active) — reachable now that the modal no longer
+      // blocks tab switches.
+      bus.dispatch("workspace", {
+        type: "active_widget_changed",
+        widgetType: "workspace",
+        tabId: "tab-1",
+        displayName: "Daily Briefing",
+      });
+    });
+    act(() => {
+      // The progress modal is STILL showing (not dismissed, not yet auto-closed).
+      bus.dispatch("workspace", { type: "nda_review_progress_visibility", progressVisible: true });
+    });
+    act(() => {
+      bus.dispatch("workspace", {
+        type: "compose_advisory_comments",
+        advisoryComments: [{ targetText: "clause 1", explanation: "risky" }],
+        overallRisk: "medium",
+        sessionId: "sess-1",
+        timestamp: "2026-08-04T00:00:00.000Z",
+      });
+    });
+
+    expect(dispatchToast).not.toHaveBeenCalled();
+    expect(updateToast).not.toHaveBeenCalled();
+  });
+
+  it("dismissed+on-tab: suppresses the toast (existing Compose-tab suppression, unchanged by item #8)", () => {
+    const { bus } = renderBridge();
+
+    act(() => {
+      bus.dispatch("workspace", {
+        type: "active_widget_changed",
+        widgetType: "compose",
+        tabId: "tab-compose",
+        displayName: "Compose",
+      });
+    });
+    act(() => {
+      // The user dismissed the modal ("Continue working in background").
+      bus.dispatch("workspace", { type: "nda_review_progress_visibility", progressVisible: false });
+    });
+    act(() => {
+      bus.dispatch("workspace", {
+        type: "compose_advisory_comments",
+        advisoryComments: [{ targetText: "clause 1", explanation: "risky" }],
+        overallRisk: "medium",
+        sessionId: "sess-1",
+        timestamp: "2026-08-04T00:00:00.000Z",
+      });
+    });
+
+    expect(dispatchToast).not.toHaveBeenCalled();
+  });
+
+  it("dismissed+off-tab: the toast FIRES — the 071 notify-me case this component exists for, now actually reachable (item #8)", () => {
+    const { bus } = renderBridge();
+
+    act(() => {
+      bus.dispatch("workspace", {
+        type: "active_widget_changed",
+        widgetType: "workspace",
+        tabId: "tab-1",
+        displayName: "Daily Briefing",
+      });
+    });
+    act(() => {
+      bus.dispatch("workspace", { type: "nda_review_progress_visibility", progressVisible: false });
+    });
+    act(() => {
+      bus.dispatch("workspace", {
+        type: "compose_advisory_comments",
+        advisoryComments: [{ targetText: "clause 1", explanation: "risky" }],
+        overallRisk: "medium",
+        sessionId: "sess-1",
+        timestamp: "2026-08-04T00:00:00.000Z",
+      });
+    });
+
+    expect(dispatchToast).toHaveBeenCalledTimes(1);
+    const [, options] = dispatchToast.mock.calls[0];
+    expect(options).toMatchObject({ toastId: REVIEW_COMPLETE_TOAST_ID, intent: "success" });
+  });
+
+  it("an UNSET progressVisible signal (component never mounted a review this session) never suppresses — defaults to the pre-#8 behavior", () => {
+    const { bus } = renderBridge();
+
+    act(() => {
+      bus.dispatch("workspace", {
+        type: "active_widget_changed",
+        widgetType: "workspace",
+        tabId: "tab-1",
+        displayName: "Daily Briefing",
+      });
+    });
+    // No `nda_review_progress_visibility` event at all this session.
+    act(() => {
+      bus.dispatch("workspace", {
+        type: "compose_advisory_comments",
+        advisoryComments: [{ targetText: "clause 1", explanation: "risky" }],
+        overallRisk: "medium",
+        sessionId: "sess-1",
+        timestamp: "2026-08-04T00:00:00.000Z",
+      });
+    });
+
+    expect(dispatchToast).toHaveBeenCalledTimes(1);
   });
 });
