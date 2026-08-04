@@ -373,10 +373,11 @@ describe('communications-list — upgrade in place (task 031, FR-14a / NFR-06)',
     expect(communicationsEntries).toEqual(['communications-list']);
   });
 
-  it('metadata (displayName/category) is unchanged by the body-swap upgrade', () => {
+  it('metadata reflects the Messages relabel (messaging-r3 UAT 2026-07-27); category/allowMultiple unchanged', () => {
     const meta = registry.getWorkspaceWidgetMetadata('communications-list');
     expect(meta).toBeDefined();
-    expect(meta!.displayName).toBe('Communications');
+    // Human-facing label is 'Messages' (the widget TYPE string stays 'communications-list').
+    expect(meta!.displayName).toBe('Messages');
     expect(meta!.category).toBe('data');
     expect(meta!.allowMultiple).toBe(true);
   });
