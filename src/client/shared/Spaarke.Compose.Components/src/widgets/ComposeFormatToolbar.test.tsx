@@ -824,9 +824,7 @@ describe('ComposeFormatToolbar — UAT round-1 (2026-08-03): repositioning + ico
   /** Returns the data-testid of every descendant of the toolbar, in DOM order. */
   function toolbarTestIdOrder(): string[] {
     const toolbar = screen.getByTestId('compose-format-toolbar');
-    return Array.from(toolbar.querySelectorAll('[data-testid]')).map(
-      (el) => el.getAttribute('data-testid') as string
-    );
+    return Array.from(toolbar.querySelectorAll('[data-testid]')).map(el => el.getAttribute('data-testid') as string);
   }
 
   it('#3 (superseded position, round-4 #12): Create Summary Memo is icon-only (no visible text), carries aria-label + Tooltip — no longer the far-left/first control (see the round-4 describe block for its current position)', () => {
