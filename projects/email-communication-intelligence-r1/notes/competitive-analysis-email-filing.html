@@ -1,0 +1,617 @@
+<style>
+  :root {
+    --paper:#FAFAF7; --surface:#FFFFFF; --surface-2:#F3F4F1;
+    --ink:#1B2430; --ink-soft:#414B58; --muted:#66707D;
+    --hairline:#E4E6E1; --hairline-strong:#D3D6D1;
+    --accent:#0C6E78; --accent-ink:#0A555D; --accent-wash:rgba(12,110,120,.08);
+    --have:#2E7D57; --have-wash:rgba(46,125,87,.12);
+    --partial:#9A6B00; --partial-wash:rgba(154,107,0,.13);
+    --gap:#B0473F; --gap-wash:rgba(176,71,63,.12);
+    --shadow:0 1px 2px rgba(20,28,40,.05), 0 8px 24px -14px rgba(20,28,40,.18);
+    --serif:"Charter","Iowan Old Style","Palatino Linotype","Book Antiqua",Georgia,"Times New Roman",serif;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","Roboto Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --paper:#10151B; --surface:#161C24; --surface-2:#1B222B;
+      --ink:#E9ECF0; --ink-soft:#B9C1CB; --muted:#8A93A0;
+      --hairline:#262E38; --hairline-strong:#333C47;
+      --accent:#2FA99B; --accent-ink:#59C4B7; --accent-wash:rgba(47,169,155,.12);
+      --have:#4FB07E; --have-wash:rgba(79,176,126,.15);
+      --partial:#C99A3A; --partial-wash:rgba(201,154,58,.15);
+      --gap:#D2685E; --gap-wash:rgba(210,104,94,.15);
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 30px -16px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="light"]{
+    --paper:#FAFAF7; --surface:#FFFFFF; --surface-2:#F3F4F1;
+    --ink:#1B2430; --ink-soft:#414B58; --muted:#66707D;
+    --hairline:#E4E6E1; --hairline-strong:#D3D6D1;
+    --accent:#0C6E78; --accent-ink:#0A555D; --accent-wash:rgba(12,110,120,.08);
+    --have:#2E7D57; --have-wash:rgba(46,125,87,.12);
+    --partial:#9A6B00; --partial-wash:rgba(154,107,0,.13);
+    --gap:#B0473F; --gap-wash:rgba(176,71,63,.12);
+    --shadow:0 1px 2px rgba(20,28,40,.05), 0 8px 24px -14px rgba(20,28,40,.18);
+  }
+  :root[data-theme="dark"]{
+    --paper:#10151B; --surface:#161C24; --surface-2:#1B222B;
+    --ink:#E9ECF0; --ink-soft:#B9C1CB; --muted:#8A93A0;
+    --hairline:#262E38; --hairline-strong:#333C47;
+    --accent:#2FA99B; --accent-ink:#59C4B7; --accent-wash:rgba(47,169,155,.12);
+    --have:#4FB07E; --have-wash:rgba(79,176,126,.15);
+    --partial:#C99A3A; --partial-wash:rgba(201,154,58,.15);
+    --gap:#D2685E; --gap-wash:rgba(210,104,94,.15);
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 30px -16px rgba(0,0,0,.6);
+  }
+
+  *{box-sizing:border-box;}
+  body{margin:0;}
+  .doc{
+    background:var(--paper); color:var(--ink);
+    font-family:var(--sans); font-size:16.5px; line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    padding:clamp(20px,5vw,72px) clamp(18px,5vw,40px) 96px;
+  }
+  .wrap{max-width:1080px; margin:0 auto;}
+  .measure{max-width:70ch;}
+
+  h1,h2,h3{font-family:var(--serif); font-weight:600; color:var(--ink); text-wrap:balance; line-height:1.15;}
+  p{color:var(--ink-soft);}
+  a{color:var(--accent-ink); text-decoration-thickness:1px; text-underline-offset:2px;}
+
+  .eyebrow{
+    font-family:var(--mono); font-size:12px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--accent-ink); font-weight:600;
+  }
+
+  /* ---- header ---- */
+  header.masthead{border-bottom:1px solid var(--hairline-strong); padding-bottom:30px; margin-bottom:8px;}
+  .masthead .kicker{display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:20px;}
+  .masthead h1{font-size:clamp(30px,5vw,50px); letter-spacing:-.01em; margin:0 0 16px;}
+  .masthead .lede{font-size:clamp(17px,2.4vw,20px); color:var(--ink-soft); max-width:64ch; margin:0;}
+  .rule-accent{width:52px; height:3px; background:var(--accent); border-radius:2px; margin:0 0 22px;}
+
+  section{margin-top:clamp(44px,7vw,76px);}
+  section > .eyebrow{display:block; margin-bottom:12px;}
+  h2.sec{font-size:clamp(23px,3.4vw,32px); letter-spacing:-.01em; margin:0 0 10px;}
+  .sec-lede{max-width:70ch; margin:0 0 28px;}
+
+  /* ---- thesis callout ---- */
+  .thesis{
+    background:var(--surface); border:1px solid var(--hairline); border-left:3px solid var(--accent);
+    border-radius:10px; padding:clamp(22px,3vw,32px); box-shadow:var(--shadow); margin-top:34px;
+  }
+  .thesis h2{font-size:clamp(21px,3vw,27px); margin:0 0 14px;}
+  .thesis p{margin:0 0 14px; color:var(--ink-soft);}
+  .thesis p:last-child{margin-bottom:0;}
+  .thesis strong{color:var(--ink); font-weight:600;}
+
+  /* ---- two philosophies ---- */
+  .split{display:grid; grid-template-columns:1fr 1fr; gap:20px;}
+  @media(max-width:720px){.split{grid-template-columns:1fr;}}
+  .phil{background:var(--surface); border:1px solid var(--hairline); border-radius:10px; padding:24px; box-shadow:var(--shadow);}
+  .phil .tag{font-family:var(--mono); font-size:11.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted);}
+  .phil h3{font-size:19px; margin:8px 0 12px;}
+  .phil.us{border-color:color-mix(in srgb,var(--accent) 40%, var(--hairline));}
+  .phil.us .tag{color:var(--accent-ink);}
+  .phil ul{margin:0; padding-left:18px;}
+  .phil li{color:var(--ink-soft); margin-bottom:7px;}
+  .phil li::marker{color:var(--muted);}
+
+  /* ---- use case blocks ---- */
+  .uc{background:var(--surface); border:1px solid var(--hairline); border-radius:12px; padding:clamp(20px,3vw,30px); box-shadow:var(--shadow); margin-bottom:22px;}
+  .uc-head{display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:6px;}
+  .uc-head h3{font-size:clamp(19px,2.6vw,23px); margin:0;}
+  .uc-cat{font-family:var(--mono); font-size:11.5px; letter-spacing:.13em; text-transform:uppercase; color:var(--muted); margin-bottom:4px;}
+  .uc-lede{margin:10px 0 20px; max-width:74ch;}
+  .uc-grid{display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--hairline); border:1px solid var(--hairline); border-radius:9px; overflow:hidden;}
+  @media(max-width:720px){.uc-grid{grid-template-columns:1fr;}}
+  .cell{background:var(--surface); padding:16px 18px;}
+  .cell.them{background:var(--surface-2);}
+  .cell .lbl{font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); display:block; margin-bottom:7px;}
+  .cell.us .lbl{color:var(--accent-ink);}
+  .cell p{margin:0; font-size:14.5px; line-height:1.55;}
+  .win{margin-top:18px; padding-top:18px; border-top:1px dashed var(--hairline-strong);}
+  .win .lbl{font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent-ink); font-weight:600;}
+  .win p{margin:8px 0 0; color:var(--ink-soft);}
+  .win code, .cell code, .measure code, li code{font-family:var(--mono); font-size:.86em; background:var(--accent-wash); color:var(--accent-ink); padding:1px 5px; border-radius:4px;}
+
+  /* ---- verdict chips ---- */
+  .chip{display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11.5px; font-weight:600; letter-spacing:.04em; padding:4px 10px; border-radius:999px; white-space:nowrap;}
+  .chip::before{content:""; width:7px; height:7px; border-radius:50%;}
+  .chip.ahead{background:var(--have-wash); color:var(--have);} .chip.ahead::before{background:var(--have);}
+  .chip.mixed{background:var(--partial-wash); color:var(--partial);} .chip.mixed::before{background:var(--partial);}
+  .chip.diverge{background:var(--accent-wash); color:var(--accent-ink);} .chip.diverge::before{background:var(--accent);}
+  .chip.gap{background:var(--gap-wash); color:var(--gap);} .chip.gap::before{background:var(--gap);}
+
+  /* ---- matrix ---- */
+  .scroll{overflow-x:auto; border:1px solid var(--hairline); border-radius:12px; box-shadow:var(--shadow); background:var(--surface);}
+  table.matrix{border-collapse:collapse; width:100%; min-width:760px; font-size:14px;}
+  table.matrix th, table.matrix td{text-align:left; padding:13px 16px; border-bottom:1px solid var(--hairline); vertical-align:top;}
+  table.matrix thead th{position:sticky; top:0; background:var(--surface); font-family:var(--mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:600; border-bottom:2px solid var(--hairline-strong);}
+  table.matrix thead th.mine{color:var(--accent-ink);}
+  table.matrix tbody th{font-family:var(--sans); font-weight:600; color:var(--ink); font-size:14px; width:26%;}
+  table.matrix tbody tr:last-child td, table.matrix tbody tr:last-child th{border-bottom:none;}
+  table.matrix td.mine{background:var(--accent-wash);}
+  .stat{display:inline-flex; align-items:center; gap:6px; font-weight:600; font-size:13px;}
+  .stat::before{content:""; width:9px; height:9px; border-radius:2px; flex:none;}
+  .stat.y{color:var(--have);} .stat.y::before{background:var(--have);}
+  .stat.p{color:var(--partial);} .stat.p::before{background:var(--partial);}
+  .stat.n{color:var(--gap);} .stat.n::before{background:var(--gap);}
+  .stat.na{color:var(--muted);} .stat.na::before{background:var(--muted); border-radius:50%;}
+  td .sub{display:block; color:var(--muted); font-size:12.5px; margin-top:3px; line-height:1.45;}
+
+  /* ---- differentiators ---- */
+  .diff-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:16px;}
+  @media(max-width:720px){.diff-grid{grid-template-columns:1fr;}}
+  .diff{background:var(--surface); border:1px solid var(--hairline); border-radius:10px; padding:20px 22px; box-shadow:var(--shadow);}
+  .diff h3{font-size:17px; margin:0 0 8px; display:flex; align-items:baseline; gap:10px;}
+  .diff h3 .n{font-family:var(--mono); font-size:12px; color:var(--accent-ink); font-weight:600;}
+  .diff p{margin:0; font-size:14.5px; color:var(--ink-soft);}
+
+  /* ---- roadmap ---- */
+  .road{display:flex; flex-direction:column; gap:14px;}
+  .item{display:grid; grid-template-columns:76px 1fr; gap:20px; background:var(--surface); border:1px solid var(--hairline); border-radius:10px; padding:20px 22px; box-shadow:var(--shadow);}
+  @media(max-width:560px){.item{grid-template-columns:1fr; gap:10px;}}
+  .prio{font-family:var(--mono); font-weight:700; font-size:15px; letter-spacing:.02em;}
+  .prio small{display:block; font-size:10.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-top:3px;}
+  .p1 .prio{color:var(--gap);} .p2 .prio{color:var(--partial);} .p3 .prio{color:var(--muted);} .enabler .prio{color:var(--accent-ink);}
+  .item h3{font-size:17px; margin:0 0 6px;}
+  .item p{margin:0 0 10px; font-size:14.5px;}
+  .item p:last-child{margin-bottom:0;}
+  .meta{display:flex; flex-wrap:wrap; gap:8px; margin-top:4px;}
+  .pill{font-family:var(--mono); font-size:11px; letter-spacing:.03em; padding:3px 9px; border-radius:6px; background:var(--surface-2); color:var(--ink-soft); border:1px solid var(--hairline);}
+  .pill.effort{color:var(--have); border-color:color-mix(in srgb,var(--have) 30%, var(--hairline));}
+  .pill.reuse{color:var(--accent-ink); border-color:color-mix(in srgb,var(--accent) 30%, var(--hairline));}
+
+  footer{margin-top:72px; padding-top:26px; border-top:1px solid var(--hairline-strong); color:var(--muted); font-size:13.5px;}
+  footer .measure{max-width:76ch;}
+  footer code{font-family:var(--mono); font-size:.86em; color:var(--ink-soft);}
+
+  .legend{display:flex; gap:18px; flex-wrap:wrap; margin:14px 0 0; font-family:var(--mono); font-size:11.5px; color:var(--muted);}
+  .legend span{display:inline-flex; align-items:center; gap:6px;}
+  .legend i{width:9px; height:9px; border-radius:2px; display:inline-block;}
+
+  @media(prefers-reduced-motion:no-preference){
+    .doc > .wrap > *{animation:rise .5s cubic-bezier(.2,.6,.2,1) both;}
+    @keyframes rise{from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:none;}}
+  }
+
+  /* ---- print / PDF (Competitive Intelligence library) ---- */
+  @media print{
+    :root, :root[data-theme="dark"]{
+      --paper:#FFFFFF; --surface:#FFFFFF; --surface-2:#F4F5F2;
+      --ink:#1B2430; --ink-soft:#3A434F; --muted:#5E6772;
+      --hairline:#DDE0DC; --hairline-strong:#C7CBC5;
+      --accent:#0C6E78; --accent-ink:#0A555D; --accent-wash:rgba(12,110,120,.10);
+      --have:#2E7D57; --have-wash:rgba(46,125,87,.14);
+      --partial:#8A6000; --partial-wash:rgba(138,96,0,.14);
+      --gap:#A8433B; --gap-wash:rgba(168,67,59,.14);
+      --shadow:none;
+    }
+    *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+    .doc{ padding:0 !important; font-size:10.3pt; background:#fff; }
+    .doc > .wrap > *{ animation:none !important; }
+    @page{ margin:14mm 13mm; }
+    section{ margin-top:22px !important; }
+    header.masthead, h2.sec, .sec-lede, .uc-head{ break-after:avoid; }
+    .thesis, .phil, .uc, .diff, .item, tr{ break-inside:avoid; box-shadow:none !important; }
+    .scroll{ overflow:visible !important; box-shadow:none !important; }
+    table.matrix{ min-width:0 !important; width:100%; font-size:8.1pt; }
+    table.matrix th, table.matrix td{ padding:7px 9px; }
+    table.matrix thead th{ position:static !important; }
+    .masthead h1{ font-size:25pt; }
+    a{ color:var(--accent-ink); }
+  }
+</style>
+
+<div class="doc">
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="kicker">
+      <span class="eyebrow">Competitive Analysis</span>
+      <span class="chip diverge">Email &amp; Communication Intelligence</span>
+    </div>
+    <div class="rule-accent"></div>
+    <h1>Filing the email &mdash; or understanding it</h1>
+    <p class="lede">How iManage, NetDocuments, Worldox and ZERO handle email filing, mapped against Spaarke's Association Engine &mdash; the same underlying jobs, approached from the opposite end of the pipe, plus a short list of gaps worth closing.</p>
+  </header>
+
+  <div class="thesis">
+    <h2>The one-sentence version</h2>
+    <p>The incumbents make <strong>filing a client-side action the user performs</strong> &mdash; prompt on send, pick a location, drop a token in the subject line. Spaarke makes <strong>association a server-side decision the system performs</strong> &mdash; every message that reaches a monitored mailbox is captured, run through a multi-signal engine, and either auto-filed or queued for one-click review, with a full audit trail of <em>why</em>.</p>
+    <p>That inversion means we are <strong>already ahead</strong> on automation, auditability, delegate handling, offline/mobile/OWA coverage, and data model &mdash; and it makes their signature feature, <em>"predict the folder,"</em> just one rung of our ladder. It also produces four specific, cheap-to-close gaps: <strong>per-matter file-to addresses</strong>, <strong>cross-mailbox dedupe</strong>, <strong>engine suggestions surfaced inside Outlook</strong>, and an optional <strong>send-time nudge</strong>. And it lets us do one thing neither competitor does at all &mdash; <strong>make the matter record current from the email's contents</strong>, not just store the email next to it.</p>
+  </div>
+
+  <section>
+    <span class="eyebrow">Framing</span>
+    <h2 class="sec">Two philosophies of "getting the email on the matter"</h2>
+    <p class="sec-lede">Every feature below is a variation on one of these two centers of gravity. Naming them makes the rest of the comparison fall into place.</p>
+    <div class="split">
+      <div class="phil them">
+        <span class="tag">iManage · NetDocuments · Worldox</span>
+        <h3>Client-side, user-initiated, folder-centric</h3>
+        <ul>
+          <li>The <strong>Outlook add-in is the product</strong>. Filing happens in the mail client, at the user's hand.</li>
+          <li>A <strong>prediction suggests a destination</strong>; the human confirms it (Predictive Filing, Suggested/Recent Locations).</li>
+          <li>Thread continuity rides a <strong>subject-line token</strong> or a repeated prediction.</li>
+          <li>The destination is a <strong>folder</strong> in a document taxonomy.</li>
+          <li>Offline, mobile and OWA require bolting on a <strong>server-side path</strong> after the fact.</li>
+        </ul>
+      </div>
+      <div class="phil us">
+        <span class="tag">Spaarke</span>
+        <h3>Server-side, engine-initiated, record-centric</h3>
+        <ul>
+          <li>The <strong>Association Engine is the product</strong>. Capture is a Graph subscription on the mailbox &mdash; no client dependency.</li>
+          <li>A <strong>ladder of rungs</strong> (explicit reference, thread, participant, attachment, name, semantic, AI) reinforces into a confidence score and a <strong>Resolved / Suggested / Ambiguous</strong> decision.</li>
+          <li>Thread continuity rides <strong>RFC message-id ancestry</strong> &mdash; no subject pollution.</li>
+          <li>The destination is a <strong>typed record</strong> &mdash; matter, project, invoice, service request, event &hellip; (12 regarding types).</li>
+          <li>Offline, mobile and OWA are <strong>inherent</strong> &mdash; delivery to Exchange is the trigger, not the client.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <span class="eyebrow">Use-case by use-case</span>
+    <h2 class="sec">The five jobs, and how we'd win each</h2>
+    <p class="sec-lede">Taking the competitor write-up's own categories in turn: what they do, what Spaarke ships today (grounded in the code), an honest verdict, and the move that reaches parity or beyond.</p>
+
+    <!-- UC A -->
+    <article class="uc">
+      <div class="uc-head">
+        <div>
+          <div class="uc-cat">Manual filing</div>
+          <h3>Send &amp; File · Browse &amp; File · Predictive Filing</h3>
+        </div>
+        <span class="chip mixed">Ahead on automation · gap in Outlook</span>
+      </div>
+      <p class="uc-lede">iManage exposes Browse-and-File from the ribbon and Send-and-File on compose, drawing on Suggested + Recent Locations. NetDocuments' ndMail adds web-scale Predictive Filing. In both, the human is in the loop <em>at the client</em>, picking from ranked destinations.</p>
+      <div class="uc-grid">
+        <div class="cell them">
+          <span class="lbl">Them</span>
+          <p>Prediction ranks folders; user confirms in Outlook. Strong in-client UX; the prediction is a single top suggestion.</p>
+        </div>
+        <div class="cell us">
+          <span class="lbl">Spaarke today</span>
+          <p>The engine auto-associates server-side (matter / project / service request auto-file; everything else surfaced). A rich review UI &mdash; candidate cards, confirm / change / link-another / create-from-email &mdash; lives in the <code>CommunicationConnections</code> form modal and the r5 <code>EmailWorkspace</code>. A real Outlook add-in ("Save to Spaarke") files manually &mdash; but it does <em>not</em> yet show the engine's suggestions.</p>
+        </div>
+      </div>
+      <div class="win">
+        <span class="lbl">How we win</span>
+        <p>Pipe the engine's top-3 candidates (already computed by <code>derivePrimaryReview</code>) <strong>into the Save-to-Spaarke task pane</strong>. That turns our add-in into true Predictive Filing &mdash; but backed by a multi-signal ladder with an audit trail, not a black-box folder guess &mdash; and unifies it with the code-page review so a user sees the same ranked candidates everywhere.</p>
+      </div>
+    </article>
+
+    <!-- UC B -->
+    <article class="uc">
+      <div class="uc-head">
+        <div>
+          <div class="uc-cat">Thread continuity</div>
+          <h3>The "luggage tag" · Inbox Filer · Conversation Filing</h3>
+        </div>
+        <span class="chip ahead">Ahead · cleaner &amp; delegate-safe</span>
+      </div>
+      <p class="uc-lede">iManage appends a token to the subject line encoding firm + client.matter, so replies survive external round-trips and auto-file via Inbox Filer. It's the category's cleverest &mdash; and ugliest &mdash; trick. NetDocuments does the same job through prediction (the prior location surfaces as the top suggestion on a reply).</p>
+      <div class="uc-grid">
+        <div class="cell them">
+          <span class="lbl">Them</span>
+          <p>Subject-line token (visible clutter; survives header stripping by design). Inbox Filer has a known gap: for a <strong>delegate's</strong> inbox it records the mailbox owner as the filer &mdash; wrong, since assistants file a lot of partner mail.</p>
+        </div>
+        <div class="cell us">
+          <span class="lbl">Spaarke today</span>
+          <p><code>ThreadContinuityRung</code> inherits the parent communication's regarding via <strong>RFC In-Reply-To / References ancestry</strong> &mdash; no subject token. It inherits auto-file strength <em>only</em> from a Resolved parent, so an unconfirmed guess never propagates down a thread. Filer identity is set correctly on confirm by Job B's impersonation write (<code>MSCRMCallerID</code> = the confirming user).</p>
+        </div>
+      </div>
+      <div class="win">
+        <span class="lbl">How we win</span>
+        <p>We already get the clean outcome without polluting the subject, and the <strong>delegate gap simply doesn't exist for us</strong> &mdash; capture has no per-inbox filer identity. The one thing the token buys is surviving header-stripping external systems; we cover that case a different way &mdash; <code>ExplicitReference</code> + <code>RecordNameMatch</code> catch a matter number in the subject or body even when threading headers are gone. If a firm genuinely needs external round-trip survival, we can stamp our own regarding into a header/subject token as an <em>opt-in</em> &mdash; never the default.</p>
+      </div>
+    </article>
+
+    <!-- UC C -->
+    <article class="uc">
+      <div class="uc-head">
+        <div>
+          <div class="uc-cat">Folder mapping</div>
+          <h3>Linked Folders · Filing Folders · Folder Mapping</h3>
+        </div>
+        <span class="chip diverge">Intentional divergence</span>
+      </div>
+      <p class="uc-lede">Link an Outlook folder to a DMS folder; anything dragged in files automatically. Attractive because it rides existing habits &mdash; problematic because, as the write-up itself concedes, the Outlook tree and the DMS taxonomy drift apart.</p>
+      <div class="uc-grid">
+        <div class="cell them">
+          <span class="lbl">Them</span>
+          <p>"Drag it and forget it." Convenient muscle-memory; guaranteed taxonomy drift and per-user folder sprawl over time.</p>
+        </div>
+        <div class="cell us">
+          <span class="lbl">Spaarke today</span>
+          <p>No folder mapping &mdash; by design. Server-side auto-association removes the reason to hand-file into folders at all: the engine picks a <em>record</em>, so there is no Outlook-folder tree to drift.</p>
+        </div>
+      </div>
+      <div class="win">
+        <span class="lbl">How we win</span>
+        <p>Position engine-driven association as the better default (no drift, no sprawl). For firms that want the muscle-memory, offer an <strong>Outlook category → regarding mapping</strong> that feeds a strong deterministic signal into the same engine &mdash; the habit is preserved, but it becomes one more rung, not a parallel filing system that rots.</p>
+      </div>
+    </article>
+
+    <!-- UC D -->
+    <article class="uc">
+      <div class="uc-head">
+        <div>
+          <div class="uc-cat">Exchange-side capture</div>
+          <h3>Workspace email addresses (<code>matter-12345@firm.com</code>)</h3>
+        </div>
+        <span class="chip mixed">Architecture matches · convenience gap</span>
+      </div>
+      <p class="uc-lede">A per-matter address in To/Cc/Bcc auto-files to that workspace. Under the hood: a shared mailbox + transport rules + a server-side service resolving the address to a workspace ID. This is <em>exactly</em> our architecture &mdash; we just don't parse the address yet.</p>
+      <div class="uc-grid">
+        <div class="cell them">
+          <span class="lbl">Them</span>
+          <p>Bcc <code>matter-12345@</code> and it files. Simple, deterministic, loved by clients' outbound systems. Needs alias provisioning + transport rules per workspace.</p>
+        </div>
+        <div class="cell us">
+          <span class="lbl">Spaarke today</span>
+          <p><code>GraphSubscriptionManager</code> already captures per monitored mailbox, server-side app-only &mdash; the shared-mailbox capture is done. Recipients (To/Cc) are modeled and <code>ParticipantCorrelation</code> resolves them via contact→membership. But nothing parses a structured <code>matter-{n}@</code> alias, and Bcc isn't modeled.</p>
+        </div>
+      </div>
+      <div class="win">
+        <span class="lbl">How we win</span>
+        <p>Add a <strong>recipient-alias rung</strong> that reads To/Cc/Bcc for a per-matter address and emits an <code>ExplicitReference</code>-tier match &mdash; the resolver infrastructure and the ladder already exist, so this is small. Result: exact iManage parity on the file-to-address pattern, <em>plus</em> our confidence ladder and provenance on top of it. (Model Bcc while we're there.)</p>
+      </div>
+    </article>
+
+    <!-- UC E -->
+    <article class="uc">
+      <div class="uc-head">
+        <div>
+          <div class="uc-cat">Execution model</div>
+          <h3>Client vs. server · dedupe · offline · delegates</h3>
+        </div>
+        <span class="chip mixed">Ahead · one real gap (dedupe)</span>
+      </div>
+      <p class="uc-lede">iManage runs both client- and server-side filing; the server path is what makes offline Send-and-File, mobile and OWA work at all. NetDocuments checks whether a copy is <em>already filed</em> before uploading &mdash; the dedupe that matters because one message lands in six mailboxes.</p>
+      <div class="uc-grid">
+        <div class="cell them">
+          <span class="lbl">Them</span>
+          <p>Server-side path added to reach mobile/OWA/offline. ND dedupes on "already filed?" before upload. SoftBlock warns on send but never permanently blocks.</p>
+        </div>
+        <div class="cell us">
+          <span class="lbl">Spaarke today</span>
+          <p>Server-side <em>by architecture</em> &mdash; offline, mobile and OWA capture are inherent, no client needed. Dedupe is multi-layer but keys on the <strong>per-mailbox Graph message id</strong>; the same RFC message in two monitored mailboxes would create two rows. <code>sprk_internetmessageid</code> is captured but only used for threading.</p>
+        </div>
+      </div>
+      <div class="win">
+        <span class="lbl">How we win</span>
+        <p>Add an <strong>internet-message-id existence check on create</strong> &mdash; we already store the field; it just isn't on the dedupe path. That gives true cross-mailbox dedupe, matching ND's "already filed?" check. On offline/mobile/OWA and delegate correctness we're already ahead and need do nothing.</p>
+      </div>
+    </article>
+  </section>
+
+  <section>
+    <span class="eyebrow">At a glance</span>
+    <h2 class="sec">Capability matrix</h2>
+    <p class="sec-lede">The underlying capability, not the marketing name for it. "Spaarke planned" reflects the roadmap below &mdash; each item is an extension of the existing engine, not a new system.</p>
+    <div class="scroll">
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th scope="col">Capability</th>
+            <th scope="col">iManage</th>
+            <th scope="col">NetDocuments</th>
+            <th scope="col" class="mine">Spaarke today</th>
+            <th scope="col" class="mine">Spaarke planned</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Server-side capture (no client dependency)</th>
+            <td><span class="stat p">Add-on</span><span class="sub">EWS path bolted on</span></td>
+            <td><span class="stat p">Add-on</span><span class="sub">ndMail service + EWS</span></td>
+            <td class="mine"><span class="stat y">Native</span><span class="sub">Graph subscription</span></td>
+            <td class="mine"><span class="stat y">Native</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Predictive destination ranking</th>
+            <td><span class="stat p">Suggested/Recent</span></td>
+            <td><span class="stat y">Predictive Filing</span></td>
+            <td class="mine"><span class="stat y">Multi-rung ladder</span><span class="sub">+ confidence + provenance</span></td>
+            <td class="mine"><span class="stat y">Surfaced in Outlook too</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Refuses to guess on conflicts</th>
+            <td><span class="stat n">Top pick</span></td>
+            <td><span class="stat n">Top pick</span></td>
+            <td class="mine"><span class="stat y">Ambiguous state</span><span class="sub">human decides; never auto-guesses</span></td>
+            <td class="mine"><span class="stat y">Ambiguous state</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Thread continuity without subject clutter</th>
+            <td><span class="stat n">Subject token</span></td>
+            <td><span class="stat y">Prediction</span></td>
+            <td class="mine"><span class="stat y">Message-id ancestry</span></td>
+            <td class="mine"><span class="stat y">+ opt-in token</span><span class="sub">for header-stripping paths</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Per-matter file-to address</th>
+            <td><span class="stat y">Workspace address</span></td>
+            <td><span class="stat y">Yes</span></td>
+            <td class="mine"><span class="stat n">Not parsed</span></td>
+            <td class="mine"><span class="stat y">Recipient-alias rung</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Cross-mailbox dedupe (6-inbox problem)</th>
+            <td><span class="stat p">Partial</span></td>
+            <td><span class="stat y">"Already filed?" check</span></td>
+            <td class="mine"><span class="stat p">Per-mailbox only</span></td>
+            <td class="mine"><span class="stat y">Internet-message-id</span></td>
+          </tr>
+          <tr>
+            <th scope="row">In-Outlook manual filing</th>
+            <td><span class="stat y">Browse &amp; File</span></td>
+            <td><span class="stat y">ndMail</span></td>
+            <td class="mine"><span class="stat p">Save to Spaarke</span><span class="sub">no suggestions in pane; quick-save stubbed</span></td>
+            <td class="mine"><span class="stat y">+ ranked candidates</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Send-time nudge (SoftBlock)</th>
+            <td><span class="stat y">SmartAlert</span></td>
+            <td><span class="stat y">SoftBlock</span></td>
+            <td class="mine"><span class="stat na">N/A by design</span><span class="sub">capture-first: nothing is "lost"</span></td>
+            <td class="mine"><span class="stat y">Optional SoftBlock</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Delegate / assistant filing correctness</th>
+            <td><span class="stat n">Records wrong filer</span></td>
+            <td><span class="stat p">Varies</span></td>
+            <td class="mine"><span class="stat y">Correct</span><span class="sub">impersonation write</span></td>
+            <td class="mine"><span class="stat y">Correct</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Full audit trail of the filing decision</th>
+            <td><span class="stat n">No</span></td>
+            <td><span class="stat n">No</span></td>
+            <td class="mine"><span class="stat y">Provenance JSON</span><span class="sub">per-rung, per-candidate</span></td>
+            <td class="mine"><span class="stat y">Provenance JSON</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Destination types</th>
+            <td><span class="stat p">Folders</span></td>
+            <td><span class="stat p">Folders</span></td>
+            <td class="mine"><span class="stat y">12 record types</span><span class="sub">matter, project, invoice, SR, event&hellip;</span></td>
+            <td class="mine"><span class="stat y">12 record types</span></td>
+          </tr>
+          <tr>
+            <th scope="row">Update the matter record from the email</th>
+            <td><span class="stat n">No</span></td>
+            <td><span class="stat n">No</span></td>
+            <td class="mine"><span class="stat y">Job B</span><span class="sub">cited, confirmed, audited field updates</span></td>
+            <td class="mine"><span class="stat y">Job B</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--have)"></i> Have it / strong</span>
+      <span><i style="background:var(--partial)"></i> Partial</span>
+      <span><i style="background:var(--gap)"></i> Gap / absent</span>
+      <span><i style="background:var(--muted);border-radius:50%"></i> Not applicable by design</span>
+    </div>
+  </section>
+
+  <section>
+    <span class="eyebrow">Where we already lead</span>
+    <h2 class="sec">Six advantages that fall out of the architecture</h2>
+    <p class="sec-lede">These aren't features we'd have to build to catch up &mdash; they're consequences of choosing a server-side engine over a client-side add-in, and they're hard for the incumbents to retrofit.</p>
+    <div class="diff-grid">
+      <div class="diff">
+        <h3><span class="n">A</span> Decision, not a guess</h3>
+        <p>Independent rungs reinforce (bounded noisy-OR) into a confidence score, and conflicts resolve to an explicit <em>Ambiguous</em> state rather than a silent top-pick. Fewer misfiles &mdash; and when we're unsure, we say so.</p>
+      </div>
+      <div class="diff">
+        <h3><span class="n">B</span> Defensible by construction</h3>
+        <p>Every association writes a provenance record: which rungs fired, each candidate's confidence, what was written and why. Neither incumbent can show a client <em>why</em> an email landed where it did.</p>
+      </div>
+      <div class="diff">
+        <h3><span class="n">C</span> Record-currency, not just storage</h3>
+        <p>Job B reads the email and <em>proposes cited, human-confirmed updates to the matter record</em> &mdash; a new deadline, a changed contact &mdash; then writes them under audit. The incumbents file the message and stop there. This is our sharpest wedge.</p>
+      </div>
+      <div class="diff">
+        <h3><span class="n">D</span> Delegate-safe, offline-native</h3>
+        <p>Capture is triggered by delivery to Exchange, so mobile, OWA and offline all work with no extra path &mdash; and there's no per-inbox filer to record incorrectly for an assistant. iManage lists both as known limitations.</p>
+      </div>
+      <div class="diff">
+        <h3><span class="n">E</span> Typed records, not folders</h3>
+        <p>We file to a matter, project, invoice, service request or event &mdash; 12 regarding types &mdash; so the email becomes queryable, related data, not a document in a tree that drifts from the taxonomy.</p>
+      </div>
+      <div class="diff">
+        <h3><span class="n">F</span> Governed and reversible</h3>
+        <p>Auto-file scope, thresholds and the core record set are config-driven kill-switches &mdash; tunable per tenant without a redeploy. A misfile is re-filed under audit, never silently overwritten.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <span class="eyebrow">Closing the gaps</span>
+    <h2 class="sec">Roadmap to parity-and-beyond</h2>
+    <p class="sec-lede">Ordered by leverage. Every item extends the existing engine or the existing Outlook add-in &mdash; none is a new system &mdash; which is why the effort estimates are small.</p>
+    <div class="road">
+
+      <div class="item p1">
+        <div class="prio">P1<small>Now</small></div>
+        <div>
+          <h3>Per-matter file-to address</h3>
+          <p>A recipient-alias rung that parses To/Cc/Bcc for <code>matter-{n}@</code> (or a provisioned per-record alias) and emits an explicit-reference-tier match. Reaches iManage/ND parity on the workspace-address pattern that clients' outbound systems rely on &mdash; with our confidence ladder layered on top.</p>
+          <div class="meta"><span class="pill effort">Small</span><span class="pill reuse">Extends: new rung + NormalizedMessage (add Bcc)</span></div>
+        </div>
+      </div>
+
+      <div class="item p1">
+        <div class="prio">P1<small>Now</small></div>
+        <div>
+          <h3>Cross-mailbox dedupe</h3>
+          <p>Add an <code>sprk_internetmessageid</code> existence check to the capture create-path. Closes the six-inbox duplication that NetDocuments explicitly guards against. The field is already captured; this is wiring, not new plumbing.</p>
+          <div class="meta"><span class="pill effort">Small</span><span class="pill reuse">Extends: IncomingCommunicationProcessor</span></div>
+        </div>
+      </div>
+
+      <div class="item p2">
+        <div class="prio">P2<small>Next</small></div>
+        <div>
+          <h3>Engine suggestions inside Outlook</h3>
+          <p>Surface the engine's top-3 candidates in the "Save to Spaarke" task pane (and finish the stubbed one-click ribbon quick-save). Turns our add-in into true Predictive Filing and unifies it with the code-page review &mdash; one ranked candidate model everywhere.</p>
+          <div class="meta"><span class="pill effort">Medium</span><span class="pill reuse">Reuses: derivePrimaryReview</span></div>
+        </div>
+      </div>
+
+      <div class="item p2">
+        <div class="prio">P2<small>Next</small></div>
+        <div>
+          <h3>Optional send-time nudge</h3>
+          <p>A LaunchEvents <code>OnMessageSend</code> SoftBlock that offers a filing destination on compose &mdash; strictly opt-in, never blocking. Lower priority than for the incumbents because capture-first means an unfiled email is never lost; it's a review-queue item, not a black hole.</p>
+          <div class="meta"><span class="pill effort">Medium</span><span class="pill reuse">Extends: Outlook add-in manifest</span></div>
+        </div>
+      </div>
+
+      <div class="item p3">
+        <div class="prio">P3<small>Later</small></div>
+        <div>
+          <h3>Unified Recent + AI Suggested Locations</h3>
+          <p>Replace the add-in's session-local recents with a server-backed, AI-ranked destination list shared across Outlook, the form and the code page &mdash; the "likely places this belongs" picker, powered by the engine rather than the user's last ten clicks.</p>
+          <div class="meta"><span class="pill effort">Medium</span></div>
+        </div>
+      </div>
+
+      <div class="item p3">
+        <div class="prio">P3<small>Later</small></div>
+        <div>
+          <h3>Optional Outlook-category mapping</h3>
+          <p>For firms that want folder-mapping muscle-memory, map an Outlook category/folder to a regarding record as a deterministic signal into the engine &mdash; the habit without the taxonomy drift.</p>
+          <div class="meta"><span class="pill effort">Small</span></div>
+        </div>
+      </div>
+
+      <div class="item enabler">
+        <div class="prio">◆<small>Enabler</small></div>
+        <div>
+          <h3>Light up content-based attachment matching</h3>
+          <p>The attachment→document rung (3.7) already queries <code>sprk_globalsearchextender</code> for distinctive keywords &mdash; it's wired but dormant until that field is populated. Populating it (the "augment global Document search" effort) unlocks matching by document <em>content</em>, not just filename, with no engine change.</p>
+          <div class="meta"><span class="pill reuse">Already wired: AttachmentDocumentAssociationRung</span></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <footer>
+    <div class="measure">
+      <p>Grounded in the current codebase: capture via <code>GraphSubscriptionManager</code>; the rung engine + <code>AssociationStatusMapper</code> confidence ladder (Resolved / Suggested / Ambiguous / Pending&nbsp;Review); <code>ParticipantCorrelationRung</code>, <code>ThreadContinuityRung</code>, <code>AttachmentDocumentAssociationRung</code>; the <code>CommunicationConnections</code> / <code>EmailConnectionsReview</code> surfaces; and the Outlook add-in under <code>src/client/office-addins/outlook</code>. Competitor behavior per the supplied write-up (iManage, NetDocuments/ndMail, Worldox, ZERO) plus public documentation.</p>
+      <p>Prepared for the Email &amp; Communication Intelligence UAT review &mdash; the intent is parity where clients expect it and a clear lead where the architecture already gives us one.</p>
+    </div>
+  </footer>
+
+</div>
+</div>
