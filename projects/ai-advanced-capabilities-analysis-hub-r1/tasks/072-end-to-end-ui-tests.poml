@@ -4,7 +4,7 @@
     <title>End-to-end UI tests (entry matrix, hub, wizard, fork, reopen, retirement grep-clean)</title>
     <phase>7 Deploy</phase>
     <gate>071 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Final experiential gate; e2e-test tag; verifies the 9 spec Success Criteria across the deployed three-pane + record-form surfaces incl. ADR-021 dark mode + session-durability behavior.</rigor-reason>
     <model-tier>sonnet</model-tier>
