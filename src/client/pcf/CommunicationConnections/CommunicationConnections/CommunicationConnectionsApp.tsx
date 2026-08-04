@@ -45,6 +45,7 @@ import {
   cleanGuid,
   resolveRecordDisplayNameFieldName,
   type IPolymorphicWebApi,
+  OOB_MODAL_SIZES,
 } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { AssociationStatus, type ICommunicationRecord } from './types';
@@ -719,10 +720,13 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
           onLaunchError
         );
       } else if (typeof xrm?.Navigation?.navigateTo === 'function') {
+        // `createForm` OOB size (70%×80%) — this opens an entity CREATE form
+        // (no entityId), the scenario createForm was named for (spec FR-11);
+        // was an ad-hoc 60%×80% literal.
         Promise.resolve(
           xrm.Navigation.navigateTo(
             { pageType: 'entityrecord', entityName: entityType },
-            { target: 2, width: { value: 60, unit: '%' }, height: { value: 80, unit: '%' } }
+            { target: 2, width: OOB_MODAL_SIZES.createForm.width, height: OOB_MODAL_SIZES.createForm.height }
           )
         ).catch(onLaunchError);
       } else {
@@ -826,9 +830,11 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
         return;
       }
       try {
+        // `record` OOB size (85%×85%) — record-modal-selection.md invariant;
+        // was an ad-hoc 80%×80% literal.
         const result = xrm.Navigation.navigateTo(
           { pageType: 'entityrecord', entityName: target.entityName, entityId: target.entityId },
-          { target: 2, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } }
+          { target: 2, width: OOB_MODAL_SIZES.record.width, height: OOB_MODAL_SIZES.record.height }
         );
         if (result && typeof result.catch === 'function') {
           result.catch((err: unknown) => console.warn('[CommunicationConnections] navigateTo rejected:', err));

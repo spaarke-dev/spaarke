@@ -11,6 +11,18 @@
  *
  * Shared library version — external dependencies (navigation, file preview
  * services) are injected via callback props.
+ *
+ * Document preview (spaarke-modal-system task 060): migrated off the
+ * @deprecated `FilePreview/FilePreviewDialog.tsx` (now deleted) onto
+ * `RichFilePreviewDialog`. This step never enables cross-record
+ * `navigationTotal`/browse nav, so it always renders via the single-document
+ * `PreviewModal` path. The `filePreviewServices` callback contract is
+ * UNCHANGED (`IFilePreviewServices` — still injected by `FindSimilarDialog`);
+ * this step now adapts those SAME service calls to `RichFilePreviewDialog`'s
+ * per-action callback shape instead of the deprecated dialog's single
+ * `services` bundle prop. `onEmailDocument` is a documented no-op — this
+ * surface has no send-email capability, mirroring the identical precedent in
+ * `EmailReadingAttachments.tsx` (another `RichFilePreviewDialog` consumer).
  */
 import * as React from 'react';
 import {
@@ -34,7 +46,7 @@ import {
   type TableColumnSizingOptions,
 } from '@fluentui/react-components';
 import { EyeRegular, OpenRegular } from '@fluentui/react-icons';
-import { FilePreviewDialog } from '../FilePreview';
+import { RichFilePreviewDialog } from '../FilePreview';
 import type { IFilePreviewServices } from '../FilePreview/filePreviewTypes';
 import type {
   FindSimilarStatus,
@@ -175,6 +187,11 @@ function mapDocumentResults(docs: IDocumentResult[]): IGridRecord[] {
     name: d.name,
     combinedScore: d.combinedScore,
     fileType: d.fileType,
+    // documentType/createdAt: carried through (additive, no grid column
+    // reads them today) so the RichFilePreviewDialog metadata pane can show
+    // real values instead of always falling back to "—" (task 060).
+    documentType: d.documentType,
+    createdAt: d.createdAt,
     parentEntityType: d.parentEntityType,
     parentEntityName: d.parentEntityName,
     parentEntityId: d.parentEntityId,
@@ -292,10 +309,13 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
 }) => {
   const styles = useStyles();
 
-  // Preview dialog state
-  const [previewOpen, setPreviewOpen] = React.useState(false);
-  const [previewDocId, setPreviewDocId] = React.useState('');
-  const [previewDocName, setPreviewDocName] = React.useState('');
+  type GridItem = IGridRecord & { _rowId: number };
+
+  // Preview dialog state — the full clicked row (documentType/createdAt come
+  // along for the preview surface's metadata pane; mirrors the `previewItem`
+  // pattern in EmailReadingAttachments.tsx, a sibling RichFilePreviewDialog
+  // consumer).
+  const [previewItem, setPreviewItem] = React.useState<GridItem | null>(null);
 
   // Lazy loading state
   const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE);
@@ -323,8 +343,6 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [records.length]);
-
-  type GridItem = IGridRecord & { _rowId: number };
 
   // Row action handler
   const handleOpenRecord = React.useCallback(
@@ -373,9 +391,7 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
                   aria-label="Preview document"
                   onClick={e => {
                     e.stopPropagation();
-                    setPreviewDocId(item.id);
-                    setPreviewDocName((item.name as string | undefined) ?? item.id ?? '');
-                    setPreviewOpen(true);
+                    setPreviewItem(item);
                   }}
                 />
               </Tooltip>
@@ -482,14 +498,61 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
         </>
       )}
 
-      {/* File Preview Dialog (documents domain) */}
-      {domain === 'documents' && (
-        <FilePreviewDialog
-          open={previewOpen}
-          documentId={previewDocId}
-          documentName={previewDocName}
-          onClose={() => setPreviewOpen(false)}
-          services={filePreviewServices}
+      {/* File Preview Dialog (documents domain) — migrated off the
+          @deprecated `FilePreviewDialog` onto `RichFilePreviewDialog`
+          (spaarke-modal-system task 060). The service-callback mapping below
+          mirrors the deprecated dialog's own open-file cascade (desktop →
+          web → fetched-preview-URL fallback) 1:1, reusing the SAME injected
+          `filePreviewServices`. `onEmailDocument` is a documented no-op —
+          this surface has no send-email capability (mirrors
+          EmailReadingAttachments.tsx). */}
+      {domain === 'documents' && previewItem && (
+        <RichFilePreviewDialog
+          open={!!previewItem}
+          documentId={previewItem.id}
+          documentName={(previewItem.name as string | undefined) ?? previewItem.id ?? ''}
+          documentType={
+            (previewItem.documentType as string | undefined) ?? (previewItem.fileType as string | undefined)
+          }
+          createdAt={(previewItem.createdAt as string | undefined) ?? null}
+          onClose={() => setPreviewItem(null)}
+          fetchPreviewUrl={() => filePreviewServices.getDocumentPreviewUrl(previewItem.id)}
+          onOpenFile={mode => {
+            void (async () => {
+              const links = await filePreviewServices.getDocumentOpenLinks(previewItem.id);
+              if (mode === 'web' && links?.webUrl) {
+                window.open(links.webUrl, '_blank', 'noopener,noreferrer');
+                return;
+              }
+              if (links?.desktopUrl) {
+                window.location.href = links.desktopUrl;
+                return;
+              }
+              if (links?.webUrl) {
+                window.open(links.webUrl, '_blank', 'noopener,noreferrer');
+                return;
+              }
+              // Fallback: open the freshly-fetched preview URL — mirrors the
+              // deprecated dialog's own cascade when no open link exists.
+              const previewUrl = await filePreviewServices.getDocumentPreviewUrl(previewItem.id);
+              if (previewUrl) window.open(previewUrl, '_blank', 'noopener,noreferrer');
+            })();
+          }}
+          onOpenRecord={() => {
+            filePreviewServices.navigateToEntity({
+              action: 'openRecord',
+              entityName: 'sprk_document',
+              entityId: previewItem.id,
+              openInNewWindow: true,
+            });
+          }}
+          onEmailDocument={() => {
+            /* Emailing a found-similar document as a new communication is out
+               of scope for this surface (mirrors EmailReadingAttachments.tsx). */
+          }}
+          onCopyLink={() => {
+            void filePreviewServices.copyDocumentLink(previewItem.id);
+          }}
         />
       )}
     </>

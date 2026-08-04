@@ -10,6 +10,24 @@
  *   - IFindSimilarServiceConfig for BFF calls (authenticatedFetch, getBffBaseUrl)
  *   - IFilePreviewServices for the document preview dialog
  *   - onNavigateToEntity for Dataverse record navigation
+ *
+ * P4 re-base (spaarke-modal-system, task 061, FR-15): this component owns NO
+ * header of its own — it renders `WizardShell`, which supplies ALL chrome
+ * (title bar + `ModalWindowControls`, task 030) and its own `Dialog`/
+ * `DialogSurface` envelope. Wrapping it in a SECOND `SprkModal` envelope would
+ * double-chrome (two nested dialogs, two title bars); `WizardShell`'s own
+ * light-first re-base is separately scoped (task 080) and is NOT touched
+ * here. The correct re-base for THIS file is therefore to align its
+ * footprint to the canonical `xl` size (92vw × 88vh) via `WizardShell`'s
+ * OWN pre-existing consumer-driven `maxWidth`/`height` sizing props (the same
+ * mechanism task 030 already reused for the maximize/restore target) —
+ * see `FIND_SIMILAR_MAX_WIDTH`/`FIND_SIMILAR_HEIGHT` below, sourced from
+ * `SprkModal`'s `SIZE_SPEC.xl` so the numbers can never drift from the
+ * canonical scale. `src/solutions/LegalWorkspace/src/components/FindSimilar/
+ * FindSimilarDialog.tsx` (the LegalWorkspace adapter) inherits this sizing
+ * transitively — it renders this component with zero sizing props of its
+ * own and needs no edit (same "inherits" precedent task 030 recorded for
+ * this exact file — see `notes/task-030-completion.md`).
  */
 import * as React from 'react';
 import { Button, MessageBar, MessageBarBody, Text, makeStyles, tokens } from '@fluentui/react-components';
@@ -17,6 +35,7 @@ import { CheckmarkCircleFilled } from '@fluentui/react-icons';
 
 import { WizardShell } from '../Wizard/WizardShell';
 import type { IWizardStepConfig, IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
+import { SIZE_SPEC } from '../SprkModal/sizes';
 
 import { FileUploadZone } from '../FileUpload/FileUploadZone';
 import { UploadedFileList } from '../FileUpload/UploadedFileList';
@@ -31,6 +50,15 @@ import type {
   INavigationMessage,
 } from './findSimilarTypes';
 import type { IFilePreviewServices } from '../FilePreview/filePreviewTypes';
+
+// ---------------------------------------------------------------------------
+// xl-aligned footprint for the WizardShell envelope this component renders
+// (task 061 — see file docstring). Sourced from the canonical size scale so
+// these can't silently drift from `SprkModal`'s own `xl` numbers.
+// ---------------------------------------------------------------------------
+
+const FIND_SIMILAR_MAX_WIDTH = `${SIZE_SPEC.xl.widthVw}vw`;
+const FIND_SIMILAR_HEIGHT = SIZE_SPEC.xl.height;
 
 // ---------------------------------------------------------------------------
 // Props
@@ -319,6 +347,8 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
       onFinish={handleFinish}
       finishingLabel="Processing&hellip;"
       finishLabel="Done"
+      maxWidth={FIND_SIMILAR_MAX_WIDTH}
+      height={FIND_SIMILAR_HEIGHT}
     />
   );
 };

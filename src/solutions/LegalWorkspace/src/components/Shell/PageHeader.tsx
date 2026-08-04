@@ -17,7 +17,7 @@ import {
   DeleteRegular,
   CheckmarkSquareRegular,
 } from "@fluentui/react-icons";
-import { ThemeToggle } from "@spaarke/ui-components";
+import { ThemeToggle, DisplaySizeMenu } from "@spaarke/ui-components";
 import type { WorkspaceLayoutSummary } from "../WorkspaceHeader";
 
 const useStyles = makeStyles({
@@ -243,6 +243,11 @@ export const PageHeader: React.FC<IPageHeaderProps> = ({
               />
             </Tooltip>
           )}
+          {/* P0.5 (FR-06): app-shell "Display size" control — mirrors the
+              existing ThemeToggle appearance-setting affordance (standalone
+              LegalWorkspace only; embedded mode inherits the host's control,
+              see LegalWorkspaceApp.tsx). */}
+          <DisplaySizeMenu />
           <ThemeToggle />
         </div>
       </header>

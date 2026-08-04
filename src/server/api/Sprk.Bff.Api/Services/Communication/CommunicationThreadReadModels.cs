@@ -134,7 +134,12 @@ public sealed record ThreadListItem(
     string? Name,
     int? ThreadType,
     DateTimeOffset? CreatedOn,
-    bool IsPinned);
+    bool IsPinned,
+    // round-8.4 UAT item 3: the thread's associated ("regarding") record, resolved from the typed ADR-024 lookups
+    // (RegardingFieldMap). Lets the message-pane "open associated record" affordance navigate to it. Both null for a
+    // record-less Direct thread.
+    string? RegardingEntityType = null,
+    Guid? RegardingId = null);
 
 /// <summary>
 /// List-all-threads result (R3 task 003 / FR-16 / Success Criterion 5): a paged, name-searchable list of ALL threads

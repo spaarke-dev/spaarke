@@ -55,7 +55,7 @@ import { CreateFollowOnEventStep } from './CreateFollowOnEventStep';
 import type { IUploadedFile } from '../CreateMatter/wizardTypes';
 import type { IWebApi } from '../../types/xrm';
 import { getSpeContainerIdFromBusinessUnit } from '../../services/xrmProvider';
-import { navigateToEntity } from '../../utils/navigation';
+import { createXrmNavigationService } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -477,7 +477,9 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
     const hasWarnings = warnings.length > 0;
 
     const viewRecord = () => {
-      navigateToEntity({ action: 'openRecord', entityName: 'sprk_workassignment', entityId: waId });
+      createXrmNavigationService().openRecord('sprk_workassignment', waId).catch((err) => {
+        console.error('[WorkAssignmentWizardDialog] openRecord failed:', err);
+      });
       onClose();
     };
 

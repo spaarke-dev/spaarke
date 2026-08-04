@@ -61,7 +61,7 @@ import type {
   SectionFactoryContext,
   ContentSectionConfig,
 } from "@spaarke/ui-components";
-import { WidgetErrorBoundary } from "@spaarke/ui-components";
+import { WidgetErrorBoundary, OOB_MODAL_SIZES } from "@spaarke/ui-components";
 import { CheckmarkCircleRegular } from "@fluentui/react-icons";
 import { SmartTodoWidget } from "@spaarke/smart-todo-components";
 import type { IFeedSyncBridge, SmartTodoWidgetProps } from "@spaarke/smart-todo-components";
@@ -155,6 +155,8 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
         }).Xrm;
         if (xrm?.Navigation?.navigateTo) {
           // Layout 1 (R2 FR-20 binding): 85% × 85%, centered, dialog target.
+          // Sourced from oobModalSizes.ts's `record` size (spec FR-11/FR-18,
+          // task 090) — was an independent 85%×85% literal, now can't drift.
           void xrm.Navigation.navigateTo(
             {
               pageType: "entityrecord",
@@ -164,8 +166,8 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
             {
               target: 2,
               position: 1, // 1 = center
-              width: { value: 85, unit: "%" },
-              height: { value: 85, unit: "%" },
+              width: OOB_MODAL_SIZES.record.width,
+              height: OOB_MODAL_SIZES.record.height,
             },
           );
           return;

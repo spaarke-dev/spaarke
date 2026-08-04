@@ -87,6 +87,12 @@ export interface IConversationRendererProps {
    * loaded, so a renderer need not fetch them separately.
    */
   threadName?: string;
+  /**
+   * The selected thread's associated ("regarding") record (round-8.4 item 3), resolved from the thread list. Forward
+   * it to `<ConversationView regarding={…} onOpenRecord={…} />` so the message pane can offer an "open record"
+   * affordance. Undefined for a record-less Direct thread (or when the list row doesn't carry regarding).
+   */
+  regarding?: IConversationWorkspaceRegarding;
   authenticatedFetch: AuthenticatedFetchFn;
   bffBaseUrl?: string;
   /**
@@ -526,6 +532,13 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
         threadId: selectedThreadId,
         // Selected thread's display name for the message-pane header (round-8.4 item 3b).
         threadName: allRows.find(r => r.threadId === selectedThreadId)?.name ?? undefined,
+        // Selected thread's associated record for the message-pane "open record" affordance (round-8.4 item 3).
+        regarding: (() => {
+          const row = allRows.find(r => r.threadId === selectedThreadId);
+          return row?.regardingEntityType && row?.regardingId
+            ? { entityType: row.regardingEntityType, id: row.regardingId }
+            : undefined;
+        })(),
         authenticatedFetch,
         bffBaseUrl,
         // Relocated mark-as-read (item 5c): clear THIS thread's list badge when

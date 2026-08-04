@@ -22,7 +22,10 @@
  */
 import { Schema } from '@tiptap/pm/model';
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { composeSessionCommentThreadsToAnchoredComments, type ComposeCommentThreadModel } from './ComposeCommentThread.types';
+import {
+  composeSessionCommentThreadsToAnchoredComments,
+  type ComposeCommentThreadModel,
+} from './ComposeCommentThread.types';
 
 const schema = new Schema({
   nodes: {
@@ -45,7 +48,10 @@ const schema = new Schema({
 });
 
 /** A single-paragraph doc whose commentAnchor mark (commentId) spans the given text. */
-function singleParagraphDoc(commentId: string, text = 'The receiving party shall retain records indefinitely.'): PMNode {
+function singleParagraphDoc(
+  commentId: string,
+  text = 'The receiving party shall retain records indefinitely.'
+): PMNode {
   const mark = schema.marks.commentAnchor.create({ commentId });
   const p1 = schema.nodes.paragraph.create({ paraId: '0A000001' }, schema.text(text, [mark]));
   return schema.nodes.doc.create(null, [p1]);

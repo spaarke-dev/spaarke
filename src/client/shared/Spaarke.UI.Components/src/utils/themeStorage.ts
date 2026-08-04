@@ -13,10 +13,18 @@
  *
  * Both share:
  *   getUserThemePreference(), setUserThemePreference(),
- *   detectDarkModeFromUrl(), detectDarkModeFromNavbar()
+ *   detectDarkModeFromUrl(), detectDarkModeFromNavbar(),
+ *   getDisplaySizePreference(), setDisplaySizePreference()
  *
  * @see ADR-021 - Fluent UI v9 Design System (dark mode, no OS fallback)
  * @see ADR-012 - Shared component library
+ * @see spec FR-06 / design §6.9 (spaarke-modal-system P0.5) - the app-shell
+ *   `uiScale` control (persisted "Display size" + auto ≥2560 breakpoint).
+ *   getDisplaySizePreference/setDisplaySizePreference below reuse this
+ *   file's localStorage + THEME_CHANGE_EVENT mechanism verbatim (no second
+ *   storage mechanism or listener). Combination logic (breakpoint + setting
+ *   → one effective uiScale) lives in components/SprkModal/uiScale.ts,
+ *   consumed via hooks/useUiScale.ts.
  */
 
 import { Theme, webLightTheme, webDarkTheme } from '@fluentui/react-components';
@@ -63,6 +71,53 @@ export function setUserThemePreference(theme: ThemePreference): void {
   window.dispatchEvent(
     new CustomEvent(THEME_CHANGE_EVENT, {
       detail: { theme },
+    })
+  );
+}
+
+// ============================================================================
+// Display Size (App-Shell UI-Scale Setting) Storage
+//
+// spec FR-06 / design §6.9 (spaarke-modal-system P0.5): the persisted half of
+// the app-shell `uiScale` control (the other half is the auto ≥2560 CSS px
+// breakpoint, computed in components/SprkModal/uiScale.ts). Lives here (not
+// a new storage module) because it reuses THIS file's localStorage +
+// THEME_CHANGE_EVENT mechanism verbatim — per design constraint, no second
+// storage mechanism or listener is introduced. setupCodePageThemeListener()
+// below already reacts to both this key and THEME_STORAGE_KEY.
+// ============================================================================
+
+export const DISPLAY_SIZE_STORAGE_KEY = 'spaarke-display-size';
+
+/** User "Display size" setting — Default (1.0x) / Large / Extra-large. */
+export type DisplaySizePreference = 'default' | 'large' | 'extra-large';
+
+/**
+ * Get the user's persisted "Display size" preference from localStorage.
+ * @returns DisplaySizePreference ('default' if not set or invalid)
+ */
+export function getDisplaySizePreference(): DisplaySizePreference {
+  const stored = localStorage.getItem(DISPLAY_SIZE_STORAGE_KEY);
+  if (stored === 'default' || stored === 'large' || stored === 'extra-large') {
+    return stored;
+  }
+  return 'default';
+}
+
+/**
+ * Set the user's "Display size" preference in localStorage.
+ *
+ * Dispatches the SAME `THEME_CHANGE_EVENT` custom event the theme functions
+ * use (reused, not duplicated) so any app shell already listening via
+ * `setupCodePageThemeListener` / `setupThemeListener` recomputes in that same
+ * callback — no second custom event or listener is introduced.
+ */
+export function setDisplaySizePreference(size: DisplaySizePreference): void {
+  localStorage.setItem(DISPLAY_SIZE_STORAGE_KEY, size);
+
+  window.dispatchEvent(
+    new CustomEvent(THEME_CHANGE_EVENT, {
+      detail: { displaySize: size },
     })
   );
 }
@@ -355,13 +410,18 @@ export type CodePageThemeChangeHandler = (theme: Theme) => void;
  * Set up listeners for theme changes relevant to Code Pages.
  *
  * Listens for:
- * - **localStorage changes** from other tabs (`storage` event on `spaarke-theme` key)
- * - **Same-tab theme changes** (`spaarke-theme-change` custom event from theme menu)
+ * - **localStorage changes** from other tabs (`storage` event on the `spaarke-theme`
+ *   OR `spaarke-display-size` key — P0.5/FR-06: the SAME listener also drives the
+ *   app-shell `uiScale` recompute so no second listener is needed for Display size)
+ * - **Same-tab changes** (`spaarke-theme-change` custom event from the theme menu
+ *   OR `setDisplaySizePreference()` — both dispatch the SAME event)
  *
  * OS `prefers-color-scheme` changes are intentionally NOT listened to — ADR-021
  * requires the Spaarke theme system (not the OS) to control all UI surfaces.
  *
- * @param onChange - Callback invoked with the newly resolved theme
+ * @param onChange - Callback invoked with the newly resolved theme. Callers that
+ *   also need to recompute `uiScale` (spec FR-06) do so in this SAME callback —
+ *   see `hooks/useUiScale.ts` — rather than registering a second listener.
  * @returns Cleanup function to remove all listeners
  *
  * @example
@@ -385,9 +445,10 @@ export function setupCodePageThemeListener(onChange: CodePageThemeChangeHandler)
     onChange(resolveCodePageTheme());
   };
 
-  // Listen for localStorage changes from other tabs
+  // Listen for localStorage changes from other tabs — both the theme key AND
+  // the Display-size key (P0.5/FR-06) recompute through this SAME handler.
   const handleStorageChange = (event: StorageEvent) => {
-    if (event.key === THEME_STORAGE_KEY) {
+    if (event.key === THEME_STORAGE_KEY || event.key === DISPLAY_SIZE_STORAGE_KEY) {
       resolveAndNotify();
     }
   };

@@ -25,7 +25,7 @@ import { AlertRegular } from '@fluentui/react-icons';
 import { IMatter } from '../../types/entities';
 import { MatterStatus, GradeLevel } from '../../types/enums';
 import { deriveMatterStatus, extractMatterGrades, isMatterOverdue } from '../../utils/statusDerivation';
-import { navigateToEntity } from '../../utils/navigation';
+import { createXrmNavigationService } from '@spaarke/ui-components';
 import { GradePill } from './GradePill';
 
 // ---------------------------------------------------------------------------
@@ -176,10 +176,8 @@ export const MatterItem: React.FC<IMatterItemProps> = React.memo(({ matter }) =>
   // ---------------------------------------------------------------------------
 
   const handleNavigate = React.useCallback(() => {
-    navigateToEntity({
-      action: 'openRecord',
-      entityName: 'sprk_matter',
-      entityId: matter.sprk_matterid,
+    createXrmNavigationService().openRecord('sprk_matter', matter.sprk_matterid).catch((err) => {
+      console.error('[MatterItem] openRecord failed:', err);
     });
   }, [matter.sprk_matterid]);
 

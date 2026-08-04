@@ -77,6 +77,13 @@ export interface IThreadListItemDto {
    * Callers should still treat it defensively as falsy (`!!row.isPinned`) rather than assume strict presence.
    */
   isPinned: boolean;
+  /**
+   * The thread's associated ("regarding") record (round-8.4 item 3) — resolved server-side from the typed ADR-024
+   * lookups. Drives the message-pane "open associated record" affordance. Both null for a record-less Direct thread.
+   * Absent (undefined) on the `by-regarding` row shape, which doesn't project them.
+   */
+  regardingEntityType?: string | null;
+  regardingId?: string | null;
 }
 
 /** Mirrors `ThreadListResult` (`GET /api/communications/threads` response). */

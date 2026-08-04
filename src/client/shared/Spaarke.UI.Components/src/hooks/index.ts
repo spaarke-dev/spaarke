@@ -21,6 +21,7 @@ export * from './useInlineAiActions';
 export * from './useSlashCommands';
 export * from './useTwoPanelLayout';
 export * from './useTheme';
+export * from './useUiScale';
 export * from './useDocumentMultiSelect';
 
 // DataGrid framework (task 003)

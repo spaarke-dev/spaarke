@@ -132,7 +132,7 @@ function placeMatchingAdvisoryComments(ref: React.RefObject<ComposeEditorHandle 
 }
 
 describe('ComposeEditor — bidirectional highlight (task 040, spec FR-10)', () => {
-  it('selecting a summary row with a matching note highlights ONLY that note\'s document anchor', async () => {
+  it("selecting a summary row with a matching note highlights ONLY that note's document anchor", async () => {
     const ref = React.createRef<ComposeEditorHandle>();
     renderEditor(ref, { speDriveItemId: 'drive-item-040-1', fileName: 'Agreement.docx' });
 

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="100" project="spaarke-modal-system">
+  <metadata>
+    <title>Project wrap-up (MANDATORY)</title>
+    <phase>8 Wrap-up</phase>
+    <gate>blocked until all</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Project-close protocol runs the code-review + adr-check quality gates and the `/test-diet` gate, verifies all Success Criteria, and writes `.claude/` (`projects/INDEX.md`) + docs — the load-bearing final gate before the project is marked complete (FULL: post-completion quality gates + `.claude/` writes).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive close-out checklist against a fixed set of skills and criteria; no design judgment, but must be executed exactly and in order.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Runs the quality gates AND writes `.claude/` (`projects/INDEX.md`) + docs; sub-agents cannot write `.claude/` (CLAUDE.md §3), so this MUST run in the main session and cannot be parallelized.</parallel-reason>
+    <deps>all</deps>
+    <tags>wrapup, documentation</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Run the mandatory project-close protocol for `spaarke-modal-system`: (1) run `code-review` + `adr-check` across the branch; (2) run `/test-diet` (the project-close gate — reconcile tests added/modified during the project against the ADR-038 build-vs-maintain classifier) and cite `notes/test-diet-report.md`; (3) verify spec Success Criteria §1–10 including the NFR-06 net-reusable-component-count-DECREASED before/after inventory and the grep-clean overlay/`FilePreviewDialog`/legacy-`SendEmailDialog` retirements; (4) update the README status to Complete; (5) write `notes/lessons-learned.md`; (6) update the `projects/INDEX.md` row for this project (hot-path: BFF=N, SpaarkeAi=Y, CI=N, Skill=N — reflect completion); (7) run `repo-cleanup`. Do NOT mark the project complete until `/test-diet` has run and all Success Criteria are checked with evidence.</prompt>
+  <role>SPAARKE platform developer + release steward. Expert in the project-close protocol (code-review, adr-check, test-diet, repo-cleanup) and the CLAUDE.md §7 project-close gate. Follow ADRs strictly.</role>
+  <goal>All spec Success Criteria §1–10 are verified with evidence; `notes/test-diet-report.md` exists and is cited; `notes/lessons-learned.md` is written; the `projects/INDEX.md` row reflects completion; the repo is clean; and `README.md` status reads Complete — with no unresolved Critical from code-review/adr-check.</goal>
+
+  <context>
+    <background>CLAUDE.md §7 makes `/test-diet` a BINDING project-close gate that MUST run BEFORE the project is marked complete, and §3 requires `.claude/`-writing (`projects/INDEX.md`) to happen in the main session. This wrap-up closes the modal-system project: it runs the judgment-layer quality gates (code-review + adr-check), reconciles the project's test changes against the ADR-038 build-vs-maintain classifier, verifies every spec Success Criterion with concrete evidence (grep-clean overlay/deprecated-dialog retirements, the net-reusable-component-count DECREASED inventory per NFR-06), and finalizes the project state (README, lessons-learned, portfolio INDEX row, repo hygiene). It is blocked until all prior tasks are ✅.</background>
+    <relevant-files>
+      <file role="modify">projects/spaarke-modal-system/README.md</file>
+      <file role="new">projects/spaarke-modal-system/notes/lessons-learned.md</file>
+      <file role="new">projects/spaarke-modal-system/notes/test-diet-report.md</file>
+      <file role="modify">projects/INDEX.md</file>
+      <file role="modify">projects/spaarke-modal-system/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="all" status="pending">Every prior task (P0–P7) must be ✅ before wrap-up runs.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">MAIN-SESSION ONLY — this task writes `.claude/` (`projects/INDEX.md`); sub-agents cannot write `.claude/` (CLAUDE.md §3). Do NOT delegate the INDEX write to a sub-agent.</constraint>
+    <constraint source="project">`/test-diet` MUST run BEFORE the project is marked complete (CLAUDE.md §7 project-close gate); the wrap-up MUST cite `notes/test-diet-report.md` or document the skip rationale.</constraint>
+    <constraint source="project">Success Criteria verification MUST use concrete evidence (grep output, before/after inventory), not assertion; the net-reusable-component-count-DECREASED claim (NFR-06) MUST show the before/after count.</constraint>
+    <constraint source="project">Client-only project — MUST NOT introduce any BFF/publish-size concern during wrap-up (NFR-05).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project-close protocol: quality gates, test-diet reconciliation, Success-Criteria verification, portfolio finalization</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/README.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>projects/INDEX.md</file>
+    </files>
+    <patterns>
+      <pattern name="test-diet" location=".claude/skills/test-diet/SKILL.md">Reconcile project test changes against the ADR-038 build-vs-maintain classifier (read-only; emits git rm/mv).</pattern>
+      <pattern name="repo-cleanup" location=".claude/skills/repo-cleanup/SKILL.md">Structure-compliance + ephemeral-file cleanup at project close.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Confirm all prior tasks are ✅ in TASK-INDEX.md; load spec Success Criteria §1–10. Declare RIGOR: FULL.</step>
+    <step order="1">Run `code-review` + `adr-check` across the branch. If either surfaces an unresolved Critical, STOP and escalate (do not proceed to completion).</step>
+    <step order="2">Run `/test-diet` — reconcile every test added/modified during the project against the ADR-038 build-vs-maintain classifier; write + cite `projects/spaarke-modal-system/notes/test-diet-report.md`.</step>
+    <step order="3">Verify spec Success Criteria §1–10 with concrete evidence: include the NFR-06 net-reusable-component-count-DECREASED before/after inventory and grep-clean confirmation that the hand-rolled overlays, `@deprecated FilePreviewDialog`, and legacy `SendEmailDialog` are retired.</step>
+    <step order="4">Update `projects/spaarke-modal-system/README.md` status to Complete; write `projects/spaarke-modal-system/notes/lessons-learned.md`.</step>
+    <step order="5">Update the `projects/INDEX.md` row for this project to reflect completion (hot-path: BFF=N, SpaarkeAi=Y, CI=N, Skill=N).</step>
+    <step order="6">Run `repo-cleanup`; resolve or record any flagged structure/ephemeral-file findings.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set 100 status to ✅ (project complete) only after Steps 1–6 pass.</step>
+    <step order="8">Document any deviation (e.g. a deferred Success Criterion, a test-diet AMBIGUOUS ruling) in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `code-review` or `adr-check` surfaces an unresolved Critical finding, STOP and surface it per CLAUDE.md §6 / §6.5 rather than marking the project complete; completion is blocked until the Critical is resolved or formalized as a documented exception.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="git">Branch-wide diff for code-review + adr-check</tool>
+    <tool name="npm">Build verification of shared lib + consumers during criteria checks</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-modal-system/notes/test-diet-report.md</output>
+    <output type="doc">projects/spaarke-modal-system/notes/lessons-learned.md</output>
+    <output type="doc">projects/spaarke-modal-system/README.md</output>
+    <output type="doc">projects/INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`code-review` + `adr-check` ran across the branch with no unresolved Critical (or each Critical is resolved / formalized as a documented exception).</criterion>
+    <criterion testable="true">`/test-diet` ran and `projects/spaarke-modal-system/notes/test-diet-report.md` exists and is cited before the project is marked complete.</criterion>
+    <criterion testable="true">All spec Success Criteria §1–10 are checked with evidence, including the NFR-06 net-reusable-component-count-DECREASED before/after inventory and the grep-clean overlay/`FilePreviewDialog`/legacy-`SendEmailDialog` retirements.</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` is written; the `projects/INDEX.md` row reflects completion (BFF=N, SpaarkeAi=Y, CI=N, Skill=N).</criterion>
+    <criterion testable="true">`repo-cleanup` ran (repo clean); `README.md` status reads Complete; TASK-INDEX 100 set to ✅ only after all gates pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Modify/wrap-up — no `&lt;justification&gt;` (no new production surface) and no `&lt;ui-tests&gt;` (documentation + gate task). Prescriptive step order is intentional: quality gates and `/test-diet` MUST precede marking complete (CLAUDE.md §7). Main-session only (§3) because it writes `projects/INDEX.md`.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute; invoke code-review, adr-check, test-diet, and repo-cleanup as directed.</protocol>
+  </execution>
+</task>

@@ -41,6 +41,24 @@ jest.mock('@spaarke/ui-components', () => {
     cleanGuid: (id: string) => String(id).replace(/[{}]/g, '').toLowerCase(),
     resolveRecordDisplayNameFieldName: jest.fn().mockResolvedValue(null),
     applyResolverFields: jest.fn().mockResolvedValue({ recordNumber: null, displayName: null }),
+    // spaarke-modal-system P7 task 090 (FR-11/FR-18): CommunicationConnectionsApp.tsx
+    // imports OOB_MODAL_SIZES from `@spaarke/ui-components` for its
+    // navigateTo calls (handleCreateType / handleRecordNumberClick). Mirror
+    // the real module's values exactly — see utils/adapters/oobModalSizes.ts.
+    OOB_MODAL_SIZES: {
+      record: {
+        width: { value: 85, unit: '%' as const },
+        height: { value: 85, unit: '%' as const },
+      },
+      createForm: {
+        width: { value: 70, unit: '%' as const },
+        height: { value: 80, unit: '%' as const },
+      },
+      wizard: {
+        width: { value: 60, unit: '%' as const },
+        height: { value: 70, unit: '%' as const },
+      },
+    },
   };
 });
 

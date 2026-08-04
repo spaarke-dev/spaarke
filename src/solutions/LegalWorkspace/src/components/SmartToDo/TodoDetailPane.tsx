@@ -37,7 +37,7 @@ import { ITodo } from "../../types/entities";
 import { PriorityLevel, EffortLevel } from "../../types/enums";
 import { computeTodoScore, ITodoScoreBreakdown } from "../../utils/todoScoreUtils";
 import { computeDueLabel, parseDueDate, DueUrgency } from "../../utils/dueLabelUtils";
-import { navigateToEntity } from "../../utils/navigation";
+import { createXrmNavigationService } from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -274,10 +274,8 @@ export const TodoDetailPane: React.FC<ITodoDetailPaneProps> = React.memo(
 
     const handleEdit = React.useCallback(() => {
       if (!todo) return;
-      navigateToEntity({
-        action: "openRecord",
-        entityName: "sprk_todo",
-        entityId: todo.sprk_todoid,
+      createXrmNavigationService().openRecord("sprk_todo", todo.sprk_todoid).catch((err) => {
+        console.error("[TodoDetailPane] openRecord failed:", err);
       });
     }, [todo]);
 

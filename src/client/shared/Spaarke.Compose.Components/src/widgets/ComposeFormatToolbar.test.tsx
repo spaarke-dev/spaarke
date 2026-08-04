@@ -722,10 +722,7 @@ describe('ComposeFormatToolbar — Review Summary / Notes toggles (UAT round-7 #
 
 describe('ComposeFormatToolbar — Create Summary Memo dropdown (FR-14, task 051)', () => {
   it('is hidden when no review is present, even with both handlers wired', () => {
-    renderFormatToolbar(
-      {},
-      { props: { hasReview: false, onGenerateMemo: jest.fn(), onEmailMemo: jest.fn() } }
-    );
+    renderFormatToolbar({}, { props: { hasReview: false, onGenerateMemo: jest.fn(), onEmailMemo: jest.fn() } });
     expect(screen.queryByTestId('compose-format-memo-menu')).not.toBeInTheDocument();
   });
 

@@ -3,7 +3,8 @@ import { makeStyles, tokens } from "@fluentui/react-components";
 import { QuickSummaryMetricCard } from "./QuickSummaryMetricCard";
 import { QUICK_SUMMARY_CARDS } from "./quickSummaryConfig";
 import { useQuickSummaryCounts } from "../../hooks/useQuickSummaryCounts";
-import { navigateToEntityList } from "../../utils/navigation";
+import { OOB_MODAL_SIZES } from "@spaarke/ui-components";
+import { getXrm } from "../../services/xrmProvider";
 import type { IWebApi } from "../../types/xrm";
 
 export interface IQuickSummaryRowProps {
@@ -74,7 +75,21 @@ export const QuickSummaryRow: React.FC<IQuickSummaryRowProps> = ({
           icon={card.icon}
           badgeType={card.badgeType}
           badgeCount={badgeCounts[card.id]}
-          onClick={() => navigateToEntityList(card.entityName, card.viewId)}
+          onClick={() => {
+            // NOTE (task 091): entitylist opens don't literally fit any of
+            // the 3 named OOB sizes; mapped onto `record` (85%x85%, nearest
+            // fit) and flagged for the P7 visual review. See
+            // notes/task-091-completion.md.
+            const xrm = getXrm();
+            if (!xrm?.Navigation?.navigateTo) {
+              console.warn("[QuickSummaryRow] Xrm.Navigation.navigateTo is not available");
+              return;
+            }
+            xrm.Navigation.navigateTo(
+              { pageType: "entitylist", entityName: card.entityName, viewId: card.viewId },
+              { target: 2, width: OOB_MODAL_SIZES.record.width, height: OOB_MODAL_SIZES.record.height }
+            );
+          }}
         />
       ))}
     </div>

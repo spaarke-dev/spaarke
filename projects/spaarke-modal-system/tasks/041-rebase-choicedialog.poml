@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-modal-system">
+  <metadata>
+    <title>P2 — Re-base ChoiceDialog onto ChoiceModal (ADR-023) — FR-13</title>
+    <phase>2 Confirms &amp; choices</phase>
+    <gate>blocked until 005</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Re-bases the ADR-023 `ChoiceDialog` onto the `ChoiceModal` preset; the 2–4 rich-choice behavioral contract is owner/ADR-locked and must be preserved exactly while chrome moves to the shell.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Preset re-base fully specified by the `ChoiceModal` reference impl, the existing `ChoiceDialog`, and the ADR-023 pattern doc.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>005</deps>
+    <tags>react, fluent-ui, frontend</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Re-base `ChoiceDialog/ChoiceDialog.tsx` onto the `ChoiceModal` preset (built in task 005), moving its chrome (envelope + header + window controls + footer) to the shell while preserving the ADR-023 2–4 rich-choice behavior EXACTLY (FR-13). Update consumers so they keep working unchanged — the public `ChoiceDialog` call contract must not break.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 and the ADR-023 choice-dialog pattern. Follow ADRs strictly.</role>
+  <goal>`ChoiceDialog/ChoiceDialog.tsx` delegates its chrome to `ChoiceModal` while preserving the exact ADR-023 2–4 rich-choice contract (choice cards, selection/return behavior, cancel semantics); existing consumers compile and behave unchanged; the shared lib and consumers build green under `@types/react` 18 and React 19.</goal>
+
+  <context>
+    <background>Design P2 preserves ADR-023 by re-basing `ChoiceDialog` onto `ChoiceModal` (the preset is built fresh in task 005 — it is NOT in the prototype). `ChoiceDialog` today uses a plain Fluent `Dialog` at ~600px with a title, no X, and a Cancel-only footer (design §3.3). The re-base gives it the standard shell chrome (incl. window controls + standard footer) WITHOUT changing the ADR-023 choice semantics: 2 to 4 rich choices, each selectable, returning the chosen key to the caller. The spec (FR-09/FR-13) and CLAUDE.md both state the project PRESERVES ADR-023 — this is a chrome migration, not a behavior change.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/ChoiceDialog/ChoiceDialog.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/ChoiceModal.tsx</file>
+      <file role="canonical-reference">.claude/patterns/ui/choice-dialog-pattern.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="005" status="pending">The `ChoiceModal` preset (ADR-023-preserving) that `ChoiceDialog` re-bases onto.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-023">Preserve the 2–4 rich-choice contract EXACTLY — number-of-choices bounds, per-choice rendering, selection/return value, and cancel behavior are unchanged. This task migrates chrome only; the choice pattern is behavior-locked.</constraint>
+    <constraint source="ADR-012">Re-base onto the shared `ChoiceModal` in `@spaarke/ui-components`; do NOT fork the preset or re-implement choice chrome.</constraint>
+    <constraint source="ADR-021">Semantic tokens only — zero hex, `'1px'` literals, or inline color styles introduced in the re-base (NFR-03).</constraint>
+    <constraint source="project">The public `ChoiceDialog` prop/call contract MUST remain backward-compatible so existing consumers are unaffected. Keep the Fluent `Dialog` envelope via `ChoiceModal`; MUST NOT hand-roll any overlay.</constraint>
+    <constraint source="project">Touched files MUST compile clean under `@types/react` 18 (PCF) and React 19 (Code Pages) — NFR-04.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ADR-023 choice-dialog pattern + Fluent v9 preset composition</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-023-choice-dialog-pattern.md</file>
+      <file>.claude/patterns/ui/choice-dialog-pattern.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="choice-dialog-pattern" location=".claude/patterns/ui/choice-dialog-pattern.md">The ADR-023 2–4 rich-choice contract to preserve.</pattern>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Shared-lib preset composition conventions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-13 + ADR-023 + the choice-dialog pattern + the `ChoiceModal` preset from task 005. Enumerate the exact ADR-023 behaviors to preserve. Declare RIGOR: FULL.</step>
+    <step order="1">Map `ChoiceDialog`'s current props/behavior to `ChoiceModal`: which chrome moves to the shell (envelope, header, window controls, footer) and which choice logic stays in `ChoiceDialog`.</step>
+    <step order="2">Re-base `ChoiceDialog.tsx` to render its choice content inside `ChoiceModal`, delegating all chrome to the preset while keeping the 2–4 rich-choice rendering + selection/return path intact.</step>
+    <step order="3">Preserve the public `ChoiceDialog` prop contract (add an internal adapter if the shape differs) so no consumer call site changes.</step>
+    <step order="4">Grep consumers of `ChoiceDialog`; confirm each still compiles and behaves; adjust only if a prop was genuinely removed (should be none).</step>
+    <step order="5">Build the shared lib + one PCF and one Code Page consumer; prove dual-React cleanliness; fix any type breaks.</step>
+    <step order="6">Run the ui-tests below (2–4 choice behavior + dark-mode parity).</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set 041 status to ✅.</step>
+    <step order="8">Document any prop-adapter or mapping decision in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If preserving the ADR-023 2–4 rich-choice contract is not possible through `ChoiceModal` without changing choice behavior or the public `ChoiceDialog` contract, STOP and surface it per CLAUDE.md §6/§6.5 (ADR-023 is preserved by design — a required deviation is an ADR-conflict escalation, not a silent change).</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="2–4 rich-choice behavior preserved">
+      <steps>
+        <step>Render `ChoiceDialog` with 2, 3, and 4 choices.</step>
+        <step>Select each choice and cancel; verify the returned value / callback and cancel behavior match the pre-re-base dialog.</step>
+      </steps>
+      <expected>All choice counts render correctly; selection returns the correct key; cancel behaves per ADR-023; chrome now comes from `ChoiceModal`.</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Render `ChoiceDialog` under the dark Fluent theme.</step>
+        <step>Verify choice cards, header, and footer read correctly via semantic tokens in both light and dark.</step>
+      </steps>
+      <expected>Correct light/dark contrast via semantic tokens; no hex/inline color introduced.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test shared lib and consumers (build:prod for PCF)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ChoiceDialog/ChoiceDialog.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `ChoiceDialog`, when opened, then its chrome (envelope + header + window controls + footer) is supplied by `ChoiceModal`, not by a local Dialog.</criterion>
+    <criterion testable="true">Given 2, 3, or 4 choices, when a choice is selected or cancelled, then the returned value + cancel behavior are identical to the pre-re-base ADR-023 behavior.</criterion>
+    <criterion testable="true">Existing `ChoiceDialog` consumers compile and behave unchanged; the public prop/call contract is backward-compatible.</criterion>
+    <criterion testable="true">Negative: the re-base introduces no hex/`'1px'`/inline color and does not fork `ChoiceModal`.</criterion>
+    <criterion testable="true">Shared-lib build, one PCF consumer, and one Code Page consumer build green under `@types/react` 18 and React 19.</criterion>
+  </acceptance-criteria>
+
+  <notes>`ChoiceModal` is built fresh in task 005 (not in the prototype — CLAUDE.md "Key Facts"). ADR-023 is PRESERVED by this project, not amended. `ChoiceDialog` also receives interim window controls in P1 (task 030); this re-base supersedes that interim wiring. COMPLETED 2026-08-02 (parallel sub-agent + main-session consolidation): ChoiceDialog is now a thin backward-compatible adapter over ChoiceModal (48 ins/134 del); ADR-023 contract preserved with per-behavior evidence table; sole consumer (SpaarkeAi FileAttachSessionPrompt) unchanged; NOT in pcf-safe (Code-Page-only). 12 new adapter tests. Consolidation closed the one gap: ChoiceModal gained `cancelLabel`, cancelText now renders (no-op test flipped). Known deliberate delta: dismiss="explicit" (settled task-005 design). Detail: notes/task-041-completion.md.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

@@ -36,7 +36,7 @@ import {
 } from './matterService';
 import type { IWebApi } from '../../types/xrm';
 import { getSpeContainerIdFromBusinessUnit } from '../../services/xrmProvider';
-import { navigateToEntity } from '../../utils/navigation';
+import { createXrmNavigationService } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // Extended props (internal — adds webApi)
@@ -205,7 +205,9 @@ export const WizardDialog: React.FC<IWizardDialogPropsInternal> = ({
         const hasWarnings = result.warnings.length > 0;
 
         const viewMatter = () => {
-          navigateToEntity({ action: 'openRecord', entityName: 'sprk_matter', entityId: matterId });
+          createXrmNavigationService().openRecord('sprk_matter', matterId).catch((err) => {
+            console.error('[WizardDialog] openRecord failed:', err);
+          });
           onClose();
         };
 

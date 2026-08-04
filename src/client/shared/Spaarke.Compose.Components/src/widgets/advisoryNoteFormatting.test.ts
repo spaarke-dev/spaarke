@@ -16,7 +16,11 @@
  * `parseAdvisoryNote`'s own marker-splitting behavior is covered exhaustively in
  * `ComposeCommentGutter.test.tsx` (moved here, re-exported there) — not duplicated below.
  */
-import { composeAdvisoryCommentExportText, getAdvisoryNoteSegments, isAdvisoryCommentThread } from './advisoryNoteFormatting';
+import {
+  composeAdvisoryCommentExportText,
+  getAdvisoryNoteSegments,
+  isAdvisoryCommentThread,
+} from './advisoryNoteFormatting';
 
 // ---------------------------------------------------------------------------
 // 1. getAdvisoryNoteSegments — discrete fields win, legacy degrades

@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarke-modal-system">
+  <metadata>
+    <title>Cross-link MODAL-DECISION-CRITERIA.md component layer + root CLAUDE.md §17 — FR-10</title>
+    <phase>0 Build</phase>
+    <gate>blocked until 010,011</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Doc cross-linking + a root CLAUDE.md (hot-path) edit with a governance obligation (§18 CHANGELOG); no code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive cross-links from settled inputs; low ambiguity, but touches the hot-path root file so care is required.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits root `CLAUDE.md` (hot-path shared with other active worktrees) + `.claude/CHANGELOG.md` — sub-agents cannot write `.claude/` per CLAUDE.md §3; main-session only.</parallel-reason>
+    <deps>010,011</deps>
+    <tags>documentation, skill-directives, root-claude-md</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Wire the FR-10 documentation set together: (1) add a "Component Layer" section to `docs/standards/MODAL-DECISION-CRITERIA.md` pointing at `SprkModal`, `MODAL-DESIGN-SYSTEM.md`, and the size scale — so the decision doc and the implementation stay in lockstep; (2) add ONE pointer row to root `CLAUDE.md` §17 for `docs/standards/MODAL-DESIGN-SYSTEM.md`; (3) add a `.claude/CHANGELOG.md` entry (root §18 requires every root-CLAUDE.md PR to add one). This is FR-10 and MUST run in the main session. Documentation only — no code.</prompt>
+  <role>SPAARKE platform developer. Expert in Spaarke documentation governance and the root CLAUDE.md pointer conventions. Follow ADRs strictly.</role>
+  <goal>`docs/standards/MODAL-DECISION-CRITERIA.md` gains a "Component Layer" section; root `CLAUDE.md` §17 gains one pointer row for `MODAL-DESIGN-SYSTEM.md`; `.claude/CHANGELOG.md` gains an entry covering the FR-10 standards/ADR/pattern doc set.</goal>
+
+  <context>
+    <background>Design §5 + §7 / spec FR-10: the decision doc (`MODAL-DECISION-CRITERIA.md`) and the new component layer must be linked both ways so a future author lands on the implementation from the decision, and root CLAUDE.md §17 (the pointer table the agent loads every session) must surface the new standard. Root CLAUDE.md §18 mandates a CHANGELOG entry for every PR touching root CLAUDE.md or `.claude/` — this task consolidates the CHANGELOG entry for the FR-10 doc/ADR/pattern set produced by tasks 010–012. Gated on 010 (the standard exists) and 011 (ADR-050 exists) so both are real targets to link.</background>
+    <relevant-files>
+      <file role="modify">docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file role="modify">CLAUDE.md</file>
+      <file role="modify">.claude/CHANGELOG.md</file>
+      <file role="canonical-reference">docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file role="reference">.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/sizes.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">`MODAL-DESIGN-SYSTEM.md` — the standard both cross-links and the §17 row point at.</dependency>
+      <dependency task="011" status="pending">ADR-050 — referenced from the component-layer section.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">The `MODAL-DECISION-CRITERIA.md` edit is additive: add a "Component Layer" section that points at the `SprkModal` shell, `docs/standards/MODAL-DESIGN-SYSTEM.md`, ADR-050, and the size scale — do NOT alter the existing Two-Layout Standard, decision tree, or anti-patterns.</constraint>
+    <constraint source="project">Add exactly ONE row to root `CLAUDE.md` §17 (Topic | Pointer) for `docs/standards/MODAL-DESIGN-SYSTEM.md`, placed beside its sibling `MODAL-DECISION-CRITERIA.md` row. Do NOT restructure §17 or touch other rows.</constraint>
+    <constraint source="project">Add a `.claude/CHANGELOG.md` entry under `[Unreleased]` in Keep-a-Changelog form (Added/Changed) that covers the FR-10 set: `MODAL-DESIGN-SYSTEM.md` (010), ADR-050 (011), `modal-shell.md` pointer (012), and this cross-link + §17 row. Root §18 requires it.</constraint>
+    <constraint source="project">Documentation only; NO code, NO BFF touch (NFR-05). Root CLAUDE.md is a hot-path file — make the minimal additive edit; do not reflow surrounding content.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>FR-10 documentation cross-linking</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/CHANGELOG.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+    </files>
+    <patterns>
+      <pattern name="record-modal-selection" location=".claude/patterns/ui/record-modal-selection.md">The decision/component layering this task cements.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Read `MODAL-DECISION-CRITERIA.md`, root `CLAUDE.md` §17, and `.claude/CHANGELOG.md` `[Unreleased]`. Confirm tasks 010/011 outputs exist. Run `/conflict-check` for in-flight root-CLAUDE.md §17 edits. Declare RIGOR: STANDARD.</step>
+    <step order="1">Add a "Component Layer" section to `docs/standards/MODAL-DECISION-CRITERIA.md` pointing at `SprkModal` + `MODAL-DESIGN-SYSTEM.md` + ADR-050 + the size scale (decision layer chooses the family; component layer implements the custom family).</step>
+    <step order="2">Add ONE `MODAL-DESIGN-SYSTEM.md` pointer row to root `CLAUDE.md` §17, beside the `MODAL-DECISION-CRITERIA.md` row.</step>
+    <step order="3">Add the consolidated `.claude/CHANGELOG.md` `[Unreleased]` entry (Added: `MODAL-DESIGN-SYSTEM.md`, ADR-050, `modal-shell.md`; Changed: `MODAL-DECISION-CRITERIA.md` component-layer section + root §17 row).</step>
+    <step order="4">Verify all cross-links resolve (relative paths), the §17 edit is a single additive row, and the CHANGELOG entry cites the FR-10 set.</step>
+    <step order="5">Re-run `/conflict-check` before staging the root CLAUDE.md change; if a conflicting §17 edit merged in the meantime, reconcile at merge (do not clobber).</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: set 013 status to ✅.</step>
+    <step order="7">Document any deviation in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Root `CLAUDE.md` is a hot-path file shared with other active worktrees. If `/conflict-check` shows a conflicting §17 edit in flight (or one lands before merge), STOP and coordinate the merge per CLAUDE.md §6 rather than clobbering the other worktree's row — reconcile both additions at merge time.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="conflict-check">Detect in-flight root-CLAUDE.md / hot-path edits before and after editing §17</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">docs/standards/MODAL-DECISION-CRITERIA.md</output>
+    <output type="doc">CLAUDE.md</output>
+    <output type="doc">.claude/CHANGELOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`docs/standards/MODAL-DECISION-CRITERIA.md` has a "Component Layer" section pointing at `SprkModal`, `MODAL-DESIGN-SYSTEM.md`, ADR-050, and the size scale, with its existing decision-layer content unchanged.</criterion>
+    <criterion testable="true">Root `CLAUDE.md` §17 has exactly one new pointer row for `docs/standards/MODAL-DESIGN-SYSTEM.md`, placed beside the `MODAL-DECISION-CRITERIA.md` row; no other §17 rows changed.</criterion>
+    <criterion testable="true">`.claude/CHANGELOG.md` `[Unreleased]` has a new entry covering the FR-10 set (`MODAL-DESIGN-SYSTEM.md`, ADR-050, `modal-shell.md`, the cross-link + §17 row).</criterion>
+    <criterion testable="true">`/conflict-check` was run before staging the root CLAUDE.md edit; any in-flight §17 conflict was reconciled at merge, not clobbered.</criterion>
+    <criterion testable="true">No source code is modified (documentation only).</criterion>
+  </acceptance-criteria>
+
+  <notes>Design §5 (decision + component in lockstep) + spec FR-10. Root §18: every PR touching root CLAUDE.md or `.claude/` MUST add a CHANGELOG entry — this task carries the consolidated FR-10 entry so 011/012 don't each need their own. Precedent §17 row format: see the `MODAL-DECISION-CRITERIA.md` row already present in §17. Completion summary appended here when done.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute. Main session only (§3 write boundary); run /conflict-check around the root CLAUDE.md edit.</protocol>
+  </execution>
+</task>

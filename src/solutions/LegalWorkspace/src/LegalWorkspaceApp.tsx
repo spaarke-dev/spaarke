@@ -7,6 +7,8 @@ import {
 } from "@fluentui/react-components";
 import {
   useTheme,
+  useUiScale,
+  scaleTheme,
   syncThemeFromDataverse,
   persistThemeToDataverse,
   getUserThemePreference,
@@ -102,6 +104,26 @@ export const LegalWorkspaceApp: React.FC<ILegalWorkspaceAppProps> = ({
 }) => {
   const { theme } = useTheme();
   const styles = useStyles();
+
+  // P0.5 (FR-06 / design §6.9, spaarke-modal-system project): the app-shell
+  // `uiScale` — STANDALONE only. When embedded (inside SpaarkeAi), the HOST
+  // already owns the scaled theme + the `--sprk-ui-scale` CSS variable (set
+  // on `document.documentElement`, which this embedded tree shares — same
+  // document, no iframe); applying it again here would be a second,
+  // redundant mechanism. Mirrors the existing `if (embedded) return;` guard
+  // used by the theme-sync effects below. `useUiScale()` itself is still
+  // called unconditionally (Rules of Hooks) — only its VALUE is unused when
+  // embedded.
+  const { uiScale } = useUiScale();
+  const scaledTheme = React.useMemo(
+    () => (embedded ? theme : scaleTheme(theme, uiScale)),
+    [embedded, theme, uiScale]
+  );
+
+  React.useEffect(() => {
+    if (embedded) return;
+    document.documentElement.style.setProperty('--sprk-ui-scale', String(uiScale));
+  }, [embedded, uiScale]);
 
   const cleanUserId = userId?.replace(/[{}]/g, '') ?? '';
 
@@ -200,5 +222,5 @@ export const LegalWorkspaceApp: React.FC<ILegalWorkspaceAppProps> = ({
     return innerTree;
   }
 
-  return <FluentProvider theme={theme}>{innerTree}</FluentProvider>;
+  return <FluentProvider theme={scaledTheme}>{innerTree}</FluentProvider>;
 };

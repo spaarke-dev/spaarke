@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-modal-system">
+  <metadata>
+    <title>P0.5 — App-shell --sprk-ui-scale control (auto breakpoint + Display size) — FR-06</title>
+    <phase>0.5 App-shell UI-scale</phase>
+    <gate>blocked until 002</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Code implementation touching frontend app shells (incl. SpaarkeAi hot-path), new persisted setting + scaled-theme wiring; tags include fluent-ui/react; code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard app-shell React/Fluent wiring composing an existing storage pattern + the task-002 scaled theme; well specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>002</deps>
+    <tags>react, fluent-ui, frontend</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the app-shell UI-scale control (FR-06 / P0.5). Derive a single `uiScale` value from (a) an auto large-viewport breakpoint (≥2560 CSS px → 1.15) and (b) a user "Display size: Default / Large / Extra-large" setting persisted via the existing code-page theme-storage pattern. Feed `uiScale` into `scaleTheme()` (from task 002) at the app-level `FluentProvider` AND pass it as the `uiScale` prop to modals. Wire it into the SpaarkeAi, LegalWorkspace, and code-page app shells. This is an APP-SHELL concern — the modal shell only inherits `--sprk-ui-scale` + the scaled theme; do NOT put the control inside the modal.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 theming, React app-shell composition, dual-React (18/19) shared-lib constraints, and the Spaarke code-page theme-storage pattern. Follow ADRs strictly.</role>
+  <goal>A single `uiScale` value derived from the auto ≥2560 breakpoint (→1.15) + a persisted "Display size" setting drives `scaleTheme(uiScale)` at each app-shell `FluentProvider` and is passed as `uiScale` to modals; the setting persists via the existing theme-storage pattern; wired into SpaarkeAi + LegalWorkspace + at least one code-page shell; modals inherit the scale with no clipping at 1.0–1.5.</goal>
+
+  <context>
+    <background>Design §6.9 + spec FR-06 / Decisions §11-I: "everything looks tiny on native-100% 4K" is an OS-scaling case that responsive `min(px,vw)` sizing alone cannot fix — it needs a scale lever. The owner confirmed building the app-shell scale control here as Phase 0.5. One `uiScale` multiplier is applied twice: to the Fluent theme (scaled tokens, via task-002 `scaleTheme`) and to our layout (the `--sprk-ui-scale` CSS variable the modal size math reads). The mechanism is the scaled theme, NOT CSS zoom (zoom under-scales portaled fixed dialogs at 4K — prototype-verified 2026-07-31). This task owns app-shell ownership; the modal shell (tasks 001–009) is already scale-compatible and only inherits.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/SpaarkeAi/src/App.tsx</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/main.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/LegalWorkspaceApp.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/scaledTheme.ts</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/sizes.ts</file>
+      <file role="reference">projects/spaarke-modal-system/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">`scaleTheme()` / `baseTheme` (scaled Fluent theme) — the function this control feeds `uiScale` into.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Realize `--sprk-ui-scale` via the scaled Fluent theme (`scaleTheme(uiScale)` from task 002), NOT CSS `zoom` (FR-06 — zoom under-scales portaled fixed dialogs at 4K). The same `uiScale` value MUST also set the `--sprk-ui-scale` CSS variable the modal size math reads.</constraint>
+    <constraint source="project">Persist the "Display size" setting via the EXISTING code-page theme-storage pattern (`themeStorage.ts` — `resolveCodePageTheme` / `setupCodePageThemeListener` neighborhood); do NOT introduce a new storage mechanism or a second listener.</constraint>
+    <constraint source="project">SpaarkeAi is a hot-path surface (`src/solutions/SpaarkeAi/**`) — run `/conflict-check` before any SpaarkeAi PR; keep the touch narrow (scale wiring only). This is an app-shell concern: the control lives at the app `FluentProvider`, not inside `SprkModal`.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; light/dark parity preserved through the scaled theme; no hex / `'1px'` literals / inline color styles introduced.</constraint>
+    <constraint source="NFR-04">Any shared-lib code added MUST compile clean under `@types/react` 18 (PCF) and React 19 (Code Pages); no React-18/19-exclusive APIs.</constraint>
+    <constraint source="NFR-05">Client-only — MUST NOT add any endpoint/service/DI to `Sprk.Bff.Api`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>App-shell UI-scale control (scaled Fluent theme)</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-theming" location=".claude/patterns/ui/fluent-v9-theming.md">FluentProvider theme wiring + scaled-theme + storage-listener conventions.</pattern>
+      <pattern name="fluent-v9-react-version-boundaries" location=".claude/patterns/ui/fluent-v9-react-version-boundaries.md">Dual-React (18/19) safety for any shared-lib addition.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load design §6.9 + spec FR-06, `themeStorage.ts`, and the task-002 `scaleTheme`. Confirm the app shells expose a shared theme-provider seam. Declare RIGOR: FULL.</step>
+    <step order="1">Implement the `uiScale` derivation: an auto large-viewport breakpoint (≥2560 CSS px → 1.15; else 1.0) combined with the user "Display size" setting (Default = 1.0 / Large / Extra-large multipliers), resolving to one effective `uiScale`. Add a "Display size" control affordance (Default / Large / Extra-large) in the app-shell settings surface.</step>
+    <step order="2">Persist + read the "Display size" setting via the existing theme-storage pattern; recompute `uiScale` on the storage-change signal (reuse the existing listener, do not add a second one).</step>
+    <step order="3">Feed `uiScale` into `scaleTheme(uiScale)` at each app-shell `FluentProvider`, and set the `--sprk-ui-scale` CSS variable to the same value; pass `uiScale` to modals rendered by the shell.</step>
+    <step order="4">Wire into SpaarkeAi (`App.tsx` / `main.tsx`), LegalWorkspace (`LegalWorkspaceApp.tsx`), and at least one code-page shell; verify each inherits the scaled theme + variable.</step>
+    <step order="5">Build both consumers — PCF (`@types/react` 18) and a Code Page (React 19) — and confirm no clipping at `uiScale` 1.0 / 1.15 / 1.25 / 1.5; verify a modal opened from SpaarkeAi inherits the scale.</step>
+    <step order="6">Add unit/UI coverage for the derivation (≥2560 auto-bump, setting persistence, effective-scale resolution).</step>
+    <step order="7">Run `/conflict-check` before staging the SpaarkeAi change.</step>
+    <step order="8">Update `tasks/TASK-INDEX.md`: set 020 status to ✅.</step>
+    <step order="9">Document any deviation in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the app shells (SpaarkeAi / LegalWorkspace / code pages) do NOT expose a shared theme-provider seam to inject the scaled theme into, STOP and surface per CLAUDE.md §6. Do NOT fork a second `FluentProvider` or duplicate theme wiring — a divergent provider tree would break the single-source scaled-theme guarantee.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The closest neighbor is the existing code-page theme-storage pattern (`src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts` — `resolveCodePageTheme` + `setupCodePageThemeListener`) which already resolves + persists a theme choice and drives the app `FluentProvider`. No `uiScale`/"Display size" control exists today (grep for `sprk-ui-scale` / `uiScale` returns only the modal-shell consumption side from tasks 001–009).</existing>
+    <extension>Yes — this extends the existing theme-storage pattern with a scale dimension (same storage, same listener, same provider seam), it does NOT introduce a parallel theming/storage abstraction. The new surface is the small `uiScale` derivation + "Display size" affordance.</extension>
+    <cost-of-doing-nothing>Without the app-shell scale lever, the native-100% 4K "everything looks tiny" case is unaddressed — responsive `min(px,vw)` sizing only solves "too wide", never "too small" (design §6.9). FR-06 acceptance (the whole modal incl. Fluent internals grows at 1.0–1.5 without clipping) is unachievable, because the modal shell is scale-compatible but nothing ever sets `--sprk-ui-scale` or the scaled theme above 1.0.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Display-size setting persists">
+      <steps>
+        <step>Open the app shell, set Display size = Large, reload the page.</step>
+        <step>Observe the setting restored from storage and the scaled theme re-applied.</step>
+      </steps>
+      <expected>The Large selection persists across reload and the effective `uiScale` is re-derived from it.</expected>
+    </test>
+    <test name="Auto breakpoint at ≥2560">
+      <steps>
+        <step>With Display size = Default, size the viewport to ≥2560 CSS px.</step>
+        <step>Read the effective `uiScale`.</step>
+      </steps>
+      <expected>The auto breakpoint bumps `uiScale` to 1.15 without a user setting change.</expected>
+    </test>
+    <test name="Modal + Fluent internals scale">
+      <steps>
+        <step>At `uiScale` 1.0, 1.25, and 1.5, open a modal from the shell.</step>
+        <step>Observe the modal chrome, Fluent buttons/inputs/spacing, and body.</step>
+      </steps>
+      <expected>The whole modal (incl. Fluent internals) grows in lock-step with no clipping; the `vw` caps still prevent overflow.</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Toggle the host to dark theme at `uiScale` 1.25.</step>
+        <step>Open a scaled modal.</step>
+      </steps>
+      <expected>Scaled theme renders correctly in dark mode; semantic tokens resolve with no hardcoded colors.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test the shared lib and both (PCF + Code Page) consumers</tool>
+    <tool name="conflict-check">Detect in-flight SpaarkeAi hot-path edits before staging</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/App.tsx</output>
+    <output type="code">src/solutions/LegalWorkspace/src/LegalWorkspaceApp.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/__tests__/uiScale.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the "Display size" setting is changed, when the app reloads, then the setting persists via the existing theme-storage pattern and the effective `uiScale` is re-derived from it.</criterion>
+    <criterion testable="true">Given a viewport ≥2560 CSS px and Display size = Default, then the auto breakpoint sets `uiScale` to 1.15.</criterion>
+    <criterion testable="true">Given `uiScale` 1.0 / 1.25 / 1.5, when a modal is opened from the shell, then the whole modal (incl. Fluent internals) scales via the scaled theme + `--sprk-ui-scale` with no clipping (never CSS `zoom`).</criterion>
+    <criterion testable="true">The control is wired into SpaarkeAi + LegalWorkspace + at least one code-page shell at the app `FluentProvider`; the modal shell only inherits (no scale control inside `SprkModal`).</criterion>
+    <criterion testable="true">Negative: no second `FluentProvider` / storage listener is introduced; shared-lib code compiles clean under `@types/react` 18 and React 19; no BFF touch.</criterion>
+    <criterion testable="true">All unit tests pass; both PCF and Code Page consumer builds are green; `/conflict-check` was run before the SpaarkeAi PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design §6.9 (the scale reframe) + spec FR-06 / §11-I. One `uiScale` value drives BOTH layers (scaled theme + `--sprk-ui-scale`). Mechanism is locked to the scaled theme (zoom rejected at 4K). SpaarkeAi hot-path coordination per plan §5. The modal shell (tasks 001–009) is already scale-compatible; this task only supplies the value from the app shell. COMPLETED 2026-08-01 (solo sub-agent, FULL rigor): `uiScale = max(settingMultiplier, breakpoint)` — Default 1.0 / Large 1.25 / Extra-large 1.5 / ≥2560px auto 1.15, bounded {1.0,1.15,1.25,1.5}. New `SprkModal/uiScale.ts` (derivation) + `hooks/useUiScale.ts` (the conversion-task seam: `{uiScale, displaySize, setDisplaySize}`) + `DisplaySizeMenu` (reuses Menu/MenuItemRadio idiom). themeStorage extended IN PLACE (same event/listener). Wired: SpaarkeAi App.tsx (new slim strip above ThreePaneShell — verified NO pre-existing settings surface existed) + LegalWorkspace PageHeader beside ThemeToggle. 21 new tests; P0 gate 107/107; suite zero new failures; all builds green (LW via scoped tsc per Issue #712); Step 9.5 code-review + adr-check PASS. AC 5/6 full pass; AC-3 modal-scaling leg mechanism-verified, end-to-end deferred to P2+ conversions by design. Detail: notes/task-020-completion.md.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute (FULL: code-review + adr-check at Step 9.5, ui-test at Step 9.7). Run /conflict-check before any SpaarkeAi PR.</protocol>
+  </execution>
+</task>

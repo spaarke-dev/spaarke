@@ -23,7 +23,7 @@ import {
   Badge,
 } from '@fluentui/react-components';
 import { IProject } from '../../types/entities';
-import { navigateToEntity } from '../../utils/navigation';
+import { createXrmNavigationService } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // Styles — mirrors the rhythm of MatterItem.tsx
@@ -190,10 +190,8 @@ export const ProjectItem: React.FC<IProjectItemProps> = ({ project }) => {
   // ---------------------------------------------------------------------------
 
   const handleNavigate = React.useCallback(() => {
-    navigateToEntity({
-      action: 'openRecord',
-      entityName: 'sprk_project',
-      entityId: project.sprk_projectid,
+    createXrmNavigationService().openRecord('sprk_project', project.sprk_projectid).catch((err) => {
+      console.error('[ProjectItem] openRecord failed:', err);
     });
   }, [project.sprk_projectid]);
 

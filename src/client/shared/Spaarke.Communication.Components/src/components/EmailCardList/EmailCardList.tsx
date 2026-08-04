@@ -42,7 +42,7 @@ import {
   type InputOnChangeData,
   type SearchBoxChangeEvent,
 } from '@fluentui/react-components';
-import { Search20Regular } from '@fluentui/react-icons';
+import { Compose20Regular, Search20Regular } from '@fluentui/react-icons';
 import {
   EMAIL_COMMUNICATION_TYPE,
   type EmailCardItem,
@@ -156,16 +156,17 @@ const useStyles = makeStyles({
     minWidth: 0,
     backgroundColor: tokens.colorNeutralBackground1,
   },
-  // Slim list toolbar. owner UAT 2026-07-30 R2 item 4 — collapsed by default to a
-  // right-aligned search ICON; clicking it reveals the full-width search field.
-  // `justifyContent: flex-end` keeps the collapsed icon on the right; when the
-  // field is open it grows (`flex: 1`) and fills the row.
+  // Slim list toolbar. owner UAT 2026-07-30 R2 item 4 — search collapses to an
+  // ICON on the RIGHT; clicking it reveals the full-width search field. owner
+  // UAT 2026-08-03 Item 2 — the optional "New email" (+) button sits on the
+  // LEFT, so `justifyContent: space-between` keeps New left and search right;
+  // when the field opens it grows (`flex: 1`) and fills the row.
   toolbar: {
     flexShrink: 0,
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     gap: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
@@ -179,8 +180,14 @@ const useStyles = makeStyles({
     flex: '1 1 auto',
     minWidth: 0,
   },
-  // Collapsed-state trigger — a right-aligned magnifier that expands the field.
+  // Collapsed-state trigger — a magnifier that expands the field. `marginInlineStart: auto`
+  // keeps it hard-right even when the leading "New email" (+) button is absent.
   searchToggle: {
+    flexShrink: 0,
+    marginInlineStart: 'auto',
+  },
+  // Leading "New email" (+) button (owner UAT 2026-08-03 Item 2) — left of the search.
+  newButton: {
     flexShrink: 0,
   },
   list: {
@@ -324,6 +331,7 @@ export const EmailCardList: React.FC<EmailCardListProps> = ({
   isLoading = false,
   skeletonCount = DEFAULT_SKELETON_COUNT,
   onSelect,
+  onCreateNew,
 }) => {
   const styles = useStyles();
   const [focusedId, setFocusedId] = React.useState<string | undefined>(undefined);
@@ -486,6 +494,18 @@ export const EmailCardList: React.FC<EmailCardListProps> = ({
        * sender OR subject, case-insensitive substring.
        */}
       <div className={styles.toolbar}>
+        {onCreateNew ? (
+          <Button
+            className={styles.newButton}
+            appearance="subtle"
+            icon={<Compose20Regular />}
+            aria-label="New email"
+            title="New email"
+            onClick={() => onCreateNew()}
+          >
+            New email
+          </Button>
+        ) : null}
         {searchOpen ? (
           <SearchBox
             ref={searchInputRef}

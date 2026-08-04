@@ -312,7 +312,7 @@ describe.skip('DailyBriefingApp (smoke)', () => {
     expect(screen.getByRole('menuitem', { name: /^Add to To Do$/i })).toBeInTheDocument();
   });
 
-  it('FR-19 link-click happy path: Open record menu item → Xrm.Navigation.navigateTo({pageType, entityName, entityId}, {target:2, 80%×80%}) (AC-19a)', async () => {
+  it('FR-19 link-click happy path: Open record menu item → Xrm.Navigation.navigateTo({pageType, entityName, entityId}, {target:2, 85%×85%}) (AC-19a)', async () => {
     // Override Xrm with a navigateTo that resolves (success case = no toast).
     uninstallXrmGlobal();
     const navigateTo = installXrmGlobal(jest.fn().mockResolvedValue(undefined));
@@ -340,10 +340,12 @@ describe.skip('DailyBriefingApp (smoke)', () => {
       entityName: 'sprk_matter',
       entityId: '11111111-1111-1111-1111-111111111111',
     });
+    // `record` OOB size (85%×85%) — spaarke-modal-system P7 task 090
+    // (FR-11/FR-18); was 80%×80%.
     expect(options).toMatchObject({
       target: 2,
-      width: { value: 80, unit: '%' },
-      height: { value: 80, unit: '%' },
+      width: { value: 85, unit: '%' },
+      height: { value: 85, unit: '%' },
     });
   });
 

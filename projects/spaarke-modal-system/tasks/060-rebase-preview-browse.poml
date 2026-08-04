@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="spaarke-modal-system">
+  <metadata>
+    <title>P4 — RichFilePreviewDialog → PreviewModal/BrowseModal; retire @deprecated FilePreviewDialog — FR-15</title>
+    <phase>4 Preview &amp; browse</phase>
+    <gate>blocked until 007</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Re-bases the preview/browse `.tsx` onto TWO presets, composes `RecordNavigationModalShell` for N-of-M nav, AND retires a `@deprecated` file with a live consumer to migrate; record-set navigation + content-driven sizing are load-bearing.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified by the `PreviewModal`/`BrowseModal` presets + `record-modal-selection` Layout 2; the single consumer to migrate is named exactly.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>007</deps>
+    <tags>react, typescript, fluent-ui, frontend</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Re-base `FilePreview/RichFilePreviewDialog.tsx` onto the `PreviewModal` preset for the single-document case and the `BrowseModal` preset (record-set "1 of N" navigation via `RecordNavigationModalShell`) for the multi-record case (FR-15). Then RETIRE the `@deprecated` `FilePreview/FilePreviewDialog.tsx`: DELETE it and migrate its sole consumer — `FindSimilar/FindSimilarResultsStep.tsx` (imports from `'../FilePreview'`) — to the new preview surface. Keep the size content-driven (record-modal-selection Layout 2) — do NOT resize the preview to 85%×85%.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9, the SprkModal preset family, and `RecordNavigationModalShell` browse chrome. Follow ADRs strictly.</role>
+  <goal>`RichFilePreviewDialog.tsx` renders single docs via `PreviewModal` and record-sets via `BrowseModal` (composing `RecordNavigationModalShell`); the `@deprecated FilePreview/FilePreviewDialog.tsx` is deleted and `FindSimilarResultsStep.tsx` migrated to the new surface with no remaining imports of the old file; shared-lib build green under `@types/react` 18 and React 19.</goal>
+
+  <context>
+    <background>Spec FR-15 collapses preview/browse onto one surface: `PreviewModal` for a single document and `BrowseModal` (a `PreviewModal` + `nav` prop in the prototype) for record-set navigation, both drawing browse chrome from `RecordNavigationModalShell`. The renderer/envelope split that `RichFilePreviewDialog` pioneered is formalized by the presets. The `@deprecated FilePreview/FilePreviewDialog.tsx` has a single live consumer — the shared `FindSimilar/FindSimilarResultsStep.tsx`, which imports `FilePreviewDialog` from `'../FilePreview'` (verified: import line 37, usage line 487). Per `record-modal-selection.md` Layout 2, preview size is content-driven (fit the document), not a fixed 85%×85% record-open rectangle.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</file>
+      <file role="delete">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/FilePreviewDialog.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/FindSimilar/FindSimilarResultsStep.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/PreviewModal.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/BrowseModal.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="007" status="pending">Ships the `PreviewModal` + `BrowseModal` presets (browse `nav` prop composing `RecordNavigationModalShell`) this dialog re-bases onto.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Any `authenticatedFetch`/service used to fetch the preview blob MUST be passed through as a FUNCTION — never snapshotted; the host owns document-fetch auth.</constraint>
+    <constraint source="ADR-021">Semantic tokens only: no hex, `'1px'` literals, or inline color in the re-based preview/browse; dark/light parity via inherited host theme (NFR-03).</constraint>
+    <constraint source="ADR-012">Re-base by COMPOSING `PreviewModal`/`BrowseModal` and the underlying `RecordNavigationModalShell` — MUST NOT fork the shell or hand-roll a parallel nav chrome; the shell lives once in `@spaarke/ui-components`.</constraint>
+    <constraint source="project">Preview size is content-driven per `record-modal-selection.md` Layout 2 — MUST NOT resize the preview surface to 85%×85% (that rectangle is for OOB record-open, not content preview).</constraint>
+    <constraint source="project">Retirement scope: delete `FilePreview/FilePreviewDialog.tsx` and migrate its sole consumer `FindSimilarResultsStep.tsx`. A grep for `FilePreviewDialog` imports MUST return zero hits in scope before completion. Keep the Fluent `Dialog` envelope (transform-robust portal).</constraint>
+    <constraint source="project">MUST compile clean under `@types/react` 18 (PCF) and React 19 (Code Pages) — NFR-04.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Re-basing preview/browse onto PreviewModal/BrowseModal + retiring the deprecated dialog</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/README.md</file>
+    </files>
+    <patterns>
+      <pattern name="record-modal-selection" location=".claude/patterns/ui/record-modal-selection.md">Layout 2 (content-driven size) + the browse "1 of N" pattern via `RecordNavigationModalShell`.</pattern>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Preset composition conventions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-15, `record-modal-selection.md` (Layout 2), the `PreviewModal`/`BrowseModal` presets, and both `RichFilePreviewDialog.tsx` + `FindSimilarResultsStep.tsx`. Confirm `FindSimilarResultsStep` is the sole importer of the deprecated dialog. Declare RIGOR: FULL.</step>
+    <step order="1">Re-base `RichFilePreviewDialog.tsx`: route the single-document path through `PreviewModal` and the record-set path through `BrowseModal` (`nav` prop → `RecordNavigationModalShell` "1 of N"); preserve the existing renderer/blob-fetch logic and keep the size content-driven (Layout 2).</step>
+    <step order="2">Migrate `FindSimilarResultsStep.tsx` off the `@deprecated FilePreviewDialog` onto the new preview surface (`PreviewModal`, or `RichFilePreviewDialog`'s single-doc entry), mapping its service-callback props across.</step>
+    <step order="3">Grep the repo for any remaining `FilePreviewDialog` import from `FilePreview/` to confirm `FindSimilarResultsStep` was the only one; then DELETE `FilePreview/FilePreviewDialog.tsx`.</step>
+    <step order="4">Grep again to prove zero dangling `FilePreviewDialog` imports in scope; run the shared-lib build + tests.</step>
+    <step order="5">Exercise in a dev host: single-document preview, and browse a record-set with `‹ N of M ›` forward/back; confirm content-driven sizing (no 85%×85% stretch) and native scroll.</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: set 060 status to ✅.</step>
+    <step order="7">Document any deviation (e.g. a preview content type that needed a specific size, or a nav-callback nuance) in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If migrating `FindSimilarResultsStep` off the deprecated dialog would change its result-preview behavior (e.g. the old service-callback contract has no `PreviewModal` equivalent), STOP and surface it per CLAUDE.md §6 rather than reshaping the consumer's behavior to force the retirement.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Preview single + browse N-of-M navigation">
+      <steps>
+        <step>Open a single document → expect `PreviewModal`.</step>
+        <step>Open a record-set (e.g. from FindSimilar results) → expect `BrowseModal` with `‹ N of M ›`; page forward and back.</step>
+      </steps>
+      <expected>Single doc renders content-fit (Layout 2, not 85%×85%); browse shows correct "1 of N" and navigates forward/back with the standard shell chrome + window controls; body scrolls natively.</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Render the re-based preview + browse under the host dark theme.</step>
+      </steps>
+      <expected>Dark palette correct; no hardcoded light-mode color leak; only host semantic tokens used.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test the shared lib</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/FindSimilar/FindSimilarResultsStep.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a single document, `RichFilePreviewDialog` renders via `PreviewModal`; given a record-set, it renders via `BrowseModal` with `‹ N of M ›` navigation composing `RecordNavigationModalShell`.</criterion>
+    <criterion testable="true">Preview size is content-driven (record-modal-selection Layout 2) — it is NOT resized to 85%×85%.</criterion>
+    <criterion testable="true">The `@deprecated FilePreview/FilePreviewDialog.tsx` file is deleted and `FindSimilarResultsStep.tsx` is migrated to the new surface.</criterion>
+    <criterion testable="true">Negative: a repo-wide grep for `FilePreviewDialog` imports returns zero hits in scope (no dangling imports).</criterion>
+    <criterion testable="true">`RecordNavigationModalShell` is composed (not forked); no hex/`'1px'`/inline color; dark parity holds; shared-lib build green under `@types/react` 18 and React 19.</criterion>
+  </acceptance-criteria>
+
+  <notes>Verified: `FindSimilarResultsStep.tsx` imports `FilePreviewDialog` from `'../FilePreview'` (line 37, used line 487) and is the sole consumer of the deprecated dialog. Prototype `BrowseModal = PreviewModal + nav` (project CLAUDE.md Key Facts). Note there are separate `FilePreviewDialog.tsx` files under DocumentRelationshipViewer / SemanticSearchControl / LegalWorkspace — those are OUT of scope here (this task retires only the shared `Spaarke.UI.Components/.../FilePreview/FilePreviewDialog.tsx`). COMPLETED 2026-08-02 (parallel sub-agent + main-session consolidation): single-doc → PreviewModal, record-set → BrowseModal (SprkModal nav + onBeforeNavigate seam per the shipped 007 single-header decision; POML's "via RecordNavigationModalShell" wording predates it — delta documented). All hand-rolled chrome removed (382→~245 lines); public IFilePreviewDialogProps byte-identical (~8 consumers zero-change). RichFilePreview gained `showMetadataPane` (default true) to avoid double side-panels; P1 interim props removed (zero other callers, grep-proven). @deprecated FilePreviewDialog DELETED; FindSimilarResultsStep migrated (escalation assessed, not fired — 1:1 service-callback mapping; onEmailDocument no-op per EmailReadingAttachments precedent); grep proof zero dangling imports. Preset gap reported (headerActions) → closed by main session on Preview/Browse presets. Detail: notes/task-060-completion.md.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>
