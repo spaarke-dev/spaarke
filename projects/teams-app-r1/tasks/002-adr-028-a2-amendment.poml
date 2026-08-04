@@ -4,7 +4,7 @@
     <title>Apply ADR-028 Amendment A2 (workforce auth for the Teams collaboration host) — Path B</title>
     <phase>0 Foundation Spike &amp; ADR</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>ADR-migration (architecture governance change); must land before/with the dependent auth code.</rigor-reason>
     <model-tier>opus</model-tier>

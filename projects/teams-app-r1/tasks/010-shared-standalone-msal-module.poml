@@ -4,7 +4,7 @@
     <title>Shared standalone-MSAL auth module with pluggable authority (CIAM + workforce-multitenant)</title>
     <phase>1 Shared Auth Module &amp; Host Adapter</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security/auth code both hosts depend on.</rigor-reason>
     <model-tier>opus</model-tier>

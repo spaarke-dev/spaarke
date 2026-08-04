@@ -865,6 +865,160 @@ public class MembershipResolverServiceTests
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // teams-app-r1 task 021 — Contact-anchored entry (ResolveByContactAsync)
+    // role-allowlist filtering (NFR-05, security-load-bearing)
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ResolveByContactAsync_AllowlistedAssignedContactRole_ReturnsMatchingRecords()
+    {
+        // (a) A contactId on an allowlisted sprk_assigned* contact-role lookup
+        // returns the record — WITHOUT a systemuser, and WITHOUT touching
+        // IIdentityNormalizationService (strict mock proves it is never called).
+        var discovery = BuildDiscoveryMock(
+            Descriptor("ownerid", "owner", "SystemUser"),                        // not contact
+            Descriptor("sprk_owningteam", "owningTeam", "Team"),                 // not contact
+            Descriptor("sprk_assignedattorney1", "assignedAttorney", "Contact")); // allowlisted
+
+        var dataverse = BuildDataverseMockReturning(
+            MatterRow(MatterIdC, ("sprk_assignedattorney1", new EntityReference("contact", TestContactId))));
+
+        var strictIdentity = new Mock<IIdentityNormalizationService>(MockBehavior.Strict);
+        var sut = CreateSut(discovery.Object, strictIdentity.Object, dataverse.Object);
+
+        // Act
+        var result = await sut.ResolveByContactAsync(TestContactId, EntityType, options: null, CancellationToken.None);
+
+        // Assert — contact-only principal; only the allowlisted role resolves.
+        result.Should().NotBeNull();
+        result.PersonIdentity.ContactId.Should().Be(TestContactId);
+        result.PersonIdentity.SystemUserId.Should().Be(Guid.Empty, "contact-only principal has no systemuser");
+        result.Ids.Should().BeEquivalentTo(new[] { MatterIdC });
+        result.ByRole.Should().ContainKey("assignedAttorney");
+        result.ByRole["assignedAttorney"].Should().BeEquivalentTo(new[] { MatterIdC });
+        result.ByRole.Should().NotContainKey("owner", "SystemUser lookups are not access-conferring on the contact path");
+        result.ByRole.Should().NotContainKey("owningTeam", "Team lookups are not access-conferring on the contact path");
+        result.RelatedByRole.Should().BeNull("the contact path performs no transitive expansion");
+
+        // The systemuser identity-normalization path is never invoked.
+        strictIdentity.Verify(
+            i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ResolveByContactAsync_AdverseOrNonAllowlistedContactFields_NeverConferAccess()
+    {
+        // (b) Adverse / informational fields MUST NEVER match:
+        //  - sprk_opposingcounsel: Contact-typed but fails the sprk_assigned* convention.
+        //  - sprk_regardingrecordid: polymorphic regarding lookup resolved to a
+        //    NON-contact target → excluded by the contact-type gate.
+        // A single allowlisted role is included to prove the filter keeps the right field only.
+        var discovery = BuildDiscoveryMock(
+            Descriptor("sprk_opposingcounsel", "opposingCounsel", "Contact"),
+            Descriptor("sprk_regardingrecordid", "regardingRecord", "SystemUser"),
+            Descriptor("sprk_assignedparalegal1", "assignedParalegal", "Contact"));
+
+        FetchExpression? captured = null;
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<FetchExpression, CancellationToken>((fe, _) => captured = fe)
+            .ReturnsAsync(new EntityCollection());
+
+        var sut = CreateSut(discovery.Object, new Mock<IIdentityNormalizationService>(MockBehavior.Strict).Object, dataverse.Object);
+
+        // Act
+        var result = await sut.ResolveByContactAsync(TestContactId, EntityType, options: null, CancellationToken.None);
+
+        // Assert — only the allowlisted paralegal role is queried; adverse fields
+        // never even reach the FetchXml.
+        result.ByRole.Keys.Should().BeEquivalentTo(new[] { "assignedParalegal" });
+        captured.Should().NotBeNull();
+        captured!.Query.Should().Contain("sprk_assignedparalegal1");
+        captured.Query.Should().NotContain("sprk_opposingcounsel",
+            "an adverse contact lookup that fails the sprk_assigned* convention must never confer access");
+        captured.Query.Should().NotContain("sprk_regardingrecordid",
+            "a polymorphic regarding lookup resolved to a non-contact target must never confer access");
+    }
+
+    [Fact]
+    public async Task ResolveByContactAsync_NewlyAddedAssignedConventionField_AutoQualifiesWithoutCodeChange()
+    {
+        // (c) A brand-new sprk_assigned* contact lookup nobody referenced in code
+        // auto-qualifies purely via metadata discovery + the naming convention.
+        var discovery = BuildDiscoveryMock(
+            Descriptor("sprk_assignedguardianadlitem", "assignedGuardianAdLitem", "Contact"));
+
+        var dataverse = BuildDataverseMockReturning(
+            MatterRow(MatterIdA, ("sprk_assignedguardianadlitem", new EntityReference("contact", TestContactId))));
+
+        var sut = CreateSut(discovery.Object, new Mock<IIdentityNormalizationService>(MockBehavior.Strict).Object, dataverse.Object);
+
+        // Act
+        var result = await sut.ResolveByContactAsync(TestContactId, EntityType, options: null, CancellationToken.None);
+
+        // Assert — the never-before-seen field confers access with no code change.
+        result.Ids.Should().BeEquivalentTo(new[] { MatterIdA });
+        result.ByRole.Should().ContainKey("assignedGuardianAdLitem");
+        result.ByRole["assignedGuardianAdLitem"].Should().BeEquivalentTo(new[] { MatterIdA });
+    }
+
+    [Fact]
+    public async Task ResolveByContactAsync_ConventionMatchOnExclusionList_IsSuppressed()
+    {
+        // (d) A field that MATCHES the sprk_assigned* convention but is on the
+        // config/data-driven exclusion list must be suppressed — while another
+        // convention-matching, non-excluded field still confers access.
+        var discovery = BuildDiscoveryMock(
+            Descriptor("sprk_assignedtoexternal", "assignedToExternal", "Contact"),
+            Descriptor("sprk_assignedattorney1", "assignedAttorney", "Contact"));
+
+        FetchExpression? captured = null;
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<FetchExpression, CancellationToken>((fe, _) => captured = fe)
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                MatterRow(MatterIdB, ("sprk_assignedattorney1", new EntityReference("contact", TestContactId))),
+            }));
+
+        var membershipOptions = new MembershipOptions();
+        membershipOptions.AccessConferringRoles.ExcludedFields.Add("sprk_assignedtoexternal");
+
+        var sut = CreateSut(
+            discovery.Object,
+            new Mock<IIdentityNormalizationService>(MockBehavior.Strict).Object,
+            dataverse.Object,
+            membershipOptions: membershipOptions);
+
+        // Act
+        var result = await sut.ResolveByContactAsync(TestContactId, EntityType, options: null, CancellationToken.None);
+
+        // Assert — excluded field suppressed despite matching the convention.
+        result.ByRole.Keys.Should().BeEquivalentTo(new[] { "assignedAttorney" });
+        result.ByRole.Should().NotContainKey("assignedToExternal");
+        result.Ids.Should().BeEquivalentTo(new[] { MatterIdB });
+        captured.Should().NotBeNull();
+        captured!.Query.Should().Contain("sprk_assignedattorney1");
+        captured.Query.Should().NotContain("sprk_assignedtoexternal",
+            "a convention-matching field on the exclusion list must never confer access");
+    }
+
+    [Fact]
+    public async Task ResolveByContactAsync_EmptyContactId_ThrowsArgumentException()
+    {
+        var sut = CreateSut(
+            new Mock<IMembershipFieldDiscoveryService>().Object,
+            new Mock<IIdentityNormalizationService>().Object,
+            new Mock<IDataverseService>().Object);
+
+        Func<Task> act = () => sut.ResolveByContactAsync(Guid.Empty, EntityType, options: null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>().WithParameterName("contactId");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────
 
@@ -873,14 +1027,15 @@ public class MembershipResolverServiceTests
         IIdentityNormalizationService identity,
         IDataverseService dataverse,
         ITenantCache? cache = null,
-        ILogger<MembershipResolverService>? logger = null)
+        ILogger<MembershipResolverService>? logger = null,
+        MembershipOptions? membershipOptions = null)
     {
         return new MembershipResolverService(
             discovery,
             identity,
             dataverse,
             cache ?? new FakeDistributedCache(),
-            Options.Create(new MembershipOptions()),
+            Options.Create(membershipOptions ?? new MembershipOptions()),
             logger ?? NullLogger<MembershipResolverService>.Instance);
     }
 

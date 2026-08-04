@@ -80,6 +80,56 @@ public sealed class MembershipOptions
     /// pointing to systemuser).
     /// </summary>
     public OrganizationLookupOptions OrganizationLookup { get; set; } = new();
+
+    /// <summary>
+    /// Convention + exclusion configuration that defines which discovered
+    /// <c>contact</c>-target lookups are <b>access-conferring</b> for the
+    /// contact-anchored membership entry point
+    /// (<c>MembershipResolverService.ResolveByContactAsync</c>, teams-app-r1
+    /// task 021, spec.md NFR-05). Drives the role allowlist convention (default
+    /// prefix <c>sprk_assigned</c>) + a data-driven exclusion list. Defaults are
+    /// safe (prefix seeded; empty exclusions) so the feature works with no
+    /// operator configuration.
+    /// </summary>
+    public AccessConferringRoleOptions AccessConferringRoles { get; set; } = new();
+}
+
+/// <summary>
+/// Convention-based role-allowlist configuration for the contact-anchored
+/// membership entry point (teams-app-r1 task 021 / NFR-05). Access-conferring
+/// roles are resolved from live metadata discovery — NEVER a hardcoded field
+/// list — by keeping only <c>contact</c>-target lookups whose logical name
+/// starts with <see cref="ConventionPrefix"/> and are not on
+/// <see cref="ExcludedFields"/>. A newly-added <c>sprk_assigned*</c> contact
+/// lookup therefore auto-qualifies with no code change; adverse/informational
+/// lookups (opposing-counsel, polymorphic <c>sprk_regardingrecord*</c>) never
+/// confer access because they either fail the convention or are not
+/// contact-typed.
+/// </summary>
+public sealed class AccessConferringRoleOptions
+{
+    /// <summary>
+    /// The canonical access-conferring naming convention prefix. Used when
+    /// <see cref="ConventionPrefix"/> is left blank by the operator.
+    /// </summary>
+    public const string DefaultConventionPrefix = "sprk_assigned";
+
+    /// <summary>
+    /// Logical-name prefix that marks a <c>contact</c>-target lookup as
+    /// access-conferring (case-insensitive). Default: <c>sprk_assigned</c>.
+    /// This is a convention, not a field list — every field matching the prefix
+    /// qualifies unless explicitly excluded. Configurable so the convention can
+    /// evolve without a code change; blank falls back to
+    /// <see cref="DefaultConventionPrefix"/>.
+    /// </summary>
+    public string ConventionPrefix { get; set; } = DefaultConventionPrefix;
+
+    /// <summary>
+    /// Logical names of lookup fields that match <see cref="ConventionPrefix"/>
+    /// but MUST NOT confer access (data/config-driven suppression). Empty by
+    /// default. Bound from <c>Membership:AccessConferringRoles:ExcludedFields</c>.
+    /// </summary>
+    public List<string> ExcludedFields { get; set; } = new();
 }
 
 /// <summary>

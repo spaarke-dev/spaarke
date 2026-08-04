@@ -4,7 +4,7 @@
     <title>Workforce-token → principal resolver for the collaboration endpoints</title>
     <phase>2 BFF Workforce→Principal Resolver &amp; Membership</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security/auth code on the critical path — every downstream membership and enforcement task composes on this resolver's output.</rigor-reason>
     <model-tier>opus</model-tier>

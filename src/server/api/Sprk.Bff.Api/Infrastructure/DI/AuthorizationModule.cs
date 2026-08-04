@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.Identity.Web;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Authorization;
+using Sprk.Bff.Api.Infrastructure.Routing;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -154,6 +155,17 @@ public static class AuthorizationModule
 
         // Register authorization handler (Scoped to match AuthorizationService dependency)
         services.AddScoped<IAuthorizationHandler, ResourceAccessHandler>();
+
+        // BFF `tid`→environment routing (teams-app-r1 task 060 · ADR-028 A2 · spec FR-09).
+        // Config-driven map (TenantRouting section; Key Vault refs in prod, mirroring AzureAd/Ciam)
+        // routing an authenticated workforce `tid` to exactly ONE environment for the three
+        // deployment models (Spaarke-hosted dedicated / customer-hosted / true SaaS). Deny-by-design:
+        // an unmapped/ambiguous/malformed/absent `tid` is DENIED — never defaulted to any environment.
+        // Singleton: the mapping is deploy-time static config, precomputed once into a tid lookup.
+        // No Graph SDK / AI-internal types injected (BFF §10 / broker-only).
+        services.Configure<TenantEnvironmentRoutingOptions>(
+            configuration.GetSection(TenantEnvironmentRoutingOptions.SectionName));
+        services.AddSingleton<ITenantEnvironmentRouter, TenantEnvironmentRouter>();
 
         // Authorization policies - granular operation-level policies matching SPE/Graph API operations
         services.AddAuthorization(options =>

@@ -1,6 +1,7 @@
-# ADR-028 Amendment A2 (DRAFT) — Workforce Auth for the Teams Collaboration Host
+# ADR-028 Amendment A2 (APPLIED) — Workforce Auth for the Teams Collaboration Host
 
-> **Status**: 🟡 DRAFT — for owner review. Not yet applied to canonical `.claude/adr/ADR-028-spaarke-auth-architecture.md`. (Resolution path **B — ADR amendment**, per root CLAUDE.md §6.5.)
+> **Status**: ✅ APPLIED 2026-08-03 (task 002) to the canonical concise `.claude/adr/ADR-028-spaarke-auth-architecture.md`. (Resolution path **B — ADR amendment**, per root CLAUDE.md §6.5.)
+> **Deviation note**: the full `docs/adr/ADR-028-*.md` copy does **not** exist (concise ADR is canonical, carrying A1 + A2). Applied concise-only, mirroring A1; creating a new full ADR was declined as scope creep.
 > **Date**: 2026-08-03
 > **Amends**: [ADR-028 (concise)](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) + [ADR-028 (full)](../../docs/adr/ADR-028-spaarke-auth-architecture.md); **builds on Amendment A1** (external SPA / Entra External ID).
 > **Driver project**: `teams-app-r1`

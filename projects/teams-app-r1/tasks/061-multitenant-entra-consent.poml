@@ -4,7 +4,7 @@
     <title>Multitenant workforce Entra app + admin-consent onboarding</title>
     <phase>6 Enterprise &amp; Routing</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>App-registration configuration + onboarding documentation following the established multitenant pattern; no new src/ code path.</rigor-reason>
     <model-tier>sonnet</model-tier>

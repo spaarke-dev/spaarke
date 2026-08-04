@@ -4,7 +4,7 @@
     <title>BFF `tid`→environment routing</title>
     <phase>6 Enterprise &amp; Routing</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Cross-cutting hosting/data-isolation layer on the critical path for enterprise deployment; a routing defect is a data-isolation failure, not a cosmetic bug.</rigor-reason>
     <model-tier>opus</model-tier>

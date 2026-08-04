@@ -4,7 +4,7 @@
     <title>Standing-grant field on `contact` + Contact-form toggle (Dataverse schema)</title>
     <phase>5 Standing Grant</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New Dataverse field + form toggle following the standard field-creation pattern (dataverse-create-schema skill); no code-review/adr-check gate required per CLAUDE.md §8.</rigor-reason>
     <model-tier>sonnet</model-tier>

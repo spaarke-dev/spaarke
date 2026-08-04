@@ -20,6 +20,15 @@
  * unavailable (e.g., harness/test environments), preserving the PRE-LIFT
  * behavior (NFR-04 — zero regression).
  *
+ * v1.0.8 (task 040, teams-app-r1) — wires the shared core's governance
+ * toolbar (person + email icons). `onOpenGrantModal` / `onOpenEmailMembers`
+ * are STUB handlers here (console-logged, no dialog) — task 041 replaces
+ * the grant-modal stub, task 042 replaces the email-members stub, with no
+ * further changes required to the shared `TrackingFieldTrio` core.
+ * `canGrantAccess` defaults to `true` (fail-open) — task 041 wires the real
+ * privilege check once the access-grant flow's authorization data source
+ * exists; building that check here would be premature (no consumer yet).
+ *
  * @remarks
  * - Uses React 16 APIs per ADR-022 (ReactDOM.render, not createRoot)
  * - Uses Fluent UI v9 per ADR-021 (via platform libraries)
@@ -140,7 +149,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       accessPermission: this.accessPermissionValue,
       showTitle,
       showVersion,
-      versionText: 'v1.0.7 • Built 2026-07-28',
+      versionText: 'v1.0.8 • Built 2026-08-03',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
@@ -160,6 +169,20 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
         this.accessPermissionValue = v;
         this.notifyOutputChanged();
       },
+      // Governance toolbar (task 040) — stub wiring only. Tasks 041/042
+      // replace these handlers with the real access-grant modal / email-
+      // members action; no further change to the shared core is needed.
+      onOpenGrantModal: () => {
+        // eslint-disable-next-line no-console
+        console.log('[TrackingFieldTrio] Grant access clicked — modal not yet wired (task 041).');
+      },
+      onOpenEmailMembers: () => {
+        // eslint-disable-next-line no-console
+        console.log('[TrackingFieldTrio] Email members clicked — dialog not yet wired (task 042).');
+      },
+      // Fail-open placeholder until task 041 sources a real privilege check
+      // (no authorization data source exists yet for this control).
+      canGrantAccess: true,
     };
 
     // React 16 API per ADR-022 - use ReactDOM.render, NOT createRoot

@@ -4,7 +4,7 @@
     <title>TrackingFieldTrio governance toolbar — person + email icons</title>
     <phase>4 Access-Management Surface (PCF)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies a shared production component (both the PCF and its shared core) consumed by multiple hosts (FR-11/FR-13); code-review + adr-check apply.</rigor-reason>
     <model-tier>sonnet</model-tier>

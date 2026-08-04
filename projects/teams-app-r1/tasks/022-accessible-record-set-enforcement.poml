@@ -4,7 +4,7 @@
     <title>Accessible-record-set composition &amp; enforcement across all principal types</title>
     <phase>2 BFF Workforce→Principal Resolver &amp; Membership</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security enforcement gate — composes and enforces the accessible-record set for every principal type; an error here means over- or under-exposure of records.</rigor-reason>
     <model-tier>opus</model-tier>

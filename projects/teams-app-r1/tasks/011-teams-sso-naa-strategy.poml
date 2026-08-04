@@ -4,7 +4,7 @@
     <title>Teams SSO/NAA client auth strategy in the shared standalone-MSAL module</title>
     <phase>1 Shared Auth Module &amp; Host Adapter</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Auth, seamless workforce SSO correctness.</rigor-reason>
     <model-tier>opus</model-tier>

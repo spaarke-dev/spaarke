@@ -7,15 +7,22 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <summary>
 /// Maps all external access API endpoints.
 ///
-/// Two route groups (distinct authentication schemes — ADR-028 Amendment A1):
+/// Three route groups (distinct authentication schemes / planes):
 ///   /api/v1/external        — external user endpoints. CIAM-only: pinned to the "Ciam" JwtBearer
 ///                             scheme via <see cref="AuthPolicies.CiamExternal"/> (task 021), plus the
-///                             per-endpoint <c>ExternalCallerAuthorizationFilter</c>.
+///                             per-endpoint <c>ExternalCallerAuthorizationFilter</c> (ADR-028 A1).
 ///   /api/v1/external-access — internal management endpoints. Workforce default scheme (Azure AD JWT).
+///   /api/v1/collab          — WORKFORCE collaboration endpoints (ADR-028 Amendment A2 · teams-app-r1
+///                             FR-04). Workforce default scheme + the per-endpoint
+///                             <c>WorkforceCallerAuthorizationFilter</c> which resolves the caller to a
+///                             systemuser / contact-only principal (or denies). This is the
+///                             collaboration surface generalized from CIAM-contact-only to the
+///                             workforce plane; it does NOT touch the CIAM /api/v1/external group
+///                             (FR-15 — the standalone SPA is unchanged).
 ///
 /// ADR-001: Minimal API — no controllers.
 /// ADR-008: Authorization applied per-endpoint or via route group — no global middleware; the
-///          scheme pin is additive to (not a replacement for) the ExternalCallerAuthorizationFilter.
+///          scheme pin is additive to (not a replacement for) the caller-authorization filters.
 /// </summary>
 public static class ExternalAccessEndpoints
 {
@@ -27,6 +34,7 @@ public static class ExternalAccessEndpoints
     {
         MapExternalUserEndpoints(app);
         MapInternalManagementEndpoints(app);
+        MapWorkforceCollaborationEndpoints(app);
     }
 
     // =========================================================================
@@ -101,5 +109,39 @@ public static class ExternalAccessEndpoints
 
         // POST /api/v1/external-access/provision-project — Provision infrastructure for Secure Project
         adminGroup.MapProvisionProjectEndpoint();
+    }
+
+    // =========================================================================
+    // Workforce collaboration endpoints — workforce Entra (Teams host) authentication
+    // (ADR-028 Amendment A2 · teams-app-r1 FR-04)
+    // =========================================================================
+
+    private static void MapWorkforceCollaborationEndpoints(WebApplication app)
+    {
+        // Workforce DEFAULT JwtBearer scheme (NOT the CIAM pin) — Teams-host workforce tokens
+        // authenticate here. RequireAuthorization() applies the default-scheme JWT policy; the
+        // per-endpoint WorkforceCallerAuthorizationFilter then resolves the caller to a systemuser /
+        // contact-only principal (ADR-028 A2 / FR-04) and DENIES an unresolvable caller. ADR-008:
+        // per-endpoint filter, no global middleware. Tasks 021 (contact-anchored membership) + 022
+        // (accessible-record-set enforcement) extend this group with data/download endpoints that
+        // compose on the resolved principal.
+        var collabGroup = app.MapGroup("/api/v1/collab")
+            .WithTags("Workforce Collaboration")
+            .RequireAuthorization();
+
+        // GET /api/v1/collab/me — Returns the caller's resolved workforce principal (kind + ids).
+        collabGroup.MapGet("/me", WorkforcePrincipalContextEndpoint.Handle)
+            .WithName("GetWorkforcePrincipalContext")
+            .WithSummary("Get the authenticated workforce caller's resolved collaboration principal")
+            .WithDescription(
+                "Resolves the workforce (Teams-host) caller via AAD oid → systemuser (with derived " +
+                "contactId), else oid/verified-email → contact, else DENY. Returns the resolved " +
+                "principal kind + ids. Requires a valid workforce Entra JWT (default scheme); an " +
+                "unresolvable caller receives 401 (missing identity) or 403 (not provisioned).")
+            .Produces<Dtos.WorkforcePrincipalContextResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .AddWorkforceCallerAuthorizationFilter();
     }
 }

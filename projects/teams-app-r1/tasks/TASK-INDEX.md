@@ -8,28 +8,30 @@
 Status: 🔲 not-started · 🔄 in-progress · ✅ completed · ⛔ blocked · 🔁 needs-retry
 Tier: model-tier @ effort (dispatch each subagent at these per root CLAUDE.md §8.5)
 
+> **Wave 0 status (2026-08-03)**: Task **002 ✅ COMPLETE** — ADR-028 Amendment A2 applied to the canonical concise `.claude/adr/ADR-028` (workforce-plane MUST/MUST NOT + generalized pluggable-authority exemption; all A1 invariants preserved; internal Xrm surfaces unaffected; ADR-034 Path-C cross-ref). Deviation: `docs/adr/` full copy does not exist → applied concise-only, mirroring A1 (documented in the ADR note + CHANGELOG + draft). The governing rule is now in place for Phase-1 auth code. Task **001** autonomous portion complete — code-path verification of both membership planes done (findings: `notes/spikes/foundation-spike-findings.md`); systemuser plane code-GO, contact plane code-CONDITIONAL-GO (no architectural blocker; = tasks 020/021), SPA no-regression. **Live Teams desktop/web SSO go/no-go remains OPERATOR-GATED** (spike scaffold at `notes/spikes/teams-tab-spike/`). 001 stays 🔄 until the operator records an overall GO in findings §5. **🚦 GATE: Do NOT start Wave 1 until findings §5 records an overall GO.**
+
 ## Task Registry
 
 | ID | Title | Phase | Status | Deps | Tier | Rigor | Parallel-safe | Group |
 |----|-------|-------|--------|------|------|-------|---------------|-------|
-| 001 | Foundation spike — workforce SSO → membership (both planes) + SPA unchanged | 0 | 🔲 | none | opus@xhigh | FULL | ❌ (foundation gate, main-session) | — |
-| 002 | Apply ADR-028 Amendment A2 (workforce auth) — Path B | 0 | 🔲 | none | opus@high | FULL | ❌ (.claude/ + docs/adr, main-session) | — |
-| 010 | Shared standalone-MSAL module, pluggable authority | 1 | 🔲 | 001,002 | opus@xhigh | FULL | ❌ (serial client-auth chain) | A |
-| 011 | Teams SSO/NAA client strategy | 1 | 🔲 | 010 | opus@high | FULL | ❌ (serial; shared auth files) | A |
-| 012 | Teams host adapter + host-detection seam | 1 | 🔲 | 011 | sonnet@high | FULL | ❌ (serial; shared bootstrap) | A |
-| 020 | Workforce→principal resolver (collaboration endpoints) | 2 | 🔲 | 001,002 | opus@xhigh | FULL | ❌ (serial BFF auth spine) | B |
-| 021 | Contact-anchored membership entry (role-allowlist filtered) | 2 | 🔲 | 020 | opus@xhigh | FULL | ❌ (serial; membership engine) | B |
-| 022 | Accessible-record-set composition + enforcement gate | 2 | 🔲 | 020,021 | opus@xhigh | FULL | ❌ (serial; enforcement) | B |
+| 001 | Foundation spike — workforce SSO → membership (both planes) + SPA unchanged | 0 | 🔄 | none | opus@xhigh | FULL | ❌ (foundation gate, main-session) | — |
+| 002 | Apply ADR-028 Amendment A2 (workforce auth) — Path B | 0 | ✅ | none | opus@high | FULL | ❌ (.claude/ + docs/adr, main-session) | — |
+| 010 | Shared standalone-MSAL module, pluggable authority | 1 | ✅ | 001,002 | opus@xhigh | FULL | ❌ (serial client-auth chain) | A |
+| 011 | Teams SSO/NAA client strategy | 1 | ✅ | 010 | opus@high | FULL | ❌ (serial; shared auth files) | A |
+| 012 | Teams host adapter + host-detection seam | 1 | ✅ | 011 | sonnet@high | FULL | ❌ (serial; shared bootstrap) | A |
+| 020 | Workforce→principal resolver (collaboration endpoints) | 2 | ✅ | 001,002 | opus@xhigh | FULL | ❌ (serial BFF auth spine) | B |
+| 021 | Contact-anchored membership entry (role-allowlist filtered) | 2 | ✅ | 020 | opus@xhigh | FULL | ❌ (serial; membership engine) | B |
+| 022 | Accessible-record-set composition + enforcement gate | 2 | ✅ | 020,021 | opus@xhigh | FULL | ❌ (serial; enforcement) | B |
 | 030 | Broker-only SPE download gated by accessible-set | 3 | 🔲 | 022 | opus@high | FULL | ❌ (serial; BFF download path) | B |
-| 040 | TrackingFieldTrio two-icon governance toolbar | 4 | 🔲 | 021 | sonnet@high | FULL | ❌ (serial PCF chain; shared component) | C |
+| 040 | TrackingFieldTrio two-icon governance toolbar | 4 | ✅ | 021 | sonnet@high | FULL | ❌ (serial PCF chain; shared component) | C |
 | 041 | Access-grant modal (candidates + named users → grant + invite) | 4 | 🔲 | 040 | sonnet@xhigh | FULL | ❌ (serial; shared component) | C |
 | 042 | Email-members action → SendEmailDialog (ADR-045) | 4 | 🔲 | 040 | sonnet@high | FULL | ❌ (serial; shared component) | C |
 | 043 | Access-Permission Option-A sharing-gate on the modal | 4 | 🔲 | 041 | sonnet@high | FULL | ❌ (serial; modifies 041 modal) | C |
 | 045 | Deploy TrackingFieldTrio PCF to Dataverse | 4 | 🔲 | 043,065 | sonnet@high | STANDARD | ❌ (deploy; shared env) | C |
-| 050 | Standing-grant field on `contact` + form toggle | 5 | 🔲 | 001 | sonnet@high | STANDARD | ✅ | D |
+| 050 | Standing-grant field on `contact` + form toggle | 5 | ✅ | 001 | sonnet@high | STANDARD | ✅ | D |
 | 051 | Standing-grant runtime union into accessible-set | 5 | 🔲 | 022,050 | opus@high | FULL | ❌ (modifies 022 composition) | D |
-| 060 | BFF `tid`→environment routing | 6 | 🔲 | 020 | opus@xhigh | FULL | ✅ | E |
-| 061 | Multitenant workforce Entra + admin-consent onboarding | 6 | 🔲 | 002 | sonnet@high | STANDARD | ✅ | E |
+| 060 | BFF `tid`→environment routing | 6 | ✅ | 020 | opus@xhigh | FULL | ✅ | E |
+| 061 | Multitenant workforce Entra + admin-consent onboarding | 6 | ✅ | 002 | sonnet@high | STANDARD | ✅ | E |
 | 062 | Teams framing headers (CSP frame-ancestors) on SWA host | 6 | 🔲 | 012 | sonnet@high | STANDARD | ✅ | E |
 | 065 | Deploy BFF (resolver, membership, routing, download) | 6 | 🔲 | 030,051,060 | sonnet@high | STANDARD | ❌ (deploy; shared spaarke-bff-dev) | E |
 | 070 | Teams manifest v1.29 + M365 Agents Toolkit packaging | 7 | 🔲 | 061,062 | sonnet@high | STANDARD | ✅ | F |

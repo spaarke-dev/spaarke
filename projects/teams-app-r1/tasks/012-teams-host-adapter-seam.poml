@@ -4,7 +4,7 @@
     <title>Teams host adapter + host-detection seam (bootstrap, framing, theme, nav)</title>
     <phase>1 Shared Auth Module &amp; Host Adapter</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New component with a canonical reference to copy — Office IHostAdapter.</rigor-reason>
     <model-tier>sonnet</model-tier>

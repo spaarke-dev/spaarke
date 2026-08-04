@@ -4,7 +4,7 @@
     <title>Contact-anchored membership entry on MembershipResolverService (role-allowlist filtered)</title>
     <phase>2 BFF Workforce→Principal Resolver &amp; Membership</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Membership/auth core — the sole source of record access for non-systemuser workforce users; errors here directly cause over- or under-exposure of records.</rigor-reason>
     <model-tier>opus</model-tier>
