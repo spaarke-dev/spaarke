@@ -51,9 +51,7 @@ describe('TrackingFieldTrio — governance toolbar (task 040)', () => {
     it('renders both the person icon and the email icon when both callbacks are supplied', () => {
       const onOpenGrantModal = jest.fn();
       const onOpenEmailMembers = jest.fn();
-      renderWithTheme(
-        <TrackingFieldTrio {...makeProps({ onOpenGrantModal, onOpenEmailMembers })} />
-      );
+      renderWithTheme(<TrackingFieldTrio {...makeProps({ onOpenGrantModal, onOpenEmailMembers })} />);
 
       expect(screen.getByRole('button', { name: 'Grant access' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Email members' })).toBeInTheDocument();
@@ -61,9 +59,7 @@ describe('TrackingFieldTrio — governance toolbar (task 040)', () => {
 
     it('invokes onOpenGrantModal when the person icon is clicked and access is granted', () => {
       const onOpenGrantModal = jest.fn();
-      renderWithTheme(
-        <TrackingFieldTrio {...makeProps({ onOpenGrantModal, canGrantAccess: true })} />
-      );
+      renderWithTheme(<TrackingFieldTrio {...makeProps({ onOpenGrantModal, canGrantAccess: true })} />);
 
       fireEvent.click(screen.getByRole('button', { name: 'Grant access' }));
       expect(onOpenGrantModal).toHaveBeenCalledTimes(1);
@@ -107,9 +103,7 @@ describe('TrackingFieldTrio — governance toolbar (task 040)', () => {
   describe('canGrantAccess=false — no dead click (acceptance criterion 3)', () => {
     it('disables the person icon and never invokes onOpenGrantModal when clicked', () => {
       const onOpenGrantModal = jest.fn();
-      renderWithTheme(
-        <TrackingFieldTrio {...makeProps({ onOpenGrantModal, canGrantAccess: false })} />
-      );
+      renderWithTheme(<TrackingFieldTrio {...makeProps({ onOpenGrantModal, canGrantAccess: false })} />);
 
       const grantButton = screen.getByRole('button', { name: 'Grant access' });
       expect(grantButton).toBeDisabled();
@@ -121,9 +115,7 @@ describe('TrackingFieldTrio — governance toolbar (task 040)', () => {
     it('does not disable the email icon when canGrantAccess=false (independent of grant gating)', () => {
       const onOpenEmailMembers = jest.fn();
       renderWithTheme(
-        <TrackingFieldTrio
-          {...makeProps({ onOpenEmailMembers, onOpenGrantModal: jest.fn(), canGrantAccess: false })}
-        />
+        <TrackingFieldTrio {...makeProps({ onOpenEmailMembers, onOpenGrantModal: jest.fn(), canGrantAccess: false })} />
       );
 
       expect(screen.getByRole('button', { name: 'Email members' })).not.toBeDisabled();
@@ -157,9 +149,7 @@ describe('TrackingFieldTrio — governance toolbar (task 040)', () => {
   describe('adr-021-dark-mode', () => {
     it('renders the toolbar and existing controls under webDarkTheme without a broken state', () => {
       renderWithTheme(
-        <TrackingFieldTrio
-          {...makeProps({ onOpenGrantModal: jest.fn(), onOpenEmailMembers: jest.fn() })}
-        />,
+        <TrackingFieldTrio {...makeProps({ onOpenGrantModal: jest.fn(), onOpenEmailMembers: jest.fn() })} />,
         webDarkTheme
       );
 
@@ -194,9 +184,7 @@ describe('TrackingFieldTrio — governance toolbar (task 040)', () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
       renderWithTheme(
-        <TrackingFieldTrio
-          {...makeProps({ onOpenGrantModal: jest.fn(), onOpenEmailMembers: jest.fn() })}
-        />,
+        <TrackingFieldTrio {...makeProps({ onOpenGrantModal: jest.fn(), onOpenEmailMembers: jest.fn() })} />,
         webDarkTheme
       );
 

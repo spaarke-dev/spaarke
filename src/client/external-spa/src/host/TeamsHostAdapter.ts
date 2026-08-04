@@ -225,7 +225,9 @@ class TeamsHostAdapter implements ITeamsHostAdapter {
       await acquireTeamsWorkforceBffToken(cfg);
     } catch (err) {
       const failure =
-        err instanceof TeamsWorkforceAuthError ? err : new TeamsWorkforceAuthError('Teams workforce bootstrap failed.', err);
+        err instanceof TeamsWorkforceAuthError
+          ? err
+          : new TeamsWorkforceAuthError('Teams workforce bootstrap failed.', err);
       teamsApp.notifyFailure({
         reason: teamsApp.FailedReason.AuthFailed,
         message: failure.message,

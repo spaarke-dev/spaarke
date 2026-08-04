@@ -111,8 +111,7 @@ function renderTeamsAuthError(root: Root, err: unknown): void {
             {message}
           </Text>
           <Text size={200} style={{ color: tokens.colorNeutralForeground4 }}>
-            Contact your Teams admin if this persists - your organization may not have consented to
-            the Spaarke app yet.
+            Contact your Teams admin if this persists - your organization may not have consented to the Spaarke app yet.
           </Text>
         </div>
       </FluentProvider>

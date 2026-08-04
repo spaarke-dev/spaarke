@@ -109,10 +109,7 @@ export function captureTeamsDeepLink(subPageId: string | undefined | null): void
  * @returns Access token string, ready for `Authorization: Bearer {token}` header.
  * @throws If silent acquisition fails for a non-interaction reason (network error, etc.).
  */
-export async function acquireStandaloneBffToken(
-  instance: IPublicClientApplication,
-  bffScope: string
-): Promise<string> {
+export async function acquireStandaloneBffToken(instance: IPublicClientApplication, bffScope: string): Promise<string> {
   const accounts = instance.getAllAccounts();
 
   if (accounts.length === 0) {
@@ -283,9 +280,7 @@ export async function createTeamsWorkforceMsalInstance(
 let teamsWorkforceInstancePromise: Promise<IPublicClientApplication> | null = null;
 let teamsWorkforceInstanceCacheKey: string | null = null;
 
-export async function getTeamsWorkforceMsalInstance(
-  cfg: TeamsWorkforceAuthConfig
-): Promise<IPublicClientApplication> {
+export async function getTeamsWorkforceMsalInstance(cfg: TeamsWorkforceAuthConfig): Promise<IPublicClientApplication> {
   const key = `${cfg.clientId}|${cfg.authority ?? ''}`;
   if (!teamsWorkforceInstancePromise || teamsWorkforceInstanceCacheKey !== key) {
     teamsWorkforceInstanceCacheKey = key;
@@ -299,10 +294,7 @@ export async function getTeamsWorkforceMsalInstance(
  * `acquireTokenPopup` on `InteractionRequiredAuthError`. The popup is brokered by the Teams host, so
  * a consented workforce user sees no visible second login. NEVER redirects (NFR-04).
  */
-async function acquireBffTokenViaNaa(
-  instance: IPublicClientApplication,
-  bffScope: string
-): Promise<string> {
+async function acquireBffTokenViaNaa(instance: IPublicClientApplication, bffScope: string): Promise<string> {
   const scopes = [bffScope];
   const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0] ?? null;
   try {
@@ -359,10 +351,7 @@ export async function acquireTeamsWorkforceBffToken(cfg: TeamsWorkforceAuthConfi
   } catch (initError) {
     // Reset so a later retry (e.g. once the host is ready) can re-initialize.
     teamsInitPromise = null;
-    throw new TeamsWorkforceAuthError(
-      'Teams JS app.initialize() failed — not running inside a Teams host.',
-      initError
-    );
+    throw new TeamsWorkforceAuthError('Teams JS app.initialize() failed — not running inside a Teams host.', initError);
   }
 
   let naaError: unknown;
