@@ -331,11 +331,25 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
             // task 021 (FR-08 "both" composite dispatch): `opts.resultLabel`, when supplied, names
             // the pack this run was measured against so a sequential multi-pack "both" run reads as
             // distinct per-pack outcomes; omitted preserves the exact original generic wording.
+            // task 070 (UAT2 review-depth selector): a Quick-depth run carries a visible caveat —
+            // "Quick scan — not a full advisory review." — read back from the SAME dispatch args
+            // this closure already threads (`opts.slots`), the least-invasive seam: `reviewDepth`
+            // never round-trips server-side (the terminal AnalysisChunk only carries the LLM's
+            // output, never the original request args — SessionDispatchOrchestrator reads
+            // `reviewDepth` only to resolve the model tier, see ResolveReviewDepthModelTierOverride),
+            // so the client — the only place that still knows which depth it picked — renders the
+            // caveat itself. Compose.Components (AgreementReviewSummaryPanel / ComposeEditor) is
+            // off-limits this wave (071's territory) and, per audit, no longer renders a live
+            // risk/disclaimer banner there anyway (overallRisk is `@deprecated`/ignored) — this
+            // conversation-side confirmation message is the correct, reachable seam. Absent for
+            // every Thorough run (the default) — zero visible change to the pre-070 wording.
+            const quickScanCaveat =
+              opts?.slots?.reviewDepth === "quick" ? "**Quick scan — not a full advisory review.** " : "";
             enqueueAssistantMessage(
               makeLocalAssistantMessage(
                 opts?.resultLabel
-                  ? `I've finished reviewing under the **${opts.resultLabel}** lens. Open the **Review Summary** and the in-document **Review Notes** in the Compose tab to see the flagged clauses and assessments.`
-                  : "I've finished reviewing the NDA. Open the **Review Summary** and the in-document **Review Notes** in the Compose tab to see the flagged clauses and assessments."
+                  ? `${quickScanCaveat}I've finished reviewing under the **${opts.resultLabel}** lens. Open the **Review Summary** and the in-document **Review Notes** in the Compose tab to see the flagged clauses and assessments.`
+                  : `${quickScanCaveat}I've finished reviewing the NDA. Open the **Review Summary** and the in-document **Review Notes** in the Compose tab to see the flagged clauses and assessments.`
               )
             );
           } else if (!isSurfaceLaunch && dispatched.result !== undefined && dispatched.result !== null) {

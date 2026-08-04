@@ -77,6 +77,8 @@ import {
   MessageBar,
   MessageBarBody,
   Option,
+  Radio,
+  RadioGroup,
   Spinner,
   Text,
   Textarea,
@@ -428,6 +430,18 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
   const selectedAgreementTypeIdRef = useRef<string | null>(null);
   selectedAgreementTypeIdRef.current = selectedAgreementTypeId;
 
+  // ── Review depth (ai-advanced-capabilities-agreements-r1 task 070, UAT2 review-depth selector) ──
+  // Small, additive wizard-door affordance alongside the Agreement Type picker: Quick (~20s fast
+  // model scan) vs Thorough (~2-3min gpt-5 reasoning; DEFAULT — the legal-quality default per
+  // project constraint). Only meaningful when the finish flow arms the auto-run bridge (task 033 —
+  // same gating as `autoRunReview`: agreement work-type + a picked sub-domain); rendered
+  // unconditionally in this step for simplicity (matches the Agreement Type field's own always-
+  // rendered-for-this-work-type placement) — a picked value on a non-agreement work type is simply
+  // never read (composeSessionId/autoRunReview never arm without a resolved subDomain).
+  const [reviewDepth, setReviewDepth] = useState<'quick' | 'thorough'>('thorough');
+  const reviewDepthRef = useRef<'quick' | 'thorough'>('thorough');
+  reviewDepthRef.current = reviewDepth;
+
   // ── Next-steps state (Send Email / Create To Do) ────────────────────────
   const [emailTo, setEmailTo] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
@@ -671,6 +685,20 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
                 ))}
               </Dropdown>
             </Field>
+
+            {workTypeValue === SprkAnalysisWorkType.AgreementAnalysis && (
+              <Field label="Review Depth">
+                <RadioGroup
+                  aria-label="Review depth"
+                  layout="horizontal"
+                  value={reviewDepth}
+                  onChange={(_, d) => setReviewDepth(d.value === 'quick' ? 'quick' : 'thorough')}
+                >
+                  <Radio value="quick" label="Quick (~20 sec)" />
+                  <Radio value="thorough" label="Thorough (~2–3 min) — recommended" />
+                </RadioGroup>
+              </Field>
+            )}
 
             <div className={styles.assignRow}>
               <Field label="Assigned Attorney" className={styles.assignField}>
@@ -1036,7 +1064,11 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
                   ? {
                       composeSessionId,
                       analysisId: analysisId.replace(/[{}]/g, '').toLowerCase(),
-                      ...(selectedSubDomain ? { autoRunReview: true } : {}),
+                      // ai-advanced-capabilities-agreements-r1 task 070 (UAT2 review-depth selector):
+                      // `reviewDepth` rides alongside `autoRunReview` so ConversationPane's wizard
+                      // hand-off listener can call `runExplicit` with the depth already decided —
+                      // no post-open depth-choice ask (would defeat the auto-run's whole point).
+                      ...(selectedSubDomain ? { autoRunReview: true, reviewDepth: reviewDepthRef.current } : {}),
                     }
                   : {}),
               },

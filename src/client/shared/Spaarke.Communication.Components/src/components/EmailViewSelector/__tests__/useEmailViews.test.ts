@@ -172,6 +172,28 @@ describe('useEmailViews', () => {
     );
   });
 
+  it('refetch() re-runs the SAME view FetchXML without changing the selection (owner UAT 2026-08-03 Item 2)', async () => {
+    const inboxId = 'view-inbox';
+    const client = makeStubClient({
+      savedQueries: [{ id: inboxId, name: EMAIL_INBOX_VIEW_NAME, isDefault: false, queryType: 0 }],
+      fetchXmlByViewId: { [inboxId]: '<fetch><entity name="sprk_communication" /></fetch>' },
+      rowsByViewId: { [inboxId]: [{ sprk_communicationid: 'row-1' }] },
+    });
+
+    const { result } = renderHook(() => useEmailViews(client));
+    await waitFor(() => expect(result.current.selectedViewId).toBe(inboxId));
+    await waitFor(() => expect(result.current.rows).toHaveLength(1));
+    expect(client.retrieveMultipleRecords).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      result.current.refetch();
+    });
+
+    // Same view stays selected; the rows fetch runs a second time.
+    await waitFor(() => expect(client.retrieveMultipleRecords).toHaveBeenCalledTimes(2));
+    expect(result.current.selectedViewId).toBe(inboxId);
+  });
+
   it('surfaces a view-list load failure via `error` instead of throwing', async () => {
     const client = makeStubClient({ savedQueriesError: new Error('boom') });
 

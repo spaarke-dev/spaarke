@@ -1,8 +1,12 @@
 # AI Advanced Capabilities — Analysis Hub & Session Persistence (`ai-advanced-capabilities-analysis-hub-r1`)
 
-> **Status**: Planning (project-pipeline run 2026-07-28) · **Branch**: `work/ai-advanced-capabilities-analysis-hub-r1`
+> **Status**: ✅ Complete (2026-08-03) · **Branch**: `work/ai-advanced-capabilities-analysis-hub-r1`
 > **Owner**: ralph.schroeder · **Round**: r1 · **Spawned from**: `ai-advanced-capabilities-nda-r1` UAT
 > **Sibling**: `ai-advanced-capabilities-research-r1` · **Program**: `projects/ai-advanced-capabilities-development/`
+
+## Changelog
+
+- **2026-08-03 — Project complete.** All 28 tasks ✅. 9 Success Criteria met (071/072 UAT-confirmed by owner; my-side verification: retirement grep-clean, record-open path, WorkspaceTabManager 67/67, widget suites 15/15, BFF Chat/Q2 35/35). Project-close `/test-diet` run — 6 test files MAINTAIN, 0 scaffolding ([`notes/test-diet-report.md`](notes/test-diet-report.md)). Lessons: [`notes/lessons-learned.md`](notes/lessons-learned.md). All hub code merged to master + deployed (client `sprk_spaarkeai` + BFF `spaarke-bff-dev`, hash-verified). Deferred (owner-gated env): ribbon-button import + retired-WR delete under task 071.
 
 ## What this project delivers
 
@@ -16,15 +20,15 @@ ONE Analysis experience (the SpaarkeAi three-pane), rendered in two hosting cont
 
 ## Graduation criteria (from spec Success Criteria)
 
-- [ ] 12 pre-existing e2e failures pass (green baseline)
-- [ ] User can create an Agreement Review from the hub (card → wizard → running analysis)
-- [ ] An analysis is a durable `sprk_analysis` record, findable + reopenable with session/review/files restored
-- [ ] Launching an analysis forks a new bound session + archives prior with warning
-- [ ] Sessions survive TTL expiry via Cosmos (no empty-session data loss)
-- [ ] Matter/Project record shows an Analysis subgrid; 2b/2d record entry paths work
-- [ ] `sprk_analysisworkspace` fully retired — no 404 deep-links, no dangling refs, casing reconciled
-- [ ] BFF publish-size ≤60 MB on every BFF task + no new HIGH CVE
-- [ ] Record-driven opens route via `openSpaarkeAi`, not `surfaceLaunchRegistry`
+- [x] 12 pre-existing e2e failures pass (green baseline) — task 001
+- [x] User can create an Agreement Review from the hub (card → wizard → running analysis) — UAT-confirmed
+- [x] An analysis is a durable `sprk_analysis` record, findable + reopenable with session/review/files restored — UAT-confirmed
+- [x] Launching an analysis forks a new bound session + archives prior with warning — UAT-confirmed
+- [x] Sessions survive TTL expiry via Cosmos (no empty-session data loss) — UAT-confirmed
+- [x] Matter/Project record shows an Analysis subgrid; 2b/2d record entry paths work — UAT-confirmed
+- [x] `sprk_analysisworkspace` fully retired — no 404 deep-links, no dangling refs, casing reconciled (grep-clean verified 2026-08-03)
+- [x] BFF publish-size ≤60 MB on every BFF task + no new HIGH CVE — task 070 (48.25 MB deploy)
+- [x] Record-driven opens route via `openSpaarkeAi`, not `surfaceLaunchRegistry` — verified in-code (`AnalysisHubWidget` → `open_analysis_headless` → `openSpaarkeAi`)
 
 ## Hot-path declaration
 

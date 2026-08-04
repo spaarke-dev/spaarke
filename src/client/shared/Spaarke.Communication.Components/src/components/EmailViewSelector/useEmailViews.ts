@@ -58,6 +58,8 @@ export interface UseEmailViewsResult<T = Record<string, unknown>> {
   isLoading: boolean;
   /** Non-null when the view list or the FetchXML run rejected. Never thrown. */
   error: Error | null;
+  /** Re-runs the active view's FetchXML (owner UAT 2026-08-03 Item 2 — the left-list Refresh button). No-op until a view has resolved. */
+  refetch: () => void;
 }
 
 function toError(err: unknown): Error {
@@ -84,6 +86,10 @@ export function useEmailViews<T = Record<string, unknown>>(client: IDataverseCli
   const [isLoadingViews, setIsLoadingViews] = React.useState<boolean>(true);
   const [isLoadingRows, setIsLoadingRows] = React.useState<boolean>(false);
   const [error, setError] = React.useState<Error | null>(null);
+  // Monotonic key bumped by `refetch()` to force a re-run of the rows effect
+  // below WITHOUT changing the selected view (owner UAT 2026-08-03 Item 2).
+  const [reloadKey, setReloadKey] = React.useState<number>(0);
+  const refetch = React.useCallback(() => setReloadKey(k => k + 1), []);
 
   // Load the saved-view list once per client instance, then resolve the
   // default selection ("Email — Inbox", falling back to the entity default).
@@ -162,7 +168,9 @@ export function useEmailViews<T = Record<string, unknown>>(client: IDataverseCli
     return () => {
       cancelled = true;
     };
-  }, [client, selectedViewId]);
+    // `reloadKey` is a dependency so `refetch()` re-runs this exact effect (same
+    // selected view) — the left-list Refresh button (owner UAT 2026-08-03 Item 2).
+  }, [client, selectedViewId, reloadKey]);
 
   return {
     views,
@@ -171,5 +179,6 @@ export function useEmailViews<T = Record<string, unknown>>(client: IDataverseCli
     rows,
     isLoading: isLoadingViews || isLoadingRows,
     error,
+    refetch,
   };
 }

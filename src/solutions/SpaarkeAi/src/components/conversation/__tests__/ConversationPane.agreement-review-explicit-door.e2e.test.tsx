@@ -21,7 +21,7 @@ if (typeof (global as any).TextEncoder === 'undefined') (global as any).TextEnco
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 if (typeof (global as any).TextDecoder === 'undefined') (global as any).TextDecoder = NodeTextDecoder;
 import React, { act } from 'react';
-import { render, waitFor } from '@testing-library/react';
+import { render, waitFor, screen, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 import { PaneEventBus, PaneEventBusProvider } from '@spaarke/ai-widgets';
@@ -222,6 +222,10 @@ jest.mock('@spaarke/ui-components', () => {
 
 // Import AFTER mocks.
 import { ConversationPane } from '../ConversationPane';
+// task 070 (UAT2 review-depth selector): the TEXT-door explicit bind (no reviewDepth supplied by
+// the caller) now inserts ONE depth-choice turn before dispatching — this harness clicks the real
+// `<ConsumerChips>` button (rendered inside the stubbed SprkChat's `transcriptFooterSlot`).
+import { LOCAL_CHIP } from '../localActionChips';
 
 const workspaceEvents: WorkspacePaneEvent[] = [];
 let bus: PaneEventBus;
@@ -291,7 +295,7 @@ beforeEach(() => {
 });
 
 describe('task 023: explicit-wins — an already-oriented session binds the pack deterministically', () => {
-  it('cancels the agent turn and dispatches the review DIRECTLY bound to the explicit subDomain — no gate, no chips', async () => {
+  it('cancels the agent turn, shows ONE depth-choice turn (task 070 — no double-ask, no type gate/chips), then dispatches the review DIRECTLY bound to the explicit subDomain + picked depth', async () => {
     renderPane();
     await driveChatUpload('acme.pdf');
 
@@ -304,12 +308,24 @@ describe('task 023: explicit-wins — an already-oriented session binds the pack
     // The agent turn is CANCELLED (return null) — the explicit door orchestrates the dispatch.
     expect(decorateResult).toBeNull();
 
+    // No review dispatch yet — task 070 inserts ONE depth-choice turn (Quick/Thorough) before the
+    // TEXT-door's explicit bind fires (no classifier gate, no type question — depth only).
+    expect(dispatchPostBodies.some((b) => b.bindingId === REVIEW_BINDING)).toBe(false);
+    const depthChip = screen.getByTestId(`consumer-chip-${LOCAL_CHIP.agreementReviewDepthThorough}`);
+    expect(depthChip).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(depthChip);
+      for (let i = 0; i < 30; i++) await Promise.resolve();
+    });
+
     // The review dispatch's wire body carries the EXPLICIT subDomain (employment), not a
-    // classifier guess.
+    // classifier guess — plus the picked reviewDepth (task 070).
     const reviewBody = dispatchPostBodies.find((b) => b.bindingId === REVIEW_BINDING);
     expect(reviewBody).toBeDefined();
     const args = reviewBody!.args as Record<string, unknown> | undefined;
     expect(args?.subDomain).toBe('employment');
+    expect(args?.reviewDepth).toBe('thorough');
     expect(args?.fileIds).toEqual([SESSION_FILE_ID]);
 
     // Orientation proof (mirrors task 021's e2e proof): the Compose mount seed still carries
@@ -325,7 +341,7 @@ describe('task 023: explicit-wins — an already-oriented session binds the pack
 });
 
 describe('task 023: mismatch-warns — a high-confidence classifier disagreement never re-routes, only notices', () => {
-  it('dispatches the review under the EXPLICIT key, then injects an informational mismatch notice', async () => {
+  it('dispatches the review under the EXPLICIT key (after the depth-choice turn), then injects an informational mismatch notice', async () => {
     // The background sanity-check classifier disagrees at high confidence.
     classifyResponse = {
       isAgreement: true,
@@ -338,6 +354,14 @@ describe('task 023: mismatch-warns — a high-confidence classifier disagreement
     await act(async () => {
       await captured.onDecorateOutboundBody!({ message: 'review this document' });
       for (let i = 0; i < 60; i++) await Promise.resolve();
+    });
+
+    // task 070: the depth-choice turn is showing; the sanity-check classifier already fired in
+    // parallel (non-blocking) — answer the depth choice to actually dispatch the review.
+    const depthChip = screen.getByTestId(`consumer-chip-${LOCAL_CHIP.agreementReviewDepthThorough}`);
+    await act(async () => {
+      fireEvent.click(depthChip);
+      for (let i = 0; i < 30; i++) await Promise.resolve();
     });
 
     // The review is STILL bound to the explicit choice — never re-routed to the classifier's "nda".

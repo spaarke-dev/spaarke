@@ -157,7 +157,10 @@ export function useNdaReviewAdvisoryCommentsBridge(
       if (!isNdaReviewResult(result)) return;
 
       const advisoryComments = projectFlaggedSectionsToAdvisoryComments(result.flaggedSections);
-      if (advisoryComments.length === 0) return;
+      // Dispatch unconditionally (even zero-length) — shell-side completion observers (the
+      // review-complete toast, task 071; a future notification-spine producer) need to see EVERY
+      // review completion, not just ones with findings. ComposeWorkspace's onAdvisoryComments has
+      // its own independent empty-array guard, so placement/panel behavior is unchanged.
 
       dispatch('workspace', {
         type: 'compose_advisory_comments',

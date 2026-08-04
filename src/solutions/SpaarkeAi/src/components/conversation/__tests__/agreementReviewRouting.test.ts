@@ -24,6 +24,10 @@ import {
   buildAgreementReviewConfirmChips,
   buildAgreementReviewCompositeChips,
   buildAgreementReviewNonAgreementChips,
+  buildAgreementReviewDepthChoiceChips,
+  buildAgreementReviewDepthChoiceMessage,
+  normalizeReviewDepth,
+  DEFAULT_REVIEW_DEPTH,
   toConsumerChipWire,
   GLOBAL_CONFIDENCE_THRESHOLD,
   type AgreementClassifyResult,
@@ -209,12 +213,16 @@ describe('resolveAgreementReviewGateDecision — FR-08 confirmation gate', () =>
 });
 
 describe('chip builders — max 2-3 chips (ASSISTANT-UI-ELEMENT-CRITERIA throwaway turn-follow-on)', () => {
-  it('confirm chips: exactly 2 — proposed type + pick-another (general)', () => {
+  it('confirm chips: exactly 3 — Quick/Thorough type-confirm pair + pick-another (general) (task 070)', () => {
     const chips = buildAgreementReviewConfirmChips('NDA');
-    expect(chips).toHaveLength(2);
-    expect(chips[0].bindingId).toBe(LOCAL_CHIP.agreementReviewConfirm);
+    expect(chips).toHaveLength(3);
+    expect(chips[0].bindingId).toBe(LOCAL_CHIP.agreementReviewConfirmQuick);
     expect(chips[0].label).toContain('NDA');
-    expect(chips[1].bindingId).toBe(LOCAL_CHIP.agreementReviewGeneral);
+    expect(chips[0].label).toContain('Quick');
+    expect(chips[1].bindingId).toBe(LOCAL_CHIP.agreementReviewConfirmThorough);
+    expect(chips[1].label).toContain('NDA');
+    expect(chips[1].label).toContain('Thorough');
+    expect(chips[2].bindingId).toBe(LOCAL_CHIP.agreementReviewGeneral);
   });
 
   it('composite chips: one per candidate + "Both" (design Lens 3d\'s "employment · just the NDA · both")', () => {
@@ -238,13 +246,43 @@ describe('chip builders — max 2-3 chips (ASSISTANT-UI-ELEMENT-CRITERIA throwaw
     expect(chips[0].bindingId).toBe(LOCAL_CHIP.agreementReviewGeneral);
   });
 
+  it('depth-choice chips (task 070): exactly 2 — Quick + Thorough, generic (no type name)', () => {
+    const chips = buildAgreementReviewDepthChoiceChips();
+    expect(chips).toHaveLength(2);
+    expect(chips[0].bindingId).toBe(LOCAL_CHIP.agreementReviewDepthQuick);
+    expect(chips[0].label).toContain('Quick');
+    expect(chips[1].bindingId).toBe(LOCAL_CHIP.agreementReviewDepthThorough);
+    expect(chips[1].label).toContain('Thorough');
+  });
+
   it('toConsumerChipWire round-trips through the SAME wire shape parseConsumerChips expects', () => {
     const wire = toConsumerChipWire(buildAgreementReviewConfirmChips('NDA'));
     expect(wire[0]).toMatchObject({
-      targetBindingId: LOCAL_CHIP.agreementReviewConfirm,
+      targetBindingId: LOCAL_CHIP.agreementReviewConfirmQuick,
       chipLabel: expect.stringContaining('NDA'),
       requiresAttachments: true,
     });
+  });
+});
+
+describe('review depth (task 070, UAT2 review-depth selector)', () => {
+  it('buildAgreementReviewDepthChoiceMessage names the settled type, asks a question', () => {
+    const message = buildAgreementReviewDepthChoiceMessage('NDA');
+    expect(message).toContain('NDA');
+    expect(message).toContain('?');
+  });
+
+  it('normalizeReviewDepth: "quick" passes through, everything else defaults to Thorough', () => {
+    expect(normalizeReviewDepth('quick')).toBe('quick');
+    expect(normalizeReviewDepth('thorough')).toBe(DEFAULT_REVIEW_DEPTH);
+    expect(normalizeReviewDepth(undefined)).toBe(DEFAULT_REVIEW_DEPTH);
+    expect(normalizeReviewDepth(null)).toBe(DEFAULT_REVIEW_DEPTH);
+    expect(normalizeReviewDepth('blazing-fast')).toBe(DEFAULT_REVIEW_DEPTH);
+    expect(normalizeReviewDepth(42)).toBe(DEFAULT_REVIEW_DEPTH);
+  });
+
+  it('DEFAULT_REVIEW_DEPTH is Thorough (project constraint: legal-quality default)', () => {
+    expect(DEFAULT_REVIEW_DEPTH).toBe('thorough');
   });
 });
 
