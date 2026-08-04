@@ -64,6 +64,10 @@ import { useConsumerChips } from "./useConsumerChips";
 // a SIBLING of the Click-path chips, subscribing to the Layer-C spine's `kind=suggestion`
 // pushes via the ONE host-wide `@spaarke/notifications` client (task 021).
 import { useSuggestionCards, type PendingSuggestionItem } from "./useSuggestionCards";
+// UAT round-4 (item #9): "Rerun a full analysis" card — offered after a QUICK-depth agreement
+// review completes. A SIBLING of useSuggestionCards (reuses its SuggestionCard visual directly)
+// but client-local/session-turn-scoped — no outbox row, no BFF re-ground.
+import { useRerunFullAnalysisCard } from "./useRerunFullAnalysisCard";
 import { getNotificationsClient } from "../../services/notificationsBootstrap";
 import { useContextEventBridge } from "./useContextEventBridge";
 import { useDocQaCitationBridge } from "./useDocQaCitationBridge";
@@ -686,6 +690,19 @@ export function ConversationPane(): React.JSX.Element {
   // with the other Compose bridges) is reached from the chips controller through this ref so the "Review
   // an NDA" card path also materializes flagged clauses as Compose comments (not just raw JSON).
   const ndaReviewEmitRef = React.useRef<(result: unknown) => void>(() => undefined);
+  // UAT round-4 (item #9): the "Rerun a full analysis" card's action needs
+  // `agreementReviewGate.rerunThorough`, but `agreementReviewGate` is constructed AFTER `chips`
+  // (it depends on `chips.dispatchBinding`) — reached through a ref, mirroring `ndaReviewEmitRef`
+  // immediately above. `useRerunFullAnalysisCard` itself is declared here (before `chips`) so its
+  // stable `showFor` callback can be threaded into `useConsumerChips`'s `onQuickReviewComplete` dep.
+  const rerunThoroughRef = React.useRef<(fileId: string, subDomainKey?: string) => Promise<void>>(
+    async () => undefined
+  );
+  const rerunFullAnalysisCard = useRerunFullAnalysisCard({
+    onRerun: React.useCallback((fileId: string, subDomainKey?: string) => {
+      void rerunThoroughRef.current(fileId, subDomainKey);
+    }, []),
+  });
   // UAT round-5 #9 — center-screen progress modal for a running NDA review. Driven by the three real
   // client transitions: dispatch-start (onChipDispatched, gated to the NDA binding), NDA-shaped terminal
   // result (onDispatchResult), and dispatch-settle-without-result (a chips.dispatching effect → fail).
@@ -778,6 +795,9 @@ export function ConversationPane(): React.JSX.Element {
       // UAT round-5 #9 — an NDA-shaped terminal result completes the progress modal.
       if (isNdaReviewResult(result)) ndaRunRef.current.complete();
     }, []),
+    // UAT round-4 (item #9): a QUICK-depth review just completed — arm the "Rerun a full
+    // analysis" card (useRerunFullAnalysisCard.showFor is itself a stable, []-deps callback).
+    onQuickReviewComplete: rerunFullAnalysisCard.showFor,
     // R5-1: append "Revise in Compose" as an in-line card alongside the post-attach cards, once at
     // least one file is indexed. Reads the promoted-files ref so it reflects current state.
     // nda-r1 follow-up (UAT 2026-07-26): also append "Review an NDA" (FIRST — the primary action for a
@@ -845,6 +865,9 @@ export function ConversationPane(): React.JSX.Element {
     // dispatch(es) can target it via sessionIdOverride — see documentSessionWaiter.ts header.
     awaitDocumentSessionId: awaitDocumentSessionIdFor,
   });
+  // UAT round-4 (item #9): publish `rerunThorough` to the ref the "Rerun a full analysis" card
+  // reaches (declared above, before `chips`) — see that ref's doc comment.
+  rerunThoroughRef.current = agreementReviewGate.rerunThorough;
 
   // task 023 (classifier-path lookup-write seam) — resolves the CLASSIFIER-determined subDomain for
   // a session being promoted (`HistoryOverlay`'s "Promote to Analysis…"), so the promote flow can
@@ -2177,6 +2200,8 @@ export function ConversationPane(): React.JSX.Element {
   const { resetForSession: resetAttachments } = attachments;
   const { resetForSession: resetChips } = chips;
   const { resetForSession: resetEventBatch } = eventBatch;
+  // UAT round-4 (item #9): the "Rerun a full analysis" card's own reset.
+  const { resetForSession: resetRerunFullAnalysisCard } = rerunFullAnalysisCard;
   const handleSessionCreated = React.useCallback(
     (session: IChatSession) => {
       if (!session?.sessionId) return;
@@ -2217,6 +2242,9 @@ export function ConversationPane(): React.JSX.Element {
       // task 031: a fresh session drops any known/pending document-session routing state — a prior
       // session's file ids/session ids must never leak into a new session's resolution.
       documentSessionWaiterRef.current.reset();
+      // UAT round-4 (item #9): a fresh session has no pending "Rerun a full analysis" card — it is
+      // session-turn-scoped plain state, never persisted, so a prior session's card must not survive.
+      resetRerunFullAnalysisCard();
     },
     [
       setChatSessionId,
@@ -2225,6 +2253,7 @@ export function ConversationPane(): React.JSX.Element {
       resetChips,
       resetEventBatch,
       agreementReviewGate,
+      resetRerunFullAnalysisCard,
     ]
   );
 
@@ -2548,6 +2577,11 @@ export function ConversationPane(): React.JSX.Element {
             from the Layer-C spine independent of a dispatch turn, so they are NOT in the
             transcript-footer chip slot. Renders nothing when there are no live suggestions. */}
         {suggestions.suggestionSlot}
+
+        {/* UAT round-4 (item #9): "Rerun a full analysis" — a persistent act-on CARD (not a
+            chip; ASSISTANT-UI-ELEMENT-CRITERIA.md) offered after a QUICK-depth review completes.
+            Renders nothing until a quick run completes; single-slot (never stacks). */}
+        {rerunFullAnalysisCard.cardSlot}
 
         {/* nda-r1 follow-up (UAT 2026-07-26): "Review an NDA" moved OUT of this top-of-pane
             notification slot (it read as "hidden" above the fold) and INTO the Suggested-Next-Steps

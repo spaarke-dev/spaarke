@@ -993,3 +993,102 @@ describe("useAgreementReviewGate — task 023 getLastResolvedSubDomainKey (class
     expect(result.current.getLastResolvedSubDomainKey()).toBeNull();
   });
 });
+
+describe("useAgreementReviewGate — UAT round-4 item #9: rerunThorough (the \"Rerun a full analysis\" card action)", () => {
+  it("dispatches THOROUGH immediately with the SAME fileId + subDomain — no classify, no ask", async () => {
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.rerunThorough("file-rerun-1", "nda");
+    });
+
+    expect(classifyDispatcherMock).not.toHaveBeenCalled();
+    expect(deps.acceptChips).not.toHaveBeenCalled();
+    expect(deps.enqueueAssistantMessage).not.toHaveBeenCalled();
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledTimes(1);
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledWith("review-binding-1", {
+      slots: { fileIds: ["file-rerun-1"], subDomain: "nda", reviewDepth: "thorough" },
+      resultLabel: "NDA",
+    });
+  });
+
+  it("re-mounts the SAME fileId into Compose (bring the existing tab to the front — the documented rerun-in-place fallback)", async () => {
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.rerunThorough("file-rerun-2", "nda");
+    });
+
+    expect(deps.mountFileInCompose).toHaveBeenCalledWith("file-rerun-2", undefined, "agreement-analysis");
+  });
+
+  it("with NO subDomainKey (the direct-chip door) dispatches the bare wire shape — no subDomain slot, no resultLabel", async () => {
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.rerunThorough("file-rerun-3");
+    });
+
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledWith("review-binding-1", {
+      slots: { fileIds: ["file-rerun-3"], reviewDepth: "thorough" },
+    });
+    const slots = (deps.dispatchReviewBinding as jest.Mock).mock.calls[0][1].slots as Record<string, unknown>;
+    expect(slots.subDomain).toBeUndefined();
+    expect((deps.dispatchReviewBinding as jest.Mock).mock.calls[0][1].resultLabel).toBeUndefined();
+  });
+
+  it("threads the resolved document session as sessionIdOverride (task 031 DEF-09, same as every other branch)", async () => {
+    const awaitDocumentSessionId = jest.fn<Promise<string | null>, [string]>().mockResolvedValue("doc-session-rerun");
+    const deps = makeDeps({ awaitDocumentSessionId });
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.rerunThorough("file-rerun-4", "employment");
+    });
+
+    expect(awaitDocumentSessionId).toHaveBeenCalledWith("file-rerun-4");
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledWith("review-binding-1", {
+      slots: { fileIds: ["file-rerun-4"], subDomain: "employment", reviewDepth: "thorough" },
+      resultLabel: "Employment",
+      sessionIdOverride: "doc-session-rerun",
+    });
+  });
+
+  it("does NOT touch resolvedRef/getLastResolvedSubDomainKey — a one-off re-fire, not a gate resolution", async () => {
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.rerunThorough("file-rerun-5", "nda");
+    });
+
+    expect(result.current.getLastResolvedSubDomainKey()).toBeNull();
+  });
+
+  it("no-ops when fileId is empty — no mount, no dispatch", async () => {
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.rerunThorough("");
+    });
+
+    expect(deps.mountFileInCompose).not.toHaveBeenCalled();
+    expect(deps.dispatchReviewBinding).not.toHaveBeenCalled();
+  });
+
+  it("no-ops when reviewBindingId is unavailable", async () => {
+    const deps = makeDeps({ reviewBindingId: null });
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.rerunThorough("file-rerun-6", "nda");
+    });
+
+    expect(deps.mountFileInCompose).not.toHaveBeenCalled();
+    expect(deps.dispatchReviewBinding).not.toHaveBeenCalled();
+  });
+});

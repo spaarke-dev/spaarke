@@ -359,3 +359,126 @@ describe('useConsumerChips — task 070 (UAT2 review-depth selector): the Quick-
     );
   });
 });
+
+describe('useConsumerChips — UAT round-4 item #9: onQuickReviewComplete (the "Rerun a full analysis" card trigger)', () => {
+  it('reviewDepth:"quick" fires onQuickReviewComplete with the SAME fileId + subDomain the dispatch slots carried', async () => {
+    dispatchConsumerMock.mockResolvedValue({
+      streamId: 's',
+      status: 'complete',
+      disposition: 'compose',
+      result: { overallRisk: 'low', flaggedSections: [] },
+    });
+
+    const onQuickReviewComplete = jest.fn<void, [{ fileId: string; subDomain?: string }]>();
+    const { result } = renderHook(() => useConsumerChips(makeDeps({ onQuickReviewComplete })));
+    await act(async () => {
+      result.current.dispatchBinding('review-binding-1', {
+        slots: { fileIds: ['file-quick-1'], subDomain: 'nda', reviewDepth: 'quick' },
+        resultLabel: 'NDA',
+      });
+    });
+    await flush();
+
+    expect(onQuickReviewComplete).toHaveBeenCalledTimes(1);
+    expect(onQuickReviewComplete).toHaveBeenCalledWith({ fileId: 'file-quick-1', subDomain: 'nda' });
+  });
+
+  it('reviewDepth:"quick" with NO subDomain slot (the direct chip door) fires with subDomain undefined', async () => {
+    dispatchConsumerMock.mockResolvedValue({
+      streamId: 's',
+      status: 'complete',
+      disposition: 'compose',
+      result: { overallRisk: 'low', flaggedSections: [] },
+    });
+
+    const onQuickReviewComplete = jest.fn<void, [{ fileId: string; subDomain?: string }]>();
+    const { result } = renderHook(() => useConsumerChips(makeDeps({ onQuickReviewComplete })));
+    await act(async () => {
+      result.current.dispatchBinding('review-binding-1', {
+        slots: { fileIds: ['file-quick-2'], reviewDepth: 'quick' },
+      });
+    });
+    await flush();
+
+    expect(onQuickReviewComplete).toHaveBeenCalledWith({ fileId: 'file-quick-2', subDomain: undefined });
+  });
+
+  it('reviewDepth:"thorough" does NOT fire onQuickReviewComplete', async () => {
+    dispatchConsumerMock.mockResolvedValue({
+      streamId: 's',
+      status: 'complete',
+      disposition: 'compose',
+      result: { overallRisk: 'low', flaggedSections: [] },
+    });
+
+    const onQuickReviewComplete = jest.fn();
+    const { result } = renderHook(() => useConsumerChips(makeDeps({ onQuickReviewComplete })));
+    await act(async () => {
+      result.current.dispatchBinding('review-binding-1', {
+        slots: { fileIds: ['file-thorough-1'], subDomain: 'nda', reviewDepth: 'thorough' },
+        resultLabel: 'NDA',
+      });
+    });
+    await flush();
+
+    expect(onQuickReviewComplete).not.toHaveBeenCalled();
+  });
+
+  it('no reviewDepth slot at all (every pre-070 caller) does NOT fire onQuickReviewComplete', async () => {
+    dispatchConsumerMock.mockResolvedValue({
+      streamId: 's',
+      status: 'complete',
+      disposition: 'compose',
+      result: { overallRisk: 'low', flaggedSections: [] },
+    });
+
+    const onQuickReviewComplete = jest.fn();
+    const { result } = renderHook(() => useConsumerChips(makeDeps({ onQuickReviewComplete })));
+    await act(async () => {
+      result.current.dispatchBinding('review-binding-1', { slots: { fileIds: ['file-1'] } });
+    });
+    await flush();
+
+    expect(onQuickReviewComplete).not.toHaveBeenCalled();
+  });
+
+  it('a non-NDA-review result at reviewDepth:"quick" does NOT fire onQuickReviewComplete (only the isNdaReview branch triggers it)', async () => {
+    dispatchConsumerMock.mockResolvedValue({
+      streamId: 's',
+      status: 'complete',
+      disposition: 'informational',
+      result: { tldr: 'A summary.' },
+    });
+
+    const onQuickReviewComplete = jest.fn();
+    const { result } = renderHook(() => useConsumerChips(makeDeps({ onQuickReviewComplete })));
+    await act(async () => {
+      result.current.dispatchBinding('summarize-binding', {
+        slots: { fileIds: ['file-1'], reviewDepth: 'quick' },
+      });
+    });
+    await flush();
+
+    expect(onQuickReviewComplete).not.toHaveBeenCalled();
+  });
+
+  it('fires exactly once per dispatch (once-per-run) even across repeated renders', async () => {
+    dispatchConsumerMock.mockResolvedValue({
+      streamId: 's',
+      status: 'complete',
+      disposition: 'compose',
+      result: { overallRisk: 'low', flaggedSections: [] },
+    });
+
+    const onQuickReviewComplete = jest.fn();
+    const { result } = renderHook(() => useConsumerChips(makeDeps({ onQuickReviewComplete })));
+    await act(async () => {
+      result.current.dispatchBinding('review-binding-1', {
+        slots: { fileIds: ['file-once'], reviewDepth: 'quick' },
+      });
+    });
+    await flush();
+
+    expect(onQuickReviewComplete).toHaveBeenCalledTimes(1);
+  });
+});

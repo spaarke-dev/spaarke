@@ -217,6 +217,16 @@ export interface WorkspacePaneEvent {
    *                              can switch workspace tabs while it is still open (UAT round-3 item
    *                              #8, ai-advanced-capabilities-agreements-r1). Same "signal
    *                              infrastructure" shape as `active_widget_changed` above.
+   * - `nda_review_background_run` — a review run's liveness moved to the WORKSPACE tab strip: the user
+   *                              clicked "Continue working in background" on the progress modal (so the
+   *                              modal is now dismissed) WHILE the run is still executing server-side.
+   *                              Carries `backgroundRunActive` (true = a dismissed-but-running review is
+   *                              live; false = it completed / failed / was never backgrounded).
+   *                              WorkspacePane consumes it to show a tiny circular progress indicator on
+   *                              the running Compose tab header until the run completes, so the dismissed
+   *                              progress card leaves NO visible-yet-unmounted remnant (UAT round-4 item
+   *                              #10a, ai-advanced-capabilities-agreements-r1). Same "signal
+   *                              infrastructure" shape as `nda_review_progress_visibility` above.
    * - `streaming_started`      — a structured-output streaming run has begun; downstream widgets
    *                              (e.g. StructuredOutputStreamWidget, R5 task 017 / D2-07) mount and
    *                              prepare to receive section events. Carries `streamId` so multiple
@@ -318,6 +328,7 @@ export interface WorkspacePaneEvent {
     | 'session_reset'
     | 'active_widget_changed'
     | 'nda_review_progress_visibility'
+    | 'nda_review_background_run'
     | 'streaming_started'
     | 'streaming_complete'
     | 'section_started'
@@ -462,6 +473,19 @@ export interface WorkspacePaneEvent {
    * ADR-015 binding: a plain boolean UI-visibility flag (Tier 1 safe). Not a user-content surface.
    */
   progressVisible?: boolean;
+
+  /**
+   * Whether a review run whose progress modal has been DISMISSED ("Continue working in background") is
+   * still executing server-side. Required when `type === 'nda_review_background_run'`.
+   *
+   * Consumer: `WorkspacePane` tracks the latest value and, while true, renders a tiny circular progress
+   * indicator (Fluent Spinner) on the running Compose tab header — the run's liveness after the modal is
+   * dismissed. Goes false when the run reaches a terminal state (completion then flows through the
+   * existing `ReviewCompleteToast` rules) or a fresh run begins visible again (UAT round-4 item #10a).
+   *
+   * ADR-015 binding: a plain boolean UI-liveness flag (Tier 1 safe). Not a user-content surface.
+   */
+  backgroundRunActive?: boolean;
 
   // ── selection_changed fields ──────────────────────────────────────────────
 

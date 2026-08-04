@@ -32,6 +32,7 @@
  *      double-notification while the modal is still showing)
  */
 import * as React from 'react';
+import { useOptionalDispatchPaneEvent } from '@spaarke/ai-widgets';
 
 export type NdaRunStatus = 'idle' | 'running' | 'complete' | 'error';
 
@@ -88,6 +89,19 @@ export function useNdaReviewRunProgress(): NdaReviewRunProgress {
   const dismiss = React.useCallback((): void => setDismissed(true), []);
 
   const visible = status !== 'idle' && !dismissed;
+
+  // UAT round-4 (item #10a): after "Continue working in background", the run's liveness moves to the
+  // WORKSPACE tab strip. `backgroundRunActive` is true exactly while a run is STILL executing but its
+  // modal has been dismissed - the state the tab spinner represents. We broadcast it on the PaneEventBus
+  // (workspace channel, additive discriminant per ADR-030, mirroring the item-#8
+  // `nda_review_progress_visibility` precedent) so WorkspacePane - which owns the tab strip and lives in
+  // a sibling pane - can render the indicator. `useOptionalDispatchPaneEvent` no-ops when this hook is
+  // rendered without a PaneEventBusProvider (e.g. its own unit test), so the hook stays bus-optional.
+  const backgroundRunActive = status === 'running' && dismissed;
+  const dispatch = useOptionalDispatchPaneEvent();
+  React.useEffect(() => {
+    dispatch('workspace', { type: 'nda_review_background_run', backgroundRunActive });
+  }, [backgroundRunActive, dispatch]);
 
   return { status, visible, begin, complete, fail, close, dismiss };
 }
