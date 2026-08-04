@@ -194,9 +194,14 @@ const useStyles = makeStyles({
     overflowY: 'auto',
     display: 'flex',
     flexDirection: 'column',
-    // Hide the visible scrollbar (round 4) — wheel scroll still works.
-    scrollbarWidth: 'none',
-    '::-webkit-scrollbar': { width: 0, height: 0 },
+    // Thin modern scrollbar (owner UAT 2026-08-04 item 1 — consistency with the Email
+    // widget's list + reading pane). Semantic tokens (ADR-021) so it themes in dark mode.
+    scrollbarWidth: 'thin',
+    scrollbarColor: `${tokens.colorNeutralStroke1} transparent`,
+    '::-webkit-scrollbar': { width: '8px', height: '8px' },
+    '::-webkit-scrollbar-thumb': { backgroundColor: tokens.colorNeutralStroke1, borderRadius: tokens.borderRadiusMedium },
+    '::-webkit-scrollbar-thumb:hover': { backgroundColor: tokens.colorNeutralStroke1Hover },
+    '::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
     // Rows are separated by thin divider lines (round 7 item 6, Email-widget
     // style) — no inter-row gap, no card radius. Padding lives on the rows so the
     // divider spans the full row width.
