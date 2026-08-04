@@ -531,9 +531,13 @@ public sealed class IncomingCommunicationProcessor
     private async Task<Guid> CreateCommunicationRecordAsync(
         Message message, string mailboxEmail, string graphMessageId, CancellationToken ct)
     {
-        // Determine body content: prefer uniqueBody (stripped of reply/forward content) over full body
-        var bodyContent = message.UniqueBody?.Content ?? message.Body?.Content ?? string.Empty;
-        var bodyContentType = message.UniqueBody?.ContentType ?? message.Body?.ContentType;
+        // Determine body content: prefer the FULL body (the complete conversation thread) over
+        // Graph's uniqueBody, which strips all quoted reply/forward content and reduces a multi-
+        // message thread to only the latest message. Owner UAT 2026-08-03: an incoming email
+        // carrying a 5-message thread must be stored WITH the thread, not just the top message.
+        // uniqueBody is retained only as a fallback for the rare case Graph omits body.
+        var bodyContent = message.Body?.Content ?? message.UniqueBody?.Content ?? string.Empty;
+        var bodyContentType = message.Body?.ContentType ?? message.UniqueBody?.ContentType;
 
         // Map CC recipients to semicolon-separated string
         var ccRecipients = message.CcRecipients?

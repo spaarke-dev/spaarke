@@ -39,6 +39,12 @@ function getInitializer(): CodePageAuthInitializer {
       // EmailPage-specific: omit tenantId → factory falls back to Xrm
       // (preserves the DailyBriefing precedent for standalone code pages).
       proactiveRefresh: false, // Short-lived dialog / standalone tab
+      // owner UAT 2026-08-03 R5 item 6 — suppress the involuntary acquireTokenPopup on
+      // load (ADR-028 INV-5). The Email page's first `.eml` render fetch was popping an
+      // interactive sign-in window on a cold MSAL cache; the user is already authenticated
+      // in the host MDA session, so ssoSilent resolves — the cold edge now degrades to the
+      // page's own retryable auth-error state instead of an out-of-context popup.
+      requireSilentOnly: true,
       logLabel: "EmailPage",
       beforeInit: waitForConfig, // Wait for runtimeConfig.setRuntimeConfig() in main.tsx
     });

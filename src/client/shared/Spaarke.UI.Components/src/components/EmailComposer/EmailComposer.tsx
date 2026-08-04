@@ -47,6 +47,9 @@ import {
   MenuList,
   MenuItem,
   MenuItemRadio,
+  Popover,
+  PopoverTrigger,
+  PopoverSurface,
   makeStyles,
   shorthands,
   tokens,
@@ -60,6 +63,7 @@ import {
   ChevronUp20Regular,
   DocumentText20Regular,
   Sparkle20Regular,
+  Add20Regular,
 } from '@fluentui/react-icons';
 import type { CommunicationSendMode } from '../../services/communicationApi';
 import { ModalWindowControls } from '../ModalWindowControls';
@@ -130,6 +134,12 @@ const DEFAULT_AI_DRAFT_ACTIONS: IEmailAiDraftAction[] = [
   { intent: 'friendly', label: 'Friendly tone' },
   { intent: 'grammar', label: 'Fix grammar & tone' },
 ];
+
+// Quick-actions that TRANSFORM a text selection rather than the whole draft (owner UAT
+// 2026-08-03 R5 item 5). They only appear when the author has text selected in the body,
+// and their result replaces that selection (not the whole body). Everything else acts on
+// the full draft.
+const SELECTION_SCOPED_AI_INTENTS = new Set<string>(['concise', 'formal', 'friendly']);
 
 /**
  * Resolve recipient-openable SPE sharing links for the attachments the author toggled **Link** on
@@ -359,6 +369,44 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: '2px',
   },
+  // Vertical "|" separator between the attach/record-link group and the template/AI group
+  // (owner UAT 2026-08-03 R5 item 3). `alignSelf: stretch` sizes it to the toolbar row height.
+  toolbarDivider: {
+    flexShrink: 0,
+    width: '1px',
+    alignSelf: 'stretch',
+    marginTop: tokens.spacingVerticalXS,
+    marginBottom: tokens.spacingVerticalXS,
+    marginLeft: tokens.spacingHorizontalXS,
+    marginRight: tokens.spacingHorizontalXS,
+    backgroundColor: tokens.colorNeutralStroke2,
+  },
+  // AI "Draft with AI" inline Popover (owner UAT 2026-08-03 R5 item 5): a titled
+  // free-text prompt over an actions row ("+" quick responses on the left, Generate/
+  // Cancel on the right). Fluent v9 semantic tokens only (ADR-021).
+  aiPopover: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    minWidth: '320px',
+    maxWidth: '420px',
+  },
+  aiPromptInput: {
+    width: '100%',
+  },
+  aiPopoverActions: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
+  },
+  aiPopoverButtons: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
   liveRegion: {
     position: 'absolute',
     width: '1px',
@@ -457,12 +505,18 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   const [templateError, setTemplateError] = React.useState<string | null>(null);
   const [pendingTemplateId, setPendingTemplateId] = React.useState<string | null>(null);
 
-  // AI "sparkle" draft (Wave E). `aiDrafting` disables the sparkle while a completion is in flight;
-  // the "Enter prompt" free-text action opens `aiPromptOpen` with `aiPromptText`.
+  // AI "sparkle" draft (Wave E; redesigned owner UAT 2026-08-03 R5 item 5). `aiDrafting`
+  // disables the sparkle while a completion is in flight. The sparkle is now an inline
+  // Popover: a free-text prompt (type directly + Generate) plus a "+" quick-responses menu.
+  // `aiMenuOpen` drives the popover; `aiSelectionText` is the editor text that was selected
+  // WHEN the popover opened (Lexical retains its selection across the focus change), which
+  // gates the selection-scoped quick actions (make concise / formal / friendly).
   const [aiDrafting, setAiDrafting] = React.useState(false);
   const [aiError, setAiError] = React.useState<string | null>(null);
-  const [aiPromptOpen, setAiPromptOpen] = React.useState(false);
+  const [aiMenuOpen, setAiMenuOpen] = React.useState(false);
+  const [aiSelectionText, setAiSelectionText] = React.useState('');
   const [aiPromptText, setAiPromptText] = React.useState('');
+  const aiPromptInputRef = React.useRef<HTMLTextAreaElement>(null);
 
   // Record lookup (owner UAT round 5, RegardingResolver pattern): a document pick attaches
   // (Attach/Link per row); any other record type is inserted as a link in the message body
@@ -709,18 +763,31 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // body (the user explicitly invoked a draft). A short in-flight guard prevents double-submits.
   const showSparkle = !state.readOnly && !!props.onDraftWithAi;
   const aiDraftActions = props.aiDraftActions ?? DEFAULT_AI_DRAFT_ACTIONS;
+  const hasAiSelection = aiSelectionText.trim().length > 0;
+  // Hide selection-scoped quick actions unless the author has a live text selection.
+  const visibleAiActions = React.useMemo(
+    () => aiDraftActions.filter(a => !SELECTION_SCOPED_AI_INTENTS.has(a.intent) || hasAiSelection),
+    [aiDraftActions, hasAiSelection]
+  );
 
   const runAiDraft = React.useCallback(
-    (intent: string, userInstruction?: string) => {
+    (intent: string, opts?: { userInstruction?: string; selectionText?: string }) => {
       const draft = props.onDraftWithAi;
       if (!draft) return;
+      const selectionText = opts?.selectionText?.trim();
+      // Only scope to the selection in HTML mode — that's where Lexical retains the range
+      // we can replace via insertAtCursor (the plain textarea exposes no selection here).
+      const scopeToSelection = !!selectionText && stateRef.current.bodyFormat === 'HTML' && !!bodyEditorRef.current;
       setAiDrafting(true);
       setAiError(null);
+      setAiMenuOpen(false);
       const isHtml = stateRef.current.bodyFormat === 'HTML';
       void draft({
         intent,
-        userInstruction,
-        currentBody: stateRef.current.body,
+        userInstruction: opts?.userInstruction,
+        // Selection-scoped actions transform ONLY the selected text; whole-draft actions
+        // send the full body.
+        currentBody: scopeToSelection ? (selectionText as string) : stateRef.current.body,
         isHtml,
         subject: stateRef.current.subject,
       })
@@ -730,8 +797,21 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             return;
           }
           const resultIsHtml = result.isHtml ?? isHtml;
-          dispatch({ type: 'SET_BODY_FORMAT', value: resultIsHtml ? 'HTML' : 'PlainText' });
-          dispatch({ type: 'SET_FIELD', field: 'body', value: result.text });
+          if (scopeToSelection) {
+            // Replace the retained editor selection with the transformed text (leaves the
+            // rest of the draft untouched). The editor's onChange propagates the new body.
+            bodyEditorRef.current?.insertAtCursor(result.text, resultIsHtml ? 'html' : 'text');
+          } else {
+            // owner UAT 2026-08-03 R5 items 1/2 — on a reply/forward, KEEP the quoted previous
+            // thread: the AI generates the author's message, then we re-append the stored quoted
+            // block below it (so the thread survives the draft AND is included when sent).
+            const quoted = stateRef.current.quotedThread;
+            const nextBody = quoted
+              ? `${result.text}${resultIsHtml ? '<p></p>' : '\n\n'}${quoted}`
+              : result.text;
+            dispatch({ type: 'SET_BODY_FORMAT', value: resultIsHtml ? 'HTML' : 'PlainText' });
+            dispatch({ type: 'SET_FIELD', field: 'body', value: nextBody });
+          }
         })
         .catch(() => setAiError('AI drafting is unavailable right now.'))
         .finally(() => setAiDrafting(false));
@@ -742,10 +822,34 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   const submitAiPrompt = React.useCallback(() => {
     const instruction = aiPromptText.trim();
     if (!instruction) return;
-    setAiPromptOpen(false);
     setAiPromptText('');
-    runAiDraft('custom', instruction);
+    runAiDraft('custom', { userInstruction: instruction });
   }, [aiPromptText, runAiDraft]);
+
+  const runAiQuickAction = React.useCallback(
+    (intent: string) => {
+      runAiDraft(intent, SELECTION_SCOPED_AI_INTENTS.has(intent) ? { selectionText: aiSelectionText } : undefined);
+    },
+    [runAiDraft, aiSelectionText]
+  );
+
+  // Capture the live editor selection the moment the sparkle Popover opens (HTML mode:
+  // Lexical retains it across the focus change; plain mode reports none), then focus the
+  // prompt field so the user can type immediately.
+  const handleAiMenuOpenChange = React.useCallback((open: boolean) => {
+    if (open) {
+      const selected = bodyEditorRef.current?.getSelectedText?.() ?? '';
+      setAiSelectionText(selected);
+      setAiError(null);
+    }
+    setAiMenuOpen(open);
+  }, []);
+
+  React.useEffect(() => {
+    if (!aiMenuOpen) return;
+    const t = window.setTimeout(() => aiPromptInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(t);
+  }, [aiMenuOpen]);
 
   const toolbarSlot =
     canAddLocal || canLinkDocument || showRecordSearch || showTemplatePicker || showSparkle ? (
@@ -786,6 +890,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             </MenuPopover>
           </Menu>
         )}
+        {/* "|" separator between the attach/record-link group and the template/AI group
+            (owner UAT 2026-08-03 R5 item 3) — only when both groups have at least one tool. */}
+        {(showTemplatePicker || showSparkle) && (canAddLocal || canLinkDocument || showRecordSearch) && (
+          <span className={styles.toolbarDivider} role="separator" aria-orientation="vertical" />
+        )}
         {showTemplatePicker && (
           // Apply an email template (Wave E). Grouped with the paperclip/search in the same
           // toolbar section. Templates load on menu open; picking one fills subject + body.
@@ -819,10 +928,17 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           </Menu>
         )}
         {showSparkle && (
-          // AI draft "sparkle" (Wave E): preset quick-actions + a free-text "Enter prompt" action.
-          // Disabled + spinner while a completion is in flight.
-          <Menu positioning="below-end">
-            <MenuTrigger disableButtonEnhancement>
+          // AI draft "sparkle" (Wave E; redesigned owner UAT 2026-08-03 R5 item 5): an
+          // inline Popover with a free-text prompt (type + Generate) and a "+" quick-
+          // responses menu. Selection-scoped actions (concise / formal / friendly) appear
+          // only when the author has text selected. Spinner + disabled while in flight.
+          <Popover
+            open={aiMenuOpen}
+            onOpenChange={(_e, data) => handleAiMenuOpenChange(data.open)}
+            positioning="above-end"
+            trapFocus
+          >
+            <PopoverTrigger disableButtonEnhancement>
               <Tooltip content="Draft or refine with AI" relationship="label">
                 <ToolbarButton
                   icon={aiDrafting ? <Spinner size="tiny" /> : <Sparkle20Regular />}
@@ -830,18 +946,55 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
                   disabled={aiDrafting}
                 />
               </Tooltip>
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                {aiDraftActions.map(a => (
-                  <MenuItem key={a.intent} onClick={() => runAiDraft(a.intent)}>
-                    {a.label}
-                  </MenuItem>
-                ))}
-                <MenuItem onClick={() => setAiPromptOpen(true)}>Enter prompt…</MenuItem>
-              </MenuList>
-            </MenuPopover>
-          </Menu>
+            </PopoverTrigger>
+            <PopoverSurface>
+              <div className={styles.aiPopover} role="group" aria-label="Draft with AI">
+                <Text weight="semibold">Draft with AI</Text>
+                <Textarea
+                  ref={aiPromptInputRef}
+                  className={styles.aiPromptInput}
+                  value={aiPromptText}
+                  onChange={(_e, data) => setAiPromptText(data.value)}
+                  onKeyDown={e => {
+                    // Ctrl/Cmd+Enter submits (a bare Enter keeps newlines for multi-line prompts).
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      submitAiPrompt();
+                    }
+                  }}
+                  placeholder="e.g. Draft a polite reply asking for the signed contract by Friday."
+                  aria-label="AI prompt"
+                  resize="vertical"
+                />
+                <div className={styles.aiPopoverActions}>
+                  <Menu positioning="above-start">
+                    <MenuTrigger disableButtonEnhancement>
+                      <Tooltip content="Quick responses" relationship="label">
+                        <Button appearance="subtle" icon={<Add20Regular />} aria-label="Quick responses" />
+                      </Tooltip>
+                    </MenuTrigger>
+                    <MenuPopover>
+                      <MenuList>
+                        {visibleAiActions.map(a => (
+                          <MenuItem key={a.intent} onClick={() => runAiQuickAction(a.intent)}>
+                            {a.label}
+                          </MenuItem>
+                        ))}
+                      </MenuList>
+                    </MenuPopover>
+                  </Menu>
+                  <div className={styles.aiPopoverButtons}>
+                    <Button appearance="primary" onClick={submitAiPrompt} disabled={!aiPromptText.trim() || aiDrafting}>
+                      Generate
+                    </Button>
+                    <Button appearance="secondary" onClick={() => setAiMenuOpen(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </PopoverSurface>
+          </Popover>
         )}
       </div>
     ) : undefined;
@@ -869,6 +1022,19 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     props.onStateChange?.(state);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
+
+  // ── Autofocus the body at the top on open (owner UAT 2026-08-03 R5 item 4) ──
+  // When the composer opens editable (new / reply / reply-all / forward), drop the
+  // caret at the TOP of the drafting field so the user types immediately without a
+  // click. Mount-only, so mode transitions on an already-mounted instance still get
+  // the a11y heading-focus above (the reset effect). A microtask defer lets the
+  // Lexical editor mount before we focus. Read-only (view mode) never grabs focus.
+  React.useEffect(() => {
+    if (stateRef.current.readOnly) return;
+    const t = window.setTimeout(() => bodyEditorRef.current?.focus('start'), 0);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Imperative handle ──────────────────────────────────────────────────
   const validate = React.useCallback((): IValidationResult => {
@@ -1210,39 +1376,6 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
                 Apply
               </Button>
               <Button appearance="secondary" onClick={cancelTemplate}>
-                Cancel
-              </Button>
-            </DialogActions>
-          </DialogBody>
-        </DialogSurface>
-      </Dialog>
-
-      {/* AI "Enter prompt" free-text dialog (Wave E). Submitting runs the 'custom' intent. */}
-      <Dialog
-        open={aiPromptOpen}
-        modalType="alert"
-        onOpenChange={(_e, data) => {
-          if (!data.open) setAiPromptOpen(false);
-        }}
-      >
-        <DialogSurface>
-          <DialogBody>
-            <DialogTitle>Draft with AI</DialogTitle>
-            <DialogContent>
-              <Textarea
-                value={aiPromptText}
-                onChange={(_e, data) => setAiPromptText(data.value)}
-                placeholder="e.g. Draft a polite reply asking for the signed contract by Friday."
-                aria-label="AI prompt"
-                resize="vertical"
-                style={{ width: '100%' }}
-              />
-            </DialogContent>
-            <DialogActions>
-              <Button appearance="primary" onClick={submitAiPrompt} disabled={!aiPromptText.trim()}>
-                Generate
-              </Button>
-              <Button appearance="secondary" onClick={() => setAiPromptOpen(false)}>
                 Cancel
               </Button>
             </DialogActions>

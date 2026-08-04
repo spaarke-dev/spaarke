@@ -36,6 +36,7 @@
  * ADR-022: React 19, NOT PCF-safe.
  */
 import * as React from 'react';
+import { makeStyles } from '@fluentui/react-components';
 import { EmailWorkspace } from '@spaarke/communication-components';
 import {
   XrmDataverseClient,
@@ -49,6 +50,30 @@ import {
 import { useAiSession } from '../../providers/useAiSession';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 
+// Bounded-height host for the DIRECT widget mount (owner UAT 2026-08-03 R5 item 1).
+// ROOT CAUSE (DevTools showed the widget rendering 752×8209px): the SpaarkeAi tab/section
+// content area is CONTENT-DRIVEN (WorkspaceShell rows are deliberately NOT height:100%), so
+// a plain `height:100%` COLLAPSES TO AUTO and the widget grows to fit ALL its content — the
+// inner list/reading-pane `overflowY:auto` never engages and the whole surface scrolls as one.
+// The fix is the established full-height-widget pattern used by the Messages widget
+// (`CommunicationsWorkspaceWidget`) and SmartTodo: declare an explicit viewport-based height
+// FLOOR + matching CAP (`calc(100vh - 200px)` ≈ app header + tab bar + section chrome), which
+// pins the widget to a DEFINITE box regardless of the content-driven parent. `height:100%`
+// still wins when a host DOES constrain height (bounded tile). With a definite box,
+// `EmailWorkspace.root` resolves and its two panes scroll INDEPENDENTLY.
+const useStyles = makeStyles({
+  host: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    width: '100%',
+    minWidth: 0,
+    minHeight: 'calc(100vh - 200px)',
+    maxHeight: 'calc(100vh - 200px)',
+    overflow: 'hidden',
+  },
+});
+
 /**
  * Direct workspace widget wrapper for `<EmailWorkspace />`.
  *
@@ -58,6 +83,7 @@ import type { WorkspaceWidgetProps } from '../../types/widget-types';
  * `useEmailWorkspaceRecord` (tasks 031/040) once mounted with host adapters.
  */
 export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
+  const styles = useStyles();
   const { authenticatedFetch, bffBaseUrl } = useAiSession();
 
   // Stable across the widget's lifetime — one Xrm-backed adapter set per
@@ -110,26 +136,28 @@ export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
   }
 
   return (
-    <EmailWorkspace
-      dataverseClient={dataverseClient}
-      dataService={dataService}
-      navigationService={navigationService}
-      webApi={webApi}
-      authenticatedFetch={authenticatedFetch}
-      bffBaseUrl={bffBaseUrl}
-      onSearchRecipients={handleSearchRecipients}
-      onLookupRecipients={composeHandlers.onLookupRecipients}
-      recordLookupCatalog={composeHandlers.recordLookupCatalog}
-      onLookupRecord={composeHandlers.onLookupRecord}
-      onAddRelationship={composeHandlers.onAddRelationship}
-      onUploadLocalAttachment={composeHandlers.onUploadLocalAttachment}
-      onResolveShareLink={composeHandlers.onResolveShareLink}
-      onListEmailTemplates={composeHandlers.onListEmailTemplates}
-      onRenderEmailTemplate={composeHandlers.onRenderEmailTemplate}
-      onDraftWithAi={composeHandlers.onDraftWithAi}
-      fromMailbox={fromMailbox}
-      dataverseUrl={dataverseUrl}
-    />
+    <div className={styles.host} data-testid="email-widget-scroll-host">
+      <EmailWorkspace
+        dataverseClient={dataverseClient}
+        dataService={dataService}
+        navigationService={navigationService}
+        webApi={webApi}
+        authenticatedFetch={authenticatedFetch}
+        bffBaseUrl={bffBaseUrl}
+        onSearchRecipients={handleSearchRecipients}
+        onLookupRecipients={composeHandlers.onLookupRecipients}
+        recordLookupCatalog={composeHandlers.recordLookupCatalog}
+        onLookupRecord={composeHandlers.onLookupRecord}
+        onAddRelationship={composeHandlers.onAddRelationship}
+        onUploadLocalAttachment={composeHandlers.onUploadLocalAttachment}
+        onResolveShareLink={composeHandlers.onResolveShareLink}
+        onListEmailTemplates={composeHandlers.onListEmailTemplates}
+        onRenderEmailTemplate={composeHandlers.onRenderEmailTemplate}
+        onDraftWithAi={composeHandlers.onDraftWithAi}
+        fromMailbox={fromMailbox}
+        dataverseUrl={dataverseUrl}
+      />
+    </div>
   );
 };
 

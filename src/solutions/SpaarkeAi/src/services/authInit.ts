@@ -70,6 +70,13 @@ function getInitializer(): CodePageAuthInitializer {
       bffBaseUrl: getBffBaseUrl(),
       bffApiScope: getBffOAuthScope(),
       proactiveRefresh: true,
+      // owner UAT 2026-08-03 R5 item 6 — never surface an involuntary sign-in popup
+      // when a widget/tab mounts (the Email tab's first BFF fetch was tripping
+      // acquireTokenPopup on a cold MSAL cache). ADR-028 INV-5: a popup only from an
+      // explicit user auth action. The user is already signed in to the MDA session,
+      // so ssoSilent resolves normally; the cold-cache edge degrades to a retryable
+      // error instead of a second SpaarkeAi window opening on load.
+      requireSilentOnly: true,
       logLabel: "SpaarkeAi:authInit",
     });
   }

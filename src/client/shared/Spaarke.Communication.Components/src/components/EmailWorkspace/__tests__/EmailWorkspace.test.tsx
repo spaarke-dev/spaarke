@@ -364,6 +364,21 @@ describe('EmailWorkspace', () => {
     expect(stripVolatileIds(widgetHtml)).toEqual(stripVolatileIds(codePageHtml));
   });
 
+  it('the left-list Refresh button re-runs the active view fetch (owner UAT 2026-08-03 Item 2)', async () => {
+    const dataverseClient = makeDataverseClient();
+    renderWorkspace({ dataverseClient });
+
+    // Initial load runs the active view's FetchXML once.
+    const listPane = await screen.findByTestId('email-list-pane');
+    expect(await within(listPane).findByText('Quarterly filing update')).toBeInTheDocument();
+    await waitFor(() => expect(dataverseClient.retrieveMultipleRecords).toHaveBeenCalledTimes(1));
+
+    // Clicking Refresh re-runs the SAME view's FetchXML (no view change) — the
+    // rows-fetch fires a second time.
+    fireEvent.click(within(listPane).getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(dataverseClient.retrieveMultipleRecords).toHaveBeenCalledTimes(2));
+  });
+
   it('renders correctly under a dark FluentProvider theme (ADR-021) with no console errors', async () => {
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     renderWorkspace({}, webDarkTheme);
