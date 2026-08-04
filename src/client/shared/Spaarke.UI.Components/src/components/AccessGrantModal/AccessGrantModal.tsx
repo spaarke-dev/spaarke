@@ -69,12 +69,7 @@ import {
 } from '@fluentui/react-components';
 import { PersonRegular, DismissCircleRegular } from '@fluentui/react-icons';
 import { SprkModal } from '../SprkModal';
-import type {
-  IAccessGrantModalProps,
-  IAccessGrantCandidate,
-  IAccessGrantRecord,
-  IContactSearchResult,
-} from './types';
+import type { IAccessGrantModalProps, IAccessGrantCandidate, IAccessGrantRecord, IContactSearchResult } from './types';
 import { DEFAULT_ACCESS_LEVEL_OPTIONS } from './types';
 
 const useStyles = makeStyles({
@@ -183,7 +178,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   defaultAccessLevel,
 }) => {
   const styles = useStyles();
-  const effectiveAccessLevel = defaultAccessLevel ?? accessLevelOptions[0]?.value ?? DEFAULT_ACCESS_LEVEL_OPTIONS[0].value;
+  const effectiveAccessLevel =
+    defaultAccessLevel ?? accessLevelOptions[0]?.value ?? DEFAULT_ACCESS_LEVEL_OPTIONS[0].value;
 
   const [loading, setLoading] = React.useState(false);
   const [candidates, setCandidates] = React.useState<IAccessGrantCandidate[]>([]);
@@ -248,7 +244,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     [authenticatedFetch]
   );
 
-/** Outcome of a single {@link grantContact} call — the grant write itself
+  /** Outcome of a single {@link grantContact} call — the grant write itself
    * either succeeds or throws; these flags describe the two BEST-EFFORT,
    * non-blocking follow-ons (NFR-06) so callers can build one combined notice
    * instead of each sub-step clobbering the other's message. */
@@ -478,7 +474,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
             {notice && (
               <MessageBar intent={notice.intent} style={{ marginBottom: tokens.spacingVerticalM }}>
                 <MessageBarBody>
-                  <MessageBarTitle>{notice.intent === 'success' ? 'Success' : notice.intent === 'warning' ? 'Notice' : 'Error'}</MessageBarTitle>
+                  <MessageBarTitle>
+                    {notice.intent === 'success' ? 'Success' : notice.intent === 'warning' ? 'Notice' : 'Error'}
+                  </MessageBarTitle>
                   {notice.text}
                 </MessageBarBody>
               </MessageBar>
@@ -651,8 +649,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         }
       >
         <Text>
-          Revoke access for <strong>{revokeTarget?.fullName}</strong>? They will immediately lose access to this
-          record (unless a standing grant or other membership still applies).
+          Revoke access for <strong>{revokeTarget?.fullName}</strong>? They will immediately lose access to this record
+          (unless a standing grant or other membership still applies).
         </Text>
       </SprkModal>
     </>

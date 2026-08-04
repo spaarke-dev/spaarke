@@ -22,12 +22,7 @@ import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
-import type {
-  IAccessGrantModalProps,
-  IAccessGrantCandidate,
-  IAccessGrantRecord,
-  IContactSearchResult,
-} from '../types';
+import type { IAccessGrantModalProps, IAccessGrantCandidate, IAccessGrantRecord, IContactSearchResult } from '../types';
 
 const renderWithTheme = (ui: React.ReactElement, theme = webLightTheme) =>
   render(<FluentProvider theme={theme}>{ui}</FluentProvider>);
@@ -72,7 +67,12 @@ function makeProps(overrides?: Partial<IAccessGrantModalProps>): IAccessGrantMod
   const isInternalContact = jest.fn(async (contactId: string) => contactId === CANDIDATE_INTERNAL.contactId);
   const authenticatedFetch = jest.fn(async (url: string) => {
     if (url.includes('/invite-and-grant')) {
-      return jsonResponse({ contactId: CANDIDATE_EXTERNAL.contactId, onboardStatus: 'Provisioned', accessRecordId: 'new-1', portalUrl: 'https://portal' });
+      return jsonResponse({
+        contactId: CANDIDATE_EXTERNAL.contactId,
+        onboardStatus: 'Provisioned',
+        accessRecordId: 'new-1',
+        portalUrl: 'https://portal',
+      });
     }
     if (url.includes('/grant')) {
       return jsonResponse({ accessRecordId: 'new-2', speContainerMembershipGranted: false });
@@ -212,7 +212,11 @@ describe('AccessGrantModal (task 041)', () => {
         (c: [string, RequestInit]) => c[0] === '/api/v1/external-access/revoke'
       ) as [string, RequestInit];
       const body = JSON.parse(init.body as string);
-      expect(body).toMatchObject({ accessRecordId: 'grant-1', contactId: 'contact-existing-1', projectId: 'project-1' });
+      expect(body).toMatchObject({
+        accessRecordId: 'grant-1',
+        contactId: 'contact-existing-1',
+        projectId: 'project-1',
+      });
 
       await waitFor(() => {
         expect(screen.queryByText('Prior Grantee')).not.toBeInTheDocument();
@@ -261,10 +265,7 @@ describe('AccessGrantModal (task 041)', () => {
       const revokeButtons = screen.getAllByRole('button', { name: 'Revoke' });
       fireEvent.click(revokeButtons[revokeButtons.length - 1]);
       await waitFor(() =>
-        expect(props.authenticatedFetch).toHaveBeenCalledWith(
-          '/api/v1/external-access/revoke',
-          expect.anything()
-        )
+        expect(props.authenticatedFetch).toHaveBeenCalledWith('/api/v1/external-access/revoke', expect.anything())
       );
 
       expect(errorSpy).not.toHaveBeenCalled();
@@ -277,7 +278,11 @@ describe('AccessGrantModal (task 041)', () => {
 
   describe('named-contact picker', () => {
     it('searching and selecting a contact enables Add, and Add grants access', async () => {
-      const namedResult: IContactSearchResult = { contactId: 'contact-named-1', fullName: 'Nora Named', email: 'nora@example.com' };
+      const namedResult: IContactSearchResult = {
+        contactId: 'contact-named-1',
+        fullName: 'Nora Named',
+        email: 'nora@example.com',
+      };
       const props = makeProps({
         searchContacts: jest.fn(async () => [namedResult]),
         isInternalContact: jest.fn(async () => false),
