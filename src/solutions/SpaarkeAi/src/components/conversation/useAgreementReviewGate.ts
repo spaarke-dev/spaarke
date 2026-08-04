@@ -47,6 +47,7 @@ import {
   buildAgreementReviewConfirmMessage,
   buildAgreementReviewDepthChoiceChips,
   buildAgreementReviewDepthChoiceMessage,
+  buildAgreementReviewDirectDepthChoiceMessage,
   buildAgreementReviewNonAgreementChips,
   buildAgreementReviewSanityMismatchMessage,
   displayNameFor,
@@ -134,6 +135,16 @@ export interface AgreementReviewGateController {
   ) => Promise<void>;
   /** Routes a `local:agreement-review-*` chip click back to the pending gate decision. */
   handleGateChipAction: (actionId: string) => void;
+  /**
+   * UAT round-3 (item #7): the DIRECT consumer-chip/card click path (ConversationPane.handleReviewNda,
+   * the "Review an NDA" chip) — no classification, no `subDomain` slot (unchanged pre-070 wire shape).
+   * Inserts ONE depth-choice turn (reusing the SAME `pendingDepthRef`/chip machinery every other branch
+   * uses — never a second mechanism) before dispatching; the chip click IS the type commitment, so
+   * there is no type question to fold in. No-op if `reviewBindingId` is unavailable — the caller (which
+   * already resolved/checked the bindingId) is responsible for its own "capability unavailable" message
+   * in that case, mirroring `handleReviewNda`'s existing structure.
+   */
+  runDirectReview: (fileId: string, fileName: string | undefined) => void;
   /** True while classification is in flight (optional "Working…" affordance). */
   classifying: boolean;
   /**
@@ -185,6 +196,14 @@ type PendingDepthChoiceTarget =
       readonly kind: "both";
       readonly candidates: readonly AgreementClassifyCandidate[];
       readonly registry: readonly AgreementTypeRegistryEntry[];
+    }
+  | {
+      /**
+       * UAT round-3 (item #7) — the DIRECT consumer-chip/card click path (`runDirectReview`, below).
+       * No `subDomainKey` (the pre-070 dispatch never carried one) and no classifier-resolution
+       * tracking (there was never a classification to track).
+       */
+      readonly kind: "direct";
     };
 
 interface PendingDepthChoice {
@@ -363,6 +382,43 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
     [mountFileInCompose, reviewBindingId, dispatchReviewBinding, inject, awaitDocumentSessionId]
   );
 
+  /**
+   * UAT round-3 (item #7) — the DIRECT consumer-chip/card click dispatch (no classification, no
+   * `subDomain` slot). Mirrors `handleReviewNda`'s PRE-existing dispatch body EXACTLY (`slots:
+   * {fileIds}`, no `resultLabel`), only adding `reviewDepth` — the chip click already committed the
+   * type, so nothing else about the wire shape changes. `mountFileInCompose` is NOT called here — the
+   * caller (`runDirectReview` below / `handleReviewNda`) already mounted the file at click time,
+   * before the depth ask, so the document opens immediately regardless of how long the user takes to
+   * answer Quick/Thorough.
+   */
+  const dispatchDirectReview = React.useCallback(
+    async (fileId: string, reviewDepth: ReviewDepth): Promise<void> => {
+      if (!reviewBindingId) return;
+      const documentSessionId = await awaitDocumentSessionId(fileId);
+      await dispatchReviewBinding(reviewBindingId, {
+        slots: { fileIds: [fileId], reviewDepth },
+        sessionIdOverride: documentSessionId ?? undefined,
+      });
+    },
+    [reviewBindingId, dispatchReviewBinding, awaitDocumentSessionId]
+  );
+
+  /**
+   * UAT round-3 (item #7): the direct chip/card click entry point — see the controller interface doc
+   * comment for the full rationale. Presents the SAME standalone depth-choice turn `runGate`'s
+   * auto-proceed branch uses (below), scoped to `kind: "direct"` so `handleGateChipAction` dispatches
+   * via `dispatchDirectReview` (no `subDomain`) instead of `dispatchReview` (which always sets one).
+   */
+  const runDirectReview = React.useCallback(
+    (fileId: string, fileName: string | undefined): void => {
+      if (!fileId || !reviewBindingId) return;
+      pendingDepthRef.current = { fileId, fileName, target: { kind: "direct" } };
+      enqueueAssistantMessage(makeLocalAssistantMessage(buildAgreementReviewDirectDepthChoiceMessage()));
+      acceptChips(toConsumerChipWire(buildAgreementReviewDepthChoiceChips()));
+    },
+    [reviewBindingId, enqueueAssistantMessage, acceptChips]
+  );
+
   const runGate = React.useCallback(
     async (fileId: string, fileName: string | undefined): Promise<void> => {
       if (!fileId) return;
@@ -483,6 +539,13 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
           return;
         }
 
+        // UAT round-3 (item #7) — the direct chip/card path: no subDomain, no classifier-resolution
+        // tracking (there was never a classification to track).
+        if (target.kind === "direct") {
+          void dispatchDirectReview(fileId, reviewDepth);
+          return;
+        }
+
         resolvedRef.current.set(fileId, { subDomainKey: target.subDomainKey, displayName: target.displayName });
         if (target.trackAsClassifierResolution) {
           lastResolvedSubDomainKeyRef.current = target.subDomainKey; // task 023: classifier resolution
@@ -553,7 +616,7 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
         acceptChips(toConsumerChipWire(buildAgreementReviewDepthChoiceChips()));
       }
     },
-    [dispatchReview, dispatchBothSequentially, enqueueAssistantMessage, acceptChips]
+    [dispatchReview, dispatchBothSequentially, dispatchDirectReview, enqueueAssistantMessage, acceptChips]
   );
 
   // task 023 (FR-09 explicit door): binds `subDomainKey` DETERMINISTICALLY — no classification
@@ -656,10 +719,19 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
       runGate,
       runExplicit,
       handleGateChipAction,
+      runDirectReview,
       classifying,
       getLastResolvedSubDomainKey,
       resetForSession,
     }),
-    [runGate, runExplicit, handleGateChipAction, classifying, getLastResolvedSubDomainKey, resetForSession]
+    [
+      runGate,
+      runExplicit,
+      handleGateChipAction,
+      runDirectReview,
+      classifying,
+      getLastResolvedSubDomainKey,
+      resetForSession,
+    ]
   );
 }

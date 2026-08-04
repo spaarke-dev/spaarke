@@ -695,6 +695,16 @@ export function ConversationPane(): React.JSX.Element {
   ndaRunRef.current = ndaRun;
   const ndaReviewBindingIdRef = React.useRef<string | null>(null);
   ndaReviewBindingIdRef.current = ndaReviewBindingId;
+  // UAT round-3 (item #8): broadcast the progress modal's visibility on the PaneEventBus so
+  // ReviewCompleteToast (shell/ReviewCompleteToast.tsx) can suppress a redundant completion toast
+  // while the modal itself is STILL showing the outcome (no double-notification per the decided
+  // matrix: dialog open+visible -> no toast; dismissed+on-tab -> no toast, existing active-tab
+  // suppression already covers it; dismissed+off-tab -> toast fires, the 071 notify-me case). The
+  // modal is now non-blocking (item #8), so "open+visible while on a DIFFERENT workspace tab" is a
+  // real reachable state that did not exist before this fix.
+  React.useEffect(() => {
+    dispatch("workspace", { type: "nda_review_progress_visibility", progressVisible: ndaRun.visible });
+  }, [ndaRun.visible, dispatch]);
   // R5-9 (UAT 2026-07-20): "Send as email" / Quick Start "Send Email" open the shared Email Compose
   // modal (SendEmailDialog / EmailComposer). `emailSeed` non-null = open; it carries the pre-fill
   // (subject / body / suggested recipients) captured from the last "Draft a response" result.
@@ -1372,18 +1382,13 @@ export function ConversationPane(): React.JSX.Element {
     const { fileId, fileName, cardLabel } = ndaReviewFile;
     mountFileInCompose(fileId, fileName);
     if (ndaReviewBindingId) {
-      // task 031 (DEF-09 routing): await the mounted file's REAL document session (may already be
-      // known — an already-open/ingested document — or back-fill shortly after the mount above) and
-      // thread it as `sessionIdOverride` so this review's compose-disposition SessionOutput lands
-      // where ComposeWorkspace reads compose-outputs. Gracefully proceeds on the bound chat session
-      // (undefined override) if the document session never establishes (no open document / mount
-      // failure) — never blocks, never drops the review.
-      void awaitDocumentSessionIdFor(fileId).then((documentSessionId) => {
-        chips.dispatchBinding(ndaReviewBindingId, {
-          slots: { fileIds: [fileId] },
-          sessionIdOverride: documentSessionId ?? undefined,
-        });
-      });
+      // UAT round-3 (item #7): the direct chip/card click no longer dispatches immediately — it now
+      // presents the SAME one-turn Quick/Thorough depth ask task 070 built for the gate's other
+      // branches (reusing its `pendingDepthRef`/chip machinery, not a second mechanism). The chip
+      // click already committed the type (no `subDomain` slot either way — unchanged pre-070 wire
+      // shape), so the depth pick is the ONLY remaining question; `runDirectReview` handles the
+      // `awaitDocumentSessionIdFor`/`sessionIdOverride` threading (task 031 DEF-09) once answered.
+      agreementReviewGate.runDirectReview(fileId, fileName);
     } else {
       // Capability discovery hasn't resolved yet (or the catalog is unreachable) — the file still
       // opens in Compose above; tell the user the review itself didn't start (never a silent drop).
@@ -1394,7 +1399,7 @@ export function ConversationPane(): React.JSX.Element {
       );
     }
     setNdaReviewFile(null);
-  }, [ndaReviewFile, ndaReviewBindingId, mountFileInCompose, chips, injection, awaitDocumentSessionIdFor]);
+  }, [ndaReviewFile, ndaReviewBindingId, mountFileInCompose, agreementReviewGate, injection]);
 
   const handleDocAction = React.useCallback(
     (action: ComposeDocAction): void => {
@@ -2437,8 +2442,15 @@ export function ConversationPane(): React.JSX.Element {
   return (
     <div className={styles.root}>
       {/* UAT round-5 #9 — center-screen live-progress popup while an NDA review runs (portals to
-          document.body, so its placement in the tree is immaterial). */}
-      <NdaReviewProgressModal status={ndaRun.status} onClose={ndaRun.close} />
+          document.body, so its placement in the tree is immaterial). UAT round-3 item #8: now
+          non-blocking (modalType="non-modal") + dismissible via ndaRun.visible/dismiss — see
+          useNdaReviewRunProgress.ts. */}
+      <NdaReviewProgressModal
+        status={ndaRun.status}
+        visible={ndaRun.visible}
+        onClose={ndaRun.close}
+        onDismiss={ndaRun.dismiss}
+      />
       <PaneHeader
         title="Assistant"
         icon={<ChatRegular />}
