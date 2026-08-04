@@ -98,6 +98,29 @@ import { openSpaarkeAi } from '../../utils/launch-resolver';
 // Briefing in dev) instead of a hard-coded Home tab. See the auto-install
 // effect below for the dispatch path.
 import { useWorkspaceLayouts } from '../../hooks/useWorkspaceLayouts';
+// UAT round-5 item #13 (workspace-tab persistence + resume): durable localStorage
+// persistence for the UNBOUND home-surface Compose tab(s) + their in-flight review
+// runs — the one surface `tabAnchorKeyForContext` (entityContext-keyed) and the
+// BFF `/tabs` store (chatSessionId-keyed) both decline to cover. See the module
+// header for the exact gap + design.
+import {
+  readComposeRunState,
+  writeComposeRunState,
+  upsertPersistedComposeTab,
+  removePersistedComposeTab,
+  clearRunInFlight,
+  isRunResumable,
+  hasFindings,
+  findLatestFindingsPayload,
+  withComposeSessionId,
+  COMPOSE_RUN_IN_FLIGHT_MAX_MS,
+  type ComposeLedgerOutputLike,
+} from './composeRunPersistence';
+// UAT round-5 item #13 (resume poll): reuse the SHIPPED live-completion projection
+// (conversation/**) so a polled compose-outputs ledger entry materializes findings
+// through the EXACT same `compose_advisory_comments` receiver the live path uses —
+// no re-implemented projection (§11 reuse).
+import { projectFlaggedSectionsToAdvisoryComments } from '../conversation/useNdaReviewAdvisoryCommentsBridge';
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -907,6 +930,256 @@ export function WorkspacePane(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isComposeLaunch, isAuthenticated, tabRestoreSettled]);
 
+  // ===========================================================================
+  // UAT round-5 item #13 — home-surface Compose-tab persistence + resume
+  //
+  // Extends (does NOT replace) the two shipped tab-persistence mechanisms for the
+  // one surface they both decline to cover: the UNBOUND "home" surface (Daily
+  // Briefing → direct-Compose door), where `tabAnchorKeyForContext` returns null
+  // (no entityContext) AND the BFF `/tabs` store has no `chatSessionId` at
+  // tab-open time. See `composeRunPersistence.ts` for the exact gap + the storage
+  // choice (localStorage, following the existing `sprk_ai2_*` convention + the
+  // owner's conditional; reliable across the code-page iframe teardown).
+  //
+  // "Home surface" = no bound host record (no local anchor), not an analysis
+  // deep-link, and not a ribbon compose-launch (each of those owns its own cold
+  // mount). When bound, the shipped anchors already restore the Compose tab.
+  // ===========================================================================
+  const isHomeSurface = !tabAnchorKey && !analysisLaunch && !isComposeLaunch;
+
+  // Refs mirror the values the (inline) PaneEventBus handler + the callbacks below
+  // read, so they never go stale regardless of the subscription's closure vintage.
+  const isHomeSurfaceRef = React.useRef(isHomeSurface);
+  const chatSessionIdRef = React.useRef<string | null>(chatSessionId ?? null);
+  React.useEffect(() => {
+    isHomeSurfaceRef.current = isHomeSurface;
+  }, [isHomeSurface]);
+  React.useEffect(() => {
+    chatSessionIdRef.current = chatSessionId ?? null;
+  }, [chatSessionId]);
+
+  // Persist-on-open + capture-session-when-available. Runs whenever the open
+  // Compose tab set OR chatSessionId changes: read-modify-writes the durable
+  // localStorage snapshot (never in-memory-only, so it can't drop a tab it did
+  // not itself open), upserting every currently-open Compose tab. Upsert MERGES
+  // (preserves any prior `run`/`sessionId`), so this never wipes an in-flight
+  // flag captured by the background-run handler. It NEVER removes — removal is
+  // explicit-close only (agency; see handleTabClose). No-op off the home surface.
+  React.useEffect(() => {
+    if (!isHomeSurface) return;
+    const composeTabs = tabState.tabs.filter(t => t.widgetType === 'compose');
+    if (composeTabs.length === 0) return;
+    const now = Date.now();
+    let snap = readComposeRunState(now);
+    let changed = false;
+    for (const t of composeTabs) {
+      const instanceKey = composeTabInstanceKey(t);
+      if (!instanceKey) continue; // no durable document identity → cannot reliably restore; skip
+      snap = upsertPersistedComposeTab(snap, {
+        instanceKey,
+        widgetType: 'compose',
+        widgetData: t.widgetData,
+        displayName: t.displayName,
+        savedAt: now,
+        sessionId: chatSessionId ?? undefined,
+      });
+      changed = true;
+    }
+    if (changed) writeComposeRunState(snap);
+  }, [tabState.tabs, chatSessionId, isHomeSurface]);
+
+  // Background-run capture: `nda_review_background_run` (round-4) fires true when a
+  // review whose progress modal was dismissed ("Continue working in background") is
+  // still executing. On the home surface we stamp the ACTIVE Compose tab's persisted
+  // entry with `run:{inFlight,dispatchedAt}` + the current session so a return trip
+  // can resume the spinner + poll; on the terminal false we clear the flag.
+  const handleBackgroundRunChange = React.useCallback((active: boolean): void => {
+    setComposeReviewRunningInBackground(active);
+    if (!isHomeSurfaceRef.current) return;
+    const activeTab = managerRef.current.getActiveTab();
+    if (!activeTab || activeTab.widgetType !== 'compose') return;
+    const instanceKey = composeTabInstanceKey(activeTab);
+    if (!instanceKey) return;
+    const now = Date.now();
+    const current = readComposeRunState(now);
+    if (active) {
+      // Upsert-with-run guarantees the entry exists even if persist-on-open has not
+      // flushed yet (races the same tab-open), capturing the session to poll on.
+      writeComposeRunState(
+        upsertPersistedComposeTab(current, {
+          instanceKey,
+          widgetType: 'compose',
+          widgetData: activeTab.widgetData,
+          displayName: activeTab.displayName,
+          savedAt: now,
+          sessionId: chatSessionIdRef.current ?? undefined,
+          run: { inFlight: true, dispatchedAt: now },
+        })
+      );
+    } else {
+      writeComposeRunState(clearRunInFlight(current, instanceKey));
+    }
+  }, []);
+
+  // Resume poll (still-running case): show the tab spinner (reusing round-4's
+  // `composeReviewRunning` slot) and poll compose-outputs until the review's
+  // findings land, then materialize them through the SAME `compose_advisory_comments`
+  // receiver the live path uses (+ the completion-toast rules run for free). A
+  // `sawEmpty` guard makes this fire ONLY when findings arrive AFTER we observed an
+  // empty ledger — so it never double-places with the reopened tab's own FR-16
+  // mount-materialize (which handles the already-complete case). Bounded by the
+  // young-run ceiling; a single shared boolean drives the spinner (round-4 parity).
+  const [composeReviewResuming, setComposeReviewResuming] = React.useState(false);
+  const resumeActiveCountRef = React.useRef(0);
+  const resumePollCleanupsRef = React.useRef<Array<() => void>>([]);
+  React.useEffect(() => {
+    return () => {
+      resumePollCleanupsRef.current.forEach(fn => fn());
+      resumePollCleanupsRef.current = [];
+    };
+  }, []);
+
+  const runResumePoll = React.useCallback(
+    (instanceKey: string, sessionId: string): void => {
+      if (!sessionId || !bffBaseUrl || !isAuthenticated) return;
+      resumeActiveCountRef.current += 1;
+      setComposeReviewResuming(resumeActiveCountRef.current > 0);
+
+      let sawEmpty = false;
+      let cancelled = false;
+      let timerId: number | null = null;
+      const startedAt = Date.now();
+      const POLL_INTERVAL_MS = 5000;
+
+      const finish = (): void => {
+        if (cancelled) return;
+        cancelled = true;
+        if (timerId !== null) {
+          window.clearInterval(timerId);
+          timerId = null;
+        }
+        resumeActiveCountRef.current = Math.max(0, resumeActiveCountRef.current - 1);
+        setComposeReviewResuming(resumeActiveCountRef.current > 0);
+        // Clear the in-flight flag durably (the run is now resolved/timed-out for us);
+        // the seed + session stay persisted so a later open still recalls findings.
+        writeComposeRunState(clearRunInFlight(readComposeRunState(Date.now()), instanceKey));
+      };
+
+      const poll = async (): Promise<void> => {
+        if (cancelled) return;
+        if (Date.now() - startedAt > COMPOSE_RUN_IN_FLIGHT_MAX_MS) {
+          finish();
+          return;
+        }
+        try {
+          const url = buildBffApiUrl(
+            bffBaseUrl,
+            `/ai/chat/sessions/${encodeURIComponent(sessionId)}/compose-outputs`
+          );
+          const resp = await authenticatedFetch(url, {
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+          });
+          if (cancelled) return;
+          if (!resp.ok) return; // transient; keep polling until the deadline
+          const outputs = (await resp.json()) as ComposeLedgerOutputLike[];
+          if (cancelled) return;
+          const present = hasFindings(outputs);
+          if (present && sawEmpty) {
+            // Findings arrived AFTER an empty observation → the reopened tab's own
+            // mount-materialize already ran empty and will NOT re-fire. Place them
+            // via the live event (dispatched ONCE), then stop.
+            const payload = findLatestFindingsPayload(outputs);
+            if (payload) {
+              dispatch('workspace', {
+                type: 'compose_advisory_comments',
+                advisoryComments: projectFlaggedSectionsToAdvisoryComments(
+                  payload.flaggedSections as Parameters<typeof projectFlaggedSectionsToAdvisoryComments>[0]
+                ),
+                overallRisk: payload.overallRisk,
+                sessionId,
+                timestamp: new Date().toISOString(),
+              });
+            }
+            finish();
+            return;
+          }
+          if (present && !sawEmpty) {
+            // Findings already present on the FIRST check → the reopened tab's own
+            // FR-16 mount-materialize is placing them from the SAME ledger; defer to
+            // it (no dispatch → no double-placement).
+            finish();
+            return;
+          }
+          sawEmpty = true;
+        } catch {
+          /* network/parse transient — keep polling until the deadline */
+        }
+      };
+
+      timerId = window.setInterval(() => {
+        void poll();
+      }, POLL_INTERVAL_MS);
+      resumePollCleanupsRef.current.push(finish);
+      void poll(); // immediate first check
+    },
+    [bffBaseUrl, isAuthenticated, authenticatedFetch, dispatch]
+  );
+
+  // Cold-load restore (home surface): once the shipped restore has settled, reopen
+  // any FRESH persisted Compose tab that is not already open — via the EXACT same
+  // `widget_load{ compose }` door a normal open uses (so ComposeDirectWidget →
+  // ComposeWorkspace resumes the document via the threaded `composeSessionId` and
+  // FR-16 recall re-materializes completed findings on mount). For a still-young
+  // in-flight run, start the resume poll (spinner + findings-on-arrival).
+  const composeRunRestoreRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!isAuthenticated) return;
+    if (!tabRestoreSettled) return;
+    if (!isHomeSurface) return;
+    if (composeRunRestoreRef.current) return;
+    composeRunRestoreRef.current = true;
+
+    const now = Date.now();
+    const snapshot = readComposeRunState(now);
+    if (!snapshot || snapshot.tabs.length === 0) return;
+
+    const manager = managerRef.current;
+    const openKeys = new Set(
+      manager
+        .getSnapshot()
+        .tabs.filter(t => t.widgetType === 'compose')
+        .map(t => composeTabInstanceKey(t))
+        .filter((k): k is string => !!k)
+    );
+    const toRestore = snapshot.tabs.filter(t => !openKeys.has(t.instanceKey));
+    if (toRestore.length === 0) return;
+
+    // Macrotask deferral — same subscription-race guard as the auto-install effects:
+    // usePaneEvent's 'workspace' subscription (declared later) must be live when we
+    // dispatch, or the widget_load lands on a zero-subscriber channel.
+    const timerId = window.setTimeout(() => {
+      for (const t of toRestore) {
+        const seed = withComposeSessionId(t.widgetData, t.sessionId);
+        // eslint-disable-next-line no-console
+        console.info(
+          `[WorkspacePane] Restoring home-surface Compose tab: ${t.displayName} (${t.instanceKey})` +
+            (isRunResumable(t.run, Date.now()) ? ' [review in-flight → resuming]' : '')
+        );
+        dispatch('workspace', {
+          type: 'widget_load',
+          widgetType: 'compose',
+          widgetData: seed,
+          displayName: t.displayName,
+        });
+        if (t.sessionId && isRunResumable(t.run, Date.now())) {
+          runResumePoll(t.instanceKey, t.sessionId);
+        }
+      }
+    }, 0);
+    return () => window.clearTimeout(timerId);
+  }, [isAuthenticated, tabRestoreSettled, isHomeSurface, dispatch, runResumePoll]);
+
   // ---------------------------------------------------------------------------
   // Analysis entry-matrix auto-install (task 050 — spec §12 / FR-14)
   //
@@ -1285,7 +1558,9 @@ export function WorkspacePane(): React.JSX.Element {
     // dismissed progress card itself is fully unmounted (useNdaReviewRunProgress `visible=false` →
     // NdaReviewProgressModal returns null), so this signal is the ONLY remaining liveness surface.
     if (event.type === 'nda_review_background_run') {
-      setComposeReviewRunningInBackground(event.backgroundRunActive === true);
+      // Drives the round-4 tab spinner AND (item #13) stamps the active home-surface
+      // Compose tab's persisted run-in-flight state for cross-navigation resume.
+      handleBackgroundRunChange(event.backgroundRunActive === true);
       return;
     }
 
@@ -1786,6 +2061,21 @@ export function WorkspacePane(): React.JSX.Element {
   const handleTabClose = React.useCallback(
     (tabId: string): void => {
       const manager = managerRef.current;
+
+      // UAT round-5 (item #13): an EXPLICIT close is an agency signal — do not
+      // resurrect this Compose tab on return. Capture its instance key BEFORE the
+      // close removes it, then drop it from the home-surface persisted snapshot.
+      // (Navigation teardown never calls closeTab, so those tabs are retained.)
+      if (isHomeSurfaceRef.current) {
+        const closingTab = manager.getSnapshot().tabs.find(t => t.id === tabId);
+        if (closingTab?.widgetType === 'compose') {
+          const instanceKey = composeTabInstanceKey(closingTab);
+          if (instanceKey) {
+            writeComposeRunState(removePersistedComposeTab(readComposeRunState(Date.now()), instanceKey));
+          }
+        }
+      }
+
       const newActiveId = manager.closeTab(tabId);
       syncState();
 
@@ -1943,7 +2233,9 @@ export function WorkspacePane(): React.JSX.Element {
         onTabDataChange={handleTabDataChange}
         // UAT round-4 (item #10a): a dismissed-but-still-running review shows a tiny circular
         // progress indicator on the running Compose tab header until completion.
-        composeReviewRunning={composeReviewRunningInBackground}
+        // UAT round-5 (item #13): the SAME slot shows while a restored Compose tab's
+        // in-flight review is being resumed (poll until findings land).
+        composeReviewRunning={composeReviewRunningInBackground || composeReviewResuming}
         // spaarkeai-compose-r1 task 100 — suppress the tab strip in compose
         // mode; the Compose widget renders full-pane. See the block comment
         // above the header definition for rationale + widget-add contract.

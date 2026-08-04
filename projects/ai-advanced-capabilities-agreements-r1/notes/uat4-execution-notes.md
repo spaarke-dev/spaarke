@@ -399,3 +399,141 @@ file-boundary/wave-scoping fact, not an ADR MUST/MUST NOT tension, so §6.5's pr
 apply — it is reported per the task's own pre-authorized STOP-and-report clause instead.
 
 No Critical or Warning findings.
+
+---
+
+## agent #13 — UAT round-5 item #13 (workspace-tab persistence + resume) — 2026-08-04
+
+Opus, FULL rigor. Scope: leaving SpaarkeAi entirely (full SPA teardown) and returning must restore the
+home-surface Compose tab that was running an NDA analysis — still open, still running (spinner) or
+completed (findings restored). History-overlay reopen is NOT an acceptable primary path (owner). HARD
+BOUNDARIES honored: surfaces = `shell/**` (read-only in the end), `workspace/**`, `conversation/**`
+(read-only reuse of one exported fn); `Compose.Components` read-only; `src/server/**` READ-ONLY (zero
+changes — polling the existing compose-outputs GET sufficed, no escalation); no `.claude/**` /
+`current-task.md` / `TASK-INDEX.md`; no git commit/push. No concurrent agents this wave.
+
+### Investigate-first (§11) — what the shipped restore infra already did, and the EXACT gap
+
+Two parallel read-only Explore agents + direct reads established ground truth:
+
+1. **`SessionRestoreManager` (ThreePaneShell.tsx:582)** is the shell-level restore, but it fires ONLY
+   when a `?sessionId=` URL param is present (`useSessionRestore` -> `GET .../restore`). The owner's
+   return trip is a plain cold-load of the SpaarkeAi area with NO `?sessionId=`, so it does not fire.
+2. **WorkspacePane tab persistence (task 065/025)** has two layers, BOTH of which decline the owner's
+   surface: (a) the localStorage anchor `tabAnchorKeyForContext` (`sprk_ai2_workspaceTabs__<entity>:<id>`)
+   returns **null** when there is no `entityContext` — and the home surface (Daily Briefing -> direct
+   Compose) has none; (b) the BFF `/tabs` PATCH/GET is gated on `chatSessionId`, which is **null at
+   tab-open time** for an unbound direct-Compose session (lazily minted later) and does not restore the
+   tab on return. Confirmed by cold-load analysis: "the compose tab is genuinely lost — neither restore
+   trigger exists." So the gap is a CLIENT persistence + resume problem, exactly as the parent framed it
+   (server-side survival is round-4 #10b; completed findings are FR-16-recallable).
+3. **The remount door** already exists: `widget_load{ widgetType:'compose', widgetData:{compose:seed} }`
+   -> `ComposeDirectWidget` (`initialSessionId = compose.composeSessionId`) -> `ComposeWorkspace` BFF Load
+   `?sessionId=` resume. On mount, `materializeComposeDraftFromLedger` (ComposeWorkspace.tsx:2085, fires
+   on `state.status -> 'loaded'`) reads `GET .../compose-outputs` and re-materializes COMPLETED findings
+   (FR-16). So reopening the tab with the right session restores completed findings for FREE.
+4. **The still-running materialization:** re-dispatching `widget_load` (same instance key) does NOT
+   re-materialize (reuse branch, no remount). The live placement mechanism is the
+   `compose_advisory_comments` PaneEventBus event (ComposeWorkspace `onAdvisoryComments`, a standing
+   subscriber that places on every dispatch). `projectFlaggedSectionsToAdvisoryComments` is EXPORTED from
+   `conversation/useNdaReviewAdvisoryCommentsBridge.ts` (reusable). The compose-outputs ledger signals
+   findings via a `payload.flaggedSections` array (no top-level flag).
+
+### Design (smallest honest version; extend, don't invent)
+
+Persist ONLY the home-surface Compose tab(s) — the one surface the shipped anchors miss — keyed on the
+SAME `deriveComposeInstanceKey` identity, to ONE versioned localStorage entry. Storage choice =
+**localStorage** (not the owner's default sessionStorage) per the owner's own conditional ("if the
+existing restore infra uses localStorage, follow ITS convention" — `tabAnchorKeyForContext` +
+`chatSessionKeyForContext` both do) AND because localStorage reliably survives the code-page iframe
+teardown/recreate that same-tab MDA navigation performs (sessionStorage's nested-browsing-context
+lifetime is ambiguous — an unacceptable risk for the load-bearing restore). Freshness + agency are
+bounded by an 8h TTL + explicit-close removal; schema is versioned + additive.
+
+- **PERSIST** — persist-on-open (an effect upserts every open home-surface Compose tab's seed +
+  `chatSessionId`) + persist-on-run-start (the round-4 `nda_review_background_run{backgroundRunActive}`
+  handler stamps the active tab's `run:{inFlight,dispatchedAt}` + session). Upsert MERGES (preserves any
+  prior run/session), NEVER removes (removal is explicit-close only).
+- **RESTORE** — a cold-load effect (home surface = no anchor + no analysis-launch + no compose-launch;
+  gated on the shipped `tabRestoreSettled` so it sequences AFTER the shipped restore) reopens each FRESH
+  persisted Compose tab via the EXACT `widget_load{compose}` door, threading the captured session as
+  `compose.composeSessionId` (-> FR-16 recall on mount). Deduped by instance key against already-open
+  compose tabs; macrotask-deferred (same subscription-race guard as the auto-install effects).
+- **RESUME** — for a still-young in-flight run (`isRunResumable`, < 300s OpenAI timeout + 30s margin),
+  reuse the round-4 tab spinner (`composeReviewRunning`) and poll `GET .../compose-outputs`; on
+  findings-**after-empty** (a `sawEmpty` guard so it never double-places with the reopened tab's own
+  mount-materialize, which handles the already-complete case) dispatch ONE `compose_advisory_comments`
+  (placement + `ReviewCompleteToast` rules run for free), then clear the flag. On timeout -> clear + show
+  the doc (findings on next open via FR-16).
+- **AGENCY** — `handleTabClose` drops the entry on an explicit close; navigation teardown never calls
+  `closeTab`, so those entries survive -> the tab reopens.
+
+### Session-id linkage (the one correctness assumption, documented)
+
+The resume/recall session = `chatSessionId` captured at persist time. For the direct upload-mount door
+(the owner's repro) chat === document session by construction (033 "session coincidence"), so threading it
+as `composeSessionId` resumes the findings-bearing session. If they ever diverge, the poll simply finds
+no findings -> times out gracefully -> the tab shows the document, findings on next open. No server probe
+needed (parent's escalation clause not triggered).
+
+### ADR-030 / §11 / §10 self-check (FULL rigor)
+
+- **ADR-030 (typed PaneEvents):** ZERO new discriminants. Dispatches the EXISTING `compose_advisory_comments`
+  (byte-identical shape to `useNdaReviewAdvisoryCommentsBridge`'s live dispatch) + `widget_load{compose}`;
+  subscribes to the EXISTING `nda_review_background_run` (round-4). PASS.
+- **§11 (extend, don't invent):** Existing? — the two shipped anchors, both proven to decline the unbound
+  home surface. Extension? — reuses `deriveComposeInstanceKey`, the `widget_load{compose}` door, the
+  round-4 spinner slot, the `compose_advisory_comments` receiver, `projectFlaggedSectionsToAdvisoryComments`,
+  the `sprk_ai2_*` localStorage key family; the only NEW surface is the storage shape + freshness/resume
+  rules (no existing mechanism provides them for the unbound case). Cost-of-doing-nothing? — the Compose
+  tab running an NDA review is CLOSED on return (the exact item-#13 loss). PASS.
+- **§10 (BFF Hygiene):** N/A — zero `src/server/**` changes; polls one EXISTING GET endpoint. PASS.
+- **code-review:** no `any` in the module (unknown + narrowing); no try/catch-log-rethrow (best-effort
+  storage/fetch swallow, matching the shipped `readLocalTabSnapshot` convention); resume polls registered
+  in a cleanup ref + cleared on unmount (no leaked timers/intervals); every guard names a concrete failure
+  mode inline. No Critical/Warning findings.
+
+### Documented limitations (honest)
+
+1. **Non-dismissed navigate-away spinner.** Run-in-flight capture rides the round-4
+   `nda_review_background_run` signal (fires on "Continue working in background"). Navigating away with the
+   modal STILL up -> the tab restores + document loads + completed findings materialize via FR-16, but with
+   NO live spinner/poll for that path. The round-4-demonstrated flow (dismiss -> spinner -> navigate) IS
+   covered. A future broadening would emit a run-start signal from `useNdaReviewRunProgress.begin()`
+   (touches `conversation/**` + a `Spaarke.AI.Widgets` event type — deferred to keep this minimal).
+2. **New browser tab / storage scope.** localStorage is origin-shared, so a fresh browser tab within the
+   8h TTL would also restore — a mild superset of the requirement, bounded by TTL + explicit-close.
+3. **Multi-tab spinner.** Persistence is fully additive (the whole compose-tab set); the resume spinner is
+   a single shared boolean across compose-tab headers (round-4 parity).
+
+### Files
+
+- **NEW** `src/solutions/SpaarkeAi/src/components/workspace/composeRunPersistence.ts` — pure module
+  (types + constants + read/write/prune/upsert/remove/mark/clear/resumable/findings-detect/seed-inject).
+- **MODIFIED** `src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx` — imports; `isHomeSurface`
+  + refs; persist-on-open effect; `handleBackgroundRunChange` (run-in-flight capture on the round-4 event);
+  `runResumePoll` + `composeReviewResuming` state (spinner OR'd into the render prop); cold-load restore
+  effect; `handleTabClose` explicit-close removal.
+- **NEW** `__tests__/composeRunPersistence.test.ts` (29) + `__tests__/WorkspacePane.compose-run-restore.test.tsx`
+  (6: persist-on-open, clear-on-close + not-resurrected, cold-load restore + session-inject, no-resume
+  when not in-flight, TTL expiry, run-in-flight resume spinner+poll->`compose_advisory_comments`).
+- **TEST-ISOLATION** `__tests__/WorkspacePane.compose-multi-tab.test.tsx` — added `localStorage.clear()` to
+  `beforeEach` (my feature now uses localStorage on the home surface; that suite asserts exact compose-tab
+  counts across cases and previously reset only `recordedPatches`). No production behavior change.
+
+### Tests (exact)
+
+```
+composeRunPersistence.test.ts                                   29/29  PASS
+WorkspacePane.compose-run-restore.test.tsx (new)                 6/6   PASS
+WorkspacePane.compose-multi-tab.test.tsx (isolation fix)         5/5   PASS
+Full SpaarkeAi package (npx jest)                              951/951 PASS (98/98 suites)
+                                                                (916 baseline + 35 new; one HardSlashExecutor
+                                                                 flake on the first full run — passed 43/43 in
+                                                                 isolation + green on the immediate re-run)
+SpaarkeAi npm run typecheck (tsc-surface-gate)                  Surface-owned: 0 (73 pre-existing shared-lib
+                                                                 errors, unchanged baseline)
+```
+
+No `.claude/**`, `current-task.md`, or `TASK-INDEX.md` writes. No git commit/push. Zero `src/server/**`
+changes.
