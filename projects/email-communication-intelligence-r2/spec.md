@@ -1,7 +1,8 @@
 # Email Communication Intelligence — R2 — AI Implementation Specification
 
-> **Status**: Ready for Implementation (pending 2 deployment/runbook inputs + 2 spikes; see Unresolved Questions)
+> **Status**: FINALIZED — ready for `/project-pipeline` (all scope resolved; 2 deployment/runbook inputs + 2 spikes are execution-phase, see Unresolved Questions)
 > **Created**: 2026-08-03
+> **Finalized**: 2026-08-04 (consistency pass: FR-A5 reference, hidden-header exclusion, publish-size baseline)
 > **Source**: `projects/email-communication-intelligence-r2/design.md`
 > **Builds on**: `email-communication-intelligence-r1` (shipped, deployed to `spaarke-bff-dev`, merged to master)
 
@@ -48,6 +49,7 @@ R2 hardens the **trusted-capture** layer under R1's association/triage engine: e
 - **SprkChat over mail**, **Daily Briefing 7th channel**, **policy-based auto-apply of the confident band** — R1 P2 deferrals, unchanged.
 - **M365 group-mailbox capture** — needs a forked pipeline + tenant-wide `Group.Read.All`; backlog.
 - **Visible subject-line token** — deferred, opt-in last resort for hostile transport only.
+- **Hidden `X-Spaarke-Regarding` header** (design §3.1 A1 delivery-channel 2) — **not built**; superseded by the owner's explicit/transparent-footer decision (a hidden header reintroduces the exact hidden-content/DLP risk the transparent footer avoids, and the body footer already survives intra-tenant hops, so the header adds no coverage the primary channel lacks for internal mail).
 - **ML ranker for the learning loop** — deferred; R2 ships the deterministic affinity table (its training corpus).
 - **Rung-level RecordNameMatch/ContactNameMatch surface-only reclassification** — round-3 partially subsumed it; not revisited here.
 - *(Moved INTO scope 2026-08-04: the r5 proposal-surface cards + Exceptions Queue are now Pillar E — R2 owns states D/E/F + Exceptions Queue.)*
@@ -106,7 +108,7 @@ R2 hardens the **trusted-capture** layer under R1's association/triage engine: e
 - **NFR-03 — Token is corroborating, never load-bearing.** Deletion/tampering of the footer degrades gracefully; the ladder never depends on the token alone.
 - **NFR-04 — Best-effort / non-fatal.** Token stamping, dedup, learning, and SPE hashing MUST NOT fail the capture or send path (ADR-045 NFR-06 inheritance).
 - **NFR-05 — AI facade discipline.** No `IOpenAiClient`/`IPlaybookService` injected into Communication code; AI reached only via `Services/Ai/PublicContracts/` (ADR-013).
-- **NFR-06 — Publish size.** Report absolute + delta per BFF-touching task; ceiling ≤60 MB compressed (baseline ~47 MB); no new HIGH CVE.
+- **NFR-06 — Publish size.** Report absolute + delta per BFF-touching task; ceiling ≤60 MB compressed (baseline ~45.9 MB excl PDBs / ~49.6 MB incl, per CLAUDE.md §10 as of 2026-07-08); no new HIGH CVE.
 - **NFR-07 — Token security.** HMAC signing key in Key Vault (ADR-028); signature verified before a token is trusted; footer is transparent (no hidden content).
 - **NFR-08 — Spike-gated SPE dedup.** The two `sdap-r1` spikes (quickXorHash post-upload timing/size; Tier-2 near-dup threshold + `documentVector3072` coverage) MUST complete before building Tier-1/Tier-2.
 - **NFR-09 — Extend never fork.** New rungs are additive to the single Association Engine (ADR-045/024); no parallel mechanism; regarding writes stay via `RegardingFieldMap`.
@@ -216,7 +218,7 @@ R2 hardens the **trusted-capture** layer under R1's association/triage engine: e
 | Token delivery | Plus-addressing vs mail-flow rule? | **Body footer is primary** (zero M365 config); mail-flow rules only for per-record addresses; plus-addressing **not** required | FR-A1 primary channel = body; FR-A2 uses mail-flow rules |
 | Token form | Hidden vs explicit? | **Explicit, transparent, generic wording**: "This message is tracked for document management. Ref: …" | Removes DLP/hidden-content risk; normal footer |
 | Token trust | Load-bearing? | **No — triangulation only**; tampering "not substantive or material" | `TrackingTokenRung` corroborates; signed-valid=high, bare=medium, deleted=graceful |
-| User-to-user mail | How matched if no Spaarke send? | Tag at any Spaarke-aware surface (send/add-in compose); untouched → ladder + learning (DMS parity) | FR-A5 coverage model |
+| User-to-user mail | How matched if no Spaarke send? | Tag at any Spaarke-aware surface (send/add-in compose); untouched → ladder + learning (DMS parity) | Coverage model realized by FR-A2/A3/A4 + the learning loop (design §A5); no separate FR |
 | Intake mechanism | Folder, add-in, or both? | **Both** | FR-B1 builds both |
 | SPE dedup | Absorb `sdap-r1`? Cover email too? | **Absorb; cover both** message and file/attachment layers | Pillar C two-layer scope |
 | Learning loop | Ship ML? | **Deterministic affinity now; defer ML** (deterministic table = future training corpus) | FR-A4 deterministic only |
