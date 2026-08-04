@@ -537,3 +537,157 @@ SpaarkeAi npm run typecheck (tsc-surface-gate)                  Surface-owned: 0
 
 No `.claude/**`, `current-task.md`, or `TASK-INDEX.md` writes. No git commit/push. Zero `src/server/**`
 changes.
+
+---
+
+## round-6 — items #14 (card placement) + #15a (dispatch-time run flag) + #15b (session re-adoption) — 2026-08-04
+
+Opus, FULL rigor. One agent owns the whole worktree this wave (no concurrent agents). Fixing gaps in the
+agent-B #9 card (top-of-pane placement), agent-C #10 background-run UX, and agent #13 persistence.
+HARD BOUNDARIES honored: `src/server/**` READ-ONLY (zero changes); no `.claude/**` / `current-task.md` /
+`TASK-INDEX.md` writes; no git commit/push.
+
+### Owner's exact repro (round-6)
+upload → "Review an NDA" chip → Quick → results → "Rerun a full analysis" → thorough started → navigated
+to Matters → returned. #13 restored the Compose tab + file (✅), but: no spinner, no poll, no notification,
+Assistant back at the start; and the rerun card had rendered pinned at the TOP of the Assistant pane.
+
+### #14 — card placement (INLINE in transcript, not top-of-pane)
+
+**Card-placement seam (found):** the transcript renders message-adjacent embellishments via SprkChat's
+`transcriptFooterSlot` — a memoized node (`transcriptFooter` in `ConversationPane.tsx`) that renders INSIDE
+the transcript, beneath the last message, and scrolls with the conversation (it already hosted the
+Click-path consumer chips + the compose doc-action chips). The `useRerunFullAnalysisCard` hook is
+unchanged; only WHERE ConversationPane renders `cardSlot` changed.
+
+**Fix:** moved `{rerunFullAnalysisCard.cardSlot}` OUT of the top-of-pane region (it sat next to
+`{suggestions.suggestionSlot}`, above SprkChat) and INTO `transcriptFooter` (rendered FIRST there, so it
+sits directly beneath the last message — right after a Quick review that is the "Quick scan — … I've
+finished reviewing…" completion message). It now scrolls with the conversation instead of floating pinned
+at top. The card arms/clears exactly as before (session-turn-scoped; single-slot; cleared on
+click/dismiss/session-reset).
+
+### #15a — dispatch-time run flag (the core fix)
+
+**Dispatch chokepoint chosen:** ConversationPane's `onChipDispatched` callback, guarded to
+`bindingId === ndaReviewBindingIdRef.current` — the SAME site where `ndaRun.begin()` already fires. This is
+the ONE true chokepoint: every review path (chip-quick `runDirectReview`→`dispatchDirectReview`; typed/gate
+`runExplicit`→`dispatchReview`; wizard auto-run; rerun-thorough `rerunThorough`) dispatches via
+`chips.dispatchBinding` → `useConsumerChips.runBindingDispatch`, which calls `onChipDispatched(bindingId)`
+at dispatch START. **Paths covered: chip-quick, typed/gate, wizard-auto-run, rerun-thorough** — all four.
+
+**Mechanism:** ONE new additive PaneEvent discriminant `nda_review_dispatch_active { dispatchActive: boolean }`
+(`@spaarke/ai-widgets` `PaneEventTypes.ts`; ADR-030 additive, ADR-015 Tier-1 boolean):
+- ConversationPane emits `{dispatchActive:true}` at the chokepoint (all paths), and `{dispatchActive:false}`
+  on review FAILURE (a new effect keyed on `ndaRun.status === 'error'`, which is reached ONLY when a review
+  run's `fail()` fired while still `running` — a genuine failure).
+- WorkspacePane stamps the ACTIVE home-surface Compose tab's persisted `run:{inFlight,dispatchedAt}` on
+  `{true}` (reusing the round-4 active-tab + session capture), clears it on `{false}`.
+- **Clear on completion** rides the EXISTING `compose_advisory_comments` event — which now fires even for a
+  zero-findings clean review (the round-1 #071 bridge fix; verified in
+  `useNdaReviewAdvisoryCommentsBridge.ts`). WorkspacePane clears keyed BY SESSION (new pure
+  `clearRunInFlightBySession`) rather than the active tab, because a dismissed run can complete while the
+  user has switched to a different workspace tab.
+- The round-4 dismiss signal (`nda_review_background_run`) is now PURELY a UI concern — it drives the
+  in-page tab spinner ONLY; it no longer stamps persistence. (This was the exact gap: the owner never
+  dismissed the modal, so nothing persisted.)
+
+The RESTORED tab's spinner + the #13 poll→materialize→toast chain run off the persisted flag as before —
+now the flag actually EXISTS on restore because it was stamped at dispatch (regardless of dismiss). This
+also closes #13's documented limitation #1 (modal-still-open navigate-away): on restore there is NO modal,
+and the spinner (`composeReviewResuming`) + resume poll carry the run alone.
+
+**Window decision:** bumped `COMPOSE_RUN_IN_FLIGHT_MAX_MS` 330s → **420s**. The resumability window must
+cover the whole dispatch→durable-findings span in the worst case: retrieval (~2–5s, ADDITIVE before the LLM)
++ the 300s OpenAI per-attempt timeout + ledger/SSE tail (~1–3s) + client dispatch→server latency + the 5s
+poll granularity + client/server clock skew between the client `dispatchedAt` stamp and the server LLM
+window ≈ 310–320s of genuinely-live time. 330s left only ~15s of margin once retrieval is counted as
+additive to the 300s timeout; 420s gives comfortable margin for a slow retrieval + clock skew + return-
+navigation latency while staying far under the 8h TTL. A ~2–3min Thorough run sits comfortably inside it.
+
+### #15b — Assistant session re-adoption on restore
+
+**Re-adoption mechanism:** ConversationPane's EXISTING workspace-channel listener (the task-033 wizard
+hand-off listener) — reuses `handleSelectHistorySession(composeSessionId)` + the synchronous
+`chatSessionIdRef` update (the SAME session-adoption seam the History menu, hub-grid `session_switch`, and
+033 wizard hand-off all use; no new mechanism). #13's cold-load restore already dispatches
+`widget_load{compose}` threading the persisted tab's `composeSessionId` (but NO `analysisId` — the direct-
+Compose door is unbound). A NEW branch in that listener adopts on `composeSessionId && !analysisId`
+(the wizard branch keeps requiring `analysisId`, unchanged).
+
+**Guard rule (documented):** adopt AT MOST once per mount (`restoreSessionAdoptedRef`), only when the pane
+is on a FRESH/DEFAULT session — `chatSessionIdRef.current !== composeSessionId` (not already on it) AND
+`chatMessageCountRef.current === 0` (empty transcript). The restore `widget_load` is dispatched macrotask-
+early on cold load (WorkspacePane defers it after `tabRestoreSettled`), before the user could realistically
+send a message; the empty-transcript check is the belt-and-braces "never clobber an active conversation the
+user already started after returning" gate. If the Assistant legitimately resumed the SAME review session
+already, the id-equality check makes it a no-op; if it resumed a DIFFERENT session that already has
+messages, the empty-transcript check blocks the clobber.
+
+*Honest limitation:* the re-adopted transcript is the SERVER-persisted conversation for that session;
+client-only injected lines (the "Quick scan…" caveat, the rerun card) are not server-persisted so they do
+not reappear on restore. The owner's complaint — session continuity ("back at the Review an NDA step") — is
+resolved; the in-flight thorough run's spinner/poll/toast/materialize is carried by #15a; the rerun card was
+already consumed (clicked) in the owner's flow.
+
+### Files
+
+- `src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts` — new `nda_review_dispatch_active`
+  discriminant + `dispatchActive?: boolean` field (additive).
+- `src/solutions/SpaarkeAi/src/components/workspace/composeRunPersistence.ts` — window 330s→420s (justified);
+  new pure `clearRunInFlightBySession`.
+- `src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx` — `handleBackgroundRunChange` now
+  UI-only (no persistence); new `handleReviewDispatchActive` (stamp/clear) + `handleReviewCompletionForSession`
+  (clear-by-session); new event branches for `nda_review_dispatch_active` + `compose_advisory_comments`.
+- `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx` — #15a emit at the
+  `onChipDispatched` chokepoint + failure-clear effect; #14 card moved into `transcriptFooter`; #15b restore
+  re-adoption branch + `chatMessageCountRef`/`restoreSessionAdoptedRef` guards.
+
+### Tests (exact)
+
+```
+composeRunPersistence.test.ts                                   33/33  PASS (29 pre-existing + 4 new:
+                                                                 3 clearRunInFlightBySession + 1 420s window)
+WorkspacePane.compose-run-restore.test.tsx                      11/11  PASS (6 pre-existing + 5 new #15a:
+                                                                 dispatch-time stamp, dismiss-no-longer-stamps,
+                                                                 completion clear-by-session incl. zero-findings,
+                                                                 failure clear, undismissed→restore→resume)
+ConversationPane.restore-session-readopt.test.tsx (NEW)          5/5   PASS (#15b adopt-when-fresh, guard on
+                                                                 active conversation, id-equality no-op,
+                                                                 once-per-mount, negative plain-open)
+ConversationPane.review-chip-depth-ask.e2e.test.tsx              5/5   PASS (3 pre-existing + 2 new: chip-quick
+                                                                 emit assertion; #14 card in transcript footer +
+                                                                 rerun-thorough dispatch + 2nd dispatch flag)
+ConversationPane.wizard-auto-run.e2e.test.tsx                    8/8   PASS (added the wizard/gate-path emit
+                                                                 assertion to the happy-path test)
+Full SpaarkeAi package (npx jest)                              966/967 PASS (951 baseline + 16 new = 967;
+                                                                 the 1 "fail" is HardSlashExecutor's
+                                                                 `elapsed < 100ms` timing flake — 43/43 in
+                                                                 isolation, documented in #13's notes)
+SpaarkeAi typecheck (tsc-surface-gate)                          Surface-owned: 0 (73 pre-existing shared-lib
+                                                                 errors, unchanged Phase-B baseline)
+Spaarke.AI.Widgets npm run build (tsc)                          clean, 0 errors
+SpaarkeAi npm run build (vite)                                  GREEN (built in 24.45s; index.html 5,274.40 kB
+                                                                 gzip 1,462.97 kB; 4 ribbon bundles rebuilt)
+```
+
+### Quality gates (self-run, FULL rigor)
+
+**code-review (self):** no `any` in production code (the typed `dispatchActive` field is used directly);
+no try/catch-log-rethrow (persistence stays best-effort per the shipped convention); every new guard names
+a concrete failure mode (non-home-surface / non-compose-active-tab / falsy-session / already-adopted /
+active-conversation); `dispatch` added to the `onChipDispatched` dep array (exhaustive-deps clean); refs
+used for cross-render-stable reads (`chatMessageCountRef`, `restoreSessionAdoptedRef`). No Critical/Warning.
+
+**adr-check (self):** ADR-030 — ONE additive discriminant + one field, unknown-type-ignored, no new
+channel (PASS). ADR-015 — `dispatchActive` a Tier-1 boolean; completion clear keys on a Tier-1 sessionId
+(PASS). ADR-039 — no new dispatch mechanism; the ONE `runBindingDispatch` chokepoint is unchanged (PASS).
+ADR-041 — card retains one-time semantics; re-adoption reuses `handleSelectHistorySession`, no new ask
+(PASS). §10 BFF Hygiene — ZERO `src/server/**` changes; resume poll reuses the EXISTING GET /compose-outputs
+(PASS). §11 — reused the transcriptFooter seam, the onChipDispatched chokepoint, the #13 persistence module,
+and the handleSelectHistorySession adoption seam; the only NEW surface is one additive event + one pure
+`clearRunInFlightBySession` (justified: completion clearing must key by session, which no existing function
+did) (PASS). No ADR conflict (§6.5 not triggered).
+
+No `.claude/**`, `current-task.md`, or `TASK-INDEX.md` writes. No git commit/push. Zero `src/server/**`
+changes. Not deployed (deploy is a separate task).

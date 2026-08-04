@@ -20,6 +20,7 @@ import {
   removePersistedComposeTab,
   markRunInFlight,
   clearRunInFlight,
+  clearRunInFlightBySession,
   isRunResumable,
   findLatestFindingsPayload,
   hasFindings,
@@ -245,6 +246,59 @@ describe('markRunInFlight / clearRunInFlight / isRunResumable', () => {
     expect(isRunResumable({ inFlight: false, dispatchedAt: NOW - 1000 }, NOW)).toBe(false);
     expect(isRunResumable({ inFlight: true, dispatchedAt: NOW - COMPOSE_RUN_IN_FLIGHT_MAX_MS - 1 }, NOW)).toBe(false);
     expect(isRunResumable(undefined, NOW)).toBe(false);
+  });
+
+  // UAT round-6 (item #15a): the resumability window must cover a worst-case dispatch→durable-findings
+  // span — retrieval (additive) + the 300s OpenAI per-attempt timeout + ledger/SSE tail + client poll
+  // granularity + clock skew. 420s comfortably covers a ~2–3min Thorough run AND a near-timeout run.
+  it('isRunResumable: the 420s window covers a ~3min run + a near-timeout run, but not a stale one', () => {
+    expect(COMPOSE_RUN_IN_FLIGHT_MAX_MS).toBe(420_000);
+    // A ~3min Thorough run (the owner's repro) that started 3min ago is still resumable.
+    expect(isRunResumable({ inFlight: true, dispatchedAt: NOW - 180_000 }, NOW)).toBe(true);
+    // A run that hit the ~300s ceiling and the user returns shortly after is still resumable.
+    expect(isRunResumable({ inFlight: true, dispatchedAt: NOW - 310_000 }, NOW)).toBe(true);
+    // Past the window, a run that produced nothing is treated as dead.
+    expect(isRunResumable({ inFlight: true, dispatchedAt: NOW - 420_001 }, NOW)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// clearRunInFlightBySession (UAT round-6 item #15a — completion clear keyed by session)
+// ---------------------------------------------------------------------------
+
+describe('clearRunInFlightBySession', () => {
+  it('clears the in-flight flag for the tab bound to the matching session', () => {
+    const prior: ComposeRunPersistenceSnapshot = {
+      version: 1,
+      tabs: [
+        tab({ instanceKey: 'upload:a', sessionId: 'sess-1', run: { inFlight: true, dispatchedAt: NOW } }),
+        tab({ instanceKey: 'upload:b', sessionId: 'sess-2', run: { inFlight: true, dispatchedAt: NOW } }),
+      ],
+    };
+    const out = clearRunInFlightBySession(prior, 'sess-1');
+    expect(out?.tabs.find(t => t.instanceKey === 'upload:a')?.run?.inFlight).toBe(false);
+    // The other session's tab is untouched.
+    expect(out?.tabs.find(t => t.instanceKey === 'upload:b')?.run?.inFlight).toBe(true);
+    // The tab + its session are preserved (only the flag flips).
+    expect(out?.tabs.find(t => t.instanceKey === 'upload:a')?.sessionId).toBe('sess-1');
+  });
+
+  it('is a no-op when no in-flight tab matches the session (and when sessionId is falsy)', () => {
+    const prior: ComposeRunPersistenceSnapshot = {
+      version: 1,
+      tabs: [tab({ instanceKey: 'upload:a', sessionId: 'sess-1', run: { inFlight: true, dispatchedAt: NOW } })],
+    };
+    expect(clearRunInFlightBySession(prior, 'sess-none')).toBe(prior);
+    expect(clearRunInFlightBySession(prior, undefined)).toBe(prior);
+    expect(clearRunInFlightBySession(null, 'sess-1')).toBeNull();
+  });
+
+  it('is a no-op when the matching tab is already not in-flight (idempotent)', () => {
+    const prior: ComposeRunPersistenceSnapshot = {
+      version: 1,
+      tabs: [tab({ instanceKey: 'upload:a', sessionId: 'sess-1', run: { inFlight: false, dispatchedAt: NOW } })],
+    };
+    expect(clearRunInFlightBySession(prior, 'sess-1')).toBe(prior);
   });
 });
 

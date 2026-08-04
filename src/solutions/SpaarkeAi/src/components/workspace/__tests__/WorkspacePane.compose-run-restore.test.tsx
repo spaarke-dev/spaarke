@@ -24,7 +24,7 @@
 
 import '@testing-library/jest-dom';
 import * as React from 'react';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, cleanup } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 import { PaneEventBus, PaneEventBusProvider, usePaneEvent } from '@spaarke/ai-widgets';
@@ -415,6 +415,164 @@ describe('WorkspacePane item #13 — run-in-flight resume', () => {
       });
       const after = readPersisted();
       expect(after?.tabs[0].run?.inFlight ?? false).toBe(false);
+    } finally {
+      jest.runOnlyPendingTimers();
+      jest.useRealTimers();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// UAT round-6 item #15a — DISPATCH-TIME run flag (the core fix)
+// ---------------------------------------------------------------------------
+
+describe('WorkspacePane item #15a — dispatch-time run flag', () => {
+  it('stamps the active Compose tab in-flight when a review is DISPATCHED (nda_review_dispatch_active:true) — no dismiss required', async () => {
+    const { bus } = renderPane();
+    await act(async () => {
+      bus.dispatch('workspace', composeUploadOpen('file-d1'));
+    });
+    await screen.findByTestId('compose-stub');
+    await waitFor(() => expect(readPersisted()?.tabs).toHaveLength(1));
+    // Precondition: nothing in-flight yet (no review dispatched).
+    expect(readPersisted()?.tabs[0].run?.inFlight ?? false).toBe(false);
+
+    // The dispatch chokepoint fires — the owner never dismissed the modal; this is the ONLY trigger now.
+    await act(async () => {
+      bus.dispatch('workspace', { type: 'nda_review_dispatch_active', dispatchActive: true });
+    });
+
+    await waitFor(() => expect(readPersisted()?.tabs[0].run?.inFlight).toBe(true));
+    expect(typeof readPersisted()?.tabs[0].run?.dispatchedAt).toBe('number');
+    expect(readPersisted()?.tabs[0].sessionId).toBe('session-home');
+  });
+
+  it('the round-4 dismiss signal (nda_review_background_run) NO LONGER stamps persistence (dismiss is now a UI-only concern)', async () => {
+    const { bus } = renderPane();
+    await act(async () => {
+      bus.dispatch('workspace', composeUploadOpen('file-d2'));
+    });
+    await screen.findByTestId('compose-stub');
+    await waitFor(() => expect(readPersisted()?.tabs).toHaveLength(1));
+
+    await act(async () => {
+      bus.dispatch('workspace', { type: 'nda_review_background_run', backgroundRunActive: true });
+    });
+    // Give any (would-be) write a chance to land, then assert it did NOT stamp a run flag.
+    await new Promise(r => setTimeout(r, 30));
+    expect(readPersisted()?.tabs[0].run).toBeUndefined();
+  });
+
+  it('clears the in-flight flag on COMPLETION (compose_advisory_comments for that session) — incl. a zero-findings clean review', async () => {
+    const { bus } = renderPane();
+    await act(async () => {
+      bus.dispatch('workspace', composeUploadOpen('file-d3'));
+    });
+    await screen.findByTestId('compose-stub');
+    await waitFor(() => expect(readPersisted()?.tabs).toHaveLength(1));
+    await act(async () => {
+      bus.dispatch('workspace', { type: 'nda_review_dispatch_active', dispatchActive: true });
+    });
+    await waitFor(() => expect(readPersisted()?.tabs[0].run?.inFlight).toBe(true));
+
+    // A zero-findings clean review still dispatches compose_advisory_comments (empty array) — the flag
+    // is keyed by the completing session, not the active tab.
+    await act(async () => {
+      bus.dispatch('workspace', {
+        type: 'compose_advisory_comments',
+        advisoryComments: [],
+        overallRisk: 'low',
+        sessionId: 'session-home',
+        timestamp: new Date().toISOString(),
+      });
+    });
+
+    await waitFor(() => expect(readPersisted()?.tabs[0].run?.inFlight).toBe(false));
+  });
+
+  it('clears the in-flight flag on dispatch FAILURE (nda_review_dispatch_active:false)', async () => {
+    const { bus } = renderPane();
+    await act(async () => {
+      bus.dispatch('workspace', composeUploadOpen('file-d4'));
+    });
+    await screen.findByTestId('compose-stub');
+    await waitFor(() => expect(readPersisted()?.tabs).toHaveLength(1));
+    await act(async () => {
+      bus.dispatch('workspace', { type: 'nda_review_dispatch_active', dispatchActive: true });
+    });
+    await waitFor(() => expect(readPersisted()?.tabs[0].run?.inFlight).toBe(true));
+
+    await act(async () => {
+      bus.dispatch('workspace', { type: 'nda_review_dispatch_active', dispatchActive: false });
+    });
+
+    await waitFor(() => expect(readPersisted()?.tabs[0].run?.inFlight).toBe(false));
+  });
+
+  it('the undismissed-modal path: a dispatch-time stamp survives a full navigate-away/return and resumes the spinner + poll (NO modal on restore — the spinner carries it alone)', async () => {
+    // Mount 1 (real timers): open the tab, then stamp at DISPATCH time. The user never dismisses the
+    // modal — this is the exact owner repro that round-4's dismiss-only stamping missed.
+    const first = renderPane();
+    await act(async () => {
+      first.bus.dispatch('workspace', composeUploadOpen('file-d5', 'Undismissed.docx'));
+    });
+    await screen.findByTestId('compose-stub');
+    await waitFor(() => expect(readPersisted()?.tabs).toHaveLength(1));
+    await act(async () => {
+      first.bus.dispatch('workspace', { type: 'nda_review_dispatch_active', dispatchActive: true });
+    });
+    await waitFor(() => expect(readPersisted()?.tabs[0].run?.inFlight).toBe(true));
+
+    // Navigate away → return: unmount, then a fresh cold mount reads the SAME (undismissed) localStorage.
+    cleanup();
+
+    jest.useFakeTimers();
+    try {
+      composeOutputsQueue = [
+        [], // first poll: still in flight
+        [
+          {
+            key: 'b1@t1',
+            bindingId: 'b1',
+            turn: 1,
+            disposition: 'compose',
+            payload: {
+              overallRisk: 'high',
+              flaggedSections: [{ quotedText: 'Clause 9', explanation: 'One-sided' }],
+            },
+          },
+        ],
+      ];
+      composeOutputsCallCount = 0;
+
+      const second = renderPane();
+      // Flush the restore setTimeout(0) → widget_load + runResumePoll (spinner + immediate empty poll).
+      await act(async () => {
+        jest.advanceTimersByTime(1);
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      await waitFor(() => {
+        expect(screen.queryByRole('status', { name: /review running/i })).not.toBeNull();
+      });
+
+      // Second poll (past the 5s interval) sees findings → materialize via compose_advisory_comments.
+      await act(async () => {
+        jest.advanceTimersByTime(5000);
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const advisory = second.events.find(e => e.type === 'compose_advisory_comments');
+      expect(advisory).toBeDefined();
+      expect(advisory?.sessionId).toBe('session-home');
+      expect(advisory?.advisoryComments).toHaveLength(1);
+
+      // Spinner clears + the flag is cleared durably.
+      await waitFor(() => {
+        expect(screen.queryByRole('status', { name: /review running/i })).toBeNull();
+      });
     } finally {
       jest.runOnlyPendingTimers();
       jest.useRealTimers();

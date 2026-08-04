@@ -364,6 +364,10 @@ beforeEach(() => {
 describe('task 033 FR-17: wizard hand-off → adopt Analysis-owned session + auto-run the review (ONE session everywhere)', () => {
   it('adopts the wizard session, and once the DEF-10 register lands the file, auto-dispatches the review on the picked pack — dispatch, upload, and ledger ALL on the wizard session', async () => {
     const bus = renderPane();
+    // UAT round-6 (item #15a): capture the workspace channel to prove the wizard/auto-run entry path
+    // also stamps the cross-navigation resume flag at the ONE `runBindingDispatch` chokepoint.
+    const workspaceEvents: WorkspacePaneEvent[] = [];
+    bus.subscribe('workspace', (e) => workspaceEvents.push(e as WorkspacePaneEvent));
 
     await publishSeed(bus);
 
@@ -401,6 +405,15 @@ describe('task 033 FR-17: wizard hand-off → adopt Analysis-owned session + aut
     expect(
       injectedMessages.some((m) => String(m.content).includes("couldn't start the agreement review automatically"))
     ).toBe(false);
+
+    // (6) UAT round-6 (item #15a): the review dispatch stamped the dispatch-time resume flag.
+    expect(
+      workspaceEvents.some(
+        (e) =>
+          e.type === 'nda_review_dispatch_active' &&
+          (e as WorkspacePaneEvent & { dispatchActive?: boolean }).dispatchActive === true
+      )
+    ).toBe(true);
   });
 
   // task 070 (UAT2 review-depth selector): the wizard's "Analysis Details" step now carries an

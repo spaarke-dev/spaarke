@@ -109,6 +109,7 @@ import {
   upsertPersistedComposeTab,
   removePersistedComposeTab,
   clearRunInFlight,
+  clearRunInFlightBySession,
   isRunResumable,
   hasFindings,
   findLatestFindingsPayload,
@@ -988,13 +989,28 @@ export function WorkspacePane(): React.JSX.Element {
     if (changed) writeComposeRunState(snap);
   }, [tabState.tabs, chatSessionId, isHomeSurface]);
 
-  // Background-run capture: `nda_review_background_run` (round-4) fires true when a
-  // review whose progress modal was dismissed ("Continue working in background") is
-  // still executing. On the home surface we stamp the ACTIVE Compose tab's persisted
-  // entry with `run:{inFlight,dispatchedAt}` + the current session so a return trip
-  // can resume the spinner + poll; on the terminal false we clear the flag.
+  // Background-run capture (round-4 dismiss signal): `nda_review_background_run` fires true when a
+  // review whose progress modal was dismissed ("Continue working in background") is still executing.
+  //
+  // UAT round-6 (item #15a): this signal is now PURELY a UI concern — it drives the in-page tab
+  // spinner ONLY. It NO LONGER stamps the persisted run-in-flight flag. The owner's repro proved the
+  // gap: they navigated away WITHOUT ever dismissing the modal, so this signal never fired and nothing
+  // persisted. The persistence flag is now stamped at DISPATCH time instead (see the
+  // `nda_review_dispatch_active` handler below), which fires for EVERY review path regardless of
+  // whether the modal is later dismissed.
   const handleBackgroundRunChange = React.useCallback((active: boolean): void => {
     setComposeReviewRunningInBackground(active);
+  }, []);
+
+  // Dispatch-time run capture (UAT round-6 item #15a): `nda_review_dispatch_active` fires true the
+  // instant a review binding is dispatched from the Assistant (the ONE `runBindingDispatch`
+  // chokepoint — chip/typed/gate/wizard/rerun all funnel through it), and false when that dispatch
+  // settles WITHOUT completing (failure). On the home surface we stamp the ACTIVE Compose tab's
+  // persisted entry with `run:{inFlight,dispatchedAt}` + the current session so a navigate-away-and-
+  // return trip resumes the spinner + poll — INDEPENDENT of the round-4 dismiss signal (the exact gap
+  // the owner hit). Clearing on COMPLETION rides `compose_advisory_comments` (keyed by session — see
+  // below); this false branch is the failure clear.
+  const handleReviewDispatchActive = React.useCallback((active: boolean): void => {
     if (!isHomeSurfaceRef.current) return;
     const activeTab = managerRef.current.getActiveTab();
     if (!activeTab || activeTab.widgetType !== 'compose') return;
@@ -1017,8 +1033,22 @@ export function WorkspacePane(): React.JSX.Element {
         })
       );
     } else {
+      // Dispatch failed — clear the active tab's flag so a return trip doesn't resume a dead run.
       writeComposeRunState(clearRunInFlight(current, instanceKey));
     }
+  }, []);
+
+  // Completion clear (UAT round-6 item #15a): a review completion — including a zero-findings clean
+  // review, which now dispatches unconditionally (see useNdaReviewAdvisoryCommentsBridge) — arrives as
+  // `compose_advisory_comments` carrying the completing `sessionId`. Clear the persisted in-flight flag
+  // for the tab bound to THAT session (keyed by session, not the active tab, because a dismissed run can
+  // complete while the user has switched to a different workspace tab). Idempotent no-op when nothing
+  // matches (e.g. the run was never stamped, or already cleared, or the completion is the resume poll's
+  // own re-dispatch on restore, which already cleared via `finish()`).
+  const handleReviewCompletionForSession = React.useCallback((sessionId: string | undefined): void => {
+    if (!isHomeSurfaceRef.current) return;
+    if (!sessionId) return;
+    writeComposeRunState(clearRunInFlightBySession(readComposeRunState(Date.now()), sessionId));
   }, []);
 
   // Resume poll (still-running case): show the tab spinner (reusing round-4's
@@ -1558,9 +1588,28 @@ export function WorkspacePane(): React.JSX.Element {
     // dismissed progress card itself is fully unmounted (useNdaReviewRunProgress `visible=false` →
     // NdaReviewProgressModal returns null), so this signal is the ONLY remaining liveness surface.
     if (event.type === 'nda_review_background_run') {
-      // Drives the round-4 tab spinner AND (item #13) stamps the active home-surface
-      // Compose tab's persisted run-in-flight state for cross-navigation resume.
+      // Round-4 dismiss signal — drives the in-page tab spinner ONLY. UAT round-6 (item #15a): it no
+      // longer stamps the persisted run flag; dispatch-time stamping does that (see below).
       handleBackgroundRunChange(event.backgroundRunActive === true);
+      return;
+    }
+
+    // UAT round-6 (item #15a): stamp / clear the persisted run-in-flight flag at DISPATCH time (true)
+    // and on dispatch failure (false). This fires for EVERY review path (chip/typed/gate/wizard/rerun)
+    // because they all funnel through the ONE `runBindingDispatch` chokepoint — so the flag is now
+    // captured whether or not the user ever dismisses the progress modal (the owner's navigate-away
+    // repro never dismissed it).
+    if (event.type === 'nda_review_dispatch_active') {
+      handleReviewDispatchActive(event.dispatchActive === true);
+      return;
+    }
+
+    // UAT round-6 (item #15a): a review COMPLETION (incl. a zero-findings clean review) arrives as
+    // `compose_advisory_comments`. Clear the persisted in-flight flag for the completing session so a
+    // later navigate-away doesn't resurrect a stale spinner. (This runs alongside ComposeWorkspace's
+    // own advisory-comments receiver — the bus is broadcast; both subscribers act independently.)
+    if (event.type === 'compose_advisory_comments') {
+      handleReviewCompletionForSession(event.sessionId);
       return;
     }
 
