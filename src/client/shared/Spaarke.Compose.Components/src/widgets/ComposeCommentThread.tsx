@@ -382,7 +382,7 @@ export function ComposeCommentThread(props: ComposeCommentThreadProps): React.JS
           threadsState.threads.map(thread => (
             <div
               key={thread.id}
-              ref={(el) => {
+              ref={el => {
                 if (el) cardRefs.current.set(thread.id, el);
                 else cardRefs.current.delete(thread.id);
               }}
@@ -405,7 +405,7 @@ export function ComposeCommentThread(props: ComposeCommentThreadProps): React.JS
                 aria-label={`Go to comment by ${thread.author} in the document`}
                 data-testid={`compose-comment-jump-${thread.id}`}
                 onClick={() => handleSelectThread(thread.id)}
-                onKeyDown={(e) => {
+                onKeyDown={e => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
                     handleSelectThread(thread.id);

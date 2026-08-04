@@ -128,9 +128,7 @@ export interface ComposeBatchNoteToolProgressModalProps {
   onClose: () => void;
 }
 
-export function ComposeBatchNoteToolProgressModal(
-  props: ComposeBatchNoteToolProgressModalProps
-): React.JSX.Element {
+export function ComposeBatchNoteToolProgressModal(props: ComposeBatchNoteToolProgressModalProps): React.JSX.Element {
   const { toolLabel, progress, outcomes, onClose } = props;
   const styles = useStyles();
 

@@ -59,10 +59,7 @@ export function resolveThreadAnchorPositions(
  * there are no anchored threads. `positions` MUST be sorted ascending (as {@link resolveThreadAnchorPositions}
  * returns). Pure — the testable core of doc→pane tracking.
  */
-export function pickActiveThreadId(
-  positions: readonly ThreadAnchorPosition[],
-  viewportTopPos: number
-): string | null {
+export function pickActiveThreadId(positions: readonly ThreadAnchorPosition[], viewportTopPos: number): string | null {
   if (positions.length === 0) return null;
   let active: ThreadAnchorPosition | null = null;
   for (const p of positions) {

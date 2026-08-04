@@ -885,329 +885,332 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
         style={{ width: `${width}px`, height: railHeight != null ? `${railHeight}px` : '100%' }}
         data-testid="compose-comment-gutter"
       >
-      {onWidthChange ? (
+        {onWidthChange ? (
+          <div
+            className={styles.resizeHandle}
+            onPointerDown={onResizePointerDown}
+            onPointerMove={onResizePointerMove}
+            onPointerUp={onResizePointerUp}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize comments pane"
+            data-testid="compose-comment-gutter-resize"
+          />
+        ) : null}
+        {/* UAT round-6 #2 — drag the bottom edge to resize the Review Notes container height. */}
         <div
-          className={styles.resizeHandle}
-          onPointerDown={onResizePointerDown}
-          onPointerMove={onResizePointerMove}
-          onPointerUp={onResizePointerUp}
+          className={styles.bottomResizeHandle}
+          onPointerDown={onHeightPointerDown}
+          onPointerMove={onHeightPointerMove}
+          onPointerUp={onHeightPointerUp}
           role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize comments pane"
-          data-testid="compose-comment-gutter-resize"
+          aria-orientation="horizontal"
+          aria-label="Resize the Review Notes height"
+          data-testid="compose-comment-gutter-resize-bottom"
         />
-      ) : null}
-      {/* UAT round-6 #2 — drag the bottom edge to resize the Review Notes container height. */}
-      <div
-        className={styles.bottomResizeHandle}
-        onPointerDown={onHeightPointerDown}
-        onPointerMove={onHeightPointerMove}
-        onPointerUp={onHeightPointerUp}
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label="Resize the Review Notes height"
-        data-testid="compose-comment-gutter-resize-bottom"
-      />
-      {/* UAT round-6 #3 — a down-arrow, centered on the notes container, appears when cards are clipped
+        {/* UAT round-6 #3 — a down-arrow, centered on the notes container, appears when cards are clipped
           below the (resized) bottom edge; it nudges the document down to bring the next note into view. */}
-      {hasClippedBelow ? (
-        <button
-          type="button"
-          className={styles.scrollNotesDown}
-          aria-label="Scroll down for more notes"
-          onClick={onScrollNotesDown}
-          data-testid="compose-comment-gutter-scroll-down"
-        >
-          <ChevronDoubleDown16Regular />
-        </button>
-      ) : null}
-      {/* Task 041 (FR-11) — the batch sub-toolbar: appears once ≥1 note is checked. Action list =
+        {hasClippedBelow ? (
+          <button
+            type="button"
+            className={styles.scrollNotesDown}
+            aria-label="Scroll down for more notes"
+            onClick={onScrollNotesDown}
+            data-testid="compose-comment-gutter-scroll-down"
+          >
+            <ChevronDoubleDown16Regular />
+          </button>
+        ) : null}
+        {/* Task 041 (FR-11) — the batch sub-toolbar: appears once ≥1 note is checked. Action list =
           `noteTools` (the SAME `getToolsForSurface('review-note', activeWorkType)` set the ⋮ menu
           uses — no batch-only actions). "Select all" only when EXACTLY 1 is selected (spec). */}
-      {batchEnabled && orderedCheckedIds.length > 0 ? (
-        <div className={styles.subToolbar} data-testid="compose-comment-gutter-batch-toolbar">
-          <div className={styles.subToolbarRow}>
-            {/* Count derives from `orderedCheckedIds` (threads-filtered), NOT the raw `checkedIds` Set
+        {batchEnabled && orderedCheckedIds.length > 0 ? (
+          <div className={styles.subToolbar} data-testid="compose-comment-gutter-batch-toolbar">
+            <div className={styles.subToolbarRow}>
+              {/* Count derives from `orderedCheckedIds` (threads-filtered), NOT the raw `checkedIds` Set
                 size — keeps the displayed count truthful to what Run will actually dispatch even if
                 `threads` shrinks out from under a stale checked id (e.g. Review Notes toggled off then
                 on) while a checkbox stays checked. */}
-            <Text size={200} className={styles.subToolbarCount} data-testid="compose-comment-gutter-batch-count">
-              {`${orderedCheckedIds.length} selected`}
-            </Text>
-            {orderedCheckedIds.length === 1 && threads.length > 1 ? (
+              <Text size={200} className={styles.subToolbarCount} data-testid="compose-comment-gutter-batch-count">
+                {`${orderedCheckedIds.length} selected`}
+              </Text>
+              {orderedCheckedIds.length === 1 && threads.length > 1 ? (
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  onClick={selectAllNotes}
+                  data-testid="compose-comment-gutter-batch-select-all"
+                >
+                  {`Select all (${threads.length})`}
+                </Button>
+              ) : null}
+              <div className={styles.subToolbarSpacer} />
               <Button
                 appearance="subtle"
                 size="small"
-                onClick={selectAllNotes}
-                data-testid="compose-comment-gutter-batch-select-all"
+                onClick={clearSelection}
+                disabled={isBatchRunning}
+                data-testid="compose-comment-gutter-batch-clear"
               >
-                {`Select all (${threads.length})`}
+                Clear
               </Button>
-            ) : null}
-            <div className={styles.subToolbarSpacer} />
-            <Button
-              appearance="subtle"
-              size="small"
-              onClick={clearSelection}
-              disabled={isBatchRunning}
-              data-testid="compose-comment-gutter-batch-clear"
-            >
-              Clear
-            </Button>
+            </div>
+            <div className={styles.subToolbarRow}>
+              <Dropdown
+                className={styles.subToolbarDropdown}
+                placeholder="Choose an action…"
+                value={batchToolLabel}
+                selectedOptions={batchToolId ? [batchToolId] : []}
+                onOptionSelect={(_e, data) => setBatchToolId(data.optionValue ?? null)}
+                disabled={isBatchRunning || !noteTools || noteTools.length === 0}
+                aria-label="Batch AI action"
+                data-testid="compose-comment-gutter-batch-tool-dropdown"
+              >
+                {(noteTools ?? []).map(tool => (
+                  <Option key={tool.id} value={tool.id} data-testid={`compose-comment-gutter-batch-tool-${tool.id}`}>
+                    {tool.label}
+                  </Option>
+                ))}
+              </Dropdown>
+              <Button
+                appearance="primary"
+                size="small"
+                onClick={handleRunBatch}
+                disabled={isBatchRunning || !batchToolId}
+                data-testid="compose-comment-gutter-batch-run"
+              >
+                {isBatchRunning ? <Spinner size="tiny" /> : 'Run'}
+              </Button>
+            </div>
           </div>
-          <div className={styles.subToolbarRow}>
-            <Dropdown
-              className={styles.subToolbarDropdown}
-              placeholder="Choose an action…"
-              value={batchToolLabel}
-              selectedOptions={batchToolId ? [batchToolId] : []}
-              onOptionSelect={(_e, data) => setBatchToolId(data.optionValue ?? null)}
-              disabled={isBatchRunning || !noteTools || noteTools.length === 0}
-              aria-label="Batch AI action"
-              data-testid="compose-comment-gutter-batch-tool-dropdown"
-            >
-              {(noteTools ?? []).map(tool => (
-                <Option key={tool.id} value={tool.id} data-testid={`compose-comment-gutter-batch-tool-${tool.id}`}>
-                  {tool.label}
-                </Option>
-              ))}
-            </Dropdown>
-            <Button
-              appearance="primary"
-              size="small"
-              onClick={handleRunBatch}
-              disabled={isBatchRunning || !batchToolId}
-              data-testid="compose-comment-gutter-batch-run"
-            >
-              {isBatchRunning ? <Spinner size="tiny" /> : 'Run'}
-            </Button>
-          </div>
-        </div>
-      ) : null}
-      {threads.map(thread => {
-        const top = cardTops[thread.id];
-        if (top === undefined) return null; // anchor unresolved (deleted) — omitted, never guessed
-        // task 052 (FR-15): the SAME shared source the export mapping uses — discrete task-002
-        // fields (flaggedClause/assessment) when the thread carries them, legacy marker-parsed
-        // `text` otherwise. `fullText` (for the truncation-length check below) is derived from the
-        // resolved segments' bodies, NOT the raw `thread.text`, so a legacy marker-laden note's
-        // truncation threshold reflects its VISIBLE length (markers are never shown to the reviewer).
-        const allSegments = getAdvisoryNoteSegments(thread);
-        const fullText = allSegments.map(seg => seg.body).join(' ').trim();
-        const isExpanded = expandedIds.has(thread.id);
-        const isTruncatable = fullText.length > COLLAPSED_BODY_MAX_CHARS;
-        const showStructured = isExpanded || !isTruncatable;
-        // UAT round-6 #5 + round-7 follow-up: ALWAYS render the structured "Flagged clause" / "Assessment
-        // says" segments (with the renamed labels) — including when COLLAPSED (the reviewer saw the raw
-        // model labels "Grounded fact" / "Advisory judgment" in the collapsed preview). Collapsed shows
-        // just the FIRST segment with a truncated body; expanding reveals every segment in full.
-        const segments = showStructured
-          ? allSegments
-          : allSegments.length > 0
-            ? [{ ...allSegments[0], body: truncate(allSegments[0].body, COLLAPSED_BODY_MAX_CHARS) }]
-            : [{ body: truncate(fullText, COLLAPSED_BODY_MAX_CHARS) }];
-        // UAT round-5 #6/#1 — the note's location, resolved from the LIVE document (section heading +
-        // ordinal that the model's sectionRef lacks) via the thread's current anchor. Identical to the
-        // summary row. Only advisory notes carry a `sectionRef`; a plain session comment has none and
-        // keeps the generic "Comment" label. Falls back to the model-only label when no editor.
-        const anchorSpan = thread.sectionRef && editor ? findCommentAnchorRange(editor.state.doc, thread.id) : null;
-        const loc = thread.sectionRef
-          ? editor
-            ? deriveClauseLocationLabel(editor.state.doc, anchorSpan?.from ?? null, thread.sectionRef)
-            : formatClauseLocation(thread.sectionRef)
-          : null;
-        const isSelected = selectedThreadId === thread.id; // UAT round-4 #8
-        // UAT round-4 #8: when selection is wired the card CLICK selects (and the cue button expands);
-        // otherwise it keeps the round-3 D2 behavior (card click toggles expand, truncatable only).
-        const selectable = Boolean(onSelectThread);
-        const isInteractive = selectable || isTruncatable;
-        const activate = selectable
-          ? () => onSelectThread?.(thread.id)
-          : isTruncatable
-            ? () => toggleExpanded(thread.id)
-            : undefined;
-        return (
-          <div
-            key={thread.id}
-            ref={el => {
-              if (el) cardElementsRef.current.set(thread.id, el);
-              else cardElementsRef.current.delete(thread.id);
-            }}
-            className={mergeClasses(
-              styles.card,
-              isInteractive ? styles.cardClickable : undefined,
-              isSelected ? styles.cardSelected : undefined
-            )}
-            style={{ top: `${top}px` }}
-            role={isInteractive ? 'button' : 'complementary'}
-            tabIndex={isInteractive ? 0 : undefined}
-            aria-pressed={selectable ? isSelected : undefined}
-            aria-expanded={!selectable && isTruncatable ? isExpanded : undefined}
-            aria-label={
-              `Comment${thread.sectionRef ? `: ${thread.sectionRef}` : ''}` +
-              (selectable
-                ? isSelected
-                  ? ' — selected, activate to deselect'
-                  : ' — activate to select and go to the clause'
-                : isTruncatable
-                  ? isExpanded
-                    ? ' — expanded, activate to collapse'
-                    : ' — truncated, activate to expand'
-                  : '')
-            }
-            onClick={activate}
-            onKeyDown={
-              activate
-                ? e => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      activate();
+        ) : null}
+        {threads.map(thread => {
+          const top = cardTops[thread.id];
+          if (top === undefined) return null; // anchor unresolved (deleted) — omitted, never guessed
+          // task 052 (FR-15): the SAME shared source the export mapping uses — discrete task-002
+          // fields (flaggedClause/assessment) when the thread carries them, legacy marker-parsed
+          // `text` otherwise. `fullText` (for the truncation-length check below) is derived from the
+          // resolved segments' bodies, NOT the raw `thread.text`, so a legacy marker-laden note's
+          // truncation threshold reflects its VISIBLE length (markers are never shown to the reviewer).
+          const allSegments = getAdvisoryNoteSegments(thread);
+          const fullText = allSegments
+            .map(seg => seg.body)
+            .join(' ')
+            .trim();
+          const isExpanded = expandedIds.has(thread.id);
+          const isTruncatable = fullText.length > COLLAPSED_BODY_MAX_CHARS;
+          const showStructured = isExpanded || !isTruncatable;
+          // UAT round-6 #5 + round-7 follow-up: ALWAYS render the structured "Flagged clause" / "Assessment
+          // says" segments (with the renamed labels) — including when COLLAPSED (the reviewer saw the raw
+          // model labels "Grounded fact" / "Advisory judgment" in the collapsed preview). Collapsed shows
+          // just the FIRST segment with a truncated body; expanding reveals every segment in full.
+          const segments = showStructured
+            ? allSegments
+            : allSegments.length > 0
+              ? [{ ...allSegments[0], body: truncate(allSegments[0].body, COLLAPSED_BODY_MAX_CHARS) }]
+              : [{ body: truncate(fullText, COLLAPSED_BODY_MAX_CHARS) }];
+          // UAT round-5 #6/#1 — the note's location, resolved from the LIVE document (section heading +
+          // ordinal that the model's sectionRef lacks) via the thread's current anchor. Identical to the
+          // summary row. Only advisory notes carry a `sectionRef`; a plain session comment has none and
+          // keeps the generic "Comment" label. Falls back to the model-only label when no editor.
+          const anchorSpan = thread.sectionRef && editor ? findCommentAnchorRange(editor.state.doc, thread.id) : null;
+          const loc = thread.sectionRef
+            ? editor
+              ? deriveClauseLocationLabel(editor.state.doc, anchorSpan?.from ?? null, thread.sectionRef)
+              : formatClauseLocation(thread.sectionRef)
+            : null;
+          const isSelected = selectedThreadId === thread.id; // UAT round-4 #8
+          // UAT round-4 #8: when selection is wired the card CLICK selects (and the cue button expands);
+          // otherwise it keeps the round-3 D2 behavior (card click toggles expand, truncatable only).
+          const selectable = Boolean(onSelectThread);
+          const isInteractive = selectable || isTruncatable;
+          const activate = selectable
+            ? () => onSelectThread?.(thread.id)
+            : isTruncatable
+              ? () => toggleExpanded(thread.id)
+              : undefined;
+          return (
+            <div
+              key={thread.id}
+              ref={el => {
+                if (el) cardElementsRef.current.set(thread.id, el);
+                else cardElementsRef.current.delete(thread.id);
+              }}
+              className={mergeClasses(
+                styles.card,
+                isInteractive ? styles.cardClickable : undefined,
+                isSelected ? styles.cardSelected : undefined
+              )}
+              style={{ top: `${top}px` }}
+              role={isInteractive ? 'button' : 'complementary'}
+              tabIndex={isInteractive ? 0 : undefined}
+              aria-pressed={selectable ? isSelected : undefined}
+              aria-expanded={!selectable && isTruncatable ? isExpanded : undefined}
+              aria-label={
+                `Comment${thread.sectionRef ? `: ${thread.sectionRef}` : ''}` +
+                (selectable
+                  ? isSelected
+                    ? ' — selected, activate to deselect'
+                    : ' — activate to select and go to the clause'
+                  : isTruncatable
+                    ? isExpanded
+                      ? ' — expanded, activate to collapse'
+                      : ' — truncated, activate to expand'
+                    : '')
+              }
+              onClick={activate}
+              onKeyDown={
+                activate
+                  ? e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        activate();
+                      }
                     }
-                  }
-                : undefined
-            }
-            data-testid={`compose-comment-gutter-card-${thread.id}`}
-          >
-            <div className={styles.cardHeader}>
-              {/* Task 041 (FR-11) — the multi-select checkbox, upper-LEFT of the card. stopPropagation
+                  : undefined
+              }
+              data-testid={`compose-comment-gutter-card-${thread.id}`}
+            >
+              <div className={styles.cardHeader}>
+                {/* Task 041 (FR-11) — the multi-select checkbox, upper-LEFT of the card. stopPropagation
                   keeps checking a box from also selecting/expanding the card (mirrors the ⋮ tools
                   button's own stopPropagation just below). Keyboard accessible via Fluent's Checkbox
                   (native input semantics — Space toggles, Tab reaches it). */}
-              {batchEnabled ? (
-                <div
-                  className={styles.checkboxSlot}
-                  onClick={e => e.stopPropagation()}
-                  onKeyDown={e => e.stopPropagation()}
-                >
-                  <Checkbox
-                    checked={checkedIds.has(thread.id)}
-                    onChange={() => toggleChecked(thread.id)}
-                    aria-label={`Select note${thread.sectionRef ? `: ${thread.sectionRef}` : ''} for batch action`}
-                    data-testid={`compose-comment-gutter-checkbox-${thread.id}`}
-                  />
-                </div>
-              ) : null}
-              {/* UAT round-5 #6 — one clear location line (no § / ¶ glyph soup), identical to the summary. */}
-              <Text weight="semibold" size={200} className={styles.sectionRef}>
-                {loc ?? 'Comment'}
-              </Text>
-              <div className={styles.cardHeaderRight}>
-                {thread.riskLevel ? (
-                  <Badge
-                    appearance="tint"
-                    size="small"
-                    color={riskBadgeColor(thread.riskLevel)}
-                    data-testid={`compose-comment-gutter-risk-${thread.id}`}
+                {batchEnabled ? (
+                  <div
+                    className={styles.checkboxSlot}
+                    onClick={e => e.stopPropagation()}
+                    onKeyDown={e => e.stopPropagation()}
                   >
-                    {thread.riskLevel}
-                  </Badge>
+                    <Checkbox
+                      checked={checkedIds.has(thread.id)}
+                      onChange={() => toggleChecked(thread.id)}
+                      aria-label={`Select note${thread.sectionRef ? `: ${thread.sectionRef}` : ''} for batch action`}
+                      data-testid={`compose-comment-gutter-checkbox-${thread.id}`}
+                    />
+                  </div>
                 ) : null}
-                {/* UAT round-8 #3/#4/#5 — the ⋮ AI-tools menu for THIS Review Note. stopPropagation keeps
+                {/* UAT round-5 #6 — one clear location line (no § / ¶ glyph soup), identical to the summary. */}
+                <Text weight="semibold" size={200} className={styles.sectionRef}>
+                  {loc ?? 'Comment'}
+                </Text>
+                <div className={styles.cardHeaderRight}>
+                  {thread.riskLevel ? (
+                    <Badge
+                      appearance="tint"
+                      size="small"
+                      color={riskBadgeColor(thread.riskLevel)}
+                      data-testid={`compose-comment-gutter-risk-${thread.id}`}
+                    >
+                      {thread.riskLevel}
+                    </Badge>
+                  ) : null}
+                  {/* UAT round-8 #3/#4/#5 — the ⋮ AI-tools menu for THIS Review Note. stopPropagation keeps
                     opening the menu from selecting/expanding the card. */}
-                {onRunNoteTool && noteTools && noteTools.length > 0 ? (
-                  <Menu positioning="below-end">
-                    <MenuTrigger disableButtonEnhancement>
-                      <Tooltip content="AI tools for this note" relationship="label" withArrow>
-                        <Button
-                          appearance="subtle"
-                          size="small"
-                          icon={<MoreVertical20Regular />}
-                          className={styles.toolsButton}
-                          aria-label="AI tools for this note"
-                          onClick={e => e.stopPropagation()}
-                          onKeyDown={e => e.stopPropagation()}
-                          data-testid={`compose-comment-gutter-tools-${thread.id}`}
-                        />
-                      </Tooltip>
-                    </MenuTrigger>
-                    <MenuPopover onClick={e => e.stopPropagation()}>
-                      <MenuList>
-                        {noteTools.map(tool => (
-                          <MenuItem
-                            key={tool.id}
-                            icon={<SparkleRegular />}
-                            onClick={e => {
-                              e.stopPropagation();
-                              onRunNoteTool(thread.id, tool.id);
-                            }}
-                            data-testid={`compose-comment-gutter-tool-${thread.id}-${tool.id}`}
-                          >
-                            {tool.label}
-                          </MenuItem>
-                        ))}
-                      </MenuList>
-                    </MenuPopover>
-                  </Menu>
-                ) : null}
+                  {onRunNoteTool && noteTools && noteTools.length > 0 ? (
+                    <Menu positioning="below-end">
+                      <MenuTrigger disableButtonEnhancement>
+                        <Tooltip content="AI tools for this note" relationship="label" withArrow>
+                          <Button
+                            appearance="subtle"
+                            size="small"
+                            icon={<MoreVertical20Regular />}
+                            className={styles.toolsButton}
+                            aria-label="AI tools for this note"
+                            onClick={e => e.stopPropagation()}
+                            onKeyDown={e => e.stopPropagation()}
+                            data-testid={`compose-comment-gutter-tools-${thread.id}`}
+                          />
+                        </Tooltip>
+                      </MenuTrigger>
+                      <MenuPopover onClick={e => e.stopPropagation()}>
+                        <MenuList>
+                          {noteTools.map(tool => (
+                            <MenuItem
+                              key={tool.id}
+                              icon={<SparkleRegular />}
+                              onClick={e => {
+                                e.stopPropagation();
+                                onRunNoteTool(thread.id, tool.id);
+                              }}
+                              data-testid={`compose-comment-gutter-tool-${thread.id}-${tool.id}`}
+                            >
+                              {tool.label}
+                            </MenuItem>
+                          ))}
+                        </MenuList>
+                      </MenuPopover>
+                    </Menu>
+                  ) : null}
+                </div>
               </div>
-            </div>
-            {/* UAT round-5 #7 / round-6 #5 / round-7 — ALWAYS split into the renamed "Flagged clause" /
+              {/* UAT round-5 #7 / round-6 #5 / round-7 — ALWAYS split into the renamed "Flagged clause" /
                 "Assessment says" labelled paragraphs, collapsed (first segment, truncated) AND expanded
                 (every segment, full). The reviewer must never see the model's raw labels. */}
-            <div className={styles.noteSegments} data-testid={`compose-comment-gutter-body-${thread.id}`}>
-              {segments.map((seg, i) => (
-                <div key={i} className={styles.noteSegment}>
-                  {seg.label ? (
-                    <Text size={200} weight="semibold" className={styles.noteSegmentLabel}>
-                      {seg.label}
+              <div className={styles.noteSegments} data-testid={`compose-comment-gutter-body-${thread.id}`}>
+                {segments.map((seg, i) => (
+                  <div key={i} className={styles.noteSegment}>
+                    {seg.label ? (
+                      <Text size={200} weight="semibold" className={styles.noteSegmentLabel}>
+                        {seg.label}
+                      </Text>
+                    ) : null}
+                    <Text size={200} className={styles.noteSegmentBody}>
+                      {seg.body}
                     </Text>
-                  ) : null}
-                  <Text size={200} className={styles.noteSegmentBody}>
-                    {seg.body}
+                  </div>
+                ))}
+              </div>
+              {thread.standardRef ? (
+                resolveStandardText ? (
+                  <StandardRefChip
+                    standardRef={thread.standardRef}
+                    resolve={resolveStandardText}
+                    className={styles.standardRefButton}
+                    surfaceClassName={styles.standardPopover}
+                    titleClassName={styles.standardPopoverTitle}
+                    bodyClassName={styles.standardPopoverBody}
+                    threadId={thread.id}
+                  />
+                ) : (
+                  <Text size={100} className={styles.standardRef}>
+                    Standard: {thread.standardRef}
                   </Text>
-                </div>
-              ))}
-            </div>
-            {thread.standardRef ? (
-              resolveStandardText ? (
-                <StandardRefChip
-                  standardRef={thread.standardRef}
-                  resolve={resolveStandardText}
-                  className={styles.standardRefButton}
-                  surfaceClassName={styles.standardPopover}
-                  titleClassName={styles.standardPopoverTitle}
-                  bodyClassName={styles.standardPopoverBody}
-                  threadId={thread.id}
-                />
-              ) : (
-                <Text size={100} className={styles.standardRef}>
-                  Standard: {thread.standardRef}
-                </Text>
-              )
-            ) : null}
-            {/* UAT round-3 D2: double-down-arrow expandability cue. When selection is wired (round-4 #8)
+                )
+              ) : null}
+              {/* UAT round-3 D2: double-down-arrow expandability cue. When selection is wired (round-4 #8)
                 the card click SELECTS, so the cue becomes the dedicated expand button (stopPropagation
                 keeps it from also selecting); otherwise it stays the passive cue and the whole card
                 toggles expand. */}
-            {isTruncatable ? (
-              selectable ? (
-                <button
-                  type="button"
-                  className={styles.expandCueButton}
-                  aria-label={isExpanded ? 'Collapse comment' : 'Expand comment'}
-                  aria-expanded={isExpanded}
-                  onClick={e => {
-                    e.stopPropagation();
-                    toggleExpanded(thread.id);
-                  }}
-                  onKeyDown={e => e.stopPropagation()}
-                  data-testid={`compose-comment-gutter-expand-${thread.id}`}
-                >
-                  <ChevronDoubleDown16Regular className={isExpanded ? styles.expandCueOpen : undefined} />
-                </button>
-              ) : (
-                <div
-                  className={styles.expandCue}
-                  aria-hidden
-                  data-testid={`compose-comment-gutter-expand-${thread.id}`}
-                >
-                  <ChevronDoubleDown16Regular className={isExpanded ? styles.expandCueOpen : undefined} />
-                </div>
-              )
-            ) : null}
-          </div>
-        );
-      })}
+              {isTruncatable ? (
+                selectable ? (
+                  <button
+                    type="button"
+                    className={styles.expandCueButton}
+                    aria-label={isExpanded ? 'Collapse comment' : 'Expand comment'}
+                    aria-expanded={isExpanded}
+                    onClick={e => {
+                      e.stopPropagation();
+                      toggleExpanded(thread.id);
+                    }}
+                    onKeyDown={e => e.stopPropagation()}
+                    data-testid={`compose-comment-gutter-expand-${thread.id}`}
+                  >
+                    <ChevronDoubleDown16Regular className={isExpanded ? styles.expandCueOpen : undefined} />
+                  </button>
+                ) : (
+                  <div
+                    className={styles.expandCue}
+                    aria-hidden
+                    data-testid={`compose-comment-gutter-expand-${thread.id}`}
+                  >
+                    <ChevronDoubleDown16Regular className={isExpanded ? styles.expandCueOpen : undefined} />
+                  </div>
+                )
+              ) : null}
+            </div>
+          );
+        })}
       </div>
       {/* Task 041 (FR-11) — soft-cap confirm. Fires only on Run when the selection exceeds
           BATCH_NOTE_TOOL_SOFT_CAP; the "select all" click itself never confirms (only Run does). */}

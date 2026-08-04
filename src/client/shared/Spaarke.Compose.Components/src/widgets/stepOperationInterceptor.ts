@@ -177,11 +177,7 @@ function importedRevisionId(ledgerRef: unknown): string | null {
 }
 
 /** Build a `Single`-scope acceptRevision/rejectRevision op addressed by native revision id (never by offset). */
-function revisionOp(
-  type: 'acceptRevision' | 'rejectRevision',
-  paraId: string,
-  revisionId: string
-): ComposeOperation {
+function revisionOp(type: 'acceptRevision' | 'rejectRevision', paraId: string, revisionId: string): ComposeOperation {
   return { type, paraId, scope: 'Single' as ComposeRevisionScope, revisionId };
 }
 
@@ -684,7 +680,11 @@ function signatureChanged(a: BlockAttrSignature, b: BlockAttrSignature): boolean
  *   - nesting depth changed within a list  → ListLevel
  *   - heading level / paragraph↔heading    → Style
  */
-function blockAttrOpForChange(paraId: string, before: BlockAttrSignature, after: BlockAttrSignature): ComposeOperation | null {
+function blockAttrOpForChange(
+  paraId: string,
+  before: BlockAttrSignature,
+  after: BlockAttrSignature
+): ComposeOperation | null {
   const wasList = before.listOrdered !== null;
   const isList = after.listOrdered !== null;
 
@@ -904,11 +904,13 @@ function classifyTableStep(step: Step, docBefore: PMNode): StepClassification | 
   // Whole-table delete → the table count dropped by one. Emit one DeleteRow per row of the removed table (the
   // engine marks each w:trPr as deleted without shifting indices, so the original 0..N-1 indices all apply).
   if (after.length === before.length - 1) {
-    const removed = before.find((b, i) => !after[i] || !rowsEqual(b.grid[0] ?? [], after[i]?.grid[0] ?? []))
-      ?? before[before.length - 1];
+    const removed =
+      before.find((b, i) => !after[i] || !rowsEqual(b.grid[0] ?? [], after[i]?.grid[0] ?? [])) ??
+      before[before.length - 1];
     if (!removed?.anchor || removed.grid.length === 0) return null;
     const ops: ComposeOperation[] = removed.grid.map((_, rowIndex) =>
-      tableOp('DeleteRow', removed.anchor as string, { row: rowIndex }));
+      tableOp('DeleteRow', removed.anchor as string, { row: rowIndex })
+    );
     return { kind: 'ops', ops };
   }
 
@@ -920,9 +922,10 @@ function classifyTableStep(step: Step, docBefore: PMNode): StepClassification | 
   for (let t = 0; t < before.length; t++) {
     const b = before[t];
     const a = after[t];
-    const changed = b.grid.length !== a.grid.length
-      || (b.grid[0]?.length ?? 0) !== (a.grid[0]?.length ?? 0)
-      || !b.grid.every((row, r) => rowsEqual(row, a.grid[r] ?? []));
+    const changed =
+      b.grid.length !== a.grid.length ||
+      (b.grid[0]?.length ?? 0) !== (a.grid[0]?.length ?? 0) ||
+      !b.grid.every((row, r) => rowsEqual(row, a.grid[r] ?? []));
     if (!changed) continue;
     const op = diffTableGrids(b, a); // may be null (not a clean single edit) → caller surfaces it
     return op ? { kind: 'ops', ops: [op] } : null;
@@ -1123,9 +1126,7 @@ function classifyMarkStep(
     paraId: anchorFrom.paraId,
     range: { start: pointOf(anchorFrom), end: pointOf(anchorTo) },
     mark: composeMark,
-    ...(composeMark === 'Link' && type === 'setMark'
-      ? { href: (step.mark.attrs as { href?: string }).href }
-      : {}),
+    ...(composeMark === 'Link' && type === 'setMark' ? { href: (step.mark.attrs as { href?: string }).href } : {}),
   } as ComposeOperation;
   return { kind: 'ops', ops: [op] };
 }
@@ -1364,7 +1365,8 @@ function buildAnchor(op: ComposeOperation, step: Step, mapping: Mapping, stepInd
   // durable payload paraId is captured from the pre-step doc at classify time.
   if (op.type === 'setBlockAttr') {
     if (step instanceof AttrStep) return { kind: 'block', point: toFinal(step.pos, -1) };
-    if (step instanceof ReplaceStep || step instanceof ReplaceAroundStep) return { kind: 'block', point: toFinal(step.from, -1) };
+    if (step instanceof ReplaceStep || step instanceof ReplaceAroundStep)
+      return { kind: 'block', point: toFinal(step.from, -1) };
     return null;
   }
 

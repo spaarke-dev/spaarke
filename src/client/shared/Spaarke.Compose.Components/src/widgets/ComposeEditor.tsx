@@ -2632,14 +2632,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         });
         setBatchRun(prev => (prev ? { ...prev, progress: null, outcomes: displayOutcomes } : prev));
       },
-      [
-        editor,
-        enqueueComposeAction,
-        sessionId,
-        promptForInstruction,
-        dispatchNoteToolRequest,
-        advisoryComments.threads,
-      ]
+      [editor, enqueueComposeAction, sessionId, promptForInstruction, dispatchNoteToolRequest, advisoryComments.threads]
     );
 
     // `ComposeCommentGutter.onRunBatchNoteTool` is typed `=> void` (fire-and-forget, mirroring

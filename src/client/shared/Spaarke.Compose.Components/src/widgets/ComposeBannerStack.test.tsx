@@ -244,7 +244,10 @@ describe('ComposeBannerStack — task 032 review-findings-degraded banner', () =
   });
 
   it('dark mode (ADR-021): renders with no hardcoded hex color', () => {
-    const { container } = renderStack({ reviewFindingsDegraded: { expectedCount: 1, reason: 'malformed' } }, webDarkTheme);
+    const { container } = renderStack(
+      { reviewFindingsDegraded: { expectedCount: 1, reason: 'malformed' } },
+      webDarkTheme
+    );
     expect(screen.getByTestId('compose-workspace-review-findings-degraded-banner')).toBeInTheDocument();
     expect(container.innerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });

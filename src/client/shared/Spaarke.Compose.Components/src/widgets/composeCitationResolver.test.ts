@@ -32,12 +32,7 @@ import { stampParaIds } from '../utils/docxBridge';
 import { resolveCitation } from './composeCitationResolver';
 import type { ParaIdMapEntry } from '../types/compose-contracts';
 
-function entry(
-  index: number,
-  paraId: string,
-  computedNumber: string,
-  listPath: number[]
-): ParaIdMapEntry {
+function entry(index: number, paraId: string, computedNumber: string, listPath: number[]): ParaIdMapEntry {
   return { index, paraId, isMinted: false, computedNumber, numberingLevel: listPath.length - 1, listPath };
 }
 
@@ -51,19 +46,14 @@ describe('resolveCitation — parity with CitationResolver.cs (structured-map ca
     entry(9, 'HEAD0042', '4.2', [4, 2]), // Heading2 "Confidentiality" (the FR-12 example)
   ];
 
-  it.each([
-    'Section 4.2',
-    'section 4.2',
-    '4.2',
-    '§ 4.2',
-    '§4.2',
-    'Article 4.2',
-    '  Section   4.2  ',
-  ])('resolves %s to the exact [4,2] clause paraId', citation => {
-    const result = resolveCitation(citation, headingStyleMap);
-    expect(result.shape).toBe('single');
-    expect(result.matches.map(m => m.paraId)).toEqual(['HEAD0042']);
-  });
+  it.each(['Section 4.2', 'section 4.2', '4.2', '§ 4.2', '§4.2', 'Article 4.2', '  Section   4.2  '])(
+    'resolves %s to the exact [4,2] clause paraId',
+    citation => {
+      const result = resolveCitation(citation, headingStyleMap);
+      expect(result.shape).toBe('single');
+      expect(result.matches.map(m => m.paraId)).toEqual(['HEAD0042']);
+    }
+  );
 
   it('resolves "Section 4" to the top-level [4] heading, not the [4,2] sub-heading', () => {
     const result = resolveCitation('Section 4', headingStyleMap);
@@ -185,10 +175,7 @@ describe('resolveCitation + collectBlocks — paraId stability across edits (acc
       '<p>Clause 4.1: Confidentiality obligations survive termination for three years.</p>' +
         '<p>Clause 4.2: The receiving party shall indemnify the disclosing party for any breach.</p>'
     );
-    const referenceMap: ParaIdMapEntry[] = [
-      entry(0, 'STAB0041', '4.1', [4, 1]),
-      entry(1, 'STAB0042', '4.2', [4, 2]),
-    ];
+    const referenceMap: ParaIdMapEntry[] = [entry(0, 'STAB0041', '4.1', [4, 1]), entry(1, 'STAB0042', '4.2', [4, 2])];
     stampParaIds(editor, referenceMap);
 
     const before = resolveCitation('Section 4.2', referenceMap);
