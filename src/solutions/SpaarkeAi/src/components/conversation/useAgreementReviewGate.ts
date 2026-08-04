@@ -145,6 +145,30 @@ export interface AgreementReviewGateController {
    * in that case, mirroring `handleReviewNda`'s existing structure.
    */
   runDirectReview: (fileId: string, fileName: string | undefined) => void;
+  /**
+   * UAT round-4 (item #9): re-fire a COMPLETED review at THOROUGH depth for the SAME document —
+   * the "Rerun a full analysis" card's action (`useRerunFullAnalysisCard.ts`), which follows a
+   * QUICK-depth completion. Reuses the caller-supplied `fileId`/`subDomainKey` VERBATIM — no
+   * re-classification (never calls the classifier; `loadRegistry` is read-only, for the
+   * confirmation message's display name only), no re-upload (the SAME `sessionFileId` the quick
+   * run already resolved). Fires IMMEDIATELY — no depth ask (thorough is already decided) and no
+   * gate bookkeeping (`resolvedRef`/`pendingDepthRef`/`lastResolvedSubDomainKeyRef` are
+   * untouched — this is a one-off re-fire, not a gate resolution). `subDomainKey` omitted for a
+   * document reviewed via the direct chip door (which never carries one — mirrors
+   * `dispatchDirectReview`'s bare wire shape); provided for the gate/classifier doors (mirrors
+   * `dispatchReview`'s wire shape). No-op if `fileId`/`reviewBindingId` is unavailable.
+   *
+   * Compose-tab targeting (investigated — see `notes/uat4-execution-notes.md` "agent-B #9"):
+   * `mountFileInCompose` re-seeds the SAME `sessionFileId`, which WorkspacePane's document-
+   * identity tab key (`upload:<sessionFileId>`, `deriveComposeInstanceKey`) resolves to the SAME
+   * existing compose tab the quick run opened — REUSE, not a new tab. Minting a genuinely
+   * distinct tab for the identical document would require a WorkspacePane-side key change
+   * (out of this wave's file boundary — WorkspacePane is agent-C's this wave). Per the task's own
+   * pre-approved fallback, this reruns IN-PLACE: the thorough findings supersede the quick scan's
+   * in the SAME tab/session, and the reused tab is brought to the front via the SAME
+   * reuse-then-activate path every other re-mount already uses.
+   */
+  rerunThorough: (fileId: string, subDomainKey?: string) => Promise<void>;
   /** True while classification is in flight (optional "Working…" affordance). */
   classifying: boolean;
   /**
@@ -417,6 +441,34 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
       acceptChips(toConsumerChipWire(buildAgreementReviewDepthChoiceChips()));
     },
     [reviewBindingId, enqueueAssistantMessage, acceptChips]
+  );
+
+  /**
+   * UAT round-4 (item #9) — see the controller interface doc comment for the full rationale
+   * (incl. why this reruns IN-PLACE in the SAME compose tab, not a new one).
+   */
+  const rerunThorough = React.useCallback(
+    async (fileId: string, subDomainKey?: string): Promise<void> => {
+      if (!fileId || !reviewBindingId) return;
+      // Bring the document's compose tab to the front (reuse — see doc comment above); no fileName
+      // is threaded here (the existing tab keeps its title — WorkspacePane merges a missing seed
+      // filename against the tab's current one, never blanking it).
+      mountFileInCompose(fileId, undefined, AGREEMENT_ANALYSIS_WORK_TYPE);
+      const documentSessionId = await awaitDocumentSessionId(fileId);
+      let resultLabel: string | undefined;
+      if (subDomainKey) {
+        const registry = await loadRegistry();
+        resultLabel = displayNameFor(subDomainKey, registry);
+      }
+      await dispatchReviewBinding(reviewBindingId, {
+        slots: subDomainKey
+          ? { fileIds: [fileId], subDomain: subDomainKey, reviewDepth: "thorough" }
+          : { fileIds: [fileId], reviewDepth: "thorough" },
+        resultLabel,
+        sessionIdOverride: documentSessionId ?? undefined,
+      });
+    },
+    [reviewBindingId, mountFileInCompose, awaitDocumentSessionId, loadRegistry, dispatchReviewBinding]
   );
 
   const runGate = React.useCallback(
@@ -720,6 +772,7 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
       runExplicit,
       handleGateChipAction,
       runDirectReview,
+      rerunThorough,
       classifying,
       getLastResolvedSubDomainKey,
       resetForSession,
@@ -729,6 +782,7 @@ export function useAgreementReviewGate(deps: AgreementReviewGateDeps): Agreement
       runExplicit,
       handleGateChipAction,
       runDirectReview,
+      rerunThorough,
       classifying,
       getLastResolvedSubDomainKey,
       resetForSession,
