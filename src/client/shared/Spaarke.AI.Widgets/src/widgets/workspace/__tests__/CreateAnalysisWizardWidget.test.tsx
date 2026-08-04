@@ -226,7 +226,12 @@ describe('CreateAnalysisWizardWidget', () => {
       entityName === 'sprk_agreementtype'
         ? {
             entities: [
-              { sprk_agreementtypeid: 'nda-type-id', sprk_key: 'nda', sprk_name: 'NDA / Confidentiality', sprk_isfallback: false },
+              {
+                sprk_agreementtypeid: 'nda-type-id',
+                sprk_key: 'nda',
+                sprk_name: 'NDA / Confidentiality',
+                sprk_isfallback: false,
+              },
             ],
           }
         : { entities: [] }
@@ -402,7 +407,12 @@ describe('CreateAnalysisWizardWidget', () => {
         entityName === 'sprk_agreementtype'
           ? {
               entities: [
-                { sprk_agreementtypeid: 'nda-type-id', sprk_key: 'nda', sprk_name: 'NDA / Confidentiality', sprk_isfallback: false },
+                {
+                  sprk_agreementtypeid: 'nda-type-id',
+                  sprk_key: 'nda',
+                  sprk_name: 'NDA / Confidentiality',
+                  sprk_isfallback: false,
+                },
               ],
             }
           : { entities: [] }
@@ -471,7 +481,8 @@ describe('CreateAnalysisWizardWidget', () => {
         },
       });
 
-      // (2) HAND-OFF: the compose seed carries the session + analysis + sub-domain + auto-run arm.
+      // (2) HAND-OFF: the compose seed carries the session + analysis + sub-domain + auto-run arm
+      // + (task 070) the default review depth (Thorough — untouched radio).
       await waitFor(() =>
         expect(dispatchMock).toHaveBeenCalledWith(
           'workspace',
@@ -487,7 +498,46 @@ describe('CreateAnalysisWizardWidget', () => {
                 composeSessionId: 'wizard-session-1',
                 analysisId: 'new-analysis-id',
                 autoRunReview: true,
+                reviewDepth: 'thorough',
               }),
+            }),
+          })
+        )
+      );
+    });
+
+    // task 070 (UAT2 review-depth selector): the "Analysis Details" step now carries a small,
+    // additive Review Depth radio group alongside the Agreement Type picker.
+    it('task 070: picking Quick on the Analysis Details step hands off reviewDepth:"quick" on the compose seed', async () => {
+      const dispatchMock = jest.fn();
+      (useDispatchPaneEvent as jest.Mock).mockReturnValue(dispatchMock);
+      const authenticatedFetch = buildRoutedAuthFetch({ ok: true, sessionId: 'wizard-session-depth-quick' });
+      const data = buildData({
+        dataService: buildSpeDataService(),
+        authenticatedFetch,
+        workTypeValue: 100000000, // Agreement Review
+        workTypeLabel: 'Agreement Review',
+        defaultSubDomain: 'nda',
+      });
+
+      renderWidget(data);
+      skipAssociateTo();
+      await selectExistingDocument();
+      clickPrimary('Next');
+      fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'FR-17 Depth Quick' } });
+      fireEvent.click(screen.getByLabelText('Quick (~20 sec)'));
+      clickPrimary('Next');
+      await act(async () => {
+        clickPrimary('Finish');
+        for (let i = 0; i < 8; i++) await Promise.resolve();
+      });
+
+      await waitFor(() =>
+        expect(dispatchMock).toHaveBeenCalledWith(
+          'workspace',
+          expect.objectContaining({
+            widgetData: expect.objectContaining({
+              compose: expect.objectContaining({ reviewDepth: 'quick' }),
             }),
           })
         )
@@ -567,9 +617,7 @@ describe('CreateAnalysisWizardWidget', () => {
       expect(composeEvent.widgetData.compose.autoRunReview).toBeUndefined();
 
       // … and the DISTINCT bind-failure warning is surfaced on the wizard success panel.
-      expect(
-        await screen.findByText(/The review could not be started automatically/)
-      ).toBeInTheDocument();
+      expect(await screen.findByText(/The review could not be started automatically/)).toBeInTheDocument();
     });
   });
 });

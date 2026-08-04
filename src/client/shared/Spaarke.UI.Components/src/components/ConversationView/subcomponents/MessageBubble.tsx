@@ -191,7 +191,13 @@ function statusLabel(status: MessageBubbleStatus): string {
   }
 }
 
-export const MessageBubble: React.FC<IMessageBubbleProps> = ({ message, isOwn, status, onOpenAttachment, headerAction }) => {
+export const MessageBubble: React.FC<IMessageBubbleProps> = ({
+  message,
+  isOwn,
+  status,
+  onOpenAttachment,
+  headerAction,
+}) => {
   const styles = useStyles();
 
   const sanitizedHtml = React.useMemo(() => {

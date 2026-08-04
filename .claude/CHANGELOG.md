@@ -23,6 +23,14 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
+### Added (2026-08-01 — Canonical modal system · spaarke-modal-system, P0 docs closeout)
+
+- **Added — [`.claude/adr/ADR-050-canonical-modal-shell.md`](adr/ADR-050-canonical-modal-shell.md)** — concise ADR codifying the one-canonical-`SprkModal`-shell + thin-presets decision: MUST compose `ModalWindowControls`/`RecordNavigationModalShell` + keep the Fluent `Dialog` envelope (transform-robust portal) + realize `--sprk-ui-scale` via a scaled Fluent theme (NOT CSS `zoom`) + semantic tokens only (**strengthens ADR-021** — bans `'1px'`/inline color in modal components); MUST NOT hand-roll `position:fixed` overlays or per-surface bespoke chrome. Preserves the Choice Dialog pattern via `ChoiceModal`. Registered in [`.claude/adr/INDEX.md`](adr/INDEX.md) (ADR-050 = next-free; ADR-049 was highest).
+- **Added — [`.claude/patterns/ui/modal-shell.md`](patterns/ui/modal-shell.md)** — 25-line component-layer pointer (When / Read These Files / Constraints / Key Rules) → `SprkModal` + presets + `docs/standards/MODAL-DESIGN-SYSTEM.md`. Registered in [`.claude/patterns/ui/INDEX.md`](patterns/ui/INDEX.md).
+- **Changed — [`.claude/patterns/ui/record-modal-selection.md`](patterns/ui/record-modal-selection.md)** — added a component-layer cross-link: the decision layer now points at `modal-shell.md` / `SprkModal` for HOW to build the chosen family (its decision content is unchanged).
+- **Root `CLAUDE.md` §17** — added a **Modal design system (component layer)** pointer row → `docs/standards/MODAL-DESIGN-SYSTEM.md` (+ ADR-050 + the pattern pointer), sibling to the existing Modal decision-criteria row.
+- Non-`.claude/` companions (same project): `docs/standards/MODAL-DESIGN-SYSTEM.md` authored (task 010) and cross-linked back from `MODAL-DECISION-CRITERIA.md`. All `.claude/` writes made main-session per §3 write boundary. spaarke-modal-system tasks 010–013; functional P0 (001–009) shipped the shell + 6 presets in `@spaarke/ui-components` (86 tests).
+
 ### Changed (2026-07-28 — Compose read/reference fidelity documented · spaarkeai-compose-fidelity-r4.5)
 
 - **Added — `docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md`** — narrative read/reference architecture doc (one reader · text exactness · deterministic numbering engine · `paraId→legal-number` reference layer + `CitationResolver` · honest page/line) with BFF surface, code inventory, and extension recipes. The narrative home the ADR-049 companion only gestures at. Registered in root CLAUDE.md §17 and cross-linked from ADR-049.

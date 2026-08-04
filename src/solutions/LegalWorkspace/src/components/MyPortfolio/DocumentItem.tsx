@@ -31,7 +31,7 @@ import {
   DocumentRegular,
 } from '@fluentui/react-icons';
 import { IDocument } from '../../types/entities';
-import { navigateToEntity } from '../../utils/navigation';
+import { createXrmNavigationService } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // Styles — mirrors the rhythm of MatterItem.tsx
@@ -200,10 +200,8 @@ export const DocumentItem: React.FC<IDocumentItemProps> = ({ document }) => {
   // ---------------------------------------------------------------------------
 
   const handleNavigate = React.useCallback(() => {
-    navigateToEntity({
-      action: 'openRecord',
-      entityName: 'sprk_document',
-      entityId: document.sprk_documentid,
+    createXrmNavigationService().openRecord('sprk_document', document.sprk_documentid).catch((err) => {
+      console.error('[DocumentItem] openRecord failed:', err);
     });
   }, [document.sprk_documentid]);
 

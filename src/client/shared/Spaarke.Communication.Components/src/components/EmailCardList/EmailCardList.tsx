@@ -39,10 +39,11 @@ import {
   makeStyles,
   mergeClasses,
   tokens,
+  type GriffelStyle,
   type InputOnChangeData,
   type SearchBoxChangeEvent,
 } from '@fluentui/react-components';
-import { Search20Regular } from '@fluentui/react-icons';
+import { ArrowClockwise20Regular, Compose20Regular, Search20Regular } from '@fluentui/react-icons';
 import {
   EMAIL_COMMUNICATION_TYPE,
   type EmailCardItem,
@@ -145,6 +146,25 @@ export function bucketEmailsByDate(items: ReadonlyArray<EmailCardItem>, now: Dat
   }));
 }
 
+/**
+ * Modern THIN scrollbar (owner UAT 2026-08-03 Item 1) — a reusable makeStyles
+ * fragment spread into any scroll container that should show a slim, themed
+ * scrollbar instead of the OS-default chunky one (Firefox `scrollbar-*` +
+ * WebKit `::-webkit-scrollbar` pseudo-elements). Semantic tokens only (ADR-021)
+ * so the thumb tracks light/dark. Mirrored in `EmailReadingPaneShell`.
+ */
+const thinScrollbar: GriffelStyle = {
+  scrollbarWidth: 'thin', // Firefox
+  scrollbarColor: `${tokens.colorNeutralStroke1} transparent`,
+  '::-webkit-scrollbar': { width: '8px', height: '8px' },
+  '::-webkit-scrollbar-thumb': {
+    backgroundColor: tokens.colorNeutralStroke1,
+    borderRadius: tokens.borderRadiusMedium,
+  },
+  '::-webkit-scrollbar-thumb:hover': { backgroundColor: tokens.colorNeutralStroke1Hover },
+  '::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
+};
+
 const useStyles = makeStyles({
   // Root wrapper: a non-scrolling toolbar pinned above a scrollable card list.
   root: {
@@ -156,16 +176,17 @@ const useStyles = makeStyles({
     minWidth: 0,
     backgroundColor: tokens.colorNeutralBackground1,
   },
-  // Slim list toolbar. owner UAT 2026-07-30 R2 item 4 — collapsed by default to a
-  // right-aligned search ICON; clicking it reveals the full-width search field.
-  // `justifyContent: flex-end` keeps the collapsed icon on the right; when the
-  // field is open it grows (`flex: 1`) and fills the row.
+  // Slim list toolbar. owner UAT 2026-07-30 R2 item 4 — search collapses to an
+  // ICON on the RIGHT; clicking it reveals the full-width search field. owner
+  // UAT 2026-08-03 Item 2 — the optional "New email" (+) button sits on the
+  // LEFT, so `justifyContent: space-between` keeps New left and search right;
+  // when the field opens it grows (`flex: 1`) and fills the row.
   toolbar: {
     flexShrink: 0,
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     gap: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
@@ -179,8 +200,32 @@ const useStyles = makeStyles({
     flex: '1 1 auto',
     minWidth: 0,
   },
-  // Collapsed-state trigger — a right-aligned magnifier that expands the field.
+  // Right-aligned group holding the search control + the Refresh icon (owner UAT
+  // 2026-08-03 Item 2). `flex: 1` fills the row after the leading "New email"
+  // button and `justifyContent: flex-end` clusters both controls hard-right, so
+  // the layout reads `[New] …… [search][refresh]`. When the search field opens it
+  // grows (its own `flex: 1`) and fills the group, with Refresh pinned after it.
+  rightGroup: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    flex: '1 1 auto',
+    minWidth: 0,
+    justifyContent: 'flex-end',
+  },
+  // Collapsed-state trigger — a magnifier that expands the field. Alignment is
+  // handled by the enclosing `rightGroup` (flex-end), so no margin is needed here.
   searchToggle: {
+    flexShrink: 0,
+  },
+  // Trailing Refresh icon (owner UAT 2026-08-03 Item 2) — sits to the RIGHT of the
+  // search inside `rightGroup`; re-runs the view fetch that populates the list.
+  refreshButton: {
+    flexShrink: 0,
+  },
+  // Leading "New email" (+) button (owner UAT 2026-08-03 Item 2) — left of the search.
+  newButton: {
     flexShrink: 0,
   },
   list: {
@@ -191,6 +236,8 @@ const useStyles = makeStyles({
     width: '100%',
     minWidth: 0,
     overflowY: 'auto',
+    // Modern thin scrollbar (owner UAT 2026-08-03 Item 1) — matches the reading pane.
+    ...thinScrollbar,
     backgroundColor: tokens.colorNeutralBackground1,
   },
   // Sticky, unobtrusive date-bucket divider (Today / Yesterday / …). Muted
@@ -324,6 +371,8 @@ export const EmailCardList: React.FC<EmailCardListProps> = ({
   isLoading = false,
   skeletonCount = DEFAULT_SKELETON_COUNT,
   onSelect,
+  onCreateNew,
+  onRefresh,
 }) => {
   const styles = useStyles();
   const [focusedId, setFocusedId] = React.useState<string | undefined>(undefined);
@@ -486,26 +535,52 @@ export const EmailCardList: React.FC<EmailCardListProps> = ({
        * sender OR subject, case-insensitive substring.
        */}
       <div className={styles.toolbar}>
-        {searchOpen ? (
-          <SearchBox
-            ref={searchInputRef}
-            className={styles.searchBox}
-            value={search}
-            onChange={handleSearchChange}
-            onBlur={handleSearchBlur}
-            placeholder="Search mail"
-            aria-label="Search mail"
-          />
-        ) : (
+        {onCreateNew ? (
+          // Icon-only "New email" (owner UAT 2026-08-03 Item 3 — the visible text
+          // label was removed; aria-label + title keep it accessible).
           <Button
-            className={styles.searchToggle}
+            className={styles.newButton}
             appearance="subtle"
-            icon={<Search20Regular />}
-            aria-label="Search mail"
-            title="Search mail"
-            onClick={() => setSearchOpen(true)}
+            icon={<Compose20Regular />}
+            aria-label="New email"
+            title="New email"
+            onClick={() => onCreateNew()}
           />
-        )}
+        ) : null}
+        {/* Search + Refresh cluster, right-aligned (owner UAT 2026-08-03 Item 2):
+            the search expands to fill this group when open; Refresh sits to its RIGHT. */}
+        <div className={styles.rightGroup}>
+          {searchOpen ? (
+            <SearchBox
+              ref={searchInputRef}
+              className={styles.searchBox}
+              value={search}
+              onChange={handleSearchChange}
+              onBlur={handleSearchBlur}
+              placeholder="Search mail"
+              aria-label="Search mail"
+            />
+          ) : (
+            <Button
+              className={styles.searchToggle}
+              appearance="subtle"
+              icon={<Search20Regular />}
+              aria-label="Search mail"
+              title="Search mail"
+              onClick={() => setSearchOpen(true)}
+            />
+          )}
+          {onRefresh ? (
+            <Button
+              className={styles.refreshButton}
+              appearance="subtle"
+              icon={<ArrowClockwise20Regular />}
+              aria-label="Refresh"
+              title="Refresh"
+              onClick={() => onRefresh()}
+            />
+          ) : null}
+        </div>
       </div>
       {buckets.length === 0 ? (
         <div className={styles.centeredState}>

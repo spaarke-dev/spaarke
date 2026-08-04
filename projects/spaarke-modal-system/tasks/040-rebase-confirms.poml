@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-modal-system">
+  <metadata>
+    <title>P2 — Re-base confirms onto ConfirmModal — FR-13</title>
+    <phase>2 Confirms &amp; choices</phase>
+    <gate>blocked until 005</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Re-bases blocking/destructive confirm dialogs onto the new `ConfirmModal` preset — changes dismiss semantics + button chrome across three surfaces (Compose lib, AI.Widgets, both CloseProjectDialog copies); behavior-preservation is load-bearing.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Preset re-base fully specified by the `ConfirmModal` reference impl and the existing dialog contracts; no architectural ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>005</deps>
+    <tags>react, fluent-ui, frontend</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Re-base the blocking/destructive confirm dialogs — `ComposeConflictDialog`, `PinnedMemoryDeleteConfirmation`, and `CloseProjectDialog` (BOTH copies) — onto the `ConfirmModal` preset (built in task 005), using `dismiss="alert"` for blocking/non-dismissible confirms and the destructive/danger variant where the action deletes or discards (FR-13). Preserve each dialog's exact messaging and button semantics. Explicitly REMOVE `CloseProjectDialog`'s inline button-color styles (the anti-pattern called out in design §3.3 / §6.5) and use the danger TOKEN class provided by `ConfirmModal` instead.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 dialog patterns, dismiss semantics, and semantic-token theming. Follow ADRs strictly.</role>
+  <goal>`ComposeConflictDialog`, `PinnedMemoryDeleteConfirmation`, and both `CloseProjectDialog.tsx` copies render via `ConfirmModal` chrome (standard header + footer + dismiss semantics); their messaging and button semantics are unchanged; `CloseProjectDialog`'s inline button-color styles are removed in favor of the danger token class; all consumers and the shared libs build green under `@types/react` 18 and React 19.</goal>
+
+  <context>
+    <background>Design P2 re-bases the confirm family onto `ConfirmModal` once the preset exists (task 005). `ComposeConflictDialog` and `PinnedMemoryDeleteConfirmation` are already `Dialog(alert)` today; the re-base standardizes their chrome and maps them to `dismiss="alert"`. `CloseProjectDialog` carries inline button-color styles — the exact anti-pattern the project bans (design §6.5: "Destructive primary uses appearance + a documented danger token class, NOT inline backgroundColor styles"); this task removes them. Both `CloseProjectDialog` copies (shared-lib `CreateProjectWizard/` + `LegalWorkspace/CreateProject/`) are folded in so they don't drift.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeConflictDialog.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.AI.Widgets/src/components/memory/PinnedMemoryDeleteConfirmation.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CloseProjectDialog.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/CreateProject/CloseProjectDialog.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/ConfirmModal.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="005" status="pending">The `ConfirmModal` preset (+ destructive/danger variant + `dismiss="alert"`) that these confirms re-base onto.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Re-base onto the shared `ConfirmModal` in `@spaarke/ui-components`; do NOT fork the preset or re-implement confirm chrome per surface.</constraint>
+    <constraint source="ADR-021">Semantic tokens only — the danger primary MUST use the documented danger token class from `ConfirmModal`, NOT an inline `backgroundColor`/hex. Remove any `'1px'` literals encountered in the re-based headers/footers (NFR-03).</constraint>
+    <constraint source="project">Preserve each dialog's exact messaging (title + body copy) and button semantics (labels, order, destructive intent). Blocking/non-dismissible confirms use `dismiss="alert"` (no ESC/backdrop).</constraint>
+    <constraint source="project">Keep the Fluent `Dialog` envelope via `ConfirmModal`; MUST NOT hand-roll any overlay. Compose the preset — do NOT fork it.</constraint>
+    <constraint source="project">All touched files MUST compile clean under `@types/react` 18 (PCF) and React 19 (Code Pages) — NFR-04.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Fluent v9 confirm/alert dialogs + destructive-action theming</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Shared-lib preset composition conventions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-13 + design §6.5/§6.7 + the `ConfirmModal` preset from task 005. Declare RIGOR: FULL.</step>
+    <step order="1">Re-base `ComposeConflictDialog` onto `ConfirmModal` with `dismiss="alert"`, preserving its title/body copy and 3-button footer semantics.</step>
+    <step order="2">Re-base `PinnedMemoryDeleteConfirmation` onto `ConfirmModal` with the destructive/danger variant + `dismiss="alert"`, preserving its warn messaging and Cancel/Delete semantics.</step>
+    <step order="3">Re-base both `CloseProjectDialog` copies onto `ConfirmModal`, mapping phase-dependent buttons to the preset footer; use the destructive/danger variant where the action closes/discards.</step>
+    <step order="4">Delete `CloseProjectDialog`'s inline button-color styles; confirm the danger primary now comes from the `ConfirmModal` danger token class (grep the two copies for inline `backgroundColor`/hex → none).</step>
+    <step order="5">Build `Spaarke.Compose.Components`, `Spaarke.AI.Widgets`, `Spaarke.UI.Components`, and the LegalWorkspace consumer; prove dual-React cleanliness; fix any type breaks; verify no consumer call site broke.</step>
+    <step order="6">Run the ui-tests below (alert non-dismiss + danger token + dark-mode parity).</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set 040 status to ✅.</step>
+    <step order="8">Document any messaging/button mapping decision or deviation in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a confirm's existing button set or messaging cannot map onto the `ConfirmModal` footer contract without changing what the user sees or which action is destructive, STOP and surface the mismatch per CLAUDE.md §6 rather than silently altering the confirm's semantics.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Alert dialogs stay non-dismissible">
+      <steps>
+        <step>Open each re-based confirm and press ESC / click the backdrop.</step>
+        <step>Verify blocking confirms (`dismiss="alert"`) do not dismiss; only an explicit button closes them.</step>
+      </steps>
+      <expected>Blocking confirms ignore ESC/backdrop; messaging + button semantics match the pre-re-base dialog.</expected>
+    </test>
+    <test name="Danger primary uses a token class (no inline color)">
+      <steps>
+        <step>Inspect both `CloseProjectDialog` copies and `PinnedMemoryDeleteConfirmation` destructive primaries in the rendered DOM.</step>
+        <step>Confirm the danger styling comes from the token class, and grep the files for inline `backgroundColor`/hex.</step>
+      </steps>
+      <expected>Destructive primary is styled by the danger token class; no inline color/hex remains in `CloseProjectDialog`.</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Render each re-based confirm under the dark Fluent theme.</step>
+        <step>Verify the danger primary + chrome read correctly via semantic tokens in both light and dark.</step>
+      </steps>
+      <expected>Correct light/dark contrast via semantic tokens; danger primary legible in both.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test shared libs and the LegalWorkspace consumer (build:prod for PCF)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeConflictDialog.tsx</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/components/memory/PinnedMemoryDeleteConfirmation.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CloseProjectDialog.tsx</output>
+    <output type="code">src/solutions/LegalWorkspace/src/components/CreateProject/CloseProjectDialog.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `ComposeConflictDialog`, `PinnedMemoryDeleteConfirmation`, and both `CloseProjectDialog` copies, when opened, then each renders via `ConfirmModal` chrome (standard header + footer + dismiss semantics).</criterion>
+    <criterion testable="true">Given a blocking confirm, when the user presses ESC or clicks the backdrop, then it does not dismiss (`dismiss="alert"`); destructive confirms use the danger variant.</criterion>
+    <criterion testable="true">Each re-based confirm's title/body messaging and button labels/order/intent are unchanged.</criterion>
+    <criterion testable="true">Negative: grep of both `CloseProjectDialog` copies returns no inline `backgroundColor`/hex/`'1px'` literal; the danger primary comes from the `ConfirmModal` danger token class.</criterion>
+    <criterion testable="true">`Spaarke.Compose.Components`, `Spaarke.AI.Widgets`, `Spaarke.UI.Components`, and the LegalWorkspace consumer build green; no consumer call site regressed.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design §3.3 flags `CloseProjectDialog` "inline button color styles" and §6.5 mandates the danger token class over inline color. These dialogs receive window controls in P1 (task 030/031); this task supersedes that interim wiring by re-basing them onto `ConfirmModal`. COMPLETED 2026-08-02 (parallel sub-agent + main-session consolidation): all 4 re-based, zero escalations. Agent composed SprkModal directly (3-button/busy/phase-dependent footers exceed ConfirmModalProps); consolidation then added `busy` to ConfirmModal → PinnedMemoryDeleteConfirmation re-pointed onto the LITERAL preset, and exported `useDangerButtonClassName` → both CloseProjectDialog copies import (not copy) the danger class. ComposeConflictDialog (3-way) + CloseProjectDialogs stay SprkModal-direct, documented in-file. Inline-color anti-pattern removed both copies (grep-clean). Cancel-left standardization + string-title fold are deliberate per design §6.4/§6.5. Builds/tests green (LW via scoped tsc, #712). Detail: notes/task-040-completion.md + wave-p2-completion.md.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

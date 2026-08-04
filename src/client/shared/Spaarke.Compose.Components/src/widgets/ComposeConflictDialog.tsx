@@ -77,26 +77,48 @@
  *     chose neither force-close nor go-to-other; the host should typically
  *     unmount the editor (the conflict is unresolved, no lock acquired here).
  *
+ * P2 re-base (spaarke-modal-system, task 040 — supersedes the task-031 interim
+ * `ModalWindowControls`/local-`isMaximized` wiring):
+ *   - Envelope is now the shared `SprkModal` shell (`size="xs"`, `dismiss="alert"`,
+ *     `maximizable={false}`) — the same envelope contract the `ConfirmModal`
+ *     preset establishes. The literal `<ConfirmModal>` wrapper component was
+ *     NOT used directly because its `ConfirmModalProps` only expose a single
+ *     Cancel + a single Confirm action; this dialog has THREE simultaneous
+ *     actions (force-close / go-to-other / cancel). Per the task-040 escalation
+ *     guidance, hosting the third action via `SprkModal`'s public `footer` slot
+ *     is legitimate composition (NOT forking) — `ConfirmModal` itself is only a
+ *     thin config of the same `SprkModal` shell. `SprkModal` and `ConfirmModal`
+ *     are both unmodified by this change.
+ *   - Button set, labels, and left-to-right order are UNCHANGED (Force-close /
+ *     Go-to-other / Cancel, right-aligned as a group) — no button was moved to
+ *     `footerStart` because doing so would have reordered the three actions
+ *     relative to each other, which the task-040 constraint (preserve exact
+ *     button order) forbids here (unlike a plain Cancel/Confirm pair, none of
+ *     these three is a "the rest are secondary to this one" Cancel analog).
+ *   - Maximize/restore is retired for this dialog (the `ConfirmModal` contract
+ *     is non-maximizable) — the local `isMaximized` state + `surfaceMaximized`
+ *     style from the task-031 interim wiring are removed as dead code.
+ *   - (Historical note, resolved: the task-040 report flagged that `SprkModal`
+ *     had no `aria-labelledby` wiring; the P2 consolidation added it — the
+ *     shell stamps a stable id on its title span and points the
+ *     `DialogSurface`'s `aria-labelledby` at it, so this dialog's accessible
+ *     name IS wired to its title.)
+ *
  * @see projects/spaarkeai-compose-r1/tasks/051-spe-multi-tab-conflict-ux.poml
  * @see projects/spaarkeai-compose-r1/notes/spikes/spike-3-spe-checkout-promotion.md §1 + §9
+ * @see projects/spaarke-modal-system/tasks/040-rebase-confirms.poml
  * @see src/server/api/Sprk.Bff.Api/Models/CheckoutModels.cs (CheckoutStatusInfo)
  * @see src/server/api/Sprk.Bff.Api/Services/DocumentCheckoutService.cs:429-457
  * @see src/solutions/SpaarkeAi/src/components/compose/ComposeWorkspace.tsx (host)
  */
 
 import * as React from 'react';
-import {
-  Dialog,
-  DialogSurface,
-  DialogBody,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
-  makeStyles,
-  tokens,
-  Text,
-} from '@fluentui/react-components';
+import { Button, makeStyles, tokens, Text } from '@fluentui/react-components';
+// Shared canonical modal shell (spaarke-modal-system) — the same envelope the
+// `ConfirmModal` preset configures (`size="xs"`, `dismiss="alert"`,
+// `maximizable={false}`); composed directly here to host a 3-button footer
+// (see the P2 re-base note above).
+import { SprkModal } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 semantic tokens only (ADR-021)
@@ -107,7 +129,6 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     rowGap: tokens.spacingVerticalM,
-    paddingTop: tokens.spacingVerticalS,
   },
   paragraph: {
     color: tokens.colorNeutralForeground1,
@@ -200,6 +221,13 @@ export interface ComposeConflictDialogProps {
    * in the empty state.
    */
   onCancel: () => void;
+
+  /**
+   * The `--sprk-ui-scale` factor forwarded to the `SprkModal` shell (design
+   * §6.9). Optional, backward-compatible; hosts thread this via `useUiScale()`
+   * (spaarke-modal-system task 040 low-cost passthrough).
+   */
+  uiScale?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -209,25 +237,27 @@ export interface ComposeConflictDialogProps {
 /**
  * `ComposeConflictDialog` — multi-tab conflict modal (FR-16).
  *
- * Renders a non-dismissible Fluent v9 Dialog with three buttons:
+ * Renders a non-dismissible `SprkModal` (`dismiss="alert"`) with three buttons
+ * in the shared footer slot:
  *   - Primary (appearance="primary"): "Force-close other session and open here"
  *   - Secondary: "Go to that session"
  *   - Tertiary (appearance="subtle"): "Cancel — close this tab"
  *
  * The primary action is force-close because it represents the "I want to
  * keep editing here" intent, which is the most common multi-tab case (user
- * forgot they had it open elsewhere and wants to consolidate).
+ * forgot they had it open elsewhere and wants to consolidate). None of the
+ * three actions is styled as destructive/danger — the original dialog never
+ * used danger styling here, and task 040 preserves that intent verbatim.
  *
  * The dialog is **non-dismissible** via Escape/background-click — only the
  * three buttons resolve it. This avoids the silent-dismiss failure mode
  * documented in the file header.
  *
  * Accessibility:
- *   - DialogTitle is the dialog's accessible name (Fluent v9 wires this).
- *   - DialogContent has live-region semantics by virtue of role="dialog"
- *     + aria-describedby (Fluent v9 internals).
- *   - Buttons are reachable in tab order; primary gets initial focus per
- *     Fluent v9 Dialog conventions.
+ *   - `SprkModal` sets `aria-modal` + the `alertdialog` role for `dismiss="alert"`.
+ *   - Buttons are reachable in tab order; the shell renders the standard
+ *     `ModalWindowControls` (×) in the header, routed to `onCancel` via the
+ *     shell's own `onClose` contract.
  */
 export function ComposeConflictDialog(props: ComposeConflictDialogProps): React.JSX.Element {
   const {
@@ -237,6 +267,7 @@ export function ComposeConflictDialog(props: ComposeConflictDialogProps): React.
     onGoToOtherSession,
     onForceCloseOtherSession,
     onCancel,
+    uiScale,
   } = props;
 
   const styles = useStyles();
@@ -256,65 +287,52 @@ export function ComposeConflictDialog(props: ComposeConflictDialogProps): React.
   }, [conflictingSessionOpenedAt]);
 
   return (
-    <Dialog
+    <SprkModal
       open={open}
-      // Non-dismissible — neither Escape nor background-click closes.
-      // `modalType="alert"` makes the dialog block interaction with the
-      // rest of the page AND disables the default close-on-escape behavior.
-      modalType="alert"
-      // No onOpenChange handler — the dialog cannot be closed except via
-      // the three action buttons. The host controls `open` via reducer.
-    >
-      <DialogSurface
-        // Sized to comfortably fit the heading + paragraph + three buttons
-        // without scrolling on a typical Compose pane width.
-        data-testid="compose-conflict-dialog"
-        aria-labelledby="compose-conflict-dialog-title"
-        aria-describedby="compose-conflict-dialog-content"
-      >
-        <DialogBody>
-          <DialogTitle id="compose-conflict-dialog-title">This document is open in another Compose session</DialogTitle>
-          <DialogContent id="compose-conflict-dialog-content" className={styles.content}>
-            <Text className={styles.paragraph}>
-              You already have {documentDisplayName ? <strong>{documentDisplayName}</strong> : 'this document'} open in
-              another tab or window. Only one editing session per document is allowed at a time.
-            </Text>
-            {openedAtDisplay ? (
-              <Text className={styles.meta} data-testid="compose-conflict-opened-at">
-                Other session opened: {openedAtDisplay}
-              </Text>
-            ) : null}
-            <Text className={styles.paragraph}>Choose how to continue:</Text>
-          </DialogContent>
-          <DialogActions
-            // Fluent v9 DialogActions is internally a flex row; we override
-            // wrapping behavior for long button labels (FR-16 verbatim labels
-            // are long enough to wrap on narrow Compose panes).
-            className={styles.actions}
+      // × always routes to onCancel — the SAME cancel-equivalent action the
+      // third button uses. This dialog's non-dismissible alert semantics are
+      // unchanged (× is a deliberate click on the one existing cancel-
+      // equivalent action, not a new Escape/backdrop path — `dismiss="alert"`
+      // blocks ESC/backdrop entirely).
+      onClose={onCancel}
+      title="This document is open in another Compose session"
+      size="xs"
+      dismiss="alert"
+      maximizable={false}
+      uiScale={uiScale}
+      footer={
+        <div className={styles.actions}>
+          <Button
+            appearance="primary"
+            onClick={onForceCloseOtherSession}
+            data-testid="compose-conflict-force-close-button"
           >
-            <Button
-              appearance="primary"
-              onClick={onForceCloseOtherSession}
-              data-testid="compose-conflict-force-close-button"
-            >
-              {/* FR-16 verbatim — do not change wording. */}
-              Force-close other session and open here
-            </Button>
-            <Button
-              appearance="secondary"
-              onClick={onGoToOtherSession}
-              data-testid="compose-conflict-go-to-other-button"
-            >
-              {/* FR-16 verbatim — do not change wording. */}
-              Go to that session
-            </Button>
-            <Button appearance="subtle" onClick={onCancel} data-testid="compose-conflict-cancel-button">
-              Cancel — close this tab
-            </Button>
-          </DialogActions>
-        </DialogBody>
-      </DialogSurface>
-    </Dialog>
+            {/* FR-16 verbatim — do not change wording. */}
+            Force-close other session and open here
+          </Button>
+          <Button appearance="secondary" onClick={onGoToOtherSession} data-testid="compose-conflict-go-to-other-button">
+            {/* FR-16 verbatim — do not change wording. */}
+            Go to that session
+          </Button>
+          <Button appearance="subtle" onClick={onCancel} data-testid="compose-conflict-cancel-button">
+            Cancel — close this tab
+          </Button>
+        </div>
+      }
+    >
+      <div data-testid="compose-conflict-dialog" className={styles.content}>
+        <Text className={styles.paragraph}>
+          You already have {documentDisplayName ? <strong>{documentDisplayName}</strong> : 'this document'} open in
+          another tab or window. Only one editing session per document is allowed at a time.
+        </Text>
+        {openedAtDisplay ? (
+          <Text className={styles.meta} data-testid="compose-conflict-opened-at">
+            Other session opened: {openedAtDisplay}
+          </Text>
+        ) : null}
+        <Text className={styles.paragraph}>Choose how to continue:</Text>
+      </div>
+    </SprkModal>
   );
 }
 

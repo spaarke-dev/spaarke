@@ -55,7 +55,12 @@ import { CaughtUpFooter } from './CaughtUpFooter';
 import { PreferencesDropdown } from './PreferencesDropdown';
 import { HighPrioritySection } from './HighPrioritySection';
 import { StatTiles, type StatTile } from './StatTiles';
-import { SendEmailDialog, type ISendEmailPayload, RichFilePreviewDialog } from '@spaarke/ui-components';
+import {
+  SendEmailDialog,
+  type ISendEmailPayload,
+  RichFilePreviewDialog,
+  OOB_MODAL_SIZES,
+} from '@spaarke/ui-components';
 import { extractEmailKey } from '@spaarke/ui-components/services';
 import { useBriefingRender, useInlineTodoCreate, useBriefingPreferences } from '../hooks';
 import { TOASTER_ID } from '../utils/toastUtils';
@@ -445,9 +450,11 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
             // (not destructured) — the platform's implementation relies on `this`
             // to access its internal _clientApiExecutor. Destructuring breaks it.
             if (typeof xrm?.Navigation?.navigateTo !== 'function') return;
+            // `record` OOB size (85%×85%) — record-modal-selection.md
+            // invariant (spec FR-11/FR-18, task 090); was ad-hoc 80%×80%.
             xrm.Navigation.navigateTo(
               { pageType: 'entityrecord', entityName: 'sprk_todo', entityId: newTodoId },
-              { target: 2, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } }
+              { target: 2, width: OOB_MODAL_SIZES.record.width, height: OOB_MODAL_SIZES.record.height }
             ).catch(() => {
               /* user closed dialog */
             });
@@ -519,13 +526,15 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
         dispatchAccessToast();
         return;
       }
+      // `record` OOB size (85%×85%) — record-modal-selection.md invariant
+      // (spec FR-11/FR-18, task 090); was an ad-hoc 80%×80% literal.
       xrm.Navigation.navigateTo(
         {
           pageType: 'entityrecord',
           entityName: entityType,
           entityId: entityId,
         },
-        { target: 2, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } }
+        { target: 2, width: OOB_MODAL_SIZES.record.width, height: OOB_MODAL_SIZES.record.height }
       ).catch(() => {
         dispatchAccessToast();
       });

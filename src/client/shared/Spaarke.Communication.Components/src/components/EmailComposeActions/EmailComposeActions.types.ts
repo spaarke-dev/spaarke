@@ -155,6 +155,14 @@ export interface EmailComposeActionsDeps {
    * uses it to close its own host window once the compose is done.
    */
   onClose?: () => void;
+  /**
+   * UAT 2026-08-03: render the composer at the maximized geometry (fills the
+   * host viewport, maximize toggle hidden). Pass true when the host is itself
+   * a dedicated/overlaid modal surface (record-single mode inside the OOB
+   * email-record modal; the standalone compose window). Default false — the
+   * standard floating mid-size rectangle (list-mode reading page).
+   */
+  composerFullBleed?: boolean;
 }
 
 export interface UseEmailComposeActionsResult {

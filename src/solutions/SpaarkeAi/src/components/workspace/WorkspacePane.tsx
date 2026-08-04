@@ -619,6 +619,18 @@ export function WorkspacePane(): React.JSX.Element {
   React.useEffect(() => {
     if (!bffBaseUrl || !isAuthenticated) return;
 
+    // Focused analysis open (headless modal / entry 2c–2d "open existing analysis"): show an
+    // INDEPENDENT session with ONLY this analysis loaded — do NOT restore the accumulated
+    // workspace tab set (neither the server-session tabs nor the per-Analysis localStorage
+    // anchor). The existing-analysis effect below mounts JUST the Compose document; the
+    // Assistant pane restores the bound session's conversation via session_switch. Settle
+    // immediately so that (tabRestoreSettled-gated) effect can proceed. (Owner UAT 2026-07-31:
+    // the headless analysis modal must open independent, not reopen the full workspace tabs.)
+    if (analysisLaunch?.mode === 'existing') {
+      setTabRestoreSettled(true);
+      return;
+    }
+
     let cancelled = false;
     (async () => {
       let restoredFromServer = false;
@@ -690,7 +702,7 @@ export function WorkspacePane(): React.JSX.Element {
     // (returned by useAiSession() but identical reference across renders).
     // Including it in deps would re-fire the effect needlessly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatSessionId, tabAnchorKey, bffBaseUrl, isAuthenticated]);
+  }, [chatSessionId, tabAnchorKey, bffBaseUrl, isAuthenticated, analysisLaunch?.mode]);
 
   // ---------------------------------------------------------------------------
   // Auto-install default workspace tab — Wave 2b (task 109)

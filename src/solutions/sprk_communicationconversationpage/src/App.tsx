@@ -61,6 +61,7 @@ export const App: React.FC = () => {
         renderConversation={({
           threadId,
           threadName,
+          regarding,
           authenticatedFetch: threadFetch,
           bffBaseUrl: threadBffBaseUrl,
           onMarkThreadRead,
@@ -76,6 +77,11 @@ export const App: React.FC = () => {
             title={threadName}
             // Inline rename (round-8.4): pencil in the header renames the thread.
             onThreadRenamed={onThreadRenamed}
+            // Open associated record (round-8.4 item 3): the selected thread's regarding record, opened as an OOB modal.
+            regarding={regarding}
+            onOpenRecord={(entityType, id) => {
+              void (navigationService.openRecordModal?.(entityType, id) ?? navigationService.openRecord(entityType, id));
+            }}
           />
         )}
       />

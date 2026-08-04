@@ -315,6 +315,8 @@ const EmailComposeStandalone: React.FC<EmailComposeStandaloneProps> = ({
   );
 
   const { actions, composerDialog } = useEmailComposeActions({
+    // Dedicated compose window (target=2 modal) — the composer IS the window.
+    composerFullBleed: true,
     authenticatedFetch,
     bffBaseUrl,
     dataService,

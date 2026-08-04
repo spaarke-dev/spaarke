@@ -26,7 +26,7 @@
 
 import '@testing-library/jest-dom';
 import * as React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
@@ -94,11 +94,16 @@ describe('ComposeConflictDialog', () => {
     it('renders dialog with title and document name when open', () => {
       renderDialog();
 
-      // Title (DialogTitle is the accessible name of the dialog).
+      // Title: the P2 re-base (spaarke-modal-system task 040) renders the
+      // header via the shared `SprkModal` shell, which sets the title as
+      // plain text rather than via Fluent's `DialogTitle` (no
+      // `aria-labelledby` wiring to the dialog's accessible name — a known,
+      // already-shipped `SprkModal`/`ConfirmModal` limitation, see task
+      // 005/009). Assert on text content within the alertdialog instead of
+      // the computed accessible `name`.
+      const dialog = screen.getByRole('alertdialog');
       expect(
-        screen.getByRole('alertdialog', {
-          name: /this document is open in another compose session/i,
-        }),
+        within(dialog).getByText(/this document is open in another compose session/i),
       ).toBeInTheDocument();
 
       // Document display name appears in the body.

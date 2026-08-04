@@ -148,7 +148,9 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
   const hideListPane = Boolean(hideList) && Boolean(initialSelectedId);
 
   // Left pane: saved-view discovery + the raw rows the view's FetchXML selects.
-  const { views, selectedViewId, setSelectedViewId, rows, isLoading, error } =
+  // `refetch` re-runs the active view's FetchXML for the list Refresh button
+  // (owner UAT 2026-08-03 Item 2).
+  const { views, selectedViewId, setSelectedViewId, rows, isLoading, error, refetch } =
     useEmailViews<Record<string, unknown>>(dataverseClient);
 
   const cardItems = React.useMemo(() => rows.map(mapRowToEmailCardItem), [rows]);
@@ -204,6 +206,9 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
     composerDialog,
     openFullForm,
   } = useEmailComposeActions({
+    // Record-single mode renders inside the OOB email-record modal — the
+    // composer must fully cover it (UAT 2026-08-03). List mode stays floating.
+    composerFullBleed: hideListPane,
     authenticatedFetch,
     bffBaseUrl,
     dataService,
@@ -253,6 +258,9 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
   const toolbarActions = React.useMemo(
     () => ({
       ...composeActions,
+      // Left-list Refresh (owner UAT 2026-08-03 Item 2) — re-runs the active
+      // view's FetchXML so the card list reflects newly-arrived/changed rows.
+      onRefresh: refetch,
       onSaveToSharePoint: handleSaveToSharePoint,
       onCreateEvent: () => handleCreate('event'),
       onCreateTodo: () => handleCreate('todo'),
@@ -261,7 +269,7 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
         void openFullForm(communicationId);
       },
     }),
-    [composeActions, handleSaveToSharePoint, handleCreate, openFullForm]
+    [composeActions, refetch, handleSaveToSharePoint, handleCreate, openFullForm]
   );
 
   const filedAssociations = record.recordState?.filedAssociations ?? [];

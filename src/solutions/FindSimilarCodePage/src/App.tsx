@@ -24,6 +24,7 @@ import {
   DismissRegular,
   SearchRegular,
 } from "@fluentui/react-icons";
+import { OOB_MODAL_SIZES } from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -378,8 +379,10 @@ export function FindSimilarApp(props: IFindSimilarAppProps) {
           },
           {
             target: 2,
-            width: { value: 85, unit: "%" },
-            height: { value: 85, unit: "%" },
+            // `record` OOB size (85%×85%) — already matched; sourced from
+            // oobModalSizes.ts so it can't drift (spec FR-11/FR-18, task 090).
+            width: OOB_MODAL_SIZES.record.width,
+            height: OOB_MODAL_SIZES.record.height,
           }
         );
       } else {

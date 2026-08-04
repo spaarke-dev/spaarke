@@ -55,11 +55,13 @@ describe('openEmailRecord (Pattern B launcher)', () => {
       data: COMMUNICATION_ID,
     });
     expect(EMAIL_PAGE_WEBRESOURCE_NAME).toBe('sprk_emailpage');
+    // `record` OOB size (85%×85%) — spaarke-modal-system P7 task 090
+    // (FR-11/FR-18); was 80%×80%.
     expect(navOptions).toEqual({
       target: 2,
       position: 1,
-      width: { value: 80, unit: '%' },
-      height: { value: 80, unit: '%' },
+      width: { value: 85, unit: '%' },
+      height: { value: 85, unit: '%' },
     });
   });
 

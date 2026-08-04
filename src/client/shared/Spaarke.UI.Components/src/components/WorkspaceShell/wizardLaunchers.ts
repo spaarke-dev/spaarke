@@ -45,6 +45,15 @@
  */
 
 // ---------------------------------------------------------------------------
+// OOB size scale (spaarke-modal-system P7 task 090 — FR-11/FR-18). ONE source
+// of truth for Xrm.Navigation.navigateTo dialog dimensions — see
+// utils/adapters/oobModalSizes.ts. Do NOT reintroduce inline width/height
+// percentage literals in this file.
+// ---------------------------------------------------------------------------
+
+import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
+
+// ---------------------------------------------------------------------------
 // Internal: Xrm.Navigation feature detection (frame-walking)
 // ---------------------------------------------------------------------------
 
@@ -93,8 +102,10 @@ export function resolveXrmNavigation(): any | null {
 // ---------------------------------------------------------------------------
 
 const DEFAULT_TARGET = 2 as const;
-const DEFAULT_WIDTH = { value: 60, unit: '%' as const };
-const DEFAULT_HEIGHT = { value: 70, unit: '%' as const };
+// `wizard` OOB size (60% × 70%) — sourced from oobModalSizes.ts, NOT an inline
+// literal (spec FR-11/FR-18). Matches the seven Get-Started wizards below.
+const DEFAULT_WIDTH = OOB_MODAL_SIZES.wizard.width;
+const DEFAULT_HEIGHT = OOB_MODAL_SIZES.wizard.height;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -400,10 +411,16 @@ export async function navigateToEntityRecordSurfaceAsync(
     pageInput.data = params.defaultValues;
   }
   try {
+    // `createForm` OOB size (70% × 80%) — this launches an OOB entity CREATE
+    // form (`pageType: 'entityrecord'`, no existing entityId), the exact
+    // scenario `createForm` was named for (spec FR-11), NOT the `wizard`
+    // (60% × 70%) webresource size the rest of this module uses. Verified
+    // zero existing callers depend on the prior 60%×70% fallback (task 090
+    // repo-wide grep) — see notes/task-090-completion.md.
     const result: any = await nav.navigateTo(pageInput, {
       target: DEFAULT_TARGET,
-      width: DEFAULT_WIDTH,
-      height: DEFAULT_HEIGHT,
+      width: OOB_MODAL_SIZES.createForm.width,
+      height: OOB_MODAL_SIZES.createForm.height,
       title: params.title,
     });
     // entityrecord resolves with `{ savedEntityReference: [{ id, entityType, name }] }`

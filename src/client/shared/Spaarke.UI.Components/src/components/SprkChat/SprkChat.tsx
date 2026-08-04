@@ -59,7 +59,10 @@ import { useDynamicSlashCommands } from './hooks/useDynamicSlashCommands';
 import { useChatFileAttachment } from './hooks/useChatFileAttachment';
 import type { ISprkChatInputHandle } from './types';
 import { Toaster, useToastController, useId, Toast, ToastTitle, ToastBody } from '@fluentui/react-components';
-import { ActionConfirmationDialog } from './ActionConfirmationDialog';
+// spaarke-modal-system task 042 (spec FR-13): the hand-rolled position:absolute
+// ActionConfirmationDialog overlay is retired; HITL action confirmations now
+// render via the shared ConfirmModal preset (Fluent Dialog envelope).
+import { ConfirmModal } from '../SprkModal/presets/ConfirmModal';
 import { actionOutcomeDataToCard } from './OutcomeCard';
 import {
   openCodePageDialog,
@@ -251,6 +254,34 @@ const useStyles = makeStyles({
       color: tokens.colorBrandForeground1,
     },
   },
+  // Ported from the retired ActionConfirmationDialog overlay (spaarke-modal-system
+  // task 042 — spec FR-13): the HITL action-confirmation parameters box, now
+  // rendered inside ConfirmModal's `message` slot. Semantic tokens only (ADR-021) —
+  // no hex, no '1px' literals, no inline color styles.
+  actionConfirmParameters: {
+    backgroundColor: tokens.colorNeutralBackground2,
+    ...shorthands.borderRadius(tokens.borderRadiusMedium),
+    ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
+    marginTop: tokens.spacingVerticalS,
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap(tokens.spacingVerticalXS),
+  },
+  actionConfirmParameterRow: {
+    display: 'flex',
+    ...shorthands.gap(tokens.spacingHorizontalS),
+    fontSize: tokens.fontSizeBase200,
+  },
+  actionConfirmParameterLabel: {
+    color: tokens.colorNeutralForeground3,
+    fontWeight: tokens.fontWeightSemibold,
+    minWidth: '100px',
+    flexShrink: 0,
+  },
+  actionConfirmParameterValue: {
+    color: tokens.colorNeutralForeground1,
+    wordBreak: 'break-word',
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -324,6 +355,42 @@ function mapInlineActionsToChipActions(actions: IInlineActionInfo[]): InlineAiAc
     actionType: (a.actionType === 'diff' ? 'diff' : 'chat') as 'chat' | 'diff',
     description: a.description,
   }));
+}
+
+/**
+ * Composes the `ConfirmModal` `message` node for a pending HITL action confirmation
+ * (spaarke-modal-system task 042 — spec FR-13). Ported verbatim in substance from the
+ * retired `ActionConfirmationDialog` overlay: the summary line, plus — when the action
+ * carries extracted parameters (e.g. "Recipient: john@example.com") — a bordered
+ * parameters box beneath it. This is body copy the user needs before confirming a
+ * side-effecting action, so it is preserved rather than dropped in the re-route.
+ */
+function renderActionConfirmationMessage(
+  action: IPendingAction,
+  styles: {
+    actionConfirmParameters: string;
+    actionConfirmParameterRow: string;
+    actionConfirmParameterLabel: string;
+    actionConfirmParameterValue: string;
+  }
+): React.ReactNode {
+  const paramEntries = Object.entries(action.parameters);
+  if (paramEntries.length === 0) {
+    return action.summary;
+  }
+  return (
+    <>
+      {action.summary}
+      <div className={styles.actionConfirmParameters} data-testid="action-parameters">
+        {paramEntries.map(([key, value]) => (
+          <div key={key} className={styles.actionConfirmParameterRow}>
+            <span className={styles.actionConfirmParameterLabel}>{key}:</span>
+            <span className={styles.actionConfirmParameterValue}>{value}</span>
+          </div>
+        ))}
+      </div>
+    </>
+  );
 }
 
 export const SprkChat: React.FC<ISprkChatProps> = ({
@@ -912,6 +979,28 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         console.warn('[SprkChat] gate reject failed:', err);
       });
   }, [pendingAction, apiBaseUrl, authenticatedFetch]);
+
+  /**
+   * ConfirmModal onClose/onConfirm wrappers (spaarke-modal-system task 042).
+   *
+   * The retired ActionConfirmationDialog overlay disabled BOTH its Cancel and
+   * Confirm buttons for the duration of the async dispatch, preventing any
+   * re-entrant confirm/cancel while a confirmation was in flight. The preset's
+   * `busy` prop (added in the P2 consolidation) now restores that visual
+   * disabled + spinner state; these thin wrappers remain as defense-in-depth so
+   * the Cancel button AND the header × (ConfirmModal's onClose covers both)
+   * stay no-ops while `isConfirmingAction` is true even if focus/keyboard
+   * activation races the disabled state.
+   */
+  const handleConfirmModalClose = React.useCallback(() => {
+    if (isConfirmingAction) return;
+    handleActionCancel();
+  }, [isConfirmingAction, handleActionCancel]);
+
+  const handleConfirmModalConfirm = React.useCallback(() => {
+    if (isConfirmingAction || !pendingAction) return;
+    handleActionConfirm(pendingAction);
+  }, [isConfirmingAction, pendingAction, handleActionConfirm]);
 
   // Initialize session on mount.
   //
@@ -2823,12 +2912,23 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         data-testid="attachment-file-input"
       />
 
-      {/* Task R2-039: HITL Action Confirmation Dialog — shown when an action requires user confirmation */}
-      <ActionConfirmationDialog
-        pendingAction={pendingAction}
-        onConfirm={handleActionConfirm}
-        onCancel={handleActionCancel}
-        isConfirming={isConfirmingAction}
+      {/* Task R2-039 / spaarke-modal-system task 042 (spec FR-13): HITL Action
+          Confirmation — re-based onto the shared ConfirmModal preset (Fluent Dialog
+          envelope via SprkModal). The hand-rolled position:absolute overlay is
+          retired; a11y (focus trap, ESC, aria-modal/alertdialog) now comes from
+          Fluent Dialog. `dismiss="alert"` (ConfirmModal's fixed contract) matches
+          the overlay's actual behavior: no backdrop-click-cancel was ever wired up,
+          and its ESC handling only fired incidentally when focus already sat inside
+          the dialog — never a true light-dismiss gesture. */}
+      <ConfirmModal
+        open={!!pendingAction}
+        onClose={handleConfirmModalClose}
+        onConfirm={handleConfirmModalConfirm}
+        title={pendingAction ? `Confirm Action: ${pendingAction.actionName}` : ''}
+        message={pendingAction ? renderActionConfirmationMessage(pendingAction, styles) : ''}
+        confirmLabel={isConfirmingAction ? 'Confirming…' : 'Confirm'}
+        cancelLabel="Cancel"
+        busy={isConfirmingAction}
       />
 
       {/* Task R2-039: Fluent v9 Toaster for autonomous action success/error feedback (ADR-021) */}

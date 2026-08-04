@@ -104,6 +104,24 @@ jest.mock('@spaarke/ui-components', () => {
     resolveRecordDisplayNameFieldName: mockResolveRecordDisplayNameFieldName,
     resolveRecordNumberFieldName: mockResolveRecordNumberFieldName,
     buildRecordUrl: (entityType: string, id: string) => `https://test/main.aspx?etn=${entityType}&id=${id}`,
+    // spaarke-modal-system P7 task 090 (FR-11/FR-18): RegardingResolverApp.tsx
+    // imports OOB_MODAL_SIZES from `@spaarke/ui-components` for its
+    // `handleRecordNumberClick` navigateTo call. Mirror the real module's
+    // values exactly — see utils/adapters/oobModalSizes.ts.
+    OOB_MODAL_SIZES: {
+      record: {
+        width: { value: 85, unit: '%' as const },
+        height: { value: 85, unit: '%' as const },
+      },
+      createForm: {
+        width: { value: 70, unit: '%' as const },
+        height: { value: 80, unit: '%' as const },
+      },
+      wizard: {
+        width: { value: 60, unit: '%' as const },
+        height: { value: 70, unit: '%' as const },
+      },
+    },
     // PolymorphicPicker mock — records catalog + onSelect + title so tests
     // can trigger onSelect programmatically and inspect the props received.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -707,8 +725,10 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         },
         {
           target: 2,
-          width: { value: 80, unit: '%' },
-          height: { value: 80, unit: '%' },
+          // `record` OOB size (85%×85%) — spaarke-modal-system P7 task 090
+          // (FR-11/FR-18); was 80%×80%.
+          width: { value: 85, unit: '%' },
+          height: { value: 85, unit: '%' },
         }
       );
     });
@@ -878,8 +898,10 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         },
         {
           target: 2,
-          width: { value: 80, unit: '%' },
-          height: { value: 80, unit: '%' },
+          // `record` OOB size (85%×85%) — spaarke-modal-system P7 task 090
+          // (FR-11/FR-18); was 80%×80%.
+          width: { value: 85, unit: '%' },
+          height: { value: 85, unit: '%' },
         }
       );
     });

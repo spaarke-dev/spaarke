@@ -19,20 +19,22 @@
  * `authenticatedFetch` (BFF) + `navigationService` (the record lookup; the host binds
  * `createXrmNavigationService()`). No `@spaarke/auth` import (ADR-028). Fluent v9 semantic tokens only;
  * dark mode passes through the host `FluentProvider` (ADR-021).
+ *
+ * spaarke-modal-system task 050 (FR-14): re-based onto the `FormModal` preset at `size="md"` — the bespoke
+ * `Dialog`/`DialogSurface` envelope + the interim P1 `ModalWindowControls` wiring are RETIRED; the standard
+ * SprkModal chrome (header/× /maximize + Cancel-left/Save-right footer) now comes from the shell (FormModal
+ * is maximizable by default, so the maximize affordance is preserved). Field content, validation, and the
+ * create/send contract above are UNCHANGED — this is a frame/wiring re-base only (no content redesign).
+ * `authenticatedFetch`/`navigationService` keep flowing through as FUNCTIONS (ADR-028) — the re-base does
+ * not touch that contract. Dismiss semantics move from Fluent's default light-dismiss (ESC/backdrop closed
+ * the dialog) to `FormModal`'s `explicit` default (no ESC/backdrop dismiss — only × or Cancel) per FR-05
+ * ("forms use explicit"); this is an intentional part of adopting the standard chrome, not a regression.
  */
 import * as React from 'react';
 import {
-  Dialog,
-  DialogSurface,
-  DialogTitle,
-  DialogBody,
-  DialogContent,
-  DialogActions,
-  Button,
   Field,
   Input,
   Textarea,
-  Spinner,
   Text,
   MessageBar,
   MessageBarBody,
@@ -40,6 +42,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 
+import { FormModal } from '../SprkModal/presets/FormModal';
 import { AssociateToStep } from '../AssociateToStep';
 import type { AssociationResult, EntityTypeOption } from '../AssociateToStep';
 import type { INavigationService } from '../../types/serviceInterfaces';
@@ -94,6 +97,12 @@ export interface INewThreadModalProps {
   onError?: (error: Error) => void;
   /** Optional Dialog title override. Default "New conversation". */
   title?: string;
+  /**
+   * The `--sprk-ui-scale` factor (spec FR-06 / task-020 seam), forwarded to the `FormModal` shell.
+   * Optional, backward-compatible passthrough — omit to use the shell's own default (1); hosts that
+   * don't yet call `useUiScale()` need no changes.
+   */
+  uiScale?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,42 +125,11 @@ const COMMUNICATION_REGARDING_TARGETS: EntityTypeOption[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Styles
+// Styles — FormModal/SprkModal now own the envelope (surface size, header,
+// maximize, footer); only the FORM CONTENT styles remain here (task 050 re-base).
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  // "Our modal" size (round 3 items 10-12): 1040 × 72vh, page-mounted + centered
-  // (Fluent Dialog `modalType="modal"` centers on the viewport). Flex column so
-  // the header + scrollable content + footer stack and the content scrolls.
-  surface: {
-    width: 'min(1040px, 95vw)',
-    maxWidth: 'min(1040px, 95vw)',
-    height: '72vh',
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  body: {
-    display: 'flex',
-    flexDirection: 'column',
-    minHeight: 0,
-    flex: '1 1 auto',
-  },
-  // Breathing room between the modal title ("New conversation") and the first
-  // section header (round 5) — the title otherwise sat flush against "New Thread".
-  title: {
-    paddingBottom: tokens.spacingVerticalL,
-  },
-  content: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXL,
-    flex: '1 1 auto',
-    minHeight: 0,
-    overflowY: 'auto',
-    // Hide the scrollbar (round 4) — the textarea fills so content rarely scrolls.
-    scrollbarWidth: 'none',
-    '::-webkit-scrollbar': { width: 0, height: 0 },
-  },
   // A clearly-delineated section (round 4): a bold header with an underline rule
   // over a subordinate, indented body so the fields read as "under" the section.
   section: {
@@ -176,8 +154,8 @@ const useStyles = makeStyles({
     // Subordinate the fields under their section header.
     paddingLeft: tokens.spacingHorizontalM,
   },
-  // The "Send a message" section fills the remaining modal height so the textarea
-  // can expand (round 4).
+  // The "Send a message" section (round 4) — best-effort fill of the remaining
+  // body height under the shared FormModal/SprkModal body wrapper.
   messageSection: {
     display: 'flex',
     flexDirection: 'column',
@@ -203,22 +181,6 @@ const useStyles = makeStyles({
   errorText: {
     color: tokens.colorPaletteRedForeground1,
     fontSize: tokens.fontSizeBase200,
-  },
-  // Footer: a top rule demarcating the modal foot; Cancel left, Create right.
-  footer: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: tokens.spacingHorizontalS,
-    borderTopWidth: tokens.strokeWidthThin,
-    borderTopStyle: 'solid',
-    borderTopColor: tokens.colorNeutralStroke2,
-    paddingTop: tokens.spacingVerticalM,
-  },
-  footerRight: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
   },
 });
 
@@ -257,6 +219,7 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
   regarding,
   onError,
   title = 'New conversation',
+  uiScale,
 }) => {
   const styles = useStyles();
 
@@ -299,16 +262,7 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
     setNotice(undefined);
   }, [regarding]);
 
-  const handleDialogOpenChange = React.useCallback(
-    (_event: unknown, data: { open: boolean }) => {
-      if (!data.open && !submitting) {
-        resetState();
-        onDismiss();
-      }
-    },
-    [submitting, resetState, onDismiss]
-  );
-
+  // Wired to both the × and the Cancel button (FormModal's `onClose`) — in-flight guard preserved verbatim.
   const handleCancel = React.useCallback(() => {
     if (submitting) return;
     resetState();
@@ -386,81 +340,71 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
   }, [association, name, body, client, onThreadCreated, resetState, onDismiss, onError]);
 
   return (
-    <Dialog open={open} onOpenChange={handleDialogOpenChange} modalType="modal">
-      <DialogSurface className={styles.surface} aria-label={title}>
-        <DialogBody className={styles.body}>
-          <DialogTitle className={styles.title}>{title}</DialogTitle>
-          <DialogContent className={styles.content}>
-            {/* Section 1 — New Thread: name + associate-to-record. The header rule
-                + indented body make the fields read as subordinate to the section. */}
-            <div className={styles.section} role="group" aria-label="New thread">
-              <div className={styles.sectionHeader}>New Thread</div>
-              <div className={styles.sectionBody}>
-                <Field label="Name">
-                  <Input
-                    value={name}
-                    onChange={(_e, data) => setName(data.value)}
-                    disabled={submitting}
-                    placeholder="Conversation name (optional — defaults to the record)"
-                  />
-                </Field>
-                {/* AssociateToStep renders its own "Associate To" sub-heading + the
-                    record-type dropdown + Select Record — no duplicate label here. */}
-                <AssociateToStep
-                  entityTypes={COMMUNICATION_REGARDING_TARGETS}
-                  navigationService={navigationService}
-                  value={association}
-                  onChange={setAssociation}
-                  disabled={submitting}
-                  locked={recordLocked}
-                  variant="compact"
-                />
-                {associationError && (
-                  <Text role="alert" className={styles.errorText}>
-                    {associationError}
-                  </Text>
-                )}
-              </div>
-            </div>
+    <FormModal
+      open={open}
+      onClose={handleCancel}
+      onSubmit={handleSubmit}
+      title={title}
+      size="md"
+      submitLabel={submitting ? 'Creating…' : 'Create'}
+      busy={submitting}
+      uiScale={uiScale}
+    >
+      {/* Section 1 — New Thread: name + associate-to-record. The header rule
+          + indented body make the fields read as subordinate to the section. */}
+      <div className={styles.section} role="group" aria-label="New thread">
+        <div className={styles.sectionHeader}>New Thread</div>
+        <div className={styles.sectionBody}>
+          <Field label="Name">
+            <Input
+              value={name}
+              onChange={(_e, data) => setName(data.value)}
+              disabled={submitting}
+              placeholder="Conversation name (optional — defaults to the record)"
+            />
+          </Field>
+          {/* AssociateToStep renders its own "Associate To" sub-heading + the
+              record-type dropdown + Select Record — no duplicate label here. */}
+          <AssociateToStep
+            entityTypes={COMMUNICATION_REGARDING_TARGETS}
+            navigationService={navigationService}
+            value={association}
+            onChange={setAssociation}
+            disabled={submitting}
+            locked={recordLocked}
+            variant="compact"
+          />
+          {associationError && (
+            <Text role="alert" className={styles.errorText}>
+              {associationError}
+            </Text>
+          )}
+        </div>
+      </div>
 
-            {/* Section 2 — Send a message: OPTIONAL plain-text first message. No
-                duplicate field label (the section header is enough); fills height. */}
-            <div className={styles.messageSection} role="group" aria-label="Send a message">
-              <div className={styles.sectionHeader}>Send a message</div>
-              <div className={styles.messageBody}>
-                <Textarea
-                  className={styles.messageTextarea}
-                  value={body}
-                  onChange={(_e, data) => setBody(data.value)}
-                  disabled={submitting}
-                  resize="none"
-                  aria-label="Message"
-                  placeholder="Optional — add a first message, or start the conversation empty."
-                />
-              </div>
-            </div>
+      {/* Section 2 — Send a message: OPTIONAL plain-text first message. No
+          duplicate field label (the section header is enough); fills height. */}
+      <div className={styles.messageSection} role="group" aria-label="Send a message">
+        <div className={styles.sectionHeader}>Send a message</div>
+        <div className={styles.messageBody}>
+          <Textarea
+            className={styles.messageTextarea}
+            value={body}
+            onChange={(_e, data) => setBody(data.value)}
+            disabled={submitting}
+            resize="none"
+            aria-label="Message"
+            placeholder="Optional — add a first message, or start the conversation empty."
+          />
+        </div>
+      </div>
 
-            {notice && (
-              <MessageBar intent={notice.intent} role={notice.intent === 'error' ? 'alert' : 'status'}>
-                <MessageBarBody>{notice.text}</MessageBarBody>
-              </MessageBar>
-            )}
-          </DialogContent>
-          <DialogActions className={styles.footer}>
-            {/* Cancel left-justified, Create right-justified, top rule = modal foot. */}
-            <Button appearance="secondary" onClick={handleCancel} disabled={submitting}>
-              Cancel
-            </Button>
-            <div className={styles.footerRight}>
-              {submitting && <Spinner size="tiny" aria-hidden="true" />}
-              <Button appearance="primary" onClick={handleSubmit} disabled={submitting} aria-busy={submitting}>
-                {submitting ? 'Creating…' : 'Create'}
-              </Button>
-            </div>
-          </DialogActions>
-        </DialogBody>
-      </DialogSurface>
-    </Dialog>
+      {notice && (
+        <MessageBar intent={notice.intent} role={notice.intent === 'error' ? 'alert' : 'status'}>
+          <MessageBarBody>{notice.text}</MessageBarBody>
+        </MessageBar>
+      )}
+    </FormModal>
   );
 };
 

@@ -52,10 +52,12 @@ describe('openEmailCompose (compose launcher)', () => {
       webresourceName: EMAIL_PAGE_WEBRESOURCE_NAME,
       data: 'compose=new',
     });
+    // `createForm` OOB size (70%×80%) — spaarke-modal-system P7 task 090
+    // (FR-11/FR-18); was 60%×80%.
     expect(navOptions).toEqual({
       target: 2,
       position: 1,
-      width: { value: 60, unit: '%' },
+      width: { value: 70, unit: '%' },
       height: { value: 80, unit: '%' },
     });
   });

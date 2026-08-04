@@ -1,0 +1,137 @@
+# Task Index — Spaarke Modal System
+
+> **Generated**: 2026-08-01 by `/project-pipeline` → task decomposition
+> **Total Tasks**: 29 (13 P0 + 1 P0.5 + 2 P1 + 3 P2 + 2 P3 + 2 P4 + 1 P5 + 1 P6 + 3 P7 + 1 wrap-up)
+> **Spec**: [../spec.md](../spec.md) · **Plan**: [../plan.md](../plan.md) · **CLAUDE.md**: [../CLAUDE.md](../CLAUDE.md)
+
+---
+
+## Status Legend
+
+🔲 not-started · 🔄 in-progress · ⛔ blocked · ✅ completed · ⏸️ deferred · 🔁 needs-retry
+
+## Task Table
+
+| ID | Title | Phase | Status | Deps | Group | Rigor | Model/Effort |
+|----|-------|-------|--------|------|-------|-------|--------------|
+| 001 | Size scale + layout tokens (sizes.ts) | 0 | ✅ | none | A | FULL | sonnet/high |
+| 002 | Scaled Fluent theme builder (scaleTheme) | 0 | ✅ | none | A | FULL | sonnet/high |
+| 003 | Reconcile ModalWindowControls glyph | 0 | ✅ | none | A | FULL | sonnet/high |
+| 004 | SprkModal base shell | 0 | ✅ | 001,002,003 | — | FULL | sonnet/high |
+| 005 | Presets: ConfirmModal + ChoiceModal (ADR-023) | 0 | ✅ | 004 | B | FULL | sonnet/high |
+| 006 | Preset: FormModal | 0 | ✅ | 004 | B | FULL | sonnet/high |
+| 007 | Presets: PreviewModal + BrowseModal | 0 | ✅ | 004 | B | FULL | sonnet/high |
+| 008 | Preset: WizardModal | 0 | ✅ | 004 | B | FULL | sonnet/high |
+| 009 | Barrel exports + a11y snapshot + dual-React verify | 0 | ✅ | 005,006,007,008 | — | FULL | sonnet/high |
+| 010 | Standards doc: MODAL-DESIGN-SYSTEM.md | 0 | ✅ | 004 | — | STANDARD | sonnet/medium |
+| 011 | ADR-050: Canonical Modal Shell 🔒 | 0 | ✅ | 004 | — | STANDARD | sonnet/high |
+| 012 | Pattern pointer: modal-shell.md 🔒 | 0 | ✅ | 010 | — | MINIMAL | sonnet/medium |
+| 013 | Cross-links: DECISION-CRITERIA + root CLAUDE.md §17 🔒 | 0 | ✅ | 010,011 | — | STANDARD | sonnet/high |
+| 020 | P0.5 — App-shell `--sprk-ui-scale` control | 0.5 | ✅ | 002 | — | FULL | sonnet/high |
+| 030 | P1 — Window controls into UI.Components dialogs | 1 | ✅ | 003 | P1 | STANDARD | sonnet/high |
+| 031 | P1 — Window controls into Compose/AI.Widgets/SpaarkeAi | 1 | ✅ | 003 | P1 | STANDARD | sonnet/high |
+| 040 | P2 — Re-base confirms onto ConfirmModal | 2 | ✅ | 005 | P2 | FULL | sonnet/high |
+| 041 | P2 — Re-base ChoiceDialog onto ChoiceModal | 2 | ✅ | 005 | P2 | FULL | sonnet/high |
+| 042 | P2 — Retire ActionConfirmationDialog overlay | 2 | ✅ | 005 | P2 | FULL | sonnet/high |
+| 050 | P3 — Re-base forms onto FormModal (md) | 3 | ✅ | 006 | P3 | FULL | sonnet/high |
+| 051 | P3 — EmailComposer → FormModal; retire legacy SendEmailDialog | 3 | ⏸️ | 006 | P3 | FULL | sonnet/high |
+| 060 | P4 — RichFilePreviewDialog → Preview/Browse; retire FilePreviewDialog | 4 | ✅ | 007 | P4 | FULL | sonnet/high |
+| 061 | P4 — Re-base FindSimilarDialog onto xl | 4 | ✅ | 004 | P4 | STANDARD→FULL | sonnet/high |
+| 070 | P5 — Replace hand-rolled ConversationModal | 5 | ✅ | 004 | — | FULL | opus (≈sonnet/xhigh) |
+| 080 | P6 — WizardShell light-first re-base | 6 | ✅ | 003,008 | — | FULL | sonnet/high |
+| 090 | P7 — OOB size scale constants + route via hubs | 7 | ✅ | none | — | FULL | sonnet/high |
+| 091 | P7 — Retire solution-local navigation.ts copies | 7 | ✅ | 090 | P7 | STANDARD→FULL | sonnet/high |
+| 092 | P7 — Convert sprk_DocumentOperations.js DOM overlay | 7 | ✅ | 090 | P7 | STANDARD→FULL | sonnet/high |
+| 100 | Project wrap-up (MANDATORY) 🔒 | 8 | ✅ | all | — | FULL | main-session |
+
+🔒 = **main-session only** (writes `.claude/` — sub-agents cannot per CLAUDE.md §3).
+
+---
+
+## Parallel Execution Groups
+
+Tasks in a group run simultaneously once the prerequisite is ✅ (ONE message, multiple `task-execute` calls; max 6 agents/wave).
+
+| Group | Tasks | Prerequisite | Files Touched | Safe |
+|-------|-------|--------------|---------------|------|
+| **A** | 001, 002, 003 | none | `SprkModal/sizes.ts` · `SprkModal/scaledTheme.ts` · `ModalWindowControls.tsx` | ✅ distinct files |
+| **B** | 005, 006, 007, 008 | 004 ✅ | `SprkModal/presets/{Confirm,Choice,Form,Preview,Browse,Wizard}Modal.tsx` | ✅ sibling presets |
+| **P1** | 030, 031 | 003 ✅ | UI.Components dialogs vs Compose/AI.Widgets/SpaarkeAi dialogs | ✅ distinct libs |
+| **P2** | 040, 041, 042 | 005 ✅ | confirms vs ChoiceDialog vs SprkChat overlay | ✅ distinct files |
+| **P3** | 050, 051 | 006 ✅ | NewThread/QuickStart/PinnedMemoryEdit vs EmailComposer | ✅ distinct files |
+| **P4** | 060, 061 | 007 ✅ (061 needs 004) | FilePreview vs FindSimilar (×3) | ✅ distinct files |
+| **P7** | 091, 092 | 090 ✅ | navigation.ts copies vs sprk_DocumentOperations.js | ✅ distinct files |
+
+**Serial / solo** (dependency joins or high blast radius): 004 (core join), 009 (barrel join), 010/011/012/013 (docs — 011/012/013 main-session), 020, 070 (hardest case), 080 (WizardShell blast radius), 090, 100.
+
+---
+
+## Critical Path
+
+```
+[001 · 002 · 003]  →  004 (SprkModal base)  →  [005 · 006 · 007 · 008]  →  009 (exports + a11y)
+                                                          │
+   docs branch: 004 → 010 → 012 ;  004/011 → 013         │  conversion waves (each gated on its preset):
+                                                          ▼
+        P1[030·031]   P2[040·041·042]   P3[050·051]   P4[060·061]   P5[070]   P6[080]
+        P7: 090 → [091 · 092]   (largely independent of the shell)
+                                                          ▼
+                                          100 wrap-up (code-review + adr-check + test-diet + repo-cleanup)
+```
+
+P0 is the gate for everything. P0.5 (020) needs only 002. P7 (090) is independent of the shell and can start any time. P5 (070) should follow proof of P0 transform-robust centering (validates the shell's hardest invariant).
+
+---
+
+## Rigor Distribution
+
+| Rigor | Count | Applies to |
+|-------|-------|-----------|
+| **FULL** | 21 | Shell/presets/base, conversions, P0.5, wrap-up |
+| **STANDARD** | 6 | Window-controls rollout (030/031), FindSimilar (061), P7 (091/092), standards doc (010), ADR (011), cross-links (013) |
+| **MINIMAL** | 1 | Pattern pointer (012) |
+
+`task-execute` Step 0.5 re-derives rigor per task and may override. **TEST-MODIFYING override**: any task adding/modifying `tests/**` runs code-review + adr-check unconditionally.
+
+---
+
+## Phase Summary
+
+| Phase | Tasks | Deliverables |
+|-------|-------|--------------|
+| 0 Build ✅ | 001–013 (13) — **DONE 2026-08-01** | SprkModal base + 6 presets + size scale + scaled theme + reconciled window controls + barrel/tests (86 tests) + standards doc + ADR-050 + pattern pointer + cross-links |
+| 0.5 App-shell scale ✅ | 020 (1) — **DONE 2026-08-01** | `uiScale = max(setting, ≥2560→1.15)` bounded {1.0,1.15,1.25,1.5}; `useUiScale()` seam in main barrel; `DisplaySizeMenu` (Menu idiom) in SpaarkeAi strip + LW PageHeader; themeStorage extended in place (same listener); 21 new tests (P0 gate 107/107) |
+| 1 Window-controls ✅ | 030–031 (2) — **DONE 2026-08-01** | Interim `DialogTitle action` adapter: 13 dialogs wired/inherited/verified; 1 owner escalation (legacy SendEmailDialog "v1.1.59 no-X" — resolves at P3/051); LegalWorkspace pre-existing build defect → Issue #712 / DEF-001 |
+| 2 Confirms & choices ✅ | 040–042 (3) — **DONE 2026-08-02** | Confirms re-based (danger token class, inline-color anti-pattern removed); ChoiceDialog → thin ChoiceModal adapter (ADR-023 preserved, 12 tests); hand-rolled ActionConfirmationDialog DELETED (overlay 1 of 3). + Main-session consolidation: ConfirmModal `busy` + exported `useDangerButtonClassName` (3 verbatim copies eliminated), ChoiceModal `cancelLabel`, SprkModal aria-labelledby |
+| 3 Forms & compose | 050 ✅ · 051 ⏸️ — **2026-08-02** | 050: NewThreadModal + QuickStartModal + PinnedMemoryEditDialog → literal FormModal/md (preset extended first: `submitDisabled`/`busy`/`cancelLabel`/`dismiss:alert`). 051 DEFERRED (Issue #713 / DEF-002): EmailComposer self-chromed + 2 live legacy consumers; interim `maxHeight:720px` cap shipped → wrapper numerically = `md`; FR-14 satisfied in substance |
+| 4 Preview & browse ✅ | 060–061 (2) — **DONE 2026-08-02** | RichFilePreviewDialog → PreviewModal (single) / BrowseModal+`onBeforeNavigate` seam (set); @deprecated FilePreviewDialog DELETED, sole consumer migrated (public contract byte-identical, ~8 consumers untouched). FindSimilarDialog ×3 → xl per-copy (literal SprkModal on the self-enveloped viewer; WizardShell-prop alignment on the wizard copies); consolidation deferred → Issue #714 / DEF-003. + Consolidation: `headerActions` passthrough added to Preview/Browse presets (060 gap report) |
+| 5 Messages overlay ✅ | 070 (1) — **DONE 2026-08-02** | ConversationModal (PCF hand-roll, overlay 2 of 3) → `SprkModal md/light` via NEW pcf-safe exports; **FR-08 transform-robust centering VALIDATED** (structural test, React 16); dark parity improved (hard-coded webLightTheme removed); 269→174 lines; build:prod green |
+| 6 Wizards ✅ | 080 (1) — **DONE 2026-08-02** | Light-first (§11-G): standard header/footer tokens + Skip·Back·Next order + named `wizard` size via getSurfaceStyle (95vw/70vh literals gone); envelope/embedded/stepper retained; 061 xl-override plumbing preserved. 9-consumer build matrix green (React 16/18/19 incl. transitive SemanticSearchControl finding). Discovered pre-existing LW WizardShell fork → Issue #715 / DEF-004 |
+| 7 OOB consolidation ✅ | 090–092 (3) — **DONE 2026-08-02** | `oobModalSizes.ts` (record 85² / createForm 70×80 / wizard 60×70) + both hubs consume it; 89-site navigateTo inventory, 45 repointed, 10 flagged for the one-time visual review; both `navigation.ts` copies DELETED (26 real callers repointed — 090's grep missed the openForm shape); `sprk_DocumentOperations.js` DOM overlay (3 of 3!) → chained openConfirmDialog, both copies, zero new asymmetry. Stale `.claude/patterns/webresource/custom-dialogs-in-dataverse.md` rewritten to supported paths. Discoveries → Issues #716 (copy drift/DEF-005) |
+| 8 Wrap-up ✅ | 100 (1) — **DONE 2026-08-02** | Branch gates: adr-check 9/9 compliant + code-review 4-pass, ZERO Critical; all recommended fixes applied (uiScale threading, SIZE_SPEC sourcing, doc corrections, inline-color cleanup, ADR-050 Path-B amendment). test-diet: 38 files, 0 SCAFFOLDING (`notes/test-diet-report.md`). Criteria §1–10 evidenced (`notes/success-criteria-verification.md`). lessons-learned + INDEX row + repo-cleanup done. **PROJECT COMPLETE** (051 → #713; visual review + stale-PCF-bundle-repack outstanding for owner) |
+
+---
+
+## Hot-Path Coordination (per `projects/INDEX.md`)
+
+- **SpaarkeAi=Y** — tasks 020 (app-shell scale) + 031/050 (QuickStartModal) touch `src/solutions/SpaarkeAi/**`. Many active worktrees also touch SpaarkeAi. Run `/conflict-check` before any SpaarkeAi PR.
+- **root-CLAUDE.md=Y** — task 013 adds ONE §17 pointer row + a `.claude/CHANGELOG.md` entry. Low conflict; coordinate at merge.
+- **BFF=N** — client-only; CLAUDE.md §10 not triggered.
+
+---
+
+## Next Action
+
+**🎉 PHASE 0 (Build) COMPLETE — all 13 tasks (001–013) ✅ (2026-08-01).** The `SprkModal` shell + 6 presets ship in `@spaarke/ui-components` (86 tests, tsc build green, eslint clean, zero hex/`'1px'`); standards doc + ADR-050 + pattern pointer + crosslinks + CHANGELOG all landed. 6 commits.
+
+**P1 (030/031) ✅ DONE 2026-08-01** — interim window-controls adapter across all custom dialogs; 1 owner escalation (legacy SendEmailDialog) + Issue #712 recorded in `notes/`.
+
+**P0.5 (020) ✅ DONE 2026-08-01** — app-shell scale control live in SpaarkeAi + LegalWorkspace; `useUiScale()` is the seam conversion tasks thread into `SprkModal uiScale`.
+
+**Next phases (conversions — higher blast radius):**
+- **P2** — **040/041/042** parallel wave (re-base confirms onto ConfirmModal · ChoiceDialog onto ChoiceModal · retire ActionConfirmationDialog overlay; needs 005 ✅). **← NEXT**
+- **P3–P6** — **050/051 · 060/061 · 070 · 080** (each gated on its preset ✅).
+- **P7** — **090 → 091/092** (OOB size scale + navigation.ts dedup + DocumentOperations overlay; independent of the shell).
+- **P8** — **100** wrap-up (code-review + adr-check + test-diet + repo-cleanup; main-session).
+
+Conversion tasks modify existing dialogs across `src/` + solutions — each needs its target files read carefully. Recommended: run per-phase (e.g. "work on 030, 031" for P1) with `/conflict-check` on any SpaarkeAi-touching task. Say "continue" to take the next phase.

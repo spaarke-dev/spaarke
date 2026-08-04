@@ -172,6 +172,7 @@ import {
   AddRegular,
 } from "@fluentui/react-icons";
 import { useAiSession, useDispatchPaneEvent } from "@spaarke/ai-widgets";
+import { OOB_MODAL_SIZES } from "@spaarke/ui-components";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 import {
   isPinned,
@@ -478,8 +479,8 @@ async function launchEditWizard(
       },
       {
         target: 2,
-        width: { value: 60, unit: "%" },
-        height: { value: 70, unit: "%" },
+        width: OOB_MODAL_SIZES.wizard.width,
+        height: OOB_MODAL_SIZES.wizard.height,
         title: mode === "saveAs" ? "Save As New Workspace" : "Edit Workspace",
       },
     );
@@ -560,8 +561,8 @@ async function launchCreateWizard(bffBaseUrl: string): Promise<void> {
       },
       {
         target: 2,
-        width: { value: 60, unit: "%" },
-        height: { value: 70, unit: "%" },
+        width: OOB_MODAL_SIZES.wizard.width,
+        height: OOB_MODAL_SIZES.wizard.height,
         title: "Create New Workspace",
       },
     );

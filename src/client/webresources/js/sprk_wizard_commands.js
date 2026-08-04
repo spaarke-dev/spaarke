@@ -8,7 +8,10 @@ var Spaarke = Spaarke || {};
 Spaarke.Commands = Spaarke.Commands || {};
 Spaarke.Commands.Wizards = (function () {
 
-  // Common dialog options — standardized to 60% x 70% per UAT feedback E-03
+  // Common dialog options — standardized to 60% x 70% per UAT feedback E-03.
+  // Matches the `wizard` OOB size in oobModalSizes.ts (spec FR-11/FR-18, task
+  // 090). Plain Dataverse web resource (no bundler) — cannot import that
+  // module; keep this literal in sync with it manually.
   var DIALOG_OPTIONS = {
     target: 2,
     width: { value: 60, unit: "%" },

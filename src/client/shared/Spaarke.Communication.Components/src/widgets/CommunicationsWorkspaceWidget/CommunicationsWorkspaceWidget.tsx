@@ -216,6 +216,7 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
       bffBaseUrl,
       onMarkThreadRead,
       onThreadRenamed,
+      regarding,
     }: IConversationRendererProps) => (
       <ConversationView
         threadId={threadId}
@@ -227,6 +228,12 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
         title={threadName}
         // Inline rename (round-8.4): pencil in the header → renames the thread; shell refreshes the list.
         onThreadRenamed={onThreadRenamed}
+        // Open associated record (round-8.4 item 3): the selected thread's regarding record + a handler that opens it
+        // as an OOB Layout-1 modal (stays on the workspace); falls back to openForm where the modal isn't available.
+        regarding={regarding}
+        onOpenRecord={(entityType, id) => {
+          void (navigationService.openRecordModal?.(entityType, id) ?? navigationService.openRecord(entityType, id));
+        }}
         // An email is a sprk_communication row (TimelineMessage.id IS the
         // sprk_communication GUID) — open it in the NEW Spaarke Email surface
         // (Pattern B: the `sprk_emailpage` code page as a centred modal, single-
@@ -239,7 +246,7 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
         }}
       />
     ),
-    [currentUserSystemUserId]
+    [currentUserSystemUserId, navigationService]
   );
 
   // FR-22 awareness count as the ThreadList header accessory (round 3 item 3) —

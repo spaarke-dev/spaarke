@@ -16,6 +16,7 @@
  */
 import * as React from 'react';
 import { Dialog, DialogSurface, DialogBody, makeStyles, mergeClasses } from '@fluentui/react-components';
+import { SIZE_SPEC } from '../../SprkModal/sizes';
 
 import { EmailComposer } from '../EmailComposer';
 import type {
@@ -65,6 +66,14 @@ const useDialogStyles = makeStyles({
     maxWidth: '1040px',
     width: '92vw',
     height: '72vh',
+    // spaarke-modal-system P3 (FR-14 alignment, 2026-08-02): cap the 72vh height at
+    // the `md` heightMax so this surface is numerically identical to the SprkModal
+    // `md` size (`min(1040px, 92vw) × min(72vh, 720px)`) — the cap fixes the
+    // square-on-tall-monitor failure `md` exists for. Sourced from SIZE_SPEC (not a
+    // literal) so a future `md` retune propagates here (task-100 gate fix). The
+    // literal FormModal re-base is deferred: EmailComposer is self-chromed (see
+    // notes/task-051-completion.md + DEF-002 / Issue #713).
+    maxHeight: `${SIZE_SPEC.md.heightMax}px`,
     display: 'flex',
     flexDirection: 'column',
     // Surface itself never scrolls — the body owns the scroll region below.
@@ -78,6 +87,13 @@ const useDialogStyles = makeStyles({
     maxWidth: '100%',
     width: '100%',
     height: '100%',
+    // UAT 2026-08-03: a maximized composer must be a TRUE full-page takeover of
+    // the host surface. Without these, Fluent's DialogSurface defaults leave
+    // auto-margins + a viewport max-height gap, so "expand" still floated with
+    // visible page chrome around it.
+    maxHeight: '100%',
+    margin: 0,
+    borderRadius: 0,
   },
   body: {
     display: 'flex',
@@ -228,10 +244,19 @@ export interface ISendEmailDialogProps {
    * `initialState`).
    */
   communicationId?: string;
+  /**
+   * UAT 2026-08-02: render at the maximized geometry (100% of the host
+   * viewport) from the start, with the maximize toggle hidden. Used by hosts
+   * that open the composer while ANOTHER modal is already on screen (e.g.
+   * Reply/Forward from the OOB email-record modal) so the composer fully
+   * covers the underlying modal instead of floating inside it. Additive;
+   * omitted → the default mid-size rectangle + toggle, unchanged.
+   */
+  fullBleed?: boolean;
 }
 
 export function SendEmailDialog(props: ISendEmailDialogProps) {
-  const { open, onClose, mode, onSent, onError, regarding, associations, ...composerProps } = props;
+  const { open, onClose, mode, onSent, onError, regarding, associations, fullBleed, ...composerProps } = props;
   const dialogStyles = useDialogStyles();
 
   // Maximize/restore (owner UAT 2026-07-30, item 11). The surface size is owned here (the
@@ -270,15 +295,17 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
         if (!data.open) onClose();
       }}
     >
-      <DialogSurface className={mergeClasses(dialogStyles.surface, maximized && dialogStyles.surfaceMaximized)}>
+      <DialogSurface
+        className={mergeClasses(dialogStyles.surface, (fullBleed || maximized) && dialogStyles.surfaceMaximized)}
+      >
         <DialogBody className={dialogStyles.body}>
           <EmailComposer
             {...composerProps}
             associations={mergedAssociations}
             mount="dialog"
             mode={mode ?? 'compose'}
-            isMaximized={maximized}
-            onToggleMaximize={() => setMaximized(m => !m)}
+            isMaximized={fullBleed || maximized}
+            onToggleMaximize={fullBleed ? undefined : () => setMaximized(m => !m)}
             onSent={result => {
               onSent?.(result.communicationId);
               onClose();

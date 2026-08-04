@@ -11,10 +11,7 @@ import * as React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
-import {
-  ComposeExternalChangeBanner,
-  EXTERNAL_CHANGE_BANNER_TEXT,
-} from './ComposeExternalChangeBanner';
+import { ComposeExternalChangeBanner, EXTERNAL_CHANGE_BANNER_TEXT } from './ComposeExternalChangeBanner';
 
 function renderBanner(
   props: Partial<React.ComponentProps<typeof ComposeExternalChangeBanner>> = {},

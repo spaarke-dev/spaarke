@@ -60,6 +60,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Spinner, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { MailRegular, OpenRegular } from '@fluentui/react-icons';
+// spaarke-modal-system P7 task 090 (FR-11/FR-18): reuse the hub's frame-walking
+// resolver + named size instead of a locally-duplicated copy of each.
+import { resolveXrmNavigation, OOB_MODAL_SIZES } from '@spaarke/ui-components';
 
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import type { WidgetState } from '../../types/shared';
@@ -145,40 +148,6 @@ const useStyles = makeStyles({
 // navigateTo helper
 // ---------------------------------------------------------------------------
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
-/**
- * Resolve the host Xrm.Navigation API by walking the frame hierarchy.
- * Returns null when running outside a Dataverse host (e.g. Vite dev).
- */
-function resolveXrmNavigation(): any | null {
-  const frames: Window[] = [window];
-  try {
-    if (window.parent !== window) frames.push(window.parent);
-  } catch {
-    /* cross-origin — skip */
-  }
-  try {
-    if (window.top && window.top !== window) frames.push(window.top);
-  } catch {
-    /* cross-origin — skip */
-  }
-
-  for (const frame of frames) {
-    try {
-      const nav = (frame as any).Xrm?.Navigation;
-      if (nav?.navigateTo) {
-        return nav;
-      }
-    } catch {
-      /* cross-origin — skip */
-    }
-  }
-  return null;
-}
-
-/* eslint-enable @typescript-eslint/no-explicit-any */
-
 /**
  * Open the Analysis Builder (Playbook Library Code Page) with the
  * `email-compose` intent pre-configured.
@@ -208,8 +177,8 @@ async function openAnalysisBuilder(bffBaseUrl: string | undefined, initialPrompt
     },
     {
       target: 2,
-      width: { value: 60, unit: '%' },
-      height: { value: 70, unit: '%' },
+      width: OOB_MODAL_SIZES.wizard.width,
+      height: OOB_MODAL_SIZES.wizard.height,
       title: DISPLAY_NAME,
     }
   );

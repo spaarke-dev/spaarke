@@ -364,7 +364,7 @@ describe('ComposeEditor.placeAdvisoryComments — deterministic sectionRef→par
     expect(anchorSpans[0].textContent).toBe(clause41);
   });
 
-  it('negative: a sectionRef matching nothing AND an unresolvable targetText places NO comment (feeds task 012\'s DEF-01 contract)', async () => {
+  it("negative: a sectionRef matching nothing AND an unresolvable targetText places NO comment (feeds task 012's DEF-01 contract)", async () => {
     const ref = React.createRef<ComposeEditorHandle>();
     const clause41 = 'Clause 4.1: Confidentiality obligations survive termination for three years.';
     renderEditorWithReferenceMap(

@@ -44,7 +44,6 @@ import { DataverseService } from '../../services/DataverseService';
 import { useMattersList } from '../../hooks/useMattersList';
 import { useProjectsList } from '../../hooks/useProjectsList';
 import { useDocumentsList } from '../../hooks/useDocumentsList';
-import { navigateToEntity } from '../../utils/navigation';
 import { PortfolioTab } from '../../types/enums';
 import { MatterItem } from './MatterItem';
 import { ProjectItem } from './ProjectItem';
@@ -295,25 +294,36 @@ export const MyPortfolioWidget: React.FC<IMyPortfolioWidgetProps> = ({
     []
   );
 
+  // NOTE (task 091): the retired local `navigateToEntity({action:'openView'})`
+  // never touched Xrm.Navigation (its openForm branch only fires for
+  // action === 'openRecord') — it always fell straight through to
+  // `window.parent.postMessage`. No receiver for this message shape was
+  // found anywhere in the repo (grepped for `openView` / `event.data.action`
+  // / any generic `message` listener). Preserved verbatim here (zero
+  // behavior change) rather than guessed at — see
+  // projects/spaarke-modal-system/notes/task-091-completion.md.
   const handleViewAllMatters = React.useCallback(() => {
-    navigateToEntity({
-      action: 'openView',
-      entityName: 'sprk_matter',
-    });
+    try {
+      window.parent.postMessage({ action: 'openView', entityName: 'sprk_matter' }, '*');
+    } catch (err) {
+      console.error('[MyPortfolioWidget] Failed to post navigation message:', err);
+    }
   }, []);
 
   const handleViewAllProjects = React.useCallback(() => {
-    navigateToEntity({
-      action: 'openView',
-      entityName: 'sprk_project',
-    });
+    try {
+      window.parent.postMessage({ action: 'openView', entityName: 'sprk_project' }, '*');
+    } catch (err) {
+      console.error('[MyPortfolioWidget] Failed to post navigation message:', err);
+    }
   }, []);
 
   const handleViewAllDocuments = React.useCallback(() => {
-    navigateToEntity({
-      action: 'openView',
-      entityName: 'sprk_document',
-    });
+    try {
+      window.parent.postMessage({ action: 'openView', entityName: 'sprk_document' }, '*');
+    } catch (err) {
+      console.error('[MyPortfolioWidget] Failed to post navigation message:', err);
+    }
   }, []);
 
   /** Refresh the currently visible tab's data */

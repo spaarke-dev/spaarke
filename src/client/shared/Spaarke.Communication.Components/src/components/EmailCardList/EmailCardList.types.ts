@@ -64,6 +64,10 @@ export interface EmailCardListProps {
   skeletonCount?: number;
   /** Fired when a card is clicked or keyboard-activated (Enter/Space). */
   onSelect: (id: string) => void;
+  /** Invoked by the list toolbar's "New email" (+) button — opens the compose form. Omit → no New button. */
+  onCreateNew?: () => void;
+  /** Invoked by the list toolbar's Refresh (↻) button — re-runs the view fetch that populates the list. Omit → no Refresh button. */
+  onRefresh?: () => void;
 }
 
 /**

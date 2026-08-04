@@ -722,10 +722,7 @@ describe('ComposeFormatToolbar — Review Summary / Notes toggles (UAT round-7 #
 
 describe('ComposeFormatToolbar — Create Summary Memo dropdown (FR-14, task 051)', () => {
   it('is hidden when no review is present, even with both handlers wired', () => {
-    renderFormatToolbar(
-      {},
-      { props: { hasReview: false, onGenerateMemo: jest.fn(), onEmailMemo: jest.fn() } }
-    );
+    renderFormatToolbar({}, { props: { hasReview: false, onGenerateMemo: jest.fn(), onEmailMemo: jest.fn() } });
     expect(screen.queryByTestId('compose-format-memo-menu')).not.toBeInTheDocument();
   });
 
@@ -803,5 +800,105 @@ describe('ComposeFormatToolbar — Create Summary Memo dropdown (FR-14, task 051
     );
 
     expect(screen.getByTestId('compose-format-memo-menu')).toBeDisabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// UAT round-1 (2026-08-03) owner feedback — three toolbar layout/labelling changes:
+//   #3 Create Summary Memo → icon-only, repositioned to the FAR LEFT of the toolbar.
+//   #5 Save Version → icon-only (split/dropdown behavior unchanged).
+//   #6 Word dropdown → moved OUT of the format-menus row to the action side (right,
+//      near Save), icon-only.
+// Each control keeps its existing testid + wiring; these tests assert the NEW
+// icon-only/no-visible-text presentation, the accessible name (aria-label) + Tooltip,
+// and — for #3/#6 — the new DOM position relative to the other toolbar controls.
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — UAT round-1 (2026-08-03): repositioning + icon-only (#3/#5/#6)', () => {
+  /** Returns the data-testid of every descendant of the toolbar, in DOM order. */
+  function toolbarTestIdOrder(): string[] {
+    const toolbar = screen.getByTestId('compose-format-toolbar');
+    return Array.from(toolbar.querySelectorAll('[data-testid]')).map(
+      (el) => el.getAttribute('data-testid') as string
+    );
+  }
+
+  it('#3: Create Summary Memo is icon-only (no visible text), carries aria-label + Tooltip, and is the FIRST control in the toolbar (far left, ahead of Body/Paragraph/Font/Table)', () => {
+    renderFormatToolbar({}, { props: { hasReview: true, onGenerateMemo: jest.fn() } });
+
+    const memoTrigger = screen.getByTestId('compose-format-memo-menu');
+    expect(memoTrigger).toHaveAttribute('aria-label', 'Create Summary Memo');
+    expect(memoTrigger.textContent).toBe(''); // icon-only — no visible label text
+
+    const order = toolbarTestIdOrder();
+    expect(order[0]).toBe('compose-format-memo-menu');
+    expect(order.indexOf('compose-format-memo-menu')).toBeLessThan(order.indexOf('compose-format-heading-menu'));
+    expect(order.indexOf('compose-format-memo-menu')).toBeLessThan(order.indexOf('compose-format-paragraph-menu'));
+    expect(order.indexOf('compose-format-memo-menu')).toBeLessThan(order.indexOf('compose-format-font-menu'));
+    expect(order.indexOf('compose-format-memo-menu')).toBeLessThan(order.indexOf('compose-format-table-menu'));
+  });
+
+  it('#3: the memo dropdown still opens and fires its handlers from the new far-left position (behavior unchanged)', async () => {
+    const user = userEvent.setup();
+    const onGenerateMemo = jest.fn();
+    renderFormatToolbar({}, { props: { hasReview: true, onGenerateMemo } });
+
+    await user.click(screen.getByTestId('compose-format-memo-menu'));
+    await user.click(screen.getByTestId('compose-format-memo-generate'));
+    expect(onGenerateMemo).toHaveBeenCalledTimes(1);
+  });
+
+  it('#5: Save Version is icon-only (no visible text) — the accessible name survives via aria-label on the primary action', () => {
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true } });
+
+    const saveWrapper = screen.getByTestId('compose-format-save');
+    const primaryButton = within(saveWrapper).getAllByRole('button')[0];
+    expect(primaryButton).toHaveAttribute('aria-label', 'Save version');
+    expect(primaryButton.textContent).toBe(''); // icon-only — no visible "Save Version" text
+  });
+
+  it('#5: a Tooltip is present on the Save trigger (hover reveals the full "Save Version" label)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true } });
+
+    const saveWrapper = screen.getByTestId('compose-format-save');
+    const primaryButton = within(saveWrapper).getAllByRole('button')[0];
+    await user.hover(primaryButton);
+    expect(await screen.findByText('Save Version')).toBeInTheDocument();
+  });
+
+  it('#6: the Word dropdown is icon-only (aria-label "Word", no visible text) and RELOCATED to the action side — after every format-menu trigger, immediately before Save', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar(
+      {},
+      { props: { onOpenInWord: jest.fn(), onOpenInWordDesktop: jest.fn(), onSave: jest.fn(), canSave: true } }
+    );
+
+    const wordTrigger = screen.getByTestId('compose-format-word-menu');
+    expect(wordTrigger).toHaveAttribute('aria-label', 'Word');
+    expect(wordTrigger.textContent).toBe(''); // icon-only — no visible "Word" text
+
+    const order = toolbarTestIdOrder();
+    // Moved OUT of the format-menus row: now sits after Body/Paragraph/Font/Table...
+    expect(order.indexOf('compose-format-word-menu')).toBeGreaterThan(order.indexOf('compose-format-heading-menu'));
+    expect(order.indexOf('compose-format-word-menu')).toBeGreaterThan(order.indexOf('compose-format-paragraph-menu'));
+    expect(order.indexOf('compose-format-word-menu')).toBeGreaterThan(order.indexOf('compose-format-font-menu'));
+    expect(order.indexOf('compose-format-word-menu')).toBeGreaterThan(order.indexOf('compose-format-table-menu'));
+    // ...and on the action side, immediately before Save ("near the save/run controls").
+    expect(order.indexOf('compose-format-word-menu')).toBeLessThan(order.indexOf('compose-format-save'));
+
+    // Popover content is UNCHANGED — Open web / Open desktop still reachable and still fire.
+    await user.click(wordTrigger);
+    expect(screen.getByTestId('compose-format-open-word-web')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-open-word-desktop')).toBeInTheDocument();
+  });
+
+  it('#6: a Tooltip is present on the Word trigger (hover reveals the "Word" label)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { onOpenInWord: jest.fn() } });
+
+    const wordTrigger = screen.getByTestId('compose-format-word-menu');
+    await user.hover(wordTrigger);
+    expect(await screen.findByText('Word')).toBeInTheDocument();
   });
 });

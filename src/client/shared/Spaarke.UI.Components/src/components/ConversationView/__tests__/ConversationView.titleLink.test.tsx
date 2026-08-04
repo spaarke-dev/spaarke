@@ -100,11 +100,13 @@ describe('ConversationView title header (FR-12)', () => {
     expect(screen.queryByRole('button', { name: /open associated record/i })).toBeNull();
   });
 
-  it('renders NO header when no title is supplied (existing callers unaffected)', async () => {
+  it('renders NO header/open-record affordance when no title is supplied (existing callers unaffected)', async () => {
     renderView({ regarding: MATTER, onOpenRecord: jest.fn() });
 
     // Let the initial load settle so the assertion is about the header, not timing.
     await waitFor(() => expect(screen.getByRole('log', { name: /conversation messages/i })).toBeInTheDocument());
+    // Opening the associated record is offered by the title hyperlink ONLY (no separate toolbar icon — round-8.4:
+    // the dedicated icon was removed as redundant). With no title there is no title link, hence no open-record affordance.
     expect(screen.queryByRole('button', { name: /open associated record/i })).toBeNull();
     expect(screen.queryByText('Acme v. Beta')).toBeNull();
   });

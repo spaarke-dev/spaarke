@@ -121,6 +121,10 @@ export * from './TodoDetail';
 // ThemeToggle - Sun/moon toggle button for dark mode switching
 export * from './ThemeToggle';
 
+// DisplaySizeMenu - App-shell "Display size" (Default/Large/Extra-large) menu
+// driving the P0.5 uiScale control (spec FR-06 / design §6.9)
+export * from './DisplaySizeMenu';
+
 // RecordCardShell - Shared card shell for all entity record cards (Documents, Matters, Todos, etc.)
 export * from './RecordCardShell';
 
@@ -259,3 +263,10 @@ export * from './ModalWindowControls';
 // hardcoding in the shared core. Consumed by the PCF (deep `dist` import) and
 // the Phase-3 reading-pane tracking view (task 035).
 export * from './TrackingFieldTrio';
+
+// SprkModal - the canonical Spaarke modal system (spaarke-modal-system, FR-01):
+// the Fluent v9 Dialog-envelope shell + six presets (Confirm/Choice/Form/Preview/
+// Browse/Wizard), all thin configs sharing one size scale, standard header/footer,
+// and dismiss semantics. No name collisions with existing exports (verified task
+// 009) -> a plain `export *`; see docs/standards/MODAL-DESIGN-SYSTEM.md + ADR-050.
+export * from './SprkModal';

@@ -52,7 +52,9 @@ describe('runBatchNoteTool — ADR-016 strict sequentiality', () => {
 
   it('does not start note N+1 until note N settles (explicit deferred-promise gate)', async () => {
     const deferredA = makeDeferred<void>();
-    const runOne = jest.fn((threadId: string): Promise<void> => (threadId === 'a' ? deferredA.promise : Promise.resolve()));
+    const runOne = jest.fn(
+      (threadId: string): Promise<void> => (threadId === 'a' ? deferredA.promise : Promise.resolve())
+    );
 
     const run = runBatchNoteTool(['a', 'b'], runOne);
 

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-modal-system">
+  <metadata>
+    <title>Pattern pointer: modal-shell.md + update record-modal-selection.md — FR-10</title>
+    <phase>0 Build</phase>
+    <gate>blocked until 010</gate>
+    <status>completed</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Short pointer-file authoring + two index/cross-link edits; documentation, no code, no quality gate.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>25-line pointer mirrors an existing pattern file; mechanical + low-ambiguity.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes `.claude/patterns/` (new pointer + record-modal-selection.md + INDEX.md) — sub-agents cannot write there per CLAUDE.md §3; main-session only.</parallel-reason>
+    <deps>010</deps>
+    <tags>documentation, skill-directives</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author `.claude/patterns/ui/modal-shell.md` — a ~25-line agent pointer file that mirrors the shape of `.claude/patterns/ui/record-modal-selection.md` (When / Read These Files / Constraints / Key Rules), pointing agents at `SprkModal`, `docs/standards/MODAL-DESIGN-SYSTEM.md`, and the size scale. Then update `.claude/patterns/ui/record-modal-selection.md` to add a "component layer" line pointing at the shell, and add a row to `.claude/patterns/ui/INDEX.md`. This is FR-10 and MUST run in the main session (§3 write boundary blocks sub-agents from `.claude/`). Documentation only — no code.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 and Spaarke pattern-pointer conventions. Follow ADRs strictly.</role>
+  <goal>`.claude/patterns/ui/modal-shell.md` exists as a concise pointer (≤~30 lines) in the record-modal-selection.md shape; `record-modal-selection.md` cross-links the component layer (`SprkModal` + `MODAL-DESIGN-SYSTEM.md`); `.claude/patterns/ui/INDEX.md` has a new `modal-shell.md` row.</goal>
+
+  <context>
+    <background>Design §7 deliverable #3 / spec FR-10: the pattern layer needs a 25-line pointer that tells an agent WHICH code + standard to read when building on the modal shell, and the existing `record-modal-selection.md` (the decision-layer pointer) needs a one-line bridge to the new component layer so they stay in lockstep. This is a thin discoverability task authored after the standards doc (task 010) exists so the pointer can reference it.</background>
+    <relevant-files>
+      <file role="new">.claude/patterns/ui/modal-shell.md</file>
+      <file role="modify">.claude/patterns/ui/record-modal-selection.md</file>
+      <file role="modify">.claude/patterns/ui/INDEX.md</file>
+      <file role="canonical-reference">docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/sizes.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">`docs/standards/MODAL-DESIGN-SYSTEM.md` — the standard the new pointer references.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">`modal-shell.md` MUST mirror the section shape of `.claude/patterns/ui/record-modal-selection.md`: "When", "Read These Files", "Constraints", "Key Rules". Keep it a pointer (≤~30 lines) — it names WHICH files to read (`SprkModal` component, `MODAL-DESIGN-SYSTEM.md`, the size scale), it does NOT restate the standard.</constraint>
+    <constraint source="project">The `record-modal-selection.md` edit is additive: add a "component layer" line (the SprkModal shell + `MODAL-DESIGN-SYSTEM.md` are the implementation beneath the decision) — do NOT rewrite its existing decision-layer content.</constraint>
+    <constraint source="project">Add exactly one `modal-shell.md` row to `.claude/patterns/ui/INDEX.md` in the existing table shape (Pattern | When to Load | Last Reviewed | Status). All three writes are under `.claude/` — main session only (§3).</constraint>
+    <constraint source="project">Documentation only; NO code, NO BFF touch (NFR-05).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Modal-shell pattern pointer</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+      <file>.claude/patterns/ui/INDEX.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="record-modal-selection" location=".claude/patterns/ui/record-modal-selection.md">The exact pointer shape to mirror + the file that gets the component-layer cross-link.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Read `record-modal-selection.md` (shape to mirror), `patterns/ui/INDEX.md`, and the just-authored `MODAL-DESIGN-SYSTEM.md`. Declare RIGOR: MINIMAL.</step>
+    <step order="1">Author `.claude/patterns/ui/modal-shell.md` with When / Read These Files / Constraints / Key Rules, pointing at `SprkModal` (`src/client/shared/Spaarke.UI.Components/src/components/SprkModal/`), `docs/standards/MODAL-DESIGN-SYSTEM.md`, and the size scale in `sizes.ts`.</step>
+    <step order="2">Add a "component layer" cross-link line to `.claude/patterns/ui/record-modal-selection.md` pointing at the shell + `MODAL-DESIGN-SYSTEM.md`.</step>
+    <step order="3">Add one `modal-shell.md` row to `.claude/patterns/ui/INDEX.md` (Pattern | When to Load | Last Reviewed | Status).</step>
+    <step order="4">Verify `modal-shell.md` is ≤~30 lines and the cross-link renders correctly (relative paths resolve).</step>
+    <step order="5">Update `tasks/TASK-INDEX.md`: set 012 status to ✅.</step>
+    <step order="6">Document any deviation in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="none">Documentation edits only — no build/test tooling required</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">.claude/patterns/ui/modal-shell.md</output>
+    <output type="doc">.claude/patterns/ui/record-modal-selection.md</output>
+    <output type="doc">.claude/patterns/ui/INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`.claude/patterns/ui/modal-shell.md` exists, is ≤~30 lines, and carries the When / Read These Files / Constraints / Key Rules sections pointing at `SprkModal` + `MODAL-DESIGN-SYSTEM.md` + the size scale.</criterion>
+    <criterion testable="true">`.claude/patterns/ui/record-modal-selection.md` gains a component-layer line pointing at the shell + `MODAL-DESIGN-SYSTEM.md`, with its existing decision-layer content unchanged.</criterion>
+    <criterion testable="true">`.claude/patterns/ui/INDEX.md` has a new `modal-shell.md` row in the existing table shape.</criterion>
+    <criterion testable="true">No source code is modified (documentation only); all three writes are under `.claude/` and were made in the main session.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design §7 deliverable #3. Mirror `record-modal-selection.md` exactly for the section headings so agents find the same shape. CLAUDE.md §18 CHANGELOG entry for the FR-10 doc/ADR/pattern set is owned by task 013 (consolidated) — coordinate rather than double-entering. Completion summary appended here when done.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute. Main session only (§3 write boundary).</protocol>
+  </execution>
+</task>
