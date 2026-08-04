@@ -806,9 +806,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             // thread: the AI generates the author's message, then we re-append the stored quoted
             // block below it (so the thread survives the draft AND is included when sent).
             const quoted = stateRef.current.quotedThread;
-            const nextBody = quoted
-              ? `${result.text}${resultIsHtml ? '<p></p>' : '\n\n'}${quoted}`
-              : result.text;
+            const nextBody = quoted ? `${result.text}${resultIsHtml ? '<p></p>' : '\n\n'}${quoted}` : result.text;
             dispatch({ type: 'SET_BODY_FORMAT', value: resultIsHtml ? 'HTML' : 'PlainText' });
             dispatch({ type: 'SET_FIELD', field: 'body', value: nextBody });
           }
