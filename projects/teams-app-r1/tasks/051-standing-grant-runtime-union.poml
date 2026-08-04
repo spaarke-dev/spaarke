@@ -4,7 +4,7 @@
     <title>Standing-grant runtime union into the accessible-record set</title>
     <phase>5 Standing Grant</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization composition — security-sensitive runtime access derivation; modifies the accessible-set enforcement path (code-review + adr-check required per CLAUDE.md §8).</rigor-reason>
     <model-tier>opus</model-tier>

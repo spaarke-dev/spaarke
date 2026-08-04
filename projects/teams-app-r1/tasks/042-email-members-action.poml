@@ -4,7 +4,7 @@
     <title>Email-members action (email icon) — SendEmailDialog pre-populated with membership contacts</title>
     <phase>4 Access-Management Surface (PCF)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared production component wiring and feeds a tracked communication pipeline (FR-13); code-review + adr-check apply.</rigor-reason>
     <model-tier>sonnet</model-tier>

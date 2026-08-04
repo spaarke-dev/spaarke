@@ -143,5 +143,36 @@ public static class ExternalAccessEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status500InternalServerError)
             .AddWorkforceCallerAuthorizationFilter();
+
+        // GET /api/v1/collab/projects/{projectId}/documents/{documentId}/content — broker-only
+        // document download for ALL workforce collaboration principals (teams-app-r1 FR-07 / task 030).
+        // Authz-before-stream, no Graph pointer to the client, app-only SPE (no OBO on any plane).
+        //
+        // Filter order is load-bearing (filters run in the order added — outermost first):
+        //   1. AddWorkforceCallerAuthorizationFilter()  — resolves the WorkforcePrincipal (task 020)
+        //   2. AddAccessibleRecordSetAuthorizationFilter("sprk_project", "projectId") — enforces
+        //      project ∈ accessible(principal) (task 022) and DENIES (403, zero bytes) a non-member
+        //      BEFORE the handler — hence before any SPE pointer resolution or byte streaming.
+        // The handler then adds document→project scoping and streams app-only via SpeFileStore.
+        collabGroup.MapGet(
+                "/projects/{projectId:guid}/documents/{documentId:guid}/content",
+                WorkforceCollaborationDownloadEndpoint.DownloadDocumentContent)
+            .WithName("DownloadWorkforceCollaborationDocument")
+            .WithSummary("Download a Secure Project document's content for a workforce collaboration principal")
+            .WithDescription(
+                "Streams a Secure Project document's bytes to a workforce-authenticated collaboration " +
+                "caller (systemuser / contact-with-grant / contact-with-standing-grant). Broker-only " +
+                "(app-only SPE, no OBO on any plane) with authz-before-stream: project access is enforced " +
+                "by the accessible-record-set filter and document→project scoping by the handler BEFORE " +
+                "any bytes stream. A non-member receives 403 with no bytes; no driveId/itemId or other " +
+                "Graph pointer ever reaches the client (success or error).")
+            .Produces(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .AddWorkforceCallerAuthorizationFilter()
+            .AddAccessibleRecordSetAuthorizationFilter("sprk_project", "projectId");
     }
 }

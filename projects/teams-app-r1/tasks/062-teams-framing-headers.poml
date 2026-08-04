@@ -4,7 +4,7 @@
     <title>Teams framing headers (CSP frame-ancestors) on the SWA host</title>
     <phase>6 Enterprise &amp; Routing</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Config change to an existing framing-headers file following the established `external-spa` pattern; no new src/ surface.</rigor-reason>
     <model-tier>sonnet</model-tier>

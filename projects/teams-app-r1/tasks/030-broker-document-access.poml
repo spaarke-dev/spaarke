@@ -4,7 +4,7 @@
     <title>Broker-only document access for all principals via SpeFileStore (authz-before-stream)</title>
     <phase>3 Broker Document Access</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-sensitive download gate — the last line of defense before document bytes leave the BFF.</rigor-reason>
     <model-tier>opus</model-tier>

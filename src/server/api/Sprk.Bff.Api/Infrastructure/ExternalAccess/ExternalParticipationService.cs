@@ -94,6 +94,63 @@ public class ExternalParticipationService
     }
 
     /// <summary>
+    /// Invalidates the cached per-Contact participation DATA entry
+    /// (<c>tenant:{tid}:external-access-grant:{contactId}:v1</c>, the tenant-scoped realization of the
+    /// documented <c>sdap:external:access:{contactId}</c> key) so a subsequent accessible-set
+    /// evaluation re-reads current state instead of serving up to 60 seconds of stale TTL.
+    /// </summary>
+    /// <remarks>
+    /// teams-app-r1 task 051 — the standing-grant runtime union (design §5). When a contact's
+    /// subject-level standing grant (<c>contact.sprk_standinggrant</c>) is toggled, the contact's
+    /// accessible set widens or narrows. This clears the contact's cached participation DATA so the
+    /// change reflects promptly. This is a DATA-cache invalidation only: it never caches — and never
+    /// invalidates — an authorization DECISION (the yes/no record∈set outcome is recomputed live by
+    /// <see cref="AccessibleRecordSetService"/> on every request per <c>.claude/constraints/auth.md</c>
+    /// "MUST NOT cache authorization decisions"). The standing-grant flag itself is read live (never
+    /// cached) by <see cref="ContactStandingGrantReader"/>, so this invalidation is the defensive
+    /// belt-and-suspenders that also drops any co-cached per-contact grant data for the same subject.
+    /// <para>
+    /// <paramref name="tenantId"/> is explicit so an out-of-request caller (e.g. a future Dataverse
+    /// change webhook on the standing-grant field) can invalidate without an ambient HttpContext; when
+    /// null it falls back to the current request's <c>tid</c> claim. A no-tenant call is a logged
+    /// no-op (the cache key is mandatorily tenant-scoped, so there is nothing to remove without one).
+    /// </para>
+    /// </remarks>
+    public virtual async Task InvalidateAsync(
+        Guid contactId,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var tenant = tenantId ?? ExtractTenantId();
+        if (string.IsNullOrEmpty(tenant))
+        {
+            _logger.LogWarning(
+                "[EXT-ACCESS] InvalidateAsync for Contact {ContactId} skipped: no tenant id available " +
+                "(no explicit tenantId argument and no 'tid' claim on the current request). The cache " +
+                "key is tenant-scoped, so there is nothing to remove.", contactId);
+            return;
+        }
+
+        try
+        {
+            await _cache.RemoveAsync(
+                tenant, ExternalAccessResource, contactId.ToString(), CacheVersion, ct: ct);
+            _logger.LogInformation(
+                "[EXT-ACCESS] Invalidated cached participation data for Contact {ContactId} (tenant {TenantId}) " +
+                "— standing-grant change reflects on next evaluation.", contactId, tenant);
+        }
+        catch (Exception ex)
+        {
+            // Non-fatal: a failed invalidation degrades to the 60s TTL expiring on its own. The
+            // authorization decision is never cached, so the worst case is a bounded staleness window,
+            // not an incorrect grant/deny beyond that window.
+            _logger.LogWarning(ex,
+                "[EXT-ACCESS] Failed to invalidate participation cache for Contact {ContactId} (tenant {TenantId}). " +
+                "Falling back to TTL expiry.", contactId, tenant);
+        }
+    }
+
+    /// <summary>
     /// Extracts the Azure AD tenant ID ('tid' claim) from the current HttpContext.
     /// Returns null when no claim is present (in which case caching is skipped).
     /// </summary>

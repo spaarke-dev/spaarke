@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Wave 1 ✅ (010·020·050·061). Wave 2 running: **011 ∥ 021**; **060** queued after 021. **001 🔄** (operator live gate). |
-| **Step** | Operator authorized building past the 001 live gate ("keep building"). Waves executing via parallel task-execute agents. |
-| **Status** | 🟢 6/25 complete (002,010,020,050,061 + Wave-2 in flight). BFF build 0 errors. Two live cloud changes applied (see below). |
-| **Next Action** | Await 011 + 021 completion → build-verify → dispatch 060 → then Wave 3 (012·022·040). |
+| **Task** | Waves 0–4 ✅ (16/25). ⏸️ **PAUSED before deploy** — operator syncing worktree with master first. **001 🔄** (operator live gate). |
+| **Step** | Completed: 002,010,011,012,020,021,022,030,040,041,042,050,051,060,061,062. Remaining: 043,045,065,070,071,072,080,090. |
+| **Status** | ⏸️ Paused pre-deploy. Master is 18 commits ahead (no same-file textual conflicts; disjoint from our surfaces). **Semantic risk**: master changed `EmailComposer` which task 042 reuses → re-verify 042 build post-merge. |
+| **Next Action** | Wave 0–3 committed at a990517ca (pushed). Commit+push Wave 4 (062,030,051,041,042). Then: merge origin/master → re-verify all builds (esp. 042↔EmailComposer) → resume at deploy tasks ONLY on operator go. |
 
 ### Files Modified This Session
 - `notes/spikes/foundation-spike-findings.md` — code-verified go/no-go per path + operator runbook (NEW)

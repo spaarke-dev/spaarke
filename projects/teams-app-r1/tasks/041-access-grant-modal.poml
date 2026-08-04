@@ -4,7 +4,7 @@
     <title>Access-grant modal (person icon) — approve membership candidates, named grants, standing grants, invite</title>
     <phase>4 Access-Management Surface (PCF)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Writes an access-control table (`sprk_externalrecordaccess`), gates by grant privilege, and triggers an external invite/onboarding email — security-sensitive per root CLAUDE.md §6.</rigor-reason>
     <model-tier>sonnet</model-tier>

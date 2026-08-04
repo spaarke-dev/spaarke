@@ -82,6 +82,25 @@ public sealed class ContactStandingGrantReader : IContactStandingGrantReader
                 .RetrieveAsync(ContactEntity, contactId, new[] { StandingGrantAttribute }, ct)
                 .ConfigureAwait(false);
 
+            // Task 051 hardening — make the FLS-denial case OBSERVABLE. A successful retrieve whose
+            // payload does NOT contain the secured attribute is the exact signature of the BFF
+            // Dataverse Application User lacking FLS read on contact.sprk_standinggrant (050 schema §2:
+            // IsSecured=true). Without a grant (via the "Standing Grant Administrators" or System
+            // Administrator field-security profile) the platform silently strips the column, so EVERY
+            // contact would read as "no standing grant" — a whole-feature-dark misconfiguration that a
+            // debug-level "flag = false" line would hide. Surface it at WARNING so the operator-gated
+            // FLS grant (see report / 050 notes §5) is detectable in logs. This does NOT change the
+            // fail-closed decision — an unreadable flag still means NO standing grant.
+            if (entity is not null && !entity.Contains(StandingGrantAttribute))
+            {
+                _logger.LogWarning(
+                    "[WF-STANDING] Contact {ContactId}: secured attribute '{Attribute}' absent from an " +
+                    "otherwise-successful app-only retrieve. Most likely the BFF Dataverse Application " +
+                    "User lacks field-level-security READ on contact.{Attribute} (grant via the " +
+                    "'Standing Grant Administrators' FSP). Treating as NO standing grant (fail-closed).",
+                    contactId, StandingGrantAttribute, StandingGrantAttribute);
+            }
+
             var held = entity?.GetAttributeValue<bool>(StandingGrantAttribute) ?? false;
 
             _logger.LogDebug(
