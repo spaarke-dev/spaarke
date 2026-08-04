@@ -602,7 +602,21 @@ public class SessionDispatchOrchestrator
             // `action` keeps ModelTierDeploymentResolver (inside ActionRunner) the ONE resolver — no second
             // routing mechanism (ADR-039). When both overrides are unset this is a no-op (`effectiveAction`
             // reference-equals `action`'s values) — byte-identical to pre-task-011 behavior.
-            var effectiveModelTier = request.ModelTierOverride ?? binding.ModelTierOverride ?? action.ModelTier;
+            //
+            // ai-advanced-capabilities-agreements-r1 task 070 (UAT2 review-depth selector): a per-run
+            // "review depth" choice carried in dispatch args (`slots.reviewDepth: 'quick'|'thorough'` — a
+            // CLOSED, client-authored INTENT, never a model/deployment name — ADR-039) resolves to its OWN
+            // tier override, composed into the SAME precedence chain ABOVE the maker-set Binding override
+            // and the Action's own catalog default (this is a genuine per-run user choice made on the
+            // review kick-off UI, so it wins over static config) but BELOW `request.ModelTierOverride` (the
+            // Assistant's separate global runtime picker, task 011 — a different UI surface that in
+            // practice never fires alongside a `reviewDepth` arg, but stays the outermost override if it
+            // ever does). `ModelTierDeploymentResolver` (inside ActionRunner) remains the ONE tier ->
+            // deployment resolver — this only decides WHICH tier intent applies for this run. A dispatch
+            // that never carries `reviewDepth` (every non-review Binding, and every pre-070 caller) computes
+            // null here and is byte-identical to pre-070 behavior.
+            var reviewDepthModelTier = ResolveReviewDepthModelTierOverride(TryReadReviewDepth(request.Args));
+            var effectiveModelTier = request.ModelTierOverride ?? reviewDepthModelTier ?? binding.ModelTierOverride ?? action.ModelTier;
             var effectiveAction = effectiveModelTier != action.ModelTier
                 ? action with { ModelTier = effectiveModelTier }
                 : action;
@@ -1073,6 +1087,48 @@ public class SessionDispatchOrchestrator
         var value = el.GetString();
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
+
+    /// <summary>
+    /// ai-advanced-capabilities-agreements-r1 task 070 (UAT2 review-depth selector): reads an optional
+    /// <c>reviewDepth</c> arg (the closed client intent <c>"quick"|"thorough"</c>) forwarded by the
+    /// review kick-off UI's depth choice. Mirrors <see cref="TryReadSubDomain"/>'s shape exactly.
+    /// Absent/malformed → null (every dispatch that does not carry this key, i.e. every non-review
+    /// Binding and every pre-070 caller, is unaffected) — the CALLER (<see cref="ResolveReviewDepthModelTierOverride"/>)
+    /// owns the closed-set validation; this boundary only extracts the raw string, never throws.
+    /// </summary>
+    internal static string? TryReadReviewDepth(JsonElement? args)
+    {
+        if (args is not { ValueKind: JsonValueKind.Object } obj)
+        {
+            return null;
+        }
+        if (!obj.TryGetProperty("reviewDepth", out var el) || el.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+        var value = el.GetString();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    /// <summary>
+    /// ai-advanced-capabilities-agreements-r1 task 070: maps the closed <c>reviewDepth</c> client intent
+    /// to an <see cref="AiModelTier"/> override for THIS dispatch. <c>"quick"</c> (case-insensitive,
+    /// whitespace-tolerant) maps to <see cref="AiModelTier.Standard"/> (the fast/cheap tier);
+    /// <c>"thorough"</c> maps EXPLICITLY to <see cref="AiModelTier.Reasoning"/> so the mapping is
+    /// self-contained (it does not merely rely on the catalog's own default happening to match) and
+    /// reads correctly regardless of how the Action/Binding catalog is configured. Any other value —
+    /// absent, malformed, or unrecognized (e.g. a legacy/future client sending something else) —
+    /// returns <c>null</c>: server-side "reject/default", never a client-named model or deployment
+    /// (ADR-039). A <c>null</c> return here means "no override" — the dispatch falls through to the
+    /// existing Binding/Action tier precedence, the safe default.
+    /// </summary>
+    internal static AiModelTier? ResolveReviewDepthModelTierOverride(string? reviewDepth) =>
+        reviewDepth?.Trim().ToLowerInvariant() switch
+        {
+            "quick" => AiModelTier.Standard,
+            "thorough" => AiModelTier.Reasoning,
+            _ => null,
+        };
 
     /// <summary>
     /// Maps the Binding's <see cref="BindingRisk"/> to the ledger/audit wire vocabulary

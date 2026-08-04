@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>UAT #1 — "review complete" toast with link back to the analysis (in-app layer)</title>
+    <phase>7 UAT round 2</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Cross-pane UX on the SpaarkeAi shell; ADR-030 typed events.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>UAT2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>060 (deployed baseline)</deps>
+    <tags>spaarkeai, frontend, fluent-ui</tags>
+  </metadata>
+  <prompt>
+    Owner-approved (UAT round 1): a long-running review shouldn't hold the user hostage — when the user has
+    navigated to another workspace tab/pane, review completion raises a Fluent toast ("Agreement review complete —
+    View findings") whose action navigates back to the Compose tab / analysis surface via the existing
+    surface-launch / tab-focus mechanism. Suppress the toast when the Compose tab is already the visible surface
+    (don't announce what's on screen). In-app layer ONLY this task; the durable "closed the browser" notification
+    (notification-spine CreateNotification) is a FILED follow-on, not built here.
+  </prompt>
+  <goal>Review finishes while the user is elsewhere in the app → toast appears; clicking it lands the user back on the findings; no toast when already watching.</goal>
+  <constraints>
+    <constraint source="ADR-030">Completion is observed via EXISTING typed PaneEventBus events (e.g. the workspace-channel advisory-comments event) — prefer subscribing over new emits; if a completion event genuinely doesn't exist for the zero-findings case, document it and (only if needed) report the exact one-line emit required rather than editing conversation-surface files.</constraint>
+    <constraint source="ADR-021">Fluent v9 Toaster, semantic tokens, dark-mode safe.</constraint>
+    <constraint source="project">HARD BOUNDARY: do NOT edit src/solutions/SpaarkeAi/src/components/conversation/** (task 070 owns it this wave) — subscribe from the shell/workspace side.</constraint>
+  </constraints>
+  <acceptance-criteria>
+    <criterion testable="true">Review completes while another tab is active → toast renders with the action; action navigates/focuses the Compose surface (assert the navigation event).</criterion>
+    <criterion testable="true">Compose tab already visible → NO toast.</criterion>
+    <criterion testable="true">Toast is dark-mode safe (tokens); auto-dismisses per Fluent defaults; repeated completions don't stack unboundedly.</criterion>
+    <criterion testable="true">Zero-findings completion behavior implemented or explicitly documented as not-observable-today (with the follow-on filed).</criterion>
+    <criterion testable="true">SpaarkeAi suites green.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <notes>
+    Completed 2026-08-03. New headless bridge `src/solutions/SpaarkeAi/src/components/shell/ReviewCompleteToast.tsx`
+    subscribes to the EXISTING `workspace.compose_advisory_comments` (completion) and
+    `workspace.active_widget_changed` (visibility — first consumer of this previously-unconsumed
+    signal) PaneEventBus events; no new emits. Reuses the shell's existing Toaster (ThreePaneShell's
+    `SessionRestoreManager` toasterId converted from `useId()` to a fixed exported
+    `SPAARKEAI_SHELL_TOASTER_ID`, §11). "View findings" reuses WorkspacePane's existing source-only
+    Compose re-activation contract (`widgetData:{source:...}`) — never mints a duplicate tab. Bounded
+    stacking via a fixed toastId + dispatch-vs-update decision (Fluent's toast store no-ops a
+    still-active duplicate toastId). Zero-findings gap investigated + documented (not fixed —
+    conversation/** out of bounds): `useNdaReviewAdvisoryCommentsBridge.ts:160` early-returns on empty
+    `advisoryComments`, so a clean review emits nothing observable today; exact one-line fix + safety
+    verification recorded in `notes/uat-round1-2026-08-03.md` for the next task that owns
+    conversation/**. Durable (browser-closed) notification layer filed as a follow-on in the same notes
+    file. 4 new tests (toast-on-hidden / no-toast-on-visible / action-navigates / bounded-stacking), all
+    passing; full execution detail in `notes/071-execution-notes.md`.
+  </notes>
+</task>

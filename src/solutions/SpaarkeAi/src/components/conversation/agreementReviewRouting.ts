@@ -153,6 +153,33 @@ export function formatConfidencePercent(confidence: number): number {
 }
 
 // ---------------------------------------------------------------------------
+// Review depth (task 070, UAT2 review-depth selector) — a CLOSED per-run user
+// intent threaded into the review dispatch as `slots.reviewDepth`. The client
+// NEVER names a model/deployment (ADR-039) — only this two-value product
+// intent, mapped server-side (SessionDispatchOrchestrator.
+// ResolveReviewDepthModelTierOverride) to an AiModelTier override.
+// ---------------------------------------------------------------------------
+
+/** The closed review-depth vocabulary (mirrors the server's `reviewDepth` arg contract exactly). */
+export type ReviewDepth = "quick" | "thorough";
+
+/** Default = Thorough (project constraint: legal-quality default; Quick is opt-in). */
+export const DEFAULT_REVIEW_DEPTH: ReviewDepth = "thorough";
+
+/** Static timing labels shown on the depth choice (design constraint: static for now). */
+const REVIEW_DEPTH_TIMING_LABEL: Record<ReviewDepth, string> = {
+  quick: "Quick (~20 sec)",
+  thorough: "Thorough (~2–3 min)",
+};
+
+/** Tolerant coercion for a review-depth value arriving from an untyped boundary (e.g. a wizard hand-off
+ * seed read back off the workspace event bus). Anything other than the literal `"quick"` normalizes to
+ * the default (Thorough) — never throws, never propagates a malformed value. */
+export function normalizeReviewDepth(value: unknown): ReviewDepth {
+  return value === "quick" ? "quick" : DEFAULT_REVIEW_DEPTH;
+}
+
+// ---------------------------------------------------------------------------
 // Gate decision (the confirmation-gate branch — ADR-041 D-F1, FR-08)
 // ---------------------------------------------------------------------------
 
@@ -276,6 +303,16 @@ export function buildAgreementReviewConfirmMessage(displayName: string, confiden
 export const AGREEMENT_REVIEW_COMPOSITE_MESSAGE =
   "This document looks like it covers more than one agreement type. Which would you like reviewed?";
 
+/**
+ * task 070 — the standalone depth-choice turn message, used where the type is ALREADY settled
+ * (auto-proceed, the explicit door, and post-pick composite) and the ONLY remaining question is
+ * how deep to run the review. `displayName` is the settled type's display name, OR a fixed phrase
+ * for the composite "Both" case (which has no single type to name).
+ */
+export function buildAgreementReviewDepthChoiceMessage(displayName: string): string {
+  return `Ready to review as **${displayName}**. How deep should the review go?`;
+}
+
 // ---------------------------------------------------------------------------
 // Chip building (wire shape — fed through the SAME `acceptChips` every server
 // chip carrier uses; ConversationPane's local-chip interceptor routes clicks
@@ -283,17 +320,55 @@ export const AGREEMENT_REVIEW_COMPOSITE_MESSAGE =
 // `local:agreement-review-*` ids)
 // ---------------------------------------------------------------------------
 
-/** Below-threshold confirm chips: proposed type + pick-another (FR-08). Max 2 — throwaway turn-follow-on (ASSISTANT-UI-ELEMENT-CRITERIA). */
+/**
+ * Below-threshold confirm chips (FR-08): task 070 (UAT2 review-depth selector) folds the depth
+ * choice into the SAME chip turn as the type-confirmation — "no double-ask" (CRITICAL UX RULE):
+ * the two "Yes, review as {type}" chips from the pre-070 shape split into a Quick/Thorough pair
+ * (e.g. "Review as NDA — Quick (~20 sec)" / "Review as NDA — Thorough (~2–3 min)"), and the
+ * "Use the general review instead" escape hatch stays a SINGLE chip (deliberately not split —
+ * see module doc note below) defaulting to Thorough. Max 3 chips — still a single turn.
+ *
+ * The general-review escape hatch is intentionally NOT split into Quick/Thorough: it is already a
+ * rare pick-another path (the classifier's OWN suggestion was declined), and a 4-chip turn (2
+ * type-confirm x 2 depth, plus 2 general x 2 depth) would clutter the strip for a path most users
+ * never take. It defaults to Thorough (the project's legal-quality default) — documented design
+ * call, not an oversight.
+ */
 export function buildAgreementReviewConfirmChips(displayName: string): ConsumerChip[] {
   return [
     {
-      label: `Yes, review as ${displayName}`,
-      bindingId: LOCAL_CHIP.agreementReviewConfirm,
+      label: `Review as ${displayName} — ${REVIEW_DEPTH_TIMING_LABEL.quick}`,
+      bindingId: LOCAL_CHIP.agreementReviewConfirmQuick,
+      requiresAttachments: true,
+    },
+    {
+      label: `Review as ${displayName} — ${REVIEW_DEPTH_TIMING_LABEL.thorough}`,
+      bindingId: LOCAL_CHIP.agreementReviewConfirmThorough,
       requiresAttachments: true,
     },
     {
       label: "Use the general review instead",
       bindingId: LOCAL_CHIP.agreementReviewGeneral,
+      requiresAttachments: true,
+    },
+  ];
+}
+
+/**
+ * task 070 — the standalone depth-choice chips (Quick / Thorough), shown as ONE follow-up turn
+ * once the type is already settled with no further type-question pending (auto-proceed, the
+ * explicit door's text-path ask, and composite once a lens/"Both" is picked).
+ */
+export function buildAgreementReviewDepthChoiceChips(): ConsumerChip[] {
+  return [
+    {
+      label: REVIEW_DEPTH_TIMING_LABEL.quick,
+      bindingId: LOCAL_CHIP.agreementReviewDepthQuick,
+      requiresAttachments: true,
+    },
+    {
+      label: REVIEW_DEPTH_TIMING_LABEL.thorough,
+      bindingId: LOCAL_CHIP.agreementReviewDepthThorough,
       requiresAttachments: true,
     },
   ];

@@ -72,6 +72,16 @@ export interface ComposeWidgetSeed {
   composeSessionId?: string;
   analysisId?: string;
   autoRunReview?: boolean;
+  /**
+   * ai-advanced-capabilities-agreements-r1 task 070 (UAT2 review-depth selector) — the review-depth
+   * choice the Create-Analysis wizard's "Analysis Details" step carries alongside `autoRunReview`
+   * (`'quick'` = ~20s fast-model scan, `'thorough'` = ~2-3min gpt-5 reasoning; default `'thorough'`
+   * — the legal-quality default). Only ever set alongside `autoRunReview`/`subDomain`; ABSENT (or
+   * any non-`'quick'` value) normalizes to Thorough via `normalizeReviewDepth` — never trusted raw.
+   * Threaded to `useAgreementReviewGate.runExplicit`'s optional 4th param so the wizard's auto-run
+   * dispatches IMMEDIATELY at the picked depth instead of inserting a post-open depth-choice ask.
+   */
+  reviewDepth?: 'quick' | 'thorough';
 }
 
 /** Tab `widgetData` shape for the `'compose'` Direct widget. */

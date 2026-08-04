@@ -39,18 +39,30 @@ export const LOCAL_CHIP = {
   reviseInCompose: "local:revise-in-compose",
   ndaReview: "local:nda-review",
   /**
-   * task 021 (FR-08 interactive confirmation gate) — below-threshold "Yes, review as
-   * {type}" chip. Accepts the classifier's top (unconfirmed) candidate.
+   * task 021 (FR-08 interactive confirmation gate), SPLIT by task 070 (UAT2 review-depth
+   * selector): below-threshold "Review as {type} — Quick/Thorough" chips. Accepts the
+   * classifier's top (unconfirmed) candidate AND the depth choice in the SAME turn (no
+   * double-ask). Replaces the pre-070 single `agreementReviewConfirm` id.
    */
-  agreementReviewConfirm: "local:agreement-review-confirm",
+  agreementReviewConfirmQuick: "local:agreement-review-confirm-quick",
+  agreementReviewConfirmThorough: "local:agreement-review-confirm-thorough",
   /**
    * task 021 — "Use the general review instead" (below-threshold pick-another) AND the
    * non-agreement decline's "Run a general review anyway" escape hatch. Both branches
    * fall back to the SAME general/fallback pack, so they share one local-action id.
+   * Deliberately NOT split by depth (task 070) — defaults to Thorough; see
+   * `buildAgreementReviewConfirmChips`'s doc comment for the rationale.
    */
   agreementReviewGeneral: "local:agreement-review-general",
   /** task 021 — composite choice-of-lens "Both" chip: sequential multi-pack dispatch (ADR-016). */
   agreementReviewBoth: "local:agreement-review-both",
+  /**
+   * task 070 (UAT2 review-depth selector) — the standalone depth-choice turn's two chips,
+   * shown once the type is already settled (auto-proceed / the explicit door's text-path ask
+   * / composite once a lens or "Both" is picked) with no further type-question pending.
+   */
+  agreementReviewDepthQuick: "local:agreement-review-depth-quick",
+  agreementReviewDepthThorough: "local:agreement-review-depth-thorough",
 } as const;
 
 export type LocalChipActionId = (typeof LOCAL_CHIP)[keyof typeof LOCAL_CHIP];

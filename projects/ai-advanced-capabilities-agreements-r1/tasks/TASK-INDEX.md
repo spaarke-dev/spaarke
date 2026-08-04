@@ -32,7 +32,9 @@
 | 052 | Word-comment export mirror + configurable author | 5 | ✅ | 002,010 | FULL | sonnet | high | B |
 | 060 | Deploy (BFF + code page + Dataverse data) | 6 | ✅ | 003,012,023,032,033,042,051,052 | FULL | sonnet | high | — |
 | 061 | E2E UI tests (5 flows incl. zero-LLM reopen) | 6 | 🔄 | 060 | STANDARD | sonnet | high | — |
-| 090 | Wrap-up + test-diet + registration-recipe handoff | 6 | 🔲 | 060,061 | FULL | sonnet | high | — |
+| 070 | UAT2: review-depth selector (Quick/Thorough + timing) | 7 | 🔲 | 060 | FULL | sonnet | high | UAT2 |
+| 071 | UAT2: review-complete toast + link-back (in-app) | 7 | 🔲 | 060 | FULL | sonnet | high | UAT2 |
+| 090 | Wrap-up + test-diet + registration-recipe handoff | 6 | 🔲 | 060,061,070,071 | FULL | sonnet | high | — |
 
 ## Critical path
 

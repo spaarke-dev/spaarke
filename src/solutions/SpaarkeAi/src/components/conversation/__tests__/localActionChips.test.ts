@@ -96,7 +96,7 @@ describe('agreement-review composite-lens chip id encode/decode', () => {
   });
 
   it('decode returns null for a bindingId that is not a lens chip', () => {
-    expect(decodeAgreementReviewLensChipId(LOCAL_CHIP.agreementReviewConfirm)).toBeNull();
+    expect(decodeAgreementReviewLensChipId(LOCAL_CHIP.agreementReviewConfirmQuick)).toBeNull();
     expect(decodeAgreementReviewLensChipId('some-real-binding-guid')).toBeNull();
   });
 
@@ -104,9 +104,13 @@ describe('agreement-review composite-lens chip id encode/decode', () => {
     expect(isLocalChip(buildAgreementReviewLensChipId('nda'))).toBe(true);
   });
 
-  it('the three new gate action ids are reserved local:* sentinels, not real Binding guids', () => {
-    expect(isLocalChip(LOCAL_CHIP.agreementReviewConfirm)).toBe(true);
+  it('the gate action ids are reserved local:* sentinels, not real Binding guids', () => {
+    expect(isLocalChip(LOCAL_CHIP.agreementReviewConfirmQuick)).toBe(true);
+    expect(isLocalChip(LOCAL_CHIP.agreementReviewConfirmThorough)).toBe(true);
     expect(isLocalChip(LOCAL_CHIP.agreementReviewGeneral)).toBe(true);
     expect(isLocalChip(LOCAL_CHIP.agreementReviewBoth)).toBe(true);
+    // task 070 (UAT2 review-depth selector) — the standalone depth-choice turn's two ids.
+    expect(isLocalChip(LOCAL_CHIP.agreementReviewDepthQuick)).toBe(true);
+    expect(isLocalChip(LOCAL_CHIP.agreementReviewDepthThorough)).toBe(true);
   });
 });
