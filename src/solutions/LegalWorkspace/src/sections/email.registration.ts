@@ -118,26 +118,48 @@ const EmailSectionMount: React.FC<EmailSectionMountProps> = ({ bffBaseUrl }) => 
     return null;
   }
 
-  return React.createElement(EmailWorkspace, {
-    dataverseClient,
-    dataService,
-    navigationService,
-    webApi,
-    authenticatedFetch,
-    bffBaseUrl,
-    onSearchRecipients: handleSearchRecipients,
-    onLookupRecipients: composeHandlers.onLookupRecipients,
-    recordLookupCatalog: composeHandlers.recordLookupCatalog,
-    onLookupRecord: composeHandlers.onLookupRecord,
-    onAddRelationship: composeHandlers.onAddRelationship,
-    onUploadLocalAttachment: composeHandlers.onUploadLocalAttachment,
-    onResolveShareLink: composeHandlers.onResolveShareLink,
-    onListEmailTemplates: composeHandlers.onListEmailTemplates,
-    onRenderEmailTemplate: composeHandlers.onRenderEmailTemplate,
-    onDraftWithAi: composeHandlers.onDraftWithAi,
-    fromMailbox,
-    dataverseUrl,
-  });
+  // Bounded-height host (owner UAT 2026-08-03 R5 item 1). The SpaarkeAi/LegalWorkspace section
+  // content area is CONTENT-DRIVEN, so a bare `EmailWorkspace` (height:100%) collapses to auto
+  // and grows to fit ALL content — the panes scroll together as one. Matches the proven Messages
+  // widget (`CommunicationsWorkspaceWidget`) full-height pattern: an explicit viewport-based
+  // FLOOR + CAP (`calc(100vh - 200px)`) pins the surface to a definite box so the list and
+  // reading pane scroll INDEPENDENTLY. See the widget's docblock for the full root-cause note.
+  return React.createElement(
+    "div",
+    {
+      "data-testid": "email-section-scroll-host",
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        width: "100%",
+        minWidth: 0,
+        minHeight: "calc(100vh - 200px)",
+        maxHeight: "calc(100vh - 200px)",
+        overflow: "hidden",
+      },
+    },
+    React.createElement(EmailWorkspace, {
+      dataverseClient,
+      dataService,
+      navigationService,
+      webApi,
+      authenticatedFetch,
+      bffBaseUrl,
+      onSearchRecipients: handleSearchRecipients,
+      onLookupRecipients: composeHandlers.onLookupRecipients,
+      recordLookupCatalog: composeHandlers.recordLookupCatalog,
+      onLookupRecord: composeHandlers.onLookupRecord,
+      onAddRelationship: composeHandlers.onAddRelationship,
+      onUploadLocalAttachment: composeHandlers.onUploadLocalAttachment,
+      onResolveShareLink: composeHandlers.onResolveShareLink,
+      onListEmailTemplates: composeHandlers.onListEmailTemplates,
+      onRenderEmailTemplate: composeHandlers.onRenderEmailTemplate,
+      onDraftWithAi: composeHandlers.onDraftWithAi,
+      fromMailbox,
+      dataverseUrl,
+    })
+  );
 };
 
 export const emailRegistration: SectionRegistration = {

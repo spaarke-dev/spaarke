@@ -66,6 +66,8 @@ export interface EmailCardListProps {
   onSelect: (id: string) => void;
   /** Invoked by the list toolbar's "New email" (+) button — opens the compose form. Omit → no New button. */
   onCreateNew?: () => void;
+  /** Invoked by the list toolbar's Refresh (↻) button — re-runs the view fetch that populates the list. Omit → no Refresh button. */
+  onRefresh?: () => void;
 }
 
 /**

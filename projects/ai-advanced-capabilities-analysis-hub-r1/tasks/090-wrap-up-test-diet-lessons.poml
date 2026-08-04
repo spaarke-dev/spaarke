@@ -4,7 +4,7 @@
     <title>Wrap-up + /test-diet reconciliation + lessons-learned</title>
     <phase>7 Deploy</phase>
     <gate>072 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Documentation + closeout orchestration on a completed project; no code authoring. Runs the mandatory project-close /test-diet gate (CLAUDE.md §7).</rigor-reason>
     <model-tier>sonnet</model-tier>

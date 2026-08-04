@@ -250,6 +250,23 @@ describe('EmailReadingPaneShell', () => {
       expect(screen.queryByRole('button', { name: 'New email' })).not.toBeInTheDocument();
     });
 
+    it('wires actions.onRefresh to the LEFT list toolbar Refresh button — reachable with nothing selected (owner UAT 2026-08-03 Item 2)', () => {
+      const onRefresh = jest.fn();
+      renderShell({ actions: { onRefresh } });
+
+      // Refresh lives in the LIST toolbar (like New) — no selection required.
+      const refresh = screen.getByRole('button', { name: 'Refresh' });
+      expect(refresh).toBeInTheDocument();
+      fireEvent.click(refresh);
+      expect(onRefresh).toHaveBeenCalledWith();
+    });
+
+    it('omits the list Refresh button when no onRefresh handler is wired', () => {
+      renderShell({ actions: {} });
+
+      expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
+    });
+
     it('falls back to a no-op (no throw) when a handler is not wired (pending task-036 integration)', () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
       renderShell({ actions: undefined });

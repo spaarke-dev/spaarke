@@ -75,9 +75,13 @@ describe('deriveReplyState', () => {
     expect(patch.cc).toEqual([]);
   });
 
-  it('applies the Re: subject and empties the body', () => {
+  it('applies the Re: subject and quotes the previous thread (owner UAT R5 item 1)', () => {
     expect(patch.subject).toBe('Re: Status update');
-    expect(patch.body).toBe('');
+    // Reply now quotes the original (it was empty before) and stores the quoted block so an
+    // AI draft can re-append it (items 1/2).
+    expect(patch.body).toContain('wrote:');
+    expect(patch.body).toContain('Body content');
+    expect(patch.quotedThread).toContain('Body content');
   });
 
   it('carries associations forward and is editable', () => {
