@@ -9,7 +9,13 @@
   still OUR deployed hash / are our Dataverse rows intact? (other projects deploy whole-package over the shared
   spaarke-bff-dev + sprk_spaarkeai; if live ≠ ours, COORDINATE, never blind-redeploy over someone's active UAT);
   (3) prefer merging our fixes to master promptly so other projects' deploys carry our code.
-- **Task**: 061 🔄 BLOCKED-ON-OWNER (21/23 done; 060 ✅ deployed+verified — deploy-report-060.md).
+- **STATE (2026-08-04)**: 24/25 tasks done (070+071 UAT2 ✅, committed 1936e09e4, merged to master 9060cbfc4).
+  ROUND-2 DEPLOY HALTED by the pre-deploy gate: another session deployed over spaarke-bff-dev +
+  sprk_spaarkeai at ~23:08+23:16 local 2026-08-03; the SECOND write regressed our round-1/2 features off
+  the live code page (built without current master). Live env is NOT ours; Dataverse rows intact.
+  NEXT: owner confirms a deploy window → re-run the gated deploy from master tip (drift-check first,
+  agent brief = the round-2 deploy prompt) → owner UAT round-2 re-test → 061 e2e → 090 wrap-up.
+- **Task**: 061 🔄 BLOCKED-ON-OWNER (060 ✅ deployed+verified — deploy-report-060.md).
   Run plan READY: notes/e2e-runplan-061.md (5 flows, both themes, negatives, Word checklist, findings protocol).
 - **OWNER PREREQUISITES for 061**: (1) provision Reasoning-tier AOAI deployment — config key
   DocumentIntelligence__ReasoningModel, az commands in nda-r1 notes/task-013-reasoning-provisioning.md
