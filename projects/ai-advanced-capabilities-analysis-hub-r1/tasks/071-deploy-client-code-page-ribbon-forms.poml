@@ -4,7 +4,7 @@
     <title>Deploy client / code-page + ribbon + form customizations</title>
     <phase>7 Deploy</phase>
     <gate>063 and 070 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Multi-surface client deployment against known deploy scripts/skills; prescriptive/ordered; no design authoring, but touches SpaarkeAi + Dataverse ribbon/forms so it is sequenced carefully.</rigor-reason>
     <model-tier>sonnet</model-tier>
