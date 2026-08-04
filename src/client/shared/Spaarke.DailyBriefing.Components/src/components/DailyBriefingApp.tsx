@@ -45,7 +45,6 @@ import {
   MessageBar,
   MessageBarBody,
   MessageBarTitle,
-  Text,
 } from '@fluentui/react-components';
 import { DigestHeader } from './DigestHeader';
 import { EmptyState } from './EmptyState';
@@ -56,15 +55,8 @@ import { CaughtUpFooter } from './CaughtUpFooter';
 import { PreferencesDropdown } from './PreferencesDropdown';
 import { HighPrioritySection } from './HighPrioritySection';
 import { StatTiles, type StatTile } from './StatTiles';
-import {
-  SendEmailDialog,
-  FormModal,
-  LookupField,
-  RichFilePreviewDialog,
-  OOB_MODAL_SIZES,
-} from '@spaarke/ui-components';
+import { SendEmailDialog, RichFilePreviewDialog, OOB_MODAL_SIZES } from '@spaarke/ui-components';
 import type { ILookupItem } from '@spaarke/ui-components/types/LookupTypes';
-import { extractEmailKey } from '@spaarke/ui-components/services';
 // #713 (2026-08-03): the canonical SendEmailDialog engine sends via the BFF; this
 // package's convention (briefingService) is @spaarke/auth's authenticatedFetch
 // with relative /api paths, so the wrapper gets that fetch + an empty base.
@@ -74,7 +66,6 @@ import { TOASTER_ID } from '../utils/toastUtils';
 import { timeWindowToHours } from '../types/notifications';
 import type { IWebApi, NotificationCategory, NotificationItem } from '../types/notifications';
 import {
-  emailBriefingToColleague,
   getDocumentPreviewUrl,
   type ChannelNarrationResult,
   type NarrativeBulletResult,
@@ -133,15 +124,14 @@ export interface DailyBriefingAppProps {
 }
 
 /**
- * r5 email-share (2026-07-09; #713 re-shape 2026-08-03) — open-dialog state.
- * `briefing` shares the whole briefing: the SERVER composes + sends
- * (emailBriefingToColleague), so the UI is a FormModal recipient picker.
- * `item` shares one high-priority record through the CANONICAL SendEmailDialog
- * engine (standard communication pipeline) — the legacy client-composed
- * draft-email-activity path is retired.
+ * r5 email-share (2026-07-09; owner UAT 2026-08-04 re-shape) — open-dialog
+ * state. BOTH modes open the CANONICAL SendEmailDialog engine (standard
+ * communication pipeline) prefilled: `briefing` carries the full-briefing HTML
+ * overview with per-item record deep links (buildBriefingEmailHtml); `item`
+ * carries a single high-priority record draft (buildItemEmailDraft).
  */
 type EmailDialogState =
-  | { mode: 'briefing' }
+  | { mode: 'briefing'; defaultSubject: string; defaultBody: string }
   | { mode: 'item'; item: HighPriorityItemResult; defaultSubject: string; defaultBody: string };
 
 /**
@@ -176,6 +166,67 @@ export function buildItemEmailDraft(
   if (link) lines.push('', `Open the record: ${link}`);
   lines.push('', '— Shared from the Daily Briefing');
   return { subject, body: lines.join('\n') };
+}
+
+/** Minimal HTML escaper for the briefing-email builder below. */
+function esc(v: string): string {
+  return v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * Owner UAT 2026-08-04 — compose the "Email Briefing" prefill: an HTML overview
+ * of the CURRENT briefing where EVERY item embeds a deep link to its record
+ * (buildRecordDeepLink from structured entityType/entityId — never narrative
+ * text). Opens in the canonical SendEmailDialog engine prefilled; the user
+ * picks recipients and can edit before sending through the standard pipeline.
+ * Items whose identity is unknown render as plain text rather than dead links.
+ * Exported for tests.
+ */
+export function buildBriefingEmailHtml(
+  clientUrl: string,
+  tldr: { summary?: string; topAction?: string; keyTakeaways?: string[] } | null,
+  highPriorityItems: HighPriorityItemResult[],
+  channelNarratives: Array<{
+    category: string;
+    bullets?: Array<{ narrative?: string; primaryEntityType?: string; primaryEntityId?: string; primaryEntityName?: string }>;
+  }>
+): string {
+  const parts: string[] = [];
+  parts.push('<h2>Daily Briefing</h2>');
+  parts.push(`<p>${esc(new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }))}</p>`);
+  if (tldr?.summary) parts.push(`<p>${esc(tldr.summary)}</p>`);
+  if (tldr?.keyTakeaways?.length) {
+    parts.push('<ul>');
+    for (const t of tldr.keyTakeaways) parts.push(`<li>${esc(t)}</li>`);
+    parts.push('</ul>');
+  }
+  if (tldr?.topAction) parts.push(`<p><strong>Top action:</strong> ${esc(tldr.topAction)}</p>`);
+  if (highPriorityItems.length > 0) {
+    parts.push('<h3>High Priority</h3>', '<ul>');
+    for (const item of highPriorityItems) {
+      const label = `${item.kindLabel ? `${item.kindLabel}: ` : ''}${item.name || 'Record'}`;
+      const link = buildRecordDeepLink(clientUrl, item.entityType, item.entityId);
+      parts.push(`<li>${link ? `<a href="${esc(link)}">${esc(label)}</a>` : esc(label)}</li>`);
+    }
+    parts.push('</ul>');
+  }
+  for (const channel of channelNarratives) {
+    const bullets = channel.bullets ?? [];
+    if (bullets.length === 0) continue;
+    const title = channel.category.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    parts.push(`<h3>${esc(title)}</h3>`, '<ul>');
+    for (const b of bullets) {
+      const text = b.narrative || b.primaryEntityName || 'Item';
+      const link =
+        b.primaryEntityType && b.primaryEntityId
+          ? buildRecordDeepLink(clientUrl, b.primaryEntityType, b.primaryEntityId)
+          : '';
+      parts.push(`<li>${link ? `<a href="${esc(link)}">${esc(text)}</a>` : esc(text)}</li>`);
+    }
+    parts.push('</ul>');
+  }
+  parts.push('<p>— Shared from the Daily Briefing</p>');
+  return parts.join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -580,7 +631,16 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     [webApi]
   );
 
-  const handleEmailBriefing = React.useCallback(() => setEmailDialog({ mode: 'briefing' }), []);
+  const handleEmailBriefing = React.useCallback(() => {
+    const subject = `Daily Briefing — ${new Date().toLocaleDateString()}`;
+    const body = buildBriefingEmailHtml(
+      clientUrl,
+      renderData?.tldr ?? null,
+      renderData?.highPriorityItems ?? [],
+      renderData?.channelNarratives ?? []
+    );
+    setEmailDialog({ mode: 'briefing', defaultSubject: subject, defaultBody: body });
+  }, [clientUrl, renderData]);
 
   const handleEmailItem = React.useCallback(
     (item: HighPriorityItemResult) => {
@@ -590,57 +650,9 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     [clientUrl]
   );
 
-  // #713 (2026-08-03): briefing share = server-composed send, so the dialog's only
-  // job is picking the recipient — a standard FormModal + LookupField (the legacy
-  // composer-as-picker is retired). Item share sends through the canonical
-  // SendEmailDialog engine in the render below — no host-owned send remains.
-  const [briefingRecipient, setBriefingRecipient] = React.useState<ILookupItem | null>(null);
-  const [briefingSending, setBriefingSending] = React.useState(false);
-
-  const closeEmailDialog = React.useCallback(() => {
-    setEmailDialog(null);
-    setBriefingRecipient(null);
-    setBriefingSending(false);
-  }, []);
-
-  const handleBriefingSubmit = React.useCallback(async () => {
-    if (!briefingRecipient || briefingSending) return;
-    const recipientEmail = extractEmailKey(briefingRecipient.name);
-    if (!recipientEmail) {
-      dispatchToast(
-        <Toast>
-          <ToastTitle>Could not send</ToastTitle>
-          <ToastBody>Could not resolve the selected user&apos;s email address.</ToastBody>
-        </Toast>,
-        { intent: 'error', timeout: 6000 }
-      );
-      return;
-    }
-    setBriefingSending(true);
-    try {
-      const result = await emailBriefingToColleague(recipientEmail);
-      if (result.status !== 'success') {
-        throw new Error(result.message);
-      }
-      dispatchToast(
-        <Toast>
-          <ToastTitle>Briefing sent</ToastTitle>
-          <ToastBody>Your Daily Briefing was emailed to {briefingRecipient.name}.</ToastBody>
-        </Toast>,
-        { intent: 'success', timeout: 6000 }
-      );
-      closeEmailDialog();
-    } catch (err) {
-      dispatchToast(
-        <Toast>
-          <ToastTitle>Send failed</ToastTitle>
-          <ToastBody>{err instanceof Error ? err.message : 'The briefing could not be sent.'}</ToastBody>
-        </Toast>,
-        { intent: 'error', timeout: 8000 }
-      );
-      setBriefingSending(false);
-    }
-  }, [briefingRecipient, briefingSending, dispatchToast, closeEmailDialog]);
+  // Owner UAT 2026-08-04: both share modes open the canonical composer prefilled
+  // (see EmailDialogState docblock) — no host-owned send remains.
+  const closeEmailDialog = React.useCallback(() => setEmailDialog(null), []);
 
   // ---------------------------------------------------------------------------
   // Render
@@ -804,35 +816,14 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
         </div>
         <CaughtUpFooter channelLabels={[]} />
       </div>
-      {emailDialog?.mode === 'briefing' && (
-        <FormModal
-          open={true}
-          onClose={closeEmailDialog}
-          onSubmit={() => {
-            void handleBriefingSubmit();
-          }}
-          title="Email Briefing"
-          submitLabel="Send"
-          busy={briefingSending}
-          submitDisabled={!briefingRecipient}
-        >
-          <Text>Choose a colleague — the server sends them your full Daily Briefing.</Text>
-          <LookupField
-            label="Send to"
-            value={briefingRecipient}
-            onChange={setBriefingRecipient}
-            onSearch={handleSearchUsers}
-          />
-        </FormModal>
-      )}
-      {emailDialog?.mode === 'item' && (
+      {emailDialog && (
         <SendEmailDialog
           open={true}
           onClose={closeEmailDialog}
-          titleOverride="Email Item"
+          titleOverride={emailDialog.mode === 'briefing' ? 'Email Briefing' : 'Email Item'}
           initialSubject={emailDialog.defaultSubject}
           initialBody={emailDialog.defaultBody}
-          initialBodyFormat="PlainText"
+          initialBodyFormat={emailDialog.mode === 'briefing' ? 'HTML' : 'PlainText'}
           onSearchRecipients={handleSearchUsers}
           authenticatedFetch={authenticatedFetch}
           bffBaseUrl=""
