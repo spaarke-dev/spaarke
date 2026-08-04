@@ -49,6 +49,19 @@
  * clearly-labeled "Notify pending" state rather than inventing a client-side
  * notify mechanism. See the task's final report for the full escalation
  * writeup.
+ *
+ * ACCESS-PERMISSION SHARING GATE (task 043, spec FR-14 Option A, added
+ * teams-app-r1). The record-level Access-Permission state — `'restricted'` /
+ * `'limited'` / `'standard'` (see {@link AccessPermissionState} in
+ * `types.ts`) — governs WHICH grant types this modal permits: Restricted
+ * blocks all external-grant actions (candidate-approve + named-contact-add)
+ * behind a disabled state + explanatory banner; Limited allows those grants
+ * but hides the standing-grant option; Standard (the default when the prop
+ * is omitted) is task 041's unmodified baseline. This gate is STRUCTURALLY
+ * independent of the per-grant `sprk_accesslevel` (`accessLevelOptions` /
+ * `defaultAccessLevel`): the gating logic below only ever touches candidate/
+ * named-contact/standing-grant availability, never `effectiveAccessLevel` or
+ * the level sent in a grant's request body.
  */
 
 import * as React from 'react';
@@ -176,10 +189,18 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   title = 'Manage Access',
   accessLevelOptions = DEFAULT_ACCESS_LEVEL_OPTIONS,
   defaultAccessLevel,
+  accessPermissionState = 'standard',
 }) => {
   const styles = useStyles();
   const effectiveAccessLevel =
     defaultAccessLevel ?? accessLevelOptions[0]?.value ?? DEFAULT_ACCESS_LEVEL_OPTIONS[0].value;
+
+  // Access-Permission sharing gate (task 043, FR-14 Option A). Deliberately
+  // computed from the prop alone — never from `effectiveAccessLevel` or any
+  // other per-grant `sprk_accesslevel` concept above, so the two stay
+  // structurally independent (see the module doc comment).
+  const grantsBlocked = accessPermissionState === 'restricted';
+  const standingGrantAllowed = accessPermissionState === 'standard';
 
   const [loading, setLoading] = React.useState(false);
   const [candidates, setCandidates] = React.useState<IAccessGrantCandidate[]>([]);
@@ -489,6 +510,20 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
               </div>
             ) : (
               <>
+                {/* Access-Permission sharing gate banner (task 043, FR-14 Option A) —
+                    shown only when Restricted; existing access below remains
+                    reviewable/revocable regardless of this gate. */}
+                {grantsBlocked && (
+                  <MessageBar intent="warning" style={{ marginBottom: tokens.spacingVerticalM }}>
+                    <MessageBarBody>
+                      <MessageBarTitle>External access is off for this record</MessageBarTitle>
+                      This record's Access Permission is set to Restricted, so new external grants (approving a
+                      membership candidate or adding a named contact) are blocked. Existing access can still be
+                      reviewed and revoked below.
+                    </MessageBarBody>
+                  </MessageBar>
+                )}
+
                 {/* Section 1 — candidate approve list (task 021 role-allowlist source) */}
                 <div className={styles.section}>
                   <Text className={styles.sectionTitle}>Membership candidates</Text>
@@ -505,6 +540,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                           checked={selectedCandidateIds.has(candidate.contactId)}
                           onChange={() => toggleCandidateSelected(candidate.contactId)}
                           aria-label={`Select ${candidate.fullName}`}
+                          disabled={grantsBlocked}
                         />
                         <div className={styles.rowMain}>
                           <Text className={styles.rowName}>{candidate.fullName}</Text>
@@ -514,7 +550,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                           </Text>
                         </div>
                         <div className={styles.rowActions}>
-                          {onSetStandingGrant && (
+                          {onSetStandingGrant && standingGrantAllowed && (
                             <Checkbox
                               label="Standing grant"
                               checked={standingForCandidate.has(candidate.contactId)}
@@ -529,7 +565,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   {candidates.length > 0 && (
                     <Button
                       appearance="primary"
-                      disabled={selectedCandidateIds.size === 0 || approving}
+                      disabled={selectedCandidateIds.size === 0 || approving || grantsBlocked}
                       icon={approving ? <Spinner size="tiny" /> : undefined}
                       onClick={handleApproveSelected}
                       style={{ alignSelf: 'flex-start' }}
@@ -557,6 +593,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                         if (found) setSearchQuery(found.fullName);
                       }}
                       expandIcon={searching ? <Spinner size="tiny" /> : undefined}
+                      disabled={grantsBlocked}
                     >
                       {searchResults.map(result => (
                         <Option key={result.contactId} value={result.contactId} text={result.fullName}>
@@ -565,7 +602,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                         </Option>
                       ))}
                     </Combobox>
-                    {onSetStandingGrant && (
+                    {onSetStandingGrant && standingGrantAllowed && (
                       <Checkbox
                         label="Standing grant"
                         checked={standingForNamed}
@@ -576,7 +613,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                     <Button
                       appearance="primary"
                       icon={addingNamed ? <Spinner size="tiny" /> : <PersonRegular />}
-                      disabled={!selectedNamed || addingNamed}
+                      disabled={!selectedNamed || addingNamed || grantsBlocked}
                       onClick={handleAddNamed}
                     >
                       Add

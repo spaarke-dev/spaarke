@@ -4,7 +4,7 @@
     <title>Org-catalog distribution + Publisher Attestation prep</title>
     <phase>7 Teams Package &amp; Deploy</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Packaging/documentation task — no code changes, no new src/ surface; CLAUDE.md §8 rigor table MINIMAL row (documentation, inventory, simple updates).</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Waves 0–4 ✅ (16/25). ⏸️ **PAUSED before deploy** — operator syncing worktree with master first. **001 🔄** (operator live gate). |
-| **Step** | Completed: 002,010,011,012,020,021,022,030,040,041,042,050,051,060,061,062. Remaining: 043,045,065,070,071,072,080,090. |
-| **Status** | ⏸️ Paused pre-deploy. Master is 18 commits ahead (no same-file textual conflicts; disjoint from our surfaces). **Semantic risk**: master changed `EmailComposer` which task 042 reuses → re-verify 042 build post-merge. |
-| **Next Action** | Wave 0–3 committed at a990517ca (pushed). Commit+push Wave 4 (062,030,051,041,042). Then: merge origin/master → re-verify all builds (esp. 042↔EmailComposer) → resume at deploy tasks ONLY on operator go. |
+| **Task** | **ALL non-deploy work ✅ (20/25).** ⏸️ **PAUSED before deploy** by operator directive. **001 🔄** (operator live Teams gate). |
+| **Step** | Completed: 002,010,011,012,020,021,022,030,040,041,042,043,050,051,060,061,062,070,071,072. Remaining = DEPLOY TAIL only: 065 (BFF deploy) → 045 (PCF deploy) → 080 (live E2E) → 090 (wrap-up). |
+| **Status** | ⏸️ Paused pre-deploy. Master synced + merged (pushed, branch current). All 4 waves + Teams-package stream committed & pushed. Every FULL task passed code-review + adr-check. Deploy tail is deliberately held for cross-project coordination. |
+| **Next Action** | On operator go: 065 BFF deploy (coordinate on shared spaarke-bff-dev) → 045 PCF deploy (v1.0.11) → operator runs 001 spike live-validation + 080 E2E (needs live Teams) → 090 wrap-up (+ /test-diet, defer-issue: pre-existing System.Security.Cryptography.Xml 8.0.3 HIGH CVE; 041 internal-notify Path A/C decision). Backups: backup-teams-{wave4,premaster,postmaster}. |
 
 ### Files Modified This Session
 - `notes/spikes/foundation-spike-findings.md` — code-verified go/no-go per path + operator runbook (NEW)

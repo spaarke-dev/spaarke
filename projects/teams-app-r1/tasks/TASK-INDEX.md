@@ -26,7 +26,7 @@ Tier: model-tier @ effort (dispatch each subagent at these per root CLAUDE.md §
 | 040 | TrackingFieldTrio two-icon governance toolbar | 4 | ✅ | 021 | sonnet@high | FULL | ❌ (serial PCF chain; shared component) | C |
 | 041 | Access-grant modal (candidates + named users → grant + invite) | 4 | ✅ | 040 | sonnet@xhigh | FULL | ❌ (serial; shared component) | C |
 | 042 | Email-members action → SendEmailDialog (ADR-045) | 4 | ✅ | 040 | sonnet@high | FULL | ❌ (serial; shared component) | C |
-| 043 | Access-Permission Option-A sharing-gate on the modal | 4 | 🔲 | 041 | sonnet@high | FULL | ❌ (serial; modifies 041 modal) | C |
+| 043 | Access-Permission Option-A sharing-gate on the modal | 4 | ✅ | 041 | sonnet@high | FULL | ❌ (serial; modifies 041 modal) | C |
 | 045 | Deploy TrackingFieldTrio PCF to Dataverse | 4 | 🔲 | 043,065 | sonnet@high | STANDARD | ❌ (deploy; shared env) | C |
 | 050 | Standing-grant field on `contact` + form toggle | 5 | ✅ | 001 | sonnet@high | STANDARD | ✅ | D |
 | 051 | Standing-grant runtime union into accessible-set | 5 | ✅ | 022,050 | opus@high | FULL | ❌ (modifies 022 composition) | D |
@@ -34,9 +34,9 @@ Tier: model-tier @ effort (dispatch each subagent at these per root CLAUDE.md §
 | 061 | Multitenant workforce Entra + admin-consent onboarding | 6 | ✅ | 002 | sonnet@high | STANDARD | ✅ | E |
 | 062 | Teams framing headers (CSP frame-ancestors) on SWA host | 6 | ✅ | 012 | sonnet@high | STANDARD | ✅ | E |
 | 065 | Deploy BFF (resolver, membership, routing, download) | 6 | 🔲 | 030,051,060 | sonnet@high | STANDARD | ❌ (deploy; shared spaarke-bff-dev) | E |
-| 070 | Teams manifest v1.29 + M365 Agents Toolkit packaging | 7 | 🔲 | 061,062 | sonnet@high | STANDARD | ✅ | F |
-| 071 | New Teams-app CI deploy workflow | 7 | 🔲 | 070 | sonnet@high | FULL | ✅ (⚠️ ci-workflows hot-path — /conflict-check) | F |
-| 072 | Org-catalog distribution + Publisher Attestation prep | 7 | 🔲 | 070 | sonnet@high | MINIMAL | ✅ | F |
+| 070 | Teams manifest v1.29 + M365 Agents Toolkit packaging | 7 | ✅ | 061,062 | sonnet@high | STANDARD | ✅ | F |
+| 071 | New Teams-app CI deploy workflow | 7 | ✅ | 070 | sonnet@high | FULL | ✅ (⚠️ ci-workflows hot-path — /conflict-check) | F |
+| 072 | Org-catalog distribution + Publisher Attestation prep | 7 | ✅ | 070 | sonnet@high | MINIMAL | ✅ | F |
 | 080 | End-to-end integration verification (graduation criteria) | 8 | 🔲 | 045,065,072,051 | opus@high | FULL | ❌ (needs all phases) | G |
 | 090 | Project wrap-up (gates, cleanup, docs, test-diet) | 8 | 🔲 | 080 | sonnet@high | FULL | ❌ (final; edits README/plan + .claude gates) | G |
 

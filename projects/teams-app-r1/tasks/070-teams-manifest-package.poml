@@ -4,7 +4,7 @@
     <title>Teams app manifest v1.29 + M365 Agents Toolkit packaging</title>
     <phase>7 Teams Package &amp; Deploy</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New file creation (manifest + appPackage) with no auth/authz code changes; Phase 7 packaging task per CLAUDE.md §8 rigor table.</rigor-reason>
     <model-tier>sonnet</model-tier>

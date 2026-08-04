@@ -60,6 +60,36 @@ export interface IContactSearchResult {
   email?: string;
 }
 
+/**
+ * The record-level Access-Permission sharing-gate state (spec FR-14, Option
+ * A — teams-app-r1 task 043). This is a project-wide SEMANTIC vocabulary
+ * ("Standard"/"Limited"/"Restricted"), NOT a raw Dataverse OptionSet value —
+ * the caller maps its own entity's Access-Permission OptionSet integer to
+ * one of these three states (see `TrackingFieldTrio`'s PCF `index.ts`, the
+ * ONLY place that knows the real `sprk_project` OptionSet values), keeping
+ * this shared modal entity-agnostic per ADR-012.
+ *
+ * - `'restricted'` — external access is off for this record: the modal
+ *   blocks ALL external-grant actions (approve-candidate + add-named-contact).
+ * - `'limited'` — named/approved grants remain available, but the
+ *   standing-grant option is unavailable (no auto-approval across future
+ *   records).
+ * - `'standard'` — every grant type is available, including standing
+ *   grants. This is the DEFAULT applied when the prop is omitted, matching
+ *   task 041's baseline behavior for any caller that hasn't wired the
+ *   record's Access-Permission value (zero-regression default).
+ *
+ * DISTINCT from the per-grant `sprk_accesslevel` field (`accessLevelOptions`
+ * / `defaultAccessLevel` below) — this state governs WHICH grant types the
+ * modal permits, never WHAT access level an individual grant carries. R1
+ * exposes no per-grant access-level selector in this modal's UI (see
+ * `defaultAccessLevel`'s doc comment), so there is no shared UI surface for
+ * this gate to affect; the independence is structural — the gate only
+ * touches candidate/named-contact/standing-grant availability, never
+ * `accessLevelOptions` or `defaultAccessLevel`.
+ */
+export type AccessPermissionState = 'standard' | 'limited' | 'restricted';
+
 /** A single access-level choice offered by the modal. Defaults mirror the
  * BFF's fixed `ExternalAccessLevel` enum (ViewOnly=100000000,
  * Collaborate=100000001, FullAccess=100000002) — this is a BFF API contract
@@ -130,6 +160,15 @@ export interface IAccessGrantModalProps {
    * design.md §5.1 — the modal's job is WHO gets access, not WHAT level);
    * callers needing a different default may override. */
   defaultAccessLevel?: number;
+  /** The record's current Access-Permission sharing-gate state (spec FR-14,
+   * Option A — task 043). Governs which grant types the modal permits:
+   * `'restricted'` blocks all external grants (approve-candidate +
+   * add-named-contact disabled, with an explanatory banner); `'limited'`
+   * allows named/approved grants but hides the standing-grant option;
+   * `'standard'` (default, when omitted) allows every grant type — task
+   * 041's unmodified baseline. See {@link AccessPermissionState} for the
+   * full mapping and the `sprk_accesslevel` independence guarantee. */
+  accessPermissionState?: AccessPermissionState;
 }
 
 /** BFF's fixed `ExternalAccessLevel` enum values (Infrastructure/ExternalAccess/

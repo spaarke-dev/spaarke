@@ -4,7 +4,7 @@
     <title>New Teams-app CI deploy workflow (parallels deploy-external-spa.yml)</title>
     <phase>7 Teams Package &amp; Deploy</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New CI workflow authoring under `.github/workflows/` — a contended, high-blast-radius hot-path per CLAUDE.md §8 rigor table (tags include ci-workflows-equivalent risk); code-review + adr-check apply.</rigor-reason>
     <model-tier>sonnet</model-tier>

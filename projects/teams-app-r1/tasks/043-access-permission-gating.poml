@@ -4,7 +4,7 @@
     <title>Access-Permission sharing gate on the grant modal (Option A: Restricted/Limited/Standard)</title>
     <phase>4 Access-Management Surface (PCF)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Governs whether external access grants are permitted at all (FR-14 sharing gate) — a security-relevant authorization boundary on an existing modal; code-review + adr-check apply.</rigor-reason>
     <model-tier>sonnet</model-tier>

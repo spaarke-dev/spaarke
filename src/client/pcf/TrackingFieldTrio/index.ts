@@ -56,6 +56,15 @@
  * through the composer's own `sendCommunication()` call — no custom send
  * logic is added here).
  *
+ * v1.0.11 (task 043, teams-app-r1) — wires `AccessGrantModal`'s new
+ * `accessPermissionState` prop (spec FR-14 Option A sharing gate) to this
+ * record's bound `sprk_project` Access Permission field. This file is the
+ * ONLY place that maps the raw `ACCESS_PERMISSION_STANDARD` /
+ * `_LIMITED` / `_RESTRICTED` OptionSet integers to the shared modal's
+ * entity-agnostic `AccessPermissionState` vocabulary — the modal itself
+ * never sees the raw Dataverse values (ADR-012). Distinct from, and does
+ * not touch, the per-grant `sprk_accesslevel` wiring below.
+ *
  * @remarks
  * - Uses React 16 APIs per ADR-022 (ReactDOM.render, not createRoot)
  * - Uses Fluent UI v9 per ADR-021 (via platform libraries)
@@ -90,6 +99,7 @@ import {
   type IAccessGrantCandidate,
   type IAccessGrantRecord,
   type IContactSearchResult,
+  type AccessPermissionState,
 } from '@spaarke/ui-components/dist/components/AccessGrantModal';
 // Canonical `SendEmailDialog` (task 042, ADR-045) — the `EmailComposer`
 // wrapper that owns the Dialog chrome + `sendCommunication()` send flow.
@@ -301,6 +311,28 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     return authenticatedFetch(url, init);
   };
 
+  /**
+   * Maps the bound `sprk_project.sprk_accesspermission` raw OptionSet value
+   * (task 043, spec FR-14 Option A) to `AccessGrantModal`'s entity-agnostic
+   * `AccessPermissionState`. This is the ONLY place that knows the real
+   * `ACCESS_PERMISSION_*` integers — the shared modal receives only the
+   * semantic 'standard' | 'limited' | 'restricted' vocabulary (ADR-012).
+   * Defaults to `'standard'` (all grant types available — task 041's
+   * baseline) when the value is unset or unrecognized, matching the modal's
+   * own default and preserving zero regression for records without the
+   * field populated.
+   */
+  private mapAccessPermissionToState(value: number | null): AccessPermissionState {
+    switch (value) {
+      case ACCESS_PERMISSION_RESTRICTED:
+        return 'restricted';
+      case ACCESS_PERMISSION_LIMITED:
+        return 'limited';
+      default:
+        return 'standard';
+    }
+  }
+
   /** Reads the current `sprk_project` record's `sprk_assigned*` contact
    * lookups (host-context, single-entity, one `$expand` read — per
    * `DATA-ACCESS-DECISION-CRITERIA.md`) and returns the populated ones as
@@ -449,7 +481,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       accessPermission: this.accessPermissionValue,
       showTitle,
       showVersion,
-      versionText: 'v1.0.10 • Built 2026-08-04',
+      versionText: 'v1.0.11 • Built 2026-08-04',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
@@ -526,6 +558,10 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                 searchContacts: this.searchContacts,
                 isInternalContact: this.isInternalContact,
                 onSetStandingGrant: this.onSetStandingGrant,
+                // Access-Permission sharing gate (task 043, FR-14 Option A) —
+                // mapped from the bound field's raw OptionSet value; see
+                // mapAccessPermissionToState()'s doc comment.
+                accessPermissionState: this.mapAccessPermissionToState(this.accessPermissionValue),
               })
             : null,
           // Canonical SendEmailDialog (task 042) — pre-populated with the
