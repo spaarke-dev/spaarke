@@ -308,6 +308,14 @@ export interface EmailComposerState {
   subject: string;
   body: string;
   bodyFormat: EmailComposerBodyFormat;
+  /**
+   * The quoted previous-thread block (attribution header + original message body) for a
+   * reply/forward, WITHOUT the leading room above it. Stored so an AI draft can re-append it
+   * after generating the author's message — the previous thread must survive an AI draft and
+   * be included when the reply/forward is sent (owner UAT 2026-08-03 R5 items 1/2). Absent for
+   * new/compose/draft/view.
+   */
+  quotedThread?: string;
   attachments: IAttachmentItem[];
   sendMode: CommunicationSendMode;
   fromMailbox?: string;

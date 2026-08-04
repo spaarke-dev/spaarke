@@ -205,17 +205,35 @@ export function dedupSubjectPrefix(subject: string, prefix: 'Re:' | 'Fwd:'): str
   return re.test(trimmed) ? trimmed : `${prefix} ${trimmed}`.trim();
 }
 
-function wrapForwardedBody(source: ISourceCommunicationRecord): string {
+// Leading room ABOVE the quoted thread so the author types their message before the quote
+// (owner UAT 2026-07-30 item 13). HTML → two empty paragraphs (caret lands in the first);
+// PlainText → two leading newlines.
+function quoteLead(source: ISourceCommunicationRecord): string {
+  return source.bodyFormat === 'HTML' ? '<p></p><p></p>' : '\n\n';
+}
+
+/**
+ * The quoted-thread block for a reply/forward — a header (attribution line) followed by the
+ * ORIGINAL message body. Reply uses an Outlook-style "On {date}, {from} wrote:" attribution;
+ * forward uses the "---------- Forwarded message ----------" header. Returned WITHOUT the
+ * leading room so it can be stored on state (`quotedThread`) and re-appended verbatim after an
+ * AI draft (owner UAT 2026-08-03 R5 items 1/2 — the previous message thread must survive an AI
+ * draft AND be included when the reply/forward is sent).
+ */
+function quotedThreadBlock(source: ISourceCommunicationRecord, kind: 'reply' | 'forward'): string {
   const sentAt = source.sentAt ? new Date(source.sentAt).toLocaleString() : '';
-  // Owner UAT 2026-07-30 (item 13): leave vertical room ABOVE the quoted thread so the
-  // author can type their message before the forwarded block. HTML → two empty paragraphs
-  // (the caret lands in the first); PlainText → two leading newlines.
-  const lead = source.bodyFormat === 'HTML' ? '<p></p><p></p>' : '\n\n';
+  if (source.bodyFormat === 'HTML') {
+    const header =
+      kind === 'forward'
+        ? `<p>---------- Forwarded message ----------</p><p>From: ${escapeHtml(source.from)}<br/>Sent: ${escapeHtml(sentAt)}<br/>Subject: ${escapeHtml(source.subject)}</p><hr/>`
+        : `<p>On ${escapeHtml(sentAt)}, ${escapeHtml(source.from)} wrote:</p><hr/>`;
+    return header + source.body;
+  }
   const header =
-    source.bodyFormat === 'HTML'
-      ? `<p>---------- Forwarded message ----------</p><p>From: ${escapeHtml(source.from)}<br/>Sent: ${escapeHtml(sentAt)}<br/>Subject: ${escapeHtml(source.subject)}</p><hr/>`
-      : `---------- Forwarded message ----------\nFrom: ${source.from}\nSent: ${sentAt}\nSubject: ${source.subject}\n\n`;
-  return lead + header + source.body;
+    kind === 'forward'
+      ? `---------- Forwarded message ----------\nFrom: ${source.from}\nSent: ${sentAt}\nSubject: ${source.subject}\n\n`
+      : `On ${sentAt}, ${source.from} wrote:\n\n`;
+  return header + source.body;
 }
 
 function escapeHtml(value: string): string {
@@ -239,12 +257,16 @@ export function deriveViewState(source: ISourceCommunicationRecord): Partial<Ema
 }
 
 export function deriveReplyState(source: ISourceCommunicationRecord): Partial<EmailComposerState> {
+  // Owner UAT 2026-08-03 R5 item 1: reply now quotes the previous thread (it was empty
+  // before). The quoted block is also stored on `quotedThread` so an AI draft re-appends it.
+  const quoted = quotedThreadBlock(source, 'reply');
   return {
     to: toRecipients([source.from]),
     cc: [],
     bcc: [],
     subject: dedupSubjectPrefix(source.subject, 'Re:'),
-    body: '',
+    body: quoteLead(source) + quoted,
+    quotedThread: quoted,
     bodyFormat: source.bodyFormat,
     // Reply OFFERS the source attachments but defaults them OFF (task 104, D1/D2) —
     // the user opts in per item (attach-file and/or body-link) via AttachmentList.
@@ -260,7 +282,8 @@ export function deriveForwardState(source: ISourceCommunicationRecord): Partial<
     cc: [],
     bcc: [],
     subject: dedupSubjectPrefix(source.subject, 'Fwd:'),
-    body: wrapForwardedBody(source),
+    body: quoteLead(source) + quotedThreadBlock(source, 'forward'),
+    quotedThread: quotedThreadBlock(source, 'forward'),
     bodyFormat: source.bodyFormat,
     // Forward DEFAULTS to including the source attachments as files (task 104).
     attachments: (source.attachments ?? []).map(a => ({ ...a, selected: true, linkSelected: a.linkSelected ?? false })),
