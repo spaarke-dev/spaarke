@@ -199,7 +199,10 @@ const useStyles = makeStyles({
     scrollbarWidth: 'thin',
     scrollbarColor: `${tokens.colorNeutralStroke1} transparent`,
     '::-webkit-scrollbar': { width: '8px', height: '8px' },
-    '::-webkit-scrollbar-thumb': { backgroundColor: tokens.colorNeutralStroke1, borderRadius: tokens.borderRadiusMedium },
+    '::-webkit-scrollbar-thumb': {
+      backgroundColor: tokens.colorNeutralStroke1,
+      borderRadius: tokens.borderRadiusMedium,
+    },
     '::-webkit-scrollbar-thumb:hover': { backgroundColor: tokens.colorNeutralStroke1Hover },
     '::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
     // Rows are separated by thin divider lines (round 7 item 6, Email-widget
