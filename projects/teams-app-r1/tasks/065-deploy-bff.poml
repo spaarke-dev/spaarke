@@ -4,7 +4,7 @@
     <title>Deploy BFF (resolver, membership, routing, download) to Azure App Service</title>
     <phase>6 Enterprise &amp; Routing</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment execution following the established `bff-deploy` skill; no new src/ design decisions made in this task.</rigor-reason>
     <model-tier>sonnet</model-tier>

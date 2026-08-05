@@ -4,7 +4,7 @@
     <title>Deploy extended TrackingFieldTrio PCF to Dataverse (grant modal + email action live)</title>
     <phase>4 Access-Management Surface (PCF)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment of an already-built, already-reviewed control (040/041/042/043 each carried FULL rigor); this task is packaging + import, not new logic — code-review/adr-check skipped per the STANDARD default.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -1,5 +1,5 @@
 # Pack TrackingFieldTrio Solution
-$version = "1.0.9"
+$version = "1.0.11"
 $solutionName = "TrackingFieldTrioSolution"
 $controlName = "sprk_Spaarke.Controls.TrackingFieldTrio"
 
