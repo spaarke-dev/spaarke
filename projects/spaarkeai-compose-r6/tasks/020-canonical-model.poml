@@ -3,7 +3,7 @@
   <metadata>
     <title>Canonical document model — generalize ComposeContentModel/projection as the single hub between every source and the editor</title>
     <phase>2 Canonical model + fidelity widening</phase>
-    <gate>dep:014</gate>
+    <gate>startable — deps 001 (ADR-049 Path-B amendment, committed on branch) + 004 (NDA fixture). RE-SEQUENCED 2026-08-05: this is the render-on-save ANCHOR (was gated on 014; that was a dependency inversion — see plan.md §5 banner). Run /conflict-check before the BFF PR.</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Architectural pivot: generalizes the editor projection into THE canonical hub every downstream fidelity task (021-026) builds on. Modifies shared Services/Compose files on the most-contested BFF surface; a wrong model shape cascades into every feature adapter. FR-03 core. code-review + adr-check run at Step 9.5 (FULL/BFF/architecture).</rigor-reason>
@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Edits shared Services/Compose files (ComposeContentModel / ComposeDocxProjectionBuilder / ComposeDocumentRenderer) — the MOST-CONTESTED repo surface. Overlaps spaarkeai-compose-r5/r4.5/r3/r2/r1 + spaarke-ai-architecture-redesign-r2 + ai-advanced-capabilities-agreements-r1/analysis-hub-r1. Anchor task of Phase 2; every 021-026 adapter serializes behind it. Run /conflict-check before the BFF PR.</parallel-reason>
-    <deps>014</deps>
+    <deps>001, 004</deps>
     <tags>bff-api, compose</tags>
     <estimated-effort>1-2 weeks</estimated-effort>
   </metadata>
@@ -41,8 +41,14 @@
       <file role="new">tests/integration/seam/Compose/</file>
     </relevant-files>
     <dependencies>
-      <dependency task="014" status="pending">Phase-1 render-on-save cutover deployed + UAT-passed (SaveAsync routes Imported through render-from-model; count-gate dropped). The canonical-model generalization builds on the render-on-save save path.</dependency>
+      <dependency task="001" status="complete">ADR-049 Path-B amendment codifying render-on-save (committed on this branch; merges with this code).</dependency>
+      <dependency task="004" status="complete">NDA fixture in tests/fixtures/compose-corpus/ (LFS) — the round-trip + no-422 oracle for this task's seam slice.</dependency>
     </dependencies>
+    <!-- RE-SEQUENCED 2026-08-05 (owner-authorized): this task is the render-on-save ANCHOR and runs FIRST among the
+         code tasks. A Step-2 trace on task 010 found that render-from-model has no faithful canonical-model SOURCE for
+         imported docs until THIS task builds the docx→canonical-model projection; the cutover (010/011/012) now depends
+         on 020 + 026, not the reverse. See notes/task-010-resequence-decision.md + plan.md §5/§6. -->
+
   </context>
 
   <constraints>
@@ -83,7 +89,7 @@
   </justification>
 
   <steps mode="directional">
-    <step order="0" name="Context + rigor declaration">Load all knowledge files. Declare RIGOR LEVEL FULL + reason. Confirm task 014 (Phase-1 cutover) is complete and the render-on-save save path is live.</step>
+    <step order="0" name="Context + rigor declaration">Load all knowledge files. Declare RIGOR LEVEL FULL + reason. Confirm 001 (ADR-049 amendment, committed on branch) + 004 (NDA fixture) are present. NOTE (re-sequence 2026-08-05): this is the FIRST render-on-save code task — do NOT wait on 010/014; the docx→canonical-model projection built here is the prerequisite the cutover (010) depends on. Run /conflict-check for Services/Compose.</step>
     <step order="1">Read ComposeContentModel + ComposeDocxProjectionBuilder.cs and ComposeDocumentRenderer.SynthesizeDocument:102 / AppendSection:142. Map the current projection shape and where it is source-specific (docx-only assumptions) vs source-agnostic.</step>
     <step order="2">Generalize ComposeContentModel into the single canonical hub: a source-agnostic block/inline model that docx projects INTO (via ComposeDocxProjectionBuilder) and that renders OUT via ComposeDocumentRenderer.SynthesizeDocument. Keep it PDF-ready by shape (Phase 4) without building PDF intake here.</step>
     <step order="3">Wire numbering through NumberingComputationEngine (ComposeDocxProjectionBuilder.cs:1357) — reuse, do not re-implement. Ensure numbering labels are computed deterministically (numId-scoped).</step>

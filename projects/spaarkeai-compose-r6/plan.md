@@ -67,6 +67,14 @@ Numbering uses 10-gaps for insertions. Every task carries the canonical POML fie
 effort, parallel-group/safe, escalation, justification for new surface). Default execution tier: **Sonnet 5 @ high**;
 `opus`/`xhigh` flagged where noted. **All Compose-touching tasks are `parallel-safe:false`** (shared-file contention).
 
+> **⚠️ RE-SEQUENCED 2026-08-05 (execution order ≠ phase-number order).** A Step-2 code trace on task 010 found a
+> dependency inversion: the render-on-save cutover (010/011/012) needs the canonical-model hub + OOXML→model
+> projection + hard-tier accept-flatten that Phase 2 (020–026) builds — otherwise it re-ships the fixed UAT #1A SEV-1
+> regression (imported docs rendered from the thin model drop headers/footers/text-boxes; `ComposeWorkspace.tsx:1432`).
+> **Corrected execution order: 020 → {011, 021–026} → 010 → 012 → {013, 027} → 014.** The phase-number labels below are
+> retained (stable task IDs); the binding order is the **§6 critical path**. Owner-authorized re-sequence; see
+> [`notes/task-010-resequence-decision.md`](../notes/task-010-resequence-decision.md). ADR-049 amendment (001) unchanged.
+
 ### Phase 0 — Foundations & gates (human/verify) — *blocks Phase 1*
 | Task | Title | Tags | Rigor | Tier | Notes |
 |---|---|---|---|---|---|
@@ -75,26 +83,26 @@ effort, parallel-group/safe, escalation, justification for new surface). Default
 | **003** | Measure BFF publish-size baseline (re-confirm ~49.63 MB) | verify, bff | MINIMAL | sonnet | `dotnet publish -c Release`; record incl./excl. PDB; sets the per-task delta reference |
 | **004** | Move `AppligentNDA_Signed.docx` → `tests/fixtures/compose-corpus/` (LFS) + manifest row | test-fixture | STANDARD | sonnet | Git-LFS; add feature-coverage row to `corpus-manifest.md` (text-boxes / `mc:AlternateContent` / duplicate paraIds) |
 
-### Phase 1 — Render-on-save core (kill the 422) — *depends on 001, 004*
+### Phase 1 — Render-on-save cutover (kill the 422) — *RUNS AFTER 020+026 (re-sequenced); 010 deps 011+026, not 001/004 directly*
 | Task | Title | Tags | Rigor | Tier | Notes |
 |---|---|---|---|---|---|
-| **010** | Route Imported docs through render-from-model in `SaveAsync`; drop count-gate from save path | bff, compose | FULL | **opus** | the pivot; extend `ComposeService.SaveAsync:714` branch to render for `Imported`; Placement Justification |
-| **011** | Generalize `ComposeDocumentRenderer.SynthesizeDocument` for imported/canonical model input | bff, compose | FULL | **opus** | render from the canonical model, not just born-in-editor blocks |
-| **012** | Retire `ComposeShadowPatchEngine` + `ComposeBaselineParaIdStamper` from the save path | bff, compose | FULL | sonnet | retain surgical engine only for transitional clean-apply per the amendment; NEVER delete `docxBridge.ts` |
-| **013** | Seam + regression tests: NDA saves (no 422), edits land, new SPE version produced | testing, seam | FULL | sonnet | `tests/integration/seam/Compose/**` + `tests/integration/regression/**` (NDA 422 regression) |
-| **014** | Deploy + UAT gate (Phase 1) — BFF + `sprk_spaarkeai` together | deploy | STANDARD | sonnet | anti-clobber verify; `/conflict-check`; manual NDA UAT |
+| **010** | **Finalize** the Imported save-path cutover through render-from-model; drop count-gate | bff, compose | FULL | **opus** | *deps 011+026.* Makes render-from-model the DEFAULT for `Imported` + removes the count-gate — builds on 020's projection + render-out wiring and 026's hard-tier accept-flatten (so the NDA degrades, never 422s) |
+| **011** | Generalize `ComposeDocumentRenderer.SynthesizeDocument` for imported/canonical model input | bff, compose | FULL | **opus** | *deps 020.* Render from the canonical model, not just born-in-editor blocks; pairs with 020's model build |
+| **012** | Retire `ComposeShadowPatchEngine` + `ComposeBaselineParaIdStamper` from the save path | bff, compose | FULL | sonnet | *deps 010.* Retain surgical engine only for transitional clean-apply per the amendment; NEVER delete `docxBridge.ts` |
+| **013** | Seam + regression tests: NDA saves (no 422), edits land, new SPE version produced | testing, seam | FULL | sonnet | *deps 004, 012.* `tests/integration/seam/Compose/**` + regression (NDA 422 regression) |
+| **014** | Deploy + UAT gate (render-on-save + fidelity) — BFF + `sprk_spaarkeai` together | deploy | STANDARD | sonnet | *deps 013, 027.* Anti-clobber verify; `/conflict-check`; manual NDA UAT (ships cutover + fidelity together) |
 
-### Phase 2 — Canonical model + fidelity widening (near-term tier) — *depends on Phase 1*
+### Phase 2 — Canonical model + fidelity widening (near-term tier) — *RUNS FIRST (model-first re-sequence); 020 deps 001+004*
 | Task | Title | Tags | Rigor | Tier | Notes |
 |---|---|---|---|---|---|
-| **020** | Canonical document model — generalize `ComposeContentModel`/projection as the single hub | bff, compose | FULL | **opus** | one model between every source and the editor; justification (extend, not new) |
+| **020** | Canonical document model — generalize `ComposeContentModel`/projection as the single hub | bff, compose | FULL | **opus** | *deps 001, 004 (was 014 — inversion fixed).* THE project anchor: docx→canonical-model projection (the imported-doc "source") + render-out wiring; justification (extend, not new) |
 | **021** | Numbering/lists through the model (reuse `NumberingComputationEngine`) | bff, compose | FULL | sonnet | golden-label parity vs corpus exemplars |
 | **022** | Tables through the model (reuse R5 tracked-table work) | bff, compose | FULL | sonnet | |
 | **023** | Headers/footers + page breaks through the model | bff, compose | STANDARD | sonnet | |
 | **024** | Hyperlinks + comments through the model | bff, compose | STANDARD | sonnet | |
 | **025** | Tracked-changes (redlines) through the model | bff, compose | FULL | sonnet | |
 | **026** | Hard-tier graceful degradation (text boxes/drawings/fields/content controls → accept-flatten + warning) | bff, compose | FULL | sonnet | the exact NDA breakers; MUST NOT 422 |
-| **027** | Fidelity seam tests across the corpus | testing, seam | FULL | sonnet | per-feature round-trip; hard-tier warns-not-fails |
+| **027** | Fidelity seam tests across the corpus | testing, seam | FULL | sonnet | *deps 021–026, 012.* Per-feature round-trip; hard-tier warns-not-fails; runs after the cutover so it tests the shipped path |
 
 ### Phase 3 — Template part-merge — *depends on Phase 2*
 | Task | Title | Tags | Rigor | Tier | Notes |
@@ -131,11 +139,18 @@ effort, parallel-group/safe, escalation, justification for new surface). Default
 
 **Task count**: ~30 across 8 phases (0–7).
 
-## 6. Critical Path
-`001 (ADR amendment) → 010 → 011 → 012 → 013 → 014 (Phase-1 cutover) → 020 → 027 → 060/061 → 090`
+## 6. Critical Path (RE-SEQUENCED 2026-08-05 — binding execution order)
+`001 (ADR amendment) → 020 (canonical model hub + docx→model projection) → {011 renderer, 021–026 fidelity + hard-tier}
+→ 010 (Imported cutover + drop count-gate) → 012 (retire surgical from save path) → {013 regression, 027 fidelity seam}
+→ 014 (deploy render-on-save + fidelity) → 060 → 061 → 090`
+
+**Why 020 precedes 010** (the correction): render-from-model needs a *faithful canonical-model source* for imported
+docs (020's docx→model projection) and *hard-tier accept-flatten* (026) so the NDA degrades instead of 422-ing or
+silently dropping text-boxes. Building the hub first is the only order that doesn't re-ship the UAT #1A SEV-1
+regression. See [`notes/task-010-resequence-decision.md`](../notes/task-010-resequence-decision.md).
 
 Phase 3 (template-merge), Phase 4 (PDF intake), and Phase 5 (version UX) branch off after their prerequisites
-(Phase 2 / task 002) and rejoin at the harness + wrap-up. They are **not** on the 422-kill critical path.
+(task 020 / task 002) and rejoin at the harness + wrap-up. They are **not** on the 422-kill critical path.
 
 ## 7. Parallel Execution Note
 Because `Services/Compose/` is the most-contested repo surface and nearly every task edits shared Compose

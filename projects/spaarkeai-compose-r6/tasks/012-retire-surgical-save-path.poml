@@ -3,7 +3,7 @@
   <metadata>
     <title>Retire ComposeShadowPatchEngine + ComposeBaselineParaIdStamper from the save path</title>
     <phase>1 Render-on-save core</phase>
-    <gate>blocked — requires 001 (ADR-049 Path-B amendment merged) + 011 (generalized renderer)</gate>
+    <gate>blocked — requires 010 (Imported cutover finalized: render-from-model is the default save path + count-gate dropped) [transitively 011 renderer + 020 model + 001 amendment]. RE-SEQUENCED 2026-08-05: retire surgical from the save path only AFTER the cutover (010) makes render-from-model the default. Run /conflict-check before the BFF PR.</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Core BFF save-path change (tags bff/compose) removing the surgical patcher/count-gate; governed by the ADR amendment — FULL per root §8.</rigor-reason>
@@ -14,7 +14,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Edits Services/Compose save-path wiring — most-contested BFF surface (overlaps spaarkeai-compose-r5/r4.5/r3/r2/r1, spaarke-ai-architecture-redesign-r2, agreements-r1, analysis-hub-r1). Serialize all Compose edits.</parallel-reason>
-    <deps>001, 011</deps>
+    <deps>010</deps>
     <tags>bff, compose</tags>
     <estimated-effort>3-5 hours</estimated-effort>
   </metadata>
@@ -31,8 +31,7 @@
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs — retained ONLY for transitional clean-apply per the amendment; do not delete.</file>
     </relevant-files>
     <dependencies>
-      <dependency task="001" status="pending">ADR-049 Path-B amendment (retains surgical engine only for transitional clean-apply) merged with/before this code.</dependency>
-      <dependency task="011" status="pending">Generalized render-from-model renderer in place so the save path no longer needs the surgical patcher.</dependency>
+      <dependency task="010" status="pending">Imported cutover finalized (render-from-model is the default save path; count-gate dropped) — so the surgical patcher/stamper are unreferenced by the save path and safe to retire. (RE-SEQUENCED 2026-08-05: was deps 001,011; 010 transitively covers both + the model hub. ADR-049 amendment retains the surgical engine only for the transitional clean-apply path.)</dependency>
     </dependencies>
   </context>
 

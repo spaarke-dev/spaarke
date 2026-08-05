@@ -2,14 +2,56 @@
 
 > Active-task tracker for context recovery. Reset per root `CLAUDE.md` §7 as tasks complete.
 
-## Status: Phase 0 ✅ complete · Phase 1 (task 010) LOADED — checkpointed at pre-implementation gate
+## Status: Phase 0 ✅ · RE-SEQUENCED (model-first) ✅ · Active task → **020** (canonical model hub — the anchor)
 
 - **Project**: `spaarkeai-compose-r6`
 - **Branch**: `work/spaarkeai-compose-r6` (pushed; 0 behind master as of 2026-08-05)
-- **Phase**: 1 Render-on-save core
-- **Active task**: 010 — Route Imported docs through render-from-model; drop count-gate (FULL, opus/**xhigh**)
-- **Status**: loaded + gated — **no code written yet** (stopped at Step 3 budget check + gate/coupling)
-- **Conflict-check**: CLEAN window (no open-PR overlap; no sibling branch has unmerged commits on ComposeService.cs / ComposeDocumentRenderer.cs / ComposeBaselineParaIdStamper.cs).
+- **Active task**: **020** — Canonical document model hub (generalize ComposeContentModel/projection; build docx→canonical-model projection + render-out wiring). FULL, **opus**/high. deps 001, 004 (both ✅).
+- **Status**: re-sequence applied + committed; **020 not yet started** (next: task-execute Step 0 for 020).
+- **New critical path**: `001 → 020 → {011, 021–026} → 010 → 012 → {013, 027} → 014 → 060 → 061 → 090`.
+- **Conflict-check**: CLEAN window (no open-PR overlap; no sibling branch has unmerged commits on ComposeService.cs / ComposeDocumentRenderer.cs / ComposeBaselineParaIdStamper.cs). Verified 2026-08-05 (task-execute run 2). **Re-run before 020's BFF PR.**
+
+### ✅ Re-sequence applied 2026-08-05 (owner-authorized — see [notes/task-010-resequence-decision.md](notes/task-010-resequence-decision.md))
+Task 010's Step-2 code trace found a dependency inversion: render-from-model needs a faithful canonical-model source
+for imported docs (020's docx→model projection) + hard-tier accept-flatten (026) before the cutover (010/012) can run
+without re-shipping the fixed UAT #1A SEV-1 regression. Fixed by moving 020+026 before 010. Edits: plan.md §5/§6,
+TASK-INDEX.md (deps/critical-path/groups/high-risk), POMLs 010/011/012/014/020/027 (deps+gates), decision note. ADR-049
+amendment (001) unchanged. All 8 touched POMLs re-validated well-formed.
+
+### 🔑 Resume 020 — do these FIRST
+1. `task-execute` Step 0/0.5 for `tasks/020-canonical-model.poml`: rigor FULL, **opus**/high, /conflict-check for Services/Compose.
+2. 020 is estimated **1–2 weeks** (the architectural anchor) — build it incrementally with checkpoints every 3 steps; do NOT attempt in one pass.
+3. Step 1 (code map, likely done already this session): projection is `ComposeDocxProjectionBuilder.Build(docx)` → **HTML/atoms** (read path), NOT ComposeContentModel. The task's core new work = a docx→`ComposeContentModel` projection (the missing "source") that `SynthesizeDocument` can render back. Reuse `NumberingComputationEngine` (`ComposeDocxProjectionBuilder.cs:1357`). NEVER delete `docxBridge.ts`.
+4. 020's own escalation trigger: if it needs a **parallel/second model type** (not an extension) or **text-search/surgical anchoring** on the save path → STOP, escalate (§6.5).
+
+### 🔔 BLOCKER — task 010 dependency inversion (surfaced 2026-08-05, Step 2 code trace)
+
+**Finding (high confidence, code-verified):** Task 010 "route Imported saves through `SynthesizeDocument`" cannot be
+faithfully implemented as scoped, because the render-from-model path has **no faithful canonical-model source for
+imported docs** — and forcing one re-ships a fixed SEV-1 fidelity regression.
+
+Evidence:
+1. `SynthesizeDocument(ComposeContentModel)` renders from a **client-authored** model that only represents
+   Paragraph/Heading/ListItem/Table + b/i/u/hyperlink (`ComposeContentModel.cs`). It CANNOT represent the NDA's
+   constructs (text boxes, `mc:AlternateContent`, signature blocks, headers/footers, tracked-changes, comments).
+2. The client (`ComposeWorkspace.tsx:1443-1473`) **deliberately** routes imported/loaded docs through the
+   op-log/patch path, NOT `contentModel` — with a documented rationale: re-authoring imported docs from the model
+   *"drops headers/footers/styles on rich docs and violates ADR-049 I-1/I-2/I-4"* (`:1432`). The dirty-imported-render
+   path was an explicit **UAT #1A SEV-1 regression** ("plain untracked runs → NO redline in Word") fixed by routing
+   imported docs to the op-log path (`:1384-1389`).
+3. There is **no OOXML→ComposeContentModel projector** server-side. `ComposeDocxProjectionBuilder.Build(docx)`
+   produces read/browse HTML (`ComposeDocxProjection`), not a `ComposeContentModel`. Building one = the read/reference
+   path — an explicit **STOP** in 010's own `<escalation><trigger>`.
+4. Making render-on-save faithful for imported docs requires: (a) a **widened canonical model** (headers/footers,
+   tracked-changes, comments, hard-tier accept-flatten) = **Phase 2 tasks 020–026**, currently sequenced AFTER
+   Phase 1; (b) a **client change** to serialize edited imported docs into it (outside 010's `ComposeService.cs`-only
+   scope). The critical path `001→010→011→…→020` has the dependency **backwards**.
+
+**Recommended resolution (owner's call): RE-SEQUENCE — build the hub before flipping the switch.**
+Move canonical-model generalization + hard-tier graceful degradation (020–026) BEFORE the save-path cutover
+(010–012). New critical path: `001 → 020 → {021–026} → 010 → 011 → 012 → 013 → 014 → 027 → …`. The cutover then
+flips only once the model can faithfully carry — or accept-flatten with a warning (026) — the NDA's rich constructs.
+The ADR-049 amendment (001) stays correct; only the WBS ordering changes. This is a plan re-sequencing, not an ADR change.
 
 ### 🔑 Resume 010 — do these FIRST (pre-implementation decisions)
 1. **Gate**: POML `<gate>` wants the ADR-049 amendment (001) MERGED. It's committed on THIS branch (`511976d7f`), so it merges together with the Phase-1 code — decide whether that "with-code" reading is acceptable or merge 001 to master first (coordinate with sibling Compose worktrees per INDEX.md).

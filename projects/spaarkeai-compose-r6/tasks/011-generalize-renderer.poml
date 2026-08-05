@@ -3,7 +3,7 @@
   <metadata>
     <title>Generalize ComposeDocumentRenderer.SynthesizeDocument for imported/canonical model input</title>
     <phase>1 Render-on-save core</phase>
-    <gate>blocked — requires 001 (ADR-049 Path-B amendment merged) + 010 (Imported save routed to render-from-model)</gate>
+    <gate>blocked — requires 001 (ADR-049 Path-B amendment, committed on branch) + 020 (canonical model hub + docx→model projection in place). RE-SEQUENCED 2026-08-05: 011 pairs with 020 (renderer generalization for the widened model) and PRECEDES 010; was gated on 010 — inversion fixed. Run /conflict-check before the BFF PR.</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Core BFF renderer change (tags bff/compose) on the render-from-model path; governed by the ADR amendment — FULL per root §8.</rigor-reason>
@@ -14,7 +14,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Edits Services/Compose/ComposeDocumentRenderer.cs — most-contested BFF surface (overlaps spaarkeai-compose-r5/r4.5/r3/r2/r1, spaarke-ai-architecture-redesign-r2, agreements-r1, analysis-hub-r1). Serialize all Compose edits.</parallel-reason>
-    <deps>001, 010</deps>
+    <deps>001, 020</deps>
     <tags>bff, compose</tags>
     <estimated-effort>4-6 hours</estimated-effort>
   </metadata>
@@ -32,7 +32,7 @@
     </relevant-files>
     <dependencies>
       <dependency task="001" status="pending">ADR-049 Path-B amendment (render-on-save) merged with/before this code.</dependency>
-      <dependency task="010" status="pending">SaveAsync Imported branch routes to render-from-model; this task supplies the generalized renderer it calls.</dependency>
+      <dependency task="020" status="pending">Canonical document model hub + docx→canonical-model projection in place; this task generalizes SynthesizeDocument to render that widened model out. (RE-SEQUENCED 2026-08-05: was dep 010 — the renderer generalization pairs with the model build and precedes the cutover.)</dependency>
     </dependencies>
   </context>
 

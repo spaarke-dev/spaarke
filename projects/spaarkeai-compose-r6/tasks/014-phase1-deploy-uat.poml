@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy + UAT gate (Phase 1) — BFF + sprk_spaarkeai together</title>
     <phase>1 Render-on-save core</phase>
-    <gate>blocked — requires 013 (render-on-save seam + regression tests green)</gate>
+    <gate>blocked — requires 013 (render-on-save seam + regression tests green) + 027 (fidelity seam suite green). RE-SEQUENCED 2026-08-05: the cutover + fidelity ship together (anti-clobber, BFF + sprk_spaarkeai), so deploy gates on BOTH test suites.</gate>
     <status>not-started</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deploy + manual UAT gate; no new production code — STANDARD per root §8 (deploy discipline).</rigor-reason>
@@ -14,7 +14,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Deploys the shared BFF + sprk_spaarkeai artifacts on the most-contested surface; must serialize and run /conflict-check first.</parallel-reason>
-    <deps>013</deps>
+    <deps>013, 027</deps>
     <tags>deploy</tags>
     <estimated-effort>2-4 hours</estimated-effort>
   </metadata>
@@ -32,6 +32,7 @@
     </relevant-files>
     <dependencies>
       <dependency task="013" status="pending">Seam + regression tests green (no 422 proven in CI before deploy).</dependency>
+      <dependency task="027" status="pending">Fidelity seam suite green (per-feature round-trip + hard-tier warns-not-fails) — ships with the cutover (RE-SEQUENCED 2026-08-05).</dependency>
     </dependencies>
   </context>
 

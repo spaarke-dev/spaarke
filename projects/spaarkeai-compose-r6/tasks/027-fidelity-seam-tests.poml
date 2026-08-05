@@ -3,7 +3,7 @@
   <metadata>
     <title>Fidelity seam tests across the corpus — per-feature round-trip; hard-tier warns-not-fails</title>
     <phase>2 Canonical model + fidelity widening</phase>
-    <gate>dep:021,022,023,024,025,026</gate>
+    <gate>dep:021,022,023,024,025,026,012 — RE-SEQUENCED 2026-08-05: also gated on 012 (surgical retired) so the fidelity seam suite tests the SHIPPED render-on-save path, not the transitional state.</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Test-modifying task (tags include testing/seam) → FULL rigor UNCONDITIONALLY per root §8 TEST-MODIFYING override. Adds the through-the-wire seam coverage that is the Phase-2 fidelity DoD (ADR-038); asserts the graceful-degradation guarantee (hard-tier warns-not-fails) and golden-label numbering parity across the corpus. code-review + adr-check run at Step 9.5.</rigor-reason>
@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Adds fidelity seam slices under the shared tests/integration/seam/Compose/ tree and exercises the shared Services/Compose canonical model — the MOST-CONTESTED repo surface. Overlaps spaarkeai-compose-r5/r4.5/r3/r2/r1 + spaarke-ai-architecture-redesign-r2 + agreements-r1/analysis-hub-r1 seam suites. Depends on all Phase-2 feature adapters (021-026) landing first; serializes behind them. Run /conflict-check before the BFF PR.</parallel-reason>
-    <deps>021,022,023,024,025,026</deps>
+    <deps>021,022,023,024,025,026,012</deps>
     <tags>testing, seam</tags>
     <estimated-effort>3-6 days</estimated-effort>
   </metadata>
@@ -47,6 +47,7 @@
       <dependency task="024" status="pending">Hyperlinks + comments through the model.</dependency>
       <dependency task="025" status="pending">Tracked-changes through the model.</dependency>
       <dependency task="026" status="pending">Hard-tier accept-flatten + warning (the warns-not-fails oracle).</dependency>
+      <dependency task="012" status="pending">Surgical save path retired — the fidelity seam suite tests the shipped render-on-save path (RE-SEQUENCED 2026-08-05).</dependency>
     </dependencies>
   </context>
 

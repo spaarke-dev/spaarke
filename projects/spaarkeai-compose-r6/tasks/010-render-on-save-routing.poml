@@ -3,7 +3,7 @@
   <metadata>
     <title>Route Imported docs through render-from-model in SaveAsync; drop count-gate from save path</title>
     <phase>1 Render-on-save core</phase>
-    <gate>blocked — requires 001 (ADR-049 Path-B amendment merged) + 004 (NDA fixture)</gate>
+    <gate>blocked — requires 011 (generalized render-from-model renderer) + 026 (hard-tier accept-flatten) [transitively 001 amendment + 020 canonical-model hub + 004 NDA fixture]. RE-SEQUENCED 2026-08-05: 010 now FINALIZES the Imported cutover AFTER the model hub (020) + renderer (011) + hard-tier degradation (026) exist — building it before 026 would re-ship the UAT #1A SEV-1 regression / re-422 the NDA. See notes/task-010-resequence-decision.md. Run /conflict-check before the BFF PR.</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Core BFF code change to ComposeService save path (tags bff/compose); the 422-kill pivot with high blast radius — FULL per root §8.</rigor-reason>
@@ -14,7 +14,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Edits Services/Compose/ComposeService.cs — the most-contested BFF surface (overlaps spaarkeai-compose-r5/r4.5/r3/r2/r1, spaarke-ai-architecture-redesign-r2, agreements-r1, analysis-hub-r1). Serialize all Compose edits.</parallel-reason>
-    <deps>001, 004</deps>
+    <deps>011, 026</deps>
     <tags>bff, compose</tags>
     <estimated-effort>4-8 hours</estimated-effort>
   </metadata>
@@ -31,9 +31,17 @@
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeBaselineParaIdStamper.cs:113 — the count-gate (422 root) to remove from the save path.</file>
     </relevant-files>
     <dependencies>
-      <dependency task="001" status="pending">ADR-049 Path-B amendment codifying render-on-save must be merged with/before this code.</dependency>
-      <dependency task="004" status="pending">NDA fixture in tests/fixtures/compose-corpus/ (used by 013 to prove the 422 is gone).</dependency>
+      <dependency task="011" status="pending">Generalized ComposeDocumentRenderer.SynthesizeDocument (accepts the widened canonical model) — the renderer this cutover routes Imported saves into.</dependency>
+      <dependency task="026" status="pending">Hard-tier accept-flatten + warning — so an Imported doc with text-boxes/mc:AlternateContent/duplicate paraIds (the NDA) degrades gracefully instead of 422-ing when routed through render-from-model. WITHOUT THIS, the cutover re-ships the UAT #1A SEV-1 regression.</dependency>
+      <dependency task="020" status="pending">(transitive via 011/026) Canonical model hub + docx→canonical-model projection — the imported-doc render SOURCE.</dependency>
+      <dependency task="001" status="complete">(transitive) ADR-049 Path-B amendment (committed on branch; merges with this code).</dependency>
     </dependencies>
+    <!-- RE-SEQUENCED 2026-08-05 (owner-authorized). Step-2 code trace found this task cannot be built before the
+         canonical-model hub (020) + hard-tier accept-flatten (026): SynthesizeDocument needs a faithful model source
+         for imported docs (none existed), and the client deliberately routes imported docs away from contentModel
+         because re-authoring them from the thin model drops headers/footers/text-boxes (ComposeWorkspace.tsx:1432,
+         the fixed UAT #1A SEV-1 regression). deps flipped 001,004 → 011,026. See notes/task-010-resequence-decision.md. -->
+
   </context>
 
   <constraints>
