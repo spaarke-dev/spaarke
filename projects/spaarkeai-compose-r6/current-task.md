@@ -2,14 +2,29 @@
 
 > Active-task tracker for context recovery. Reset per root `CLAUDE.md` §7 as tasks complete.
 
-## Status: Phase 0 complete — STOPPED before Phase 1 (human gating required)
+## Status: Phase 0 ✅ complete · Phase 1 (task 010) LOADED — checkpointed at pre-implementation gate
 
 - **Project**: `spaarkeai-compose-r6`
-- **Branch**: `work/spaarkeai-compose-r6`
-- **Phase**: 0 Foundations & gates — ✅ COMPLETE (001, 002, 003, 004 all ✅)
-- **Active task**: none
-- **Next task**: 010 — Route Imported docs through render-from-model (Phase 1, FULL, opus/xhigh) — **NOT auto-started**
-- **Next action**: human decision to begin Phase 1 (see "Phase-1 gating" below)
+- **Branch**: `work/spaarkeai-compose-r6` (pushed; 0 behind master as of 2026-08-05)
+- **Phase**: 1 Render-on-save core
+- **Active task**: 010 — Route Imported docs through render-from-model; drop count-gate (FULL, opus/**xhigh**)
+- **Status**: loaded + gated — **no code written yet** (stopped at Step 3 budget check + gate/coupling)
+- **Conflict-check**: CLEAN window (no open-PR overlap; no sibling branch has unmerged commits on ComposeService.cs / ComposeDocumentRenderer.cs / ComposeBaselineParaIdStamper.cs).
+
+### 🔑 Resume 010 — do these FIRST (pre-implementation decisions)
+1. **Gate**: POML `<gate>` wants the ADR-049 amendment (001) MERGED. It's committed on THIS branch (`511976d7f`), so it merges together with the Phase-1 code — decide whether that "with-code" reading is acceptable or merge 001 to master first (coordinate with sibling Compose worktrees per INDEX.md).
+2. **Do 010 + 011 together** (or 011 first): `ComposeDocumentRenderer.SynthesizeDocument` (`ComposeDocumentRenderer.cs:102`) currently only accepts born-in-editor `ComposeContentModel.Blocks`. 010 reroutes the `SaveAsync` Imported branch (`ComposeService.cs:642`, branch `:714`) into it; 011 generalizes the renderer to accept the imported/canonical model. They are one coupled change — plan them jointly.
+3. Start a FRESH session (010 is 4–8h opus/xhigh on a 2,915-line file — needs a clean context budget).
+
+### Implementation pointer for 010 (from the POML)
+- Reroute `ComposeService.SaveAsync` Authored/Imported branch (`:714`) so **Imported** renders via `SynthesizeDocument` instead of surgical patch.
+- Make `ComposeBaselineParaIdStamper` count-gate (`ComposeBaselineParaIdStamper.cs:113`) unreachable from a normal save; **retain** the type (+ `ComposeShadowPatchEngine`) for the transitional clean-apply path. NEVER delete `docxBridge.ts`.
+- Keep `ReplaceFileContentAsUserAsync` (→ new SPE version) + Redis eTag stamp + stale-base re-anchor UNCHANGED.
+- Gates: build BFF; publish-size vs task-003 baseline (**48.25 MB** compressed incl PDBs; 11.75 MB headroom); no new HIGH CVE (baseline has 1 pre-existing: `System.Security.Cryptography.Xml` 8.0.3); Step 9.5 code-review + adr-check; then task 013 (NDA saves, no 422) + 014 deploy/UAT.
+- Escalation trigger: if routing needs the read/reference path, a `Services/Ai` fork, or a new AI dispatch endpoint → STOP, escalate (§6.5).
+
+### Prior phases
+- Phase 0 ✅ (001 ADR amendment `511976d7f`; 002 SPE append-only verified + config-dependency flag; 003 baseline 48.25 MB; 004 NDA fixture + row #14). Phase 0 wave committed `e5c1d5f65`.
 
 ### Phase 0 — ✅ complete (2026-08-05)
 - **001** ✅ ADR-049 R6 Path-B amendment (render-on-save supersedes I-4 + line-40, save path only). Committed `511976d7f`.
