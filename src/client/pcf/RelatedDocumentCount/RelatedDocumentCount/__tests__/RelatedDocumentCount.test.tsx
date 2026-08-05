@@ -65,8 +65,8 @@ jest.mock('@spaarke/ui-components/dist/components/RelationshipCountCard', () => 
   },
 }));
 
-jest.mock('@spaarke/ui-components/dist/components/FindSimilarDialog', () => ({
-  FindSimilarDialog: (props: Record<string, unknown>) => {
+jest.mock('@spaarke/ui-components/dist/components/FindSimilarViewer', () => ({
+  FindSimilarViewerDialog: (props: Record<string, unknown>) => {
     capturedDialogProps = props;
     const urlStr = props.url ? String(props.url as string) : '';
     return props.open ? (
