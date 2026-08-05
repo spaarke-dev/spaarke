@@ -10,7 +10,7 @@
 
 | # | Task | Phase | Status | deps | model·effort | parallel-safe |
 |---|---|---|---|---|---|---|
-| 003 | R1 close-out — reconcile 013 + pin golden misfile emails | 0 | 🔲 | — | sonnet·high | ✅ true |
+| 003 | R1 close-out — reconcile 013 + pin golden misfile emails | 0 | ✅ | — | sonnet·high | ✅ true |
 | 004 | Entra NAA app-registration verify/provision | 0 | 🔲 | — | sonnet·med | ✅ true |
 | 010 | HMAC footer/token signing helper (Key Vault) | 1·A | 🔲 | — | **opus·xhigh** | ❌ false |
 | 011 | Footer config (operator app setting, per-tenant) | 1·A | 🔲 | — | sonnet·high | ❌ false |
@@ -27,7 +27,7 @@
 | 024 | SPE content dedup Tier-1 — **gate-after-write** (quickXorHash detector) | 2·C | 🔲 | 023 | **opus·high** | ❌ false |
 | 025 | Cross-path reconciliation (comm ↔ document via message-id) | 2·C | 🔲 | 021 | sonnet·high | ❌ false |
 | 026 | Pillar C BFF deploy (size/CVE) | 2·C | 🔲 | 021,022,023,024,025 | sonnet·med | ❌ false |
-| 030 | Fix FR-06 RAG grounding — ParentEntity tagging (both sites) | 3·D | 🔲 | — | sonnet·high | ✅ true (D-indep) |
+| 030 | Fix FR-06 RAG grounding — ParentEntity tagging (both sites) | 3·D | ✅ | — | sonnet·high | ✅ true (D-indep) |
 | 031 | Batched identifier query (≈175→≤7) | 3·D | 🔲 | — | sonnet·high | ✅ true (D-indep) |
 | 032 | Golden regression suite (+ absorbs A3 test) | 3·D | 🔲 | 015 | sonnet·high | ✅ true (D-indep) |
 | 033 | Job B allow-list seed (`sprk_emailupdatefield`) | 3·D | 🔲 | — | sonnet·med | ✅ true (D-indep) |

@@ -10,13 +10,21 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — project scaffolded, execution not started |
+| **Task** | 031 — Batched identifier query (≈175→≤7) — NOT started |
 | **Step** | — |
-| **Status** | none |
-| **Next Action** | Run `task-execute` on **003** (R1 close-out) or **020** (alternate-key schema) — both startable, **no spike gate** |
+| **Status** | not-started (003 ✅, 030 ✅ complete) |
+| **Next Action** | Run `task-execute` on **031** (batched identifier query, code-only, FULL rigor). Then GATE before 004/020/023/033/010 (cloud/security) + all deploys + Pillar E. |
+
+### Completed this session
+- **Task 003 ✅** — `notes/fixtures/r1-golden-emails.md` (R1 013 reconciled=applied; 4 golden items pinned; KEEP path; raw-.eml gap flagged).
+- **Task 030 ✅** — FR-D1 RAG grounding. New `Services/Communication/Engine/RegardingParentEntityMapper.cs` (primary-regarding→`ParentEntityContext`, misfile-guard, NFR-04 degrade); wired both index sites (inbound signature takes `ParentEntityContext?`, resolved once per communication — N+1 fixed in review; outbound inline). Seam test 8/8. Build 0 err; publish 46.88 MB (Δ≈0). adr-check + code-review clean. Deferral `DEFER-030-01` (service-request grounding) filed. **/conflict-check must re-run before the 030 PR.**
+
+### Uncommitted (not pushed — no commit requested this session)
+Task 003 + 030 artifacts + this checkpoint. Pre-existing HIGH CVE `System.Security.Cryptography.Xml 8.0.3` (transitive) noted — separate remediation candidate, not introduced here.
 
 ### Files Modified This Session
-- Project artifacts generated (README.md, plan.md, CLAUDE.md, current-task.md) + 40 task POMLs + TASK-INDEX.md; open questions resolved (spikes retired)
+- **Task 003 ✅** (2026-08-05): created `notes/fixtures/r1-golden-emails.md` (R1 013 reconciled=applied; 4 golden items pinned w/ expected outcomes; KEEP path named; raw-.eml gap flagged). Updated task 003 POML status + TASK-INDEX.
+- Worktree synced to master (Update-Only) @ b2167eb21 — 0 behind.
 
 ### Critical Context
 **Open questions resolved 2026-08-05 — project runs spike-free** (tasks 001/002 removed): gate-after-write dedup · Tier-2 deferred out of R2 · FR-E5 = Path B (create via `IActionSeam` + PATCH; add base/final-due-date fields, task 034) · backfill forward-only · browse shell = `BrowseModal` preset. See CLAUDE.md → **Decisions Made** + TASK-INDEX → **Resolved decisions**. Pillar-E UI is prototype-validated (`spaarke-prototype/projects/email-communication-intelligence-r2-uat`). Heavily-contended shared surfaces — `/conflict-check` before every shared PR; `parallel-safe:false` on shared writers. Execution intentionally **not started** — operator review gate.

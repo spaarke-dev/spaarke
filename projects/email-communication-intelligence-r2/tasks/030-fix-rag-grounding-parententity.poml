@@ -4,7 +4,7 @@
     <title>Fix FR-06 RAG grounding — tag ParentEntity at index time (both sites) + backfill decision</title>
     <phase>3 Pillar D — R1 carry-overs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF .cs on the capture/enrichment index path (tags bff-api); touches the RAG grounding contract that other queries depend on.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -97,7 +97,9 @@
     <criterion testable="true">Publish size ≤60 MB compressed with delta reported; no new HIGH CVE; all unit + seam tests pass; build is green.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec §Requirements FR-D1; discovery: L1031 (EnqueueRagIndexingAsync) + L388 (outbound RAG index enqueue). The regarding is already persisted on sprk_communication — this task reads it, it does not re-run the engine. Backfill is **forward-only** (owner 2026-08-05): no historical re-index, no backfill job — matter-scoped grounding heals as new correspondence indexes. Completion summary appended here when done.</notes>
+  <notes>Spec §Requirements FR-D1; discovery: L1031 (EnqueueRagIndexingAsync) + L388 (outbound RAG index enqueue). The regarding is already persisted on sprk_communication — this task reads it, it does not re-run the engine. Backfill is **forward-only** (owner 2026-08-05): no historical re-index, no backfill job — matter-scoped grounding heals as new correspondence indexes.
+
+**COMPLETED 2026-08-05.** New shared static helper `Services/Communication/Engine/RegardingParentEntityMapper.cs` reads the communication's polymorphic regarding in `RegardingFieldMap.All` priority order → maps the PRIMARY (first-set) regarding to `ParentEntityContext` when representable (matter/project/invoice/account/contact), else degrades to null (no fall-through to a lower-priority regarding — misfile guard). Best-effort/non-fatal `ResolveAsync` (try/catch → null; NFR-04). Wired at BOTH sites: inbound `EnqueueRagIndexingAsync` (signature now takes `ParentEntityContext?`; caller `ProcessIncomingAttachmentsAsync` resolves ONCE before the attachment foreach — fixes a per-attachment N+1 found in code-review — and `ArchiveEmlAsync` resolves once) + outbound `RunRagIndexingAsync` (inline, single doc). Seam test `tests/integration/seam/Communication/RagGroundingParentEntitySeamTests.cs` (8 tests: matter/project mapping, priority preference, **non-representable-primary→null misfile guard**, no-regarding→null, name fallback, ResolveAsync map + NFR-04 degrade-on-throw) — 8/8 green. Build 0 err; publish 46.88 MB compressed (Δ≈0, 0 new packages); pre-existing HIGH CVE `System.Security.Cryptography.Xml 8.0.3` flagged (NOT introduced — 0 packages added). adr-check clean; code-review clean (N+1 fixed). **Known limitation** (service-request-primary → null grounding) filed `notes/defer-issues.md#DEFER-030-01`. Backfill decision `notes/030-rag-backfill-decision.md` = forward-only. **/conflict-check MUST re-run before the PR** (binding — soft-warn cleared at execution time).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

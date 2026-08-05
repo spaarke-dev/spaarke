@@ -783,6 +783,11 @@ public sealed class IncomingCommunicationProcessor
 
         var processedCount = 0;
 
+        // FR-D1 / FR-06: resolve the RAG grounding key ONCE for this communication — every attachment
+        // shares the same regarding, so resolving inside the per-attachment enqueue would refetch it N times.
+        var parentEntity = await RegardingParentEntityMapper.ResolveAsync(
+            _genericEntityService, communicationId, _logger, ct);
+
         foreach (var attachment in fileAttachments)
         {
             var fileName = attachment.Name ?? $"attachment_{processedCount + 1}";
@@ -829,8 +834,8 @@ public sealed class IncomingCommunicationProcessor
                     // Enqueue AI analysis for the attachment (best-effort)
                     await EnqueueDocumentAnalysisAsync(attachmentDocumentId.Value, communicationId, ct);
 
-                    // Enqueue RAG indexing for semantic search (best-effort)
-                    await EnqueueRagIndexingAsync(driveId, fileHandle.Id, attachmentDocumentId.Value, fileName, communicationId, ct);
+                    // Enqueue RAG indexing for semantic search (best-effort); grounding resolved once above.
+                    await EnqueueRagIndexingAsync(driveId, fileHandle.Id, attachmentDocumentId.Value, fileName, communicationId, parentEntity, ct);
                 }
 
                 // Create sprk_communicationattachment record
@@ -946,7 +951,10 @@ public sealed class IncomingCommunicationProcessor
         // Enqueue RAG indexing for semantic search (best-effort)
         if (fileHandle?.Id is not null)
         {
-            await EnqueueRagIndexingAsync(driveId, fileHandle.Id, documentId, emlResult.FileName, communicationId, ct);
+            // FR-D1 / FR-06: resolve the grounding key for the archived .eml (single doc, one resolve).
+            var parentEntity = await RegardingParentEntityMapper.ResolveAsync(
+                _genericEntityService, communicationId, _logger, ct);
+            await EnqueueRagIndexingAsync(driveId, fileHandle.Id, documentId, emlResult.FileName, communicationId, parentEntity, ct);
         }
     }
 
@@ -1016,7 +1024,7 @@ public sealed class IncomingCommunicationProcessor
     /// </summary>
     private async Task EnqueueRagIndexingAsync(
         string driveId, string itemId, Guid documentId, string fileName,
-        Guid communicationId, CancellationToken ct)
+        Guid communicationId, ParentEntityContext? parentEntity, CancellationToken ct)
     {
         var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
 
@@ -1028,7 +1036,10 @@ public sealed class IncomingCommunicationProcessor
             FileSizeBytes: null,
             ContentType: null,
             DocumentId: documentId.ToString(),
-            ParentEntity: null,
+            // FR-D1 / FR-06: the communication's resolved regarding, resolved ONCE per communication by
+            // the caller (avoids a per-attachment refetch) so matter-scoped RAG returns this correspondence
+            // (was null). Best-effort/non-fatal (NFR-04): null when no representable regarding is set.
+            ParentEntity: parentEntity,
             SearchIndexName: null, // handler runs ISearchIndexNameResolver chain
             Source: "InboundEmail",
             CorrelationId: communicationId.ToString("N"));

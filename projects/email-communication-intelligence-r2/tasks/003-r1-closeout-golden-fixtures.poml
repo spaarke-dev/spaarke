@@ -4,7 +4,7 @@
     <title>R1 close-out — reconcile task 013 + pin R1 UAT golden misfile emails as regression fixtures</title>
     <phase>0 Prerequisites &amp; spikes</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Reconciliation + fixture-pinning that feeds a later ADR-038 KEEP-path regression suite (FR-D3). No production .cs/.ts change in this task; it mines R1 notes and captures fixtures. STANDARD per task-create Step 3.5.5.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -85,7 +85,9 @@
     <criterion testable="true">TASK-INDEX.md shows this task ✅ and any deviation is recorded under notes/.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec refs: FR-D3, Dependencies → Prerequisites ("R1 formally closed — reconcile task 013, pin golden regression"). R1 open follow-up in `notes/061-*` explicitly requests this. Feeds the Phase-3 FR-D3 harness task. Completion summary appended here when done.</notes>
+  <notes>Spec refs: FR-D3, Dependencies → Prerequisites ("R1 formally closed — reconcile task 013, pin golden regression"). R1 open follow-up in `notes/061-*` explicitly requests this. Feeds the Phase-3 FR-D3 harness task.
+
+**COMPLETED 2026-08-05.** Output: `notes/fixtures/r1-golden-emails.md`. (1) R1 task 013 reconciled = **APPLIED/done** (7 taxonomy rows live in `spaarkedev1`, verdict PASS + row GUIDs). (2) The 4 golden items are identifiers/attachment inside ONE representative "new patent application" UAT email — pinned with exact expected outcomes transcribed from the R1 UAT record: two conflicting matters → **Ambiguous** (withheld); PAT numbers → **new-record-referenced** (E1 subject-tier ranked); embedded `123456` → **no invoice collision** (P1 guard); attached invoice → **Suggested, never Filed** (Fix B + round-2b surface-only); contact/org/invoice → **suggest-only**; only matter/project/service-request auto-file (round-3 core-only). (3) Intended KEEP path = `tests/integration/seam/Communication/**`. (4) Recovery gap flagged: no raw `.eml` exists (FR-D3 synthesizes from descriptor or re-hydrates from live provenance rows `47251eb3-…`/`cfd3f282-…`). Escalation trigger evaluated → did NOT fire (013 unambiguous; rounds are progressive fixes, no cross-round conflict).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
