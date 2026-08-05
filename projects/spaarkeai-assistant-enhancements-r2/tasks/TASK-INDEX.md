@@ -54,10 +54,9 @@ Tier: `sonnet` (default) · `opus` (high-blast/judgment) — effort: `high` (def
 - **012** (FR-A4) — ADR-015 Path A privacy boundary (active content-visible; background metadata-only). opus/xhigh.
 - **042** (FR-C1) — email compact shape lives in `useEmailWorkspaceRecord`, not the widget wrapper. opus/xhigh.
 
-## Cross-worktree coordination (⚠️)
-- **`spaarke-notification-spine-r1`** *adds* an Assistant suggestion renderer; **task 001 (E) removes** the suggestion surface → resolve merge-order before landing E.
-- **`ai-advanced-capabilities-analysis-hub-r1`** edits `ConversationPane.tsx` + `Services/Ai/Chat` session binding.
-- Run `/conflict-check` before every BFF (`Services/Ai`) or `ConversationPane` PR.
+## Cross-worktree coordination
+- **No live overlaps.** `spaarke-notification-spine-r1` and `ai-advanced-capabilities-analysis-hub-r1` are **both fully merged into master** (verified 2026-08-05: 0 unmerged commits each; `projects/INDEX.md` rows are stale — worktrees not yet archived). R2 fast-forwarded to master, so their changes are already in this branch. Task 001 (E) removes the suggestion surface (`useSuggestionCards.tsx`, present in HEAD) from a **known static state** — no merge-order coordination needed.
+- Run `/conflict-check` before BFF (`Services/Ai`) / `ConversationPane` PRs as normal hygiene, but no specific in-flight peer is expected.
 
 ## Parallel Execution Plan
 

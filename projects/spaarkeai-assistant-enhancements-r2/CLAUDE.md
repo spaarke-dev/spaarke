@@ -136,8 +136,8 @@ Track deferred work + newly-discovered issues in BOTH `notes/defer-issues.md` (s
 
 ### Related Projects
 - `spaarkeai-assistant-enhancements-r1` (predecessor — shipped spine + catalog)
-- `spaarke-notification-spine-r1` (⚠️ merge-order overlap: adds a suggestion renderer E removes)
-- `ai-advanced-capabilities-analysis-hub-r1` (⚠️ edits ConversationPane + Services/Ai/Chat session binding)
+- `spaarke-notification-spine-r1` — **MERGED to master** (verified 2026-08-05). Its suggestion renderer is in HEAD; task 001 (E) removes it from a known static state. No live overlap.
+- `ai-advanced-capabilities-analysis-hub-r1` — **MERGED to master** (verified 2026-08-05). Its ConversationPane + Services/Ai/Chat session-binding changes are already in R2's branch. No live overlap.
 - `email-communication-solution-r5` (prerequisite — merged; email widgets + `eml-render`)
 
 ### External Documentation

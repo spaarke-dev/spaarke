@@ -86,7 +86,7 @@ The project is **complete** when:
 | Tab-restore overwrite hazard (FR-D1) corrupts stored tabs on resume | High | Med | Clear/remount workspace FIRST; regression test the overwrite path; task 035 at opus/xhigh |
 | Cosmos retention change (FR-D10) causes data loss | High | Low | Spike per-doc TTL feasibility first; idempotent cleanup only deletes past-due unfiled; task 033 opus/xhigh |
 | Email visible-state can't reach widget data | Med | Med | Widget wrapper holds no email data — derive compact shape from `useEmailWorkspaceRecord` |
-| Merge collision with `spaarke-notification-spine-r1` on the suggestion surface | Med | Med | Coordinate merge order; `/conflict-check` before Assistant/BFF PRs |
+| ~~Merge collision with `spaarke-notification-spine-r1`~~ (retired 2026-08-05) | — | — | notification-spine-r1 + analysis-hub-r1 both fully merged to master; no live overlap. Normal `/conflict-check` hygiene only |
 
 ## Dependencies
 

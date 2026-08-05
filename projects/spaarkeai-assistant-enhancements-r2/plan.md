@@ -241,7 +241,7 @@ Per README graduation criteria + spec §Success Criteria (1–9). Each BFF-touch
 | R2 | FR-D10 retention change causes data loss | Low | High | Spike per-doc TTL; idempotent past-due-only cleanup; opus/xhigh |
 | R3 | FR-A4 leaks background-tab content (ADR-015) | Low | High | Bounded compact shape; background metadata-only; documented bound |
 | R4 | FR-C1 can't reach email data from widget wrapper | Med | Med | Derive compact shape from `useEmailWorkspaceRecord` |
-| R5 | Merge collision with notification-spine-r1 on suggestion surface | Med | Med | Coordinate merge order; `/conflict-check` before Assistant/BFF PRs |
+| R5 | ~~Merge collision with notification-spine-r1~~ (RETIRED) | — | — | Verified 2026-08-05: notification-spine-r1 + analysis-hub-r1 both fully merged to master (stale INDEX.md rows). R2 builds on their landed state; no live overlap. Normal `/conflict-check` hygiene only |
 | R6 | BFF publish size creeps >60 MB | Low | Med | No new packages anticipated; measure per BFF task |
 
 ---
@@ -249,8 +249,7 @@ Per README graduation criteria + spec §Success Criteria (1–9). Each BFF-touch
 ## 9. Next Steps
 
 1. **Review this plan.md** + TASK-INDEX.md
-2. **Resolve** the notification-spine-r1 merge-order overlap (who owns the Assistant suggestion surface)
-3. **Begin** Phase 1 (task 001) via `task-execute`; dispatch waves with `/conflict-check` before BFF/ConversationPane PRs
+2. **Begin** Phase 1 (task 001) via `task-execute` — no cross-worktree blocker (notification-spine-r1 + analysis-hub-r1 both merged to master); `/conflict-check` before BFF/ConversationPane PRs as normal hygiene
 
 ---
 

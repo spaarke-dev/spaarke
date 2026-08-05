@@ -19,7 +19,7 @@
 - Project artifacts created (README, plan, CLAUDE.md, current-task, tasks/, TASK-INDEX)
 
 ### Critical Context
-5 phases E→A→B→D→C. `ConversationPane.tsx` is a sequential spine (E/A/B/D edit it). Resolve the `spaarke-notification-spine-r1` merge-order overlap before landing E. `/conflict-check` before every BFF/ConversationPane PR.
+5 phases E→A→B→D→C. `ConversationPane.tsx` is a sequential spine (E/A/B/D edit it). No live cross-worktree overlap — notification-spine-r1 + analysis-hub-r1 both merged to master (verified 2026-08-05). `/conflict-check` before BFF/ConversationPane PRs as normal hygiene.
 
 ---
 
@@ -62,7 +62,7 @@
 
 **Pre-conditions**:
 - Review TASK-INDEX.md
-- Coordinate the notification-spine-r1 suggestion-surface merge-order overlap
+- (No cross-worktree blocker — notification-spine-r1 + analysis-hub-r1 both merged to master)
 
 **Key Context**:
 - Refer to `spec.md` FR-E1 for the exact files to remove/preserve
