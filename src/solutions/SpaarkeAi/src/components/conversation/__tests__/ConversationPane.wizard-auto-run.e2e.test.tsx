@@ -364,6 +364,10 @@ beforeEach(() => {
 describe('task 033 FR-17: wizard hand-off → adopt Analysis-owned session + auto-run the review (ONE session everywhere)', () => {
   it('adopts the wizard session, and once the DEF-10 register lands the file, auto-dispatches the review on the picked pack — dispatch, upload, and ledger ALL on the wizard session', async () => {
     const bus = renderPane();
+    // UAT round-6 (item #15a): capture the workspace channel to prove the wizard/auto-run entry path
+    // also stamps the cross-navigation resume flag at the ONE `runBindingDispatch` chokepoint.
+    const workspaceEvents: WorkspacePaneEvent[] = [];
+    bus.subscribe('workspace', (e) => workspaceEvents.push(e as WorkspacePaneEvent));
 
     await publishSeed(bus);
 
@@ -401,6 +405,43 @@ describe('task 033 FR-17: wizard hand-off → adopt Analysis-owned session + aut
     expect(
       injectedMessages.some((m) => String(m.content).includes("couldn't start the agreement review automatically"))
     ).toBe(false);
+
+    // (6) UAT round-6 (item #15a): the review dispatch stamped the dispatch-time resume flag.
+    expect(
+      workspaceEvents.some(
+        (e) =>
+          e.type === 'nda_review_dispatch_active' &&
+          (e as WorkspacePaneEvent & { dispatchActive?: boolean }).dispatchActive === true
+      )
+    ).toBe(true);
+  });
+
+  // task 070 (UAT2 review-depth selector): the wizard's "Analysis Details" step now carries an
+  // additive `reviewDepth` field on the SAME hand-off seed. Auto-run dispatches IMMEDIATELY at
+  // that depth — no post-open depth-choice ask (would defeat FR-17's "no manual re-upload, review
+  // auto-runs"). These two tests prove BOTH the explicit-value and default-absent cases.
+  it('task 070: reviewDepth:"quick" on the hand-off seed threads to the review dispatch — no ask, no chips', async () => {
+    const bus = renderPane();
+    await publishSeed(bus, { reviewDepth: 'quick' });
+    await driveComposeRegister();
+
+    const reviews = reviewDispatches();
+    expect(reviews).toHaveLength(1);
+    const reviewArgs = dispatchPostBodies[reviews[0]].args as Record<string, unknown>;
+    expect(reviewArgs.subDomain).toBe(SUB_DOMAIN);
+    expect(reviewArgs.reviewDepth).toBe('quick');
+  });
+
+  it('task 070: an absent reviewDepth on the hand-off seed normalizes to Thorough (the legal-quality default)', async () => {
+    const bus = renderPane();
+    // No reviewDepth override — mirrors every seed authored before task 070.
+    await publishSeed(bus);
+    await driveComposeRegister();
+
+    const reviews = reviewDispatches();
+    expect(reviews).toHaveLength(1);
+    const reviewArgs = dispatchPostBodies[reviews[0]].args as Record<string, unknown>;
+    expect(reviewArgs.reviewDepth).toBe('thorough');
   });
 
   // task 070 (UAT2 review-depth selector): the wizard's "Analysis Details" step now carries an

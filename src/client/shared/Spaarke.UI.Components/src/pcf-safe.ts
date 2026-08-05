@@ -41,8 +41,6 @@ export type { IModalWindowControlsProps } from './components/ModalWindowControls
 export { RelationshipCountCard } from './components/RelationshipCountCard';
 export { FindSimilarDialog } from './components/FindSimilar/FindSimilarDialog';
 export { MiniGraph } from './components/MiniGraph';
-export { SendEmailDialog } from './components/SendEmailDialog';
-export type { ISendEmailPayload } from './components/SendEmailDialog';
 export { AiSummaryPopover } from './components/AiSummaryPopover';
 
 // ─── Hooks (PCF-safe — React 16 compatible) ────────────────────────────────

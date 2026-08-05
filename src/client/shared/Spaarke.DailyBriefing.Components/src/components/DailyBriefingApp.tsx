@@ -55,19 +55,17 @@ import { CaughtUpFooter } from './CaughtUpFooter';
 import { PreferencesDropdown } from './PreferencesDropdown';
 import { HighPrioritySection } from './HighPrioritySection';
 import { StatTiles, type StatTile } from './StatTiles';
-import {
-  SendEmailDialog,
-  type ISendEmailPayload,
-  RichFilePreviewDialog,
-  OOB_MODAL_SIZES,
-} from '@spaarke/ui-components';
-import { extractEmailKey } from '@spaarke/ui-components/services';
+import { SendEmailDialog, RichFilePreviewDialog, OOB_MODAL_SIZES } from '@spaarke/ui-components';
+import type { ILookupItem } from '@spaarke/ui-components/types/LookupTypes';
+// #713 (2026-08-03): the canonical SendEmailDialog engine sends via the BFF; this
+// package's convention (briefingService) is @spaarke/auth's authenticatedFetch
+// with relative /api paths, so the wrapper gets that fetch + an empty base.
+import { authenticatedFetch } from '@spaarke/auth';
 import { useBriefingRender, useInlineTodoCreate, useBriefingPreferences } from '../hooks';
 import { TOASTER_ID } from '../utils/toastUtils';
 import { timeWindowToHours } from '../types/notifications';
 import type { IWebApi, NotificationCategory, NotificationItem } from '../types/notifications';
 import {
-  emailBriefingToColleague,
   getDocumentPreviewUrl,
   type ChannelNarrationResult,
   type NarrativeBulletResult,
@@ -126,12 +124,14 @@ export interface DailyBriefingAppProps {
 }
 
 /**
- * r5 email-share (2026-07-09) — open-dialog state for the shared SendEmailDialog.
- * `briefing` shares the whole briefing (server renders + sends via /email);
- * `item` shares one high-priority record (client-composed draft email activity).
+ * r5 email-share (2026-07-09; owner UAT 2026-08-04 re-shape) — open-dialog
+ * state. BOTH modes open the CANONICAL SendEmailDialog engine (standard
+ * communication pipeline) prefilled: `briefing` carries the full-briefing HTML
+ * overview with per-item record deep links (buildBriefingEmailHtml); `item`
+ * carries a single high-priority record draft (buildItemEmailDraft).
  */
 type EmailDialogState =
-  | { mode: 'briefing' }
+  | { mode: 'briefing'; defaultSubject: string; defaultBody: string }
   | { mode: 'item'; item: HighPriorityItemResult; defaultSubject: string; defaultBody: string };
 
 /**
@@ -145,30 +145,6 @@ export function buildRecordDeepLink(clientUrl: string, entityType: string, entit
   if (!clientUrl || !entityType || !entityId) return '';
   const id = entityId.replace(/[{}]/g, '');
   return `${clientUrl}/main.aspx?pagetype=entityrecord&etn=${encodeURIComponent(entityType)}&id=${encodeURIComponent(id)}`;
-}
-
-/**
- * r5 email-share #3 — build the Xrm.WebApi `email` (draft activity) record for a
- * single-item share. Pure + exported so the party payload (the runtime-risky
- * surface) is unit-testable without a live Dataverse. The From party is bound to
- * the caller's systemuser (participationtypemask 1) and the To party to the
- * picked internal user (mask 2). From is omitted when the caller's id is unknown
- * (Dataverse defaults it to the current user).
- */
-export function buildEmailActivityRecord(
-  senderSystemUserId: string,
-  payload: { to: { id: string }; subject: string; body: string }
-): Record<string, unknown> {
-  const parties: Record<string, unknown>[] = [];
-  if (senderSystemUserId) {
-    parties.push({ 'partyid_systemuser@odata.bind': `/systemusers(${senderSystemUserId})`, participationtypemask: 1 });
-  }
-  parties.push({ 'partyid_systemuser@odata.bind': `/systemusers(${payload.to.id})`, participationtypemask: 2 });
-  return {
-    subject: payload.subject,
-    description: payload.body,
-    email_activity_parties: parties,
-  };
 }
 
 /**
@@ -190,6 +166,74 @@ export function buildItemEmailDraft(
   if (link) lines.push('', `Open the record: ${link}`);
   lines.push('', '— Shared from the Daily Briefing');
   return { subject, body: lines.join('\n') };
+}
+
+/** Minimal HTML escaper for the briefing-email builder below. */
+function esc(v: string): string {
+  return v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * Owner UAT 2026-08-04 — compose the "Email Briefing" prefill: an HTML overview
+ * of the CURRENT briefing where EVERY item embeds a deep link to its record
+ * (buildRecordDeepLink from structured entityType/entityId — never narrative
+ * text). Opens in the canonical SendEmailDialog engine prefilled; the user
+ * picks recipients and can edit before sending through the standard pipeline.
+ * Items whose identity is unknown render as plain text rather than dead links.
+ * Exported for tests.
+ */
+export function buildBriefingEmailHtml(
+  clientUrl: string,
+  tldr: { summary?: string; topAction?: string; keyTakeaways?: string[] } | null,
+  highPriorityItems: HighPriorityItemResult[],
+  channelNarratives: Array<{
+    category: string;
+    bullets?: Array<{
+      narrative?: string;
+      primaryEntityType?: string;
+      primaryEntityId?: string;
+      primaryEntityName?: string;
+    }>;
+  }>
+): string {
+  const parts: string[] = [];
+  parts.push('<h2>Daily Briefing</h2>');
+  parts.push(
+    `<p>${esc(new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }))}</p>`
+  );
+  if (tldr?.summary) parts.push(`<p>${esc(tldr.summary)}</p>`);
+  if (tldr?.keyTakeaways?.length) {
+    parts.push('<ul>');
+    for (const t of tldr.keyTakeaways) parts.push(`<li>${esc(t)}</li>`);
+    parts.push('</ul>');
+  }
+  if (tldr?.topAction) parts.push(`<p><strong>Top action:</strong> ${esc(tldr.topAction)}</p>`);
+  if (highPriorityItems.length > 0) {
+    parts.push('<h3>High Priority</h3>', '<ul>');
+    for (const item of highPriorityItems) {
+      const label = `${item.kindLabel ? `${item.kindLabel}: ` : ''}${item.name || 'Record'}`;
+      const link = buildRecordDeepLink(clientUrl, item.entityType, item.entityId);
+      parts.push(`<li>${link ? `<a href="${esc(link)}">${esc(label)}</a>` : esc(label)}</li>`);
+    }
+    parts.push('</ul>');
+  }
+  for (const channel of channelNarratives) {
+    const bullets = channel.bullets ?? [];
+    if (bullets.length === 0) continue;
+    const title = channel.category.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    parts.push(`<h3>${esc(title)}</h3>`, '<ul>');
+    for (const b of bullets) {
+      const text = b.narrative || b.primaryEntityName || 'Item';
+      const link =
+        b.primaryEntityType && b.primaryEntityId
+          ? buildRecordDeepLink(clientUrl, b.primaryEntityType, b.primaryEntityId)
+          : '';
+      parts.push(`<li>${link ? `<a href="${esc(link)}">${esc(text)}</a>` : esc(text)}</li>`);
+    }
+    parts.push('</ul>');
+  }
+  parts.push('<p>— Shared from the Daily Briefing</p>');
+  return parts.join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -571,7 +615,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   // server-side egress guard, which requires an active systemuser). Formats each
   // result as "Full Name (email)" so SendEmailDialog's extractEmailKey resolves it.
   const handleSearchUsers = React.useCallback(
-    async (query: string): Promise<ISendEmailPayload['to'][]> => {
+    async (query: string): Promise<ILookupItem[]> => {
       if (!webApi || !query || query.trim().length < 2) return [];
       const safe = query.trim().replace(/'/g, "''");
       const options =
@@ -594,7 +638,16 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     [webApi]
   );
 
-  const handleEmailBriefing = React.useCallback(() => setEmailDialog({ mode: 'briefing' }), []);
+  const handleEmailBriefing = React.useCallback(() => {
+    const subject = `Daily Briefing — ${new Date().toLocaleDateString()}`;
+    const body = buildBriefingEmailHtml(
+      clientUrl,
+      renderData?.tldr ?? null,
+      renderData?.highPriorityItems ?? [],
+      renderData?.channelNarratives ?? []
+    );
+    setEmailDialog({ mode: 'briefing', defaultSubject: subject, defaultBody: body });
+  }, [clientUrl, renderData]);
 
   const handleEmailItem = React.useCallback(
     (item: HighPriorityItemResult) => {
@@ -604,76 +657,9 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     [clientUrl]
   );
 
-  // Single onSend for both modes. Throwing keeps SendEmailDialog open + shows the
-  // error; resolving closes it. Success dispatches a confirmation toast.
-  const handleEmailSend = React.useCallback(
-    async (payload: ISendEmailPayload): Promise<void> => {
-      if (!emailDialog) return;
-
-      if (emailDialog.mode === 'briefing') {
-        const recipientEmail = extractEmailKey(payload.to.name);
-        if (!recipientEmail) {
-          throw new Error("Could not resolve the selected user's email address.");
-        }
-        const result = await emailBriefingToColleague(recipientEmail);
-        if (result.status !== 'success') {
-          throw new Error(result.message);
-        }
-        dispatchToast(
-          <Toast>
-            <ToastTitle>Briefing sent</ToastTitle>
-            <ToastBody>Your Daily Briefing was emailed to {payload.to.name}.</ToastBody>
-          </Toast>,
-          { intent: 'success', timeout: 6000 }
-        );
-        return;
-      }
-
-      // mode === 'item' — create the email activity, then SEND it so the user is
-      // done after the dialog (UAT 2026-07-09: no "open from activities" step). If
-      // the send action fails (e.g. the sender mailbox isn't approved to send in
-      // this environment), the created activity remains a draft and we say so.
-      if (!webApi) {
-        throw new Error('Dataverse is not available.');
-      }
-      const created = await webApi.createRecord('email', buildEmailActivityRecord(userId, payload));
-      let sent = false;
-      try {
-        // Same-origin Dataverse Web API (the code page is served from the org URL);
-        // cookie auth via credentials:'include' — mirrors the EntityDefinitions fetch
-        // in useInlineTodoCreate. SendEmail is the bound action that delivers it.
-        const resp = await fetch(`/api/data/v9.2/emails(${created.id})/Microsoft.Dynamics.CRM.SendEmail`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-            'OData-MaxVersion': '4.0',
-            'OData-Version': '4.0',
-            Accept: 'application/json',
-          },
-          body: JSON.stringify({ IssueSend: true }),
-        });
-        sent = resp.ok;
-        if (!resp.ok) {
-          console.warn('[DailyBriefing] SendEmail action failed:', resp.status, await resp.text().catch(() => ''));
-        }
-      } catch (sendErr) {
-        console.warn('[DailyBriefing] SendEmail action threw:', sendErr);
-      }
-      dispatchToast(
-        <Toast>
-          <ToastTitle>{sent ? 'Email sent' : 'Draft email created'}</ToastTitle>
-          <ToastBody>
-            {sent
-              ? `Your email to ${payload.to.name} was sent.`
-              : `A draft to ${payload.to.name} was saved — open it from your activities to send.`}
-          </ToastBody>
-        </Toast>,
-        { intent: 'success', timeout: 8000 }
-      );
-    },
-    [emailDialog, webApi, userId, dispatchToast]
-  );
+  // Owner UAT 2026-08-04: both share modes open the canonical composer prefilled
+  // (see EmailDialogState docblock) — no host-owned send remains.
+  const closeEmailDialog = React.useCallback(() => setEmailDialog(null), []);
 
   // ---------------------------------------------------------------------------
   // Render
@@ -840,22 +826,33 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
       {emailDialog && (
         <SendEmailDialog
           open={true}
-          onClose={() => setEmailDialog(null)}
-          title={emailDialog.mode === 'briefing' ? 'Email Briefing' : 'Email Item'}
-          defaultSubject={
-            emailDialog.mode === 'briefing'
-              ? `Daily Briefing — ${new Date().toLocaleDateString()}`
-              : emailDialog.defaultSubject
-          }
-          defaultBody={
-            emailDialog.mode === 'briefing'
-              ? 'Sharing my Daily Briefing with you — the full briefing is included in this email.'
-              : emailDialog.defaultBody
-          }
-          onSearchUsers={handleSearchUsers}
-          onSend={handleEmailSend}
-          maxWidth="720px"
-          height="70vh"
+          onClose={closeEmailDialog}
+          titleOverride={emailDialog.mode === 'briefing' ? 'Email Briefing' : 'Email Item'}
+          initialSubject={emailDialog.defaultSubject}
+          initialBody={emailDialog.defaultBody}
+          initialBodyFormat={emailDialog.mode === 'briefing' ? 'HTML' : 'PlainText'}
+          onSearchRecipients={handleSearchUsers}
+          authenticatedFetch={authenticatedFetch}
+          bffBaseUrl=""
+          onSent={() => {
+            dispatchToast(
+              <Toast>
+                <ToastTitle>Email sent</ToastTitle>
+                <ToastBody>Your email was sent.</ToastBody>
+              </Toast>,
+              { intent: 'success', timeout: 6000 }
+            );
+            closeEmailDialog();
+          }}
+          onError={err => {
+            dispatchToast(
+              <Toast>
+                <ToastTitle>Send failed</ToastTitle>
+                <ToastBody>{err.detail ?? 'The email could not be sent.'}</ToastBody>
+              </Toast>,
+              { intent: 'error', timeout: 8000 }
+            );
+          }}
         />
       )}
       {previewDoc && (
