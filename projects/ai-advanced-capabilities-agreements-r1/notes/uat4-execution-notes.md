@@ -537,6 +537,8 @@ SpaarkeAi npm run typecheck (tsc-surface-gate)                  Surface-owned: 0
 
 No `.claude/**`, `current-task.md`, or `TASK-INDEX.md` writes. No git commit/push. Zero `src/server/**`
 changes.
+<<<<<<< HEAD
+=======
 
 ---
 
@@ -691,3 +693,4 @@ did) (PASS). No ADR conflict (§6.5 not triggered).
 
 No `.claude/**`, `current-task.md`, or `TASK-INDEX.md` writes. No git commit/push. Zero `src/server/**`
 changes. Not deployed (deploy is a separate task).
+>>>>>>> origin/master

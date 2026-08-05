@@ -227,6 +227,8 @@ export interface WorkspacePaneEvent {
    *                              progress card leaves NO visible-yet-unmounted remnant (UAT round-4 item
    *                              #10a, ai-advanced-capabilities-agreements-r1). Same "signal
    *                              infrastructure" shape as `nda_review_progress_visibility` above.
+<<<<<<< HEAD
+=======
    * - `nda_review_dispatch_active` — a review run's in-flight state stamped at DISPATCH time, for
    *                              cross-navigation resume persistence (UAT round-6 item #15a,
    *                              ai-advanced-capabilities-agreements-r1). Carries `dispatchActive`
@@ -242,6 +244,7 @@ export interface WorkspacePaneEvent {
    *                              Completion clearing rides the EXISTING `compose_advisory_comments`
    *                              (fires even for a zero-findings clean review). Same "signal
    *                              infrastructure" shape as `nda_review_background_run` above.
+>>>>>>> origin/master
    * - `streaming_started`      — a structured-output streaming run has begun; downstream widgets
    *                              (e.g. StructuredOutputStreamWidget, R5 task 017 / D2-07) mount and
    *                              prepare to receive section events. Carries `streamId` so multiple
@@ -344,7 +347,10 @@ export interface WorkspacePaneEvent {
     | 'active_widget_changed'
     | 'nda_review_progress_visibility'
     | 'nda_review_background_run'
+<<<<<<< HEAD
+=======
     | 'nda_review_dispatch_active'
+>>>>>>> origin/master
     | 'streaming_started'
     | 'streaming_complete'
     | 'section_started'
@@ -503,6 +509,8 @@ export interface WorkspacePaneEvent {
    */
   backgroundRunActive?: boolean;
 
+<<<<<<< HEAD
+=======
   /**
    * Whether a review binding was just DISPATCHED (true) or the dispatch settled without completing —
    * i.e. failed (false). Required when `type === 'nda_review_dispatch_active'`.
@@ -518,6 +526,7 @@ export interface WorkspacePaneEvent {
    */
   dispatchActive?: boolean;
 
+>>>>>>> origin/master
   // ── selection_changed fields ──────────────────────────────────────────────
 
   /**

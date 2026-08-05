@@ -24,7 +24,11 @@
 
 import '@testing-library/jest-dom';
 import * as React from 'react';
+<<<<<<< HEAD
+import { render, screen, waitFor, act } from '@testing-library/react';
+=======
 import { render, screen, waitFor, act, cleanup } from '@testing-library/react';
+>>>>>>> origin/master
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 import { PaneEventBus, PaneEventBusProvider, usePaneEvent } from '@spaarke/ai-widgets';
@@ -421,6 +425,8 @@ describe('WorkspacePane item #13 — run-in-flight resume', () => {
     }
   });
 });
+<<<<<<< HEAD
+=======
 
 // ---------------------------------------------------------------------------
 // UAT round-6 item #15a — DISPATCH-TIME run flag (the core fix)
@@ -579,3 +585,4 @@ describe('WorkspacePane item #15a — dispatch-time run flag', () => {
     }
   });
 });
+>>>>>>> origin/master

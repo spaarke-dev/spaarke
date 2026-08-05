@@ -1124,7 +1124,10 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
 
   // ── Render ──────────────────────────────────────────────────────────────
   const mountClass = props.mount === 'page' ? styles.page : props.mount === 'dialog' ? styles.dialog : styles.inline;
-  const isChromed = props.mount !== 'inline';
+  // #713 chrome seam: a shell host (SprkModal via the SendEmailDialog wrapper)
+  // that draws its own title + window controls sets `hostOwnsChrome` to suppress
+  // the engine's header — one chrome owner per window.
+  const isChromed = props.mount !== 'inline' && !props.hostOwnsChrome;
 
   const middle = (
     <>

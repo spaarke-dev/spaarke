@@ -444,6 +444,34 @@ describe('task 033 FR-17: wizard hand-off → adopt Analysis-owned session + aut
     expect(reviewArgs.reviewDepth).toBe('thorough');
   });
 
+  // task 070 (UAT2 review-depth selector): the wizard's "Analysis Details" step now carries an
+  // additive `reviewDepth` field on the SAME hand-off seed. Auto-run dispatches IMMEDIATELY at
+  // that depth — no post-open depth-choice ask (would defeat FR-17's "no manual re-upload, review
+  // auto-runs"). These two tests prove BOTH the explicit-value and default-absent cases.
+  it('task 070: reviewDepth:"quick" on the hand-off seed threads to the review dispatch — no ask, no chips', async () => {
+    const bus = renderPane();
+    await publishSeed(bus, { reviewDepth: 'quick' });
+    await driveComposeRegister();
+
+    const reviews = reviewDispatches();
+    expect(reviews).toHaveLength(1);
+    const reviewArgs = dispatchPostBodies[reviews[0]].args as Record<string, unknown>;
+    expect(reviewArgs.subDomain).toBe(SUB_DOMAIN);
+    expect(reviewArgs.reviewDepth).toBe('quick');
+  });
+
+  it('task 070: an absent reviewDepth on the hand-off seed normalizes to Thorough (the legal-quality default)', async () => {
+    const bus = renderPane();
+    // No reviewDepth override — mirrors every seed authored before task 070.
+    await publishSeed(bus);
+    await driveComposeRegister();
+
+    const reviews = reviewDispatches();
+    expect(reviews).toHaveLength(1);
+    const reviewArgs = dispatchPostBodies[reviews[0]].args as Record<string, unknown>;
+    expect(reviewArgs.reviewDepth).toBe('thorough');
+  });
+
   it('a DUPLICATE hand-off for the SAME analysis never re-adopts or re-arms (once per Analysis)', async () => {
     const bus = renderPane();
 

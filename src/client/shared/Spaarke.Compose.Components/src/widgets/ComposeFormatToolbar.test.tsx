@@ -926,9 +926,7 @@ describe('ComposeFormatToolbar — UAT round-4 (2026-08-04): menu allocation (#1
   /** Returns the data-testid of every descendant of the toolbar, in DOM order. */
   function toolbarTestIdOrder(): string[] {
     const toolbar = screen.getByTestId('compose-format-toolbar');
-    return Array.from(toolbar.querySelectorAll('[data-testid]')).map(
-      (el) => el.getAttribute('data-testid') as string
-    );
+    return Array.from(toolbar.querySelectorAll('[data-testid]')).map(el => el.getAttribute('data-testid') as string);
   }
 
   const allControlsProps = (): Partial<ComposeFormatToolbarProps> => ({
@@ -955,7 +953,10 @@ describe('ComposeFormatToolbar — UAT round-4 (2026-08-04): menu allocation (#1
 
   it('#11: the Word menu contains ONLY the two Open-in-Word items — no Save / Save New Document duplicate, even when onSave is wired', async () => {
     const user = userEvent.setup();
-    renderFormatToolbar({}, { props: { onOpenInWord: jest.fn(), onOpenInWordDesktop: jest.fn(), onSave: jest.fn(), canSave: true } });
+    renderFormatToolbar(
+      {},
+      { props: { onOpenInWord: jest.fn(), onOpenInWordDesktop: jest.fn(), onSave: jest.fn(), canSave: true } }
+    );
 
     await user.click(screen.getByTestId('compose-format-word-menu'));
 

@@ -29,7 +29,11 @@ if (typeof (global as any).TextEncoder === 'undefined') (global as any).TextEnco
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 if (typeof (global as any).TextDecoder === 'undefined') (global as any).TextDecoder = NodeTextDecoder;
 import React, { act } from 'react';
+<<<<<<< HEAD
+import { render, screen, fireEvent } from '@testing-library/react';
+=======
 import { render, screen, fireEvent, within } from '@testing-library/react';
+>>>>>>> origin/master
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 import { PaneEventBus, PaneEventBusProvider } from '@spaarke/ai-widgets';
@@ -353,6 +357,8 @@ describe('UAT round-3 item #7: "Review an NDA" chip click now asks Quick/Thoroug
     const reviewBody = dispatchPostBodies.find((b) => b.bindingId === REVIEW_BINDING);
     const args = reviewBody!.args as Record<string, unknown> | undefined;
     expect(args).toMatchObject({ fileIds: [SESSION_FILE_ID], reviewDepth: 'quick' });
+<<<<<<< HEAD
+=======
 
     // UAT round-6 (item #15a): the chip-quick dispatch stamped the cross-navigation resume flag at the
     // ONE `runBindingDispatch` chokepoint — a `nda_review_dispatch_active{dispatchActive:true}` fired on
@@ -364,6 +370,7 @@ describe('UAT round-3 item #7: "Review an NDA" chip click now asks Quick/Thoroug
           (e as WorkspacePaneEvent & { dispatchActive?: boolean }).dispatchActive === true
       )
     ).toBe(true);
+>>>>>>> origin/master
   });
 
   it('the file still opens in Compose immediately on the chip click, before the depth question is answered', async () => {
@@ -385,6 +392,8 @@ describe('UAT round-3 item #7: "Review an NDA" chip click now asks Quick/Thoroug
     expect(composeOpen).toBeDefined();
   });
 });
+<<<<<<< HEAD
+=======
 
 // ---------------------------------------------------------------------------
 // UAT round-6 items #14 (card placement) + #15a (rerun-thorough dispatch flag)
@@ -452,3 +461,4 @@ describe('UAT round-6: rerun-full-analysis card renders INLINE in the transcript
     expect(dispatchActiveCountAfter).toBeGreaterThan(dispatchActiveCountBefore);
   });
 });
+>>>>>>> origin/master
