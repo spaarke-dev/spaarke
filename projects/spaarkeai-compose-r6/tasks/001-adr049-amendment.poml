@@ -4,7 +4,7 @@
     <title>Draft ADR-049 Path-B amendment (render-on-save save path)</title>
     <phase>0 Foundations &amp; gates</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Architecture-decision change (ADR amendment) with repo-wide blast radius; gates all Phase-1 code — FULL per root §8.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -84,7 +84,10 @@
     <criterion testable="true">A CHANGELOG entry is added to .claude/CHANGELOG.md and the amendment states it MUST merge with/before Phase-1 code (tasks 010/011/012).</criterion>
   </acceptance-criteria>
 
-  <notes>spec ADR-Tensions table is the verbatim source for the four points. This task gates Phase 1 — 010/011/012 carry deps on 001 and a &lt;gate&gt; on the merged amendment. Path-B per root §6.5; house-style precedent is the existing Path-B block already in ADR-049.</notes>
+  <notes>spec ADR-Tensions table is the verbatim source for the four points. This task gates Phase 1 — 010/011/012 carry deps on 001 and a &lt;gate&gt; on the merged amendment. Path-B per root §6.5; house-style precedent is the existing Path-B block already in ADR-049.
+
+--- COMPLETION SUMMARY (2026-08-05) ---
+Added the "R6 Path-B Amendment" block to .claude/adr/ADR-049-compose-shadow-document.md (inserted between the R4.5 Read/Reference Fidelity section and Integration, mirroring the existing Path-B block's format). Supersedes I-4 + line-40 MUST NOT for the SAVE PATH ONLY; codifies the four spec points; Scope guard preserves I-7 (trivially satisfied) + R4.5 F-1…F-5 + all auth/security ADRs. Added a dated CHANGELOG entry (.claude/CHANGELOG.md [Unreleased]). Wrote notes/adr049-amendment-summary.md (traceability to FR-01/02/07/08 + the Path-B merge-with/before-Phase-1 obligation). All 5 acceptance criteria met; escalation trigger did not fire (scope confined to save path). Docs-only → Step 9.5 gates N/A. Outputs: ADR-049, .claude/CHANGELOG.md, notes/adr049-amendment-summary.md.
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

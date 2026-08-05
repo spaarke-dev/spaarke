@@ -17,7 +17,7 @@ Overlapping worktrees: `spaarkeai-compose-r5` (active on `ComposeService.cs`/`Co
 
 | ID | Title | Phase | Deps | Parallel group | Parallel-safe | Rigor | Tier | Status |
 |---|---|---|---|---|---|---|---|---|
-| 001 | Draft ADR-049 Path-B amendment (render-on-save save path) | 0 | none | none | false | FULL | opus/high | 🔲 |
+| 001 | Draft ADR-049 Path-B amendment (render-on-save save path) | 0 | none | none | false | FULL | opus/high | ✅ |
 | 002 | Verify SPE versioning append-only + inventory Documents version APIs | 0 | none | phase0-foundations | true | STANDARD | sonnet/high | 🔲 |
 | 003 | Measure BFF publish-size baseline (re-confirm ~49.63 MB) | 0 | none | phase0-foundations | true | MINIMAL | sonnet/medium | 🔲 |
 | 004 | Move AppligentNDA_Signed.docx → tests/fixtures/compose-corpus/ (LFS) + manifest row | 0 | none | phase0-foundations | true | STANDARD | sonnet/high | 🔲 |

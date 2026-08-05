@@ -77,6 +77,34 @@ R4 (above) made the **write/save** side principled; **R4.5** completed the **rea
 
 ---
 
+## R6 Path-B Amendment — render-on-save supersedes surgical byte-patch **on the save path** (per CLAUDE.md §6.5)
+
+> **Amendment 2026-08-05 · author `spaarkeai-compose-r6` · Path B (ADR amendment)** — MUST merge with or before the dependent R6 Phase-1 code (`spaarkeai-compose-r6` tasks 010/011/012). Source: `projects/spaarkeai-compose-r6/spec.md` "ADR Tensions" + `design.md` §11. Scope is the **write/save path only**; the R4.5 read/reference invariants **F-1…F-5** and I-7 remain in force (see Scope guard).
+
+🔔 **ADR Conflict — Resolution (Path B, amendment)**
+
+- **Rule challenged**: invariant **I-4** ("edits are surgical operations, and untouched XML subtrees are byte-identical after save") **and** the MUST NOT at line 40 ("MUST NOT re-derive the `.docx` from the editor model on save … violates I-1/I-2/I-4"). Both govern the **save path**.
+- **Conflict**: R6 re-architects Compose around **render-on-save** — every save **renders a fresh `.docx` from a canonical document model into a new immutable SPE version**, which is precisely a "re-derive on save" and by construction does *not* keep untouched subtrees byte-identical. The R3→R5 treadmill was the *same anchor-reconciliation bug class* (reconciling `(paraId, runIndex, offset)` anchors between the editor model and the retained OOXML), surfacing reactively in UAT one divergence at a time; the latest (`AppligentNDA_Signed.docx`) hard-fails **HTTP 422** on interior text-boxes / `mc:AlternateContent` / duplicate paraIds. I-4 + line-40 were **guardrails against R1–R3 naive-re-render fidelity loss** — a failure mode R6 removes at the source by (a) a **widened canonical model + tiered format adapters** (near-term tier round-trips safely; hard tier accept-flattens with a warning, never 422) and (b) **version history as the fidelity safety net** (every save appends; the prior byte-perfect version stays retrievable). With nothing to anchor against on save, the 422 anchor bug class disappears **by construction**.
+- **Proposed path**: **B (amendment)** — context changed; I-4 + line-40 are no longer correct *for the save path* as written. The surgical-anchor mechanism they protect is itself the treadmill's root cause.
+- **Resolution** (codifies the four spec points; binding for R6 and forward, save path only):
+  1. **Save renders a new immutable version from the canonical model — no surgical anchoring on the save path.** `ComposeService.SaveAsync` routes **all** saves (born-in-editor *and* imported) through render-from-model (`ComposeDocumentRenderer`); the `ComposeBaselineParaIdStamper` count-gate (the 422 root) and per-op anchoring are removed from the save path.
+  2. **Version history is the fidelity safety net** — SPE versioning is append-only; a prior version is always retrievable (R6 FR-07 exposes an OBO list/open-prior-version read path). The render-on-save promise ("open v3 after v4 and get the exact bytes") depends on this.
+  3. **Representative-corpus round-trip is a release gate** — a CI harness round-trips the fidelity corpus (seeded with `AppligentNDA_Signed.docx`) and fails the build on a hard-fail/regression (R6 FR-08), moving divergence discovery from UAT to CI.
+  4. **The surgical `ComposeShadowPatchEngine` is retained ONLY for a transitional clean-apply path** — it is removed from the normal save path; any residual clean-apply use during the R6 transition is the sole remaining caller. It is not the save mechanism.
+- **Impact**: the save path is re-authored from "resolve retained baseline → surgical patch → replace content" to "render the canonical model → replace content (SPE makes the new version) → stamp eTag". `ComposeBaselineParaIdStamper`'s count-gate leaves the save path; `ComposeShadowPatchEngine` is demoted to the transitional clean-apply path only. The persistence (`ReplaceFileContentAsUserAsync`), Redis eTag stamp, and `AnnotationReanchorService` machinery carry over unchanged.
+- **Alternative considered (rejected)**: **Path A** (project-scoped exception — make the surgical patcher tolerant per document, the abandoned `compose-anchor-robustness-r1` framing) — rejected because a per-divergence tolerance patch is the treadmill itself; it cannot close the anchor bug *class*, only the current instance. **Path C** (comply — keep surgical byte-patch on the save path) — rejected because complying re-ships the exact 422 anchor-reconciliation failure R6 exists to eliminate.
+
+### Scope guard (what this amendment does NOT touch)
+
+- **I-7 (no text-search in the write path) remains in force — satisfied *trivially*.** Rendering from the model needs no text-search at all; there is nothing to locate. R6 does not reintroduce a write-path text search.
+- **The R4.5 read/reference invariants F-1…F-5 are UNCHANGED.** One reader, deterministic numbering (`NumberingComputationEngine`), the `paraId → legal-number` reference layer + `CitationResolver`, and honest layout numbering all stand exactly as written and are reused by R6's canonical model (the read/reference-path use of I-4's byte-identity by the stateless browse projector is **not** superseded — this amendment is save-path only).
+- **I-1/I-2 hold in spirit**: the server still authors all `.docx` bytes (the client never authors — R6 renders server-side; I-2 intact). The *authoritative model* shifts on the save path from "retained original OOXML + ops" to "the canonical document model rendered to a new version" — the I-1 supersession is scoped to that.
+- **No auth/security/compliance ADR is touched**, and no unrelated ADR-049 section is modified. The amendment is confined to the Compose save-path fidelity decision.
+
+**Other tensions (Path C — comply, mention only)**: ADR-013 / ADR-007 (render-from-model stays `byte[]`/model-in → `byte[]`-out, no AI internals, no Graph above `SpeFileStore`), ADR-039 (engine frozen — render-on-save adds no AI dispatch), ADR-038 (seam + corpus round-trip harness DoD per FR-08), §10 BFF Hygiene (PDF intake + template part-merge get Placement Justifications; ≤60 MB publish).
+
+---
+
 ## Integration
 ADR-013 (facade boundary — no AI internals in `Services/Compose/`) · ADR-007 (`SpeFileStore` — no Graph types above it) · ADR-009 (version/re-anchor state via `IDistributedCache`) · ADR-010 (Patch Engine = stateless concrete singleton) · ADR-028 (client fetches via `@spaarke/auth`) · ADR-038 (seam DoD; banned mock/DI/ctor tests) · ADR-039/040 (AI engine frozen; redline path envelope-only; no new dispatch).
 
