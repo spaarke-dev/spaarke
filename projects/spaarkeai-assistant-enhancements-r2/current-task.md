@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Workstream A implementation ✅ (010+011+012) → next: **013 deploy+verify A** (needs live env) OR start Phase B (020) |
+| **Task** | E + A DONE & DEPLOYED (001,002,010,011,012,013) → next: **Phase B** (020 ∥ 021) |
 | **Step** | — |
 | **Status** | not-started |
-| **Next Action** | Two options: (a) `work on task 013` — deploy BFF + SpaarkeAi and verify focus-stamp end-to-end (Success Criterion 1); NEEDS a live Dataverse/Azure environment. (b) Skip deploy for now and start Phase B: `work on task 020` (closed contextType set, shared-lib). Deploy tasks (013/025/039/043) can be batched later. |
+| **Next Action** | Owner E2E check pending (notes/a-deploy-verify.md: "summarize this" → focused email on spaarkedev1). To continue building: `work on task 020` (closed contextType set, shared-lib Spaarke.AI.Widgets) — parallelizable with 021 (catalog data). Deploys 025/039/043 batch later. |
 
 ### Files Modified This Session
 - Task 010 (FR-A1, ✅ complete): ConversationPane.tsx (added `activeTabFocusRef` + extended the existing `usePaneEvent('workspace', …)` handler with an `active_widget_changed` branch), new `activeTabFocusStamp.ts` (pure derivation helper + `ActiveTabFocusStamp` type), new `__tests__/activeTabFocusStamp.test.ts` (seam test, 5/5 passing). Quality gates clean (code-review 1 low-severity note for 011/012 awareness; adr-check ADR-030 clean). Not committed — left staged/unstaged for orchestrator to commit after build-verifying the wave.
