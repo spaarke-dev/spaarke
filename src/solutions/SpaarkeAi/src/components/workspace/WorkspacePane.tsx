@@ -50,7 +50,6 @@ import {
 import type {
   WorkspacePaneEvent,
   ConversationPaneEvent,
-  WorkspaceWidgetComponent,
   CreateAnalysisWizardData,
 } from '@spaarke/ai-widgets';
 // R6 Hotfix Wave B-G9c2 (2026-06-10): the previously-eager Summary tab
