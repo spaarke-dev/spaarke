@@ -15,7 +15,7 @@
 
 import * as React from 'react';
 import { RelationshipCountCard } from '@spaarke/ui-components/dist/components/RelationshipCountCard';
-import { FindSimilarDialog } from '@spaarke/ui-components/dist/components/FindSimilarDialog';
+import { FindSimilarViewerDialog } from '@spaarke/ui-components/dist/components/FindSimilarViewer';
 import { MiniGraph } from '@spaarke/ui-components/dist/components/MiniGraph';
 import { initializeAuth } from './authInit';
 import type { ResolvedAuthConfig } from './authInit';
@@ -157,7 +157,7 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({ con
       : null;
 
   return (
-    <div data-pcf-version="1.21.3">
+    <div data-pcf-version="1.21.4">
       <RelationshipCountCard
         count={count}
         isLoading={effectiveIsLoading}
@@ -167,7 +167,7 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({ con
         lastUpdated={lastUpdated ?? undefined}
         graphPreview={graphPreview}
       />
-      <FindSimilarDialog open={isDialogOpen} onClose={handleClose} url={isDialogOpen ? viewerUrl : null} />
+      <FindSimilarViewerDialog open={isDialogOpen} onClose={handleClose} url={isDialogOpen ? viewerUrl : null} />
     </div>
   );
 };

@@ -28,7 +28,7 @@ import { getEffectiveDarkMode } from "../../providers/ThemeProvider";
 import { authenticatedFetch } from "../../services/authInit";
 import { getDocumentOpenLinks } from "../../services/DocumentApiService";
 import { getBffBaseUrl, getTenantId } from "../../config/runtimeConfig";
-import { RecordCardShell, CardIcon, AiSummaryPopover, FindSimilarDialog, createXrmNavigationService } from "@spaarke/ui-components";
+import { RecordCardShell, CardIcon, AiSummaryPopover, FindSimilarViewerDialog, createXrmNavigationService } from "@spaarke/ui-components";
 import type { ISummaryData } from "@spaarke/ui-components";
 import { FilePreviewDialog } from "../FilePreview/FilePreviewDialog";
 
@@ -326,7 +326,7 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
         />
 
         {/* Child dialogs */}
-        <FindSimilarDialog
+        <FindSimilarViewerDialog
           open={!!findSimilarUrl}
           onClose={() => setFindSimilarUrl(null)}
           url={findSimilarUrl}
