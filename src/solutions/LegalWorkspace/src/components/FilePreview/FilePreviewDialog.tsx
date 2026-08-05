@@ -110,14 +110,20 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   }, [documentId, documentName]);
 
   const handleOpenRecord = React.useCallback(() => {
-    // NOTE (task 091): the retired local `navigateToEntity` passed
-    // `openInNewWindow: true` here. The shared xrmNavigationServiceAdapter's
-    // `openRecord()` has no equivalent option (adapter is out of scope for
-    // this task's edits) — flagged for the P7 visual review; this now opens
-    // in the same window/tab rather than a new one. See
-    // projects/spaarke-modal-system/notes/task-091-completion.md.
-    createXrmNavigationService().openRecord('sprk_document', documentId).catch((err) => {
-      console.error('[FilePreviewDialog] openRecord failed:', err);
+    // #717 item 1 (owner decision 2026-08-05): the retired local helper opened
+    // the record with `openInNewWindow: true` so the workspace was never
+    // navigated away; task 091's repoint to the shared adapter's `openRecord()`
+    // (openForm, same-tab) clobbered the workspace tab. Resolution: the
+    // MODAL-DECISION-CRITERIA Layout-1 standard — `openRecordModal` (85%×85%
+    // `navigateTo` target:2 overlay; host page stays) — same no-clobber outcome
+    // as new-window, in-app and standard-conformant. `openRecord` remains the
+    // fallback only for a host service without the optional member.
+    const nav = createXrmNavigationService();
+    (nav.openRecordModal
+      ? nav.openRecordModal('sprk_document', documentId)
+      : nav.openRecord('sprk_document', documentId)
+    ).catch((err) => {
+      console.error('[FilePreviewDialog] open record failed:', err);
     });
   }, [documentId]);
 
