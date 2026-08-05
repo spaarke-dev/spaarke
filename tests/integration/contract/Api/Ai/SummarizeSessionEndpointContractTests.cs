@@ -674,13 +674,26 @@ public sealed class StubOpenAiClient : IOpenAiClient
     /// without a live model — mirrors the seam-test stub's capture.</summary>
     public string? LastPrompt { get; private set; }
 
-    public Task<string> GetStructuredCompletionRawAsync(
+    /// <summary>
+    /// Optional async gate the prompted executor awaits INSIDE <see cref="GetStructuredCompletionRawAsync"/>
+    /// before returning <see cref="RawJsonToReturn"/>. Lets a test hold a "review" mid-flight
+    /// deterministically (a TaskCompletionSource gate — NOT a time-based Task.Delay) so it can simulate a
+    /// client disconnect DURING the long Reasoning-tier run (UAT round-4 #10b). Default null = no gate
+    /// (current fast behavior — every existing test is unaffected).
+    /// </summary>
+    public Func<CancellationToken, Task>? GateBeforeReturn { get; set; }
+
+    public async Task<string> GetStructuredCompletionRawAsync(
         string prompt, BinaryData jsonSchema, string schemaName, string? model = null,
         int? maxOutputTokens = null, float? temperature = null,
         CancellationToken cancellationToken = default)
     {
         LastPrompt = prompt;
-        return Task.FromResult(RawJsonToReturn);
+        if (GateBeforeReturn is not null)
+        {
+            await GateBeforeReturn(cancellationToken).ConfigureAwait(false);
+        }
+        return RawJsonToReturn;
     }
 
     public IAsyncEnumerable<string> StreamStructuredCompletionAsync(

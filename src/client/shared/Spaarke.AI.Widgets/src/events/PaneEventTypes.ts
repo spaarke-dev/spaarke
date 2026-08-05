@@ -209,6 +209,42 @@ export interface WorkspacePaneEvent {
    *                              adapt their view to the new active context (Round 4 Fix 4 signal
    *                              infrastructure — no consumers yet, just the foundation for future
    *                              pane coordination)
+   * - `nda_review_progress_visibility` — the Assistant's center-screen agreement/NDA-review progress
+   *                              modal changed visibility (opened / dismissed / auto-closed); carries
+   *                              `progressVisible`. Added so ReviewCompleteToast (shell layer) can
+   *                              avoid a double-notification while the modal is still on screen, now
+   *                              that the modal is non-blocking (`modalType="non-modal"`) and the user
+   *                              can switch workspace tabs while it is still open (UAT round-3 item
+   *                              #8, ai-advanced-capabilities-agreements-r1). Same "signal
+   *                              infrastructure" shape as `active_widget_changed` above.
+   * - `nda_review_background_run` — a review run's liveness moved to the WORKSPACE tab strip: the user
+   *                              clicked "Continue working in background" on the progress modal (so the
+   *                              modal is now dismissed) WHILE the run is still executing server-side.
+   *                              Carries `backgroundRunActive` (true = a dismissed-but-running review is
+   *                              live; false = it completed / failed / was never backgrounded).
+   *                              WorkspacePane consumes it to show a tiny circular progress indicator on
+   *                              the running Compose tab header until the run completes, so the dismissed
+   *                              progress card leaves NO visible-yet-unmounted remnant (UAT round-4 item
+   *                              #10a, ai-advanced-capabilities-agreements-r1). Same "signal
+   *                              infrastructure" shape as `nda_review_progress_visibility` above.
+<<<<<<< HEAD
+=======
+   * - `nda_review_dispatch_active` — a review run's in-flight state stamped at DISPATCH time, for
+   *                              cross-navigation resume persistence (UAT round-6 item #15a,
+   *                              ai-advanced-capabilities-agreements-r1). Carries `dispatchActive`
+   *                              (true = a review binding was just dispatched from the Assistant, for
+   *                              EVERY review path — chip/typed/gate/wizard/rerun — since they all funnel
+   *                              through the ONE `runBindingDispatch` chokepoint; false = the dispatch
+   *                              settled WITHOUT completing, i.e. failed). WorkspacePane consumes it to
+   *                              stamp / clear the ACTIVE home-surface Compose tab's persisted
+   *                              `run:{inFlight,dispatchedAt}` so a navigate-away-and-return trip resumes
+   *                              the spinner + poll — INDEPENDENT of whether the user ever dismissed the
+   *                              progress modal (the round-4 `nda_review_background_run` dismiss signal is
+   *                              now purely a UI-spinner concern, no longer the persistence trigger).
+   *                              Completion clearing rides the EXISTING `compose_advisory_comments`
+   *                              (fires even for a zero-findings clean review). Same "signal
+   *                              infrastructure" shape as `nda_review_background_run` above.
+>>>>>>> origin/master
    * - `streaming_started`      — a structured-output streaming run has begun; downstream widgets
    *                              (e.g. StructuredOutputStreamWidget, R5 task 017 / D2-07) mount and
    *                              prepare to receive section events. Carries `streamId` so multiple
@@ -309,6 +345,12 @@ export interface WorkspacePaneEvent {
     | 'entity_resolved'
     | 'session_reset'
     | 'active_widget_changed'
+    | 'nda_review_progress_visibility'
+    | 'nda_review_background_run'
+<<<<<<< HEAD
+=======
+    | 'nda_review_dispatch_active'
+>>>>>>> origin/master
     | 'streaming_started'
     | 'streaming_complete'
     | 'section_started'
@@ -441,6 +483,50 @@ export interface WorkspacePaneEvent {
    */
   displayName?: string;
 
+  /**
+   * Whether the Assistant's center-screen agreement/NDA-review progress modal is CURRENTLY visible
+   * (shown, not dismissed, not idle). Required when `type === 'nda_review_progress_visibility'`.
+   *
+   * Consumer: `ReviewCompleteToast` (shell layer) tracks the latest value in a ref, alongside the
+   * existing `active_widget_changed` tab-visibility ref, and suppresses its own completion toast
+   * whenever this is `true` — the progress modal itself is already showing the outcome, so a toast at
+   * the same moment would be a double notification (UAT round-3 item #8).
+   *
+   * ADR-015 binding: a plain boolean UI-visibility flag (Tier 1 safe). Not a user-content surface.
+   */
+  progressVisible?: boolean;
+
+  /**
+   * Whether a review run whose progress modal has been DISMISSED ("Continue working in background") is
+   * still executing server-side. Required when `type === 'nda_review_background_run'`.
+   *
+   * Consumer: `WorkspacePane` tracks the latest value and, while true, renders a tiny circular progress
+   * indicator (Fluent Spinner) on the running Compose tab header — the run's liveness after the modal is
+   * dismissed. Goes false when the run reaches a terminal state (completion then flows through the
+   * existing `ReviewCompleteToast` rules) or a fresh run begins visible again (UAT round-4 item #10a).
+   *
+   * ADR-015 binding: a plain boolean UI-liveness flag (Tier 1 safe). Not a user-content surface.
+   */
+  backgroundRunActive?: boolean;
+
+<<<<<<< HEAD
+=======
+  /**
+   * Whether a review binding was just DISPATCHED (true) or the dispatch settled without completing —
+   * i.e. failed (false). Required when `type === 'nda_review_dispatch_active'`.
+   *
+   * Consumer: `WorkspacePane` stamps (true) / clears (false) the ACTIVE home-surface Compose tab's
+   * persisted `run:{inFlight,dispatchedAt}` so a navigate-away-and-return trip resumes the review's
+   * spinner + poll regardless of whether the progress modal was ever dismissed. Emitted at the ONE
+   * `runBindingDispatch` chokepoint (all review paths — chip/typed/gate/wizard/rerun) so the flag is
+   * captured for every entry path (UAT round-6 item #15a). Completion clearing rides the separate
+   * `compose_advisory_comments` event (fires even for a zero-findings clean review).
+   *
+   * ADR-015 binding: a plain boolean UI-liveness flag (Tier 1 safe). Not a user-content surface.
+   */
+  dispatchActive?: boolean;
+
+>>>>>>> origin/master
   // ── selection_changed fields ──────────────────────────────────────────────
 
   /**

@@ -137,6 +137,85 @@ public class DispatchSessionEndpointContractTests : IClassFixture<DispatchSessio
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // UAT round-4 #10b — the review + ADR-040 ledger write MUST survive a client
+    // disconnect (navigate away from SpaarkeAi mid-run → full SPA teardown). Before
+    // the fix the endpoint ran execution + ledger under httpContext.RequestAborted,
+    // so a disconnect cancelled the executor AND the store → the analysis was LOST.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Post_LedgerWrite_RunsUnderDisconnectDecoupledToken_NotRequestAborted()
+    {
+        // Deterministic seam guarantee: the ADR-040 ledger write (IOutputRouter.RouteAsync) receives a
+        // token that CANNOT be cancelled. httpContext.RequestAborted is always cancelable, so a client
+        // disconnect could abort the store BEFORE this fix; a non-cancelable token proves the store is
+        // decoupled from the response lifetime (UAT round-4 #10b).
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, fileId: "file-001");
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/dispatch",
+            new { bindingId = TestBindingId.ToString() });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _fx.Router.LastRouted.Should().NotBeNull("the ledger write ran");
+        _fx.Router.LastRouteCancellationToken.CanBeCanceled.Should().BeFalse(
+            "UAT round-4 #10b — the review execution + ADR-040 ledger write run under the " +
+            "disconnect-decoupled executionToken (CancellationToken.None), so a client disconnect " +
+            "(RequestAborted) can never abort the store; the analysis is durably persisted");
+    }
+
+    [Fact]
+    public async Task Post_ClientDisconnectsMidReview_LedgerWriteStillCompletes()
+    {
+        // Behavioral proof of UAT round-4 #10b, the owner's exact repro: hold the "review" mid-flight,
+        // disconnect the client (navigate away from SpaarkeAi), then confirm the ADR-040 ledger write
+        // STILL completes server-side — the analysis is stored and recoverable on reopen (durable
+        // recall / FR-16), not lost. Gate is a TaskCompletionSource (deterministic — no Task.Delay).
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, fileId: "file-001");
+        _fx.OpenAi.RawJsonToReturn =
+            """{"tldr":["survived the disconnect"],"summary":"ledgered anyway.","keywords":"durable","entities":{"organizations":[],"persons":[]}}""";
+
+        var reachedExecutor = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseExecutor = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _fx.OpenAi.GateBeforeReturn = _ =>
+        {
+            reachedExecutor.TrySetResult();
+            return releaseExecutor.Task;
+        };
+
+        var client = _fx.CreateAuthenticatedClient();
+        using var cts = new CancellationTokenSource();
+
+        var postTask = client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/dispatch",
+            new { bindingId = TestBindingId.ToString() },
+            cts.Token);
+
+        // The review is now in flight (executor blocked, response headers NOT yet sent) — the owner
+        // navigates away from the SpaarkeAi code page: the SSE request aborts (RequestAborted fires).
+        await reachedExecutor.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        cts.Cancel();
+
+        // The "review" completes server-side AFTER the disconnect.
+        releaseExecutor.TrySetResult();
+
+        // Client side observes the cancellation (the SSE write to the dead socket is abandoned).
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => postTask);
+
+        // THE assertion: the ADR-040 ledger write completed despite the disconnect. Under the old
+        // (RequestAborted-coupled) code the store was cancelled and LastRouted stayed null.
+        await _fx.Router.RouteCalledTask.WaitAsync(TimeSpan.FromSeconds(10));
+        _fx.Router.LastRouted.Should().NotBeNull(
+            "UAT round-4 #10b — the review + ADR-040 ledger write survive the client disconnect so " +
+            "the analysis is durably stored (recoverable on reopen), not lost");
+        _fx.Router.LastRouteCancellationToken.CanBeCanceled.Should().BeFalse(
+            "the store ran under the disconnect-decoupled executionToken");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // ARGS PASS-THROUGH — chip args (fileIds) reach the execution boundary
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -684,11 +763,27 @@ public sealed class RecordingOutputRouter : IOutputRouter
     /// <summary>When set, the stored entry's payload is replaced with this JSON (render-follows-store proof).</summary>
     public string? SubstituteStoredPayloadJson { get; set; }
 
+    /// <summary>
+    /// The CancellationToken the last ledger write (RouteAsync) received. UAT round-4 #10b asserts this is
+    /// NOT cancelable (`CanBeCanceled == false`) — proving the ADR-040 store runs under the
+    /// disconnect-decoupled executionToken, so a client disconnect (RequestAborted, which IS cancelable)
+    /// can never abort the write.
+    /// </summary>
+    public CancellationToken LastRouteCancellationToken { get; private set; }
+
+    /// <summary>Completes when RouteAsync is ENTERED — lets a test await the ledger seam being reached
+    /// even after the client has disconnected (UAT round-4 #10b). Re-armed by <see cref="ResetRecording"/>.</summary>
+    private TaskCompletionSource _routeCalled =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public Task RouteCalledTask => _routeCalled.Task;
+
     public void ResetRecording()
     {
         LastExecutorOutput = null;
         LastRouted = null;
         SubstituteStoredPayloadJson = null;
+        LastRouteCancellationToken = default;
+        _routeCalled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     public async Task<RoutedOutput> RouteAsync(
@@ -699,6 +794,8 @@ public sealed class RecordingOutputRouter : IOutputRouter
         CancellationToken cancellationToken = default)
     {
         LastExecutorOutput = output.Clone();
+        LastRouteCancellationToken = cancellationToken;
+        _routeCalled.TrySetResult();
 
         var routed = await _inner.RouteAsync(session, binding, output, sourceRefs, cancellationToken);
 

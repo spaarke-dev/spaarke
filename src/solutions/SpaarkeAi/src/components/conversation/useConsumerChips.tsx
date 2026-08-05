@@ -64,6 +64,27 @@ import {
   buildAskAboutFilesChip,
 } from "./localActionChips";
 
+/**
+ * UAT round-4 (item #9): the QUICK-review-completion trigger reads `fileId`/`subDomain` back off
+ * the SAME dispatch `slots` task 070's quick-scan caveat already reads `reviewDepth` from — never
+ * a re-classification, never a re-fetch. `slots.fileIds` is typed `unknown` (a generic
+ * `Record<string, unknown>` — the wire shape every review dispatch populates with `[fileId]`, see
+ * `dispatchReview`/`dispatchDirectReview` in useAgreementReviewGate.ts); this extracts the first
+ * entry defensively (never throws on a malformed/legacy payload).
+ */
+function extractFirstFileIdSlot(slots: Record<string, unknown> | undefined): string | undefined {
+  const raw = slots?.fileIds;
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const first = raw[0];
+  return typeof first === "string" && first.length > 0 ? first : undefined;
+}
+
+/** Same defensive-extraction shape as {@link extractFirstFileIdSlot}, for a single string slot. */
+function extractStringSlot(slots: Record<string, unknown> | undefined, key: string): string | undefined {
+  const value = slots?.[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 export interface ConsumerChipsDeps {
   bffBaseUrl: string;
   /** Fresh access-token getter (Auth v2 / ADR-028). */
@@ -131,6 +152,15 @@ export interface ConsumerChipsDeps {
    * document comments instead of only rendering as raw JSON in the transcript. Omitted → no projection.
    */
   onDispatchResult?: (result: unknown) => void;
+
+  /**
+   * UAT round-4 (item #9): notified when an NDA-REVIEW dispatch completes at QUICK depth — the
+   * "Rerun a full analysis" card trigger seam (`useRerunFullAnalysisCard.ts`). Carries the SAME
+   * `fileId`/`subDomain` this dispatch's own `slots` already carried (no re-classification, no
+   * re-upload). NEVER fires for a `thorough` (or absent) `reviewDepth` — no card for an
+   * already-thorough review. Omitted → no card offered.
+   */
+  onQuickReviewComplete?: (info: { fileId: string; subDomain?: string }) => void;
 }
 
 export interface ConsumerChipsController {
@@ -197,6 +227,7 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
     onCorrespondenceDraft,
     chipDisplayPreference,
     onChipDispatched,
+    onQuickReviewComplete,
   } = deps;
 
   const [consumerChips, setConsumerChips] = React.useState<ReadonlyArray<ConsumerChip>>([]);
@@ -352,6 +383,19 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
                   : `${quickScanCaveat}I've finished reviewing the NDA. Open the **Review Summary** and the in-document **Review Notes** in the Compose tab to see the flagged clauses and assessments.`
               )
             );
+            // UAT round-4 (item #9): a QUICK run just completed — offer the "Rerun a full
+            // analysis" CARD (useRerunFullAnalysisCard.ts), reusing the SAME fileId/subDomain
+            // this dispatch's own slots already carried (no re-classification, no re-upload).
+            // Thorough runs (the default) and any non-"quick" value never reach here.
+            if (opts?.slots?.reviewDepth === "quick") {
+              const fileId = extractFirstFileIdSlot(opts.slots);
+              if (fileId) {
+                onQuickReviewComplete?.({
+                  fileId,
+                  subDomain: extractStringSlot(opts.slots, "subDomain"),
+                });
+              }
+            }
           } else if (!isSurfaceLaunch && dispatched.result !== undefined && dispatched.result !== null) {
             enqueueAssistantMessage(
               makeLocalAssistantMessage(formatEventOutputMarkdown(dispatched.result))
@@ -439,6 +483,7 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
       getAppendedLocalChips,
       onChipDispatched,
       onDispatchResult,
+      onQuickReviewComplete,
     ]
   );
 

@@ -521,6 +521,137 @@ describe("useAgreementReviewGate — task 031 DEF-09 session routing", () => {
   });
 });
 
+describe("useAgreementReviewGate — UAT round-3 item #7: runDirectReview (direct chip/card click)", () => {
+  it("inserts ONE depth-choice turn — no classify, no mount, no dispatch yet", () => {
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    act(() => {
+      result.current.runDirectReview("file-direct-1", "AppligentNDA.docx");
+    });
+
+    expect(classifyDispatcherMock).not.toHaveBeenCalled();
+    expect(deps.mountFileInCompose).not.toHaveBeenCalled();
+    expect(deps.dispatchReviewBinding).not.toHaveBeenCalled();
+    expect(deps.enqueueAssistantMessage).toHaveBeenCalledTimes(1);
+    expect(deps.acceptChips).toHaveBeenCalledTimes(1);
+    const wire = (deps.acceptChips as jest.Mock).mock.calls[0][0] as Array<Record<string, unknown>>;
+    expect(wire).toHaveLength(2);
+    expect(wire[0].targetBindingId).toBe(LOCAL_CHIP.agreementReviewDepthQuick);
+    expect(wire[1].targetBindingId).toBe(LOCAL_CHIP.agreementReviewDepthThorough);
+  });
+
+  it("clicking Thorough dispatches with reviewDepth:'thorough' and NO subDomain slot (unchanged pre-070 wire shape)", async () => {
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    act(() => {
+      result.current.runDirectReview("file-direct-2", "AppligentNDA.docx");
+    });
+    act(() => {
+      result.current.handleGateChipAction(LOCAL_CHIP.agreementReviewDepthThorough);
+    });
+    await waitFor(() => expect(deps.dispatchReviewBinding).toHaveBeenCalledTimes(1));
+
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledWith("review-binding-1", {
+      slots: { fileIds: ["file-direct-2"], reviewDepth: "thorough" },
+    });
+    const slots = (deps.dispatchReviewBinding as jest.Mock).mock.calls[0][1].slots as Record<string, unknown>;
+    expect(slots.subDomain).toBeUndefined();
+    // mountFileInCompose is the CALLER's responsibility (ConversationPane.handleReviewNda mounts at
+    // click time, before the depth ask) — the gate's dispatch path itself never mounts.
+    expect(deps.mountFileInCompose).not.toHaveBeenCalled();
+  });
+
+  it("clicking Quick dispatches with reviewDepth:'quick'", async () => {
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    act(() => {
+      result.current.runDirectReview("file-direct-3", "AppligentNDA.docx");
+    });
+    act(() => {
+      result.current.handleGateChipAction(LOCAL_CHIP.agreementReviewDepthQuick);
+    });
+    await waitFor(() => expect(deps.dispatchReviewBinding).toHaveBeenCalledTimes(1));
+
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledWith("review-binding-1", {
+      slots: { fileIds: ["file-direct-3"], reviewDepth: "quick" },
+    });
+  });
+
+  it("threads the resolved document session as sessionIdOverride (task 031 DEF-09, same as every other branch)", async () => {
+    const awaitDocumentSessionId = jest.fn<Promise<string | null>, [string]>().mockResolvedValue("doc-session-direct");
+    const deps = makeDeps({ awaitDocumentSessionId });
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    act(() => {
+      result.current.runDirectReview("file-direct-4", "AppligentNDA.docx");
+    });
+    act(() => {
+      result.current.handleGateChipAction(LOCAL_CHIP.agreementReviewDepthThorough);
+    });
+    await waitFor(() => expect(deps.dispatchReviewBinding).toHaveBeenCalledTimes(1));
+
+    expect(awaitDocumentSessionId).toHaveBeenCalledWith("file-direct-4");
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledWith("review-binding-1", {
+      slots: { fileIds: ["file-direct-4"], reviewDepth: "thorough" },
+      sessionIdOverride: "doc-session-direct",
+    });
+  });
+
+  it("does NOT track getLastResolvedSubDomainKey (there was never a classification to track)", async () => {
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    act(() => {
+      result.current.runDirectReview("file-direct-5", "AppligentNDA.docx");
+    });
+    act(() => {
+      result.current.handleGateChipAction(LOCAL_CHIP.agreementReviewDepthThorough);
+    });
+    await waitFor(() => expect(deps.dispatchReviewBinding).toHaveBeenCalledTimes(1));
+
+    expect(result.current.getLastResolvedSubDomainKey()).toBeNull();
+  });
+
+  it("no-ops when reviewBindingId is unavailable — no message, no chips, no dispatch", () => {
+    const deps = makeDeps({ reviewBindingId: null });
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    act(() => {
+      result.current.runDirectReview("file-direct-6", "AppligentNDA.docx");
+    });
+
+    expect(deps.enqueueAssistantMessage).not.toHaveBeenCalled();
+    expect(deps.acceptChips).not.toHaveBeenCalled();
+    expect(deps.dispatchReviewBinding).not.toHaveBeenCalled();
+  });
+
+  it("other chip flows (e.g. the confirm-gate branch) are UNCHANGED by the new direct path — still dispatch with subDomain as before", async () => {
+    classifyDispatcherMock.mockResolvedValue(
+      classifyResult({ isAgreement: true, composite: false, candidates: [{ subDomainKey: "nda", confidence: 0.5 }] })
+    );
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.runGate("file-regression-1", "unknown.pdf");
+    });
+    act(() => {
+      result.current.handleGateChipAction(LOCAL_CHIP.agreementReviewConfirmThorough);
+    });
+    await waitFor(() => expect(deps.dispatchReviewBinding).toHaveBeenCalledTimes(1));
+
+    // Unaffected by item #7 — the confirm-gate branch still carries subDomain + resultLabel exactly
+    // as task 070 established.
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledWith("review-binding-1", {
+      slots: { fileIds: ["file-regression-1"], subDomain: "nda", reviewDepth: "thorough" },
+      resultLabel: "NDA",
+    });
+  });
+});
+
 describe("useAgreementReviewGate — classify unavailable", () => {
   it("degrades gracefully (no bindingId resolved) — no dispatch, no throw", async () => {
     const deps = makeDeps({ classifyBindingId: null });
@@ -860,5 +991,104 @@ describe("useAgreementReviewGate — task 023 getLastResolvedSubDomainKey (class
       result.current.resetForSession();
     });
     expect(result.current.getLastResolvedSubDomainKey()).toBeNull();
+  });
+});
+
+describe("useAgreementReviewGate — UAT round-4 item #9: rerunThorough (the \"Rerun a full analysis\" card action)", () => {
+  it("dispatches THOROUGH immediately with the SAME fileId + subDomain — no classify, no ask", async () => {
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.rerunThorough("file-rerun-1", "nda");
+    });
+
+    expect(classifyDispatcherMock).not.toHaveBeenCalled();
+    expect(deps.acceptChips).not.toHaveBeenCalled();
+    expect(deps.enqueueAssistantMessage).not.toHaveBeenCalled();
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledTimes(1);
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledWith("review-binding-1", {
+      slots: { fileIds: ["file-rerun-1"], subDomain: "nda", reviewDepth: "thorough" },
+      resultLabel: "NDA",
+    });
+  });
+
+  it("re-mounts the SAME fileId into Compose (bring the existing tab to the front — the documented rerun-in-place fallback)", async () => {
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.rerunThorough("file-rerun-2", "nda");
+    });
+
+    expect(deps.mountFileInCompose).toHaveBeenCalledWith("file-rerun-2", undefined, "agreement-analysis");
+  });
+
+  it("with NO subDomainKey (the direct-chip door) dispatches the bare wire shape — no subDomain slot, no resultLabel", async () => {
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.rerunThorough("file-rerun-3");
+    });
+
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledWith("review-binding-1", {
+      slots: { fileIds: ["file-rerun-3"], reviewDepth: "thorough" },
+    });
+    const slots = (deps.dispatchReviewBinding as jest.Mock).mock.calls[0][1].slots as Record<string, unknown>;
+    expect(slots.subDomain).toBeUndefined();
+    expect((deps.dispatchReviewBinding as jest.Mock).mock.calls[0][1].resultLabel).toBeUndefined();
+  });
+
+  it("threads the resolved document session as sessionIdOverride (task 031 DEF-09, same as every other branch)", async () => {
+    const awaitDocumentSessionId = jest.fn<Promise<string | null>, [string]>().mockResolvedValue("doc-session-rerun");
+    const deps = makeDeps({ awaitDocumentSessionId });
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.rerunThorough("file-rerun-4", "employment");
+    });
+
+    expect(awaitDocumentSessionId).toHaveBeenCalledWith("file-rerun-4");
+    expect(deps.dispatchReviewBinding).toHaveBeenCalledWith("review-binding-1", {
+      slots: { fileIds: ["file-rerun-4"], subDomain: "employment", reviewDepth: "thorough" },
+      resultLabel: "Employment",
+      sessionIdOverride: "doc-session-rerun",
+    });
+  });
+
+  it("does NOT touch resolvedRef/getLastResolvedSubDomainKey — a one-off re-fire, not a gate resolution", async () => {
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.rerunThorough("file-rerun-5", "nda");
+    });
+
+    expect(result.current.getLastResolvedSubDomainKey()).toBeNull();
+  });
+
+  it("no-ops when fileId is empty — no mount, no dispatch", async () => {
+    const deps = makeDeps();
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.rerunThorough("");
+    });
+
+    expect(deps.mountFileInCompose).not.toHaveBeenCalled();
+    expect(deps.dispatchReviewBinding).not.toHaveBeenCalled();
+  });
+
+  it("no-ops when reviewBindingId is unavailable", async () => {
+    const deps = makeDeps({ reviewBindingId: null });
+    const { result } = renderHook(() => useAgreementReviewGate(deps));
+
+    await act(async () => {
+      await result.current.rerunThorough("file-rerun-6", "nda");
+    });
+
+    expect(deps.mountFileInCompose).not.toHaveBeenCalled();
+    expect(deps.dispatchReviewBinding).not.toHaveBeenCalled();
   });
 });

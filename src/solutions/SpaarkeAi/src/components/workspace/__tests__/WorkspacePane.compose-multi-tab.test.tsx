@@ -194,6 +194,13 @@ const lastPatchComposeTabs = () => {
 beforeEach(() => {
   recordedPatches.length = 0;
   authenticatedFetchMock.mockClear();
+  // item #13 (home-surface Compose-tab persistence, 2026-08-04): WorkspacePane now
+  // persists home-surface Compose tabs to localStorage and restores them on mount.
+  // These tests render on the home surface (entityContext null) and assert exact
+  // compose-tab counts across cases, so localStorage must be reset between them
+  // (same isolation reason `recordedPatches` is reset) or an earlier case's
+  // persisted tab would resurrect and inflate the next case's count.
+  localStorage.clear();
   if (!Element.prototype.scrollIntoView) {
     // eslint-disable-next-line @typescript-eslint/no-empty-function
     Element.prototype.scrollIntoView = function (): void {};
