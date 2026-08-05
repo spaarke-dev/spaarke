@@ -23,9 +23,7 @@
 - **Task 015 ✅** — FR-A3 self-association guarantee formalized + seam regression (`ThreadSelfAssociationRegressionTests`, 2/2; stripped-headers via In-Reply-To + References). No production code changed. → **task 032 must absorb this into the D3 golden suite.**
 
 - **DEFER-030-01 ✅ CLOSED** (`e0650bcac`) — service-request RAG grounding added (core type); residual edge types intentional non-support. No open deferrals.
-
-### Next code-only task now UNBLOCKED
-- **032** (FR-D3 golden regression suite) — dep 015 ✅ satisfied. Test-authoring under the seam KEEP path; consumes `notes/fixtures/r1-golden-emails.md` + **absorbs the 015 FR-A3 case**. Code-only, autonomous-safe. Substantial (reproduce R1 UAT misfile scenarios; assert round-1/2/2b/3 outcomes).
+- **Task 032 ✅** — FR-D3 golden regression suite (`GoldenMisfileRegressionTests`, 3 golden scenarios drive the REAL spine → Ambiguous/Resolved/contact-not-filed verdicts reproduced; 149/149 Communication suite green). FR-A3 absorbed via co-located 015 file (no duplicate). Pillar D test coverage complete.
 
 ### Gates ahead (need operator go-ahead — NOT autonomous)
 004 (Entra/security), 020/023 (Dataverse schema mutation), 033 (Dataverse seed), 010 (Key Vault), all deploys, all Pillar E (contended shared-lib, sequential).

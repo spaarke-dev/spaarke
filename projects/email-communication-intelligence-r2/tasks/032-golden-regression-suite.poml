@@ -4,7 +4,7 @@
     <title>Golden end-to-end regression suite from R1 UAT misfile emails (ADR-038 KEEP path) — absorbs the FR-A3 formalization test</title>
     <phase>3 Pillar D — R1 carry-overs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING override (CLAUDE.md §8): task creates/modifies tests/** and is tagged testing/integration-test → code-review + adr-check run UNCONDITIONALLY at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -88,7 +88,11 @@
     <criterion testable="true">All new tests live under tests/integration/seam/Communication/** (KEEP path), are CI-guarded, and are green; no Mock&lt;HttpMessageHandler&gt;/DI-registration/ctor-null tests; BFF build is green.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-D3 (absorbs FR-A3 regression). This suite is the CI guard behind Success Criteria #8. It runs the engine as-is; landing 030/031 must keep it green (031 is behavior-preserving; 030 changes indexing not association). Completion summary appended here when done.</notes>
+  <notes>Spec FR-D3 (absorbs FR-A3 regression). This suite is the CI guard behind Success Criteria #8. It runs the engine as-is; landing 030/031 must keep it green (031 is behavior-preserving; 030 changes indexing not association).
+
+**COMPLETED 2026-08-05.** New `tests/integration/seam/Communication/GoldenMisfileRegressionTests.cs` drives the REAL association spine (real ExplicitReference/IdentifierReverseLookup/ThreadContinuity/ParticipantCorrelation rungs → real `AssociationStatusMapper` → real `AutoFileGate` with default core-writable set → `IncomingAssociationResolver`), faking only the Dataverse boundary. 3 golden scenarios over the pinned identifiers reproduce the R1 UAT verdicts: (1) **PAT-942665 + PAT-942404 → Ambiguous** (two conflicting matters ≥ threshold, no single auto-file, matter withheld); (2) **REAL-2026-123456.02 → Resolved** onto its matter AND the embedded `123456`/`2026` digit-runs are **never queried** (P1 guard, no invoice collision) AND the invoice is not written (round-1/2/2b); (3) **contact-only match → not auto-filed** (status ≠ Resolved, `sprk_regardingperson` not written — round-3 core-only gate). 3/3 green; full Communication seam + rung suite 149/149 green; build 0 err.
+
+**Deviations (documented):** (a) FR-A3 is **absorbed by co-location** — task 015 already authored `ThreadSelfAssociationRegressionTests.cs` under this KEEP path; creating the POML's separate `ExternalReplySelfAssociationTests.cs` would duplicate the FR-A3 test and violate the "one golden suite, not two" constraint, so it was NOT created. (b) No raw `.eml` fixtures exist (per `notes/fixtures/r1-golden-emails.md` the R1 artifacts were unrecoverable) — the suite drives the engine with the golden **identifiers + expected verdicts**, the faithful reproduction. Escalation trigger evaluated → did NOT fire (all golden outcomes reproduce against the current engine; the one interim failure was a Moq last-match-wins setup bug, corrected). **/conflict-check MUST re-run before the PR** (shared seam suite).
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
