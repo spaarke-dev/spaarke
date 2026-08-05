@@ -23,6 +23,9 @@ import { Tooltip, Button, Textarea, makeStyles, tokens, mergeClasses } from '@fl
 import { TextFont20Regular, TextT20Regular } from '@fluentui/react-icons';
 import { RichTextEditor } from '../../RichTextEditor';
 import type { RichTextEditorRef } from '../../RichTextEditor';
+import { InlineAiToolbar } from '../../InlineAiToolbar';
+import type { InlineAiAction } from '../../InlineAiToolbar';
+import { useInlineAiToolbar } from '../../../hooks/useInlineAiToolbar';
 import type { EmailComposerBodyFormat } from '../EmailComposer.types';
 
 /**
@@ -60,6 +63,15 @@ export interface IBodyEditorProps {
   minHeight?: number;
   /** Host controls rendered at the end of the RTF toolbar (HTML mode only). */
   toolbarSlot?: React.ReactNode;
+  /**
+   * When provided (HTML/rich-text mode), a floating "select text → AI" toolbar
+   * (`@spaarke/ui-components` `InlineAiToolbar`) appears above the current selection with
+   * these actions. Omit to disable. `onInlineAiAction` receives the picked action + the
+   * selected text at click time.
+   */
+  inlineAiActions?: InlineAiAction[];
+  /** Fired when the user picks a floating-toolbar action; receives the action + selected text. */
+  onInlineAiAction?: (action: InlineAiAction, selectedText: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,10 +128,32 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export const BodyEditor = React.forwardRef<RichTextEditorRef, IBodyEditorProps>(function BodyEditor(
-  { value, format, onChange, onFormatChange, readOnly, errorMessage, minHeight = 200, toolbarSlot },
+  {
+    value,
+    format,
+    onChange,
+    onFormatChange,
+    readOnly,
+    errorMessage,
+    minHeight = 200,
+    toolbarSlot,
+    inlineAiActions,
+    onInlineAiAction,
+  },
   ref
 ) {
   const styles = useStyles();
+
+  // Floating "select text → AI" toolbar (shared `@spaarke/ui-components` primitive). Active
+  // only in rich-text mode (the browser Selection API the hook uses does not surface a
+  // <textarea> selection) and when the host wires actions + a handler. The `editorArea` is
+  // already `position: relative`, so the absolutely-positioned toolbar anchors to it.
+  const editorAreaRef = React.useRef<HTMLDivElement>(null);
+  const inlineAiEnabled = format === 'HTML' && !readOnly && !!inlineAiActions?.length && !!onInlineAiAction;
+  const inlineAi = useInlineAiToolbar({
+    editorContainerRef: editorAreaRef,
+    actions: inlineAiActions ?? [],
+  });
 
   return (
     <div className={styles.wrapper} role="region" aria-label="Message body">
@@ -150,7 +184,7 @@ export const BodyEditor = React.forwardRef<RichTextEditorRef, IBodyEditorProps>(
         </div>
       )}
 
-      <div className={styles.editorArea} style={{ minHeight }}>
+      <div className={styles.editorArea} style={{ minHeight }} ref={editorAreaRef}>
         {format === 'HTML' ? (
           <div className={styles.editorFill}>
             <RichTextEditor
@@ -172,6 +206,14 @@ export const BodyEditor = React.forwardRef<RichTextEditorRef, IBodyEditorProps>(
             aria-label="Message body"
             disabled={readOnly}
             resize="vertical"
+          />
+        )}
+        {inlineAiEnabled && (
+          <InlineAiToolbar
+            visible={inlineAi.visible}
+            position={inlineAi.position}
+            actions={inlineAiActions ?? []}
+            onAction={(action, selectedText) => onInlineAiAction?.(action, selectedText)}
           />
         )}
       </div>
