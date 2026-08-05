@@ -650,6 +650,12 @@ public static class ChatEndpoints
                 // text-path dispatch composes it with the Binding's own tier override (ADR-039 — the
                 // ONE resolver). Null (the default) is a no-op.
                 modelTierOverride: request.ModelTierOverride,
+                // spaarkeai-assistant-enhancements-r2 FR-A3: the client focus-stamp's tab id. When
+                // present, BuildWorkspaceStateBlock labels the matching tab "(active)" in preference
+                // to the UpdatedAt-most-recent heuristic. Null = no focus-stamp → UpdatedAt fallback
+                // (backward compatible). Only the tab id is forwarded — the compact state is NOT
+                // trusted as prompt content (ADR-015: server-derived visible state is authoritative).
+                activeContextTabId: request.ActiveContext?.TabId,
                 cancellationToken: cancellationToken);
 
             // Convert session history to AI framework messages for context
@@ -3198,6 +3204,23 @@ public record ChatSessionCreatedResponse(string SessionId, DateTimeOffset Create
 /// through the ONE tier→deployment resolver (ADR-039). Default <c>null</c> = no override; the Action's
 /// own tier governs unchanged (pre-task-011 behavior).
 /// </param>
+/// <param name="ActiveContext">
+/// spaarkeai-assistant-enhancements-r2 FR-A2/A3 (Active-tab awareness / focus-stamp): the
+/// identity + compact state of the workspace tab the user has explicitly focused, captured
+/// client-side from the <c>workspace.active_widget_changed</c> signal and attached to the
+/// outbound body via the existing <c>onDecorateOutboundBody</c> seam (FR-A1/A2 — no
+/// <c>SprkChat</c> change). Server-side, <see cref="ChatActiveContext.TabId"/> is the ONLY
+/// load-bearing field: it is forwarded to
+/// <see cref="Sprk.Bff.Api.Services.Ai.Chat.SprkChatAgentFactory.CreateAgentAsync"/> so
+/// <c>BuildWorkspaceStateBlock</c> labels the matching tab "(active)" in preference to the
+/// legacy <c>UpdatedAt</c>-most-recent heuristic (FR-A3). The active tab then contributes its
+/// COMPACT content shape while background tabs stay metadata-only (FR-A4, ADR-015 Path A
+/// exception). Default <c>null</c> = no focus-stamp → the <c>UpdatedAt</c> fallback is used
+/// unchanged (backward compatible). ADR-015 note: the server does NOT trust the client-supplied
+/// <see cref="ChatActiveContext.CompactState"/> as prompt content — the agent-visible content is
+/// derived server-side from persisted tab state, so this field cannot widen visibility beyond the
+/// bounded compact shape.
+/// </param>
 /// <remarks>
 /// FR-P2-05 hard cutover (task 034): the former soft-slash bias field was RETIRED
 /// end-to-end (NFR-08). There is no longer any client-to-server intent-bias hint —
@@ -3208,7 +3231,35 @@ public record ChatSendMessageRequest(
     string Message,
     string? DocumentId = null,
     IReadOnlyList<ChatMessageAttachment>? Attachments = null,
-    AiModelTier? ModelTierOverride = null);
+    AiModelTier? ModelTierOverride = null,
+    ChatActiveContext? ActiveContext = null);
+
+/// <summary>
+/// spaarkeai-assistant-enhancements-r2 FR-A2 — the client "focus-stamp": the identity and
+/// compact state of the currently focused workspace tab, mirrored from the client
+/// <c>{ widgetType, contextType, tabId, displayName, compactState }</c> shape (FR-A1/A2).
+///
+/// <para>
+/// Server-side contract: <see cref="TabId"/> matches <c>WorkspaceTab.id</c> and is used ONLY to
+/// prefer the explicit focus-stamp over the <c>UpdatedAt</c>-most-recent heuristic when labeling
+/// the "(active)" tab (FR-A3). The remaining fields are carried for wire-fidelity with the client
+/// stamp; <see cref="CompactState"/> is deliberately NOT injected into the agent prompt — the
+/// agent-visible content is derived server-side from persisted tab state (ADR-015: the server is
+/// the authority on what content is visible, never client-supplied bytes). This keeps the field
+/// a labeling preference, not a new content channel or intent-classifier (ADR-039).
+/// </para>
+/// </summary>
+/// <param name="WidgetType">The focused tab's widget-type discriminator (e.g. "DocumentViewer", "Summary", "email"). Carried for fidelity; not load-bearing server-side.</param>
+/// <param name="ContextType">The focused widget's context type from the closed FR-B1 set (email | document | compose-doc | matter-grid | dashboard | calendar). Carried for fidelity.</param>
+/// <param name="TabId">Stable tab identity matching <c>WorkspaceTab.id</c>. The ONLY load-bearing field — drives the FR-A3 active-tab labeling preference.</param>
+/// <param name="DisplayName">Human-readable tab label. Carried for fidelity; not load-bearing server-side.</param>
+/// <param name="CompactState">Client-computed compact visible-state payload. Accepted for wire-fidelity but NOT emitted into the agent prompt (ADR-015 — server-derived visible state is authoritative).</param>
+public record ChatActiveContext(
+    string? WidgetType = null,
+    string? ContextType = null,
+    string? TabId = null,
+    string? DisplayName = null,
+    JsonElement? CompactState = null);
 
 /// <summary>
 /// In-memory chat-message attachment with client-extracted text content (FR-07).

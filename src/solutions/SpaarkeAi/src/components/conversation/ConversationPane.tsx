@@ -78,6 +78,7 @@ import { usePlaybookOptions } from "./usePlaybookOptions";
 import { useCommandRouting } from "./useCommandRouting";
 import { useSelectionChip } from "./useSelectionChip";
 import { useSerialActionQueue, type ComposeActionRequest } from "./useSerialActionQueue";
+import { deriveActiveTabFocusStamp, type ActiveTabFocusStamp } from "./activeTabFocusStamp";
 // Deep-import the cross-pane bridge hook (not the `@spaarke/compose-components`
 // barrel) so this Assistant-pane module does NOT transitively pull the TipTap
 // editor widgets — mirrors ComposeEditor/ComposeWorkspace's `@spaarke/ai-widgets/events`
@@ -602,6 +603,16 @@ export function ConversationPane(): React.JSX.Element {
   // Compose door is unbound). This pane adopts that session so the Assistant transcript CONTINUES on
   // return instead of cold-starting "back at the Review an NDA step". Adopted at most once per mount.
   const restoreSessionAdoptedRef = React.useRef<boolean>(false);
+
+  // task 010 (FR-A1) — active-tab focus-stamp. The currently-focused Workspace tab's identity +
+  // compact state, updated by the `workspace.active_widget_changed` subscriber below. Held in a
+  // REF (not state) so a tab switch never triggers a ConversationPane re-render — this is a
+  // read-on-send value, not a render input. Consumed by FR-A2 (outbound-body decorate, task 011)
+  // and, server-side, by FR-A3's focus-stamp (task 012, via the value threaded in task 011).
+  // `contextType` is populated by a later task (020, FR-B1's closed set { email, document,
+  // compose-doc, matter-grid, dashboard, calendar }) — intentionally left undefined here rather
+  // than inventing a value ahead of that closed union landing.
+  const activeTabFocusRef = React.useRef<ActiveTabFocusStamp | null>(null);
 
   // ── Behaviour hooks (see module map in the header) ────────────────────────
   const injection = useInjectionQueue();
@@ -2306,6 +2317,18 @@ export function ConversationPane(): React.JSX.Element {
   // A seed WITHOUT the hand-off fields (every non-wizard compose open — upload door, Browse,
   // "Open in Compose", revise mounts) returns immediately: zero behavior change.
   usePaneEvent("workspace", (event) => {
+    // task 010 (FR-A1) — active-tab focus-stamp. Extend the existing `workspace` subscription
+    // (rather than adding a second bus subscription, per ADR-030's single-subscriber-per-concern
+    // convention already followed by this handler) with an `active_widget_changed` branch that
+    // writes `activeTabFocusRef`. Ref write only — no state, no re-render. The field-mapping logic
+    // lives in `deriveActiveTabFocusStamp` (activeTabFocusStamp.ts) so it's unit-testable in
+    // isolation; this branch is the trivial glue.
+    const focusStamp = deriveActiveTabFocusStamp(event);
+    if (focusStamp) {
+      activeTabFocusRef.current = focusStamp;
+      return;
+    }
+
     const evt = event as WorkspacePaneEvent & {
       widgetType?: string;
       widgetData?: { compose?: ComposeWidgetSeed };

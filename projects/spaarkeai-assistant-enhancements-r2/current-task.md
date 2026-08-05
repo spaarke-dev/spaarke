@@ -10,17 +10,18 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 001 ✅ complete → next: Phase 2 (A) wave A1 = **010 + 012** (parallel) |
+| **Task** | Wave A1 (010 + 012) ✅ complete → next: A2 = **011** |
 | **Step** | — |
-| **Status** | not-started (next wave) |
-| **Next Action** | `work on tasks 010 and 012` (010 = active-tab subscriber [ConvPane]; 012 = server focus-stamp [BFF] — different files, parallel-safe) |
+| **Status** | not-started (011 next) |
+| **Next Action** | `work on task 011` (activeContext focus-stamp decorate, FR-A2 — edits ConversationPane.tsx, wires 010's `activeTabFocusRef` into the outbound body via onDecorateOutboundBody). Server side (012) is done and expects the `activeContext` shape `{ widgetType, contextType, tabId, displayName, compactState }` with **tabId** load-bearing (server reads TabId; compactState accepted as JsonElement but not injected). |
 
 ### Files Modified This Session
+- Task 010 (FR-A1, ✅ complete): ConversationPane.tsx (added `activeTabFocusRef` + extended the existing `usePaneEvent('workspace', …)` handler with an `active_widget_changed` branch), new `activeTabFocusStamp.ts` (pure derivation helper + `ActiveTabFocusStamp` type), new `__tests__/activeTabFocusStamp.test.ts` (seam test, 5/5 passing). Quality gates clean (code-review 1 low-severity note for 011/012 awareness; adr-check ADR-030 clean). Not committed — left staged/unstaged for orchestrator to commit after build-verifying the wave.
 - Task 001 (FR-E1): ConversationPane.tsx (removed suggestion hook + render), deleted useSuggestionCards.tsx, trimmed SuggestionCard.test.tsx
 - Project artifacts (earlier): README, plan, CLAUDE.md, TASK-INDEX
 
 ### Critical Context
-5 phases E→A→B→D→C. `ConversationPane.tsx` is a sequential spine (E/A/B/D edit it). **001 done** (banner removed; SuggestionCard.tsx retained — see notes/deviations.md). No live cross-worktree overlap (spine-r1 + analysis-hub-r1 merged). Next wave A1: 010 (ConvPane) ∥ 012 (BFF SprkChatAgentFactory/ChatEndpoints — opus/xhigh, ADR-015 boundary). Note 012 & 041 both edit SprkChatAgentFactory.cs, and 012 & 031 both edit ChatEndpoints.cs → don't run those concurrently later.
+5 phases E→A→B→D→C. `ConversationPane.tsx` is a sequential spine (E/A/B/D edit it). **001 done** (banner removed; SuggestionCard.tsx retained — see notes/deviations.md). **010 done** (active-tab focus ref wired; see task 010 POML `<notes>` for full completion detail). No live cross-worktree overlap (spine-r1 + analysis-hub-r1 merged). Wave A1 sibling: 012 (BFF SprkChatAgentFactory/ChatEndpoints — opus/xhigh, ADR-015 boundary) may still be running in parallel. Note 012 & 041 both edit SprkChatAgentFactory.cs, and 012 & 031 both edit ChatEndpoints.cs → don't run those concurrently later. Task 010 deviation: extracted the event→stamp mapping into a pure `deriveActiveTabFocusStamp` helper (new file `activeTabFocusStamp.ts`) instead of inlining it in the `usePaneEvent` handler, so the seam test unit-tests the pure logic directly rather than rendering the full pane to poke a private ref (mirrors the file's existing `routeSummarizeIntent`/`normalizeReviewDepth` pattern).
 
 ---
 

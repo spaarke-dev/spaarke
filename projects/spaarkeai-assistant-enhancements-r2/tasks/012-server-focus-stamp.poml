@@ -4,7 +4,7 @@
     <title>Thread activeContext through the chat request and prefer the focus-stamp over UpdatedAt (FR-A3/A4)</title>
     <phase>2 A — Active-tab awareness</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF code: DTO + agent-factory change on the ADR-015 privacy boundary</rigor-reason>
     <model-tier>opus</model-tier>

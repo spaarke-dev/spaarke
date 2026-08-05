@@ -4,7 +4,7 @@
     <title>ConversationPane subscribes to active_widget_changed and holds a focus ref (FR-A1)</title>
     <phase>2 A — Active-tab awareness</phase>
     <gate>blocked until 001</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend .tsx implementation with a seam test</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -72,7 +72,9 @@
     <criterion testable="true">No SprkChat fork.</criterion>
     <criterion testable="true">Build clean.</criterion>
   </acceptance-criteria>
-  <notes>Ref shape must match FR-A1 exactly: { widgetType, contextType, tabId, displayName, compactState }.</notes>
+  <notes>Ref shape must match FR-A1 exactly: { widgetType, contextType, tabId, displayName, compactState }.
+
+Completed 2026-08-05. Extended the existing `usePaneEvent('workspace', …)` handler (:2320, single subscription preserved) with an `active_widget_changed` branch that writes `activeTabFocusRef` (React.useRef, no state). Factored the event→stamp mapping into a pure, exported `deriveActiveTabFocusStamp` helper in a new sibling file `activeTabFocusStamp.ts` (mirrors the file's existing `routeSummarizeIntent`/`normalizeReviewDepth` pattern) so the seam test unit-tests the derivation logic directly rather than rendering the full pane to poke a private ref. `contextType` intentionally left `undefined` (FR-B1 closed set lands in task 020). New seam test `__tests__/activeTabFocusStamp.test.ts` — 5/5 passing (exact-shape mapping, displayName fallback to widgetType, empty-string defaults for missing tabId/widgetType, compactState undefined when widgetData absent, ignores every other workspace event type). Regression-checked 3 existing workspace-subscription tests (restore-session-readopt, wizard-auto-run e2e, hooks-order) — all still pass. `npm run typecheck`: Surface-owned 0 (307 pre-existing shared-lib errors unrelated). code-review: 1 low-severity/PLAUSIBLE note (compactState passes widgetData verbatim, unbounded at this layer — bounding is task 011/012's ADR-015 responsibility, not this task's). adr-check (ADR-030): clean — single subscription, no `any`, additive-only, typed via PaneChannelEventMap. No SprkChat fork.</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
