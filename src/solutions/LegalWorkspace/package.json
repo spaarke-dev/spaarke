@@ -31,6 +31,7 @@
     "@lexical/rich-text": "^0.41.0",
     "@lexical/selection": "^0.41.0",
     "@microsoft/applicationinsights-web": "^3.3.11",
+    "@spaarke/ai-outputs": "file:../../client/shared/Spaarke.AI.Outputs",
     "@spaarke/ai-widgets": "file:../../client/shared/Spaarke.AI.Widgets",
     "@spaarke/auth": "file:../../client/shared/Spaarke.Auth",
     "@spaarke/communication-components": "file:../../client/shared/Spaarke.Communication.Components",
