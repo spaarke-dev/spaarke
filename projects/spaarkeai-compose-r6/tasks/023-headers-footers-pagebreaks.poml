@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Headers/footers + page breaks through the canonical model</title>
+    <phase>2 Canonical model + fidelity widening</phase>
+    <gate>dep:020</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Per plan.md §5 Phase 2 — feature-adapter task routing headers/footers + page breaks through the canonical model. Modifies shared Services/Compose (BFF hot-path) so the BFF task obligations (publish-size, conflict-check, seam DoD) still apply, but it is a narrower construct set than 020/021/022 with an existing render precedent (AppendSection sectPr handling). Step 9.5 gates skipped at STANDARD; task-execute may escalate to FULL if it touches the save discriminant.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Per plan.md §5 Phase 2 — well-specified feature-adapter work through the canonical model with a render precedent; not architectural.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared Services/Compose files (ComposeDocxProjectionBuilder / ComposeDocumentRenderer) — the MOST-CONTESTED repo surface. Overlaps spaarkeai-compose-r5/r4.5/r3/r2/r1 + spaarke-ai-architecture-redesign-r2 + agreements-r1/analysis-hub-r1. Serializes behind 020 and against 021/022/024-026. Run /conflict-check before the BFF PR.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, compose</tags>
+    <estimated-effort>2-4 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Route headers/footers + page breaks through the canonical document model (from task 020). Prove header/footer
+    content and page breaks load → edit → save → reopen round-trip through the model without hard-fail, authored as
+    Word-valid w:headerReference/w:footerReference (+ header/footer parts) and page-break markup on the
+    render-on-save path.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in OOXML section properties and header/footer parts (w:sectPr, w:headerReference/w:footerReference, header/footer XML parts, w:br type="page" / w:lastRenderedPageBreak), and the Compose canonical model + render-on-save author. Follow ADRs strictly; keep Services/Compose byte[]-in / projection-out.</role>
+
+  <goal>Headers/footers and page breaks flow through the canonical model: the projection captures header/footer content + page-break positions and the renderer authors valid w:headerReference/w:footerReference (with header/footer parts) and page-break markup on the render-on-save path. A seam slice proves each construct round-trips (load→edit→save→reopen) without hard-fail.</goal>
+
+  <context>
+    <background>Spec FR-04: headers/footers and page breaks are near-term fidelity features that must round-trip through the canonical model without hard-fail. ComposeDocumentRenderer.AppendSection (:142) already handles section-level authoring, giving a render precedent to follow. (Note: template chrome part-merge for firm/matter .dotx is Phase 3 — this task is the model's own header/footer/page-break round-trip only.)</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file role="new">tests/integration/seam/Compose/</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">The generalized canonical document model (the single hub headers/footers/page breaks flow through).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Save renders headers/footers/page breaks from the canonical model per the Path-B amendment — NO surgical byte-patch, NO text-search on the save path.</constraint>
+    <constraint source="ADR-007">Services/Compose stays byte[]-in / projection-out; NO Microsoft.Graph above SpeFileStore.</constraint>
+    <constraint source="ADR-013">No AI-internal types in Services/Compose (Tier-1 NetArchTest); consume PublicContracts seams only, NO fork of Services/Ai.</constraint>
+    <constraint source="ADR-039">Engine frozen — no new AI dispatch endpoint.</constraint>
+    <constraint source="ADR-040">Persist the canonical-model/projection payload per the existing pattern.</constraint>
+    <constraint source="ADR-038">Add through-the-wire seam slices in tests/integration/seam/Compose/. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="ADR-029/010">Report BFF publish size + delta vs ~49.63 MB incl. PDBs; ≤60 MB ceiling; minimal DI.</constraint>
+    <constraint source="project">NEVER delete docxBridge.ts. Run /conflict-check before the BFF PR; state Placement Justification citing .claude/constraints/bff-extensions.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OOXML section properties / headers-footers / page breaks + Compose canonical model</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Section author precedent" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs">AppendSection:142 / SynthesizeDocument:102 — author w:sectPr + header/footer references and page breaks here from the canonical model.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load all knowledge files. Declare RIGOR LEVEL STANDARD + reason (escalate to FULL if the save discriminant is touched). Confirm task 020 canonical model is in place.</step>
+    <step order="1">Map how header/footer content, section properties, and page breaks are captured in the canonical model (task 020) and authored via AppendSection (:142).</step>
+    <step order="2">Route headers/footers + page breaks through the canonical model: projection captures them; the renderer authors valid w:headerReference/w:footerReference (+ header/footer parts) and page-break markup on the save path.</step>
+    <step order="3">Add a seam slice in tests/integration/seam/Compose/: header/footer content + page breaks load → edit → save → reopen without hard-fail.</step>
+    <step order="4">Run dotnet publish -c Release; report absolute size + delta vs ~49.63 MB. Run /conflict-check; state Placement Justification.</step>
+    <step order="5">Run/verify: BFF build + this task's seam slice + Tier-1 NetArchTest pass.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="7">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a header/footer or page-break construct cannot round-trip through the canonical model without hard-fail, STOP and escalate per §6.5 — do NOT emit a 422. Hard-tier degradation belongs in task 026; template-chrome part-merge belongs in Phase 3.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF; run the seam slice + Tier-1 NetArchTest.</tool>
+    <tool name="terminal">Run /conflict-check before the BFF PR.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (headers/footers + page breaks through the model)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs (author sectPr / header-footer refs / page breaks)</output>
+    <output type="test">tests/integration/seam/Compose/ (header/footer + page-break round-trip)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a corpus doc with headers/footers and page breaks, when it loads → edit → save → reopen, then they round-trip through the canonical model without hard-fail.</criterion>
+    <criterion testable="true">Given a save, then header/footer references (+ parts) and page-break markup are authored from the canonical model on the render-on-save path with no surgical byte-patch and no text-search.</criterion>
+    <criterion testable="true">Negative / no-regression: Tier-1 NetArchTest passes; docxBridge.ts not deleted; BFF publish ≤60 MB with delta reported vs ~49.63 MB; seam slice uses no banned mock/DI/ctor shapes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-04; plan.md §5 Phase 2. Template-chrome part-merge is Phase 3, not here. Builds on 020; seam-tested with the rest in 027. parallel-safe=false. Run /conflict-check before the BFF PR.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist. Enforce §10 publish-size gate and /conflict-check on the BFF PR.</protocol>
+  </execution>
+</task>

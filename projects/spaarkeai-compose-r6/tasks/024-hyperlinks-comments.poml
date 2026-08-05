@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Hyperlinks + comments through the canonical model</title>
+    <phase>2 Canonical model + fidelity widening</phase>
+    <gate>dep:020</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Per plan.md §5 Phase 2 — feature-adapter task routing hyperlinks + comments through the canonical model. Modifies shared Services/Compose (BFF hot-path) so BFF task obligations (publish-size, conflict-check, seam DoD) apply; narrower construct set than 020/021/022 with an R5 hyperlink precedent. Step 9.5 gates skipped at STANDARD; task-execute may escalate to FULL if a silent-loss round-trip risk is found.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Per plan.md §5 Phase 2 — well-specified feature-adapter work with an existing R5 hyperlink reference; not architectural.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared Services/Compose files (ComposeDocxProjectionBuilder / ComposeDocumentRenderer) plus the shared Spaarke.Compose.Components client — the MOST-CONTESTED repo surface. Overlaps spaarkeai-compose-r5/r4.5/r3/r2/r1 + spaarke-ai-architecture-redesign-r2 + agreements-r1/analysis-hub-r1. Serializes behind 020 and against 021-023/025/026. Run /conflict-check before the BFF PR.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, compose</tags>
+    <estimated-effort>2-4 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Route hyperlinks + comments through the canonical document model (from task 020). Prove hyperlinks and comments
+    load → edit → save → reopen round-trip through the model without hard-fail — hyperlinks authored as Word-valid
+    w:hyperlink (with relationships) and comments as w:commentRangeStart/End + comment parts on the render-on-save
+    path. Reuse the R5 hyperlink representation; do NOT re-build it.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in OOXML hyperlinks (w:hyperlink + relationship handling) and comments (w:commentReference / w:commentRangeStart/End + comments part), the R5 hyperlink work, and the Compose canonical model + render-on-save author. Follow ADRs strictly; keep Services/Compose byte[]-in / projection-out.</role>
+
+  <goal>Hyperlinks and comments flow through the canonical model: the projection captures hyperlink targets/anchors and comment ranges/content, and the renderer authors valid w:hyperlink (relationships) and comment markup (+ comments part) on the render-on-save path, reusing the R5 hyperlink representation. A seam slice proves each construct round-trips (load→edit→save→reopen) without hard-fail and with no silent-loss.</goal>
+
+  <context>
+    <background>Spec FR-04: hyperlinks and comments are near-term fidelity features that must round-trip through the canonical model without hard-fail. R5 (spaarkeai-compose-r5 task 033) already built hyperlink support (authored w:hyperlink render + edit op); R6 routes that representation through the canonical model rather than re-building it. Comments (comment ranges + comments part) are captured and re-authored through the model.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/widgets/docxBridge.ts</file>
+      <file role="new">tests/integration/seam/Compose/</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">The generalized canonical document model (the single hub hyperlinks/comments flow through).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Save renders hyperlinks/comments from the canonical model per the Path-B amendment — NO surgical byte-patch, NO text-search on the save path.</constraint>
+    <constraint source="ADR-007">Services/Compose stays byte[]-in / projection-out; NO Microsoft.Graph above SpeFileStore.</constraint>
+    <constraint source="ADR-013">No AI-internal types in Services/Compose (Tier-1 NetArchTest); consume PublicContracts seams only, NO fork of Services/Ai.</constraint>
+    <constraint source="ADR-039">Engine frozen — no new AI dispatch endpoint.</constraint>
+    <constraint source="ADR-040">Persist the canonical-model/projection payload per the existing pattern.</constraint>
+    <constraint source="ADR-038">Add through-the-wire seam slices in tests/integration/seam/Compose/. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="ADR-029/010">Report BFF publish size + delta vs ~49.63 MB incl. PDBs; ≤60 MB ceiling; minimal DI.</constraint>
+    <constraint source="project">REUSE the R5 hyperlink representation — do NOT re-build. NEVER delete docxBridge.ts. Run /conflict-check before the BFF PR; state Placement Justification citing .claude/constraints/bff-extensions.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OOXML hyperlinks + comments + Compose canonical model</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/tasks/033-g5-hyperlinks-both-paths.poml</file>
+    </files>
+    <patterns>
+      <pattern name="R5 hyperlink representation (reuse)" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs">R5 task 033 authored clean w:hyperlink (BuildRun/AssembleParagraph) with relationship handling. Reuse the representation through the canonical model.</pattern>
+      <pattern name="Render-from-model author" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs">SynthesizeDocument:102 / AppendSection:142 — author w:hyperlink + comment ranges/parts here from the canonical model.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load all knowledge files. Declare RIGOR LEVEL STANDARD + reason (escalate to FULL on a silent-loss risk). Confirm task 020 canonical model is in place; read the R5 hyperlink work (compose-r5 task 033).</step>
+    <step order="1">Map how hyperlink targets/anchors and comment ranges/content are captured in the canonical model (task 020) and authored via SynthesizeDocument.</step>
+    <step order="2">Route hyperlinks + comments through the canonical model: projection captures them; the renderer authors valid w:hyperlink (relationships) and comment markup (+ comments part) on the save path, reusing the R5 hyperlink representation.</step>
+    <step order="3">Add a seam slice in tests/integration/seam/Compose/: hyperlinks + comments load → edit → save → reopen without hard-fail and with no silent-loss (link target/text and comment anchor/content preserved).</step>
+    <step order="4">Run dotnet publish -c Release; report absolute size + delta vs ~49.63 MB. Run /conflict-check; state Placement Justification.</step>
+    <step order="5">Run/verify: BFF build + this task's seam slice + Tier-1 NetArchTest pass.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="7">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a hyperlink or comment round-trips as unrepresentable / silent-loss through the canonical model (link target/text or comment anchor/content lost), STOP and escalate per §6.5 — this is a data-loss path. Do NOT emit a 422 and do NOT re-build the R5 hyperlink work.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF; run the seam slice + Tier-1 NetArchTest.</tool>
+    <tool name="npm">Build Spaarke.Compose.Components if the client projection is touched.</tool>
+    <tool name="terminal">Run /conflict-check before the BFF PR.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (hyperlinks + comments through the model)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs (author w:hyperlink + comment ranges/parts)</output>
+    <output type="test">tests/integration/seam/Compose/ (hyperlink + comment round-trip)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a corpus doc with hyperlinks and comments, when it loads → edit → save → reopen, then both round-trip through the canonical model without hard-fail and with no silent-loss.</criterion>
+    <criterion testable="true">Given a save, then w:hyperlink (relationships) and comment markup (+ comments part) are authored from the canonical model on the render-on-save path with no surgical byte-patch and no text-search, reusing the R5 hyperlink representation.</criterion>
+    <criterion testable="true">Negative / no-regression: hyperlink handling is NOT re-built (R5 reused); Tier-1 NetArchTest passes; docxBridge.ts not deleted; BFF publish ≤60 MB with delta reported vs ~49.63 MB; seam slice uses no banned mock/DI/ctor shapes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-04; plan.md §5 Phase 2. Reuse the R5 hyperlink work (compose-r5 task 033). Builds on 020; seam-tested with the rest in 027. parallel-safe=false. Run /conflict-check before the BFF PR.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist. Enforce §10 publish-size gate and /conflict-check on the BFF PR.</protocol>
+  </execution>
+</task>

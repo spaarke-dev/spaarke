@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Measure BFF publish-size baseline (re-confirm ~49.63 MB)</title>
+    <phase>0 Foundations &amp; gates</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Single measurement + notes record; no code change — MINIMAL per root §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical measurement; sonnet default per §8.5.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>phase0-foundations</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only build measurement writing only a notes file; touches no Services/Compose/ shared source.</parallel-reason>
+    <deps>none</deps>
+    <tags>verify, bff</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Re-measure the BFF publish-size baseline by running a Release publish, recording compressed size both including and excluding PDBs, so every subsequent BFF-touching task in R6 can report an absolute size + delta against a fresh reference. Confirm (or correct) the ~49.63 MB incl.-PDB figure and state the PDB convention explicitly.</prompt>
+  <role>SPAARKE platform developer. Expertise in dotnet publish, BFF publish-size hygiene (root §10 / ADR-029), and the NFR-01 ratchet. Follow ADRs strictly.</role>
+  <goal>A notes/publish-baseline.md file recording the measured compressed publish size (incl. PDB and excl. PDB), the exact command used, the date, and a one-line statement that this is the R6 per-task delta reference against the ≤60 MB ceiling and ≥+5 MB single-task escalation threshold.</goal>
+
+  <context>
+    <background>Root §10 bullet 4 + NFR-01 require every BFF-touching task to report absolute publish size + delta vs baseline. The last recorded baseline is ~49.63 MB incl. PDBs (45.87 MB excl.) from 2026-07-08. R6 re-confirms it on the first BFF-touching task so the 010/011/012 deltas measure against a current number.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj — the publish target.</file>
+      <file role="canonical-reference">.claude/constraints/azure-deployment.md — "BFF Publish-Size Per-Task Verification Rule (NFR-01)" (the measurement + reporting convention).</file>
+      <file role="new">projects/spaarkeai-compose-r6/notes/publish-baseline.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite tasks.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-029">Scope: measure the compressed publish output of Sprk.Bff.Api only; do not add/remove packages or change DI as part of this measurement task.</constraint>
+    <constraint source="project">Scope: report BOTH incl.-PDB and excl.-PDB compressed sizes and name which convention subsequent R6 tasks will use (incl.-PDB, matching root §10).</constraint>
+    <constraint source="project">Scope: verification only — the sole committed artifact is the notes file; do not commit the publish output directory.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF publish-size hygiene; NFR-01 ratchet</topic>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Publish-size measurement" location=".claude/constraints/azure-deployment.md">Follow the NFR-01 recipe: dotnet publish -c Release -o deploy/api-publish/ then measure compressed output; report absolute + delta.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare RIGOR LEVEL: MINIMAL, model-tier sonnet. Load the azure-deployment.md NFR-01 section.</step>
+    <step order="1">Run: dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/ (into the scratchpad or gitignored output).</step>
+    <step order="2">Measure compressed size incl. PDBs and excl. PDBs.</step>
+    <step order="3">Write projects/spaarkeai-compose-r6/notes/publish-baseline.md with sizes, command, date, PDB convention, and the ≤60 MB / +5 MB threshold reminders.</step>
+    <step order="4">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="5">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the measured baseline is ≥55 MB compressed (cumulative architecture-review threshold) or otherwise materially above the ~49.63 MB reference before any R6 change, STOP and escalate per root §6 / §10 rather than proceeding into Phase 1.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">projects/spaarkeai-compose-r6/notes/publish-baseline.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Release publish, when measured, then notes/publish-baseline.md records compressed size incl. PDB and excl. PDB with the exact command and date.</criterion>
+    <criterion testable="true">Given the baseline file, when read, then it names the incl.-PDB convention as the R6 per-task reference and restates the ≤60 MB ceiling + ≥+5 MB escalation threshold.</criterion>
+    <criterion testable="true">Negative: no package/DI change is made and the publish output directory is not committed.</criterion>
+  </acceptance-criteria>
+
+  <notes>Sets the per-task delta reference used by 010/011/012/014. Baseline as of 2026-07-08: ~49.63 MB incl. PDBs (45.87 MB excl.). Root §10 bullet 4 + NFR-01.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

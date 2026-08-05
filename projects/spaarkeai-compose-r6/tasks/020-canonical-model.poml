@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Canonical document model — generalize ComposeContentModel/projection as the single hub between every source and the editor</title>
+    <phase>2 Canonical model + fidelity widening</phase>
+    <gate>dep:014</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Architectural pivot: generalizes the editor projection into THE canonical hub every downstream fidelity task (021-026) builds on. Modifies shared Services/Compose files on the most-contested BFF surface; a wrong model shape cascades into every feature adapter. FR-03 core. code-review + adr-check run at Step 9.5 (FULL/BFF/architecture).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Per plan.md §5 Phase 2 — high-blast-radius architectural generalization of the canonical model; deep OOXML/model-shape reasoning that anchors the whole phase; opus tier assigned in the plan.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared Services/Compose files (ComposeContentModel / ComposeDocxProjectionBuilder / ComposeDocumentRenderer) — the MOST-CONTESTED repo surface. Overlaps spaarkeai-compose-r5/r4.5/r3/r2/r1 + spaarke-ai-architecture-redesign-r2 + ai-advanced-capabilities-agreements-r1/analysis-hub-r1. Anchor task of Phase 2; every 021-026 adapter serializes behind it. Run /conflict-check before the BFF PR.</parallel-reason>
+    <deps>014</deps>
+    <tags>bff-api, compose</tags>
+    <estimated-effort>1-2 weeks</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Generalize the existing editor projection (ComposeContentModel / ComposeDocxProjectionBuilder) into the single
+    canonical document model that sits between EVERY source format and the editor: every source becomes the model,
+    the editor edits the model, and save renders the model out (FR-03). This is an EXTENSION of the existing
+    projection — not a new model type. Reuse the R4.5 NumberingComputationEngine (ComposeDocxProjectionBuilder.cs:1357)
+    for numbering. Prove docx projects into the canonical model and the model renders back out through
+    ComposeDocumentRenderer.SynthesizeDocument on the render-on-save path with no hard-fail.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in OOXML (DocumentFormat.OpenXml 3.5.1), the Compose canonical projection (ComposeContentModel), the render-from-model author (ComposeDocumentRenderer), and the render-on-save architecture codified by the ADR-049 Path-B amendment. Follow ADRs strictly; keep Services/Compose byte[]-in / projection-out.</role>
+
+  <goal>ComposeContentModel is generalized into the single canonical hub: docx projects into it via ComposeDocxProjectionBuilder, the editor edits it, and ComposeDocumentRenderer.SynthesizeDocument renders it back to a fresh docx on the save path. The model is source-agnostic (docx today, PDF-ready by shape for Phase 4), reuses NumberingComputationEngine for numbering, and persists per ADR-040. A seam slice proves docx → canonical model → render round-trips without hard-fail and the NDA fixture still saves (no 422). No new parallel model type is introduced; the existing projection is extended.</goal>
+
+  <context>
+    <background>Spec FR-03 (canonical document model): the render-on-save pivot (Phase 1) routes all saves through render-from-model; Phase 2 makes the model the single hub so every source format (docx now, PDF in Phase 4) and every fidelity feature (021-026) flows through one representation. The R4.5 NumberingComputationEngine (deterministic, numId-scoped per ECMA-376) is reused, not re-implemented. This is the Phase-2 anchor: 021-026 each widen a feature THROUGH this model.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/widgets/docxBridge.ts</file>
+      <file role="new">tests/integration/seam/Compose/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="014" status="pending">Phase-1 render-on-save cutover deployed + UAT-passed (SaveAsync routes Imported through render-from-model; count-gate dropped). The canonical-model generalization builds on the render-on-save save path.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Save renders a fresh docx from the canonical model per the Path-B amendment (task 001) — NO surgical byte-patch and NO text-search on the save path. The canonical model is the single source the renderer authors from; version history is the fidelity safety net.</constraint>
+    <constraint source="ADR-007">Services/Compose stays byte[]-in / projection-out; NO Microsoft.Graph types above SpeFileStore. The canonical model is a pure in-memory projection.</constraint>
+    <constraint source="ADR-013">No AI-internal types (IOpenAiClient / executors / routing) in Services/Compose (Tier-1 NetArchTest). Consume Services/Ai/PublicContracts/ seams only — NO fork of Services/Ai (sole owner: spaarke-ai-architecture-redesign-r2).</constraint>
+    <constraint source="ADR-039">Engine frozen — add NO new AI dispatch endpoint. The canonical model is a projection/render concern, not a dispatch surface.</constraint>
+    <constraint source="ADR-040">Persist the canonical model / projection payload per the existing session-ledger pattern; do not invent a new persistence channel.</constraint>
+    <constraint source="ADR-038">Add through-the-wire WebApplicationFactory seam slices in tests/integration/seam/Compose/. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="ADR-029/010">Report absolute BFF publish size + delta vs ~49.63 MB incl. PDBs baseline (re-measured task 003); ≤60 MB compressed ceiling; minimal DI (no new singletons unless justified).</constraint>
+    <constraint source="project">NEVER delete docxBridge.ts (exports buildContentModel/stampParaIds/paraId helpers the write path depends on — only the mammoth READ fn was removed in R4.5). Reuse NumberingComputationEngine (ComposeDocxProjectionBuilder.cs:1357) — do NOT re-implement. Run /conflict-check before the BFF PR; state Placement Justification citing .claude/constraints/bff-extensions.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Compose canonical model + render-on-save</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+      <file>projects/spaarkeai-compose-r6/plan.md</file>
+    </files>
+    <patterns>
+      <pattern name="Render-from-model author" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs">SynthesizeDocument:102 (render-from-model precedent) / AppendSection:142 (author-not-patch) — the canonical model must render out through this author on the save path.</pattern>
+      <pattern name="Numbering engine (reuse)" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs">NumberingComputationEngine:1357 — deterministic, numId-scoped; reuse for numbering in the canonical model, do not re-implement.</pattern>
+      <pattern name="Save-path discriminant" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs">SaveAsync:642, Authored/Imported branch :714 — both branches now render the canonical model.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>Closest neighbors: ComposeContentModel + ComposeDocxProjectionBuilder.cs (the existing editor projection) and ComposeDocumentRenderer.SynthesizeDocument:102 (the existing render-from-model author). A projection already exists — this task generalizes it, it does not introduce a parallel model.</existing>
+    <extension>Yes — EXTEND the existing ComposeContentModel/projection into the single source-agnostic hub. Not a new model type, not a new service. Per spec §"New Components": render-on-save routing and the canonical model are explicitly "modify/extend existing → no new-component justification required"; this brief justification is stated per the operator directive since the model is broadened.</extension>
+    <cost-of-doing-nothing>Without one canonical hub, each source (docx, PDF) and each fidelity feature (021-026) would need its own projection/render pairing — the exact fan-out that produced the R3→R5 anchor bug class. FR-03 acceptance (docx and PDF projecting into the same model; golden-label numbering parity) cannot be met.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load all knowledge files. Declare RIGOR LEVEL FULL + reason. Confirm task 014 (Phase-1 cutover) is complete and the render-on-save save path is live.</step>
+    <step order="1">Read ComposeContentModel + ComposeDocxProjectionBuilder.cs and ComposeDocumentRenderer.SynthesizeDocument:102 / AppendSection:142. Map the current projection shape and where it is source-specific (docx-only assumptions) vs source-agnostic.</step>
+    <step order="2">Generalize ComposeContentModel into the single canonical hub: a source-agnostic block/inline model that docx projects INTO (via ComposeDocxProjectionBuilder) and that renders OUT via ComposeDocumentRenderer.SynthesizeDocument. Keep it PDF-ready by shape (Phase 4) without building PDF intake here.</step>
+    <step order="3">Wire numbering through NumberingComputationEngine (ComposeDocxProjectionBuilder.cs:1357) — reuse, do not re-implement. Ensure numbering labels are computed deterministically (numId-scoped).</step>
+    <step order="4">Ensure ComposeService.SaveAsync (:642 / :714) renders the canonical model out on both branches on the render-on-save path; persist the canonical-model/projection payload per ADR-040.</step>
+    <step order="5">Add a seam slice in tests/integration/seam/Compose/: docx → canonical model → render round-trips without hard-fail; the NDA fixture saves (no 422) and produces a new SPE version.</step>
+    <step order="6">Run dotnet publish -c Release; report absolute size + delta vs ~49.63 MB (incl. PDBs). Run /conflict-check; state Placement Justification in the PR.</step>
+    <step order="7">Run/verify: BFF build + this task's seam slice + Tier-1 NetArchTest pass.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If generalizing ComposeContentModel would require introducing a second/parallel model type (not an extension of the existing projection), STOP and escalate per CLAUDE.md §11 / §6.5 — the directive is extend-not-new.</trigger>
+    <trigger>If the render-on-save path would need text-search or surgical anchoring to render the canonical model faithfully, STOP (ADR-049 Path-B amendment: no text-search / no surgical anchoring on the save path).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF; run the seam slice + Tier-1 NetArchTest.</tool>
+    <tool name="terminal">Run /conflict-check before the BFF PR.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (generalized canonical model)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (render-out of canonical model on save)</output>
+    <output type="test">tests/integration/seam/Compose/ (docx → canonical model → render round-trip)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a corpus docx, when it is projected then rendered on the save path, then it round-trips through the single canonical ComposeContentModel without hard-fail and produces a new immutable SPE version.</criterion>
+    <criterion testable="true">Given the NDA fixture, when saved after an edit, then it succeeds (no 422) with no surgical-anchor code on the save path.</criterion>
+    <criterion testable="true">Given the corpus numbering exemplars, when projected through the canonical model, then numbering labels match Word (R4.5 golden labels) via the reused NumberingComputationEngine.</criterion>
+    <criterion testable="true">Given the canonical model, then it is source-agnostic by shape (no docx-only coupling that blocks a future PDF projection) — verified by the model's public shape, not by building PDF intake.</criterion>
+    <criterion testable="true">Negative / no-regression: no new parallel model type is introduced (extension only); Tier-1 NetArchTest passes (no AI internals in Services/Compose); docxBridge.ts is not deleted; BFF publish ≤60 MB with delta reported vs ~49.63 MB; seam slice uses no banned mock/DI/ctor shapes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-03; plan.md §5 Phase 2 (anchor task) + §6 critical path (014 → 020 → 027). EXTEND the existing projection — justification emitted above. Phase-2 anchor: 021-026 build on this model; 027 seam-tests them. parallel-safe=false (most-contested Compose surface). Run /conflict-check before the BFF PR.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist incl. Step 9.5 gates (code-review + adr-check, FULL/BFF). Enforce §10 publish-size gate and /conflict-check.</protocol>
+  </execution>
+</task>

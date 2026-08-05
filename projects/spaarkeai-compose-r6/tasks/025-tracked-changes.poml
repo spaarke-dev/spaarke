@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Tracked-changes (redlines) through the canonical model</title>
+    <phase>2 Canonical model + fidelity widening</phase>
+    <gate>dep:020</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tracked-changes markup (w:ins/w:del/w:*Change) is legal-correctness critical — invalid revision markup breaks Word accept/reject and a silent-loss redline is data loss. Modifies shared Services/Compose files on the most-contested BFF surface; save/projection change requires ADR-038 seam DoD. code-review + adr-check run at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Per plan.md §5 Phase 2 — routes the existing R5 tracked-changes representation through the canonical model; well-specified feature-adapter work with an existing reference, not new architecture.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared Services/Compose files (ComposeDocxProjectionBuilder / ComposeDocumentRenderer, tracked-change representation) — the MOST-CONTESTED repo surface. Overlaps spaarkeai-compose-r5 (owner of the tracked-change/redline work) + r4.5/r3/r2/r1 + spaarke-ai-architecture-redesign-r2 + agreements-r1/analysis-hub-r1. Serializes behind 020 and against 021-024/026. Run /conflict-check before the BFF PR.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, compose</tags>
+    <estimated-effort>3-6 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Route tracked-changes (redlines) through the canonical document model (from task 020). Prove tracked insertions,
+    deletions, and property changes load → edit → save → reopen round-trip through the model as Word-valid revision
+    markup (w:ins/w:del/w:pPrChange/w:rPrChange) without hard-fail and with no silent-loss of existing redlines.
+    Reuse the R5 tracked-change / redline representation; do NOT re-build it.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in OOXML tracked-changes / revision markup (w:ins/w:del/w:moveFrom/w:moveTo/w:pPrChange/w:rPrChange, revision ids/authors/dates), the R5 tracked-change work, and the Compose canonical model + render-on-save author. Follow ADRs strictly; keep Services/Compose byte[]-in / projection-out.</role>
+
+  <goal>Tracked-changes flow through the canonical model: the projection captures revisions (insertions/deletions/property changes with author/date/id) and the renderer authors Word-valid revision markup on the render-on-save path, reusing the R5 redline representation. A seam slice proves tracked-changes round-trip (load→edit→save→reopen) as Word-valid revision markup — openable in Word with real accept/reject — without hard-fail and with no silent-loss of pre-existing redlines.</goal>
+
+  <context>
+    <background>Spec FR-04: tracked-changes (redlines) are a near-term fidelity feature that must round-trip through the canonical model without hard-fail. R5 (spaarkeai-compose-r5 — G11 redline visibility, G12 accept/reject imported revisions, tracked-table work) built the redline representation; R6 routes it through the canonical model rather than re-building it. Preserving pre-existing imported redlines (no silent-loss) is a hard invariant.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/widgets/importedRevisions.ts</file>
+      <file role="new">tests/integration/seam/Compose/</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">The generalized canonical document model (the single hub tracked-changes flow through).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Save renders tracked-changes from the canonical model per the Path-B amendment — NO surgical byte-patch, NO text-search on the save path. Pre-existing redlines are represented in the model and re-authored, not surgically preserved.</constraint>
+    <constraint source="ADR-007">Services/Compose stays byte[]-in / projection-out; NO Microsoft.Graph above SpeFileStore.</constraint>
+    <constraint source="ADR-013">No AI-internal types in Services/Compose (Tier-1 NetArchTest); consume PublicContracts seams only, NO fork of Services/Ai.</constraint>
+    <constraint source="ADR-039">Engine frozen — no new AI dispatch endpoint. Reuse the existing closed-catalog redline representation; do not fork.</constraint>
+    <constraint source="ADR-040">Persist the canonical-model/projection payload per the existing pattern.</constraint>
+    <constraint source="ADR-038">Add through-the-wire seam slices in tests/integration/seam/Compose/ on a redline corpus fixture. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="ADR-029/010">Report BFF publish size + delta vs ~49.63 MB incl. PDBs; ≤60 MB ceiling; minimal DI.</constraint>
+    <constraint source="project">REUSE the R5 tracked-change / redline representation — do NOT re-build. Coordinate with spaarkeai-compose-r5. NEVER delete docxBridge.ts. Run /conflict-check before the BFF PR; state Placement Justification citing .claude/constraints/bff-extensions.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OOXML tracked-changes / revisions + Compose canonical model</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/tasks/012-g12-accept-reject-revision-single.poml</file>
+      <file>projects/spaarkeai-compose-r5/tasks/032-g11-track-changes-off-redline-visibility.poml</file>
+    </files>
+    <patterns>
+      <pattern name="R5 redline representation (reuse)" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs">R5 built tracked insertions/deletions (ApplyInsertText / WrapRunAsDeleted) + accept/reject of imported revisions (G12). Reuse the revision representation through the canonical model.</pattern>
+      <pattern name="Render-from-model author" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs">SynthesizeDocument:102 — author Word-valid w:ins/w:del/w:*Change here from the canonical model.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load all knowledge files. Declare RIGOR LEVEL FULL + reason. Confirm task 020 canonical model is in place; read the R5 redline work (compose-r5 tasks 012/013/032) and coordinate.</step>
+    <step order="1">Map how revisions (insertions/deletions/property changes with author/date/id) are captured in the canonical model (task 020) and authored via SynthesizeDocument.</step>
+    <step order="2">Route tracked-changes through the canonical model: projection captures revisions; the renderer authors Word-valid w:ins/w:del/w:pPrChange/w:rPrChange on the save path, reusing the R5 redline representation; pre-existing imported redlines survive round-trip.</step>
+    <step order="3">Add a seam slice in tests/integration/seam/Compose/ on a redline corpus fixture: tracked insertions/deletions/property changes load → edit → save → reopen as Word-valid revision markup (real accept/reject) without hard-fail and with no silent-loss.</step>
+    <step order="4">Run dotnet publish -c Release; report absolute size + delta vs ~49.63 MB. Run /conflict-check; state Placement Justification.</step>
+    <step order="5">Run/verify: BFF build + this task's seam slice + Tier-1 NetArchTest pass.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="7">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a tracked-change construct cannot be authored as Word-valid revision markup from the canonical model, STOP and escalate per §6.5 — do NOT emit invalid revision markup and do NOT emit a 422.</trigger>
+    <trigger>If routing redlines through the canonical model would silently drop a pre-existing imported redline, STOP — this is a data-loss path.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF; run the seam slice + Tier-1 NetArchTest.</tool>
+    <tool name="terminal">Run /conflict-check before the BFF PR.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (tracked-changes through the model)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs (author w:ins/w:del/w:*Change)</output>
+    <output type="test">tests/integration/seam/Compose/ (tracked-changes round-trip on a redline corpus fixture)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a redline corpus doc, when it loads → edit → save → reopen, then tracked insertions/deletions/property changes round-trip through the canonical model as Word-valid revision markup (openable in Word with real accept/reject) without hard-fail.</criterion>
+    <criterion testable="true">Given a doc with pre-existing imported redlines, when saved through the model, then those redlines are preserved (no silent-loss).</criterion>
+    <criterion testable="true">Given a save, then revision markup is authored from the canonical model on the render-on-save path with no surgical byte-patch and no text-search, reusing the R5 redline representation.</criterion>
+    <criterion testable="true">Negative / no-regression: redline handling is NOT re-built (R5 reused); Tier-1 NetArchTest passes; docxBridge.ts not deleted; BFF publish ≤60 MB with delta reported vs ~49.63 MB; seam slice uses no banned mock/DI/ctor shapes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-04; plan.md §5 Phase 2. Reuse the R5 tracked-change/redline work (compose-r5 G11/G12/tables). Builds on 020; seam-tested with the rest in 027. Coordinate with spaarkeai-compose-r5. parallel-safe=false. Run /conflict-check before the BFF PR.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist incl. Step 9.5 gates (code-review + adr-check, FULL/BFF). Enforce §10 publish-size gate and /conflict-check.</protocol>
+  </execution>
+</task>

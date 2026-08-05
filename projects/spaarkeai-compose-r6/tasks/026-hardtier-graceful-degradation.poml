@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Hard-tier graceful degradation — text boxes / drawings / fields / content controls accept-flatten + warning (the exact NDA breakers; MUST NOT 422)</title>
+    <phase>2 Canonical model + fidelity widening</phase>
+    <gate>dep:020</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>This is the graceful-degradation guarantee that makes the render-on-save pivot safe: the hard-tier constructs (text boxes/drawings/fields/content controls) are exactly what hard-failed the surgical patcher on the NDA (the 422). A wrong degradation path either 422s (regression) or silently loses content (data loss). Modifies shared Services/Compose on the most-contested BFF surface; ADR-038 seam DoD. code-review + adr-check run at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Per plan.md §5 Phase 2 — well-specified degradation rule (accept-flatten + surfaced warning) over a known construct set with a clear acceptance oracle (NDA no-422); not new architecture.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared Services/Compose files (ComposeDocxProjectionBuilder / ComposeDocumentRenderer) + surfaces a warning through the shared client — the MOST-CONTESTED repo surface. Overlaps spaarkeai-compose-r5/r4.5/r3/r2/r1 + spaarke-ai-architecture-redesign-r2 + agreements-r1/analysis-hub-r1. Serializes behind 020 and against 021-025. Run /conflict-check before the BFF PR.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, compose</tags>
+    <estimated-effort>3-6 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Implement graceful degradation for the HARD-tier constructs — text boxes, drawings, fields, and content
+    controls (exactly what broke the surgical patcher on AppligentNDA_Signed.docx and produced the 422). When the
+    canonical model encounters a hard-tier construct it CANNOT faithfully round-trip, it MUST accept-flatten it
+    (preserve visible text/content in a degraded form) and surface a user-visible warning — and it MUST NOT 422.
+    The prior version stays retrievable via version history (FR-07). Prove on the NDA fixture that each hard-tier
+    construct flattens without hard-failing, with a warning.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in the hard-tier OOXML constructs (w:txbxContent / VML + DrawingML text boxes, w:drawing / pict, w:fldSimple / complex fields w:fldChar, w:sdt content controls, mc:AlternateContent), the Compose canonical model + render-on-save author, and honest-degradation UX. Follow ADRs strictly; keep Services/Compose byte[]-in / projection-out.</role>
+
+  <goal>Hard-tier constructs (text boxes, drawings, fields, content controls) degrade gracefully through the canonical model: when a construct cannot faithfully round-trip, it is accept-flattened (visible text/content preserved in a degraded form) and a user-visible warning is surfaced; the save NEVER 422s. A seam slice on the NDA fixture (and the corpus hard-tier exemplars) proves each hard-tier construct flattens without hard-failing, emits a warning, and the save succeeds producing a new SPE version; the prior version remains retrievable (FR-07 safety net).</goal>
+
+  <context>
+    <background>Spec FR-04: "Hard-tier constructs (text boxes, drawings, fields, content controls — exactly what broke the surgical patcher on the NDA) degrade gracefully (accept-flatten) and are surfaced as warnings, never a 422." This is the graceful-degradation GUARANTEE that lets render-on-save ship safely: the render-on-save pivot removes the anchor bug class, and hard-tier degradation ensures the residual unrepresentable constructs never re-introduce a hard-fail. The NDA (AppligentNDA_Signed.docx, corpus fixture from task 004) carries text boxes / mc:AlternateContent / duplicate paraIds — the exact breakers. Version history (FR-07) is the fidelity safety net for anything flattened.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/widgets/docxBridge.ts</file>
+      <file role="new">tests/integration/seam/Compose/</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">The generalized canonical document model (the single hub through which hard-tier constructs are detected + degraded).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Save renders from the canonical model per the Path-B amendment — NO surgical byte-patch, NO text-search on the save path. Hard-tier constructs are flattened during projection/render, never surgically patched. Version history is the fidelity safety net for flattened content (amendment point 2).</constraint>
+    <constraint source="project">A hard-tier construct MUST accept-flatten (preserve visible text/content in a degraded form) + surface a user-visible warning. It MUST NOT 422 and MUST NOT silently drop visible content. This is the non-negotiable graceful-degradation guarantee (spec FR-04).</constraint>
+    <constraint source="ADR-007">Services/Compose stays byte[]-in / projection-out; NO Microsoft.Graph above SpeFileStore.</constraint>
+    <constraint source="ADR-013">No AI-internal types in Services/Compose (Tier-1 NetArchTest); consume PublicContracts seams only, NO fork of Services/Ai.</constraint>
+    <constraint source="ADR-039">Engine frozen — no new AI dispatch endpoint.</constraint>
+    <constraint source="ADR-040">Persist the canonical-model/projection payload (incl. any degradation warnings) per the existing pattern.</constraint>
+    <constraint source="ADR-038">Add through-the-wire seam slices in tests/integration/seam/Compose/ on the NDA fixture + hard-tier exemplars. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="ADR-029/010">Report BFF publish size + delta vs ~49.63 MB incl. PDBs; ≤60 MB ceiling; minimal DI.</constraint>
+    <constraint source="project">NEVER delete docxBridge.ts. Run /conflict-check before the BFF PR; state Placement Justification citing .claude/constraints/bff-extensions.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Hard-tier OOXML constructs + graceful degradation + Compose canonical model</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+      <file>tests/fixtures/compose-corpus/corpus-manifest.md</file>
+    </files>
+    <patterns>
+      <pattern name="Render-from-model author" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs">SynthesizeDocument:102 — the canonical model renders out here; hard-tier constructs are already flattened in the model, so the author never has to represent them faithfully.</pattern>
+      <pattern name="Warning surfacing" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs">SaveAsync:642 — return degradation warnings in the save response (success with warnings), never a 422, so the client can surface them.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load all knowledge files. Declare RIGOR LEVEL FULL + reason. Confirm task 020 canonical model is in place and the NDA fixture (task 004) is in tests/fixtures/compose-corpus/.</step>
+    <step order="1">Enumerate the hard-tier constructs (text boxes incl. VML/DrawingML + mc:AlternateContent, drawings, fields simple+complex, content controls w:sdt) and how each appears in the projected docx. Cross-check against the NDA fixture's actual breakers.</step>
+    <step order="2">In projection/render, detect each hard-tier construct and accept-flatten it: preserve visible text/content in a degraded (paragraph/run) form in the canonical model; discard only the unrepresentable structural wrapper. Record a structured degradation warning per flattened construct.</step>
+    <step order="3">Surface the warnings: return them in the save response (success-with-warnings) and thread them to a user-visible warning in the client — NEVER a 422. Confirm the prior version stays retrievable (FR-07 safety net).</step>
+    <step order="4">Add a seam slice in tests/integration/seam/Compose/ on the NDA fixture + hard-tier exemplars: each hard-tier construct flattens, a warning is emitted, the save succeeds (no 422) and produces a new SPE version, and visible content is preserved (no silent drop).</step>
+    <step order="5">Run dotnet publish -c Release; report absolute size + delta vs ~49.63 MB. Run /conflict-check; state Placement Justification.</step>
+    <step order="6">Run/verify: BFF build + this task's seam slice + Tier-1 NetArchTest pass.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a hard-tier construct cannot be flattened without silently dropping VISIBLE content (i.e. accept-flatten would lose user-visible text), STOP and escalate per §6.5 — decide with the operator whether to flatten-with-warning or preserve-as-opaque. A 422 is NEVER an acceptable outcome for a hard-tier construct.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF; run the seam slice + Tier-1 NetArchTest.</tool>
+    <tool name="npm">Build Spaarke.Compose.Components for the warning surfacing.</tool>
+    <tool name="terminal">Run /conflict-check before the BFF PR.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (hard-tier detection + accept-flatten)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (success-with-warnings save response)</output>
+    <output type="test">tests/integration/seam/Compose/ (NDA + hard-tier accept-flatten + no-422 slice)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the NDA fixture (text boxes / mc:AlternateContent / duplicate paraIds), when it is saved through the canonical model, then it succeeds (NO 422), produces a new SPE version, and emits a user-visible degradation warning.</criterion>
+    <criterion testable="true">Given each hard-tier construct (text box, drawing, field, content control), when encountered, then it is accept-flattened (visible text/content preserved in degraded form) with a warning — never silently dropped and never a 422.</criterion>
+    <criterion testable="true">Given a flattened construct, then the prior (pre-flatten) version remains retrievable via version history (FR-07 safety net).</criterion>
+    <criterion testable="true">Negative / no-regression: no code path produces a 422 for a hard-tier construct; no visible content is silently lost; Tier-1 NetArchTest passes; docxBridge.ts not deleted; BFF publish ≤60 MB with delta reported vs ~49.63 MB; seam slice uses no banned mock/DI/ctor shapes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-04 (graceful-degradation guarantee); plan.md §5 Phase 2. The exact NDA breakers — MUST NOT 422. Builds on 020; the no-422 behavior is asserted broadly in 027. Version history (FR-07) is the safety net for flattened content. parallel-safe=false. Run /conflict-check before the BFF PR.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist incl. Step 9.5 gates (code-review + adr-check, FULL/BFF). Enforce §10 publish-size gate and /conflict-check.</protocol>
+  </execution>
+</task>

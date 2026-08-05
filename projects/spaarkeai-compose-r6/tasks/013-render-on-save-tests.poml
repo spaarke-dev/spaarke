@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Seam + regression tests: NDA saves (no 422), edits land, new SPE version produced</title>
+    <phase>1 Render-on-save core</phase>
+    <gate>blocked — requires 004 (NDA fixture) + 012 (surgical save path retired)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Test-modifying task (tags testing/seam; modifies tests/**) — FULL UNCONDITIONALLY per root §8 TEST-MODIFYING override.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified seam/regression tests over the shipped save path; sonnet default per §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>Vertical-slice seam + regression over a contested save path with fixture wiring; high per §8.5.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Adds tests under tests/integration/seam/Compose/** covering the contested Compose save path; serialize with the Compose code tasks to avoid seam-fixture contention.</parallel-reason>
+    <deps>004, 012</deps>
+    <tags>testing, seam</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add ADR-038 seam + regression tests proving the render-on-save pivot: saving the NDA fixture after edits succeeds (no 422), the edits land correctly in the rendered docx, and a new immutable SPE version is produced — with no surgical-anchor code executed on the save path. The NDA becomes a permanent regression fixture.</prompt>
+  <role>SPAARKE platform developer. Expertise in ADR-038 vertical-slice seam testing, the Compose save path, and OOXML assertion. Follow ADRs strictly.</role>
+  <goal>New tests under tests/integration/seam/Compose/** and tests/integration/regression/** that (a) round-trip the NDA fixture through SaveAsync and assert no 422 + edits present + a new SPE version, and (b) assert statically/behaviorally that the surgical patcher/count-gate is not invoked on the save path — all green, using no banned mock/DI/ctor-null test shapes.</goal>
+
+  <context>
+    <background>spec FR-01/FR-02 acceptance + NFR-05: every save change adds/updates seam + fidelity slices; the NDA 422 moves from UAT to a CI regression. The pivot (010/011/012) is proven here. ADR-038 KEEP paths: tests/integration/seam/** (vertical-slice) + tests/integration/regression/**; banned: Mock&lt;HttpMessageHandler&gt;, DI-registration, ctor-null tests.</background>
+    <relevant-files>
+      <file role="new">tests/integration/seam/Compose/RenderOnSaveSeamTests.cs — vertical-slice: NDA load→edit→save→reopen; new-version + edits-land assertions.</file>
+      <file role="new">tests/integration/regression/NdaSaveNo422RegressionTests.cs — regression: NDA save must not 422; no surgical-anchor path executed.</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/AppligentNDA_Signed.docx — the fixture from task 004.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs:714 — the save path under test.</file>
+      <file role="canonical-reference">tests/integration/seam/Compose/** — existing Compose seam tests are the shape/pattern to mirror.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="004" status="pending">NDA fixture in tests/fixtures/compose-corpus/ (LFS).</dependency>
+      <dependency task="012" status="pending">Surgical save path retired; render-on-save is the shipped behavior under test.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Scope: use tests/integration/seam/** (vertical-slice-seam) + tests/integration/regression/** KEEP paths only; MUST NOT add Mock&lt;HttpMessageHandler&gt;, DI-registration, or ctor-null-check tests.</constraint>
+    <constraint source="ADR-038">Scope: coverage is observation, not a gate — assert behavior (no 422, edits present, new version), not line coverage.</constraint>
+    <constraint source="project">Scope: assert render-on-save behaviorally — the surgical patcher/count-gate is not invoked on the NDA save; do not test private internals via reflection where a seam assertion suffices.</constraint>
+    <constraint source="ADR-007">Scope: exercise the save path through the SpeFileStore seam; do not introduce Microsoft.Graph mocks above SpeFileStore.</constraint>
+    <constraint source="project">Scope: these are MAINTAIN-class regression tests (the NDA 422 must never return) — mark/keep them so /test-diet retains them at their KEEP path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ADR-038 seam/regression testing; Compose save path; OOXML assertion</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+    <patterns>
+      <pattern name="Vertical-slice seam" location="tests/integration/seam/Compose/">Mirror the existing Compose seam test structure; drive SaveAsync end-to-end through the SpeFileStore seam.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare RIGOR LEVEL: FULL (TEST-MODIFYING override), model-tier sonnet, effort high. Confirm 004 fixture + 012 code landed (gate).</step>
+    <step order="1">Read existing tests/integration/seam/Compose/** to match the seam pattern + fixture-loading convention.</step>
+    <step order="2">Write RenderOnSaveSeamTests: load the NDA, apply an edit, save, reopen; assert no 422, edit present, a new SPE version exists.</step>
+    <step order="3">Write NdaSaveNo422RegressionTests: assert the NDA save does not 422 and no surgical-anchor path executes on the save path.</step>
+    <step order="4">Run dotnet test; confirm green; confirm no banned mock/DI/ctor shapes were introduced.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the NDA still 422s or edits do not land after 010/011/012, STOP and escalate per root §6 — the pivot is not complete; do not weaken the test to make it pass.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="test">tests/integration/seam/Compose/RenderOnSaveSeamTests.cs</output>
+    <output type="test">tests/integration/regression/NdaSaveNo422RegressionTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the NDA fixture, when loaded → edited → saved, then the save returns success (no 422), the edit is present in the reopened docx, and a new SPE version exists.</criterion>
+    <criterion testable="true">Given the NDA save, when asserted, then no surgical-anchor / count-gate code path is executed on the save path.</criterion>
+    <criterion testable="true">Negative: the test suite adds NO Mock&lt;HttpMessageHandler&gt;, DI-registration, or ctor-null-check test.</criterion>
+    <criterion testable="true">All new + existing tests pass; dotnet test is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Critical path 001→010→011→012→013→014. Proves Success Criterion 1 at the seam level; the fidelity harness (060) later seeds from the same NDA fixture. spec FR-01/FR-02/NFR-05.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Tables through the canonical model (reuse the R5 tracked-table work)</title>
+    <phase>2 Canonical model + fidelity widening</phase>
+    <gate>dep:020</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tables are the most complex OOXML construct (w:tbl/w:tr/w:tc); invalid markup breaks Word. Modifies shared Services/Compose files on the most-contested BFF surface; save/projection change requires ADR-038 seam DoD + round-trip parity. code-review + adr-check run at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Per plan.md §5 Phase 2 — reuse of the R5 tracked-table work routed through the canonical model; well-specified feature-adapter work with an existing reference implementation, not new architecture.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared Services/Compose files (ComposeDocxProjectionBuilder / ComposeDocumentRenderer) — the MOST-CONTESTED repo surface. Overlaps spaarkeai-compose-r5 (which owns the R5 tracked-table code being reused) + r4.5/r3/r2/r1 + spaarke-ai-architecture-redesign-r2 + agreements-r1/analysis-hub-r1. Serializes behind 020 and against 021/023-026. Run /conflict-check before the BFF PR.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, compose</tags>
+    <estimated-effort>3-6 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Route tables through the canonical document model (from task 020), REUSING the R5 tracked-table work
+    (w:tbl/w:tr/w:tc structure and its tracked-table markup) rather than re-building table handling. Prove tables
+    load → edit → save → reopen round-trip through the model as Word-valid table markup without hard-fail.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in OOXML table markup (w:tbl/w:tr/w:tc, w:tblPr/w:trPr/w:tcPr), the R5 tracked-table implementation, and the Compose canonical model + render-on-save author. Follow ADRs strictly; keep Services/Compose byte[]-in / projection-out.</role>
+
+  <goal>Tables flow through the canonical model: the projection captures table structure (rows/cells/properties) and the renderer authors Word-valid w:tbl on the render-on-save path, reusing the R5 tracked-table work. A seam slice on a table corpus doc proves tables round-trip (load→edit→save→reopen) as Word-valid markup without hard-fail.</goal>
+
+  <context>
+    <background>Spec FR-04 explicitly says "tables (reuse the R5 tracked-table work)". R5 (spaarkeai-compose-r5 task 014) built full tracked table structure (w:tblPrChange + row/cell w:ins/w:del) in the surgical engine; R6 reuses that table representation through the canonical model on the render-on-save path. Tables are a near-term fidelity feature that must round-trip without hard-fail.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</file>
+      <file role="new">tests/integration/seam/Compose/</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">The generalized canonical document model (the single hub tables flow through).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Save renders tables from the canonical model per the Path-B amendment — NO surgical byte-patch, NO text-search on the save path. (The R5 tracked-table markup is REUSED as a representation, not re-run as a surgical patch on save.)</constraint>
+    <constraint source="ADR-007">Services/Compose stays byte[]-in / projection-out; NO Microsoft.Graph above SpeFileStore.</constraint>
+    <constraint source="ADR-013">No AI-internal types in Services/Compose (Tier-1 NetArchTest); consume PublicContracts seams only, NO fork of Services/Ai.</constraint>
+    <constraint source="ADR-039">Engine frozen — no new AI dispatch endpoint. Reuse the existing closed-catalog table representation; do not fork.</constraint>
+    <constraint source="ADR-040">Persist the canonical-model/projection payload per the existing pattern.</constraint>
+    <constraint source="ADR-038">Add through-the-wire seam slices in tests/integration/seam/Compose/ on a table corpus fixture. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="ADR-029/010">Report BFF publish size + delta vs ~49.63 MB incl. PDBs; ≤60 MB ceiling; minimal DI.</constraint>
+    <constraint source="project">REUSE the R5 tracked-table work — do NOT re-build table handling. Coordinate with spaarkeai-compose-r5 (owner of the R5 table code). NEVER delete docxBridge.ts. Run /conflict-check before the BFF PR; state Placement Justification citing .claude/constraints/bff-extensions.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OOXML tables + Compose canonical model</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/tasks/014-g4-tables-full-tracked.poml</file>
+    </files>
+    <patterns>
+      <pattern name="R5 tracked-table representation (reuse)" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs">R5 task 014 built w:tblPrChange + row/cell w:ins/w:del structure. Reuse the table representation through the canonical model; do not re-derive.</pattern>
+      <pattern name="Render-from-model author" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs">SynthesizeDocument:102 / AppendSection:142 — author Word-valid w:tbl here from the canonical model.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load all knowledge files. Declare RIGOR LEVEL FULL + reason. Confirm task 020 canonical model is in place; read the R5 tracked-table work (compose-r5 task 014) and coordinate.</step>
+    <step order="1">Map the R5 table representation and the canonical model's block shape (task 020). Decide how table structure (rows/cells/properties) is captured in the projection and authored back out.</step>
+    <step order="2">Route tables through the canonical model: projection captures table structure; the renderer authors Word-valid w:tbl on the save path, reusing the R5 table markup work.</step>
+    <step order="3">Add a seam slice in tests/integration/seam/Compose/ on a table corpus doc: table loads → edit → save → reopen as Word-valid markup without hard-fail; untouched content unaffected.</step>
+    <step order="4">Run dotnet publish -c Release; report absolute size + delta vs ~49.63 MB. Run /conflict-check; state Placement Justification.</step>
+    <step order="5">Run/verify: BFF build + this task's seam slice + Tier-1 NetArchTest pass.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="7">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a table construct cannot round-trip through the canonical model as Word-valid markup without hard-fail, STOP and escalate per §6.5 — do NOT emit a 422 and do NOT emit invalid table markup. Hard-tier degradation belongs in task 026.</trigger>
+    <trigger>If reusing the R5 table work would require forking it (rather than routing its representation through the model), STOP and coordinate with spaarkeai-compose-r5.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF; run the seam slice + Tier-1 NetArchTest.</tool>
+    <tool name="terminal">Run /conflict-check before the BFF PR.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (tables through the model)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs (author w:tbl)</output>
+    <output type="test">tests/integration/seam/Compose/ (table round-trip on a table corpus doc)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a table corpus doc, when it loads → edit → save → reopen, then tables round-trip through the canonical model as Word-valid markup without hard-fail.</criterion>
+    <criterion testable="true">Given a save, then w:tbl is authored from the canonical model on the render-on-save path with no surgical byte-patch and no text-search, reusing the R5 tracked-table work.</criterion>
+    <criterion testable="true">Negative / no-regression: table handling is NOT re-built (R5 work reused); Tier-1 NetArchTest passes; docxBridge.ts not deleted; BFF publish ≤60 MB with delta reported vs ~49.63 MB; seam slice uses no banned mock/DI/ctor shapes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-04 ("reuse the R5 tracked-table work"); plan.md §5 Phase 2. Builds on 020; seam-tested with the rest in 027. Coordinate with spaarkeai-compose-r5 (table-code owner). parallel-safe=false. Run /conflict-check before the BFF PR.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist incl. Step 9.5 gates (code-review + adr-check, FULL/BFF). Enforce §10 publish-size gate and /conflict-check.</protocol>
+  </execution>
+</task>

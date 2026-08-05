@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Route Imported docs through render-from-model in SaveAsync; drop count-gate from save path</title>
+    <phase>1 Render-on-save core</phase>
+    <gate>blocked — requires 001 (ADR-049 Path-B amendment merged) + 004 (NDA fixture)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Core BFF code change to ComposeService save path (tags bff/compose); the 422-kill pivot with high blast radius — FULL per root §8.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High-blast-radius brownfield change on the most-contested BFF surface + governed by an ADR amendment; opus per §8.5.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Brownfield root-cause pivot: rerouting the save discriminant and retiring the count-gate on the live 422 path — xhigh justified per §8.5.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Services/Compose/ComposeService.cs — the most-contested BFF surface (overlaps spaarkeai-compose-r5/r4.5/r3/r2/r1, spaarke-ai-architecture-redesign-r2, agreements-r1, analysis-hub-r1). Serialize all Compose edits.</parallel-reason>
+    <deps>001, 004</deps>
+    <tags>bff, compose</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Route ComposeOrigin.Imported saves through render-from-model (ComposeDocumentRenderer.SynthesizeDocument) in the SaveAsync Imported branch, and drop the ComposeBaselineParaIdStamper count-gate from the save path so a paraId/count mismatch on an imported document (the NDA 422 root) can no longer refuse the save. This is the pivot that eliminates the anchor-reconciliation 422 bug class by construction.</prompt>
+  <role>SPAARKE platform developer. Deep expertise in the Compose OOXML save path (ComposeService / ComposeDocumentRenderer), ADR-049, and SpeFileStore-facade byte[]-in/projection-out discipline. Follow ADRs strictly.</role>
+  <goal>ComposeService.SaveAsync's Authored/Imported branch (:714) renders every Imported save from the canonical model via ComposeDocumentRenderer.SynthesizeDocument instead of surgically patching inherited XML; the ComposeBaselineParaIdStamper count-gate (:113) is no longer reachable from a normal save; persistence (ReplaceFileContentAsUserAsync → new SPE version), the Redis eTag stamp, and the stale-base re-anchor path carry over unchanged; the NDA saves without a 422.</goal>
+
+  <context>
+    <background>spec FR-01/FR-02: route ALL saves (Authored + Imported) through render-from-model; retire the surgical-patch save path and the paraId count-gate that produces the 422. SynthesizeDocument already renders born-in-editor docs (author-not-patch); this task extends the Imported branch to use it. Governed by the ADR-049 Path-B amendment (task 001) which supersedes I-4 + line-40 for the save path only. Task 011 generalizes SynthesizeDocument to accept the imported/canonical model input; this task wires the routing + gate removal.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — SaveAsync:642, Authored/Imported branch :714 (reroute Imported to render-from-model; stop invoking the count-gate on the save path).</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs:102 — SynthesizeDocument, the render-from-model precedent already used for born-in-editor docs; :142 AppendSection (second author-not-patch precedent).</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeBaselineParaIdStamper.cs:113 — the count-gate (422 root) to remove from the save path.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">ADR-049 Path-B amendment codifying render-on-save must be merged with/before this code.</dependency>
+      <dependency task="004" status="pending">NDA fixture in tests/fixtures/compose-corpus/ (used by 013 to prove the 422 is gone).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Scope: on the save path, MUST render from the canonical model and MUST NOT execute any surgical byte-patch or count-gate — per the task-001 Path-B amendment (save path only). The R4.5 read/reference invariants remain untouched.</constraint>
+    <constraint source="ADR-007">Scope: keep ComposeService/ComposeDocumentRenderer byte[]-in / projection-out; NO Microsoft.Graph types above SpeFileStore in the save path.</constraint>
+    <constraint source="ADR-013">Scope: introduce NO AI-internal types (IOpenAiClient / executors / routing) into Services/Compose; if any AI capability is needed, consume Services/Ai/PublicContracts/ seams only — no fork.</constraint>
+    <constraint source="ADR-039">Scope: the AI dispatch engine is frozen — add NO new AI dispatch endpoint as part of this rerouting.</constraint>
+    <constraint source="project">Scope: retain ComposeShadowPatchEngine and ComposeBaselineParaIdStamper in the codebase for the transitional clean-apply path permitted by the amendment; only make them unreachable from a normal SaveAsync. NEVER delete docxBridge.ts.</constraint>
+    <constraint source="project">Scope (Placement Justification, root §10): this is modify/extend of existing Services/Compose code — cite .claude/constraints/bff-extensions.md in the PR, state the placement decision explicitly, verify publish size ≤60 MB (report absolute + delta vs the task-003 baseline), verify no new HIGH CVE, and run /conflict-check before the PR.</constraint>
+    <constraint source="ADR-040">Scope: persist the canonical model / projection payload per the existing session-ledger pattern; do not invent a new persistence mechanism.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Compose render-on-save; SaveAsync discriminant; count-gate retirement</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-007-spe-storage-seam-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+    </files>
+    <patterns>
+      <pattern name="Render-from-model (author-not-patch)" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs">SynthesizeDocument:102 + AppendSection:142 are the precedent to route Imported saves through.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare RIGOR LEVEL: FULL, model-tier opus, effort xhigh. Confirm task 001 amendment is merged (gate) and load ComposeService + ComposeDocumentRenderer + the count-gate.</step>
+    <step order="1">Run /conflict-check for Services/Compose before starting (most-contested surface).</step>
+    <step order="2">Trace SaveAsync:642 → the Authored/Imported branch :714; identify where the surgical patch + count-gate are invoked for Imported.</step>
+    <step order="3">Reroute the Imported branch to render from the canonical model via SynthesizeDocument (coordinating with 011 which generalizes SynthesizeDocument's input); keep ReplaceFileContentAsUserAsync, the Redis eTag stamp, and stale-base re-anchor unchanged.</step>
+    <step order="4">Make ComposeBaselineParaIdStamper's count-gate unreachable from a normal SaveAsync (retain the type for the transitional clean-apply path).</step>
+    <step order="5">Build the BFF; measure publish size vs the task-003 baseline; run dotnet list package --vulnerable.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document the placement decision + publish-size delta + any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If routing Imported through render-from-model would require touching the read/reference path, forking Services/Ai, or adding an AI dispatch endpoint (ADR-039), STOP and escalate per root §6.5 rather than adapting silently — the amendment scopes the change to the save path only.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an Imported document, when SaveAsync runs, then the docx is rendered from the canonical model via SynthesizeDocument and no surgical byte-patch executes on the save path.</criterion>
+    <criterion testable="true">Given an imported document with a w14:paraId/count mismatch (the NDA case), when saved, then the save is NOT refused — the count-gate is not reached from the normal save path.</criterion>
+    <criterion testable="true">Given a save, when it persists, then ReplaceFileContentAsUserAsync produces a new SPE version and the Redis eTag stamp + stale-base re-anchor behavior are unchanged.</criterion>
+    <criterion testable="true">Negative: no Microsoft.Graph type is introduced above SpeFileStore and no AI-internal type enters Services/Compose.</criterion>
+    <criterion testable="true">Negative: ComposeShadowPatchEngine and ComposeBaselineParaIdStamper remain in the codebase (retained for transitional clean-apply) and docxBridge.ts is not deleted.</criterion>
+    <criterion testable="true">Publish size ≤60 MB with absolute + delta reported vs the task-003 baseline; no new HIGH CVE; BFF builds green.</criterion>
+  </acceptance-criteria>
+
+  <notes>The pivot; critical path 001→010→011→012→013→014. Coordinate tightly with 011 (SynthesizeDocument generalization) — 010 wires routing, 011 generalizes the renderer input. Placement Justification per root §10 in the PR. spec FR-01/FR-02.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
