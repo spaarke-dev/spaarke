@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>RecipientAliasRung + Bcc plumbing (per-record intake addresses)</title>
+    <phase>1 Pillar A: Trusted threading &amp; external matching</phase>
+    <gate>blocked: 011</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New association rung (.cs) + new RungKind + explicit mapper eligibility change + capture-boundary plumbing (Graph $select, normalizer, envelope); Step 3.5.5 FULL.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified: parse recipients for a per-record alias → ExplicitReference-tier match; mapper eligibility mirrors an existing deterministic rung; low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A-rungs</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>011</deps>
+    <tags>bff-api,communication</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a new RecipientAliasRung that parses To/Cc/Bcc for a per-record intake address (e.g. matter-12345@) and resolves it to a deterministic ExplicitReference-tier association. Thread Bcc end-to-end: add bccRecipients to the capture Graph $select, carry it through GraphMessageNormalizer into a new NormalizedMessage.Bcc, and read it in the rung. Add a new RungKind member and give it explicit auto-file-eligible treatment in AssociationStatusMapper.</prompt>
+  <role>SPAARKE platform developer with Association-Engine + Graph-capture expertise. Follow ADR-045, ADR-024, ADR-010 strictly.</role>
+  <goal>A new Rungs/RecipientAliasRung.cs (IAssociationRung) that parses To/Cc/Bcc for a configured per-record alias pattern and emits an ExplicitReference-tier RungMatch to the resolved record; NormalizedMessage gains a Bcc list populated from the Graph message's bccRecipients (added to the $select at IncomingCommunicationProcessor L228-234 and mapped in GraphMessageNormalizer); a new RungKind.RecipientAlias member is auto-file-eligible in AssociationStatusMapper. Registered unconditionally. Unit-tested incl. Bcc-only delivery.</goal>
+
+  <context>
+    <background>FR-A2: parse To/Cc/Bcc for a per-record address (matter-12345@) → ExplicitReference-tier match, delivered via a targeted Exchange mail-flow rule (not tenant-wide plus-addressing). Acceptance: an email addressed (incl. Bcc) to a configured per-record alias associates deterministically; NormalizedMessage carries Bcc; no plus-addressing tenant setting is required. Today the capture $select does NOT request bccRecipients (spec Implementation Notes) and NormalizedMessage has no Bcc field.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/RecipientAliasRung.cs — the rung.</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/Models/NormalizedMessage.cs — add `IReadOnlyList&lt;string&gt; Bcc { get; init; } = Array.Empty&lt;string&gt;();` beside To/Cc.</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/GraphMessageNormalizer.cs — map Graph bccRecipients → NormalizedMessage.Bcc.</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs — add "bccRecipients" to the $select array at L228-234.</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RungKind.cs — add a new RecipientAlias member (choose an unused enum value; Order governs cascade, not the numeric value).</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs — add RecipientAlias to IsAutoFileEligible (a per-record alias is as deterministic as an explicit reference).</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs — AddSingleton&lt;IAssociationRung, RecipientAliasRung&gt;() (unconditional).</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ParticipantCorrelationRung.cs — reference for parsing recipient addresses (rung 2); the alias rung is deterministic, not a contact correlation.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ExplicitReferenceRung.cs — reference for the reference-number→record resolution query (ICommunicationDataverseService.QueryMatterByReferenceNumberAsync) reused to resolve the alias's record id.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">Sequences this task after the config foundation lands to avoid CommunicationModule.cs churn collisions (no hard functional dependency on 011's footer config).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-045">The rung reads ONLY the normalized envelope (To/Cc/Bcc), never Microsoft.Graph.Message; Bcc is mapped once at the boundary in GraphMessageNormalizer. Best-effort/non-fatal: a throwing rung = non-match (NFR-04). Scope: rung + normalizer.</constraint>
+    <constraint source="ADR-024">Resolve the alias to a record and write via RegardingFieldMap.FieldFor typed lookups only; MUST NOT introduce a second regarding mechanism. Scope: match emission.</constraint>
+    <constraint source="project">The alias pattern is deterministic (a per-record intake address), so the new RungKind.RecipientAlias MUST be added to AssociationStatusMapper.IsAutoFileEligible — a Bcc-delivered alias associates deterministically (auto-file-eligible), matching an ExplicitReference-tier signal. Scope: mapper eligibility (explicit, reviewed edit).</constraint>
+    <constraint source="ADR-010">Register the rung unconditionally; the RungKind enum add + mapper eligibility are code, not a feature gate. Scope: DI + enum + mapper.</constraint>
+    <constraint source="ADR-013">No AI-internal types; alias resolution uses the existing ICommunicationDataverseService query seam. Scope: rung deps.</constraint>
+    <constraint source="ADR-038">Unit tests in tests/unit/Sprk.Bff.Api.Tests/Services/Communication/RecipientAliasRungTests.cs (model on ExplicitReferenceRungTests.cs) + a GraphMessageNormalizer Bcc-mapping test; ban Mock&lt;HttpMessageHandler&gt;/DI-registration/ctor-null tests. Scope: this task's tests.</constraint>
+    <constraint source="bff-extensions">Report publish size (absolute + delta); ≤60 MB; no new NuGet/CVE. Scope: this task's additions.</constraint>
+    <constraint source="project">Placement Justification: additive rung + additive envelope field — state in PR, cite .claude/constraints/bff-extensions.md. Scope: PR.</constraint>
+    <constraint source="project">Run /conflict-check before the PR — RungKind.cs, AssociationStatusMapper.cs, GraphMessageNormalizer.cs, IncomingCommunicationProcessor.cs, NormalizedMessage.cs, CommunicationModule.cs are all contended shared files. Scope: shared files.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Association rung + Graph capture boundary + envelope extension</topic>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Deterministic rung + mapper eligibility" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs (IsAutoFileEligible / IsDeterministicWriteEligible)">Add RecipientAlias to these predicates so a per-record alias auto-files like ExplicitReference/ThreadContinuity.</pattern>
+      <pattern name="Envelope boundary mapping" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/GraphMessageNormalizer.cs">Bcc is mapped exactly once here from the Graph message; rungs never round-trip to Graph.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML, ParticipantCorrelationRung, ExplicitReferenceRung, GraphMessageNormalizer, AssociationStatusMapper, NormalizedMessage; declare RIGOR LEVEL FULL + sonnet/high.</step>
+    <step order="1">Add NormalizedMessage.Bcc; add "bccRecipients" to the $select at IncomingCommunicationProcessor L228-234; map bccRecipients→Bcc in GraphMessageNormalizer.</step>
+    <step order="2">Add RungKind.RecipientAlias (unused numeric value); add it to AssociationStatusMapper.IsAutoFileEligible (and IsDeterministicWriteEligible if it should be written on auto-file) with a comment citing FR-A2.</step>
+    <step order="3">Implement RecipientAliasRung: parse To/Cc/Bcc for the configured alias pattern (matter-{ref}@ etc.), resolve the record via the existing Dataverse query seam, emit an ExplicitReference-tier RungMatch (Kind=RecipientAlias) via RegardingFieldMap.FieldFor.</step>
+    <step order="4">Register the rung unconditionally in CommunicationModule.cs.</step>
+    <step order="5">Unit tests: To-alias → deterministic match; Cc-alias → match; Bcc-ONLY delivery → match (key case); no alias → empty; malformed alias → empty; normalizer maps bccRecipients. Build green.</step>
+    <step order="6">dotnet build + test; /conflict-check; record publish-size delta.</step>
+    <step order="7">Update TASK-INDEX.md: set task 014 status to ✅.</step>
+    <step order="8">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If resolving the alias needs a record-type→address-scheme mapping that no config/catalog supplies (beyond matter-{ref}@), STOP and escalate per §6 — do not hardcode per-tenant address conventions; FR-A2 is opt-in per client and mail-flow-rule-delivered.</trigger>
+    <trigger>If adding RecipientAlias to IsAutoFileEligible conflicts with the C-1 narrowing intent (misfile-avoidance), surface it per §6.5 (ADR-045 Path A) rather than silently widening auto-file.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>ParticipantCorrelationRung (rung 2) resolves sender/recipient email+domain → contact/org/account — NOT a per-record intake alias; grep Rungs/ finds no alias rung (spec §New-Components confirms).</existing>
+    <extension>Partial — could extend ParticipantCorrelation, but that rung resolves people/orgs at a correlation tier (not auto-file-eligible), whereas a per-record alias is a deterministic ExplicitReference-tier signal. A separate rung keeps alias parsing isolated + testable and lets it carry the correct (auto-file-eligible) tier without perturbing rung 2's semantics.</extension>
+    <cost-of-doing-nothing>Without it, external systems (client billing, e-filing) cannot file to a matter via a matter-*@ address, and Bcc-delivered intake (the common mail-flow-rule pattern) is invisible because the capture $select never requests bccRecipients — the email silently never associates.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test the BFF.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/RecipientAliasRung.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/NormalizedMessage.cs (Bcc)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/GraphMessageNormalizer.cs (Bcc mapping)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs ($select)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RungKind.cs (RecipientAlias) + AssociationStatusMapper.cs (eligibility) + CommunicationModule.cs (registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/RecipientAliasRungTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an email whose To contains a configured per-record alias, when EvaluateAsync, then it emits an ExplicitReference-tier RungMatch (Kind=RecipientAlias) to that record.</criterion>
+    <criterion testable="true">Given the alias appears ONLY in Bcc, when captured and evaluated, then NormalizedMessage.Bcc carries it and the rung associates the email deterministically (key acceptance).</criterion>
+    <criterion testable="true">Given the mapper decides on a RecipientAlias match at ≥ threshold for a core record, then the status is Resolved/auto-file (RecipientAlias is auto-file-eligible).</criterion>
+    <criterion testable="true">Negative: given no alias / a malformed alias in any recipient field, when EvaluateAsync, then it returns an empty list (no misfire).</criterion>
+    <criterion testable="true">The capture $select requests bccRecipients and GraphMessageNormalizer maps it to NormalizedMessage.Bcc (unit-tested); no plus-addressing tenant setting is required.</criterion>
+    <criterion testable="true">The rung is registered unconditionally; all unit tests pass; build green; publish-size ≤60 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-A2. Unlike 013 (which reuses ExplicitReference), THIS task deliberately adds a new RungKind + explicit mapper eligibility. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

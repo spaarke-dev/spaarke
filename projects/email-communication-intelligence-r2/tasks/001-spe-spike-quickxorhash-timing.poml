@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>SPE spike 1 — quickXorHash post-upload timing/size stability</title>
+    <phase>0 Prerequisites &amp; spikes</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Investigation/spike producing a decision note; no production code change. Reads SPE code + drives a live upload probe. STANDARD per task-create Step 3.5.5 (no .cs/.ts modification, single deliverable, gates a downstream build decision).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded empirical spike with a clear question and closed output; Sonnet 5 default (CLAUDE.md §8.5). Opus reserved for the C3 detector build this spike gates, not for the spike itself.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only against SpeFileStore + a throwaway probe container; writes only to notes/spikes/. No shared-lib or .claude/ writes. Independent of 002/003/004.</parallel-reason>
+    <deps>none</deps>
+    <tags>spike, spe, dedup</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Empirically determine whether Microsoft Graph `quickXorHash` (from `driveItem.file.hashes.quickXorHash` — NOT the deprecated `sha256Hash`) is present and stable immediately after upload on SharePoint Embedded, including &gt;250 MB chunked uploads, so we can gate the FR-C3 Tier-1 content-dedup design on a gate-before-write vs gate-after-write decision. Produce a spike note that answers the timing/size question with evidence. This is a decision gate — do not build the C3 detector here.</prompt>
+  <role>SPAARKE platform developer with SharePoint Embedded + Microsoft Graph expertise. Follow ADR-007 (all SPE access via the `SpeFileStore` facade) and ADRs strictly.</role>
+  <goal>A spike note `notes/spikes/001-quickxorhash-timing.md` exists that: (1) reports whether `quickXorHash` is populated on the first `driveItem` read immediately post-upload for small (&lt;4 MB single-shot) and large (&gt;250 MB chunked) uploads; (2) reports observed latency-to-populate (retry/poll count if not immediate); (3) confirms the value is stable/identical on re-read; (4) states a clear RECOMMENDATION for FR-C3: gate-before-write, gate-after-write, or poll-then-gate; (5) records the exact Graph fields used and any deprecation caveat.</goal>
+
+  <context>
+    <background>FR-C3 (spec §Requirements Pillar C) makes indexed `sprk_document.sprk_canonicalhash = quickXorHash` the SPE content-dedup key. NFR-08 requires this spike to complete BEFORE building Tier-1. The R2 CLAUDE.md Implementation Notes record that `sha256Hash` is DEPRECATED on SPE, so `quickXorHash` is the only viable content identity. The design was absorbed from `sdap-file-duplication-detector-r1`.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs</file>
+      <file role="canonical-reference">projects/sdap-file-duplication-detector-r1/README.md</file>
+      <file role="canonical-reference">.claude/agent-memory/researcher/spe-dedup-content-identity-2026-07.md</file>
+      <file role="new">projects/email-communication-intelligence-r2/notes/spikes/001-quickxorhash-timing.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No task dependency; requires a reachable SPE dev container (spaarkedev1) and app-only Graph credentials already used by SpeFileStore.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">All SPE/Graph reads for this probe MUST route through the `SpeFileStore` facade (or a probe that mirrors its call shape); do NOT introduce direct `GraphServiceClient` calls in caller code outside the facade — scope: the probe/harness written for this spike.</constraint>
+    <constraint source="spec-NFR-08">This spike MUST complete and record a RECOMMENDATION before any FR-C3 Tier-1 build task starts — scope: the C3 gate decision only; do not implement the detector here.</constraint>
+    <constraint source="project">Use `quickXorHash` from `driveItem.file.hashes`; treat `sha256Hash` as DEPRECATED and do NOT rely on it — scope: hash-field selection for the probe.</constraint>
+    <constraint source="project">Probe uploads MUST target a throwaway/dev container and be cleaned up after measurement; do NOT write to production containers — scope: spike harness lifecycle.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SharePoint Embedded content identity / dedup</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/agent-memory/researcher/spe-dedup-content-identity-2026-07.md</file>
+      <file>projects/sdap-file-duplication-detector-r1/README.md</file>
+      <file>docs/architecture/communication-intelligence-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="SpeFileStore facade" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs">Read `driveItem` metadata (incl. `file.hashes`) through the facade; mirror its chunked-upload path for the &gt;250 MB case.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this task POML + project CLAUDE.md + the spec FR-C3/NFR-08 sections; declare RIGOR LEVEL STANDARD with reason per CLAUDE.md §8.</step>
+    <step order="1">Read `SpeFileStore.cs` to locate the upload paths (single-shot and chunked/&gt;250 MB) and the `driveItem` metadata read that exposes `file.hashes`. Read the sdap-r1 README + researcher memory note for prior findings on quickXorHash.</step>
+    <step order="2">Create `notes/spikes/` if absent. Design a minimal probe (script or scratch harness) that uploads a small (&lt;4 MB) and a large (&gt;250 MB) test blob to a dev container via the facade path, then reads `driveItem.file.hashes.quickXorHash` immediately.</step>
+    <step order="3">Measure: is `quickXorHash` present on the FIRST read post-upload for each size? If null/absent, poll with backoff and record how many retries / how much wall-clock until it populates.</step>
+    <step order="4">Re-read each item a second time and confirm the `quickXorHash` value is identical (stable, not recomputed/changed).</step>
+    <step order="5">Clean up the probe blobs/container. Record the exact Graph `$select`/property path used and note the `sha256Hash` deprecation caveat.</step>
+    <step order="6">Write `notes/spikes/001-quickxorhash-timing.md` with: question, method, small-file result, large-file result, latency-to-populate, stability-on-reread, and a bolded RECOMMENDATION for FR-C3 (gate-before-write / gate-after-write / poll-then-gate) plus any risk that would defer Tier-1.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation (e.g., could not reach a dev container, had to simulate) in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `quickXorHash` is NOT reliably present+stable immediately post-upload (e.g., absent for chunked &gt;250 MB uploads, or the value changes on re-read), STOP and escalate per CLAUDE.md §6: this is an FR-C3 gating decision (poll-then-gate vs defer Tier-1), not a choice to adapt silently. Record the failure mode and the options; do not proceed to a C3 build recommendation without human sign-off.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/run a probe harness if a C# scratch probe is used.</tool>
+    <tool name="bash">Drive uploads / measure timing if a script probe is used.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/email-communication-intelligence-r2/notes/spikes/001-quickxorhash-timing.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a small (&lt;4 MB) upload, when `driveItem.file.hashes` is read immediately after upload, then the spike note records whether `quickXorHash` is present and, if not, the measured latency-to-populate.</criterion>
+    <criterion testable="true">Given a &gt;250 MB chunked upload, when the item metadata is read post-upload, then the spike note records `quickXorHash` presence/absence + latency for the chunked path specifically.</criterion>
+    <criterion testable="true">Given two consecutive reads of the same uploaded item, when the `quickXorHash` values are compared, then the note confirms they are identical (stable) or flags instability.</criterion>
+    <criterion testable="true">The note contains a single bolded RECOMMENDATION for FR-C3 (gate-before-write / gate-after-write / poll-then-gate / defer) with the evidence that supports it.</criterion>
+    <criterion testable="true">Negative: if the probe cannot reach a live SPE container or the hash is unstable, the note explicitly states the unresolved gate + escalation rather than asserting an unsupported "safe to build" conclusion, and the escalation trigger is invoked.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows this task ✅ and any deviation is recorded under notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-C3, NFR-08, Assumptions ("quickXorHash present and stable enough post-upload"), Unresolved Questions "SPE spike 1". Gates the Opus/xhigh C3 detector build. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

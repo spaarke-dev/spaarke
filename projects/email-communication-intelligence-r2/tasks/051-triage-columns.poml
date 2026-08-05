@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Triage as grid columns — category / priority / summary / RI-confidence / review-outcome renderers</title>
+    <phase>5 Pillar E — Reconciliation UI</phase>
+    <gate>deps 050 complete (grid shell + columnRenderers seam)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Additive column renderers on an existing grid surface (no new architecture, no new entity); STANDARD per §8 (extends existing files + shared-lib constraint).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully-specified presentational renderers over a known triage field-set; sonnet default.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes shared Spaarke.Communication.Components (co-owned with r5). Serialize main-session; /conflict-check before the shared-lib PR.</parallel-reason>
+    <deps>050</deps>
+    <tags>frontend, fluent-ui, datagrid, communication, pillar-e</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Render the currently-dark `sprk_communication` triage into the reconciliation grid via the task-050
+    `overrides.columnRenderers` seam: category, priority (drives the default sort), summary (reachable on the row/detail),
+    RI-confidence, and review-outcome. Priority + review-outcome are status-style cells (Fluent v9 tokens); summary is a
+    truncated/hover cell; RI-confidence is a confidence indicator. No bespoke table — these are additive renderers on the
+    existing grid.
+  </prompt>
+  <role>SPAARKE platform developer. Fluent UI v9 + the Spaarke DataGrid columnRenderers seam. Follow ADRs strictly.</role>
+  <goal>The reconciliation grid shows each email's category / priority / summary / RI-confidence / review-outcome via additive columnRenderers; priority drives default sort; all cells render in light + dark themes.</goal>
+
+  <context>
+    <background>
+      FR-E1 (spec §101): triage is stored but rendered nowhere. Surface category / priority / summary / RI-confidence /
+      review-outcome as grid columns — priority drives the default sort, summary is reachable on the row/detail — using
+      the `overrides.columnRenderers[field] = (value, record) => node` seam added in task 050. This is presentational
+      reuse of existing triage data on the existing grid; no new data path.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/ReconciliationGrid.tsx</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/triageColumnRenderers.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Models/QueueFeedModels.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Reconciliation grid + the additive columnRenderers seam these renderers plug into.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">SCOPE: the triage cells. Fluent v9 semantic tokens only (priority/outcome status colors from tokens, not literals); MUST render correctly in light AND dark themes.</constraint>
+    <constraint source="ADR-022">SCOPE: the renderers. React-version-agnostic (dual-use on PCF form mount); no React-16/17-incompatible APIs.</constraint>
+    <constraint source="ADR-045">SCOPE: data. Render existing triage fields on `sprk_communication`; do NOT add a new store or a second triage path.</constraint>
+    <constraint source="project">SCOPE: sort. Priority drives the default grid sort via the `sprk_gridconfiguration` sort (framework mechanism), not a bespoke client re-sort.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Triage rendering on the DataGrid</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="columnRenderers" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts">`overrides.columnRenderers[field] = (value, record) => node` — one renderer per triage field; keep them pure/presentational.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; declare RIGOR: STANDARD. Confirm the triage field names on `sprk_communication` (category/priority/summary/RI-confidence/review-outcome) against QueueFeedModels + the grid config.</step>
+    <step order="1">Author triageColumnRenderers.tsx: a renderer per field (priority + review-outcome as token-based status cells; summary truncated with hover/detail; RI-confidence as a confidence indicator).</step>
+    <step order="2">Wire the renderers into ReconciliationGrid via `overrides.columnRenderers`; set priority as the default sort in the config.</step>
+    <step order="3">Add ui-tests (each triage column renders; priority sort default; ADR-021 dark-mode) and run them.</step>
+    <step order="4">Update TASK-INDEX.md: set 051 status to ✅.</step>
+    <step order="5">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Triage columns render">
+      <steps><step>Mount the grid with seeded Emails carrying triage values.</step></steps>
+      <expected>Category, priority, summary (reachable), RI-confidence, and review-outcome all render in their cells.</expected>
+    </test>
+    <test name="Priority drives default sort">
+      <steps><step>Load the Needs-review view.</step></steps>
+      <expected>Rows are ordered by triage priority by default (framework sort, not a bespoke re-sort).</expected>
+    </test>
+    <test name="ADR-021 dark-mode">
+      <steps><step>Render the triage cells under the dark Fluent theme.</step></steps>
+      <expected>Status/priority/outcome colors use Fluent tokens with correct contrast; nothing unreadable in dark mode.</expected>
+    </test>
+  </ui-tests>
+  <tools><tool name="npm">Build/test the shared lib.</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/triageColumnRenderers.tsx</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/__tests__/triageColumnRenderers.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given seeded triage values, when the grid renders, then category / priority / summary / RI-confidence / review-outcome each render in their column (summary reachable on row/detail).</criterion>
+    <criterion testable="true">Given the Needs-review view, when it loads, then rows sort by triage priority by default via the framework sort.</criterion>
+    <criterion testable="true">Negative: an email with missing/null triage renders a neutral placeholder cell (no crash, no "undefined").</criterion>
+    <criterion testable="true">ADR-021: all triage cells render correctly in light AND dark themes (dark-mode ui-test passes).</criterion>
+    <criterion testable="true">All unit/ui tests pass; shared-lib build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-E1 (§101). Renderers plug into the task-050 seam; no new data path. Field names sourced from `sprk_communication` triage + QueueFeedModels.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

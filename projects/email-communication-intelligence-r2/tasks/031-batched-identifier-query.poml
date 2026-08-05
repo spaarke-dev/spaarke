@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Batched identifier reverse-lookup query — collapse per-(field,value) loop to an In-filter (≈175→≤7), identical results</title>
+    <phase>3 Pillar D — R1 carry-overs</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Performance refactor of one existing rung file; no new surface, no auth/schema change. Behavior-preserving optimization (identical match results is the acceptance gate).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Contained, fully-specified optimization within a single well-documented file.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>pillar-d-independent</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only IdentifierReverseLookupRung.cs (+ possibly the ICommunicationDataverseService query interface) — disjoint from 030 and 033. Cross-worktree: /conflict-check on Services/Communication before the BFF PR.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,communication,perf</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Replace the per-(field,value) SafeQueryAsync loop in IdentifierReverseLookupRung with a batched In-filter query so per-message identifier-rung Dataverse calls drop from ≈175 to ≤7 (one per distinct number field), while producing byte-identical match results. Do NOT change NewRecordIntentDetector, the confidence policy, or the token-extraction/substring guards.</prompt>
+  <role>SPAARKE platform developer. BFF .NET 8, Communication Association Engine rung ladder, Dataverse query optimization. Follow ADRs strictly.</role>
+  <goal>The rung issues at most one query per distinct catalog number field (≤7 for the 7 core types) using an In-filter over all distinct candidate token values for that field, replacing the nested per-token × per-roster-entry loop. The confidence policy (well-formed 0.90 / bare-numeric 0.65 / multi-entity + referenced-not-filed 0.65 caps), NewRecordIntentDetector wiring, substring guard, dedup, and provenance strings are UNCHANGED and produce identical RungMatch output.</goal>
+
+  <context>
+    <background>FR-D2 (NFR-08 cost). Today IdentifierReverseLookupRung queries QueryRecordsByNumberFieldAsync once per (roster-entry, token) pair — up to MaxDistinctTokens(25) × 7 core types ≈ 175 round-trips (deduped only by identical (field,value)). Two core types never share a number field, so a single query per number field with an In-filter over all distinct token values returns the same candidate set, then the existing per-token grouping re-associates matches to tokens for the confidence policy.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/IdentifierReverseLookupRung.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/NewRecordIntentDetector.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/ICommunicationDataverseService.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Catalog roster + RegardingFieldMap already built (GetRosterAsync) — unchanged.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-045">SCOPE = this rung only: optimize the existing rung in place; MUST NOT add a parallel matching mechanism or change the ladder contract (Kind=ExplicitReference, Order=0).</constraint>
+    <constraint source="ADR-024">SCOPE = match emission: the regarding write field still comes from RegardingFieldMap (never the catalog's sprk_regardingfield); unchanged.</constraint>
+    <constraint source="project">SCOPE = correctness gate: the batched query MUST yield the same set of matched records per token as the per-value loop — verified by a differential test over the golden inputs. Multi-entity detection (distinctFields>1 per token) MUST remain per-token after the batched fetch.</constraint>
+    <constraint source="project">SCOPE = NFR-04 non-fatal: a batched-query failure degrades to no-match for the affected field(s), never throws into capture; keep the zero-token short-circuit (no tokens ⇒ zero Dataverse work).</constraint>
+    <constraint source="project">SCOPE = §10 BFF hygiene: Placement Justification in PR (in-place rung optimization); publish-size absolute + delta ≤60 MB; no new HIGH CVE; log the reduced structured QueryCount.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Association Engine rung — batched Dataverse In-filter</topic>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="rung-ladder" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ExplicitReferenceRung.cs">Reference rung shape (IAssociationRung, Kind/Order, best-effort). Keep this rung's contract identical.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML, spec FR-D2, the rung file + its NewRecordIntentDetector. Declare RIGOR LEVEL: STANDARD with reason. Run /conflict-check on Services/Communication.</step>
+    <step order="1">Add (or confirm) a batched query on ICommunicationDataverseService: QueryRecordsByNumberFieldValuesAsync(entity, numberField, IReadOnlyCollection&lt;string&gt; values, ct) returning matched entities (with the matched value discernible so results re-associate to tokens). Register unconditionally (ADR-010).</step>
+    <step order="2">In EvaluateAsync: build distinct token values, then for each roster entry issue ONE batched In-filter query over all distinct token values; map each returned record back to the token(s) whose value it matched. Preserve the (field,value) uniqueness reasoning (two core types never share a number field).</step>
+    <step order="3">Keep BuildMatches, NewRecordIntentDetector.Detect / IsReferencedNotFiled, the substring guard, dedup-by-(field,id)-max, and provenance strings exactly as-is.</step>
+    <step order="4">Update the structured log so QueryCount reflects the new ≤7 count.</step>
+    <step order="5">Add a differential unit test: for the golden token inputs (PAT-942665, PAT-942404, REAL-2026-123456.02, bare-numeric, multi-entity, referenced-not-filed), assert the batched path produces the SAME RungMatch set (target, field, confidence, provenance) as the pre-change per-value path, and QueryCount ≤ 7.</step>
+    <step order="6">Build + test green; dotnet publish -c Release, record compressed size + delta; dotnet list package --vulnerable --include-transitive.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the batched In-filter cannot recover which token value a returned record matched (needed for per-token multi-entity + confidence classification), STOP and escalate per CLAUDE.md §6 rather than approximating the per-token grouping.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/IdentifierReverseLookupRung.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ICommunicationDataverseService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Communication/IdentifierReverseLookupRungBatchedTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a message with N distinct candidate tokens across the 7 core types, when the rung evaluates, then it issues ≤7 Dataverse queries (one per distinct number field) instead of ≈175.</criterion>
+    <criterion testable="true">Given the golden token inputs, the batched path returns an IDENTICAL RungMatch set (same targets, fields, confidences, provenance) as the per-value loop — proven by a differential test.</criterion>
+    <criterion testable="true">Multi-entity capping and referenced-not-filed (NewRecordIntentDetector) behavior is unchanged for a token whose value matches more than one type.</criterion>
+    <criterion testable="true">Negative: a message with zero candidate tokens issues zero Dataverse queries; a batched-query failure degrades to no-match without throwing into capture (NFR-04).</criterion>
+    <criterion testable="true">Publish size ≤60 MB compressed with delta reported; no new HIGH CVE; all unit tests pass; build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-D2. The existing (field,value) dedup dictionary already proves batching is safe; this task hoists it to a single In-filter per field. Do not touch the confidence constants or NewRecordIntentDetector. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

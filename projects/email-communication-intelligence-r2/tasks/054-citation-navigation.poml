@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Citation navigation — ParaIdMap-style reference map over the reader + resolveCitation jump/highlight (reuse Compose CitationResolver, no second mechanism)</title>
+    <phase>5 Pillar E — Reconciliation UI</phase>
+    <gate>deps 053 complete (normalized reader surface exists)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Correctness-critical citation anchoring (NFR-11) reusing the Compose read-reference-fidelity layer; a mis-mapped anchor mis-navigates a reviewer; net-new glue; §8 FULL.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Anchor-space mapping of proposal citations onto a normalized reader, reusing a shipped reference layer without forking it — architectural correctness work; Opus.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>P5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Reuses Compose CitationResolver client twin (spaarkeai-compose reuse, do NOT fork — NFR-11) and writes shared Spaarke.Communication.Components. Serialize main-session; /conflict-check before the PR.</parallel-reason>
+    <deps>053</deps>
+    <tags>frontend, communication, compose, citation, pillar-e</tags>
+    <estimated-effort>5-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Make every proposal citation a clickable anchor that jumps to + highlights the exact passage in the reconciliation
+    reader. Build a ParaIdMap-style NORMALIZED reference map over the reader's normalized text (body + folded
+    attachment text from task 053), map each proposal `Citation{Source, Locator, QuotedText}` into that anchor space,
+    and navigate via `resolveCitation(citation, referenceMap)` — REUSING the client Compose resolver
+    `composeCitationResolver.ts` (server twin `CitationResolver.cs`). Do NOT build a second citation mechanism. Because
+    the reader shows the same normalized text the AI matching ran over, anchors are exact. If a proposal locator cannot
+    map into the reader's anchor space, surface it (escalate) rather than silently mis-navigating.
+  </prompt>
+  <role>SPAARKE platform developer. The Compose read-reference-fidelity / CitationResolver layer + reconciliation reader anchoring. Follow ADRs strictly.</role>
+  <goal>Clicking a proposal citation jumps to + highlights the exact passage in the reader (body AND folded attachment text) via resolveCitation over a ParaIdMap-style map built on the normalized reader text; the Compose resolver is reused, not duplicated; unmappable locators are surfaced, not silently mis-navigated.</goal>
+
+  <context>
+    <background>
+      NFR-11 (spec §120): reuse the Compose `CitationResolver` / read-reference-fidelity layer; do NOT build a second
+      citation mechanism. The client twin is `src/client/shared/Spaarke.Compose.Components/src/widgets/composeCitationResolver.ts`
+      `resolveCitation(citation, referenceMap)` (server twin `Services/Compose/CitationResolver.cs`). Build a
+      ParaIdMap-style normalized reference map over the unified reader text (the task-053 normalized surface) and map
+      each proposal `Citation{Source, Locator, QuotedText}` into that anchor space. The reader shows the SAME normalized
+      text the AI extraction ran over — that identity is what makes anchors exact. Proposals come from the queue-feed
+      (`QueueFeedModels.cs`); each Fields (055) / Tasks (056) proposal carries a citation that clicks through to here.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/widgets/composeCitationResolver.ts</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/CitationResolver.cs</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationBrowseShell/ReconciliationBrowseShell.tsx</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationBrowseShell/readerReferenceMap.ts</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Models/QueueFeedModels.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="053" status="pending">The normalized reader text (body + folded attachment text) — the anchor space this map is built over.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-11">SCOPE: citation resolution. REUSE composeCitationResolver.resolveCitation over a ParaIdMap-style map; do NOT build a second citation mechanism or fork the resolver. The map is built over the same normalized text the AI extraction ran over.</constraint>
+    <constraint source="ADR-045">SCOPE: reuse. Consume the Compose resolver as a library; do not copy/re-implement its resolution logic in Communication.</constraint>
+    <constraint source="ADR-021">SCOPE: highlight styling. Fluent v9 tokens for the jump/highlight; visible in light + dark themes.</constraint>
+    <constraint source="ADR-022">SCOPE: the map + nav. React-version-agnostic (dual-use); pure logic deep-importable from /logic.</constraint>
+    <constraint source="project">SCOPE: unmappable locators. A citation whose locator/quoted-text cannot resolve into the reader anchor space MUST surface a "source not locatable" affordance — never scroll to a wrong/nearest passage (no silent mis-navigation).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Citation anchoring over the reader (reuse Compose)</topic>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+    </files>
+    <patterns>
+      <pattern name="resolveCitation" location="src/client/shared/Spaarke.Compose.Components/src/widgets/composeCitationResolver.ts">resolveCitation(citation, referenceMap) → anchor; build the referenceMap ParaIdMap-style over the reader's normalized text. Parity with the server twin CitationResolver.cs.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; declare RIGOR: FULL, model Opus/xhigh. Study composeCitationResolver.ts + CitationResolver.cs to learn the referenceMap/anchor contract; study the task-053 normalized reader text.</step>
+    <step order="1">Author readerReferenceMap.ts: build a ParaIdMap-style normalized reference map over the reader text (body + folded attachment text) matching the shape resolveCitation expects.</step>
+    <step order="2">Map each proposal Citation{Source,Locator,QuotedText} into the anchor space (Source selects body vs a specific attachment segment; Locator+QuotedText resolve to the exact span).</step>
+    <step order="3">Wire click-a-citation → resolveCitation → scroll-to + highlight the span in the reader (works for both body and folded attachment text).</step>
+    <step order="4">Handle unmappable locators: surface a "source not locatable" affordance; never navigate to a wrong/nearest passage.</step>
+    <step order="5">Add parity checks against the Compose resolver semantics (single ref, sub-locator, range) — extend, do not duplicate the Compose tests.</step>
+    <step order="6">Add ui-tests (click citation in body → jump+highlight; click citation in attachment text → jump+highlight; unmappable → surfaced; ADR-021 dark-mode) and run them.</step>
+    <step order="7">Update TASK-INDEX.md: set 054 status to ✅.</step>
+    <step order="8">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a proposal Locator/QuotedText cannot be mapped into the reader's anchor space (e.g. the AI cited text absent from the normalized reader, or a forged/mismatched quote), STOP the auto-navigation and surface "source not locatable" — do NOT silently jump to the nearest/wrong passage. Escalate per CLAUDE.md §6 if this is systemic (indicates the reader text ≠ the AI-extraction text, breaking NFR-11's identity guarantee).</trigger>
+    <trigger>If a second citation mechanism seems needed because composeCitationResolver can't express an email/attachment anchor, STOP and escalate per §6.5 — extending the shared resolver (coordinated with spaarkeai-compose) is the path, not a forked mechanism.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>composeCitationResolver.ts (client) + CitationResolver.cs (server) already resolve citation→anchor for Compose. No reader-side reference map over email body + attachment text exists.</existing>
+    <extension>Yes — reuse resolveCitation; the only new file (readerReferenceMap.ts) builds the ParaIdMap-style map over the reconciliation reader text so the SAME resolver can run against email content. No second citation mechanism.</extension>
+    <cost-of-doing-nothing>Without it, each proposal's "reference source" is inert text — a reviewer cannot verify the AI's claim against the exact passage, defeating NFR-11 and forcing blind Accept/Reject on Fields (055) and Tasks (056).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Citation jumps + highlights in body">
+      <steps><step>Open an email; click a Fields/Tasks proposal citation whose source is the body.</step></steps>
+      <expected>The reader scrolls to + highlights the exact cited passage in the body.</expected>
+    </test>
+    <test name="Citation jumps + highlights in attachment text">
+      <steps><step>Click a proposal citation whose source is an attachment.</step></steps>
+      <expected>The reader scrolls to + highlights the exact passage in the folded attachment text (one reader, exact anchor).</expected>
+    </test>
+    <test name="Unmappable citation is surfaced, not mis-navigated">
+      <steps><step>Click a citation whose quoted text is absent/forged relative to the reader.</step></steps>
+      <expected>A "source not locatable" affordance appears; the reader does NOT scroll to a wrong/nearest passage.</expected>
+    </test>
+    <test name="ADR-021 dark-mode">
+      <steps><step>Trigger a highlight under the dark Fluent theme.</step></steps>
+      <expected>The highlight is visible with correct contrast via Fluent tokens in dark mode.</expected>
+    </test>
+  </ui-tests>
+  <tools><tool name="npm">Build/test the shared lib.</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationBrowseShell/readerReferenceMap.ts</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationBrowseShell/__tests__/readerReferenceMap.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a proposal citation sourced in the body, when clicked, then resolveCitation resolves it over the ParaIdMap-style reader map and the reader jumps to + highlights the exact passage.</criterion>
+    <criterion testable="true">Given a proposal citation sourced in an attachment, when clicked, then it jumps to + highlights the exact passage in the folded attachment text (same reader, exact anchor).</criterion>
+    <criterion testable="true">Given the resolver, when resolving single-ref / sub-locator / range citations, then behavior matches the Compose CitationResolver semantics (parity-asserted, resolver reused not duplicated).</criterion>
+    <criterion testable="true">Negative: a forged/absent citation (quoted text not present in the normalized reader) surfaces "source not locatable" and performs NO navigation to a wrong/nearest passage.</criterion>
+    <criterion testable="true">No second citation mechanism is introduced (grep-asserted: composeCitationResolver is the only resolver invoked).</criterion>
+    <criterion testable="true">ADR-021: highlight visible in light AND dark themes; all unit/ui tests pass; shared-lib build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec NFR-11 (§120) + UI model §99. This anchoring is what Fields (055) + Tasks (056) proposal citations click through to. Reader-text identity with the AI-extraction surface (task 053) is the load-bearing invariant.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>AffinityRung + sprk_affinity per-tenant learning store</title>
+    <phase>1 Pillar A: Trusted threading &amp; external matching</phase>
+    <gate>blocked: 011</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New rung (.cs) + new Dataverse store (sprk_affinity) + new RungKind + write-on-confirmation path; ADR-040 Path A tension; Step 3.5.5 FULL.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New state store with an ADR-040 boundary decision (affinity ≠ session ledger ≠ ADR-048 participant index); schema + suggest-only mapper treatment are correctness-sensitive, high blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A-rungs</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>011</deps>
+    <tags>bff-api,communication,dataverse,schema</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a deterministic learning loop (FR-A4): a new per-tenant sprk_affinity store recording confirmation frequencies (sender→record, sender-domain→record, subject-keyword→record, participant-set→record), and a new AffinityRung that surfaces the highest-affinity record as an explainable, SUGGEST-ONLY candidate (never auto-file). Distinct from the ADR-040 session ledger and the ADR-048 participant index (ADR-040 Path A exception).</prompt>
+  <role>SPAARKE platform developer with Association-Engine + Dataverse-schema expertise. Follow ADR-045, ADR-024, ADR-040, ADR-027 strictly.</role>
+  <goal>A new sprk_affinity Dataverse table (per-tenant frequency rows: signal-type, signal-value, target record ref, confirmation count, inspectable) created via dataverse-create-schema into the managed solution; a writer that increments affinity on human confirmation; a new Rungs/AffinityRung.cs (IAssociationRung, new RungKind.Affinity) that emits a SUGGEST-ONLY candidate citing the confirmation count; explicit mapper treatment keeping Affinity NEVER auto-file-eligible. Registered unconditionally, config-gated via IOptionsMonitor. Unit-tested incl. the N-confirmations→suggestion case and the never-auto-file guarantee.</goal>
+
+  <context>
+    <background>FR-A4: human confirmations record a per-tenant affinity (sender→record, sender-domain→record, subject-keyword→record, participant-set→record); a new AffinityRung surfaces the highest-affinity record as a candidate with an explainable reason. Acceptance: after N confirmed associations from a sender to a record, a subsequent untagged email from that sender surfaces that record as a Suggested candidate citing the confirmation count; the store is per-tenant and inspectable; no ML/training infra. ADR Tension (spec): ADR-040 Path A — affinity is filing-history metadata, NOT session disposition (ADR-040) and NOT the ADR-048 participant index; keep it a separate, documented store.</background>
+    <relevant-files>
+      <file role="new">Dataverse: sprk_affinity table (managed solution) — columns: sprk_signaltype (option/string), sprk_signalvalue (string), sprk_targetentity + sprk_targetid (or typed regarding ref), sprk_confirmationcount (int), tenant key, last-confirmed timestamp. Created via dataverse-create-schema.</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/AffinityRung.cs — the rung (suggest-only).</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AffinityStore.cs (or similar) — read (highest-affinity for a signal set) + increment-on-confirmation writer over IGenericEntityService.</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Configuration/AffinityOptions.cs — IOptionsMonitor toggle (per-tenant, ADR-018) mirroring AutoFileOptions.</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RungKind.cs — add RungKind.Affinity (unused value).</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs — Affinity is SUGGEST-ONLY: MUST NOT be in IsAutoFileEligible/IsDeterministicWriteEligible (mirror RecordNameMatch/ContactNameMatch exclusion).</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs — register the rung + store + Configure&lt;AffinityOptions&gt; (unconditional, ADR-010; self-gated by config).</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ContactNameMatchRung.cs — reference for a deterministic SUGGEST-ONLY rung (emits a fallback field at suggest-band, excluded from auto-file).</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs — FieldFor for the target record's typed lookup.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (CommunicationParticipantIndexer remark) — the ADR-048 participant index this store must NOT be conflated with.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">Sequences after the config foundation; AffinityOptions clones the same IOptionsMonitor pattern.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-040">The sprk_affinity store is filing-history metadata, DISTINCT from the ADR-040 session ledger (session disposition) and the ADR-048 participant index — this is the accepted Path A exception; MUST be documented as such in the PR and not folded into either. Scope: store design.</constraint>
+    <constraint source="project">AffinityRung is SUGGEST-ONLY: it MUST NEVER auto-file. Add RungKind.Affinity but MUST NOT add it to IsAutoFileEligible/IsDeterministicWriteEligible (mirror RecordNameMatch/ContactNameMatch); the match surfaces as a Suggested candidate citing the confirmation count. Scope: mapper treatment + match emission.</constraint>
+    <constraint source="ADR-024">Write the target via RegardingFieldMap.FieldFor typed lookups; no second regarding mechanism. Scope: match emission.</constraint>
+    <constraint source="ADR-027">The sprk_affinity table + columns land in the managed solution (subscription isolation); create via dataverse-create-schema (Web API + PowerShell). Scope: schema.</constraint>
+    <constraint source="ADR-045">The rung reads only the normalized envelope + the store; best-effort/non-fatal (a throwing rung = non-match, NFR-04); the increment-on-confirmation writer is best-effort and never fails the confirmation path. Scope: rung + writer.</constraint>
+    <constraint source="ADR-018">Affinity is config-gated via IOptionsMonitor (AffinityOptions), per-tenant, no redeploy; when disabled the rung no-ops. Scope: gating.</constraint>
+    <constraint source="ADR-013">No AI/ML infra and no AI-internal types — deterministic frequency counting only (spec: ML deferred). Scope: rung + store.</constraint>
+    <constraint source="ADR-010">Register the rung + store + options unconditionally; self-gate via config (no DI feature gate → no Null-Object peer needed). Scope: DI.</constraint>
+    <constraint source="ADR-038">Unit tests in tests/unit/Sprk.Bff.Api.Tests/Services/Communication/AffinityRungTests.cs; ban Mock&lt;HttpMessageHandler&gt;/DI-registration/ctor-null tests. Scope: this task's tests.</constraint>
+    <constraint source="bff-extensions">Report publish size (absolute + delta); ≤60 MB; no new HIGH CVE. Scope: this task's additions.</constraint>
+    <constraint source="project">Placement Justification: rung + store live in Services/Communication/ behind the ADR-045 boundary, reusing IGenericEntityService (no new access path) — state in PR, cite .claude/constraints/bff-extensions.md. Scope: PR.</constraint>
+    <constraint source="project">Run /conflict-check before the PR — RungKind.cs, AssociationStatusMapper.cs, CommunicationModule.cs are contended. Scope: shared files.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Deterministic learning loop, new Dataverse store, ADR-040 boundary</topic>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-048-communication-participant-index.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Suggest-only rung" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ContactNameMatchRung.cs">The template for a deterministic rung that is excluded from auto-file eligibility — mirror its mapper treatment for Affinity.</pattern>
+      <pattern name="Schema via dataverse-create-schema" location=".claude/skills/dataverse-create-schema/SKILL.md">Create sprk_affinity + columns into the managed solution (no pac table create).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML, ContactNameMatchRung, AssociationStatusMapper, ADR-040/048/027; declare RIGOR LEVEL FULL + opus/high; write the ADR-040 Path A boundary note first (why affinity ≠ ledger ≠ participant index).</step>
+    <step order="1">Create the sprk_affinity table + columns via dataverse-create-schema into the managed solution (per-tenant key, signal-type/value, target ref, confirmation count, last-confirmed).</step>
+    <step order="2">Implement AffinityStore: read highest-affinity target for a message's signal set; increment-on-confirmation writer (best-effort) over IGenericEntityService.</step>
+    <step order="3">Implement AffinityRung (Kind=RungKind.Affinity, config-gated): compute the message's signals, look up highest-affinity record, emit a SUGGEST-ONLY RungMatch with provenance citing the confirmation count.</step>
+    <step order="4">Add RungKind.Affinity; confirm the mapper EXCLUDES it from IsAutoFileEligible/IsDeterministicWriteEligible (add explicit comment); wire the confirmation-write hook where human confirmations are recorded.</step>
+    <step order="5">Register rung + store + AffinityOptions unconditionally in CommunicationModule.cs (self-gated by config).</step>
+    <step order="6">Unit tests: after N confirmations sender→R, an untagged email from that sender surfaces R as Suggested citing count N; Affinity NEVER pushes a target to Resolved/auto-file; disabled config → no-op; store is per-tenant + inspectable. Build green.</step>
+    <step order="7">dotnet build + test; /conflict-check; record publish-size delta.</step>
+    <step order="8">Update TASK-INDEX.md: set task 016 status to ✅.</step>
+    <step order="9">Document the ADR-040 Path A boundary + any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the affinity store's shape overlaps materially with the ADR-048 participant index or ADR-040 ledger (risking a duplicate mechanism), STOP and escalate per §6.5 — the Path A exception requires the store to stay genuinely distinct, and reuse may be the correct pivot (Path C).</trigger>
+    <trigger>If recording confirmations requires a write at a confirmation site outside this task's scope (r5 review surface), note the seam and escalate rather than editing r5-owned code.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>None — grep Services/Communication + Spaarke.Dataverse/Models.cs for "affinity"/history-frequency store finds none (spec §New-Components row confirms); the ADR-040 session ledger and ADR-048 participant index exist but serve different purposes.</existing>
+    <extension>No — the session ledger records per-session disposition and the participant index is a per-message junction; neither accumulates cross-message confirmation frequency by signal type. A separate, inspectable store is the minimum state a deterministic learning loop needs (ADR-040 Path A).</extension>
+    <cost-of-doing-nothing>Without it, untagged cold inbound never gets easier: the same sender/domain/subject pattern is manually filed to the same record over and over with no accumulated signal, and there is no deterministic corpus to later train the deferred ML ranker on.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test the BFF.</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">Dataverse sprk_affinity table + columns (managed solution)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/AffinityRung.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AffinityStore.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/AffinityOptions.cs + RungKind.cs + AssociationStatusMapper.cs + CommunicationModule.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/AffinityRungTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given N confirmed associations from sender S to record R (per-tenant), when a later untagged email from S is evaluated, then AffinityRung surfaces R as a Suggested candidate whose provenance cites the confirmation count N.</criterion>
+    <criterion testable="true">Given any affinity match at any confidence, when the mapper decides, then it NEVER auto-files (Affinity is excluded from IsAutoFileEligible/IsDeterministicWriteEligible) — always at most Suggested.</criterion>
+    <criterion testable="true">Given the AffinityOptions toggle is off for the tenant, when evaluated, then AffinityRung no-ops.</criterion>
+    <criterion testable="true">The sprk_affinity store is per-tenant and inspectable (queryable rows with signal-type/value/target/count); the increment-on-confirmation writer is best-effort and never fails the confirmation path.</criterion>
+    <criterion testable="true">No ML/training infra and no AI-internal types are introduced; the store is documented as an ADR-040 Path A exception distinct from the session ledger + ADR-048 participant index.</criterion>
+    <criterion testable="true">Rung + store + options registered unconditionally; all unit tests pass; build green; publish-size ≤60 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-A4; ADR Tensions ADR-040 Path A. Schema created via dataverse-create-schema into the managed solution (ADR-027). Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

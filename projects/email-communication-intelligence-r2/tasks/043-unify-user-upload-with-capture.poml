@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Unify user-upload ("Save to Spaarke") with the capture pipeline — same engine + dedup (FR-B3)</title>
+    <phase>4 Pillar B — Unified filing surfaces</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF Office upload code (`Services/Office/**`, .cs) to route through the Communication engine + dedup; resolves the structural capture-vs-upload split. tags include bff-api + communication. FULL per task-create Step 3.5.5 → code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified re-routing of an existing upload path onto the existing engine + existing dedup (C1) + existing attachment-hash detector (C3); Sonnet 5 default (CLAUDE.md §8.5). The hard race/crypto logic lives in C1/C3, not here.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shared-service writer on the contended `Services/Communication/**` + `Services/Office/**` paths (hot-path coordination — messaging-communication-app r1/r2/r3, spaarke-notification-spine-r1, email-communication-solution-r4). Run sequentially main-session; `/conflict-check` before the PR.</parallel-reason>
+    <deps>021, 024</deps>
+    <tags>bff-api, communication, office</tags>
+    <estimated-effort>6-9 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Per FR-B3, route the user-upload "Save to Spaarke" path (`OfficeService` / `OfficeDocumentPersistence`) through the SAME engine as capture so a hand-filed email gets association + triage + provenance identically to a mailbox-captured email, and shares the same dedup: message-level on internet-message-id (FR-C1 / task 021) and attachment content-hash (FR-C3 / task 024). This resolves the capture-vs-upload two-path problem — a saved email becomes an intelligence-bearing `sprk_communication`, not merely an archived `sprk_document`.</prompt>
+  <role>SPAARKE platform developer with Communication capture-pipeline + Office upload + SPE dedup expertise. Follow ADR-045 (extend never fork), ADR-013 (AI facade), ADR-007 (SpeFileStore), ADR-038 (seam tests), and BFF §10 hygiene strictly.</role>
+  <goal>A user-saved email is associated + triaged by the engine (not merely archived as `sprk_document`) and is deduped against capture and other users via internet-message-id (FR-C1), with attachment content-hash dedup via FR-C3. One code path; no separate upload-only archive branch. BFF publish size ≤60 MB with delta reported.</goal>
+
+  <context>
+    <background>FR-B3 (spec §Requirements Pillar B) + plan Phase 4 B3. The spec Executive Summary names "the capture-vs-upload split" as one of the two structural gaps. `Services/Office/OfficeService.cs` + `OfficeDocumentPersistence.cs` currently archive a saved email as a `sprk_document` without the engine. This task makes upload a peer entry into the capture engine, sharing FR-C1 message-id dedup + FR-C3 attachment content-hash dedup.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs</file>
+      <file role="test">tests/integration/seam/Communication/ (upload-vs-capture parity + dedup seam test)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="021" status="pending">FR-C1 — canonical internet-message-id dedup + Dataverse alternate key; the upload path reuses it (no second dedup mechanism).</dependency>
+      <dependency task="024" status="pending">FR-C3 — SPE content dedup Tier-1 (`sprk_canonicalhash` = quickXorHash) on `SpeFileStore`; the email-attachment upload path hooks it.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-045">Route upload into the EXISTING engine (`IncomingCommunicationProcessor` capture path) — do NOT fork a second engine or keep a separate archive-only branch; regarding via `RegardingFieldMap` (ADR-024) — scope: upload flow.</constraint>
+    <constraint source="ADR-013">AI/triage reached ONLY via `Services/Ai/PublicContracts/`; MUST NOT inject `IOpenAiClient`/`IPlaybookService`/node executors into Office/upload code — scope: upload triage.</constraint>
+    <constraint source="ADR-007">Attachment content-hash dedup reads `quickXorHash`/hash ONLY through the `SpeFileStore` facade (reuse FR-C3's detector) — do NOT call Graph directly from OfficeService — scope: attachment dedup.</constraint>
+    <constraint source="NFR-02">Message-level dedup relies on the FR-C1 Dataverse alternate key (structural), not an app-level check-then-insert in the upload path — scope: upload dedup.</constraint>
+    <constraint source="NFR-04">Upload capture is best-effort/non-fatal — engine/dedup/hash failures MUST NOT fail the user's save — scope: upload handler.</constraint>
+    <constraint source="project">BFF §10: state Placement Justification in the PR; `dotnet publish -c Release` + report absolute compressed size + delta vs baseline (~45.9 MB excl PDBs); no new HIGH CVE; update `tests/unit/Sprk.Bff.Api.Tests/` — scope: this BFF task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Unify upload with capture + shared dedup</topic>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Capture pipeline entry" location="src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs">Upload MUST enter the same engine here so association+triage+provenance match mailbox capture.</pattern>
+      <pattern name="SpeFileStore dedup hook" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs">Reuse the FR-C3 content-hash detector on the email-attachment upload path via the facade.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML + project CLAUDE.md + spec FR-B3 + FR-C1/C3 + BFF §10; declare RIGOR LEVEL FULL with reason per CLAUDE.md §8. Run `/conflict-check` on `Services/Communication/**` + `Services/Office/**`.</step>
+    <step order="1">Read `OfficeService.cs` + `OfficeDocumentPersistence.cs` to map the current archive-only save path; read `IncomingCommunicationProcessor.cs` for the engine entry contract (what a captured email needs).</step>
+    <step order="2">Re-route the "Save to Spaarke" upload so the saved email enters the same engine (association + triage + provenance) — producing a `sprk_communication`, not merely a `sprk_document` archive.</step>
+    <step order="3">Wire message-level dedup: reuse FR-C1's internet-message-id alternate key so an upload that duplicates a captured/other-user email merges to the single canonical row (structural, NFR-02).</step>
+    <step order="4">Wire attachment content-hash dedup: hook FR-C3's `SpeFileStore` detector on the email-attachment upload path (notify never silent).</step>
+    <step order="5">Ensure the whole upload capture is non-fatal (NFR-04) — a triage/dedup/hash failure does not fail the user's save.</step>
+    <step order="6">Add a seam test under `tests/integration/seam/Communication/` proving upload-vs-capture parity (identical engine output for the same email) + dedup (upload duplicating a capture → one canonical row; byte-identical attachment → no second canonical document). Update `tests/unit/Sprk.Bff.Api.Tests/`.</step>
+    <step order="7">Run `dotnet publish -c Release`; record absolute compressed size + delta; `dotnet list package --vulnerable --include-transitive` (no new HIGH). Write Placement Justification into task notes for the PR.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If FR-C1 (task 021) or FR-C3 (task 024) is not yet merged, do NOT re-implement a second dedup mechanism in the upload path to "unblock" — STOP and escalate per CLAUDE.md §6; the whole point (NFR-02/NFR-09) is one dedup authority. If the engine entry contract cannot accept an upload-sourced email without a shape change, surface it as an ADR-045 tension (CLAUDE.md §6.5) rather than forking.</trigger>
+  </escalation>
+
+  <justification>OMIT — modify-only re-routing of the existing `OfficeService`/`OfficeDocumentPersistence` upload path onto the existing engine (021) + existing dedup detectors (021/024). No new component/endpoint/DI/column introduced by this task.</justification>
+
+  <tools>
+    <tool name="dotnet">Build/test the BFF; publish for size measurement.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</output>
+    <output type="test">tests/integration/seam/Communication/ (upload parity + dedup seam test)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a user-saved email, when saved via "Save to Spaarke", then it is associated + triaged by the engine and produces a `sprk_communication` (not merely a `sprk_document` archive).</criterion>
+    <criterion testable="true">Given the same email saved by a user AND captured from a mailbox, when both processed, then exactly one canonical `sprk_communication` results (deduped on internet-message-id via FR-C1, structural).</criterion>
+    <criterion testable="true">Given byte-identical attachment content uploaded twice (any path), when persisted, then no second canonical `sprk_document` is created (FR-C3 Tier-1) and the user is notified (never silent).</criterion>
+    <criterion testable="true">Negative: an engine/dedup/hash failure during upload is non-fatal (NFR-04) — the user's save still completes and does not surface an unhandled error.</criterion>
+    <criterion testable="true">Upload and mailbox capture produce identical engine output for the same email (parity seam test green).</criterion>
+    <criterion testable="true">BFF publish size ≤60 MB compressed with delta reported; no new HIGH CVE; tests in `tests/unit/Sprk.Bff.Api.Tests/` updated. All unit tests pass; build is green. TASK-INDEX.md ✅; deviations recorded under notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-B3, FR-C1, FR-C3, NFR-02/04/09, Success Criterion 3 + 4. Depends on 021 (C1) + 024 (C3). `/conflict-check` before the PR (contended Services/Communication + Services/Office). Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

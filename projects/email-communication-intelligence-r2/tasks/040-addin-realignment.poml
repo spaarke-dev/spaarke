@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Outlook/Word add-in realignment — Entra NAA sign-in, Word manifest, authenticatedFetch, cleanup (FR-B0)</title>
+    <phase>4 Pillar B — Unified filing surfaces</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Realign + verify an already-ADR-028-migrated add-in (no rebuild): manifest edit, routing existing JSON calls through authenticatedFetch, cosmetic cleanup. Touches .ts and a UI surface but is a bounded, well-specified alignment — STANDARD per task-create Step 3.5.5. (UI-tests included per Step 3.65 because it has a runtime sign-in surface.)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded, fully-specified alignment work against an existing add-in; Sonnet 5 default (CLAUDE.md §8.5). No architectural or security-secret authoring.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>PB-a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Client-only work under src/client/office-addins/** — different surface from 041's BFF work, so the two run concurrently. No shared-lib or .claude/ writes. Note: 040 and 041 form wave PB-a.</parallel-reason>
+    <deps>004</deps>
+    <tags>office-addin, frontend, auth</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Bring the existing (already ADR-028 / @spaarke/auth OfficeNaaStrategy-migrated 2026-07-14) Outlook/Word add-in production-current per FR-B0: (a) verify Entra NAA sign-in succeeds against the BFF at runtime (registration itself is provisioned in task 004); (b) migrate the half-migrated Word manifest to the parameterized unified form with no hardcoded SWA origin; (c) route the remaining JSON BFF calls through `authenticatedFetch` (401-retry), leaving the documented SSE/XHR D-AUTH-7 exceptions untouched; (d) remove dead scope args and stale version/build strings. This is realign + verify, NOT a rebuild.</prompt>
+  <role>SPAARKE platform developer with Office Add-ins + Spaarke Auth v2 (@spaarke/auth OfficeNaaStrategy) expertise. Follow ADR-028 (auth) and ADR-021/022 (UI) strictly.</role>
+  <goal>The add-in signs in via Entra NAA and calls the BFF successfully at runtime; the Word manifest is parameterized (no hardcoded SWA origin); every JSON BFF call routes through `authenticatedFetch` with 401-retry (SSE/XHR keep their D-AUTH-7 exceptions); no dead scope args or stale version/build strings remain; the add-in builds green.</goal>
+
+  <context>
+    <background>FR-B0 (spec §Requirements Pillar B) + plan Phase 4 B0. The add-in was ADR-028-migrated on 2026-07-14; the likely-broken part is the Entra NAA app registration (verified/provisioned in task 004 / plan P0-d) and a half-migrated Word manifest. This task realigns runtime auth + manifest + fetch routing + cosmetics — it does not re-architect the add-in.</background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/word/word-manifest.xml</file>
+      <file role="modify">src/client/office-addins/word/WordHostAdapter.ts</file>
+      <file role="modify">src/client/office-addins/outlook/manifest.json</file>
+      <file role="canonical-reference">src/client/office-addins/shared/services/ApiClient.ts</file>
+      <file role="canonical-reference">src/client/office-addins/shared/services/AuthService.ts</file>
+      <file role="canonical-reference">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</file>
+      <file role="canonical-reference">src/client/office-addins/shared/taskpane/services/SseClient.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Auth/src/createCodePageAuthInitializer.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="004" status="pending">Entra NAA app-registration verification/provisioning (plan P0-d) — the runtime prerequisite this task verifies sign-in against.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Auth MUST go through @spaarke/auth (OfficeNaaStrategy); do NOT introduce a second token-acquisition path or hardcode secrets/origins — scope: all BFF calls made by the add-in.</constraint>
+    <constraint source="project">JSON BFF calls MUST route through `authenticatedFetch` (401-retry); SSE (`SseClient.ts`) and XHR paths KEEP their documented D-AUTH-7 exceptions and MUST NOT be forced through authenticatedFetch — scope: fetch routing only.</constraint>
+    <constraint source="project">The Word manifest MUST be parameterized to the unified form with NO hardcoded SWA origin (parity with the Outlook manifest form) — scope: word-manifest.xml + any build-time origin substitution.</constraint>
+    <constraint source="ADR-021">Any UI touched keeps Fluent v9 semantic tokens with a working dark-mode; do NOT hardcode light-only colors — scope: taskpane surfaces edited during cleanup.</constraint>
+    <constraint source="project">Realign + verify only — do NOT rebuild the add-in, add new features, or change the OfficeNaaStrategy migration — scope: whole task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office Add-ins realignment + Spaarke Auth v2 NAA</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>docs/guides/office-addins-admin-guide.md</file>
+      <file>docs/guides/office-addins-deployment-checklist.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="authenticatedFetch (401-retry)" location="src/client/office-addins/shared/services/ApiClient.ts">Route JSON BFF calls through this; mirror its 401-retry shape; do NOT wrap SSE/XHR.</pattern>
+      <pattern name="OfficeNaaStrategy sign-in" location="src/client/shared/Spaarke.Auth/src/createCodePageAuthInitializer.ts">Reference for the NAA token acquisition the add-in already uses; verify runtime sign-in against the BFF matches this contract.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML + project CLAUDE.md + spec FR-B0; declare RIGOR LEVEL STANDARD with reason per CLAUDE.md §8. Confirm task 004 (Entra NAA registration) status before verifying runtime sign-in.</step>
+    <step order="1">Audit the add-in's BFF calls: enumerate every fetch/XHR/SSE call site in `shared/services/**`, `shared/taskpane/**`, `outlook/**`, `word/**`. Classify each as JSON (must use authenticatedFetch) vs SSE/XHR (D-AUTH-7 exception, leave as-is).</step>
+    <step order="2">Route the JSON calls not yet on `authenticatedFetch` through it (preserve 401-retry). Do NOT touch `SseClient.ts` or documented XHR exceptions.</step>
+    <step order="3">Migrate `word-manifest.xml` to the parameterized unified form: remove any hardcoded SWA origin, align with the Outlook manifest's origin-substitution approach. Update `WordHostAdapter.ts` if it references the old origin.</step>
+    <step order="4">Cosmetic cleanup: remove dead scope arguments, stale version/build strings across manifests + host adapters + taskpane bootstrap. Keep dark-mode-safe Fluent tokens on any edited UI.</step>
+    <step order="5">Build the add-in (`npm run build` in office-addins per its package.json). Run the add-in unit tests (jest). Perform the ui-tests below (runtime sign-in + dark-mode).</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation (e.g., NAA sign-in failed at runtime → see escalation) in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Entra NAA sign-in FAILS at runtime against the BFF, STOP and escalate per CLAUDE.md §6: this is an Entra app-registration/configuration problem (task 004 scope), NOT a code fix to improvise in the add-in. Record the exact failure (consent, redirect URI, scope, audience) and hand back to the registration owner; do NOT work around it with a second auth path.</trigger>
+  </escalation>
+
+  <justification>OMIT — modify/realign-only task (no new component/endpoint/DI). Reuses existing ApiClient authenticatedFetch, existing OfficeNaaStrategy, existing manifests.</justification>
+
+  <ui-tests>
+    <test name="NAA sign-in succeeds against BFF">
+      <steps><step>Sideload the add-in in Outlook (and Word) against a dev tenant with task 004's NAA registration.</step><step>Trigger sign-in; make a JSON BFF call from the taskpane.</step></steps>
+      <expected>Sign-in completes via OfficeNaaStrategy and the JSON call returns 200 (not 401/redirect loop). A forced-expired token triggers exactly one authenticatedFetch 401-retry that then succeeds.</expected>
+    </test>
+    <test name="Dark-mode (ADR-021)">
+      <steps><step>Switch Outlook/Word to dark theme and open the taskpane.</step></steps>
+      <expected>Taskpane surfaces render with Fluent v9 dark tokens (no light-only hardcoded colors; readable contrast).</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build the add-in (its build script) + run jest tests.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/word/word-manifest.xml</output>
+    <output type="code">src/client/office-addins/word/WordHostAdapter.ts</output>
+    <output type="code">src/client/office-addins/shared/services/ApiClient.ts (call sites routed)</output>
+    <output type="test">src/client/office-addins/**/__tests__/ (updated as needed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given task 004's NAA registration, when the add-in signs in, then it authenticates via OfficeNaaStrategy and a JSON BFF call returns 200 at runtime.</criterion>
+    <criterion testable="true">Given the Word manifest, when inspected, then it uses the parameterized unified form with NO hardcoded SWA origin (parity with Outlook).</criterion>
+    <criterion testable="true">Given the add-in's JSON BFF call sites, when audited, then all route through `authenticatedFetch` (401-retry) while `SseClient.ts` and documented XHR paths retain their D-AUTH-7 exceptions.</criterion>
+    <criterion testable="true">Negative: an unauthenticated/expired-token JSON call returns 401 and is transparently retried once via authenticatedFetch (not surfaced as an unhandled error or a second auth path).</criterion>
+    <criterion testable="true">Given the taskpane in dark theme, when rendered, then it uses Fluent v9 dark tokens (ADR-021) with no light-only hardcoded colors.</criterion>
+    <criterion testable="true">Dead scope args and stale version/build strings are removed; the add-in builds green and jest tests pass.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows this task ✅ and any deviation is recorded under notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-B0 (a-d), Success Criterion 7 ("Add-in signs in and files against the BFF at runtime"). Deploy of this add-in happens in task 044. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

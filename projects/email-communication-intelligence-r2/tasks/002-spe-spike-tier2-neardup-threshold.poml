@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>SPE spike 2 — Tier-2 near-dup threshold + documentVector3072 coverage</title>
+    <phase>0 Prerequisites &amp; spikes</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Investigation/spike producing a ship-or-defer decision note; no production code change. STANDARD per task-create Step 3.5.5 (single deliverable, gates a downstream scope decision, no .cs/.ts modification).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded empirical spike with a closed question (threshold + coverage) and a decision output; Sonnet 5 default (CLAUDE.md §8.5).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only against existing `documentVector3072` / Find-Similar surfaces + writes only to notes/spikes/. Independent of 001/003/004; no shared-lib or .claude/ writes.</parallel-reason>
+    <deps>none</deps>
+    <tags>spike, spe, dedup</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Determine whether FR-C3 Tier-2 (near-duplicate detection, reusing the existing `documentVector3072` "Find Similar" embedding at a duplicate-tuned threshold) is robust enough to ship in R2 or must defer. Establish (a) a candidate near-dup cosine/similarity threshold that separates true near-dups from merely-related documents, and (b) whether `documentVector3072` coverage across the document corpus is sufficient for the detector to be trustworthy. Produce a ship-or-defer decision note. Do not build Tier-2 here.</prompt>
+  <role>SPAARKE platform developer with SharePoint Embedded + Azure AI Search / vector-similarity expertise. Follow ADR-007 (SPE via `SpeFileStore` facade) and ADRs strictly.</role>
+  <goal>A spike note `notes/spikes/002-tier2-neardup-threshold.md` exists that: (1) reports `documentVector3072` population/coverage across the current corpus (what % of documents have a vector); (2) proposes a duplicate-tuned similarity threshold with evidence (sample near-dup pairs above vs related pairs below); (3) states a clear SHIP or DEFER recommendation for Tier-2 in R2 with rationale; (4) if DEFER, names the concrete coverage/threshold gap that must close first.</goal>
+
+  <context>
+    <background>FR-C3 (spec §Requirements Pillar C) ships message-level dedup + Tier-1 (exact hash-equality) in R2 core; Tier-2 (near-dup) is a spike-gated fast-follow. NFR-08 requires this spike before any Tier-2 build. Owner clarification (Q2): Tier-2 ships ONLY if this spike validates the near-dup threshold + `documentVector3072` coverage, else it defers behind a scoped enhancement.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs</file>
+      <file role="canonical-reference">projects/sdap-file-duplication-detector-r1/README.md</file>
+      <file role="canonical-reference">.claude/agent-memory/researcher/spe-dedup-content-identity-2026-07.md</file>
+      <file role="new">projects/email-communication-intelligence-r2/notes/spikes/002-tier2-neardup-threshold.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No task dependency; requires read access to the document corpus with `documentVector3072` and the Find-Similar path.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">Any SPE/document reads for the coverage survey MUST route through the `SpeFileStore` facade or the existing Find-Similar surface; no ad-hoc direct Graph in caller code — scope: the spike harness.</constraint>
+    <constraint source="spec-NFR-08">This spike MUST complete with a SHIP/DEFER recommendation before any Tier-2 build task starts — scope: the Tier-2 scope decision only; do not implement the near-dup detector here.</constraint>
+    <constraint source="project">Tier-2 reuses the EXISTING `documentVector3072` "Find Similar" embedding; do NOT propose a new/second vector field or embedding model — scope: near-dup mechanism selection (ADR-045 extend-not-fork).</constraint>
+    <constraint source="project">Sample-based evaluation MUST use real corpus pairs (or clearly-labeled synthetic near-dups) and report both a true-near-dup set and a related-but-distinct set to justify the threshold — scope: threshold evidence.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Near-duplicate detection via document embeddings</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/agent-memory/researcher/spe-dedup-content-identity-2026-07.md</file>
+      <file>projects/sdap-file-duplication-detector-r1/README.md</file>
+      <file>docs/architecture/communication-intelligence-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="documentVector3072 Find-Similar" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs">Reuse the existing similarity path; tune a threshold for the duplicate case rather than the related-document case.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this task POML + project CLAUDE.md + spec FR-C3/NFR-08 + owner clarification Q2; declare RIGOR LEVEL STANDARD with reason.</step>
+    <step order="1">Read the sdap-r1 README + researcher memory note for prior near-dup findings; locate the `documentVector3072` / Find-Similar surface in code.</step>
+    <step order="2">Survey `documentVector3072` coverage: what fraction of documents in the corpus have a populated vector, and which classes of documents lack one (e.g., unsupported file types).</step>
+    <step order="3">Assemble an evaluation set: a handful of KNOWN near-dup pairs (e.g., minor-edit variants of the same doc) and a handful of related-but-distinct pairs; compute pairwise similarity.</step>
+    <step order="4">Identify a threshold that separates near-dups (above) from related docs (below); record false-positive/false-negative risk at that threshold.</step>
+    <step order="5">Decide SHIP vs DEFER for Tier-2 in R2 based on (a) coverage sufficiency and (b) threshold separability.</step>
+    <step order="6">Write `notes/spikes/002-tier2-neardup-threshold.md` with: coverage stats, evaluation pairs + scores, proposed threshold, and a bolded SHIP/DEFER recommendation with rationale; if DEFER, name the concrete gap.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation (e.g., corpus too small to validate) in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `documentVector3072` coverage is too sparse or no threshold cleanly separates near-dups from related documents, STOP and escalate per CLAUDE.md §6: recommend DEFER Tier-2 with the named gap rather than proposing a threshold the evidence does not support. Do not assert "ship Tier-2" without separable evidence + human sign-off.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/run a scratch harness if similarity is computed in-process.</tool>
+    <tool name="bash">Drive corpus coverage queries / similarity sampling.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/email-communication-intelligence-r2/notes/spikes/002-tier2-neardup-threshold.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the current document corpus, when coverage is surveyed, then the note reports the fraction of documents with a populated `documentVector3072` and the classes lacking one.</criterion>
+    <criterion testable="true">Given a set of known near-dup pairs and related-but-distinct pairs, when pairwise similarity is computed, then the note tabulates the scores and identifies a candidate separating threshold.</criterion>
+    <criterion testable="true">The note contains a single bolded SHIP-or-DEFER recommendation for Tier-2 in R2 with supporting rationale.</criterion>
+    <criterion testable="true">Negative: if coverage is insufficient or the threshold is not separable, the note recommends DEFER and names the concrete gap (not a hand-waved "should work"), and the escalation trigger is invoked.</criterion>
+    <criterion testable="true">The note proposes NO new vector field / embedding model — it reuses `documentVector3072` (extend-not-fork).</criterion>
+    <criterion testable="true">TASK-INDEX.md shows this task ✅ and any deviation is recorded under notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-C3 (Tier-2), NFR-08, Owner Clarification Q2, Assumptions ("documentVector3072 coverage sufficient"), Unresolved Questions "SPE spike 2". Decides whether Tier-2 is in R2 scope. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
