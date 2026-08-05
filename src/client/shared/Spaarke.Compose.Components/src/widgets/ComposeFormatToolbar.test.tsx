@@ -812,6 +812,12 @@ describe('ComposeFormatToolbar — Create Summary Memo dropdown (FR-14, task 051
 // Each control keeps its existing testid + wiring; these tests assert the NEW
 // icon-only/no-visible-text presentation, the accessible name (aria-label) + Tooltip,
 // and — for #3/#6 — the new DOM position relative to the other toolbar controls.
+//
+// #3's FAR-LEFT placement is SUPERSEDED by UAT round-4 #12 (2026-08-04, see the
+// dedicated describe block below) — the owner moved Memo off the far-left position
+// into the regrouped action-icon area. The far-left-position assertion below was
+// replaced accordingly; #5/#6 (icon-only + Word's post-format-menu, pre-Save
+// position) remain accurate under the round-4 layout and are unchanged.
 // ---------------------------------------------------------------------------
 
 describe('ComposeFormatToolbar — UAT round-1 (2026-08-03): repositioning + icon-only (#3/#5/#6)', () => {
@@ -821,22 +827,20 @@ describe('ComposeFormatToolbar — UAT round-1 (2026-08-03): repositioning + ico
     return Array.from(toolbar.querySelectorAll('[data-testid]')).map(el => el.getAttribute('data-testid') as string);
   }
 
-  it('#3: Create Summary Memo is icon-only (no visible text), carries aria-label + Tooltip, and is the FIRST control in the toolbar (far left, ahead of Body/Paragraph/Font/Table)', () => {
+  it('#3 (superseded position, round-4 #12): Create Summary Memo is icon-only (no visible text), carries aria-label + Tooltip — no longer the far-left/first control (see the round-4 describe block for its current position)', () => {
     renderFormatToolbar({}, { props: { hasReview: true, onGenerateMemo: jest.fn() } });
 
     const memoTrigger = screen.getByTestId('compose-format-memo-menu');
     expect(memoTrigger).toHaveAttribute('aria-label', 'Create Summary Memo');
     expect(memoTrigger.textContent).toBe(''); // icon-only — no visible label text
 
+    // Round-4 #12: Memo now sits AFTER the format-menu group, not ahead of it.
     const order = toolbarTestIdOrder();
-    expect(order[0]).toBe('compose-format-memo-menu');
-    expect(order.indexOf('compose-format-memo-menu')).toBeLessThan(order.indexOf('compose-format-heading-menu'));
-    expect(order.indexOf('compose-format-memo-menu')).toBeLessThan(order.indexOf('compose-format-paragraph-menu'));
-    expect(order.indexOf('compose-format-memo-menu')).toBeLessThan(order.indexOf('compose-format-font-menu'));
-    expect(order.indexOf('compose-format-memo-menu')).toBeLessThan(order.indexOf('compose-format-table-menu'));
+    expect(order[0]).not.toBe('compose-format-memo-menu');
+    expect(order.indexOf('compose-format-memo-menu')).toBeGreaterThan(order.indexOf('compose-format-table-menu'));
   });
 
-  it('#3: the memo dropdown still opens and fires its handlers from the new far-left position (behavior unchanged)', async () => {
+  it('#3: the memo dropdown still opens and fires its handlers from its (now regrouped) position (behavior unchanged)', async () => {
     const user = userEvent.setup();
     const onGenerateMemo = jest.fn();
     renderFormatToolbar({}, { props: { hasReview: true, onGenerateMemo } });
@@ -898,5 +902,188 @@ describe('ComposeFormatToolbar — UAT round-1 (2026-08-03): repositioning + ico
     const wordTrigger = screen.getByTestId('compose-format-word-menu');
     await user.hover(wordTrigger);
     expect(await screen.findByText('Word')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// UAT round-4 (2026-08-04) owner feedback — two toolbar changes:
+//   #11 MENU ALLOCATION — the Word dropdown must contain ONLY "Open in Word (web)" /
+//        "Open in Word (desktop)"; its legacy Save/Save New Document duplicate
+//        entries (round-1's "UX-1 parity affordance") are REMOVED. Save stays the
+//        ONE split-button (Save Version primary / Save New Document caret). Zero
+//        functional overlap between the two menus.
+//   #12 REGROUP + SPACING — format menus (Body/Paragraph/Font/Table) stay at the
+//        left; the action icons regroup left→right as FOUR `ToolbarDivider`-
+//        separated groups: [Review Summary · Create Summary Memo] | [Word · Save] |
+//        [Review Notes · Track Changes] | [Undo · Redo · Info]. Supersedes round-1
+//        #3's far-left Memo placement. Open Document / Reload from source / Refresh
+//        Profile (not named in the owner's order) are placed immediately after the
+//        format-menu group and before the regrouped action groups — a flagged
+//        placement decision, not a deletion.
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — UAT round-4 (2026-08-04): menu allocation (#11) + regroup/spacing (#12)', () => {
+  /** Returns the data-testid of every descendant of the toolbar, in DOM order. */
+  function toolbarTestIdOrder(): string[] {
+    const toolbar = screen.getByTestId('compose-format-toolbar');
+    return Array.from(toolbar.querySelectorAll('[data-testid]')).map(el => el.getAttribute('data-testid') as string);
+  }
+
+  const allControlsProps = (): Partial<ComposeFormatToolbarProps> => ({
+    onOpenInWord: jest.fn(),
+    onOpenInWordDesktop: jest.fn(),
+    onSave: jest.fn(),
+    canSave: true,
+    hasReview: true,
+    reviewSummaryOpen: false,
+    onToggleReviewSummary: jest.fn(),
+    reviewNotesOpen: false,
+    onToggleReviewNotes: jest.fn(),
+    onToggleTrackChanges: jest.fn(),
+    trackChangesEnabled: false,
+    onGenerateMemo: jest.fn(),
+    onEmailMemo: jest.fn(),
+    onOpenDocument: jest.fn(),
+    onReloadFromSource: jest.fn(),
+    onRefreshProfile: jest.fn(),
+    reviewDisclaimer: 'Not legal advice.',
+  });
+
+  // ---- #11: menu allocation ----
+
+  it('#11: the Word menu contains ONLY the two Open-in-Word items — no Save / Save New Document duplicate, even when onSave is wired', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar(
+      {},
+      { props: { onOpenInWord: jest.fn(), onOpenInWordDesktop: jest.fn(), onSave: jest.fn(), canSave: true } }
+    );
+
+    await user.click(screen.getByTestId('compose-format-word-menu'));
+
+    expect(screen.getByTestId('compose-format-open-word-web')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-open-word-desktop')).toBeInTheDocument();
+    // The former Word-menu Save duplicate testids must be entirely absent from the DOM.
+    expect(screen.queryByTestId('compose-format-word-save')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-format-word-save-new')).not.toBeInTheDocument();
+    expect(screen.queryByText('Save Version')).not.toBeInTheDocument();
+    expect(screen.queryByText('Save New Document')).not.toBeInTheDocument();
+  });
+
+  it('#11: the Word menu items read "Open in Word (web)" / "Open in Word (desktop)"', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { onOpenInWord: jest.fn(), onOpenInWordDesktop: jest.fn() } });
+
+    await user.click(screen.getByTestId('compose-format-word-menu'));
+
+    expect(screen.getByTestId('compose-format-open-word-web')).toHaveTextContent('Open in Word (web)');
+    expect(screen.getByTestId('compose-format-open-word-desktop')).toHaveTextContent('Open in Word (desktop)');
+  });
+
+  it('#11: Save remains the ONE entry point — the split-button still renders "Save Version" primary + "Save New Document" caret item', async () => {
+    const user = userEvent.setup();
+    const onSave = jest.fn();
+    renderFormatToolbar({}, { props: { onSave, canSave: true } });
+
+    const saveWrapper = screen.getByTestId('compose-format-save');
+    const primaryButton = within(saveWrapper).getAllByRole('button')[0];
+    await user.click(primaryButton);
+    expect(onSave).toHaveBeenCalledWith('version');
+
+    await user.click(screen.getByRole('button', { name: /save options/i }));
+    const saveNew = await screen.findByTestId('compose-format-save-new');
+    await user.click(saveNew);
+    expect(onSave).toHaveBeenCalledWith('new');
+  });
+
+  // ---- #12: regroup + spacing ----
+
+  it('#12: exactly THREE ToolbarDividers are rendered, separating the four action-icon groups', () => {
+    renderFormatToolbar({}, { props: allControlsProps() });
+    expect(screen.getByTestId('compose-format-divider-1')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-divider-2')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-divider-3')).toBeInTheDocument();
+  });
+
+  it('#12: format menus (Body/Paragraph/Font/Table) stay at the left, unchanged relative order', () => {
+    renderFormatToolbar({}, { props: allControlsProps() });
+    const order = toolbarTestIdOrder();
+    expect(order[0]).toBe('compose-format-heading-menu');
+    expect(order.indexOf('compose-format-heading-menu')).toBeLessThan(order.indexOf('compose-format-paragraph-menu'));
+    expect(order.indexOf('compose-format-paragraph-menu')).toBeLessThan(order.indexOf('compose-format-font-menu'));
+    expect(order.indexOf('compose-format-font-menu')).toBeLessThan(order.indexOf('compose-format-table-menu'));
+  });
+
+  it('#12: the EXACT owner-specified left→right action-icon order — [Review Summary · Memo] | [Word · Save] | [Review Notes · Track Changes] | [Undo · Redo · Info]', () => {
+    renderFormatToolbar({}, { props: allControlsProps() });
+    const order = toolbarTestIdOrder();
+    const idx = (id: string): number => order.indexOf(id);
+
+    // Group 1
+    expect(idx('compose-format-review-summary-toggle')).toBeLessThan(idx('compose-format-memo-menu'));
+    // Divider 1 separates Group 1 from Group 2
+    expect(idx('compose-format-memo-menu')).toBeLessThan(idx('compose-format-divider-1'));
+    expect(idx('compose-format-divider-1')).toBeLessThan(idx('compose-format-word-menu'));
+    // Group 2
+    expect(idx('compose-format-word-menu')).toBeLessThan(idx('compose-format-save'));
+    // Divider 2 separates Group 2 from Group 3
+    expect(idx('compose-format-save')).toBeLessThan(idx('compose-format-divider-2'));
+    expect(idx('compose-format-divider-2')).toBeLessThan(idx('compose-format-review-notes-toggle'));
+    // Group 3
+    expect(idx('compose-format-review-notes-toggle')).toBeLessThan(idx('compose-format-track-changes'));
+    // Divider 3 separates Group 3 from Group 4
+    expect(idx('compose-format-track-changes')).toBeLessThan(idx('compose-format-divider-3'));
+    expect(idx('compose-format-divider-3')).toBeLessThan(idx('compose-format-undo'));
+    // Group 4
+    expect(idx('compose-format-undo')).toBeLessThan(idx('compose-format-redo'));
+    expect(idx('compose-format-redo')).toBeLessThan(idx('compose-format-review-info'));
+  });
+
+  it('#12: the unmentioned icons (Open Document / Reload from source / Refresh Profile) are preserved — placed after the format-menu group and before Group 1, in their pre-round-4 relative order', () => {
+    renderFormatToolbar({}, { props: allControlsProps() });
+    const order = toolbarTestIdOrder();
+    const idx = (id: string): number => order.indexOf(id);
+
+    expect(screen.getByTestId('compose-format-open-document')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-reload-from-source')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-refresh-profile')).toBeInTheDocument();
+
+    // After the format-menu group...
+    expect(idx('compose-format-table-menu')).toBeLessThan(idx('compose-format-open-document'));
+    // ...preserved relative order...
+    expect(idx('compose-format-open-document')).toBeLessThan(idx('compose-format-reload-from-source'));
+    expect(idx('compose-format-reload-from-source')).toBeLessThan(idx('compose-format-refresh-profile'));
+    // ...and before Group 1 (Review Summary is the first control of the regrouped action area).
+    expect(idx('compose-format-refresh-profile')).toBeLessThan(idx('compose-format-review-summary-toggle'));
+  });
+
+  it('#12: with the review-only controls absent (no hasReview), the format menus, unmentioned icons, Word/Save, and Undo/Redo/Info still render in order around the dividers', () => {
+    renderFormatToolbar(
+      {},
+      {
+        props: {
+          onOpenInWord: jest.fn(),
+          onOpenInWordDesktop: jest.fn(),
+          onSave: jest.fn(),
+          canSave: true,
+          onOpenDocument: jest.fn(),
+          onReloadFromSource: jest.fn(),
+          onRefreshProfile: jest.fn(),
+        },
+      }
+    );
+    const order = toolbarTestIdOrder();
+    const idx = (id: string): number => order.indexOf(id);
+
+    expect(screen.queryByTestId('compose-format-memo-menu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-format-review-summary-toggle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-format-review-notes-toggle')).not.toBeInTheDocument();
+
+    expect(idx('compose-format-table-menu')).toBeLessThan(idx('compose-format-open-document'));
+    expect(idx('compose-format-refresh-profile')).toBeLessThan(idx('compose-format-divider-1'));
+    expect(idx('compose-format-divider-1')).toBeLessThan(idx('compose-format-word-menu'));
+    expect(idx('compose-format-word-menu')).toBeLessThan(idx('compose-format-save'));
+    expect(idx('compose-format-save')).toBeLessThan(idx('compose-format-divider-2'));
+    expect(idx('compose-format-divider-3')).toBeLessThan(idx('compose-format-undo'));
+    expect(idx('compose-format-undo')).toBeLessThan(idx('compose-format-redo'));
   });
 });

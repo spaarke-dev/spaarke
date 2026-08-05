@@ -148,6 +148,11 @@ export default defineConfig({
       // hook from `@spaarke/ai-widgets/src/hooks/useWorkspaceLayouts.ts`
       // without an intermediate build step. Matches the SpaarkeAi pattern.
       "@spaarke/ai-widgets": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src"),
+      // #712 (2026-08-05): ai-widgets (aliased to SOURCE above) subpath-imports
+      // @spaarke/ai-outputs/output-widgets/*; the package has no exports map, so
+      // bare subpaths only resolve through an alias — mirror SpaarkeAi's.
+      "@spaarke/ai-outputs/src": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src"),
+      "@spaarke/ai-outputs": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src"),
       // spaarkeai-compose-r1 (2026-06-29): aliased to source so the
       // `sections/dailyBriefing/dailyBriefing.registration.ts` shim can import
       // `createDailyBriefingRegistration` (R2.1 hotfix 2026-06-19) from

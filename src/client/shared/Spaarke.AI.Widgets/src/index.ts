@@ -617,7 +617,7 @@ export type { PaneEventBusProviderProps } from './events/PaneEventBusContext';
 
 // React hooks — primary API for components
 export { usePaneEvent } from './events/usePaneEvent';
-export { useDispatchPaneEvent } from './events/useDispatchPaneEvent';
+export { useDispatchPaneEvent, useOptionalDispatchPaneEvent } from './events/useDispatchPaneEvent';
 export type { DispatchPaneEvent } from './events/useDispatchPaneEvent';
 
 // ---------------------------------------------------------------------------

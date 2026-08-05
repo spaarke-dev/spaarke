@@ -4,5 +4,5 @@ All 28 tasks complete (001–090). Project-close /test-diet gate run (6 test fil
 Closing PR: none (work landed via incremental merges to master across the project, not a single wrap-up PR)
 Worktree: C:/code_files/spaarke-wt-ai-advanced-capabilities-analysis-hub-r1 (PRESERVED — not removed by this skill; clean up separately if desired)
 Remote branch: work/ai-advanced-capabilities-analysis-hub-r1 (still on origin)
-Issue: none — project was never registered in the GitHub portfolio tracker (Project #2). No Issue to close. Run /devops-project-register --from-folder if a board entry is desired retroactively.
+Issue: #728 (closed, Completed) — registered retroactively via /devops-project-register on 2026-08-04, parented under Epic #421 (SPAARKE AI). Start Date 2026-07-28, Closed Date 2026-08-03. https://github.com/spaarke-dev/spaarke/issues/728
 Deferred (owner-gated env, out of code scope): 071 ribbon-button import via /ribbon-edit + retired sprk_analysisworkspace web-resource delete + Matter/Project form subgrid placement. UAT-confirmed by owner 2026-08-03.

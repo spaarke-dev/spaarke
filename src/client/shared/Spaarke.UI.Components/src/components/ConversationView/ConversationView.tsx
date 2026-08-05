@@ -173,11 +173,18 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
-    // Hide the visible scrollbar (round 4) — the jump-to-latest circle-down
-    // button + mouse wheel drive scrolling; the bar itself is suppressed. Scroll
-    // behavior (wheel, programmatic scrollTop) is unaffected.
-    scrollbarWidth: 'none',
-    '::-webkit-scrollbar': { width: 0, height: 0 },
+    // Thin modern scrollbar (owner UAT 2026-08-04 item 1 — consistency with the Email
+    // widget). The jump-to-latest circle-down button stays as an extra affordance; the
+    // bar is now visible+thin instead of suppressed. Semantic tokens (ADR-021).
+    scrollbarWidth: 'thin',
+    scrollbarColor: `${tokens.colorNeutralStroke1} transparent`,
+    '::-webkit-scrollbar': { width: '8px', height: '8px' },
+    '::-webkit-scrollbar-thumb': {
+      backgroundColor: tokens.colorNeutralStroke1,
+      borderRadius: tokens.borderRadiusMedium,
+    },
+    '::-webkit-scrollbar-thumb:hover': { backgroundColor: tokens.colorNeutralStroke1Hover },
+    '::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
   },
   centerState: {
     flex: 1,

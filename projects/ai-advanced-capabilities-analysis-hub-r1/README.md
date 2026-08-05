@@ -3,6 +3,7 @@
 > **Status**: ✅ Complete (2026-08-03) · **Branch**: `work/ai-advanced-capabilities-analysis-hub-r1`
 > **Owner**: ralph.schroeder · **Round**: r1 · **Spawned from**: `ai-advanced-capabilities-nda-r1` UAT
 > **Sibling**: `ai-advanced-capabilities-research-r1` · **Program**: `projects/ai-advanced-capabilities-development/`
+> **Portfolio**: Issue [#728](https://github.com/spaarke-dev/spaarke/issues/728) (closed, Completed) · Parent Epic [#421 SPAARKE AI](https://github.com/spaarke-dev/spaarke/issues/421) · [Project #2 board](https://github.com/users/spaarke-dev/projects/2)
 
 ## Changelog
 

@@ -1,6 +1,7 @@
 /**
  * NdaReviewProgressModal — center-screen live-progress popup for a running NDA review
- * (ai-advanced-capabilities-nda-r1, UAT round-5 #9; UAT round-6 #6/#7 polish).
+ * (ai-advanced-capabilities-nda-r1, UAT round-5 #9; UAT round-6 #6/#7 polish; UAT round-3 item #8 -
+ * non-blocking / dismissible, see the `visible`/`onDismiss` doc comments below).
  *
  * The reviewer asked for a clear, center-of-screen indication of what the review is doing while it runs
  * (the old signal was just a tiny "Working…" chip). This renders the shared {@link AiProgressStepper}
@@ -22,6 +23,7 @@
  */
 import * as React from 'react';
 import {
+  Button,
   Dialog,
   DialogSurface,
   DialogBody,
@@ -149,17 +151,31 @@ const useStyles = makeStyles({
   iconError: {
     color: tokens.colorStatusDangerForeground1,
   },
+  // UAT round-3 (item #8): the non-blocking "Continue working in background" dismiss affordance.
+  // Own row, small top margin so it reads as a secondary action under the step list.
+  dismissRow: {
+    width: '100%',
+    marginTop: tokens.spacingVerticalS,
+  },
 });
 
 export interface NdaReviewProgressModalProps {
-  /** Current run status. The modal renders whenever this is not `idle`. */
+  /** Current run status. */
   status: NdaRunStatus;
+  /** UAT round-3 (item #8): the modal renders whenever this is true (idle, or dismissed, hide it). */
+  visible: boolean;
   /** Called to return to idle after the terminal state has been shown. */
   onClose: () => void;
+  /**
+   * UAT round-3 (item #8): "Continue working in background" - hides the modal WITHOUT stopping the
+   * review (it keeps running server-side either way). Called from the dismiss button and from
+   * Escape/light-dismiss (the dialog is `modalType="non-modal"`, so there is no backdrop to click).
+   */
+  onDismiss: () => void;
 }
 
 export function NdaReviewProgressModal(props: NdaReviewProgressModalProps): React.JSX.Element | null {
-  const { status, onClose } = props;
+  const { status, visible, onClose, onDismiss } = props;
   const styles = useStyles();
   const [activeIdx, setActiveIdx] = React.useState(0);
   const [phraseIdx, setPhraseIdx] = React.useState(0);
@@ -190,7 +206,7 @@ export function NdaReviewProgressModal(props: NdaReviewProgressModalProps): Reac
     return () => clearTimeout(id);
   }, [status, onClose]);
 
-  if (status === 'idle') return null;
+  if (!visible) return null;
 
   const steps = NDA_REVIEW_PROGRESS_STEPS;
   let activeStepId: string | null = null;
@@ -212,10 +228,14 @@ export function NdaReviewProgressModal(props: NdaReviewProgressModalProps): Reac
   }
 
   return (
-    // `modalType="alert"` = no light-dismiss (no backdrop/Escape close) — a progress modal auto-dismisses
-    // on the real outcome. DialogSurface brings the elevated background + the Dialog brings the scrim
-    // (round-6 #6). `open` is always true here; the parent conditionally renders this component.
-    <Dialog open modalType="alert">
+    // UAT round-3 (item #8): `modalType="non-modal"` - NO backdrop scrim, NO focus trap. The rest of
+    // the app (workspace tabs, etc.) stays fully interactive while the review runs; this used to be
+    // `modalType="alert"`, which held the whole app hostage for the ~20s-2min run (the bug this fixes).
+    // DialogSurface still brings its own elevated background, so it reads as a floating status card
+    // (round-6 #6), just without the blocking scrim. Escape routes to `onDismiss` (hide, keep running)
+    // rather than `onClose` (terminal reset-to-idle) - there is no backdrop to click on non-modal, and
+    // dismissing mid-run must never look like the review was cancelled.
+    <Dialog open modalType="non-modal" onOpenChange={(_, data) => { if (!data.open) onDismiss(); }}>
       <DialogSurface className={styles.surface} data-testid="nda-review-progress-modal">
         <DialogBody>
           <div className={styles.body}>
@@ -268,6 +288,23 @@ export function NdaReviewProgressModal(props: NdaReviewProgressModalProps): Reac
                 );
               })}
             </div>
+
+            {/* UAT round-3 (item #8): explicit "Continue working in background" affordance - hides
+                the modal WITHOUT stopping the review (it keeps running server-side either way). Only
+                shown while running: once the review reaches a terminal state, the linger timer above
+                dismisses the modal on its own in under ~1s (complete) / ~3.2s (error). */}
+            {status === 'running' ? (
+              <div className={styles.dismissRow}>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  onClick={onDismiss}
+                  data-testid="nda-review-progress-dismiss"
+                >
+                  Continue working in background
+                </Button>
+              </div>
+            ) : null}
           </div>
         </DialogBody>
       </DialogSurface>

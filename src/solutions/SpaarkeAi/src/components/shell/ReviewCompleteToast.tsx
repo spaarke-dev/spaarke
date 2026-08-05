@@ -17,6 +17,17 @@
  * 031; agreements-r1 task-002 schema split). No new emit; this is a NEW
  * SUBSCRIBER on an existing, additive discriminant.
  *
+ * ── Progress-modal suppression (UAT round-3 item #8, ai-advanced-capabilities-agreements-r1) ────────
+ * The center-screen NDA/agreement-review progress modal (`conversation/NdaReviewProgressModal.tsx`)
+ * used to be fully BLOCKING, so "review completed while the user is on a different workspace tab"
+ * never happened in practice — the blocking scrim made switching tabs impossible while it was open.
+ * Item #8 made the modal non-blocking (`modalType="non-modal"`) + dismissible, so that combination is
+ * now reachable. This component subscribes to the new `nda_review_progress_visibility` discriminant
+ * (additive, ADR-030) and suppresses its own toast whenever the modal is STILL showing the outcome —
+ * the modal itself already notifies the user in that case; a toast at the same moment would be a
+ * double notification. The existing `active_widget_changed` (Compose-tab) suppression below is
+ * unchanged and combines with this one (either condition suppresses the toast).
+ *
  * KNOWN GAP (documented, not fixed here — HARD BOUNDARY forbids editing
  * conversation/** this wave): `useNdaReviewAdvisoryCommentsBridge.emitFromResult`
  * (src/solutions/SpaarkeAi/src/components/conversation/useNdaReviewAdvisoryCommentsBridge.ts,
@@ -102,6 +113,11 @@ export function ReviewCompleteToast({ toasterId }: ReviewCompleteToastProps): nu
   // undefined until the first tab activation is observed.
   const activeWidgetTypeRef = React.useRef<string | undefined>(undefined);
 
+  // UAT round-3 (item #8): whether the progress modal is CURRENTLY visible, fed by the
+  // `nda_review_progress_visibility` broadcast. Defaults false (no run in flight / modal not yet
+  // mounted its first event) — the toast is never suppressed by an unknown/absent signal.
+  const progressModalVisibleRef = React.useRef(false);
+
   // True while the fixed-id toast is queued/visible (cleared by onStatusChange
   // once it dismisses/unmounts) — drives the dispatch-vs-update bounded-stacking
   // decision.
@@ -141,11 +157,22 @@ export function ReviewCompleteToast({ toasterId }: ReviewCompleteToastProps): nu
       return;
     }
 
+    // UAT round-3 (item #8): track the progress modal's own visibility.
+    if (event.type === "nda_review_progress_visibility") {
+      progressModalVisibleRef.current = event.progressVisible === true;
+      return;
+    }
+
     if (event.type !== "compose_advisory_comments") return;
 
     // Suppress — the Compose surface is already the visible workspace tab
     // (don't announce what's already on screen).
     if (activeWidgetTypeRef.current === "compose") return;
+
+    // UAT round-3 (item #8): suppress — the non-blocking progress modal is STILL showing this same
+    // completion outcome on screen (no double notification). Only reachable now that the modal is
+    // non-blocking: a dismissed modal, or one that already auto-closed, does not suppress.
+    if (progressModalVisibleRef.current) return;
 
     const content = renderToastContent();
 

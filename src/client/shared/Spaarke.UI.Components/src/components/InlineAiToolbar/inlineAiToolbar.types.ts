@@ -39,8 +39,14 @@ export interface InlineAiAction {
   label: string;
   /** Fluent UI icon element rendered on the button. */
   icon: React.ReactElement;
-  /** Delivery mechanism for the action result. */
-  actionType: InlineAiActionType;
+  /**
+   * OPTIONAL delivery-mechanism hint (chat/diff) used by the Analysis Workspace host to
+   * route the action to a side pane. It is metadata only — the toolbar renders it as a
+   * `data-action-type` attribute and never branches on it; behavior is entirely driven by
+   * the host's `onAction`. Hosts with their own result handling (e.g. the email composer,
+   * which runs the AI on the selection in-place) omit it.
+   */
+  actionType?: InlineAiActionType;
   /** Optional tooltip description surfaced to screen readers and hover tooltips. */
   description?: string;
 }

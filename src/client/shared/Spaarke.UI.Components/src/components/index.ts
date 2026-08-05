@@ -38,14 +38,12 @@ export * from './DiffCompareView';
 // LookupField - Reusable search-as-you-type lookup
 export * from './LookupField';
 
-// SendEmailDialog - Reusable email composition dialog
-export * from './SendEmailDialog';
-
 // AiSummaryPopover - Reusable AI summary popover with lazy fetch and copy
 export * from './AiSummaryPopover';
 
-// FindSimilarDialog - Reusable iframe dialog for DocumentRelationshipViewer
-export * from './FindSimilarDialog';
+// FindSimilarViewerDialog - Reusable iframe dialog for DocumentRelationshipViewer
+// (#714: renamed from FindSimilarDialog to end the name collision with the FindSimilar wizard family)
+export * from './FindSimilarViewer';
 
 // RelationshipCountCard - Document relationship count with drill-through
 export * from './RelationshipCountCard';
@@ -204,6 +202,9 @@ export * from './WizardFollowOns';
 // send-email implementations.
 export * from './EmailComposer';
 
+// (#713, 2026-08-03: the LEGACY components/SendEmailDialog is DELETED — the
+// explicit re-export below is now the sole SendEmailDialog source, kept for
+// import-shape stability alongside the EmailComposer star.)
 // Name-collision disambiguation (task 021): the NEW canonical dialog wrapper
 // (`EmailComposer/wrappers/SendEmailDialog`, mount='dialog', onSent/onClose API)
 // wins the `SendEmailDialog` / `ISendEmailDialogProps` names on the main barrel
