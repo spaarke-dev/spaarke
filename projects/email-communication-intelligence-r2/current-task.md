@@ -10,17 +10,20 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 031 — Batched identifier query (≈175→≤7) — NOT started |
+| **Task** | Safe-autonomous code-only lane EXHAUSTED (003, 030, 031 ✅). Awaiting operator direction. |
 | **Step** | — |
-| **Status** | not-started (003 ✅, 030 ✅ complete) |
-| **Next Action** | Run `task-execute` on **031** (batched identifier query, code-only, FULL rigor). Then GATE before 004/020/023/033/010 (cloud/security) + all deploys + Pillar E. |
+| **Status** | 003 ✅, 030 ✅, 031 ✅ — all committed. |
+| **Next Action** | GATE. Remaining startable tasks are either cloud/security (004 Entra, 020/023 Dataverse schema, 033 Dataverse seed, 010 Key Vault — need operator go-ahead), or sequential shared-lib (Pillar E), or dep-gated (032←015, 034 opus-contract). 015 (formalize external-reply, code-only, parallel-safe:false) is the next code-only candidate if continuing. |
 
-### Completed this session
-- **Task 003 ✅** — `notes/fixtures/r1-golden-emails.md` (R1 013 reconciled=applied; 4 golden items pinned; KEEP path; raw-.eml gap flagged).
-- **Task 030 ✅** — FR-D1 RAG grounding. New `Services/Communication/Engine/RegardingParentEntityMapper.cs` (primary-regarding→`ParentEntityContext`, misfile-guard, NFR-04 degrade); wired both index sites (inbound signature takes `ParentEntityContext?`, resolved once per communication — N+1 fixed in review; outbound inline). Seam test 8/8. Build 0 err; publish 46.88 MB (Δ≈0). adr-check + code-review clean. Deferral `DEFER-030-01` (service-request grounding) filed. **/conflict-check must re-run before the 030 PR.**
+### Completed this session (all committed)
+- **Task 003 ✅** — `notes/fixtures/r1-golden-emails.md`.
+- **Task 030 ✅** — FR-D1 RAG grounding (`RegardingParentEntityMapper` + both index sites; N+1 fixed; seam 8/8; DEFER-030-01 filed). Commit `f1f5cf5dd`.
+- **Task 031 ✅** — FR-D2 batched identifier query (`QueryRecordsByNumberFieldValuesAsync` In-filter; ≈175→≤7; rung tests migrated to batched seam 21/21). 
 
-### Uncommitted (not pushed — no commit requested this session)
-Task 003 + 030 artifacts + this checkpoint. Pre-existing HIGH CVE `System.Security.Cryptography.Xml 8.0.3` (transitive) noted — separate remediation candidate, not introduced here.
+### Gates ahead (need operator go-ahead — NOT autonomous)
+004 (Entra/security), 020/023 (Dataverse schema mutation), 033 (Dataverse seed), 010 (Key Vault), all deploys, all Pillar E (contended shared-lib, sequential).
+### Standing reminders
+- **/conflict-check MUST re-run before any 030/031 PR** (cleared only at execution time). Publish baseline 46.88 MB. Pre-existing HIGH CVE `System.Security.Cryptography.Xml 8.0.3` (transitive) = separate remediation candidate.
 
 ### Files Modified This Session
 - **Task 003 ✅** (2026-08-05): created `notes/fixtures/r1-golden-emails.md` (R1 013 reconciled=applied; 4 golden items pinned w/ expected outcomes; KEEP path named; raw-.eml gap flagged). Updated task 003 POML status + TASK-INDEX.

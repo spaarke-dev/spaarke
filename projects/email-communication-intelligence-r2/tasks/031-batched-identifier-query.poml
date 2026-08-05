@@ -4,7 +4,7 @@
     <title>Batched identifier reverse-lookup query — collapse per-(field,value) loop to an In-filter (≈175→≤7), identical results</title>
     <phase>3 Pillar D — R1 carry-overs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Performance refactor of one existing rung file; no new surface, no auth/schema change. Behavior-preserving optimization (identical match results is the acceptance gate).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -89,7 +89,9 @@
     <criterion testable="true">Publish size ≤60 MB compressed with delta reported; no new HIGH CVE; all unit tests pass; build is green.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-D2. The existing (field,value) dedup dictionary already proves batching is safe; this task hoists it to a single In-filter per field. Do not touch the confidence constants or NewRecordIntentDetector. Completion summary appended here when done.</notes>
+  <notes>Spec FR-D2. The existing (field,value) dedup dictionary already proves batching is safe; this task hoists it to a single In-filter per field. Do not touch the confidence constants or NewRecordIntentDetector.
+
+**COMPLETED 2026-08-05.** New batched seam `ICommunicationDataverseService.QueryRecordsByNumberFieldValuesAsync(entity, numberField, IReadOnlyCollection&lt;string&gt; values, ct)` (impl in `DataverseServiceClientImpl` via `ConditionOperator.In` + `ColumnSet(numberField)` so the matched value is returned; `DataverseWebApiService` NotImplemented stub mirroring the existing pattern). Rung `EvaluateAsync` now issues ONE In-filter query per roster entry (≤7) over all distinct token values, then re-associates each returned record to its token via `record[NumberField]` — `BuildMatches`, `NewRecordIntentDetector`, the P1 substring guard, dedup, and provenance are UNTOUCHED. `SafeQueryAsync`→`SafeQueryBatchAsync` (per-field NFR-04 degrade). TopCount = min(values×5, 250) headroom preserves same-field-duplicate detection. **Differential proof**: the existing `IdentifierReverseLookupRungTests` (20 scenarios: 7-type well-formed 0.90, bare-numeric 0.65, multi-entity cap, same-field→Ambiguous, FR-12 referenced-not-filed + control, P1 substring guard, dirty-catalog, cross-tenant, NFR-04/08) migrated to the batched seam and stay green + new `FrD2_ManyDistinctTokens_StillAtMostSevenQueries` (3 tokens → exactly 7 queries, one In-filter carries all values). 21/21 pass. Build 0 err; publish 46.88 MB (Δ≈0, 0 new packages); pre-existing HIGH CVE Xml 8.0.3 noted (not introduced). adr-check + code-review clean. §11: batched sibling of the single-value method (no fork); cost-of-nothing = ≈175 round-trips/message (NFR-08). **/conflict-check MUST re-run before the PR.**</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

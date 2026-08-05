@@ -60,5 +60,18 @@ public interface ICommunicationDataverseService
     Task<IReadOnlyList<Entity>> QueryRecordsByNumberFieldAsync(
         string entityLogicalName, string numberFieldLogicalName, string value, CancellationToken ct = default);
 
+    /// <summary>
+    /// Batched value-based reverse lookup (FR-D2 / NFR-08): resolves active records of
+    /// <paramref name="entityLogicalName"/> whose <paramref name="numberFieldLogicalName"/> equals ANY of
+    /// <paramref name="values"/> (an <c>In</c>-filter), in ONE round-trip instead of one per value. Each
+    /// returned entity carries its id + the number field so the caller re-associates a match to the value it
+    /// matched. Same active-only + duplicate-surfacing semantics as the single-value
+    /// <see cref="QueryRecordsByNumberFieldAsync"/>; returns empty (never throws) when the entity/field name is
+    /// null/blank or <paramref name="values"/> is empty (NFR-04). Collapses the identifier rung's per-(field,
+    /// value) loop (≈175 calls) to ≤1 per distinct number field (≤7).
+    /// </summary>
+    Task<IReadOnlyList<Entity>> QueryRecordsByNumberFieldValuesAsync(
+        string entityLogicalName, string numberFieldLogicalName, IReadOnlyCollection<string> values, CancellationToken ct = default);
+
     Task<Guid?> QuerySystemUserByAzureAdOidAsync(string azureAdObjectId, CancellationToken ct = default);
 }
