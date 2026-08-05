@@ -235,8 +235,10 @@ public class NdaReviewDispatchEvalTests
             "the nda-review Binding must resolve through the real FR-1R-03 selection algorithm — " +
             "the exact read the Text-path capability-discovery/dispatch seam performs");
         byType!.ConsumerType.Should().Be("nda-review");
-        byType.Disposition.Should().Be(BindingDisposition.Informational,
-            "the mirror row declares disposition=100000000 (Informational) — read-only advisory, no side effect");
+        byType.Disposition.Should().Be(BindingDisposition.Compose,
+            "the mirror row declares disposition=100000006 (Compose) — findings are durable-by-disposition " +
+            "since agreements-r1 task 030 (FR-16a): the review output lands on the document session's ledger " +
+            "and re-materializes on reopen; still advisory (no edit side effect — apply-leg gated by FR-16d)");
         byType.Risk.Should().Be(BindingRisk.None,
             "the mirror row declares risk=100000000 (None) — no confirmation turn for a read-only review");
         byType.ActionKind.Should().Be(ActionKind.Prompted);
