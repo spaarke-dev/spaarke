@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Return 404 for a genuinely-missing session on GET history/session-load (FR-D3)</title>
+    <phase>4 D — History &amp; true resume</phase>
+    <gate>blocked until 001</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF endpoint contract change</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small contract fix mirroring the existing 404 handlers on DELETE/context/tabs</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D-srv-a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits ChatEndpoints GetHistoryAsync — disjoint from persistence (030) and client; but see 032 (same file, serialized)</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, api</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+  <prompt>Make GET …/history (and session load) return 404 for a genuinely-missing session so the client's stale-session recovery fires (today GetHistoryAsync returns 200 always).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. .NET 8 Minimal API expertise; comfortable mirroring an existing 404-on-missing contract without changing the 200 shape.</role>
+  <goal>A missing session yields 404 → "session expired — starting fresh," not a silent blank 200.</goal>
+  <context>
+    <background>FR-D3 — GetHistoryAsync (ChatEndpoints.cs:1145-1167) returns 200 always, so a missing session yields a silent blank pane instead of triggering the client's stale-session recovery. The route already advertises 404 but the handler never emits it. DeleteSessionAsync (:1231-1261), PATCH /context (:1173), and PATCH /tabs (:2051) already return 404 on missing.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (GetHistoryAsync:1145-1167; mirror the 404 pattern from DeleteSessionAsync:1231-1261)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project">Mirror the existing 404-on-missing pattern used by DELETE/context/tabs; do NOT change the 200 shape for existing sessions.</constraint>
+    <constraint source="ADR-040">The existence check reads the same session store.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Add a session-existence check in GetHistoryAsync.</step>
+    <step order="2">Return 404 when genuinely missing; keep 200 for existing (incl. legitimately empty) sessions.</step>
+    <step order="3">Add a unit test for the 404 path.</step>
+    <step order="4">dotnet build.</step>
+    <step order="5">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If distinguishing 'missing' from 'exists-but-empty' is ambiguous in the session store, STOP and escalate rather than 404-ing empty-but-valid sessions.</trigger>
+  </escalation>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</output>
+    <output type="test">the endpoint test</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">A missing session yields 404.</criterion>
+    <criterion testable="true">An existing empty session still yields 200.</criterion>
+    <criterion testable="true">The client stale-session recovery path is triggerable.</criterion>
+    <criterion testable="true">Tests pass.</criterion>
+  </acceptance-criteria>
+  <notes>FR-D3. Note the route already advertises 404 but the handler never emits it.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

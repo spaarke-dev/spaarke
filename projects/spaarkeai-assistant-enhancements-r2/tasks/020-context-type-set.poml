@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Declare the closed contextType set on widget-registry metadata (FR-B1, FR-C3)</title>
+    <phase>3 B — Proactive follow-ons</phase>
+    <gate>blocked until 001</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Shared-lib TypeScript type + registry metadata change</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive closed-union type + per-widget metadata following existing registry patterns</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits Spaarke.AI.Widgets types/registry — disjoint from ConversationPane and catalog data</parallel-reason>
+    <deps>001</deps>
+    <tags>react, frontend, typescript</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Add a closed `contextType` union { email, document, compose-doc, matter-grid, dashboard, calendar } to widget-registry metadata and assign each registered widget exactly one (or none); declare `email` for the email widget (FR-C3).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React/TypeScript frontend expertise; comfortable extending shared-lib closed-union types and per-widget registry metadata without breaking existing registrations.</role>
+  <goal>Every registered widget resolves to exactly one context type or none.</goal>
+  <context>
+    <background>FR-B1 + FR-C3 — today there is only a free-form `contextType` string on ContextPaneEvent (PaneEventTypes.ts:1179); no closed set exists. Proactive chips (Workstream B) need a closed, per-widget context tag to scope grounded selection to the active tab.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/types/shared.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project">contextType is a CLOSED union (exactly the six values) — not the existing free-form ContextPaneEvent string.</constraint>
+    <constraint source="ADR-039">This tag feeds grounded selection, not a classifier.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Add the closed contextType union { email, document, compose-doc, matter-grid, dashboard, calendar } to types.</step>
+    <step order="2">Add an optional contextType field to widget metadata.</step>
+    <step order="3">Assign contextType to each registered widget (email→'email'); leave non-matching widgets as none.</step>
+    <step order="4">Build the shared lib + typecheck.</step>
+    <step order="5">Update TASK-INDEX ✅.</step>
+  </steps>
+  <justification>
+    <existing>Only a free-form contextType string on ContextPaneEvent (PaneEventTypes.ts:1179); no closed set.</existing>
+    <extension>Yes — add a closed union + optional metadata field on the existing registry.</extension>
+    <cost-of-doing-nothing>Proactive chips can't be scoped to the active tab → noisy or absent.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">The union has exactly the six values.</criterion>
+    <criterion testable="true">Every registered widget resolves to one contextType or none.</criterion>
+    <criterion testable="true">The email widget resolves to 'email'.</criterion>
+    <criterion testable="true">Shared lib builds.</criterion>
+  </acceptance-criteria>
+  <notes>FR-B1 + FR-C3.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

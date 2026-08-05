@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Rename Promote → 'Set related record' with a prompted existing-vs-create-document flow (FR-D9)</title>
+    <phase>4 D — History &amp; true resume</phase>
+    <gate>blocked until 037</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF + frontend behavior change on the association action</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Spans server promote logic + client prompt + regarding semantics (ADR-024); cross-layer judgment</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches HistoryOverlay.tsx (same file as 037) + AnalysisEndpoints — serialize after 037</parallel-reason>
+    <deps>037</deps>
+    <tags>bff-api, api, react, frontend, dataverse</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Rename the "Promote" action to "Set related record", move it to the per-row overflow menu, and make it file an otherwise-unassociated analysis via a prompt: (a) associate to an existing matter/project (sets `regarding`), or (b) create/attach a Document to anchor it (regarding = document). Under the hood, name + create the sprk_analysis anchor + bind the session via the existing promote endpoint.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Full-stack (.NET 8 BFF + React/Fluent v9) expertise; comfortable with ADR-024 polymorphic regarding semantics and reusing the existing promote endpoint without adding a new one.</role>
+  <goal>The prompt offers existing-record vs create-document; a filed session appears on the target matter's Analyses tab; an already-associated session does not offer the action (or shows its Analysis instead).</goal>
+  <context>
+    <background>FR-D9 (was "Promote") — the promote action files an otherwise-unassociated analysis. Server: AnalysisEndpoints POST /promote (:77-83; PromoteSession :1285-1403, already-associated guard at :1326-1330) → ChatSessionManager.PromoteSessionToAnalysisAsync:499-544. The client action moves into the 037 per-row overflow menu, replacing the old up-arrow promote dialog handler in HistoryOverlay.tsx.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/HistoryOverlay.tsx (the action moves into the 037 overflow menu; replace the old promote dialog handler)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs (PromoteSession:1285-1403)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs (PromoteSessionToAnalysisAsync:499-544)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-024">The association uses the polymorphic `regarding` field-set.</constraint>
+    <constraint source="project">Reuse the existing promote endpoint — do NOT add a new one.</constraint>
+    <constraint source="project">An already-associated session must NOT offer the action (guard exists at PromoteSession:1326-1330).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Client: rename the action to "Set related record" in the 037 overflow menu; add the existing-vs-create-document prompt.</step>
+    <step order="2">Path (a): associate to an existing matter/project (regarding). Path (b): create/attach a Document (regarding=document).</step>
+    <step order="3">Wire both through the existing promote endpoint (name+create sprk_analysis anchor + bind).</step>
+    <step order="4">Ensure already-associated sessions don't offer the action.</step>
+    <step order="5">Build client + dotnet build; tests.</step>
+    <step order="6">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If the promote endpoint cannot express the 'attach to existing document' path without a new endpoint, STOP and escalate (compose invariant: no new dispatch/endpoint) rather than adding one.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="Set related record">
+      <steps>From a history row overflow menu, choose Set related record, verify the existing-vs-create-document prompt; file to a matter; verify it appears on the matter's Analyses tab; verify an already-associated session doesn't offer it. Include an ADR-021 dark-mode check.</steps>
+      <expected>The prompt offers existing-record vs create-document; the filed session appears on the matter's Analyses tab; an already-associated session does not offer the action; no dark-mode regressions.</expected>
+    </test>
+  </ui-tests>
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/HistoryOverlay.tsx</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">The action is named "Set related record" in the overflow menu.</criterion>
+    <criterion testable="true">The prompt offers existing-record vs create-document.</criterion>
+    <criterion testable="true">A filed session appears on the matter's Analyses tab.</criterion>
+    <criterion testable="true">An already-associated session does not offer the action.</criterion>
+    <criterion testable="true">Reuses the existing promote endpoint.</criterion>
+  </acceptance-criteria>
+  <notes>FR-D9 (was "Promote").</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

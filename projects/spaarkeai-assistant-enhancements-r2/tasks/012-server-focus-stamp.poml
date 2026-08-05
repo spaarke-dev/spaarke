@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Thread activeContext through the chat request and prefer the focus-stamp over UpdatedAt (FR-A3/A4)</title>
+    <phase>2 A — Active-tab awareness</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF code: DTO + agent-factory change on the ADR-015 privacy boundary</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Sits on the ADR-015 active-vs-background content-visibility boundary (Path A exception) — judgment-sensitive</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits BFF files (ChatEndpoints DTO + SprkChatAgentFactory) — disjoint from the client tasks; contract coordinated with 011</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, api, ai</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Add `activeContext` to ChatSendMessageRequest, thread it into CreateAgentAsync/BuildWorkspaceStateBlock, and prefer the explicit focus-stamp over the UpdatedAt-most-recent heuristic when labeling the active tab; keep active=compact-content and background=metadata-only.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. .NET 8 Minimal API + AI agent-factory expertise; comfortable reasoning about the ADR-015 content-visibility boundary and additive DTO threading through existing seams.</role>
+  <goal>With a focus-stamp present, the "(active)" tab in the agent prompt matches the stamp; background tabs emit only deterministic metadata.</goal>
+  <context>
+    <background>FR-A3/A4 — server "active tab" is currently the UpdatedAt-max heuristic at SprkChatAgentFactory.cs BuildWorkspaceStateBlock (:1454-1507, marker :1479; OrderByDescending(UpdatedAt) at :1467); the doc-comment already flags explicit active-tab state as a follow-up. Workspace tabs are fetched server-side via GetTabsAsync (:544-580), NOT from the body today. The chat body DTO is ChatSendMessageRequest (record) at ChatEndpoints.cs:3207-3211 (Message, DocumentId, Attachments, ModelTierOverride), model-bound in SendMessageAsync (:409) → CreateAgentAsync (:339-354/628-653).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (ChatSendMessageRequest :3207, SendMessageAsync :409/628-653)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (CreateAgentAsync :339-354/544-580, BuildWorkspaceStateBlock :1454-1507)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-015">Path A exception: the ACTIVE tab is content-visible as a COMPACT shape; BACKGROUND tabs remain metadata-only — this bound is load-bearing.</constraint>
+    <constraint source="project">Reuse existing seams — no new endpoint.</constraint>
+    <constraint source="project">Publish size ≤60 MB — measure and report the delta (BFF §10).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Add a nullable activeContext to ChatSendMessageRequest matching the client shape from 011.</step>
+    <step order="2">Pass it into CreateAgentAsync.</step>
+    <step order="3">In BuildWorkspaceStateBlock, when a focus-stamp is present, label that tab '(active)' instead of the UpdatedAt-max tab.</step>
+    <step order="4">Enforce active=compact-content, background=metadata-only.</step>
+    <step order="5">Add/extend unit tests.</step>
+    <step order="6">dotnet build + dotnet publish size check; record delta.</step>
+    <step order="7">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If honoring the focus-stamp would require emitting more than the bounded compact shape for the active tab, STOP and escalate (ADR-015 Path A bound) rather than widening visibility.</trigger>
+  </escalation>
+  <justification>
+    <existing>No activeContext field exists; BuildWorkspaceStateBlock:1467 uses OrderByDescending(UpdatedAt); the doc-comment flags this as a follow-up.</existing>
+    <extension>Yes — additive DTO field + prefer-stamp branch in the existing method.</extension>
+    <cost-of-doing-nothing>Active-tab labeling stays wrong; 'summarize this' targets the most-recently-updated tab, not the focused one.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</output>
+    <output type="test">the agent-factory test</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">With a focus-stamp, the agent prompt's '(active)' tab matches the stamp.</criterion>
+    <criterion testable="true">Without a focus-stamp, behavior is unchanged (UpdatedAt fallback).</criterion>
+    <criterion testable="true">Background tabs emit only metadata.</criterion>
+    <criterion testable="true">The active tab emits the compact content shape.</criterion>
+    <criterion testable="true">Publish size ≤60 MB reported.</criterion>
+    <criterion testable="true">Tests pass.</criterion>
+  </acceptance-criteria>
+  <notes>NFR-03 — the server change adds no per-turn cost; the compact shape is client-supplied.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

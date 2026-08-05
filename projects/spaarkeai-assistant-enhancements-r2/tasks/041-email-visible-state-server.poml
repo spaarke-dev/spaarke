@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Add the Email variant to the server WorkspaceTabVisibleState + derive/format (FR-C2 server)</title>
+    <phase>5 C — Email visibility</phase>
+    <gate>blocked until 001</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF model + agent-factory derivation/format change</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive record variant + switch cases following the existing 4-variant pattern</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits BFF WorkspaceTabVisibleState.cs + SprkChatAgentFactory — disjoint from the client variant (040)</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, api, ai</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Add a lean `Email` variant to the closed `WorkspaceTabVisibleState` union and emit it via `TryDeriveVisibleState` / `FormatVisibleStateFields`.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. .NET 8 Minimal API + AI agent-factory expertise; comfortable extending closed sealed-record unions and their derive/format switch cases while preserving structural deserialization.</role>
+  <goal>The union deserializes the Email shape structurally (no fallback to Dashboard/Summary); the server emits the Email fields in the agent prompt.</goal>
+  <context>
+    <background>FR-C2 server half. The server `WorkspaceTabVisibleState` union has 4 variants at :41-94. `TryDeriveVisibleState` (SprkChatAgentFactory.cs:1547-1592) derives the visible state and `FormatVisibleStateFields` (:1679-1717) emits its fields into the agent prompt. Email has no honest fit among the 4 variants and must be added, kept closed, and 1:1 with the client discriminator (040).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Models/Workspace/WorkspaceTabVisibleState.cs (:41-94 variants)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (TryDeriveVisibleState :1547-1592, FormatVisibleStateFields :1679-1717)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-015">The Email fields are a compact shape (subject/from/date/thread + short snippet) — background tabs stay metadata-only.</constraint>
+    <constraint source="project">Keep the union closed + 1:1 with the client discriminator (040).</constraint>
+    <constraint source="project">Publish ≤60 MB (report delta).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Add the Email sealed variant to WorkspaceTabVisibleState.</step>
+    <step order="2">Add the Email case to TryDeriveVisibleState.</step>
+    <step order="3">Add the Email field emission to FormatVisibleStateFields.</step>
+    <step order="4">Add a unit test asserting structural deserialization (no Dashboard fallback) + field emission.</step>
+    <step order="5">dotnet build + publish size.</step>
+    <step order="6">Update TASK-INDEX ✅.</step>
+  </steps>
+  <justification>
+    <existing>WorkspaceTabVisibleState has 4 variants (:41); no Email.</existing>
+    <extension>No — must add a variant; email has no honest fit.</extension>
+    <cost-of-doing-nothing>The server can't emit email subject/from/thread; the core user complaint persists.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Workspace/WorkspaceTabVisibleState.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</output>
+    <output type="test">the visible-state test</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">The union deserializes the Email shape structurally (no fallback).</criterion>
+    <criterion testable="true">TryDeriveVisibleState returns Email for an email tab.</criterion>
+    <criterion testable="true">FormatVisibleStateFields emits subject/from/date/thread.</criterion>
+    <criterion testable="true">Publish ≤60 MB.</criterion>
+    <criterion testable="true">Tests pass.</criterion>
+  </acceptance-criteria>
+  <notes>FR-C2 server half; field set matches task 040.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

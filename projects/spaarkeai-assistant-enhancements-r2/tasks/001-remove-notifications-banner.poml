@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Remove the spine-driven Notifications suggestion surface (banner + cards) from the Assistant</title>
+    <phase>1 E — Remove Notifications banner</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx code + deletes components/tests (frontend implementation)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded deletion + render-site removal following an explicit spec (FR-E1 names exact files/lines)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ConversationPane.tsx — the sequential client spine shared by workstreams E/A/B/D</parallel-reason>
+    <deps>none</deps>
+    <tags>react, frontend, fluent-ui, refactoring</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Remove the spine-driven proactive-suggestion surface (the "You have N new notifications" banner + its suggestion-card stack) from the Assistant pane per FR-E1, while preserving the notification spine and shared NotificationsClient.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React/TypeScript + Fluent UI v9 frontend expertise; comfortable tracing render sites and safely deleting components without collateral damage.</role>
+  <goal>The Notifications banner + suggestion cards no longer render in the Assistant; useSuggestionCards.tsx + SuggestionCard.tsx (+ their tests) are deleted; notificationsBootstrap.ts, the spine, and Daily Briefing are untouched.</goal>
+  <context>
+    <background>Trace 2026-08-05 — the banner is NOT a standalone widget; it is the collapsed header of the suggestion-card stack (useSuggestionCards.tsx:335), rendered at ConversationPane.tsx:2649 via suggestionSlot; data = GET /api/notifications/pending. Keeping cards while dropping the header renders them unconditionally (worse), so remove the WHOLE surface.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (remove hook block lines ~941-987 + render site line ~2649)</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/useSuggestionCards.tsx (DELETE)</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/SuggestionCard.tsx (DELETE)</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/__tests__ files for useSuggestionCards + SuggestionCard (DELETE)</file>
+      <file>src/solutions/SpaarkeAi/src/services/notificationsBootstrap.ts (PRESERVE — read-only, do NOT modify)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-047">Remove only the Assistant suggestion SURFACE; the notification spine (sprk_notificationoutbox, OutboxService, /api/notifications/*) MUST remain intact and functional.</constraint>
+    <constraint source="project">MUST preserve notificationsBootstrap.ts / getNotificationsClient — the Communications widget badge/toast depends on it (one-connection invariant).</constraint>
+    <constraint source="project">MUST NOT touch useConsumerChips.tsx / ConsumerChips.tsx — that is a DIFFERENT (reactive sprk_chiptransitions) surface that workstream B reuses.</constraint>
+    <constraint source="project">Do NOT gate the DailyBriefingSuggestionProducer; it keeps writing outbox rows that no longer render here — harmless and out of scope.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-047-notification-action-spine.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read ConversationPane.tsx around 900-990 and 2640-2660 to locate the useSuggestionCards hook block + suggestionSlot render site.</step>
+    <step order="2">Remove the hook invocation + render site; remove now-dead imports of useSuggestionCards/SuggestionCard.</step>
+    <step order="3">Delete useSuggestionCards.tsx, SuggestionCard.tsx, and their test files.</step>
+    <step order="4">Verify notificationsBootstrap.ts and useConsumerChips.tsx are untouched.</step>
+    <step order="5">Build the SpaarkeAi code page (npm run build) and fix any type/import errors.</step>
+    <step order="6">Update TASK-INDEX.md status to ✅.</step>
+    <step order="7">Note any deviations in projects/spaarkeai-assistant-enhancements-r2/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If removing the render site breaks the Communications badge/toast or the reactive chip surface (useConsumerChips), STOP and escalate per CLAUDE.md §6 — those must remain functional.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="Banner Removed">
+      <steps>Open the Assistant pane; verify no 'You have N new notifications' banner or suggestion cards render; verify the reactive 'Suggested Next Steps' chips (useConsumerChips) still render; verify the Communications widget badge/toast still works. Include a Dark Mode (ADR-021) check: toggle dark mode, verify no regressions in the Assistant pane.</steps>
+      <expected>Banner+cards gone; reactive chips + Communications badge intact; no dark-mode regressions.</expected>
+    </test>
+  </ui-tests>
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the Assistant pane open, when it renders, then no notifications banner or suggestion cards appear.</criterion>
+    <criterion testable="true">Given the deletion, then useSuggestionCards.tsx and SuggestionCard.tsx (and their tests) no longer exist.</criterion>
+    <criterion testable="true">Given the change, then notificationsBootstrap.ts, the spine, useConsumerChips.tsx, and Daily Briefing render are unmodified and functional.</criterion>
+    <criterion testable="true">The SpaarkeAi code page builds without type/import errors.</criterion>
+  </acceptance-criteria>
+  <notes>See spec.md FR-E1 for the authoritative file/line list.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

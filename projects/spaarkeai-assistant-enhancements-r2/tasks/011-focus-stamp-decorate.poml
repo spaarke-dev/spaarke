@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Add activeContext focus-stamp to the outbound chat body via onDecorateOutboundBody (FR-A2)</title>
+    <phase>2 A — Active-tab awareness</phase>
+    <gate>blocked until 010</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend .tsx implementation on the decorate seam</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive body field on the existing decorate seam</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ConversationPane.tsx (shared client spine); depends on 010's ref</parallel-reason>
+    <deps>010</deps>
+    <tags>react, frontend</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>In handleDecorateOutboundBody, add an `activeContext` field carrying the focused tab's identity + compact state from the 010 focus ref, without modifying SprkChat.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React/TypeScript frontend expertise; comfortable extending the outbound-body decorate seam without forking SprkChat.</role>
+  <goal>Outbound message bodies include `activeContext` matching the focused tab; "summarize this" with an email focused resolves to that email.</goal>
+  <context>
+    <background>FR-A2 — the outbound-body seam is `onDecorateOutboundBody` → `handleDecorateOutboundBodyWithRevise` wraps the base `handleDecorateOutboundBody` at ConversationPane.tsx:1955-2090; the prop is wired at :2800. The base body is {message, documentId, attachments}.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (handleDecorateOutboundBodyWithRevise :1955-2090)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project">MUST use the existing onDecorateOutboundBody seam — MUST NOT fork SprkChat.</constraint>
+    <constraint source="ADR-015">Active tab emits a COMPACT shape only (compact-ambient) — do NOT dump full content.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read handleDecorateOutboundBodyWithRevise.</step>
+    <step order="2">Merge `activeContext` (from the 010 ref) into the returned body.</step>
+    <step order="3">Verify no SprkChat changes.</step>
+    <step order="4">Build.</step>
+    <step order="5">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If the compact shape would need to exceed a small bounded size to be useful, STOP and escalate (ADR-015 bound) rather than widening it.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="Outbound body carries activeContext">
+      <steps>Focus a tab, send a message, and inspect the outbound body; verify `activeContext` matches the focused tab and is a bounded compact shape. Include an ADR-021 dark-mode no-regression check.</steps>
+      <expected>Outbound body includes activeContext matching the focused tab; compact shape bounded; no dark-mode regressions.</expected>
+    </test>
+  </ui-tests>
+  <justification>
+    <existing>handleDecorateOutboundBodyWithRevise wraps the base decorator at :1955; body is {message, documentId, attachments}.</existing>
+    <extension>Yes — additive field on the existing decorate seam.</extension>
+    <cost-of-doing-nothing>The server cannot know which tab is focused; active-tab resolution stays wrong.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Outbound body includes activeContext matching the focused tab.</criterion>
+    <criterion testable="true">No SprkChat fork.</criterion>
+    <criterion testable="true">Compact shape bounded.</criterion>
+    <criterion testable="true">Build clean.</criterion>
+  </acceptance-criteria>
+  <notes>Coordinate the activeContext contract shape with task 012 (server reader).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

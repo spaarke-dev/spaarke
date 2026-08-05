@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Indefinite retention for filed analyses — per-doc TTL extension or expiresAt + cleanup (FR-D10)</title>
+    <phase>4 D — History &amp; true resume</phase>
+    <gate>blocked until 030</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Cosmos retention/persistence change with data-loss risk</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Container-TTL/retention change carries data-loss risk; requires a feasibility spike + careful branch selection</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits SessionPersistenceService.cs (same file as 030) — serialize after it</parallel-reason>
+    <deps>030</deps>
+    <tags>bff-api, api, ai</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+  <prompt>Retain a filed analysis's transcript+tabs+redline INDEFINITELY; unfiled sessions expire ~90 days. Prefer per-document Cosmos TTL extension on filing; if per-doc TTL is unavailable, remove the container-level TTL (all docs permanent) and manage retention with an explicit expiresAt field + an idempotent scheduled cleanup that only deletes past-due, UNFILED sessions.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. .NET 8 + Cosmos DB retention expertise; disciplined about spiking feasibility before a retention change and about data-loss blast radius.</role>
+  <goal>A filed session is resumable after &gt;90 days; an unfiled session is purged after its expiresAt; the cleanup job is idempotent and only deletes past-due unfiled sessions.</goal>
+  <context>
+    <background>FR-D10 — there is no per-doc TTL today; retention is container-level only (SessionPersistenceService.UpsertToCosmosAsync:863-879), so filed analyses would expire at 90 days (lost). Filing happens in ChatSessionManager.PromoteSessionToAnalysisAsync:499-544. Owner-directed 2026-08-05: prefer per-doc TTL extension on filing; fallback = remove container TTL + expiresAt + scheduled cleanup.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs (UpsertToCosmosAsync:863-879 — no per-doc TTL today)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/StoredSession.cs (add expiresAt if fallback)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs (PromoteSessionToAnalysisAsync:499-544 — filing clears expiry)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-040">Retention change stays WITHIN the existing Cosmos tiering — no new store.</constraint>
+    <constraint source="project">SPIKE per-doc TTL feasibility FIRST; only implement the container-TTL-removal + expiresAt + cleanup fallback if per-doc TTL is unavailable.</constraint>
+    <constraint source="project">Cleanup MUST be idempotent and delete ONLY past-due AND unfiled sessions.</constraint>
+    <constraint source="project">Publish ≤60 MB (report delta).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+    </files>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">SPIKE: determine whether per-document Cosmos TTL override on filing is available in this container config; record findings in notes/.</step>
+    <step order="2">IF available: extend/clear TTL on filing (per-doc).</step>
+    <step order="3">ELSE: remove the container TTL, add expiresAt (unfiled ~90 days; filing clears it), and add an idempotent scheduled cleanup that deletes only past-due unfiled docs.</step>
+    <step order="4">Add tests (filed resumable after &gt;90 days; unfiled purged; cleanup idempotent; never deletes filed).</step>
+    <step order="5">dotnet build + publish size.</step>
+    <step order="6">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>Removing the container-level TTL makes ALL docs permanent until cleanup runs — if the spike is inconclusive on per-doc TTL, STOP and escalate the container-TTL-removal decision (data-retention blast radius) per CLAUDE.md §6 before proceeding.</trigger>
+  </escalation>
+  <justification>
+    <existing>No per-doc TTL; retention is container-level only (SessionPersistenceService/StoredSession).</existing>
+    <extension>Prefer native per-doc TTL (no new surface); expiresAt+cleanup only as fallback.</extension>
+    <cost-of-doing-nothing>Filed analyses expire at 90 days (lost) OR removing container TTL without cleanup grows Cosmos unbounded.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/StoredSession.cs</output>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r2/notes/d10-ttl-spike.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Filed session resumable after &gt;90 days.</criterion>
+    <criterion testable="true">Unfiled session purged after expiresAt.</criterion>
+    <criterion testable="true">Cleanup idempotent and only deletes past-due unfiled.</criterion>
+    <criterion testable="true">A filed session is never deleted.</criterion>
+    <criterion testable="true">Spike findings recorded.</criterion>
+    <criterion testable="true">Publish ≤60 MB.</criterion>
+    <criterion testable="true">Tests pass.</criterion>
+  </acceptance-criteria>
+  <notes>FR-D10, owner-directed 2026-08-05.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

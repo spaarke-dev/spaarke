@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Manual 'refresh suggestions' affordance (FR-B4)</title>
+    <phase>3 B — Proactive follow-ons</phase>
+    <gate>blocked until 022</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend .tsx affordance + re-run wiring</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small additive control reusing the 022 suggestion turn</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ConversationPane.tsx (shared client spine); depends on 022</parallel-reason>
+    <deps>022</deps>
+    <tags>react, frontend, fluent-ui</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+  <prompt>Add a manual "refresh suggestions" affordance that re-runs the grounded suggestion turn for the active tab and replaces the cached chips.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React/TypeScript + Fluent UI v9 frontend expertise; comfortable adding a small dismissible control that reuses the existing proactive suggestion turn.</role>
+  <goal>Clicking it re-fires the grounded turn for the active tab and replaces the cached chips.</goal>
+  <context>
+    <background>FR-B4 — task 022 fires the proactive suggestion turn at most once per tab. Users need a manual way to re-request suggestions; this control is the ONLY re-fire path besides first-open (NFR-02).</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project">Reuse the 022 suggestion turn; the ONLY re-fire path besides first-open is this manual control (NFR-02).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Add a small dismissible refresh control near the chip surface.</step>
+    <step order="2">On click, re-run the 022 grounded turn for the active tab and replace the cached chips for that tabId.</step>
+    <step order="3">Build.</step>
+    <step order="4">Update TASK-INDEX ✅.</step>
+  </steps>
+  <ui-tests>
+    <test name="Manual refresh">
+      <steps>Click refresh; verify the grounded turn re-fires and the chips replace. Include an ADR-021 dark-mode no-regression check.</steps>
+      <expected>The grounded turn re-fires for the active tab and cached chips are replaced; no dark-mode regressions.</expected>
+    </test>
+  </ui-tests>
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Clicking refresh re-fires the grounded turn for the active tab and replaces cached chips.</criterion>
+    <criterion testable="true">No automatic re-fire is introduced elsewhere.</criterion>
+  </acceptance-criteria>
+  <notes>FR-B4.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

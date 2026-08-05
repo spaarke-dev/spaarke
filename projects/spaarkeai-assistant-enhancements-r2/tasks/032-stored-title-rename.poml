@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Add a writable stored session title + rename endpoint + grounded title generation (FR-D4)</title>
+    <phase>4 D — History &amp; true resume</phase>
+    <gate>blocked until 031</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF: new persisted field + endpoint + a cheap grounded label</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive field+endpoint following existing PATCH /context and /tabs patterns</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ChatEndpoints.cs (same file as 031) — serialize after it</parallel-reason>
+    <deps>031</deps>
+    <tags>bff-api, api, ai</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Add a writable, stored session `title`; generate a 3–6 word work-descriptive title via a cheap grounded turn at first substantive exchange (fallback: generated → first user message → NEVER bare timestamp); add PATCH /api/ai/chat/sessions/{id} to rename.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. .NET 8 Minimal API + AI session expertise; comfortable adding an additive persisted field + rename endpoint and a cheap grounded label without introducing a classifier.</role>
+  <goal>New sessions get descriptive titles; a user can rename; rename persists across reloads.</goal>
+  <context>
+    <background>FR-D4 — there is no stored title today; BuildSessionTitle (SessionPersistenceService.cs:811-822) is read-computed only, so generated titles have nowhere to persist and users can't rename. Existing PATCH /context (ChatEndpoints.cs:1173) and /tabs (:2051) show the additive endpoint pattern; DTOs live inline at the bottom of ChatEndpoints.cs (~:3170-3255).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (add PATCH rename near existing PATCH /context:1173, /tabs:2051; DTOs at bottom ~:3170-3255)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs (BuildSessionTitle:811-822 → back with a stored field)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/StoredSession.cs</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039">Title generation is a CHEAP grounded label, not a classifier/reranker.</constraint>
+    <constraint source="ADR-040">Store the title on the existing StoredSession — no new store.</constraint>
+    <constraint source="project">Fallback order generated → first user message → NEVER bare timestamp.</constraint>
+    <constraint source="project">Publish ≤60 MB (report delta).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Add a stored writable Title to StoredSession.</step>
+    <step order="2">Generate a 3–6 word grounded title at first substantive exchange with the specified fallback chain.</step>
+    <step order="3">Add PATCH /api/ai/chat/sessions/{id} (title) returning 404 on missing, 204 on success.</step>
+    <step order="4">Add unit tests (title-gen fallback + rename persists + 404).</step>
+    <step order="5">dotnet build + publish size.</step>
+    <step order="6">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If a stored Title conflicts with the read-computed Title used by the recent-sessions projection, STOP and escalate rather than silently double-sourcing titles.</trigger>
+  </escalation>
+  <justification>
+    <existing>No stored title; BuildSessionTitle:811 is read-computed only.</existing>
+    <extension>No writable field exists — must add Title to StoredSession + a rename endpoint.</extension>
+    <cost-of-doing-nothing>Generated titles have nowhere to persist and users can't rename.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/StoredSession.cs</output>
+    <output type="test">the rename/title tests</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">New sessions get 3–6 word descriptive titles.</criterion>
+    <criterion testable="true">The fallback never yields a bare timestamp.</criterion>
+    <criterion testable="true">PATCH renames and persists across reloads.</criterion>
+    <criterion testable="true">PATCH returns 404 on missing.</criterion>
+    <criterion testable="true">Publish ≤60 MB.</criterion>
+    <criterion testable="true">Tests pass.</criterion>
+  </acceptance-criteria>
+  <notes>FR-D4.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

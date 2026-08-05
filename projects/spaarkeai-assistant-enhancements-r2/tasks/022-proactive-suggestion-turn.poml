@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Fire one grounded suggestion turn per tab (cached by tabId) and render ≤3 chips via the reactive surface (FR-B3/B5)</title>
+    <phase>3 B — Proactive follow-ons</phase>
+    <gate>blocked until 020,021</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend .tsx implementation of the proactive-turn + cache logic</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cache/lifecycle correctness (once-per-tab, no re-fire on switch-back) + reuse-not-resurrect discipline is judgment-sensitive</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ConversationPane.tsx (shared client spine)</parallel-reason>
+    <deps>020,021</deps>
+    <tags>react, frontend, ai</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+  <prompt>On a tab's first open/load, run ONE grounded suggestion turn filtered by the tab's contextType, cache the result per `tabId` (do NOT re-fire on switch-back), and render ≤3 dismissible follow-on chips via the reactive chip surface (useConsumerChips / sprk_chiptransitions).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React/TypeScript + Fluent UI v9 frontend expertise; disciplined about reusing the reactive chip surface and cache-keyed lifecycle correctness without resurrecting removed machinery.</role>
+  <goal>Opening tab X fires exactly one suggestion turn; switching away and back fires zero additional turns; ≤3 dismissible content-specific chips render.</goal>
+  <context>
+    <background>FR-B3/B5 + NFR-02 — on a tab's first open, the Assistant should proactively surface ≤3 content-specific follow-on chips via the SAME grounded agent turn (filtered by contextType from task 020, scoped by the Binding tags from task 021), cached per tabId so it fires at most once per tab.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/useConsumerChips.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project">MUST render via the REACTIVE chip surface (useConsumerChips / sprk_chiptransitions) — MUST NOT reuse or resurrect the removed useSuggestionCards.</constraint>
+    <constraint source="ADR-039">The suggestion turn is the SAME grounded agent turn filtered by contextType — no classifier/reranker/keyword map.</constraint>
+    <constraint source="project">NFR-02 — fire AT MOST once per tab (cache by tabId); never on switch-back.</constraint>
+    <constraint source="project">≤3 chips, dismissible, non-modal; no generic boilerplate chips for content-rich tabs.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Detect a tab's first open (widget_load / active_widget_changed for a not-yet-suggested tabId).</step>
+    <step order="2">Run one grounded suggestion turn filtered by the tab's contextType.</step>
+    <step order="3">Cache chips keyed by tabId; guard against re-fire on switch-back.</step>
+    <step order="4">Render ≤3 dismissible chips via useConsumerChips.</step>
+    <step order="5">Build + test the cache seam (one fire; zero on switch-back).</step>
+    <step order="6">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If firing once-per-tab would require a second intent mechanism (classifier/keyword map), STOP and escalate (ADR-039) — the selection must stay one grounded turn.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="Once per tab">
+      <steps>Open the email tab; verify ≤3 relevant chips render and exactly one suggestion turn fires. Switch away and back; verify zero additional turns fire. Verify chips are dismissible. Include an ADR-021 dark-mode no-regression check.</steps>
+      <expected>≤3 relevant dismissible chips on first open; exactly one suggestion turn; zero additional turns on switch-back; no dark-mode regressions.</expected>
+    </test>
+  </ui-tests>
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Opening a tab fires exactly one suggestion turn.</criterion>
+    <criterion testable="true">Switch-away-and-back fires zero additional turns.</criterion>
+    <criterion testable="true">≤3 dismissible chips render.</criterion>
+    <criterion testable="true">Rendered via useConsumerChips (NOT useSuggestionCards).</criterion>
+    <criterion testable="true">No generic boilerplate on content-rich tabs.</criterion>
+    <criterion testable="true">Cache keyed by tabId.</criterion>
+    <criterion testable="true">Seam test passes.</criterion>
+  </acceptance-criteria>
+  <notes>FR-B3/B5 + NFR-02.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

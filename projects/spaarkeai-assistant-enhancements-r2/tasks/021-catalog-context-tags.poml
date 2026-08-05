@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Add context-type relevance tags + a Reanalyze Binding to the ADR-039 catalog (FR-B2, FR-D11 data)</title>
+    <phase>3 B — Proactive follow-ons</phase>
+    <gate>blocked until 020</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Dataverse catalog data authoring (analyst-editable), no code deploy</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Data/config authoring via the existing catalog authoring surface</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Dataverse catalog data — disjoint from code files</parallel-reason>
+    <deps>020</deps>
+    <tags>dataverse, ai, config</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Add a context-type relevance tag to catalog Bindings (one or more of the six context types) and author a "Reanalyze" Binding, using the existing catalog authoring surface — analyst-editable, no deploy.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. ADR-039 grounded-catalog authoring expertise; comfortable extending `sprk_playbookconsumer` Binding data via the PlaybookBuilder catalog surface without introducing a classifier.</role>
+  <goal>A Binding tagged `email` is selectable for an email tab and not surfaced for a `matter-grid` tab; a Reanalyze Binding exists for the `document` context.</goal>
+  <context>
+    <background>FR-B2 + FR-D11 (data half) — Bindings today carry sprk_chiptransitions (successor edges) + sprk_tooldescription (intent) but no context-type tag. Proactive chips (Workstream B) need Bindings tagged by context type so grounded selection can be scoped to the active tab's contextType (closed set from task 020).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/catalog/BindingEditorForm.tsx</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/catalog/catalogService.ts</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039">Relevance tags scope grounded selection; no classifier/reranker/keyword map.</constraint>
+    <constraint source="project">Bindings are Dataverse `sprk_playbookconsumer` data — analyst-editable, no code deploy.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Determine the tag field/column on the Binding (extend the catalog with a context-type tag if none exists — coordinate with task 020's closed set).</step>
+    <step order="2">Author/seed context-type tags on the relevant Bindings.</step>
+    <step order="3">Author the Reanalyze Binding tagged `document`.</step>
+    <step order="4">Verify via the PlaybookBuilder authoring UI.</step>
+    <step order="5">Update TASK-INDEX ✅.</step>
+  </steps>
+  <justification>
+    <existing>sprk_chiptransitions (successor edges) + sprk_tooldescription (intent) exist; no context-type tag.</existing>
+    <extension>Yes — extend the catalog with a tag field, not a new registry.</extension>
+    <cost-of-doing-nothing>Proactive chips can't be filtered by active-tab context type.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="config">projects/spaarkeai-assistant-enhancements-r2/notes/catalog-context-tags.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">A Binding tagged email is selectable for an email tab and not for matter-grid.</criterion>
+    <criterion testable="true">A Reanalyze Binding exists for document context.</criterion>
+    <criterion testable="true">No classifier introduced.</criterion>
+  </acceptance-criteria>
+  <notes>FR-B2 + FR-D11 data half.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

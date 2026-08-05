@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Deploy + verify Workstream A (focus-stamp: code page + BFF)</title>
+    <phase>2 A — Active-tab awareness</phase>
+    <gate>blocked until 011,012</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment + verification (no new implementation)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical deploy via code-page-deploy + bff-deploy skills</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment step after A code lands</parallel-reason>
+    <deps>011,012</deps>
+    <tags>deploy, frontend, bff-api</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+  <prompt>Deploy the SpaarkeAi code page and the BFF, then verify the focus-stamp end-to-end (Success Criterion 1).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Deployment expertise with the code-page-deploy + bff-deploy skills; comfortable running end-to-end verification of the active-tab focus-stamp.</role>
+  <goal>A deployed; "summarize this" with an email focused resolves to that email.</goal>
+  <context>
+    <background>Workstream A code (011 client focus-stamp + 012 server reader) has landed; deploy both surfaces and verify the focus-stamp resolves the active tab end-to-end per Success Criterion 1.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/</file>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project">Use the code-page-deploy + bff-deploy skills; verify publish ≤60 MB.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+    </files>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Deploy the BFF via bff-deploy (record the publish size).</step>
+    <step order="2">Deploy SpaarkeAi via code-page-deploy.</step>
+    <step order="3">Verify: focus an email tab, ask "summarize this", confirm the agent prompt '(active)' matches the focused tab.</step>
+    <step order="4">Update TASK-INDEX ✅.</step>
+    <step order="5">Record in notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If deployment fails or the focus-stamp does not resolve the active tab end-to-end, STOP and escalate rather than proceeding.</trigger>
+  </escalation>
+  <outputs>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r2/notes/a-deploy-verify.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Both surfaces deploy.</criterion>
+    <criterion testable="true">Publish size ≤60 MB.</criterion>
+    <criterion testable="true">Focus-stamp verified end-to-end.</criterion>
+  </acceptance-criteria>
+  <notes>Success Criterion 1.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>
