@@ -4,7 +4,7 @@
     <title>Formalize external-reply self-association + regression test</title>
     <phase>1 Pillar A: Trusted threading &amp; external matching</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>No new rung code — the behavior already exists in ThreadContinuityRung; this task formalizes it as a first-class guarantee + adds regression coverage. Note: it MODIFIES tests/**, so task-execute applies the TEST-MODIFYING override (code-review + adr-check at Step 9.5 unconditionally per CLAUDE.md §8).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -87,7 +87,9 @@
     <criterion testable="true">All tests pass; build is green.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-A3; folds into FR-D3 golden regression suite (Phase 3, 030-range). No new rung, no justification (modify/test only). Completion summary appended here when done.</notes>
+  <notes>spec.md FR-A3; folds into FR-D3 golden regression suite (Phase 3, 030-range). No new rung, no justification (modify/test only).
+
+**COMPLETED 2026-08-05.** Confirmed (read-only) `ThreadContinuityRung` reads ONLY the envelope's InReplyTo/References (never a custom header) → the FR-A3 guarantee holds by construction; production code UNCHANGED (ADR-045). New seam regression `tests/integration/seam/Communication/ThreadSelfAssociationRegressionTests.cs` (2 tests): external reply with X-Spaarke-* headers stripped inherits the Resolved parent's regarding matter M at 1.0 via (1) In-Reply-To and (2) References-chain-only. Drives the real rung; doubles only the `ICommunicationDataverseService` boundary. 2/2 pass (escalation trigger did NOT fire — behavior correct). Guarantee documented in `notes/015-fr-a3-self-association-guarantee.md`. D3 (task 032) should ABSORB this case — coordinate via /conflict-check; **re-run /conflict-check before the PR** (shared seam suite).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

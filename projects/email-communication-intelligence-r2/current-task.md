@@ -10,15 +10,17 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Safe-autonomous code-only lane EXHAUSTED (003, 030, 031 ✅). Awaiting operator direction. |
+| **Task** | Safe-autonomous code-only lane COMPLETE (003, 030, 031, 015 ✅ + CVE fix). Awaiting operator direction. |
 | **Step** | — |
-| **Status** | 003 ✅, 030 ✅, 031 ✅ — all committed. |
-| **Next Action** | GATE. Remaining startable tasks are either cloud/security (004 Entra, 020/023 Dataverse schema, 033 Dataverse seed, 010 Key Vault — need operator go-ahead), or sequential shared-lib (Pillar E), or dep-gated (032←015, 034 opus-contract). 015 (formalize external-reply, code-only, parallel-safe:false) is the next code-only candidate if continuing. |
+| **Status** | 003 ✅, 030 ✅, 031 ✅, 015 ✅, CVE fix ✅ — all committed. |
+| **Next Action** | GATE. Remaining startable tasks are cloud/security (004 Entra, 020/023 Dataverse schema, 033 Dataverse seed, 010 Key Vault — need operator go-ahead), sequential shared-lib (Pillar E), or dep-gated (032 golden suite absorbs 015; 034 opus-contract). No more pure code-only-autonomous work remains. |
 
 ### Completed this session (all committed)
 - **Task 003 ✅** — `notes/fixtures/r1-golden-emails.md`.
 - **Task 030 ✅** — FR-D1 RAG grounding (`RegardingParentEntityMapper` + both index sites; N+1 fixed; seam 8/8; DEFER-030-01 filed). Commit `f1f5cf5dd`.
-- **Task 031 ✅** — FR-D2 batched identifier query (`QueryRecordsByNumberFieldValuesAsync` In-filter; ≈175→≤7; rung tests migrated to batched seam 21/21). 
+- **Task 031 ✅** — FR-D2 batched identifier query (`QueryRecordsByNumberFieldValuesAsync` In-filter; ≈175→≤7; rung tests migrated to batched seam 21/21). Commit `c700d1b0b`.
+- **CVE fix ✅** — `System.Security.Cryptography.Xml` 8.0.3→8.0.4 (3 HIGH); solution-wide clean. Commit `0455d8658`.
+- **Task 015 ✅** — FR-A3 self-association guarantee formalized + seam regression (`ThreadSelfAssociationRegressionTests`, 2/2; stripped-headers via In-Reply-To + References). No production code changed. → **task 032 must absorb this into the D3 golden suite.**
 
 ### Gates ahead (need operator go-ahead — NOT autonomous)
 004 (Entra/security), 020/023 (Dataverse schema mutation), 033 (Dataverse seed), 010 (Key Vault), all deploys, all Pillar E (contended shared-lib, sequential).
