@@ -91,17 +91,33 @@ describe('EmailComposer — compose AI sparkle (Wave E / R5 redesign)', () => {
     });
   });
 
-  it('selection-scoped quick actions are hidden when nothing is selected', async () => {
+  it('the "+" quick-responses menu lists ALL whole-draft actions (selection transforms live in the floating toolbar)', async () => {
     const onDraftWithAi = jest.fn().mockResolvedValue(DRAFTED);
     renderComposer({ initialBody: '<p>original</p>', initialBodyFormat: 'HTML', onDraftWithAi });
 
     await openQuickResponses();
 
-    // Whole-draft actions are present; selection-only ones are not (no live selection in jsdom).
+    // The popover is now purely whole-draft: every quick action is always present (concise/
+    // formal/friendly are no longer gated on a selection — that moved to the floating
+    // InlineAiToolbar that appears over a highlight).
     expect(await screen.findByRole('menuitem', { name: 'Summarize the thread' })).toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: 'Make it concise' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: 'Formal tone' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: 'Friendly tone' })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Make it concise' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Formal tone' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Friendly tone' })).toBeInTheDocument();
+  });
+
+  it('a whole-draft quick action sends the full body (no selectionText scoping)', async () => {
+    const onDraftWithAi = jest.fn().mockResolvedValue(DRAFTED);
+    renderComposer({ initialBody: '<p>original</p>', initialBodyFormat: 'HTML', onDraftWithAi });
+
+    await openQuickResponses();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Make it concise' }));
+
+    await waitFor(() => {
+      expect(onDraftWithAi).toHaveBeenCalledWith(
+        expect.objectContaining({ intent: 'concise', currentBody: expect.stringContaining('original') })
+      );
+    });
   });
 
   it('surfaces a message when the draft comes back empty', async () => {
