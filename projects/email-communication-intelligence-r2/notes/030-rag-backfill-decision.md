@@ -25,11 +25,12 @@ Model it on `scripts/Backfill-DocumentHasFile.ps1` (paged, resumable, non-fatal)
 re-enqueue `PostUploadIndexingRequest` with the mapped `ParentEntity`. Gated behind an explicit operator
 decision + escalation because it re-runs embeddings at scale.
 
-## Known limitation (tracked follow-up, not a backfill item)
+## Representable grounding types (updated 2026-08-05)
 
-`ParentEntityContext.EntityTypes` supports only matter / project / invoice / account / contact. A
-communication whose **primary** regarding is a **service request** (or work assignment / event / budget /
-report card / analysis / organization) degrades to null grounding — the pre-existing behavior — because
-`RegardingParentEntityMapper` will not fabricate an unsupported scheme or misfile to a lower-priority
-regarding. Extending `ParentEntityContext.EntityTypes` is a change to the AI-owned contract (ADR-013 / §11)
-and is out of scope for this Communication-side task. **Filed as a deferral** (see `notes/defer-issues.md`).
+`ParentEntityContext.EntityTypes` supports the three **core auto-file types** (matter / project / service
+request) plus invoice / account / contact — i.e. every regarding type a correspondence RAG query realistically
+scopes by. Service request was added 2026-08-05 (operator direction, closing DEFER-030-01) after confirming the
+grounding path is a generic `parentEntityType eq …` filter with no per-type index routing. The remaining
+non-core regarding targets (work assignment / event / budget / report card / analysis / organization) degrade
+to null grounding **by design** — RAG scoping by those is not a product need; the one-line recipe to add one
+later is documented in `RegardingParentEntityMapper`'s XML docs.

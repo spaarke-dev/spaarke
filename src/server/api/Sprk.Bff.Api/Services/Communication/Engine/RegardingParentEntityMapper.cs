@@ -18,12 +18,12 @@ namespace Sprk.Bff.Api.Services.Communication.Engine;
 /// type is representable in <see cref="ParentEntityContext"/>; otherwise we degrade to null. We
 /// deliberately do NOT fall through to a lower-priority representable regarding — grounding a document to
 /// a non-primary parent would misfile it into the wrong parent's RAG scope.</para>
-/// <para><b>Representable types.</b> <see cref="ParentEntityContext.EntityTypes"/> supports
-/// matter / project / invoice / account / contact only. Other regarding targets (service request, work
-/// assignment, event, budget, report card, analysis, organization) degrade to null grounding — the
-/// current behavior — rather than fabricating an unsupported scheme (that expansion would be a change to
-/// the AI-owned <see cref="ParentEntityContext"/> contract, out of scope for Communication code per
-/// ADR-013 / §11). Tracked as a follow-up.</para>
+/// <para><b>Representable types.</b> <see cref="ParentEntityContext.EntityTypes"/> supports the three core
+/// auto-file types (matter / project / service request) plus invoice / account / contact. The remaining
+/// non-core regarding targets (work assignment, event, budget, report card, analysis, organization) degrade
+/// to null grounding rather than fabricating an unsupported scheme — RAG scoping by those is not a product
+/// need; if one arises, add the type to <see cref="ParentEntityContext.EntityTypes"/> + a row here (the RAG
+/// index filter is a generic <c>parentEntityType eq …</c> string match, so no downstream change is needed).</para>
 /// <para><b>Best-effort / non-fatal (NFR-04).</b> Any failure resolving the regarding degrades to null
 /// grounding and never fails the capture or send path.</para>
 /// </remarks>
@@ -38,6 +38,7 @@ public static class RegardingParentEntityMapper
         {
             ["sprk_matter"] = ParentEntityContext.EntityTypes.Matter,
             ["sprk_project"] = ParentEntityContext.EntityTypes.Project,
+            ["sprk_servicerequest"] = ParentEntityContext.EntityTypes.ServiceRequest,
             ["sprk_invoice"] = ParentEntityContext.EntityTypes.Invoice,
             ["account"] = ParentEntityContext.EntityTypes.Account,
             ["contact"] = ParentEntityContext.EntityTypes.Contact,

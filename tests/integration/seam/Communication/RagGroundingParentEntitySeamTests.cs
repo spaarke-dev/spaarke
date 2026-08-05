@@ -82,12 +82,25 @@ public sealed class RagGroundingParentEntitySeamTests
     }
 
     [Fact]
+    public void FromCommunication_ServiceRequestRegarding_ReturnsServiceRequestGroundingKey()
+    {
+        // Service request is a core auto-file type (matter / project / service request) — it must ground.
+        var srId = Guid.NewGuid();
+        var comm = Communication(("sprk_regardingservicerequest", "sprk_servicerequest", srId, "SR-42"));
+
+        var result = RegardingParentEntityMapper.FromCommunication(comm);
+
+        result!.EntityType.Should().Be(ParentEntityContext.EntityTypes.ServiceRequest);
+        result.EntityId.Should().Be(srId.ToString());
+    }
+
+    [Fact]
     public void FromCommunication_NonRepresentablePrimary_ReturnsNull_DoesNotFallThroughToSecondary()
     {
-        // Service request is the primary (higher priority than account) but is NOT representable in
-        // ParentEntityContext. The mapper must degrade to null rather than misfiling to the account.
+        // Work assignment is the primary (higher priority than account in RegardingFieldMap order) but is NOT
+        // a representable type. The mapper must degrade to null rather than misfiling to the account.
         var comm = Communication(
-            ("sprk_regardingservicerequest", "sprk_servicerequest", Guid.NewGuid(), "SR-1"),
+            ("sprk_regardingworkassignment", "sprk_workassignment", Guid.NewGuid(), "WA-1"),
             ("sprk_regardingaccount", "account", Guid.NewGuid(), "Contoso"));
 
         var result = RegardingParentEntityMapper.FromCommunication(comm);
