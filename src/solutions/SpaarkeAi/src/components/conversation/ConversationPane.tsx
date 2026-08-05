@@ -597,6 +597,12 @@ export function ConversationPane(): React.JSX.Element {
   const [wizardAutoRunWatchdog, setWizardAutoRunWatchdog] = React.useState<{
     analysisId: string;
   } | null>(null);
+  // UAT round-6 (item #15b) — once-per-mount guard for cold-load Compose-tab session RE-ADOPTION.
+  // When WorkspacePane restores a persisted home-surface Compose tab (item #13), it dispatches
+  // `widget_load{compose}` threading the tab's `composeSessionId` (but NO `analysisId` — the direct-
+  // Compose door is unbound). This pane adopts that session so the Assistant transcript CONTINUES on
+  // return instead of cold-starting "back at the Review an NDA step". Adopted at most once per mount.
+  const restoreSessionAdoptedRef = React.useRef<boolean>(false);
 
   // ── Behaviour hooks (see module map in the header) ────────────────────────
   const injection = useInjectionQueue();
@@ -663,6 +669,11 @@ export function ConversationPane(): React.JSX.Element {
   // `hasPriorMessages` is available for the `useAttachments` call immediately below — a file
   // attach mid-chat needs to know, AT ATTACH TIME, whether the chat already has messages.
   const [chatMessageCount, setChatMessageCount] = React.useState(0);
+  // UAT round-6 (item #15b): a ref mirror so the bus-driven restore-adoption listener reads the CURRENT
+  // transcript length synchronously (its guard must never clobber a conversation the user is mid-way
+  // through). usePaneEvent always invokes the latest closure, so this stays fresh.
+  const chatMessageCountRef = React.useRef(chatMessageCount);
+  chatMessageCountRef.current = chatMessageCount;
 
   const attachments = useAttachments({
     bffBaseUrl,
@@ -838,8 +849,15 @@ export function ConversationPane(): React.JSX.Element {
       // card OR its chip), open the center-screen progress modal.
       if (ndaReviewBindingIdRef.current && bindingId === ndaReviewBindingIdRef.current) {
         ndaRunRef.current.begin();
+        // UAT round-6 (item #15a) — THE dispatch-time chokepoint. Every review path (chip-quick,
+        // typed-gate, wizard-auto-run, rerun-thorough) funnels through this ONE `runBindingDispatch`
+        // callback, so stamping the cross-navigation resume flag HERE captures it for all of them —
+        // regardless of whether the user later dismisses the progress modal. WorkspacePane stamps the
+        // active home-surface Compose tab's persisted `run:{inFlight,dispatchedAt}` off this signal;
+        // completion clears it via `compose_advisory_comments`, failure via the `{false}` emit below.
+        dispatch("workspace", { type: "nda_review_dispatch_active", dispatchActive: true });
       }
-    }, []),
+    }, [dispatch]),
   });
   acceptChipsRef.current = chips.acceptChips;
 
@@ -895,6 +913,19 @@ export function ConversationPane(): React.JSX.Element {
   React.useEffect(() => {
     if (!chips.dispatching) ndaRunFail();
   }, [chips.dispatching, ndaRunFail]);
+
+  // UAT round-6 (item #15a) — clear the cross-navigation resume flag on review FAILURE. `ndaRun.status`
+  // reaches 'error' ONLY when `fail()` fired while a review run was still 'running' (a genuine review
+  // failure — a successful `complete()` already transitioned to 'complete' and fail() no-ops). Emitting
+  // the `{dispatchActive:false}` clear exactly here means a failed run doesn't leave a stale in-flight
+  // flag that would resume a dead spinner+poll on a later return. The SUCCESS clear rides the separate
+  // `compose_advisory_comments` completion event (fires even for a zero-findings clean review), so this
+  // effect is failure-only.
+  React.useEffect(() => {
+    if (ndaRun.status === "error") {
+      dispatch("workspace", { type: "nda_review_dispatch_active", dispatchActive: false });
+    }
+  }, [ndaRun.status, dispatch]);
 
   // ── spaarke-notification-spine-r1 task 051/052 (FR-16/FR-17): proactive-suggestion cards ──
   // A `kind=suggestion` outbox row (task 050 producer) is delivered by the Layer-C
@@ -2337,6 +2368,36 @@ export function ConversationPane(): React.JSX.Element {
     const seed = evt.widgetData?.compose;
     const composeSessionId = seed?.composeSessionId;
     const analysisId = seed?.analysisId;
+
+    // UAT round-6 (item #15b) — RESTORE re-adoption branch. WorkspacePane's item-#13 cold-load restore
+    // reopens a persisted home-surface Compose tab with `composeSessionId` threaded but NO `analysisId`
+    // (the direct-Compose door is unbound — no wizard hand-off). On cold reload the Assistant pane's own
+    // session (persisted via AiSessionProvider's sessionStorage) can be lost across the code-page iframe
+    // teardown, so it cold-starts "back at the Review an NDA step". Re-adopt the restored tab's session
+    // — the SAME `handleSelectHistorySession` mechanism the wizard branch below and the History menu use
+    // — so the transcript CONTINUES on return.
+    //
+    // GUARD (never clobber an active conversation the user started after returning): adopt AT MOST once
+    // per mount, only when this pane is on a FRESH/DEFAULT session — i.e. it hasn't already adopted the
+    // restored session (`chatSessionIdRef !== composeSessionId`) AND the current transcript is empty
+    // (`chatMessageCountRef.current === 0`). The restore `widget_load` is dispatched macrotask-early on
+    // cold load (WorkspacePane defers it after `tabRestoreSettled`), before the user could realistically
+    // send a message; the empty-transcript check is the belt-and-braces "fresh session" gate. If the
+    // Assistant legitimately resumed the SAME review session already, the id-equality check makes this a
+    // no-op; if it resumed a DIFFERENT session that already has messages, the empty-transcript check
+    // blocks the clobber.
+    if (composeSessionId && !analysisId) {
+      if (restoreSessionAdoptedRef.current) return;
+      if (chatSessionIdRef.current === composeSessionId) return; // already on the restored session
+      if (chatMessageCountRef.current > 0) return; // an active conversation exists — never clobber
+      restoreSessionAdoptedRef.current = true;
+      // Synchronous ref update FIRST (ensureChatSession's documented pattern) so any same-tick
+      // getSessionId() reader sees the adopted session before the re-render lands.
+      chatSessionIdRef.current = composeSessionId;
+      handleSelectHistorySession(composeSessionId);
+      return;
+    }
+
     if (!composeSessionId || !analysisId) return; // not a wizard hand-off seed
     if (wizardAutoRunHandledRef.current.has(analysisId)) return; // once per Analysis
     wizardAutoRunHandledRef.current.add(analysisId);
@@ -2419,9 +2480,18 @@ export function ConversationPane(): React.JSX.Element {
   // the user acts (handleDocAction clears reviseChipsPending), the consumer cards resume.
   const transcriptFooter = React.useMemo(
     () => (
-      <>{reviseChipsPending ? <ComposeDocActionChips onAction={handleDocAction} /> : chips.consumerChipsSlot}</>
+      <>
+        {/* UAT round-6 (item #14): the "Rerun a full analysis" card renders FIRST in the transcript
+            footer — i.e. INLINE in the transcript, directly beneath the last message, which right after
+            a Quick review is the "Quick scan — … I've finished reviewing…" completion message. It
+            scrolls WITH the conversation (it lives inside SprkChat's transcriptFooterSlot) instead of
+            floating pinned at the top of the pane (the owner's round-6 complaint). Renders nothing until
+            a quick run arms it; single-slot (never stacks). */}
+        {rerunFullAnalysisCard.cardSlot}
+        {reviseChipsPending ? <ComposeDocActionChips onAction={handleDocAction} /> : chips.consumerChipsSlot}
+      </>
     ),
-    [reviseChipsPending, handleDocAction, chips.consumerChipsSlot]
+    [rerunFullAnalysisCard.cardSlot, reviseChipsPending, handleDocAction, chips.consumerChipsSlot]
   );
 
   // task 042 (FR-F3) — My Assistant questionnaire: open-state, cold-start gate, write/erase path.
@@ -2578,10 +2648,19 @@ export function ConversationPane(): React.JSX.Element {
             transcript-footer chip slot. Renders nothing when there are no live suggestions. */}
         {suggestions.suggestionSlot}
 
+<<<<<<< HEAD
         {/* UAT round-4 (item #9): "Rerun a full analysis" — a persistent act-on CARD (not a
             chip; ASSISTANT-UI-ELEMENT-CRITERIA.md) offered after a QUICK-depth review completes.
             Renders nothing until a quick run completes; single-slot (never stacks). */}
         {rerunFullAnalysisCard.cardSlot}
+=======
+        {/* UAT round-4 (item #9): "Rerun a full analysis" — a persistent act-on CARD (not a chip;
+            ASSISTANT-UI-ELEMENT-CRITERIA.md) offered after a QUICK-depth review completes.
+            UAT round-6 (item #14): the card MOVED OUT of this top-of-pane region (it read as pinned
+            above the notifications area) and INTO the transcript footer (SprkChat.transcriptFooterSlot,
+            see `transcriptFooter` above), so it renders inline beneath the "Quick scan…" completion
+            message and scrolls WITH the conversation. */}
+>>>>>>> origin/master
 
         {/* nda-r1 follow-up (UAT 2026-07-26): "Review an NDA" moved OUT of this top-of-pane
             notification slot (it read as "hidden" above the fold) and INTO the Suggested-Next-Steps

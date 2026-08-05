@@ -29,7 +29,11 @@ if (typeof (global as any).TextEncoder === 'undefined') (global as any).TextEnco
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 if (typeof (global as any).TextDecoder === 'undefined') (global as any).TextDecoder = NodeTextDecoder;
 import React, { act } from 'react';
+<<<<<<< HEAD
 import { render, screen, fireEvent } from '@testing-library/react';
+=======
+import { render, screen, fireEvent, within } from '@testing-library/react';
+>>>>>>> origin/master
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 import { PaneEventBus, PaneEventBusProvider } from '@spaarke/ai-widgets';
@@ -353,6 +357,20 @@ describe('UAT round-3 item #7: "Review an NDA" chip click now asks Quick/Thoroug
     const reviewBody = dispatchPostBodies.find((b) => b.bindingId === REVIEW_BINDING);
     const args = reviewBody!.args as Record<string, unknown> | undefined;
     expect(args).toMatchObject({ fileIds: [SESSION_FILE_ID], reviewDepth: 'quick' });
+<<<<<<< HEAD
+=======
+
+    // UAT round-6 (item #15a): the chip-quick dispatch stamped the cross-navigation resume flag at the
+    // ONE `runBindingDispatch` chokepoint — a `nda_review_dispatch_active{dispatchActive:true}` fired on
+    // the workspace channel (WorkspacePane persists it against the active Compose tab).
+    expect(
+      workspaceEvents.some(
+        (e) =>
+          e.type === 'nda_review_dispatch_active' &&
+          (e as WorkspacePaneEvent & { dispatchActive?: boolean }).dispatchActive === true
+      )
+    ).toBe(true);
+>>>>>>> origin/master
   });
 
   it('the file still opens in Compose immediately on the chip click, before the depth question is answered', async () => {
@@ -374,3 +392,73 @@ describe('UAT round-3 item #7: "Review an NDA" chip click now asks Quick/Thoroug
     expect(composeOpen).toBeDefined();
   });
 });
+<<<<<<< HEAD
+=======
+
+// ---------------------------------------------------------------------------
+// UAT round-6 items #14 (card placement) + #15a (rerun-thorough dispatch flag)
+// ---------------------------------------------------------------------------
+
+describe('UAT round-6: rerun-full-analysis card renders INLINE in the transcript + rerun dispatches at DISPATCH-flagged thorough depth', () => {
+  async function driveQuickReviewToCompletion(): Promise<void> {
+    renderPane();
+    await driveChatUpload('AppligentNDA_Signed.docx');
+    const ndaChip = screen.getByTestId(`consumer-chip-${LOCAL_CHIP.ndaReview}`);
+    await act(async () => {
+      fireEvent.click(ndaChip);
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+    });
+    const quickChip = screen.getByTestId(`consumer-chip-${LOCAL_CHIP.agreementReviewDepthQuick}`);
+    await act(async () => {
+      fireEvent.click(quickChip);
+      for (let i = 0; i < 40; i++) await Promise.resolve();
+    });
+  }
+
+  it('#14: after a Quick review completes, the "Rerun a full analysis" card renders INSIDE the transcript footer (scrolls with the conversation — NOT pinned at the top of the pane)', async () => {
+    await driveQuickReviewToCompletion();
+
+    // The card is armed (a Quick review completed with an NDA-shaped result).
+    const card = await screen.findByTestId('rerun-full-analysis-card');
+    expect(card).toBeInTheDocument();
+    // #14 placement: the card lives INSIDE SprkChat's transcriptFooterSlot (the `sprkchat-stub` renders
+    // exactly `{props.transcriptFooterSlot}`), i.e. inline at the bottom of the transcript — beneath the
+    // "Quick scan…" completion message — NOT in the top-of-pane region above SprkChat.
+    const transcript = screen.getByTestId('sprkchat-stub');
+    expect(within(transcript).getByTestId('rerun-full-analysis-card')).toBe(card);
+  });
+
+  it('#15a: clicking the rerun card dispatches THOROUGH and stamps a fresh dispatch-time run flag', async () => {
+    await driveQuickReviewToCompletion();
+    // Precondition: exactly one review dispatch so far (the Quick run).
+    const quickCount = dispatchPostBodies.filter((b) => b.bindingId === REVIEW_BINDING).length;
+    expect(quickCount).toBe(1);
+    const dispatchActiveCountBefore = workspaceEvents.filter(
+      (e) =>
+        e.type === 'nda_review_dispatch_active' &&
+        (e as WorkspacePaneEvent & { dispatchActive?: boolean }).dispatchActive === true
+    ).length;
+
+    const card = await screen.findByTestId(`suggestion-card-rerun-full-analysis-${SESSION_FILE_ID}`);
+    await act(async () => {
+      fireEvent.click(card);
+      for (let i = 0; i < 60; i++) await Promise.resolve();
+    });
+
+    // The rerun-thorough path funnels through the SAME `runBindingDispatch` chokepoint → a THOROUGH
+    // dispatch AND a second dispatch-time flag stamp.
+    const thoroughBody = dispatchPostBodies
+      .filter((b) => b.bindingId === REVIEW_BINDING)
+      .map((b) => b.args as Record<string, unknown> | undefined)
+      .find((a) => a?.reviewDepth === 'thorough');
+    expect(thoroughBody).toMatchObject({ fileIds: [SESSION_FILE_ID], reviewDepth: 'thorough' });
+
+    const dispatchActiveCountAfter = workspaceEvents.filter(
+      (e) =>
+        e.type === 'nda_review_dispatch_active' &&
+        (e as WorkspacePaneEvent & { dispatchActive?: boolean }).dispatchActive === true
+    ).length;
+    expect(dispatchActiveCountAfter).toBeGreaterThan(dispatchActiveCountBefore);
+  });
+});
+>>>>>>> origin/master

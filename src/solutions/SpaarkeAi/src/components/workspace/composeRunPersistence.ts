@@ -67,13 +67,29 @@ export const COMPOSE_RUN_STATE_TTL_MS = 8 * 60 * 60 * 1000;
 
 /**
  * A review run is only "resumable" (spinner + poll) if it was dispatched within
- * this window. The BFF's per-attempt OpenAI timeout is 300s (the slow gpt-5
- * Reasoning review); +30s margin covers ledger-write + SSE tail. Past this, a
- * run that has not produced findings is assumed dead — we clear the flag and
- * show only the document (findings still materialize on a later open if they
- * ever land, via FR-16 durable recall).
+ * this window. The window must cover the WHOLE span from the client
+ * `dispatchedAt` stamp until the review's findings are durably readable in the
+ * compose-outputs ledger, in the worst case:
+ *   - retrieval (1 embedding + 1 hybrid search, additive BEFORE the LLM): ~2–5s
+ *   - the BFF's per-attempt OpenAI network timeout for the slow gpt-5 Reasoning
+ *     review: 300s (the review call itself is measured at ~120–180s but can run
+ *     to the 300s ceiling on a hard case)
+ *   - ledger write + SSE tail: ~1–3s
+ *   - client dispatch→server-start latency + the resume poll's own 5s
+ *     granularity + client/server clock skew between the `dispatchedAt` stamp
+ *     and the server LLM window: several more seconds
+ * That sums to ~310–320s of genuinely-live time. The prior 330s left only ~15s
+ * of margin over that ceiling — too thin once retrieval is counted as ADDITIVE
+ * to the 300s timeout (retrieval runs, THEN the up-to-300s completion). 420s
+ * (UAT round-6 item #15a) gives a comfortable margin that absorbs a slow
+ * retrieval + clock skew + realistic return-navigation latency while staying far
+ * under the 8h TTL and the explicit-close agency bound. A ~2–3min Thorough run
+ * (the owner's repro) sits comfortably inside it. Past this window a run that
+ * produced nothing is assumed dead — we clear the flag and show only the
+ * document (findings, if any, still materialize on a later open via FR-16
+ * durable recall on the reopened tab's mount-materialize).
  */
-export const COMPOSE_RUN_IN_FLIGHT_MAX_MS = 330_000;
+export const COMPOSE_RUN_IN_FLIGHT_MAX_MS = 420_000;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -277,6 +293,29 @@ export function clearRunInFlight(
     t.instanceKey === instanceKey && t.run
       ? { ...t, run: { ...t.run, inFlight: false } }
       : t
+  );
+  return { version: COMPOSE_RUN_STATE_SCHEMA_VERSION, tabs };
+}
+
+/**
+ * Clear the in-flight flag for EVERY tab whose captured `sessionId` matches
+ * (UAT round-6 item #15a — clear-on-completion). The dispatch-time stamp keys a
+ * run to the ACTIVE Compose tab, but a review can COMPLETE while the user has
+ * switched to a different workspace tab (the "Continue working in background"
+ * case), so completion clearing keys on the SESSION the completion event carries
+ * (`compose_advisory_comments.sessionId`) rather than the currently-active tab.
+ * No-op (returns the input unchanged) when `sessionId` is falsy or no in-flight
+ * tab matches. Never mutates the input.
+ */
+export function clearRunInFlightBySession(
+  prev: ComposeRunPersistenceSnapshot | null,
+  sessionId: string | undefined
+): ComposeRunPersistenceSnapshot | null {
+  const prevTabs = prev?.tabs ?? [];
+  if (!sessionId) return prev ?? null;
+  if (!prevTabs.some(t => t.sessionId === sessionId && t.run?.inFlight)) return prev ?? null;
+  const tabs = prevTabs.map(t =>
+    t.sessionId === sessionId && t.run ? { ...t, run: { ...t.run, inFlight: false } } : t
   );
   return { version: COMPOSE_RUN_STATE_SCHEMA_VERSION, tabs };
 }
