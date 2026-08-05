@@ -12,7 +12,7 @@ Tier: `sonnet` (default) · `opus` (high-blast/judgment) — effort: `high` (def
 
 | ID | Title | Phase | Status | Deps | Tier / Effort | Rigor | Parallel |
 |----|-------|-------|--------|------|---------------|-------|----------|
-| 001 | Remove Notifications suggestion surface (E) | 1 E | 🔲 | none | sonnet / high | FULL | none (ConvPane spine) |
+| 001 | Remove Notifications suggestion surface (E) | 1 E | ✅ | none | sonnet / high | FULL | none (ConvPane spine) |
 | 002 | Deploy + verify E | 1 E | 🔲 | 001 | sonnet / high | STANDARD | none (deploy) |
 | 010 | active_widget_changed subscriber + focus ref (FR-A1) | 2 A | 🔲 | 001 | sonnet / high | FULL | none (ConvPane spine) |
 | 011 | activeContext focus-stamp decorate (FR-A2) | 2 A | 🔲 | 010 | sonnet / high | FULL | none (ConvPane spine) |

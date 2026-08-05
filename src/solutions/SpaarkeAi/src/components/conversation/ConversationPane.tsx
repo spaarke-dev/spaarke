@@ -63,12 +63,11 @@ import { useConsumerChips } from "./useConsumerChips";
 // spaarke-notification-spine-r1 task 051 (FR-16): the proactive-suggestion renderer branch —
 // a SIBLING of the Click-path chips, subscribing to the Layer-C spine's `kind=suggestion`
 // pushes via the ONE host-wide `@spaarke/notifications` client (task 021).
-import { useSuggestionCards, type PendingSuggestionItem } from "./useSuggestionCards";
 // UAT round-4 (item #9): "Rerun a full analysis" card — offered after a QUICK-depth agreement
-// review completes. A SIBLING of useSuggestionCards (reuses its SuggestionCard visual directly)
-// but client-local/session-turn-scoped — no outbox row, no BFF re-ground.
+// review completes. Client-local/session-turn-scoped (no outbox row, no BFF re-ground). It reuses
+// the SuggestionCard presentational component, which is why SuggestionCard.tsx is retained even
+// though assistant-enhancements-r2 task 001 (FR-E1) removed the spine-driven suggestion surface.
 import { useRerunFullAnalysisCard } from "./useRerunFullAnalysisCard";
-import { getNotificationsClient } from "../../services/notificationsBootstrap";
 import { useContextEventBridge } from "./useContextEventBridge";
 import { useDocQaCitationBridge } from "./useDocQaCitationBridge";
 import { useNdaReviewAdvisoryCommentsBridge, isNdaReviewResult } from "./useNdaReviewAdvisoryCommentsBridge";
@@ -927,64 +926,11 @@ export function ConversationPane(): React.JSX.Element {
     }
   }, [ndaRun.status, dispatch]);
 
-  // ── spaarke-notification-spine-r1 task 051/052 (FR-16/FR-17): proactive-suggestion cards ──
-  // A `kind=suggestion` outbox row (task 050 producer) is delivered by the Layer-C
-  // spine via the task-021 `@spaarke/notifications` client, re-grounded through the
-  // BFF, and rendered as a compact card (SuggestionCard) — a SIBLING of the Click-path
-  // chips, independent of a dispatch turn. ACTING on it OPENS the regarding record in a
-  // MODAL (owner decision, task 052 / FR-17) — the modal-standard Layout 1
-  // (`Xrm.Navigation.navigateTo({ pageType: "entityrecord" }, { target: 2, 85% })`), so the
-  // Assistant is NOT navigated away. This is navigation, NOT a capability dispatch — it uses
-  // the existing `INavigationService` surface, so no second dispatch pipeline is introduced.
-  // ONE shared Xrm navigation service — also drives the saved-preview record open below.
+  // Shared Xrm navigation service — drives the saved-preview record "Open record" action below
+  // (~line 2952). assistant-enhancements-r2 task 001 (FR-E1) removed the spine-driven
+  // proactive-suggestion surface (useSuggestionCards) that formerly also consumed this service's
+  // openRecordModal; the service is retained for the saved-preview path.
   const previewNavigationService = React.useMemo(() => createXrmNavigationService(), []);
-  const suggestions = useSuggestionCards({
-    subscribe: React.useCallback(
-      (kind, handler) => getNotificationsClient().registerHandler(kind, handler),
-      []
-    ),
-    // Re-fetch/re-ground: GET /api/notifications/pending (task 022) — oid-scoped +
-    // read-time expiry-filtered SERVER-side. Tolerant of the `{ items }` wrapper or a bare array.
-    fetchPending: React.useCallback(async (): Promise<ReadonlyArray<PendingSuggestionItem>> => {
-      const response = await authenticatedFetch(`${bffBaseUrl}/api/notifications/pending`, {
-        method: "GET",
-      });
-      const data: unknown = await response.json();
-      const items = Array.isArray(data)
-        ? data
-        : data && typeof data === "object" && Array.isArray((data as { items?: unknown }).items)
-          ? (data as { items: unknown[] }).items
-          : [];
-      return items as ReadonlyArray<PendingSuggestionItem>;
-    }, [authenticatedFetch, bffBaseUrl]),
-    // task 052 (FR-17): acting on a suggestion OPENS the regarding record in a modal
-    // (owner decision) — the shared INavigationService's Layout-1 `openRecordModal`
-    // (`navigateTo` entityrecord, `target: 2`, 85%). Navigation, not a capability dispatch,
-    // so no second dispatch pipeline. `openRecordModal` is optional on the interface; the
-    // Xrm adapter always provides it, and a re-fetch already confirmed the row is live.
-    onSuggestionAction: React.useCallback(
-      (envelope) =>
-        previewNavigationService.openRecordModal?.(
-          envelope.regardingRecordType,
-          envelope.regardingRecordId
-        ) ?? Promise.resolve(),
-      []
-    ),
-    // Dismiss 'x' (UAT 2026-07-22): POST /api/notifications/{id}/dismiss stamps sprk_dismissed
-    // server-side so the row leaves /pending (ownership enforced server-side). Also fired after a
-    // successful action so an acted-on suggestion does not reappear. Best-effort — a non-2xx is
-    // swallowed (the hook has already removed the card locally).
-    dismiss: React.useCallback(
-      async (outboxRowId: string): Promise<void> => {
-        await authenticatedFetch(
-          `${bffBaseUrl}/api/notifications/${encodeURIComponent(outboxRowId)}/dismiss`,
-          { method: "POST" }
-        );
-      },
-      [authenticatedFetch, bffBaseUrl]
-    ),
-    inject: injection.inject,
-  });
 
   // ── spaarkeai-assistant-enhancements-r1 P0(b): TEXT/agent-path surface launch ──
   // The BFF's BindingCapabilityTool emits a `surface_launch` SSE event when the
@@ -2643,10 +2589,10 @@ export function ConversationPane(): React.JSX.Element {
           </MessageBar>
         )}
 
-        {/* task 051 (FR-16): proactive suggestions render at the top of the pane — they arrive
-            from the Layer-C spine independent of a dispatch turn, so they are NOT in the
-            transcript-footer chip slot. Renders nothing when there are no live suggestions. */}
-        {suggestions.suggestionSlot}
+        {/* assistant-enhancements-r2 task 001 (FR-E1): the spine-driven proactive-suggestion
+            surface (banner + suggestion-card stack, formerly `{suggestions.suggestionSlot}`) was
+            removed here. The notification spine, NotificationsClient, and Daily Briefing are
+            unaffected; the reactive Suggested-Next-Steps chips render via the transcript footer. */}
 
         {/* UAT round-4 (item #9): "Rerun a full analysis" — a persistent act-on CARD (not a chip;
             ASSISTANT-UI-ELEMENT-CRITERIA.md) offered after a QUICK-depth review completes.

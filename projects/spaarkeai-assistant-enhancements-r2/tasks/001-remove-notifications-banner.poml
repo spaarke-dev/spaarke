@@ -4,7 +4,7 @@
     <title>Remove the spine-driven Notifications suggestion surface (banner + cards) from the Assistant</title>
     <phase>1 E — Remove Notifications banner</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx code + deletes components/tests (frontend implementation)</rigor-reason>
     <model-tier>sonnet</model-tier>

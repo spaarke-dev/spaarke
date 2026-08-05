@@ -10,16 +10,17 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — project initialized, tasks generated |
+| **Task** | 001 ✅ complete → next: Phase 2 (A) wave A1 = **010 + 012** (parallel) |
 | **Step** | — |
-| **Status** | not-started |
-| **Next Action** | Begin Phase 1: `work on task 001` (Remove Notifications banner) |
+| **Status** | not-started (next wave) |
+| **Next Action** | `work on tasks 010 and 012` (010 = active-tab subscriber [ConvPane]; 012 = server focus-stamp [BFF] — different files, parallel-safe) |
 
 ### Files Modified This Session
-- Project artifacts created (README, plan, CLAUDE.md, current-task, tasks/, TASK-INDEX)
+- Task 001 (FR-E1): ConversationPane.tsx (removed suggestion hook + render), deleted useSuggestionCards.tsx, trimmed SuggestionCard.test.tsx
+- Project artifacts (earlier): README, plan, CLAUDE.md, TASK-INDEX
 
 ### Critical Context
-5 phases E→A→B→D→C. `ConversationPane.tsx` is a sequential spine (E/A/B/D edit it). No live cross-worktree overlap — notification-spine-r1 + analysis-hub-r1 both merged to master (verified 2026-08-05). `/conflict-check` before BFF/ConversationPane PRs as normal hygiene.
+5 phases E→A→B→D→C. `ConversationPane.tsx` is a sequential spine (E/A/B/D edit it). **001 done** (banner removed; SuggestionCard.tsx retained — see notes/deviations.md). No live cross-worktree overlap (spine-r1 + analysis-hub-r1 merged). Next wave A1: 010 (ConvPane) ∥ 012 (BFF SprkChatAgentFactory/ChatEndpoints — opus/xhigh, ADR-015 boundary). Note 012 & 041 both edit SprkChatAgentFactory.cs, and 012 & 031 both edit ChatEndpoints.cs → don't run those concurrently later.
 
 ---
 
