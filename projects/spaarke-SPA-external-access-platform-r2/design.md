@@ -1,133 +1,162 @@
-# Design — Spaarke External Access Platform (R2): Multi-App Foundation + Legal Front Door
+# Design — Spaarke External Access Platform (R2): Module-Host SPA Foundation + Legal Front Door
 
 > **Status**: DRAFT scoping brief (input to `/design-to-spec`)
 > **Author**: Owner + Claude (post-R1 scoping, 2026-07-21)
 > **Predecessor**: `projects/spaarke-SPA-external-access-platform-r1/` — SHIPPED. Migrated the external Secure Project Workspace (Outside Counsel) from Power Pages + B2B guests to Azure Static Web Apps (SWA) + Entra External ID (CIAM), broker-only (ADR-028 Amendment A1). Live + owner-verified.
-> **Grounding**: `notes/external-access-capability-synopsis.md` (code-based synopsis of what R1 shipped, cited to file:line).
+> **Grounding**: `notes/external-access-capability-synopsis.md` (code synopsis of what R1 shipped, cited to file:line).
 
 ---
 
 ## 1. What R2 actually is
 
-R1 proved the pattern with **one** app (Outside Counsel). R2 turns that one-off into a **reusable platform for non-Power-App-licensed users**, and ships the **second** app on it (Legal Front Door).
+R1 proved the pattern with **one** app (Outside Counsel). R2 turns it into a **module-host SPA platform** that serves **every non-core user** through one shell, and ships the **second capability** on it (Legal Front Door).
 
-Spaarke needs external/lightweight-SPA apps for three audiences:
+### The real product axis: core user vs SPA user
 
-| App | Audience | Identity plane | Core data domain | Status |
-|-----|----------|----------------|------------------|--------|
-| **Outside Counsel** (R1, shipped) | Outside law firms | **CIAM** (truly external) | `sprk_project` / `sprk_matter` / documents | Live |
-| **Legal Front Door** (R2) | **Internal business users, unlicensed for Power Apps** | **Workforce Entra SSO** (employees) | `sprk_servicerequest` intake + NDA/trademark/invention/policy workflows | **This project** |
-| **E-billing Portal** (R3) | Outside service providers / vendors | **CIAM** (truly external) | `sprk_invoice` / `sprk_billingevent` / budget submit + status | Next |
+The boundary is **NOT internal-vs-external**. It is:
 
-**Owner decisions (2026-07-21):**
-- **Program shape**: R2 = platform **Foundation + Legal Front Door**; **R3 = E-billing**.
-- **Legal Front Door identity**: **Workforce Entra SSO** — business users are employees with M365 accounts; no CIAM account, no invite/provision. They use a lightweight SPA only because they are unlicensed for Power Apps.
-- **Volume**: ~10s of external users/month (not 100s) — provisioning automation is useful but not the driving constraint; per-app scoping and correct authz are.
+- **Core user** — a fully-licensed Power Apps user → the **model-driven app** (full Spaarke). Out of scope here.
+- **SPA user** — *everyone else*: a licensed employee **without** a Power Apps license, OR a truly-external party. **If you are not a core user, you are a SPA user.**
 
-**Consequence — the foundation is dual-identity-plane from day one**: CIAM (Outside Counsel, future E-billing) **and** Workforce Entra SSO (Legal Front Door). Choosing Legal Front Door as the R2 second app is deliberately the harder validation: it exercises a *different identity plane* AND a *different authorization model* than R1, so the generalization is real, not speculative (§11).
+All SPA users get **one Teams-capable module-host SPA**: a home **card launcher** that shows the **modules** the user has been granted (via a Dataverse access-control table). A module is a lazy-loaded feature. Identity plane (where the user's account lives) is a **sign-in detail**, not a product boundary.
+
+| Module (examples) | Audience | Typical sign-in plane |
+|---|---|---|
+| **Assigned Work** (= R1 Outside Counsel workspace, refactored to a module) | outside counsel | CIAM |
+| **E-billing** (R3) | outside vendors | CIAM |
+| **NDA submission** | internal business users | Workforce SSO |
+| **Policy & Procedures** | internal business users | Workforce SSO |
+| **Invention submission** | internal inventors | Workforce SSO |
+
+A user sees exactly the cards their grants allow (e.g. a law-firm ops contact → Assigned Work + E-billing; an internal inventor → Invention submission). Same shell, same access table, same BFF.
+
+### Owner decisions (2026-07-21)
+- **Program shape**: R2 = **module-host Foundation + Legal Front Door** modules; **R3 = E-billing** module.
+- **Both identity planes required**: CIAM (external) **and** Workforce Entra SSO (internal-unlicensed). Legal Front Door business users are employees with M365 accounts — **workforce SSO, no CIAM account/provisioning**.
+- **Teams compatibility is a first-class requirement**: the module-host shell must install as a Teams app (personal tab). Teams SSO = workforce identity; external users use the browser. Same shell, same deployment.
+- **Volume**: ~10s of SPA users/month (not 100s) — per-app scoping + correct authz matter more than bulk-provisioning automation.
+
+### One SPA, not two — identity plane handled at bootstrap
+A single MSAL instance targets one authority, so the only real complexity is **which authority the shell logs a user into**:
+- **In Teams** → Teams SSO = workforce identity (automatic).
+- **In a browser** → home-realm discovery (email-domain or a "my organization / partner" chooser) → workforce or CIAM authority.
+
+This is **one codebase, one SWA deployment**, *also* wrapped by a Teams manifest (a Teams app is an iframe pointing at the same content URL). The BFF already validates both schemes (workforce default + CIAM from R1). Not a one-way door: if a single unified URL is later required for all, the shell already does realm discovery.
 
 ---
 
 ## 2. What R1 shipped (the baseline — see synopsis for citations)
 
-- **Hosting**: SWA (`swa-spaarke-external-spa-dev`), BrowserRouter + navigationFallback + security headers; `deploy-external-spa.yml`.
+- **Hosting**: SWA, BrowserRouter + navigationFallback + security headers; `deploy-external-spa.yml`.
 - **Identity (CIAM)**: second `"Ciam"` JwtBearer scheme pinned to `/api/v1/external`; Contact-by-`oid` (`Contact.sprk_externalobjectid`); broker-only (no OBO, app-only downstream, no B2B guest).
-- **Authorization model (Outside Counsel)**: `(Contact → Project)` participation grants (`sprk_externalrecordaccess`, 3 access levels → effective rights); server-enforced; Redis cache invalidation on grant/revoke.
+- **Authorization (Outside Counsel)**: `(Contact → Project)` participation grants (`sprk_externalrecordaccess`, 3 access levels → effective rights); server-enforced; Redis cache invalidation.
 - **Onboarding**: `invite` / `invite-and-grant` / `grant` / `revoke` / `provision-project` — **API-only, no admin UI**.
-- **Key limitation for R2**: access is **app-agnostic and Project-shaped**. No app/portal concept; the grant model is hardwired to `sprk_projectid`; one CIAM identity plane; no admin UI.
+- **Limitations R2 removes**: access is **app-agnostic + Project-shaped**; no module/app concept; grant hardwired to `sprk_projectid`; one CIAM identity plane; no admin UI; no card launcher.
 
 ---
 
-## 3. Foundation work (the reusable platform) — R2 core
+## 3. Reuse baseline (what we build ON, per §11)
 
-These generalize R1's plumbing so it can host N audience-apps across 2 identity planes. Each names a concrete gap (§11).
+The module-host is assembled from **two donor sources + net-new**, verified against code:
 
-### F1 — App/portal registry + per-app scoping  ·  gap G1
-- **Gap**: nothing scopes a Contact/user to *which app* they may use; a token for one app can hit another's surface.
-- **Deliver**: a first-class **application/portal concept** (e.g. `sprk_externalapp` or a config registry) declaring, per app: its identity plane (CIAM vs workforce), its external endpoint group, its allowed origin(s), its authz model. A user's access is scoped to specific app(s).
-- **Cost-of-doing-nothing**: three apps share one undifferentiated `/api/v1/external` surface; a vendor could reach the counsel workspace endpoints.
+| Layer | Source | Verdict | Notes (file:line) |
+|---|---|---|---|
+| **App frame** (standalone SPA, MSAL, router, AuthGuard, theme, deep-link, SWA hosting) | **R1 `src/client/external-spa`** | **Extend** | Closest existing frame; already a standalone MSAL SPA. Extend for dual-plane auth-bootstrap + Teams. |
+| **Module registry** (lazy `register(type, meta, () => import())` / `resolve`) | `Spaarke.AI.Widgets` `WorkspaceWidgetRegistry.ts` | **Reuse pattern** | `{displayName, icon, category}` metadata ≈ module descriptor 1:1. Adopt registry; drop the PaneEventBus/tab mount machinery. |
+| **Card launcher primitives** | `Spaarke.UI.Components` `WorkspaceShell/ActionCard.tsx`, `ActionCardRow.tsx` | **Reuse as-is** | Fluent v9 icon+label cards, hover/focus/keyboard/dark-mode, context-agnostic. |
+| **Theme** | `@spaarke/ui-components` `useTheme`/`ThemeToggle` | **Reuse as-is** | Fluent v9 light/dark; host owns one `FluentProvider`. |
+| **Auth base** | `@spaarke/auth` `AuthStrategy` | **Extend** | Pluggable strategy + config-driven authority; today workforce-only → add CIAM + per-user/per-context plane selection. |
+| **Embedded-mode discipline** (host owns chrome/theme/auth; content owns itself) | `LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` | **Reuse discipline only** | Sound split for module-in-shell and shell-in-Teams. NOT the `Xrm.WebApi` contract — external/Teams hosts have no Xrm. |
+| **Access-gated module visibility** | — | **NET-NEW** | No entitlement/permission gating exists anywhere today (visibility = layout config + localStorage). The access table + `/me` entitlement endpoint + card-gating is the core new surface. |
 
-### F2 — Dual identity-plane auth in the BFF  ·  gap G4
-- **Gap**: R1 has one CIAM scheme. Legal Front Door needs the **workforce** scheme; the two must coexist and route per-app.
-- **Deliver**: a per-app-group auth policy that selects the right scheme (CIAM for external apps, workforce default for Legal Front Door), reusing R1's additive-scheme pattern (`AuthorizationModule`, `AuthPolicies.CiamExternal`) — add a `WorkforceExternalApp`-style policy/group. No OBO on any external app path; internal SSO users are already workforce-validated.
-- **Cost-of-doing-nothing**: Legal Front Door can't authenticate its (employee) users.
+**Do NOT fork `LegalWorkspaceApp`** (the "dashboard engine") — it hard-requires `Xrm.WebApi` + a Dataverse user GUID and cannot serve external users. It is a component/pattern donor, not a shell to adopt.
 
-### F3 — Generalized access/authorization model  ·  gap G2
-- **Gap**: `sprk_externalrecordaccess` is Project-shaped; `GetParticipations` returns `(Project, level)`. R2 needs (a) **self-service submitter** authz for Legal Front Door ("see my own service requests") and later (b) invoice/vendor scope for E-billing.
-- **Deliver**: generalize the caller-context/authz so an app can plug in its authz model:
-  - **Granted-participation** (Outside Counsel, E-billing) — existing/extended.
-  - **Self-service submitter** (Legal Front Door) — a user sees/creates their own `sprk_servicerequest` records (scoped by submitter identity), not grants on others' records.
-- **Cost-of-doing-nothing**: Legal Front Door would misuse the Project-grant model, which doesn't fit intake.
+---
 
-### F4 — Reusable SPA scaffold + per-app deploy  ·  builds on R1
-- **Deliver**: extract the R1 SPA's reusable shell (SWA config, BrowserRouter/deep-link-through-login, MSAL/session or workforce-SSO auth guard, Fluent v9 theme, BFF client) into a scaffold a new app instantiates; per-app SWA + deploy workflow (config-only per the synopsis). Clean up the dead Power Pages proxy/config carried in R1 (`vite.config.ts`, `README.md`, `powerpages.config.json`).
-- **Cost-of-doing-nothing**: each new app hand-copies R1 and re-introduces its stale Power-Pages cruft.
+## 4. Foundation work (the module-host platform) — R2 core
+
+### F1 — Module registry + access-gated card launcher  ·  **the centerpiece**
+- **Deliver**: the reusable module framework — a module registry (adopt `WorkspaceWidgetRegistry` pattern), a home **card launcher** (reuse `ActionCard`), and `/me`-driven visibility so a user sees only granted modules. Adding a module = register a card + a lazy route + a grant type.
+- **Cost-of-doing-nothing**: without it, each capability is a separate hand-copied SPA with drift.
+
+### F2 — Dual identity-plane auth in one shell  ·  gap G4
+- **Deliver**: context/realm-aware auth bootstrap in the shell — Teams → Teams SSO (workforce); browser → home-realm discovery → workforce or CIAM authority. Extend `@spaarke/auth` with a CIAM strategy + plane selection. BFF: reuse R1's additive-scheme pattern; add a workforce-plane external-app policy alongside `CiamExternal`. **No OBO on any SPA path.**
+- **Cost-of-doing-nothing**: the shell can't serve both external and internal SPA users.
+
+### F3 — Access-control table: grant MODULES to any SPA user  ·  gaps G1+G2
+- **Deliver**: generalize the grant model so it grants **module access** (not just Project), and generalizes the **grantee** to cover both a **Contact** (external/CIAM) and an **internal directory user** (workforce oid / systemuser) — because internal specialty users authenticate with their workforce identity, not a Contact. Plug per-module authz models: **granted-participation** (Assigned Work, E-billing) and **self-service submitter** (Legal Front Door — "see my own requests"). Add a BFF `/me` entitlement endpoint returning the user's modules. Redis-cached + invalidated on grant/revoke (ADR-009), extending R1.
+- **Cost-of-doing-nothing**: no way to say "this user gets these modules"; the Project-grant model doesn't fit intake or internal users.
+
+### F4 — Teams-capable module-host shell scaffold  ·  builds on R1 external-spa
+- **Deliver**: extend R1's external-spa frame into the reusable shell: SWA config, BrowserRouter/deep-link, theme, BFF client, PLUS Teams JS SDK init (no-op outside Teams), Teams theme bridging (light/dark/contrast → Fluent v9), configurable `frame-ancestors` CSP (allow Teams origins), and the Teams-SSO path. Package the same SWA as a Teams app (manifest). Clean up R1's dead Power Pages proxy/config (`vite.config.ts`, `README.md`, `powerpages.config.json`).
+- **Cost-of-doing-nothing**: Teams requirement unmet; every module re-solves embedding.
 
 ### F5 — Core-user admin UI  ·  gap G5 / DI-029-01
-- **Gap**: onboarding/grant/revoke/provision are API-only.
-- **Deliver**: a Dataverse command-bar / model-driven admin surface (Fluent v9, dark-mode per ADR-021) for the core-user actions every app needs — for Outside Counsel: invite-and-grant / revoke / provision-project on the Matter/Project form; generalized so future apps reuse it.
-- **Cost-of-doing-nothing**: no app is operable by its intended core-user persona without curl.
+- **Deliver**: a Dataverse command-bar / model-driven admin surface (Fluent v9, dark-mode per ADR-021) for the core-user actions every module needs — grant/revoke module access, invite-and-grant / provision for Outside Counsel — reusable across modules.
+- **Cost-of-doing-nothing**: no module is operable by its core-user persona without curl.
 
 ### F6 — R1 reliability + verification hardening  ·  DI-025-01 / DI-030-01 / SSPR
-- Provisioner self-healing on the CIAM `POST /users` 409 window (recover existing oid); live-E2E for wrong-issuer→401 and oid-bound-not-email-hijacked; verify the SSPR first-run.
+- Provisioner self-healing on the CIAM `POST /users` 409 window; live-E2E (wrong-issuer→401, oid-bound not email-hijacked); verify SSPR first-run.
 
 ---
 
-## 4. Legal Front Door app (the R2 second app) — largely greenfield
+## 5. Legal Front Door modules (the R2 second capability) — largely greenfield
 
-The `sprk_servicerequest` entity exists but is a **stub** (`sprk_name` + statecode + regarding lookups only — no submitter, request-type, or workflow-status fields). Legal Front Door needs real intake schema + workflows.
+`sprk_servicerequest` exists but is a **stub** (`sprk_name` + statecode + regarding lookups only — no submitter, request-type, or workflow-status fields). Legal Front Door needs real intake schema + modules.
 
 ### L1 — Intake data model (greenfield schema)
-Extend `sprk_servicerequest` (or add child entities) with: **submitter** (workforce user), **request type** (NDA review/approval/signature · approval-to-publish · trademark search/filing · invention disclosure · policy & procedure), **status workflow**, assignment/routing to legal, and per-type fields. Design-time work.
+Extend `sprk_servicerequest` (or add child entities) with: **submitter** (workforce user), **request type** (NDA review/approval/signature · approval-to-publish · trademark search/filing · invention disclosure · policy & procedure), **status workflow**, routing/assignment to legal, per-type fields.
 
-### L2 — Business-user intake SPA (workforce SSO)
-A lightweight SWA app where an employee signs in via workforce SSO, submits a request (typed form), uploads documents (app-only SPE, broker pattern), and tracks status of **their own** requests. Reuses F4 scaffold + F2 workforce plane + F3 submitter authz.
+### L2 — Legal Front Door modules (workforce SSO, self-service submitter)
+Modules registered in the shell — e.g. **NDA submission**, **Invention submission**, **Policy & Procedures** — where an employee (workforce SSO) submits a typed request, uploads documents (app-only SPE broker pattern), and tracks **their own** requests' status (F3 submitter authz).
 
-### L3 — Legal-side processing surface
-Where legal reviews/approves/routes submitted requests. Likely the internal model-driven app / existing surfaces — R2 defines the intake→processing handoff; deep workflow automation (signature, filing) may phase to later.
+### L3 — Legal-side processing handoff
+Where legal reviews/approves/routes submitted requests (internal MDA / existing surfaces). R2 defines the intake→processing handoff; deep automation (e-signature, trademark filing) phases later.
 
-> **Scope question for design-to-spec**: which request *types* are in R2's first cut (recommend: generic intake + NDA + one more) vs. phased later. NDA review/approval/signature is the richest workflow; the others may start as typed intake + manual routing.
-
----
-
-## 5. Cross-cutting constraints (carry forward — binding)
-
-- **ADR-028 (+A1) broker-only** for CIAM apps: external token authenticates ONLY to the BFF, never exchanged downstream; app-only SPE/Dataverse. Workforce-SSO apps (Legal Front Door) use the standard workforce path but **still no Power-Apps license dependency** and no elevation.
-- **§10 BFF Hygiene**: Placement Justification for every BFF addition; `dotnet publish` size (≤60 MB, baseline ~49.63 MB); no new HIGH CVE; tests in `tests/unit/Sprk.Bff.Api.Tests/`; per-app endpoint groups via `Map{App}Endpoints` extensions.
-- **§11 Component Justification**: the foundation is justified by ≥2 concrete consumers (counsel + front door); reuse `ExternalCallerAuthorizationFilter`/participation, `SpeFileStore`, `RegistrationEmailService`, the R1 SPA shell — extend, don't fork.
-- **ADR-038 testing**; **ADR-021/022 Fluent v9 + React 18** for SPAs; **no plaintext secrets**; **preserve external-SPA sessionStorage** per-tab isolation for CIAM apps.
+> **Scope question for design-to-spec**: which request *types* are R2's first cut (recommend: generic intake + NDA + one more) vs. phased. NDA review/approval/signature is the richest workflow; others may start as typed intake + manual routing.
 
 ---
 
-## 6. Out of scope (R2)
+## 6. Cross-cutting constraints (carry forward — binding)
 
-- **E-billing Portal** → R3 (data domain exists — `sprk_invoice` — external vendor surface is the R3 build).
-- Deep Legal Front Door workflow automation beyond the R2 first-cut request types (e-signature integration, automated trademark filing) — phase as decided in design-to-spec.
-- Self-service CIAM sign-up / public registration router — still deferred; not required by these three apps (all onboarding is admin-initiated or workforce-SSO).
-- The E-3 direct-Office boundary (ADR-028 A1) — permanently out.
-
----
-
-## 7. Draft success criteria (design-to-spec formalizes as FRs/NFRs)
-
-1. A single BFF hosts **multiple external apps**, each scoped to its identity plane + authz model + data surface; a token for app A cannot read app B's surface.
-2. Legal Front Door: an **employee signs in via workforce SSO** (no CIAM, no license), submits a typed service request with document upload, and tracks **their own** requests' status.
-3. Outside Counsel continues to work unchanged on the generalized foundation.
-4. A core user performs invite/grant/revoke/provision **from a UI** (no curl).
-5. CIAM provisioner self-heals the create-ok/persist-fail window; live-E2E confirms wrong-issuer→401 + no email-hijack; SSPR first-run verified.
-6. Standing up a **new app** is documented + largely config/scaffold (new SWA + app-reg/registry entry + endpoint group), not a fork.
+- **ADR-028 (+A1) broker-only** for CIAM modules: external token authenticates ONLY to the BFF, never exchanged downstream; app-only SPE/Dataverse. Workforce-SSO modules use the standard workforce path, still no Power-Apps-license dependency and no elevation.
+- **§10 BFF Hygiene**: Placement Justification per BFF addition; `dotnet publish` size (≤60 MB, baseline ~49.63 MB); no new HIGH CVE; tests in `tests/unit/Sprk.Bff.Api.Tests/`; per-module endpoint groups via `Map{Module}Endpoints`.
+- **§11 Component Justification**: reuse the donor components in §3 (registry pattern, `ActionCard`, theme, `@spaarke/auth`, R1 frame); the new surface (entitlement model + `/me` modules) is justified by ≥2 concrete consumers. Do NOT fork `LegalWorkspaceApp`.
+- **ADR-038 testing**; **ADR-021/022 Fluent v9 + React 18**; **no plaintext secrets**; **preserve external-SPA sessionStorage** per-tab isolation for CIAM sign-in.
 
 ---
 
-## 8. Sequencing note (R2 is large — phase within it)
+## 7. Out of scope (R2)
 
-R2 spans a dual-plane foundation + a substantially-greenfield Legal Front Door + admin UI + hardening. Recommend design-to-spec phase it, e.g.: **P1** foundation (F1–F4) → **P2** Legal Front Door intake MVP (L1–L2, generic + NDA) → **P3** admin UI (F5) + hardening (F6) → **P4** Legal Front Door workflow depth (L3 + more request types). Owner confirms phase cut lines during design-to-spec.
+- **E-billing module** → R3 (data domain `sprk_invoice` exists; external vendor surface is the R3 build).
+- Deep Legal Front Door workflow automation beyond R2's first-cut request types (e-signature, automated trademark filing).
+- Self-service CIAM public sign-up / registration router — still deferred; all onboarding is admin-initiated or workforce-SSO.
+- Core-user MDA experience; the E-3 direct-Office boundary (ADR-028 A1, permanently out).
 
 ---
 
-## 9. References
+## 8. Draft success criteria (design-to-spec formalizes as FRs/NFRs)
+
+1. One module-host SPA renders a **card launcher** showing only the modules a user is **granted** via the access-control table; a user cannot reach a module they lack.
+2. The shell serves **both planes**: an external user (CIAM) and an internal unlicensed employee (workforce SSO) each sign in and see their modules — and it **installs and runs as a Teams app** (workforce SSO) with correct theme + framing.
+3. Legal Front Door: an employee submits a typed service request with document upload and tracks **their own** requests' status (self-service submitter authz).
+4. Outside Counsel (R1) works unchanged **as a registered module**.
+5. A core user grants/revokes module access **from a UI** (no curl); CIAM provisioner self-heals; live-E2E + SSPR verified.
+6. Adding a **new module** is documented + largely register-a-card + lazy-route + grant-type — not a new SPA/app-reg/deploy.
+
+---
+
+## 9. Sequencing note (R2 is large — phase within it)
+
+Recommend design-to-spec phase R2, e.g.: **P1** module-host foundation (F1–F4: registry + launcher + dual-plane bootstrap + Teams shell, with Outside Counsel as the first module) → **P2** access-control model + entitlement endpoint (F3) + admin UI (F5) → **P3** Legal Front Door intake MVP (L1–L2: generic + NDA) → **P4** hardening (F6) + Front Door workflow depth (L3 + more request types). Owner confirms cut lines during design-to-spec.
+
+---
+
+## 10. References
 
 - R1 project + code synopsis: `projects/spaarke-SPA-external-access-platform-r1/`, `projects/spaarke-SPA-external-access-platform-r2/notes/external-access-capability-synopsis.md`
-- Architecture: `docs/architecture/external-access-spa-architecture.md`; ADR-028 (+A1) `.claude/adr/ADR-028-spaarke-auth-architecture.md`
+- Reuse donors: `src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts`, `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ActionCard.tsx`, `src/client/shared/Spaarke.Auth/src/index.ts`, `src/client/external-spa/` (frame base)
+- Architecture: `docs/architecture/external-access-spa-architecture.md`, `LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md`, `SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`; ADR-028 (+A1)
 - Data models: `docs/data-model/sprk_servicerequest.md` (stub — needs intake schema), `sprk_invoice.md` (R3), `sprk_externalrecordaccess` (`src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/`)
+- Teams: Teams JS SDK + Teams SSO (workforce identity), personal-tab manifest pointing at the SWA content URL
 - North-star for a future public router: `projects/spaarke-self-service-registration-app`
