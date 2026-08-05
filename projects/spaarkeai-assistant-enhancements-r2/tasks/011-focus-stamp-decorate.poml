@@ -4,7 +4,7 @@
     <title>Add activeContext focus-stamp to the outbound chat body via onDecorateOutboundBody (FR-A2)</title>
     <phase>2 A — Active-tab awareness</phase>
     <gate>blocked until 010</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend .tsx implementation on the decorate seam</rigor-reason>
     <model-tier>sonnet</model-tier>

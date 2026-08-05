@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Wave A1 (010 + 012) ✅ complete → next: A2 = **011** |
+| **Task** | Workstream A implementation ✅ (010+011+012) → next: **013 deploy+verify A** (needs live env) OR start Phase B (020) |
 | **Step** | — |
-| **Status** | not-started (011 next) |
-| **Next Action** | `work on task 011` (activeContext focus-stamp decorate, FR-A2 — edits ConversationPane.tsx, wires 010's `activeTabFocusRef` into the outbound body via onDecorateOutboundBody). Server side (012) is done and expects the `activeContext` shape `{ widgetType, contextType, tabId, displayName, compactState }` with **tabId** load-bearing (server reads TabId; compactState accepted as JsonElement but not injected). |
+| **Status** | not-started |
+| **Next Action** | Two options: (a) `work on task 013` — deploy BFF + SpaarkeAi and verify focus-stamp end-to-end (Success Criterion 1); NEEDS a live Dataverse/Azure environment. (b) Skip deploy for now and start Phase B: `work on task 020` (closed contextType set, shared-lib). Deploy tasks (013/025/039/043) can be batched later. |
 
 ### Files Modified This Session
 - Task 010 (FR-A1, ✅ complete): ConversationPane.tsx (added `activeTabFocusRef` + extended the existing `usePaneEvent('workspace', …)` handler with an `active_widget_changed` branch), new `activeTabFocusStamp.ts` (pure derivation helper + `ActiveTabFocusStamp` type), new `__tests__/activeTabFocusStamp.test.ts` (seam test, 5/5 passing). Quality gates clean (code-review 1 low-severity note for 011/012 awareness; adr-check ADR-030 clean). Not committed — left staged/unstaged for orchestrator to commit after build-verifying the wave.

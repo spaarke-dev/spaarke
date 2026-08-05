@@ -1918,6 +1918,18 @@ export function ConversationPane(): React.JSX.Element {
         body.modelTierOverride = modelTierOverride;
       }
 
+      // task 011 (FR-A2): stamp the focused Workspace tab's compact identity onto the outbound
+      // body via this SAME onDecorateOutboundBody seam — MUST NOT fork SprkChat. Reuses the 010
+      // ref + `ActiveTabFocusStamp` shape verbatim (no redefinition). Omitted entirely when no tab
+      // has been focused yet (activeTabFocusRef.current is null before the first
+      // `active_widget_changed` event) — never send an empty/placeholder stamp. The stamp is
+      // already bounded (ADR-015 compact-ambient shape: widgetType/contextType/tabId/displayName +
+      // the widget's own small compactState) by task 010's derivation, so no further trimming is
+      // needed here.
+      if (activeTabFocusRef.current != null) {
+        body.activeContext = activeTabFocusRef.current;
+      }
+
       const messageText = typeof body.message === "string" ? body.message : "";
       const hasActiveSourceDoc =
         activeSourceDocRef.current?.sessionFileId != null && chatSessionIdRef.current != null;
