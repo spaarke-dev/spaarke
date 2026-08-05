@@ -50,7 +50,6 @@ import {
 import type {
   WorkspacePaneEvent,
   ConversationPaneEvent,
-  WorkspaceWidgetComponent,
   CreateAnalysisWizardData,
 } from '@spaarke/ai-widgets';
 // R6 Hotfix Wave B-G9c2 (2026-06-10): the previously-eager Summary tab
@@ -74,11 +73,6 @@ import type {
 } from './WorkspaceTabManager';
 import { WorkspaceTabManagerComponent } from './WorkspaceTabManagerComponent';
 import { WorkspacePaneMenu } from './WorkspacePaneMenu';
-// FIX #10b — STUB email widget rendered when the Compose "Email" affordance
-// (or the chat "email" chip) dispatches a `widget_load` with widgetType 'email'.
-// Statically imported so the email branch resolves the component synchronously
-// (no WorkspaceWidgetRegistry round-trip).
-import { EmailStubWidget } from './EmailStubWidget';
 // spaarkeai-compose-r2 UNIFY — the DIRECT 'compose' widget's seed shape. Used to
 // build the ribbon composeMode=editor launch seed (stored-doc pointer) that the
 // workspace handler's 'compose' branch consumes.
@@ -1637,58 +1631,11 @@ export function WorkspacePane(): React.JSX.Element {
       const widgetType = event.widgetType ?? 'unknown';
       const widgetData = event.widgetData ?? null;
 
-      // ── FIX #10b — STUB email tab (compose DRAFT hand-off ONLY) ────────────
-      // The Compose "Email" affordance (ComposeAiToolbar → handleEmailAction)
-      // dispatches widgetType 'email' carrying a compose DRAFT payload
-      // (`mode: 'open'|'send'` + `bodyText`/`attachmentFileName`). That flow opens
-      // the lightweight EmailStubWidget preview (statically imported — synchronous).
-      //
-      // Owner UAT 2026-07-30 (item #1): the plain **Email tab** (tab bar / pinned)
-      // ALSO dispatches widgetType 'email' but WITHOUT a draft payload — it must
-      // load the REAL `EmailWorkspaceWidget`. Previously this intercept fired for
-      // ANY 'email' load and force-mounted the stub ("Email — coming soon"),
-      // shadowing the registry; a page refresh then restored the real widget via
-      // the registry, producing the "refresh fixes it" symptom. Gating the stub to
-      // the draft hand-off lets the plain tab fall through to the generic registry
-      // path below (→ resolveWorkspaceWidget('email') → EmailWorkspaceWidget).
-      const emailData = widgetData as {
-        layoutName?: string;
-        mode?: string;
-        bodyText?: string;
-        attachmentFileName?: string;
-      } | null;
-      const isComposeDraftHandoff = !!(
-        emailData &&
-        (emailData.mode || emailData.bodyText || emailData.attachmentFileName)
-      );
-      if ((widgetType === 'email' || emailData?.layoutName === 'Email') && isComposeDraftHandoff) {
-        const emailDisplayName = event.displayName ?? 'Email';
-        const emailTabId = manager.addTab('email', widgetData, emailDisplayName);
-        // Cast to the registry's WorkspaceWidgetComponent (matches the 'compose'
-        // registry path) — EmailStubWidget takes WorkspaceWidgetProps<EmailWidgetData>.
-        manager.resolveTabComponent(
-          emailTabId,
-          EmailStubWidget as unknown as WorkspaceWidgetComponent,
-          emailDisplayName
-        );
-        syncState();
-        const emailSnapshot = manager.getSnapshot();
-        dispatch('workspace', {
-          type: 'widget_load',
-          widgetType: 'email',
-          tabId: emailTabId,
-          ...(emailSnapshot.tabs.length > 0 ? { tabCount: emailSnapshot.tabs.length } : {}),
-        });
-        dispatch('workspace', {
-          type: 'tab_count_change',
-          tabCount: emailSnapshot.tabs.length,
-        });
-        // D-F3 truthfulness parity with the generic path — ack a server frame if present.
-        if (event.frameId) {
-          sendUiActionAck(event.frameId);
-        }
-        return;
-      }
+      // NOTE: All 'email' widget_load events now fall through to the generic registry
+      // path below (→ resolveWorkspaceWidget('email') → the REAL EmailWorkspaceWidget).
+      // The former "Email — coming soon" stub intercept (FIX #10b) was removed once the
+      // full email widget shipped (email-communication-solution-r5); nothing dispatches
+      // the compose-draft hand-off payload (mode/bodyText/attachmentFileName) any more.
 
       // Resolve the tab display name with this precedence:
       //   1. Event payload `displayName` (Round 4 Fix 4: lets the menu set the

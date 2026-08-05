@@ -862,9 +862,10 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
   );
 
   // Round-8 #6 (UAT): the "Email" split-menu was REMOVED from the selection toolbar —
-  // it launched the EmailStubWidget from the clause BubbleMenu, which the review UX did
-  // not want. The EmailStubWidget itself is unchanged; it is simply no longer launched
-  // from here. `extractCleanDraftText` stays exported for any future email path.
+  // it launched an email hand-off from the clause BubbleMenu, which the review UX did not
+  // want. (The "Email — coming soon" stub it used to launch was deleted once the full email
+  // widget shipped — email-communication-solution-r5.) `extractCleanDraftText` stays exported
+  // for any future email path.
 
   if (!editor) return null;
 

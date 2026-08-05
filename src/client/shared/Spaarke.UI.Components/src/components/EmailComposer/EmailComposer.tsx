@@ -64,6 +64,10 @@ import {
   DocumentText20Regular,
   Sparkle20Regular,
   Add20Regular,
+  ArrowMinimize16Regular,
+  Briefcase16Regular,
+  Emoji16Regular,
+  TextGrammarWand16Regular,
 } from '@fluentui/react-icons';
 import type { CommunicationSendMode } from '../../services/communicationApi';
 import { ModalWindowControls } from '../ModalWindowControls';
@@ -89,6 +93,7 @@ import type {
   IValidationResult,
 } from './EmailComposer.types';
 import type { RichTextEditorRef } from '../RichTextEditor';
+import type { InlineAiAction } from '../InlineAiToolbar';
 
 import { RecipientField } from './subcomponents/RecipientField';
 import { BodyEditor } from './subcomponents/BodyEditor';
@@ -135,11 +140,31 @@ const DEFAULT_AI_DRAFT_ACTIONS: IEmailAiDraftAction[] = [
   { intent: 'grammar', label: 'Fix grammar & tone' },
 ];
 
-// Quick-actions that TRANSFORM a text selection rather than the whole draft (owner UAT
-// 2026-08-03 R5 item 5). They only appear when the author has text selected in the body,
-// and their result replaces that selection (not the whole body). Everything else acts on
-// the full draft.
-const SELECTION_SCOPED_AI_INTENTS = new Set<string>(['concise', 'formal', 'friendly']);
+// Floating "select text → AI" toolbar actions (owner UAT item 5). These transform ONLY the
+// highlighted text (the shared `InlineAiToolbar` appears above the selection; the result
+// replaces the selection in place). Each `id` is the stable AI intent — the same server-side
+// prompts as the whole-draft quick-actions above, applied to the selection instead of the body.
+const EMAIL_INLINE_AI_ACTIONS: InlineAiAction[] = [
+  { id: 'concise', label: 'Concise', icon: <ArrowMinimize16Regular />, description: 'Make the selection more concise' },
+  {
+    id: 'formal',
+    label: 'Formal',
+    icon: <Briefcase16Regular />,
+    description: 'Rewrite the selection in a formal tone',
+  },
+  {
+    id: 'friendly',
+    label: 'Friendly',
+    icon: <Emoji16Regular />,
+    description: 'Rewrite the selection in a friendly tone',
+  },
+  {
+    id: 'grammar',
+    label: 'Fix grammar',
+    icon: <TextGrammarWand16Regular />,
+    description: 'Fix grammar & spelling in the selection',
+  },
+];
 
 /**
  * Resolve recipient-openable SPE sharing links for the attachments the author toggled **Link** on
@@ -505,16 +530,13 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   const [templateError, setTemplateError] = React.useState<string | null>(null);
   const [pendingTemplateId, setPendingTemplateId] = React.useState<string | null>(null);
 
-  // AI "sparkle" draft (Wave E; redesigned owner UAT 2026-08-03 R5 item 5). `aiDrafting`
-  // disables the sparkle while a completion is in flight. The sparkle is now an inline
-  // Popover: a free-text prompt (type directly + Generate) plus a "+" quick-responses menu.
-  // `aiMenuOpen` drives the popover; `aiSelectionText` is the editor text that was selected
-  // WHEN the popover opened (Lexical retains its selection across the focus change), which
-  // gates the selection-scoped quick actions (make concise / formal / friendly).
+  // AI "sparkle" draft (Wave E). `aiDrafting` disables the sparkle while a completion is in
+  // flight. The sparkle is an inline Popover: a free-text prompt (type directly + Generate)
+  // plus a "+" quick-responses menu — all WHOLE-DRAFT. Selection transforms live in the
+  // separate floating `InlineAiToolbar` that appears over a text highlight (owner UAT item 5).
   const [aiDrafting, setAiDrafting] = React.useState(false);
   const [aiError, setAiError] = React.useState<string | null>(null);
   const [aiMenuOpen, setAiMenuOpen] = React.useState(false);
-  const [aiSelectionText, setAiSelectionText] = React.useState('');
   const [aiPromptText, setAiPromptText] = React.useState('');
   const aiPromptInputRef = React.useRef<HTMLTextAreaElement>(null);
 
@@ -763,12 +785,6 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // body (the user explicitly invoked a draft). A short in-flight guard prevents double-submits.
   const showSparkle = !state.readOnly && !!props.onDraftWithAi;
   const aiDraftActions = props.aiDraftActions ?? DEFAULT_AI_DRAFT_ACTIONS;
-  const hasAiSelection = aiSelectionText.trim().length > 0;
-  // Hide selection-scoped quick actions unless the author has a live text selection.
-  const visibleAiActions = React.useMemo(
-    () => aiDraftActions.filter(a => !SELECTION_SCOPED_AI_INTENTS.has(a.intent) || hasAiSelection),
-    [aiDraftActions, hasAiSelection]
-  );
 
   const runAiDraft = React.useCallback(
     (intent: string, opts?: { userInstruction?: string; selectionText?: string }) => {
@@ -824,22 +840,23 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     runAiDraft('custom', { userInstruction: instruction });
   }, [aiPromptText, runAiDraft]);
 
-  const runAiQuickAction = React.useCallback(
-    (intent: string) => {
-      runAiDraft(intent, SELECTION_SCOPED_AI_INTENTS.has(intent) ? { selectionText: aiSelectionText } : undefined);
+  // Floating "select text → AI" toolbar (owner UAT item 5): transform ONLY the highlighted
+  // text via runAiDraft's selection-scoped path (replaces the selection in place). The shared
+  // `InlineAiToolbar` + `useInlineAiToolbar` (BodyEditor) drive show/position; this only runs.
+  const handleInlineAiAction = React.useCallback(
+    (action: InlineAiAction, selectedText: string) => {
+      const text = selectedText.trim();
+      if (!text) return;
+      runAiDraft(action.id, { selectionText: text });
     },
-    [runAiDraft, aiSelectionText]
+    [runAiDraft]
   );
 
-  // Capture the live editor selection the moment the sparkle Popover opens (HTML mode:
-  // Lexical retains it across the focus change; plain mode reports none), then focus the
-  // prompt field so the user can type immediately.
+  // Sparkle Popover open/close: clear any prior error and focus the prompt on open. Selection
+  // transforms now live in the floating InlineAiToolbar above the selection, so the popover's
+  // quick actions always apply to the WHOLE draft.
   const handleAiMenuOpenChange = React.useCallback((open: boolean) => {
-    if (open) {
-      const selected = bodyEditorRef.current?.getSelectedText?.() ?? '';
-      setAiSelectionText(selected);
-      setAiError(null);
-    }
+    if (open) setAiError(null);
     setAiMenuOpen(open);
   }, []);
 
@@ -973,8 +990,8 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
                     </MenuTrigger>
                     <MenuPopover>
                       <MenuList>
-                        {visibleAiActions.map(a => (
-                          <MenuItem key={a.intent} onClick={() => runAiQuickAction(a.intent)}>
+                        {aiDraftActions.map(a => (
+                          <MenuItem key={a.intent} onClick={() => runAiDraft(a.intent)}>
                             {a.label}
                           </MenuItem>
                         ))}
@@ -1401,6 +1418,8 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         errorMessage={fieldErrors.body}
         minHeight={props.mount === 'dialog' ? 200 : 220}
         toolbarSlot={toolbarSlot}
+        inlineAiActions={showSparkle ? EMAIL_INLINE_AI_ACTIONS : undefined}
+        onInlineAiAction={handleInlineAiAction}
       />
     </>
   );
