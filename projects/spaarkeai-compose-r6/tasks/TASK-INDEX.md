@@ -18,9 +18,9 @@ Overlapping worktrees: `spaarkeai-compose-r5` (active on `ComposeService.cs`/`Co
 | ID | Title | Phase | Deps | Parallel group | Parallel-safe | Rigor | Tier | Status |
 |---|---|---|---|---|---|---|---|---|
 | 001 | Draft ADR-049 Path-B amendment (render-on-save save path) | 0 | none | none | false | FULL | opus/high | ✅ |
-| 002 | Verify SPE versioning append-only + inventory Documents version APIs | 0 | none | phase0-foundations | true | STANDARD | sonnet/high | 🔲 |
-| 003 | Measure BFF publish-size baseline (re-confirm ~49.63 MB) | 0 | none | phase0-foundations | true | MINIMAL | sonnet/medium | 🔲 |
-| 004 | Move AppligentNDA_Signed.docx → tests/fixtures/compose-corpus/ (LFS) + manifest row | 0 | none | phase0-foundations | true | STANDARD | sonnet/high | 🔲 |
+| 002 | Verify SPE versioning append-only + inventory Documents version APIs | 0 | none | phase0-foundations | true | STANDARD | sonnet/high | ✅ |
+| 003 | Measure BFF publish-size baseline (re-confirm ~49.63 MB) | 0 | none | phase0-foundations | true | MINIMAL | sonnet/medium | ✅ |
+| 004 | Move AppligentNDA_Signed.docx → tests/fixtures/compose-corpus/ (LFS) + manifest row | 0 | none | phase0-foundations | true | STANDARD | sonnet/high | ✅ |
 | 010 | Route Imported docs through render-from-model in SaveAsync; drop count-gate | 1 | 001, 004 | none | false | FULL | opus/xhigh | 🔲 |
 | 011 | Generalize ComposeDocumentRenderer.SynthesizeDocument for canonical-model input | 1 | 001, 010 | none | false | FULL | opus/high | 🔲 |
 | 012 | Retire ComposeShadowPatchEngine + ComposeBaselineParaIdStamper from save path | 1 | 001, 011 | none | false | FULL | sonnet/high | 🔲 |

@@ -4,7 +4,7 @@
     <title>Measure BFF publish-size baseline (re-confirm ~49.63 MB)</title>
     <phase>0 Foundations &amp; gates</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Single measurement + notes record; no code change — MINIMAL per root §8.</rigor-reason>
     <model-tier>sonnet</model-tier>
