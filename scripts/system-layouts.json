@@ -43,12 +43,12 @@
       "description": "Round-9 task 115. CalendarWorkspaceWidget from @spaarke/events-components — 3-month strip + date-range filter + EventsPage toolbar + view selector + grid of all events+tasks the user has access to. Event detail opens via Xrm.Navigation.navigateTo modal (NOT Xrm.App.sidePanes)."
     },
     {
-      "name": "Communications",
+      "name": "Messages",
       "sectionId": "communications",
       "layoutTemplateId": "single-column",
       "sortOrder": 6,
       "isDefault": false,
-      "description": "ai-spaarke-ai-workspace-UI-r2 post-merge parity (2026-07-01). LegalWorkspace communications section (Active Communications — sprk_communication, all types: Email/Teams/SMS/Notification). Row-click opens Layout 1 (85%×85%) via DataGrid framework's defaultRecordOpen per FR-03/FR-20. Note: sortOrder 6 chosen so Compose (added by spaarkeai-compose-r1 at sortOrder 5) is not disturbed."
+      "description": "ai-spaarke-ai-workspace-UI-r2 post-merge parity (2026-07-01). LegalWorkspace communications section (Active Communications — sprk_communication, all types: Email/Teams/SMS/Notification). Row-click opens Layout 1 (85%×85%) via DataGrid framework's defaultRecordOpen per FR-03/FR-20. Note: sortOrder 6 chosen so Compose (added by spaarkeai-compose-r1 at sortOrder 5) is not disturbed. RENAMED 'Communications' → 'Messages' (owner UAT 2026-08-04) to match the section label (messaging-r3 renamed the section/widget to 'Messages' on 2026-07-27); the seed matches by name, so the old 'Communications' name created a DUPLICATE system-workspace record (07-29) alongside the existing 'Messages' record (07-02). Renaming here makes future seeds UPDATE the existing 'Messages' record instead of recreating 'Communications'. The stale 'Communications' sprk_workspacelayout record was deleted manually."
     },
     {
       "name": "Projects",
