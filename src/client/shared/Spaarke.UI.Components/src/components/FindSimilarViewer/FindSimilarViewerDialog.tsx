@@ -1,5 +1,5 @@
 /**
- * FindSimilarDialog - Reusable iframe dialog for the DocumentRelationshipViewer.
+ * FindSimilarViewerDialog - Reusable iframe dialog for the DocumentRelationshipViewer.
  *
  * Renders a near-fullscreen dialog containing an iframe that loads the
  * DocumentRelationshipViewer Code Page web resource.
@@ -41,7 +41,7 @@
  *     wrapping this path in `SprkModal` would ALWAYS show a header, breaking
  *     the "hides the title bar chrome" contract `embedded` exists to
  *     provide. This mirrors the sibling reconciliation this same task made
- *     for the `FindSimilar/FindSimilarDialog.tsx` (WizardShell-hosted)
+ *     for the `FindSimilar/FindSimilarViewerDialog.tsx` (WizardShell-hosted)
  *     copies, where a mandatory pre-existing envelope cannot be
  *     double-wrapped in a second shell. The embedded branch therefore keeps
  *     a minimal, header-less `Dialog`/`DialogSurface` composition, but its
@@ -70,7 +70,7 @@ import type { IDataService } from '../../types/serviceInterfaces';
 // Props
 // ---------------------------------------------------------------------------
 
-export interface IFindSimilarDialogProps {
+export interface IFindSimilarViewerDialogProps {
   /** Whether the dialog is open. */
   open: boolean;
   /** Called when the dialog requests to close (backdrop click, Escape). */
@@ -153,7 +153,7 @@ const useStyles = makeStyles({
 // Component
 // ---------------------------------------------------------------------------
 
-export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
+export const FindSimilarViewerDialog: React.FC<IFindSimilarViewerDialogProps> = ({
   open,
   onClose,
   url,
@@ -215,4 +215,4 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
   );
 };
 
-export default FindSimilarDialog;
+export default FindSimilarViewerDialog;

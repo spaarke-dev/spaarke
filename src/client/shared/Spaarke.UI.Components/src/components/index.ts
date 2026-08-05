@@ -41,8 +41,9 @@ export * from './LookupField';
 // AiSummaryPopover - Reusable AI summary popover with lazy fetch and copy
 export * from './AiSummaryPopover';
 
-// FindSimilarDialog - Reusable iframe dialog for DocumentRelationshipViewer
-export * from './FindSimilarDialog';
+// FindSimilarViewerDialog - Reusable iframe dialog for DocumentRelationshipViewer
+// (#714: renamed from FindSimilarDialog to end the name collision with the FindSimilar wizard family)
+export * from './FindSimilarViewer';
 
 // RelationshipCountCard - Document relationship count with drill-through
 export * from './RelationshipCountCard';
