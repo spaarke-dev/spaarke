@@ -22,10 +22,15 @@
 - **CVE fix ✅** — `System.Security.Cryptography.Xml` 8.0.3→8.0.4 (3 HIGH); solution-wide clean. Commit `0455d8658`.
 - **Task 015 ✅** — FR-A3 self-association guarantee formalized + seam regression (`ThreadSelfAssociationRegressionTests`, 2/2; stripped-headers via In-Reply-To + References). No production code changed. → **task 032 must absorb this into the D3 golden suite.**
 
+- **DEFER-030-01 ✅ CLOSED** (`e0650bcac`) — service-request RAG grounding added (core type); residual edge types intentional non-support. No open deferrals.
+
+### Next code-only task now UNBLOCKED
+- **032** (FR-D3 golden regression suite) — dep 015 ✅ satisfied. Test-authoring under the seam KEEP path; consumes `notes/fixtures/r1-golden-emails.md` + **absorbs the 015 FR-A3 case**. Code-only, autonomous-safe. Substantial (reproduce R1 UAT misfile scenarios; assert round-1/2/2b/3 outcomes).
+
 ### Gates ahead (need operator go-ahead — NOT autonomous)
 004 (Entra/security), 020/023 (Dataverse schema mutation), 033 (Dataverse seed), 010 (Key Vault), all deploys, all Pillar E (contended shared-lib, sequential).
 ### Standing reminders
-- **/conflict-check MUST re-run before any 030/031 PR** (cleared only at execution time). Publish baseline 46.88 MB. Pre-existing HIGH CVE `System.Security.Cryptography.Xml 8.0.3` (transitive) = separate remediation candidate.
+- **/conflict-check MUST re-run before the PR** (030/031/015/DEFER-030-01 touched shared Communication + the AI-owned `ParentEntityContext.cs`; cleared only at execution time). Publish baseline 46.88 MB. **CVE fixed** (Xml 8.0.4).
 
 ### Files Modified This Session
 - **Task 003 ✅** (2026-08-05): created `notes/fixtures/r1-golden-emails.md` (R1 013 reconciled=applied; 4 golden items pinned w/ expected outcomes; KEEP path named; raw-.eml gap flagged). Updated task 003 POML status + TASK-INDEX.
