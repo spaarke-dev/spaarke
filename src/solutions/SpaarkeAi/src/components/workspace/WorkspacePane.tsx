@@ -109,10 +109,7 @@ import {
   upsertPersistedComposeTab,
   removePersistedComposeTab,
   clearRunInFlight,
-<<<<<<< HEAD
-=======
   clearRunInFlightBySession,
->>>>>>> origin/master
   isRunResumable,
   hasFindings,
   findLatestFindingsPayload,
@@ -992,15 +989,6 @@ export function WorkspacePane(): React.JSX.Element {
     if (changed) writeComposeRunState(snap);
   }, [tabState.tabs, chatSessionId, isHomeSurface]);
 
-<<<<<<< HEAD
-  // Background-run capture: `nda_review_background_run` (round-4) fires true when a
-  // review whose progress modal was dismissed ("Continue working in background") is
-  // still executing. On the home surface we stamp the ACTIVE Compose tab's persisted
-  // entry with `run:{inFlight,dispatchedAt}` + the current session so a return trip
-  // can resume the spinner + poll; on the terminal false we clear the flag.
-  const handleBackgroundRunChange = React.useCallback((active: boolean): void => {
-    setComposeReviewRunningInBackground(active);
-=======
   // Background-run capture (round-4 dismiss signal): `nda_review_background_run` fires true when a
   // review whose progress modal was dismissed ("Continue working in background") is still executing.
   //
@@ -1023,7 +1011,6 @@ export function WorkspacePane(): React.JSX.Element {
   // the owner hit). Clearing on COMPLETION rides `compose_advisory_comments` (keyed by session — see
   // below); this false branch is the failure clear.
   const handleReviewDispatchActive = React.useCallback((active: boolean): void => {
->>>>>>> origin/master
     if (!isHomeSurfaceRef.current) return;
     const activeTab = managerRef.current.getActiveTab();
     if (!activeTab || activeTab.widgetType !== 'compose') return;
@@ -1046,16 +1033,11 @@ export function WorkspacePane(): React.JSX.Element {
         })
       );
     } else {
-<<<<<<< HEAD
-=======
       // Dispatch failed — clear the active tab's flag so a return trip doesn't resume a dead run.
->>>>>>> origin/master
       writeComposeRunState(clearRunInFlight(current, instanceKey));
     }
   }, []);
 
-<<<<<<< HEAD
-=======
   // Completion clear (UAT round-6 item #15a): a review completion — including a zero-findings clean
   // review, which now dispatches unconditionally (see useNdaReviewAdvisoryCommentsBridge) — arrives as
   // `compose_advisory_comments` carrying the completing `sessionId`. Clear the persisted in-flight flag
@@ -1069,7 +1051,6 @@ export function WorkspacePane(): React.JSX.Element {
     writeComposeRunState(clearRunInFlightBySession(readComposeRunState(Date.now()), sessionId));
   }, []);
 
->>>>>>> origin/master
   // Resume poll (still-running case): show the tab spinner (reusing round-4's
   // `composeReviewRunning` slot) and poll compose-outputs until the review's
   // findings land, then materialize them through the SAME `compose_advisory_comments`
@@ -1607,19 +1588,12 @@ export function WorkspacePane(): React.JSX.Element {
     // dismissed progress card itself is fully unmounted (useNdaReviewRunProgress `visible=false` →
     // NdaReviewProgressModal returns null), so this signal is the ONLY remaining liveness surface.
     if (event.type === 'nda_review_background_run') {
-<<<<<<< HEAD
-      // Drives the round-4 tab spinner AND (item #13) stamps the active home-surface
-      // Compose tab's persisted run-in-flight state for cross-navigation resume.
-=======
       // Round-4 dismiss signal — drives the in-page tab spinner ONLY. UAT round-6 (item #15a): it no
       // longer stamps the persisted run flag; dispatch-time stamping does that (see below).
->>>>>>> origin/master
       handleBackgroundRunChange(event.backgroundRunActive === true);
       return;
     }
 
-<<<<<<< HEAD
-=======
     // UAT round-6 (item #15a): stamp / clear the persisted run-in-flight flag at DISPATCH time (true)
     // and on dispatch failure (false). This fires for EVERY review path (chip/typed/gate/wizard/rerun)
     // because they all funnel through the ONE `runBindingDispatch` chokepoint — so the flag is now
@@ -1639,7 +1613,6 @@ export function WorkspacePane(): React.JSX.Element {
       return;
     }
 
->>>>>>> origin/master
     // FR-34 D-F3 (task 071): the deferred CONTENT-render ack. ComposeWorkspace emits
     // `compose_content_rendered` once a seeded draft actually renders in the editor.
     // If we deferred an ack for this ledgerRef on the originating `workspace_open_tab`
