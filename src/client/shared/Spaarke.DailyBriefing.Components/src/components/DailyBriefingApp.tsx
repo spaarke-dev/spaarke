@@ -188,12 +188,19 @@ export function buildBriefingEmailHtml(
   highPriorityItems: HighPriorityItemResult[],
   channelNarratives: Array<{
     category: string;
-    bullets?: Array<{ narrative?: string; primaryEntityType?: string; primaryEntityId?: string; primaryEntityName?: string }>;
+    bullets?: Array<{
+      narrative?: string;
+      primaryEntityType?: string;
+      primaryEntityId?: string;
+      primaryEntityName?: string;
+    }>;
   }>
 ): string {
   const parts: string[] = [];
   parts.push('<h2>Daily Briefing</h2>');
-  parts.push(`<p>${esc(new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }))}</p>`);
+  parts.push(
+    `<p>${esc(new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }))}</p>`
+  );
   if (tldr?.summary) parts.push(`<p>${esc(tldr.summary)}</p>`);
   if (tldr?.keyTakeaways?.length) {
     parts.push('<ul>');
