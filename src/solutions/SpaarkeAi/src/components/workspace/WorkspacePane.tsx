@@ -50,7 +50,6 @@ import {
 import type {
   WorkspacePaneEvent,
   ConversationPaneEvent,
-  WorkspaceWidgetComponent,
   CreateAnalysisWizardData,
 } from '@spaarke/ai-widgets';
 // R6 Hotfix Wave B-G9c2 (2026-06-10): the previously-eager Summary tab
@@ -74,11 +73,6 @@ import type {
 } from './WorkspaceTabManager';
 import { WorkspaceTabManagerComponent } from './WorkspaceTabManagerComponent';
 import { WorkspacePaneMenu } from './WorkspacePaneMenu';
-// FIX #10b — STUB email widget rendered when the Compose "Email" affordance
-// (or the chat "email" chip) dispatches a `widget_load` with widgetType 'email'.
-// Statically imported so the email branch resolves the component synchronously
-// (no WorkspaceWidgetRegistry round-trip).
-import { EmailStubWidget } from './EmailStubWidget';
 // spaarkeai-compose-r2 UNIFY — the DIRECT 'compose' widget's seed shape. Used to
 // build the ribbon composeMode=editor launch seed (stored-doc pointer) that the
 // workspace handler's 'compose' branch consumes.
@@ -109,10 +103,7 @@ import {
   upsertPersistedComposeTab,
   removePersistedComposeTab,
   clearRunInFlight,
-<<<<<<< HEAD
-=======
   clearRunInFlightBySession,
->>>>>>> origin/master
   isRunResumable,
   hasFindings,
   findLatestFindingsPayload,
@@ -992,15 +983,6 @@ export function WorkspacePane(): React.JSX.Element {
     if (changed) writeComposeRunState(snap);
   }, [tabState.tabs, chatSessionId, isHomeSurface]);
 
-<<<<<<< HEAD
-  // Background-run capture: `nda_review_background_run` (round-4) fires true when a
-  // review whose progress modal was dismissed ("Continue working in background") is
-  // still executing. On the home surface we stamp the ACTIVE Compose tab's persisted
-  // entry with `run:{inFlight,dispatchedAt}` + the current session so a return trip
-  // can resume the spinner + poll; on the terminal false we clear the flag.
-  const handleBackgroundRunChange = React.useCallback((active: boolean): void => {
-    setComposeReviewRunningInBackground(active);
-=======
   // Background-run capture (round-4 dismiss signal): `nda_review_background_run` fires true when a
   // review whose progress modal was dismissed ("Continue working in background") is still executing.
   //
@@ -1023,7 +1005,6 @@ export function WorkspacePane(): React.JSX.Element {
   // the owner hit). Clearing on COMPLETION rides `compose_advisory_comments` (keyed by session — see
   // below); this false branch is the failure clear.
   const handleReviewDispatchActive = React.useCallback((active: boolean): void => {
->>>>>>> origin/master
     if (!isHomeSurfaceRef.current) return;
     const activeTab = managerRef.current.getActiveTab();
     if (!activeTab || activeTab.widgetType !== 'compose') return;
@@ -1046,16 +1027,11 @@ export function WorkspacePane(): React.JSX.Element {
         })
       );
     } else {
-<<<<<<< HEAD
-=======
       // Dispatch failed — clear the active tab's flag so a return trip doesn't resume a dead run.
->>>>>>> origin/master
       writeComposeRunState(clearRunInFlight(current, instanceKey));
     }
   }, []);
 
-<<<<<<< HEAD
-=======
   // Completion clear (UAT round-6 item #15a): a review completion — including a zero-findings clean
   // review, which now dispatches unconditionally (see useNdaReviewAdvisoryCommentsBridge) — arrives as
   // `compose_advisory_comments` carrying the completing `sessionId`. Clear the persisted in-flight flag
@@ -1069,7 +1045,6 @@ export function WorkspacePane(): React.JSX.Element {
     writeComposeRunState(clearRunInFlightBySession(readComposeRunState(Date.now()), sessionId));
   }, []);
 
->>>>>>> origin/master
   // Resume poll (still-running case): show the tab spinner (reusing round-4's
   // `composeReviewRunning` slot) and poll compose-outputs until the review's
   // findings land, then materialize them through the SAME `compose_advisory_comments`
@@ -1607,19 +1582,12 @@ export function WorkspacePane(): React.JSX.Element {
     // dismissed progress card itself is fully unmounted (useNdaReviewRunProgress `visible=false` →
     // NdaReviewProgressModal returns null), so this signal is the ONLY remaining liveness surface.
     if (event.type === 'nda_review_background_run') {
-<<<<<<< HEAD
-      // Drives the round-4 tab spinner AND (item #13) stamps the active home-surface
-      // Compose tab's persisted run-in-flight state for cross-navigation resume.
-=======
       // Round-4 dismiss signal — drives the in-page tab spinner ONLY. UAT round-6 (item #15a): it no
       // longer stamps the persisted run flag; dispatch-time stamping does that (see below).
->>>>>>> origin/master
       handleBackgroundRunChange(event.backgroundRunActive === true);
       return;
     }
 
-<<<<<<< HEAD
-=======
     // UAT round-6 (item #15a): stamp / clear the persisted run-in-flight flag at DISPATCH time (true)
     // and on dispatch failure (false). This fires for EVERY review path (chip/typed/gate/wizard/rerun)
     // because they all funnel through the ONE `runBindingDispatch` chokepoint — so the flag is now
@@ -1639,7 +1607,6 @@ export function WorkspacePane(): React.JSX.Element {
       return;
     }
 
->>>>>>> origin/master
     // FR-34 D-F3 (task 071): the deferred CONTENT-render ack. ComposeWorkspace emits
     // `compose_content_rendered` once a seeded draft actually renders in the editor.
     // If we deferred an ack for this ledgerRef on the originating `workspace_open_tab`
@@ -1664,58 +1631,11 @@ export function WorkspacePane(): React.JSX.Element {
       const widgetType = event.widgetType ?? 'unknown';
       const widgetData = event.widgetData ?? null;
 
-      // ── FIX #10b — STUB email tab (compose DRAFT hand-off ONLY) ────────────
-      // The Compose "Email" affordance (ComposeAiToolbar → handleEmailAction)
-      // dispatches widgetType 'email' carrying a compose DRAFT payload
-      // (`mode: 'open'|'send'` + `bodyText`/`attachmentFileName`). That flow opens
-      // the lightweight EmailStubWidget preview (statically imported — synchronous).
-      //
-      // Owner UAT 2026-07-30 (item #1): the plain **Email tab** (tab bar / pinned)
-      // ALSO dispatches widgetType 'email' but WITHOUT a draft payload — it must
-      // load the REAL `EmailWorkspaceWidget`. Previously this intercept fired for
-      // ANY 'email' load and force-mounted the stub ("Email — coming soon"),
-      // shadowing the registry; a page refresh then restored the real widget via
-      // the registry, producing the "refresh fixes it" symptom. Gating the stub to
-      // the draft hand-off lets the plain tab fall through to the generic registry
-      // path below (→ resolveWorkspaceWidget('email') → EmailWorkspaceWidget).
-      const emailData = widgetData as {
-        layoutName?: string;
-        mode?: string;
-        bodyText?: string;
-        attachmentFileName?: string;
-      } | null;
-      const isComposeDraftHandoff = !!(
-        emailData &&
-        (emailData.mode || emailData.bodyText || emailData.attachmentFileName)
-      );
-      if ((widgetType === 'email' || emailData?.layoutName === 'Email') && isComposeDraftHandoff) {
-        const emailDisplayName = event.displayName ?? 'Email';
-        const emailTabId = manager.addTab('email', widgetData, emailDisplayName);
-        // Cast to the registry's WorkspaceWidgetComponent (matches the 'compose'
-        // registry path) — EmailStubWidget takes WorkspaceWidgetProps<EmailWidgetData>.
-        manager.resolveTabComponent(
-          emailTabId,
-          EmailStubWidget as unknown as WorkspaceWidgetComponent,
-          emailDisplayName
-        );
-        syncState();
-        const emailSnapshot = manager.getSnapshot();
-        dispatch('workspace', {
-          type: 'widget_load',
-          widgetType: 'email',
-          tabId: emailTabId,
-          ...(emailSnapshot.tabs.length > 0 ? { tabCount: emailSnapshot.tabs.length } : {}),
-        });
-        dispatch('workspace', {
-          type: 'tab_count_change',
-          tabCount: emailSnapshot.tabs.length,
-        });
-        // D-F3 truthfulness parity with the generic path — ack a server frame if present.
-        if (event.frameId) {
-          sendUiActionAck(event.frameId);
-        }
-        return;
-      }
+      // NOTE: All 'email' widget_load events now fall through to the generic registry
+      // path below (→ resolveWorkspaceWidget('email') → the REAL EmailWorkspaceWidget).
+      // The former "Email — coming soon" stub intercept (FIX #10b) was removed once the
+      // full email widget shipped (email-communication-solution-r5); nothing dispatches
+      // the compose-draft hand-off payload (mode/bodyText/attachmentFileName) any more.
 
       // Resolve the tab display name with this precedence:
       //   1. Event payload `displayName` (Round 4 Fix 4: lets the menu set the

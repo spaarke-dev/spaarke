@@ -2648,19 +2648,12 @@ export function ConversationPane(): React.JSX.Element {
             transcript-footer chip slot. Renders nothing when there are no live suggestions. */}
         {suggestions.suggestionSlot}
 
-<<<<<<< HEAD
-        {/* UAT round-4 (item #9): "Rerun a full analysis" — a persistent act-on CARD (not a
-            chip; ASSISTANT-UI-ELEMENT-CRITERIA.md) offered after a QUICK-depth review completes.
-            Renders nothing until a quick run completes; single-slot (never stacks). */}
-        {rerunFullAnalysisCard.cardSlot}
-=======
         {/* UAT round-4 (item #9): "Rerun a full analysis" — a persistent act-on CARD (not a chip;
             ASSISTANT-UI-ELEMENT-CRITERIA.md) offered after a QUICK-depth review completes.
             UAT round-6 (item #14): the card MOVED OUT of this top-of-pane region (it read as pinned
             above the notifications area) and INTO the transcript footer (SprkChat.transcriptFooterSlot,
             see `transcriptFooter` above), so it renders inline beneath the "Quick scan…" completion
             message and scrolls WITH the conversation. */}
->>>>>>> origin/master
 
         {/* nda-r1 follow-up (UAT 2026-07-26): "Review an NDA" moved OUT of this top-of-pane
             notification slot (it read as "hidden" above the fold) and INTO the Suggested-Next-Steps
