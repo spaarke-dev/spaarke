@@ -3,7 +3,7 @@
   <metadata>
     <title>SPE content dedup Tier-1 — quickXorHash detector on SpeFileStore, all upload paths</title>
     <phase>2 Pillar C — De-duplication</phase>
-    <gate>blocked: needs 001 (spike 1) + 023 (canonicalhash column)</gate>
+    <gate>startable</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF code introducing a new detector service on the SPE facade + hooking every upload path; correctness-sensitive (silent duplicate suppression); tags include bff-api. code-review + adr-check MANDATORY at Step 9.5.</rigor-reason>
@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Modifies `Infrastructure/Graph/SpeFileStore.cs` + `Services/Office/OfficeDocumentPersistence.cs` (shared storage/upload surface — contended with compose / messaging / notification-spine). Sequential, main-session; `/conflict-check` before PR.</parallel-reason>
-    <deps>001, 023</deps>
+    <deps>023</deps>
     <tags>bff-api, spe, dedup, storage</tags>
     <estimated-effort>1-2 days</estimated-effort>
   </metadata>
@@ -23,7 +23,7 @@
   <goal>Uploading byte-identical content twice via ANY path (Assistant persist, Compose save, email-attachment) is detected at/before persist and does not create a second canonical document (Tier-1); on a hit the user is notified (never silent) and the upload is hash-linked / canonical-opened; the hash read + dedup route through `SpeFileStore` (no direct Graph in callers); all non-fatal (a hashing/detect failure never fails the upload). Unit + seam tests prove no second document on byte-identical content.</goal>
 
   <context>
-    <background>FR-C3 absorbs `projects/sdap-file-duplication-detector-r1/` (design-only, no code). Task 023 created the indexed `sprk_document.sprk_canonicalhash`. This task builds the detector: on upload, obtain the SPE `quickXorHash` (via the facade — `driveItem.file.hashes`; `sha256Hash` is DEPRECATED), look up an equal hash on `sprk_document`, and on a hit suppress the second canonical document while NOTIFYING (never silent) and linking. It hooks every upload entry — critically the email-attachment path (`OfficeDocumentPersistence`), which is the R2-specific extension over the sdap-r1 scope. The `sprk_document` model mapping for the new column lives in `src/server/shared/Spaarke.Dataverse/Models.cs`. GATED on spike 1 (hash timing/stability post-upload — determines gate-before-vs-after-write) and on task 023 (the column). Tier-2 near-dup (`documentVector3072` "Find Similar") is deferred pending spike 2 — do NOT build it here.</background>
+    <background>FR-C3 absorbs `projects/sdap-file-duplication-detector-r1/` (design-only, no code). Task 023 created the indexed `sprk_document.sprk_canonicalhash`. This task builds the detector: on upload, obtain the SPE `quickXorHash` (via the facade — `driveItem.file.hashes`; `sha256Hash` is DEPRECATED), look up an equal hash on `sprk_document`, and on a hit suppress the second canonical document while NOTIFYING (never silent) and linking. It hooks every upload entry — critically the email-attachment path (`OfficeDocumentPersistence`), which is the R2-specific extension over the sdap-r1 scope. The `sprk_document` model mapping for the new column lives in `src/server/shared/Spaarke.Dataverse/Models.cs`. Uses **gate-after-write** (owner 2026-08-05): read the `quickXorHash` from the driveItem AFTER upload completes, then reconcile against the `sprk_canonicalhash` index + notify — no pre-write spike gate. Depends only on task 023 (the column). Tier-2 near-dup (`documentVector3072` "Find Similar") is deferred OUT of R2 (exact-hash Tier-1 only) — do NOT build it here.</background>
     <relevant-files>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs (add the hash-read / dedup-lookup facade method)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs (email-attachment upload path hook)</file>
@@ -33,14 +33,14 @@
       <file role="canonical-reference">.claude/agent-memory/researcher/spe-dedup-content-identity-2026-07.md</file>
     </relevant-files>
     <dependencies>
-      <dependency task="001" status="pending">SPE spike 1 — quickXorHash post-upload timing/size; determines gate-before-vs-after-write and whether Tier-1 is buildable at all.</dependency>
+      <!-- Task 001 (SPE spike 1) removed: gate-after-write (owner decision 2026-08-05) — read quickXorHash from the driveItem AFTER upload completes; no pre-write spike gate. -->
       <dependency task="023" status="pending">The indexed `sprk_document.sprk_canonicalhash` column the detector reads/writes.</dependency>
     </dependencies>
   </context>
 
   <constraints>
     <constraint source="ADR-007">SCOPE: SPE access. The hash read + any Graph interaction MUST route through `SpeFileStore`; callers (detector, OfficeDocumentPersistence) MUST NOT touch Graph directly. Add a facade method for the hash/dedup read.</constraint>
-    <constraint source="NFR-08">SCOPE: Tier-1 build. Do NOT start until spike 1 (task 001) confirms quickXorHash stability post-upload. If spike 1 showed the hash is unavailable at persist time, follow its gate-after-write decision or escalate.</constraint>
+    <constraint source="project">SCOPE: gate-after-write (owner decision 2026-08-05). The detector reads `quickXorHash` from the driveItem metadata AFTER the upload completes (never a pre-write gate), then reconciles against the `sprk_canonicalhash` index and notifies (never silent). A brief transient duplicate blob is ACCEPTABLE — reconciliation + notify happen post-upload. There is no spike gate; do not block on spike 1.</constraint>
     <constraint source="project">SCOPE: hit behavior. On a byte-identical hit, NOTIFY (never silent) and open-canonical / proceed-hash-linked; do NOT silently drop the upload. Content divergence graduates a copy to its own document (Tier-1 = exact-equality only).</constraint>
     <constraint source="project">SCOPE: coverage. Hook the detector at ALL upload paths — Assistant persist, Compose save, AND the email-attachment path (`OfficeDocumentPersistence`). Missing the email-attachment path is a spec miss (R2-specific).</constraint>
     <constraint source="project">SCOPE: identity. Use `quickXorHash` from `driveItem.file.hashes`; `sha256Hash` is DEPRECATED on SPE and MUST NOT be the identity.</constraint>
@@ -72,7 +72,7 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="0" name="Context + rigor declaration">Load POML + project CLAUDE.md + spec FR-C3/NFR-04/NFR-08 + ADR-007/045/010/032 + sdap-r1 design + researcher SPE memo. Declare RIGOR LEVEL: FULL. Confirm spike-1 (task 001) outcome + task 023 column active. If spike 1 failed → apply its gate-after-write decision or escalate. Invoke task-execute + spe-integration.</step>
+    <step order="0" name="Context + rigor declaration">Load POML + project CLAUDE.md + spec FR-C3/NFR-04/NFR-08 + ADR-007/045/010/032 + sdap-r1 design + researcher SPE memo. Declare RIGOR LEVEL: FULL. Confirm task 023 column active. Apply gate-after-write (owner 2026-08-05): read quickXorHash from the driveItem AFTER upload completes, then reconcile against the index + notify (never silent); a brief transient duplicate blob is accepted. No spike-1 gate. Invoke task-execute + spe-integration.</step>
     <step order="1">Add a `SpeFileStore` facade method to read `quickXorHash` for a persisted/uploaded driveItem (via `driveItem.file.hashes`) — callers stay Graph-free.</step>
     <step order="2">Map `sprk_canonicalhash` on the `sprk_document` model in `Models.cs`; write the hash on document create.</step>
     <step order="3">Build the content-dedup detector service: given a new upload's quickXorHash, look up an equal `sprk_document.sprk_canonicalhash`; on a hit, suppress the second canonical document, notify (never silent), and link/open-canonical. Register unconditionally (ADR-010/032). Wrap non-fatal (NFR-04).</step>
@@ -85,7 +85,7 @@
   </steps>
 
   <escalation>
-    <trigger>If spike 1 (task 001) found quickXorHash unstable / unavailable at persist time such that exact Tier-1 dedup cannot be made reliable, STOP and gate/defer Tier-1 per NFR-08 and escalate per CLAUDE.md §6/§6.5 — do NOT ship a detector that suppresses documents on an unreliable identity (silent data loss risk).</trigger>
+    <trigger>If a duplicate is detected, the detector MUST notify + link/graduate the upload (reconcile post-write) — it MUST NEVER silently suppress or drop a document. If the reconcile+notify path cannot be made reliable such that a duplicate could be silently swallowed, STOP and escalate per CLAUDE.md §6/§6.5 (silent data-loss risk).</trigger>
   </escalation>
 
   <justification>
@@ -115,7 +115,7 @@
     <criterion testable="true">All unit + seam tests pass; build green; publish size ≤60 MB with delta reported; no new HIGH CVE.</criterion>
   </acceptance-criteria>
 
-  <notes>spec FR-C3 Tier-1 + NFR-04/08; plan Phase 2 C3. Opus per project CLAUDE.md. Absorbs sdap-file-duplication-detector-r1. Gated on 001 (spike 1) + 023 (column). Tier-2 = spike-2 fast-follow, out of scope. Email-attachment path coverage is the R2-specific extension — do not omit it.</notes>
+  <notes>spec FR-C3 Tier-1 + NFR-04. Opus per project CLAUDE.md. Absorbs sdap-file-duplication-detector-r1. Gate-after-write (owner 2026-08-05): read quickXorHash from the driveItem post-upload, reconcile + notify, accept a brief transient duplicate blob; no spike-1 gate. Depends only on 023 (column). Tier-2 (near-dup / documentVector3072) is deferred OUT of R2 (exact-hash Tier-1 only; owner 2026-08-05) — do NOT build it here. Email-attachment path coverage is the R2-specific extension — do not omit it.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

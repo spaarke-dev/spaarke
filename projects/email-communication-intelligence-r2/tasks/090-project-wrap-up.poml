@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Runs only after all other tasks complete; reconciles whole-project state (tests, docs, coordination contract, INDEX) — must be sequential main-session, not parallelized.</parallel-reason>
-    <deps>001, 002, 003, 004</deps>
+    <deps>003, 004</deps>
     <tags>wrap-up, testing, docs</tags>
     <estimated-effort>3-5 hours</estimated-effort>
   </metadata>
@@ -33,8 +33,7 @@
       <file role="new">projects/email-communication-intelligence-r2/notes/test-diet-report.md</file>
     </relevant-files>
     <dependencies>
-      <dependency task="001" status="pending">SPE spike 1 outcome (FR-C3 gate) — referenced in lessons-learned.</dependency>
-      <dependency task="002" status="pending">SPE spike 2 outcome (Tier-2 ship/defer) — referenced in lessons-learned.</dependency>
+      <!-- Tasks 001 (SPE spike 1) + 002 (SPE spike 2) removed: spikes retired by the 2026-08-05 gate-after-write + Tier-2-deferred owner decisions; lessons-learned references those decisions instead. -->
       <dependency task="003" status="pending">R1 close-out + golden fixtures — referenced in test-diet reconciliation.</dependency>
       <dependency task="004" status="pending">Entra NAA registration verified — referenced in lessons-learned/runbook status.</dependency>
     </dependencies>
@@ -68,7 +67,7 @@
     <step order="3">Produce the final BFF publish-size report: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, measure compressed output, record absolute + delta vs ~45.9 MB (excl PDBs) baseline + the PDB convention; verify ≤60 MB and no new HIGH CVE (`dotnet list package --vulnerable --include-transitive`).</step>
     <step order="4">Update the r5 coordination note (`projects/email-communication-solution-r5/notes/email-intelligence-r1-coordination.md`) to record R2 ownership of the Pillar E surfaces (FR-E6); run `/conflict-check` before committing the shared-surface update.</step>
     <step order="5">Update `projects/INDEX.md` — mark the R2 worktree's status at close (retain the hot-path declaration row per the registry convention).</step>
-    <step order="6">Write `notes/lessons-learned.md` — spike outcomes (001/002), dedup/token/Pillar-E decisions, shared-surface coordination notes, and anything for a future R3.</step>
+    <step order="6">Write `notes/lessons-learned.md` — the gate-after-write + Tier-2-deferred decisions (2026-08-05, spikes retired), dedup/token/Pillar-E decisions, shared-surface coordination notes, and anything for a future R3.</step>
     <step order="7">Flip `projects/email-communication-intelligence-r2/README.md` status → Complete; ensure `current-task.md` is reset to "none" (project complete).</step>
     <step order="8">Update TASK-INDEX.md: set this task's status to ✅ (and confirm all other rows are ✅).</step>
     <step order="9">Document any deviation (e.g., a HARD-WARNING test-diet skip rationale, or a publish-size escalation) in projects/email-communication-intelligence-r2/notes/.</step>

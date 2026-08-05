@@ -65,7 +65,7 @@
     <step order="2">At IncomingCommunicationProcessor.cs (~L1031), obtain the communication's resolved regarding (retrieve the persisted sprk_regarding* / reuse an already-loaded value if present) and pass it as ParentEntity; keep null-degradation when no regarding is resolved.</step>
     <step order="3">At CommunicationEnrichmentService.cs (~L388, outbound half), apply the identical tagging using the same regarding source; keep the existing informational log and Source="OutboundEmail" tag.</step>
     <step order="4">Factor the regarding→ParentEntity mapping into one small shared helper if it would otherwise be duplicated verbatim across the two sites (§11 — extend, do not duplicate); otherwise keep it inline.</step>
-    <step order="5">Decide + document the backfill for already-indexed correspondence: recommended default = forward-only (no bulk re-index) unless a cheap re-enqueue exists; if a backfill is warranted, specify the mechanism + trigger. Write the decision to notes/030-rag-backfill-decision.md and cite it in the PR.</step>
+    <step order="5">Record the backfill decision for already-indexed correspondence = **forward-only** (owner decision 2026-08-05): tag ParentEntity from index-time forward only; NO historical re-index / no backfill job. Write the forward-only decision (and its rationale — matter-scoped grounding heals as new correspondence indexes; no bulk re-index) to notes/030-rag-backfill-decision.md and cite it in the PR.</step>
     <step order="6">Add/extend a seam test under tests/integration/seam/Communication/** proving a matter-scoped RAG query returns the tagged correspondence and that an unresolved-regarding message still enqueues (degrades) without throwing.</step>
     <step order="7">Build + test green; run dotnet publish -c Release and record compressed size + delta vs ~49.63 MB baseline; run dotnet list package --vulnerable --include-transitive.</step>
     <step order="8">Run code-review + adr-check (Step 9.5).</step>
@@ -93,11 +93,11 @@
     <criterion testable="true">Given an outbound .eml archived with a resolved regarding, when the enrichment index enqueue runs, then ParentEntity = the resolved regarding at CommunicationEnrichmentService L388.</criterion>
     <criterion testable="true">Given a matter-scoped RAG query for matter M after indexing, then that matter's tagged correspondence is returned (was zero before).</criterion>
     <criterion testable="true">Negative: an email with NO resolved regarding still enqueues indexing (ParentEntity null) and does not throw into the capture or send path (NFR-04).</criterion>
-    <criterion testable="true">A backfill decision for already-indexed correspondence is recorded in notes/030-rag-backfill-decision.md and cited in the PR.</criterion>
+    <criterion testable="true">The backfill decision recorded in notes/030-rag-backfill-decision.md and cited in the PR is **forward-only** (owner 2026-08-05): tag from index-time forward, NO historical re-index / no backfill job.</criterion>
     <criterion testable="true">Publish size ≤60 MB compressed with delta reported; no new HIGH CVE; all unit + seam tests pass; build is green.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec §Requirements FR-D1; discovery: L1031 (EnqueueRagIndexingAsync) + L388 (outbound RAG index enqueue). The regarding is already persisted on sprk_communication — this task reads it, it does not re-run the engine. Completion summary appended here when done.</notes>
+  <notes>Spec §Requirements FR-D1; discovery: L1031 (EnqueueRagIndexingAsync) + L388 (outbound RAG index enqueue). The regarding is already persisted on sprk_communication — this task reads it, it does not re-run the engine. Backfill is **forward-only** (owner 2026-08-05): no historical re-index, no backfill job — matter-scoped grounding heals as new correspondence indexes. Completion summary appended here when done.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

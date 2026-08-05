@@ -8,7 +8,7 @@
 
 **Scope**: 5 pillars, 24 FRs + 11 NFRs. Backend enablers (A/C/D) precede the surfaces that consume them (B/E). Pillar E's UI is prototype-validated.
 
-**Estimated effort**: ~7 phases, ~40–48 tasks. Dominant tier **Sonnet 5 @ high**; **Opus/xhigh** on 5 correctness/security-critical tasks (token signing, race-proof dedup, SPE detector, Job C apply, citation glue).
+**Estimated effort**: 7 phases, **40 tasks** (spikes 001/002 retired 2026-08-05). Dominant tier **Sonnet 5 @ high**; **Opus/xhigh** on 5 correctness/security-critical tasks (token signing, race-proof dedup, SPE detector, Job C apply, citation glue).
 
 ## 2. Architecture Context
 
@@ -31,11 +31,10 @@ Dependency-ordered phases. Critical path: **P0 spikes → C1/C3 dedup → B3 uni
 
 ## 4. Work Breakdown Structure
 
-### Phase 0 — Prerequisites & spikes *(gate the rest)*
-- **P0-a** SPE spike 1 — quickXorHash post-upload timing/size (gates FR-C3). *NFR-08.*
-- **P0-b** SPE spike 2 — Tier-2 near-dup threshold + `documentVector3072` coverage.
-- **P0-c** R1 close-out — reconcile R1 task 013; pin R1 UAT golden emails (feeds FR-D3).
-- **P0-d** Entra NAA app-registration verification (FR-B0 runtime prereq; runbook).
+### Phase 0 — Prerequisites *(spikes retired 2026-08-05)*
+- **003** R1 close-out — reconcile R1 task 013; pin R1 UAT golden emails (feeds FR-D3).
+- **004** Entra NAA app-registration verification (FR-B0 runtime prereq; runbook).
+> **Spikes retired (owner 2026-08-05):** SPE dedup adopts **gate-after-write** (read `quickXorHash` from the driveItem *after* upload; reconcile + notify; accept a transient blob) — no spike-1 gate. **Tier-2 (near-dup) deferred out of R2** — exact-hash Tier-1 only — no spike-2.
 
 ### Phase 1 — Pillar A: Trusted threading & external matching
 - **A1a** HMAC footer/token signing helper (Key Vault, `DefaultAzureCredential`). **Opus/xhigh.**
@@ -49,15 +48,15 @@ Dependency-ordered phases. Critical path: **P0 spikes → C1/C3 dedup → B3 uni
 ### Phase 2 — Pillar C: De-duplication *(C3 gated on P0-a)*
 - **C1** internet-message-id dedup + Dataverse alternate key (extend `ExistsByGraphMessageIdAsync`; race-proof; SB idempotency on message-id). **Opus/xhigh.** *Schema: alternate key.*
 - **C2** Context-merge on duplicate (delivery/recipient/uploader context on canonical row).
-- **C3** SPE content dedup Tier-1 (`sprk_document.sprk_canonicalhash` = quickXorHash; detector on `SpeFileStore`; all upload paths incl. email-attachment; notify-never-silent). **Opus.** *Schema: canonicalhash column + backfill.* Tier-2 deferred (P0-b).
+- **C3** SPE content dedup Tier-1 — **gate-after-write** (read `quickXorHash` from driveItem post-upload; detector on `SpeFileStore`; all upload paths incl. email-attachment; notify-never-silent). **Opus.** *Schema: `sprk_canonicalhash` column, **forward-only** (no backfill).* Tier-2 deferred out of R2.
 - **C4** Cross-path reconciliation (`sprk_communication` ↔ `sprk_document` via message-id).
 
 ### Phase 3 — Pillar D: R1 carry-overs *(backend enablers for B/E)*
-- **D1** Fix FR-06 RAG grounding (ParentEntity tagging at `IncomingCommunicationProcessor` L1031 + `CommunicationEnrichmentService` L388; backfill decision).
+- **D1** Fix FR-06 RAG grounding (ParentEntity tagging at `IncomingCommunicationProcessor` L1031 + `CommunicationEnrichmentService` L388; **forward-only**, no historical re-index).
 - **D2** Batched identifier query (`IdentifierReverseLookupRung` → `In`-filter; ≈175→≤7).
 - **D3** Golden regression suite (R1 UAT misfile emails; ADR-038 KEEP path; absorbs A3 test).
 - **D4** Job B allow-list seed (`sprk_emailupdatefield` starter rows).
-- **D5** Job C apply endpoint + `create-task` queue-feed discriminator (sibling of `CommunicationProposalApplyService`; `IActionSeam.CreateTaskAsync` under audit). **Opus.** Backs E5.
+- **D5** Job C apply endpoint + `create-task` queue-feed discriminator (sibling of `CommunicationProposalApplyService`). **Path B**: create via `IActionSeam.CreateTaskAsync`, then PATCH status/completed-date/base-date/final-due-date via impersonated `UpdateRecordAsync` under the same audit; **add `base-date` + `final-due-date` task-entity fields** (schema step). **Opus.** Backs E5.
 
 ### Phase 4 — Pillar B: Unified filing surfaces *(B3 depends on C1)*
 - **B0** Add-in realignment (Entra NAA sign-in; Word manifest; `authenticatedFetch`; cleanup).
@@ -69,7 +68,7 @@ Dependency-ordered phases. Critical path: **P0 spikes → C1/C3 dedup → B3 uni
 - **E2** Reconciliation grid (enhance `DataGrid` via `overrides.columnRenderers` + `onRecordAction`; `sprk_gridconfiguration` over `sprk_communication` type=Email). `parallel-safe:false`.
 - **E1** Triage as grid columns + detail (`columnRenderers`).
 - **E3** Related-to card-picker (reuse `EmailConnectionsReview`; no second write path).
-- **E-shell+reader** Browse shell (`SprkModal`/`RecordNavigationModalShell` — pick one) + one normalized reader (`EmailReadingPaneShell(hideList)` + extended `EmailBodyView` folding attachment text) + citation navigation via ParaIdMap + `resolveCitation`. **Opus/xhigh** (net-new glue; NFR-11).
+- **E-shell+reader** Browse shell (**`BrowseModal` preset** — `@spaarke/ui-components`, `SprkModal/presets`, ADR-050) + one normalized reader (`EmailReadingPaneShell(hideList)` + extended `EmailBodyView` folding attachment text) + citation navigation via ParaIdMap + `resolveCitation`. **Opus/xhigh** (net-new glue; NFR-11).
 - **E4** Field-update reconcile tab (`FormModal`; value editable before Accept; `POST /proposals/{id}/apply`).
 - **E5** Task/deadline reconcile tab (`FormModal`; name/desc/base·due·final/assigned-to/status/completed; create-and-complete + ad-hoc). Depends on D5.
 - **E7** Reconciliation routing (category→team ADR-018 config + per-team `sprk_gridconfiguration` views + `membershipFilter`; no new entity).

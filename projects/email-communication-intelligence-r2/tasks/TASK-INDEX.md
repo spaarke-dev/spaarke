@@ -1,6 +1,7 @@
 # Task Index — Email Communication Intelligence R2
 
-> **Generated**: 2026-08-05 via `/project-pipeline` · **42 tasks** across 7 phases (0–6)
+> **Generated**: 2026-08-05 via `/project-pipeline` · **40 tasks** across 7 phases (0–6)
+> **Revised 2026-08-05**: spikes 001/002 retired (gate-after-write + Tier-2-deferred decisions); see Resolved decisions below.
 > **Status legend**: 🔲 not-started · 🔄 in-progress · ✅ completed · ⛔ blocked · ⏸️ deferred
 > **Execution**: via `task-execute` per task (Sonnet 5 @ high default; `<model-tier>`/`<effort>` per POML).
 > **⚠️ Execution intentionally NOT started** — operator review gate (per pipeline run choice).
@@ -9,8 +10,6 @@
 
 | # | Task | Phase | Status | deps | model·effort | parallel-safe |
 |---|---|---|---|---|---|---|
-| 001 | SPE spike 1 — quickXorHash post-upload timing/size | 0 | 🔲 | — | sonnet·high | ✅ true |
-| 002 | SPE spike 2 — Tier-2 near-dup threshold + documentVector3072 | 0 | 🔲 | — | sonnet·high | ✅ true |
 | 003 | R1 close-out — reconcile 013 + pin golden misfile emails | 0 | 🔲 | — | sonnet·high | ✅ true |
 | 004 | Entra NAA app-registration verify/provision | 0 | 🔲 | — | sonnet·med | ✅ true |
 | 010 | HMAC footer/token signing helper (Key Vault) | 1·A | 🔲 | — | **opus·xhigh** | ❌ false |
@@ -24,8 +23,8 @@
 | 020 | Alternate key on `sprk_communication.sprk_internetmessageid` | 2·C | 🔲 | — | sonnet·high | ✅ true (schema-c) |
 | 021 | Canonical message-id dedup — race-proof create + SB idempotency | 2·C | 🔲 | 020 | **opus·xhigh** | ❌ false |
 | 022 | Context-merge on duplicate | 2·C | 🔲 | 021 | sonnet·high | ❌ false |
-| 023 | Indexed `sprk_document.sprk_canonicalhash` column + backfill | 2·C | 🔲 | 001 | sonnet·high | ✅ true (schema-c) |
-| 024 | SPE content dedup Tier-1 (quickXorHash detector on SpeFileStore) | 2·C | 🔲 | 001,023 | **opus·high** | ❌ false |
+| 023 | Indexed `sprk_document.sprk_canonicalhash` column (forward-only) | 2·C | 🔲 | — | sonnet·high | ✅ true (schema-c) |
+| 024 | SPE content dedup Tier-1 — **gate-after-write** (quickXorHash detector) | 2·C | 🔲 | 023 | **opus·high** | ❌ false |
 | 025 | Cross-path reconciliation (comm ↔ document via message-id) | 2·C | 🔲 | 021 | sonnet·high | ❌ false |
 | 026 | Pillar C BFF deploy (size/CVE) | 2·C | 🔲 | 021,022,023,024,025 | sonnet·med | ❌ false |
 | 030 | Fix FR-06 RAG grounding — ParentEntity tagging (both sites) | 3·D | 🔲 | — | sonnet·high | ✅ true (D-indep) |
@@ -56,11 +55,11 @@
 
 | Wave | Tasks | Prerequisite | Notes |
 |---|---|---|---|
-| **W0 — spikes/prereqs** | 001, 002, 003, 004 | — | Independent; parallel. **001 gates C3 (023/024); 002 gates Tier-2.** |
+| **W0 — prereqs** | 003, 004 | — | Independent; parallel. *(Spikes 001/002 retired 2026-08-05 — gate-after-write + Tier-2-deferred.)* |
 | **W1a — A foundation** | 010 → 011 → 012 | — | `parallel-safe:false` (shared `CommunicationModule`/`Configuration`/send path) — **sequential**. 015 (test-only) any time. |
 | **W1b — A-rungs** | 013, 014, 016 | 010,011 | Parallel *within this project* (distinct rung files) — but `/conflict-check` on shared `CommunicationModule.cs`/`RungKind.cs`/`AssociationStatusMapper.cs`. |
-| **W2-schema — C schema** | 020, 023 | 023←001 | Parallel (disjoint schema surfaces). |
-| **W2-code — C dedup** | 021 → 022, 025 · 024 | 021←020; 024←001,023 | `parallel-safe:false` (contended `Services/Communication` / `SpeFileStore`) — **sequential**. |
+| **W2-schema — C schema** | 020, 023 | — | Parallel (disjoint schema surfaces). |
+| **W2-code — C dedup** | 021 → 022, 025 · 024 | 021←020; 024←023 | `parallel-safe:false` (contended `Services/Communication` / `SpeFileStore`) — **sequential**. |
 | **W3 — D independent** | 030, 031, 033 (+032←015) | — | Parallel. **Goal-eligible candidate** (machine-verifiable, low-ambiguity, non-security) — operator may run under `/goal`; Step 9.5 authority unchanged. |
 | **W3-code — D5** | 034 | — | Sequential (contract). Backs 056. |
 | **W4 — B** | 040, 041 (PB-a) → 042 (PB-b) · 043 | 040←004; 042←041; 043←021,024 | 040/041 parallel; 043 gated on C1/C3. |
@@ -70,7 +69,7 @@
 
 ## Critical Path
 
-`001 → 023 → 024 → 043 → 045` (dedup foundation → unify upload → deploy) **and** the Pillar E spine `050 → 053 → 054 / 055 / 056 → 059` (with `056` gated on `034`). `090` is terminal (deps all). Longest chains are Pillar C→B backend and the Pillar E reader/citation glue.
+`020 → 021 → 043 → 045` and `023 → 024 → 043` (dedup foundation → unify upload → deploy) **and** the Pillar E spine `050 → 053 → 054 / 055 / 056 → 059` (with `056` gated on `034`). `090` is terminal (deps all). Longest chains are Pillar C→B backend and the Pillar E reader/citation glue. *(No spike gate — 023/024 start on their own deps.)*
 
 ## 🚨 Hot-path coordination (BINDING — run `/conflict-check` before every shared PR)
 
@@ -81,15 +80,17 @@
 - **spaarkeai-compose-r5 / -fidelity-r4.5** — `CitationResolver` reused by task 054 (do NOT fork — NFR-11).
 - **spaarke-ai-architecture-redesign-r2** — `Services/Ai` owner; reach AI only via `PublicContracts/` (task 034 — NFR-05/ADR-013).
 
-## ⚠️ Flagged decisions surfaced during generation
+## ✅ Resolved decisions (owner, 2026-08-05)
 
-1. **FR-E5 task fields vs `IActionSeam.CreateTaskAsync` (tasks 034 + 056)** — the seam carries only Subject/Description/DueDate/Regarding/Owner; it does **not** carry FR-E5's *base-date / final-due-date / status / completed-date*. Task 034 encodes a §6.5 escalation trigger (path A extend the facade · path B post-create PATCH via `UpdateRecordAsync` under the same audit · path C narrow FR-E5), per ADR-015 "never silently drop a deadline-bearing field." **Decide at 034; 056 depends on the outcome.**
-2. **SPE Tier-2 (near-dup)** is deferred pending spike 2 (task 002) — R2 core ships message dedup + Tier-1 only (tasks 021/024).
-3. **Browse shell choice** (task 053): `SprkModal`'s built-in nav slot **or** `RecordNavigationModalShell` — pick one during implementation.
+1. **SPE content dedup → gate-after-write** (tasks 023/024): read `quickXorHash` from the driveItem metadata **after** upload, reconcile + notify (never silently suppress a document); accept a brief transient blob. **Spikes 001/002 retired.**
+2. **SPE Tier-2 (near-dup) → deferred out of R2** — exact-hash Tier-1 only (task 024); near-dup is a follow-up.
+3. **FR-E5 task fields vs `IActionSeam.CreateTaskAsync` → Path B "add fields"** (task 034): create via the seam, then PATCH status/completed-date/**base-date/final-due-date** via impersonated `UpdateRecordAsync` under the same audit row; **add `base-date` + `final-due-date` as new task-entity fields** (schema step in 034). Facade unchanged (ADR-013); full FR-E5 field set structured in R2. 056 consumes it.
+4. **Backfill → forward-only** (tasks 023/030): no historical reprocessing.
+5. **Browse shell → `BrowseModal` preset** (`@spaarke/ui-components`, `SprkModal/presets`; ADR-050 / MODAL-DESIGN-SYSTEM / MODAL-DECISION-CRITERIA) — task 053.
 
 ## High-risk items
-- 021 (race-proof structural dedup), 024 (SPE detector), 010 (HMAC signing), 034 (Job C audit), 053/054 (citation-map glue) — the `opus`/`xhigh` tasks; highest blast radius.
-- Spike-gated: 023/024 on 001; escalate per NFR-08 if the hash is unstable.
+- 021 (race-proof structural dedup), 024 (SPE detector), 010 (HMAC signing), 034 (Job C audit + PATCH), 053/054 (citation-map glue) — the `opus`/`xhigh` tasks; highest blast radius.
+- Gate-after-write (024): the detector notifies + links on a hit, **never silently suppresses** a document (data-loss guard).
 
 ---
 

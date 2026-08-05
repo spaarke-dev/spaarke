@@ -19,10 +19,11 @@
   </metadata>
 
   <prompt>
-    Build the reconciliation browse shell + the one normalized reader it wraps. PICK ONE browse mechanism — either
-    `SprkModal`'s built-in `nav:{index,total,onNavigate}` slot OR `RecordNavigationModalShell` — for "N of M"
-    prev/next step-through so a reviewer walks the whole Needs-review queue without returning to the grid (wire it to
-    the task-050 `onRecordOpen` override). Inside the shell, render a LEFT reader = `EmailReadingPaneShell` in
+    Build the reconciliation browse shell + the one normalized reader it wraps. The browse mechanism is DECIDED (owner
+    2026-08-05): use the `BrowseModal` preset from `@spaarke/ui-components` (`SprkModal/presets`) — its "N of M"
+    prev/next step-through — so a reviewer walks the whole Needs-review queue without returning to the grid (wire it to
+    the task-050 `onRecordOpen` override). Do NOT use `RecordNavigationModalShell` and do NOT hand-roll a modal (ADR-050
+    / MODAL-DESIGN-SYSTEM / MODAL-DECISION-CRITERIA). Inside the shell, render a LEFT reader = `EmailReadingPaneShell` in
     `hideList` (per-record form) mode, and EXTEND `EmailBodyView` to fold ATTACHMENT contents into the same reader as
     readable text (NOT file chips) — one normalized surface over body + attachment text. Add "open original" links that
     open the raw `.eml` / files in an overlay preview via `AttachmentList`. The right side hosts the three tabs
@@ -30,20 +31,21 @@
     citation anchoring over the reader text.
   </prompt>
   <role>SPAARKE platform developer. Fluent v9 modal/browse shells + the Communication reader components (EmailReadingPaneShell / EmailBodyView / AttachmentList). Follow ADRs strictly.</role>
-  <goal>A browse shell (one chosen mechanism) steps N-of-M through the queue and hosts a left reader that shows body + attachment contents as ONE normalized readable surface with "open original" overlays; the right pane hosts the three reconcile tabs.</goal>
+  <goal>A browse shell built on the `BrowseModal` preset (`@spaarke/ui-components`, `SprkModal/presets`) steps N-of-M through the queue and hosts a left reader that shows body + attachment contents as ONE normalized readable surface with "open original" overlays; the right pane hosts the three reconcile tabs.</goal>
 
   <context>
     <background>
       Spec UI model §99 + NFR-11 (§120): the reconciliation reader is a SINGLE normalized text surface over the email
       body AND the attachment contents rendered readable (not chips) — the same normalized text the AI extraction ran
-      over, which is what makes citation anchors exact (054). Browse: reuse the doc-preview "N of M" pattern —
-      SprkModal's `nav:{index,total,onNavigate}` slot OR RecordNavigationModalShell (pick ONE; document the choice).
+      over, which is what makes citation anchors exact (054). Browse: use the `BrowseModal` preset from
+      `@spaarke/ui-components` (`SprkModal/presets`) and its "N of M" prev/next step-through (owner-decided 2026-08-05;
+      NOT RecordNavigationModalShell, no hand-rolled modal — ADR-050 / MODAL-DESIGN-SYSTEM / MODAL-DECISION-CRITERIA).
       Reader: `EmailReadingPaneShell(hideList=true)` = per-record form mode; extend `EmailBodyView` to fold attachment
       text; `AttachmentList` provides the "open original" overlay. Opening a grid row launches this shell via the
       task-050 onRecordOpen override.
     </background>
     <relevant-files>
-      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/RecordNavigationModalShell.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets (BrowseModal preset — the DECIDED browse mechanism)</file>
       <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/SprkModal.tsx</file>
       <file role="modify">src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingPaneShell/EmailReadingPaneShell.tsx</file>
       <file role="modify">src/client/shared/Spaarke.Communication.Components/src/components/EmailBody/EmailBodyView.tsx</file>
@@ -56,7 +58,7 @@
   </context>
 
   <constraints>
-    <constraint source="ADR-050">SCOPE: the shell chrome. If using SprkModal, use the canonical shell + its nav slot (Cancel-left, explicit dismiss); do NOT hand-roll a modal. Pick ONE browse mechanism, not both.</constraint>
+    <constraint source="ADR-050">SCOPE: the shell chrome. Use the `BrowseModal` preset from `@spaarke/ui-components` (`SprkModal/presets`) — the canonical shell + its N-of-M nav (Cancel-left, explicit dismiss) per docs/standards/MODAL-DESIGN-SYSTEM.md + docs/standards/MODAL-DECISION-CRITERIA.md; do NOT hand-roll a modal and do NOT use RecordNavigationModalShell. The browse mechanism is DECIDED (owner 2026-08-05) — no "pick one".</constraint>
     <constraint source="NFR-11">SCOPE: the reader. ONE normalized surface over body + attachment text (the same normalized text AI extraction ran over); attachments fold in as readable text, NOT chips; no separate per-file-type viewer in the reader (open-original overlay is separate).</constraint>
     <constraint source="ADR-021">SCOPE: shell + reader. Fluent v9 tokens; light + dark themes; md/lg height caps per MODAL-DESIGN-SYSTEM are load-bearing.</constraint>
     <constraint source="ADR-022">SCOPE: shell + reader. React-version-agnostic (dual-use); no React-16/17-incompatible APIs.</constraint>
@@ -70,33 +72,34 @@
       <file>.claude/adr/ADR-021-fluent-design-system.md</file>
       <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
       <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
       <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
     </files>
     <patterns>
-      <pattern name="Browse N-of-M" location="src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/RecordNavigationModalShell.tsx">The "1 of N" prev/next step-through; OR SprkModal's nav:{index,total,onNavigate} slot — pick one, document the choice.</pattern>
+      <pattern name="Browse N-of-M" location="src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets">The `BrowseModal` preset's "N of M" prev/next step-through (the DECIDED browse mechanism, owner 2026-08-05) — NOT RecordNavigationModalShell.</pattern>
       <pattern name="Per-record reader" location="src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingPaneShell/EmailReadingPaneShell.tsx">hideList=true = per-record form mode; embed inside the shell's left pane.</pattern>
     </patterns>
   </knowledge>
 
   <steps mode="directional">
-    <step order="0" name="Context + rigor declaration">Load knowledge; declare RIGOR: FULL, model Opus/xhigh. Study SprkModal nav slot vs RecordNavigationModalShell; study EmailReadingPaneShell(hideList) + EmailBodyView + AttachmentList.</step>
-    <step order="1">PICK ONE browse mechanism; document the choice + rationale in notes/.</step>
-    <step order="2">Author ReconciliationBrowseShell.tsx: wrap the chosen browse mechanism with N-of-M prev/next over the queue; wire to the task-050 onRecordOpen override.</step>
+    <step order="0" name="Context + rigor declaration">Load knowledge; declare RIGOR: FULL, model Opus/xhigh. Study the `BrowseModal` preset (`@spaarke/ui-components`, `SprkModal/presets`) — the DECIDED browse mechanism (owner 2026-08-05); study EmailReadingPaneShell(hideList) + EmailBodyView + AttachmentList.</step>
+    <step order="1">Confirm the `BrowseModal` preset's N-of-M nav API; note the wiring approach in notes/ (the mechanism is decided — no pick-one).</step>
+    <step order="2">Author ReconciliationBrowseShell.tsx: wrap the `BrowseModal` preset with N-of-M prev/next over the queue; wire to the task-050 onRecordOpen override.</step>
     <step order="3">Embed EmailReadingPaneShell(hideList=true) as the left pane; leave a right-pane slot for the three tabs.</step>
     <step order="4">Extend EmailBodyView to fold attachment contents into the reader as readable normalized text (not chips); the normalized text = the AI-extraction surface (054 anchors over it).</step>
     <step order="5">Add "open original" links (raw .eml / files) opening an overlay preview via AttachmentList.</step>
     <step order="6">Add ui-tests (browse N-of-M steps; attachment content readable-as-text; open-original overlay; ADR-021 dark-mode) and run them.</step>
     <step order="7">Update TASK-INDEX.md: set 053 status to ✅.</step>
-    <step order="8">Document the browse-mechanism choice + any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+    <step order="8">Document the BrowseModal-preset wiring + any deviation in projects/email-communication-intelligence-r2/notes/.</step>
   </steps>
 
   <escalation>
-    <trigger>If neither SprkModal's nav slot nor RecordNavigationModalShell cleanly hosts a two-pane (reader + tabs) body without forking a modal, STOP and escalate per CLAUDE.md §6.5 — the shell choice is an ADR-050 decision, not a hand-rolled modal.</trigger>
+    <trigger>If the `BrowseModal` preset cannot cleanly host a two-pane (reader + tabs) body without forking a modal, STOP and escalate per CLAUDE.md §6.5 — the shell is an ADR-050 decision (BrowseModal preset), not a hand-rolled modal and not RecordNavigationModalShell.</trigger>
     <trigger>If an attachment type cannot be extracted to readable text for the normalized reader, STOP — that gap affects NFR-11 anchoring; surface it (open-original stays available) rather than silently dropping the content from the reader.</trigger>
   </escalation>
 
   <justification>
-    <existing>EmailReadingPaneShell + EmailBodyView + AttachmentList (reader) and RecordNavigationModalShell / SprkModal (browse) all exist. No shell that BROWSES the reconciliation queue and folds attachment text into one reader exists today.</existing>
+    <existing>EmailReadingPaneShell + EmailBodyView + AttachmentList (reader) and the `BrowseModal` preset (`@spaarke/ui-components`, `SprkModal/presets`) all exist. No shell that BROWSES the reconciliation queue and folds attachment text into one reader exists today.</existing>
     <extension>Yes, mostly — reuse the reader components + the browse shell; extend EmailBodyView (attachment-text folding) additively. The one new file (ReconciliationBrowseShell) is the two-pane frame + N-of-M wiring, not a new reader or modal.</extension>
     <cost-of-doing-nothing>Without it a reviewer must return to the grid between every email (no step-through), attachment content stays invisible as chips, and NFR-11 has no normalized reader surface for citations to anchor into — 054 cannot exist.</cost-of-doing-nothing>
   </justification>
@@ -128,7 +131,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Given a row is opened, when the browse shell mounts, then it steps N-of-M prev/next through the queue via ONE chosen mechanism (SprkModal nav slot OR RecordNavigationModalShell — documented), never returning to the grid to advance.</criterion>
+    <criterion testable="true">Given a row is opened, when the browse shell mounts, then it steps N-of-M prev/next through the queue via the `BrowseModal` preset (`@spaarke/ui-components`, `SprkModal/presets`; NOT RecordNavigationModalShell, not a hand-rolled modal), never returning to the grid to advance.</criterion>
     <criterion testable="true">Given an email with attachments, when the reader renders, then body + attachment contents appear as ONE normalized readable text surface (attachments folded as text, not chips).</criterion>
     <criterion testable="true">Given the reader, when "open original" is clicked, then the raw .eml/file opens in an overlay preview via AttachmentList.</criterion>
     <criterion testable="true">The right pane exposes a slot hosting the three reconcile tabs (Related to / Fields / Tasks).</criterion>

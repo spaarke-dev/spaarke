@@ -104,7 +104,11 @@ This project touches **heavily-contended shared surfaces**. Before EVERY PR that
 
 ## Decisions Made
 
-*No implementation decisions recorded yet.*
+- **2026-08-05 — SPE dedup gate-after-write.** Read `quickXorHash` from the driveItem metadata *after* upload; reconcile + notify (never silently suppress a document); accept a brief transient blob. Retires spikes 001/002. — Why: removes the post-upload-timing unknown; matches the spec's "notify, never silent" UX.
+- **2026-08-05 — SPE Tier-2 deferred out of R2.** Exact-hash Tier-1 only; near-dup is a follow-up.
+- **2026-08-05 — FR-E5 task fields = Path B ("add fields").** Create via `IActionSeam.CreateTaskAsync`, then PATCH status/completed-date/base-date/final-due-date via impersonated `UpdateRecordAsync` under the same audit; **add `base-date` + `final-due-date` as new task-entity fields** (schema step in task 034). — Why: keeps the AI facade unchanged (ADR-013) while delivering the full FR-E5 field set structured in R2.
+- **2026-08-05 — Backfill forward-only** for the RAG-grounding fix (D1) + canonicalhash column (C3). No historical reprocessing.
+- **2026-08-05 — Browse shell = `BrowseModal` preset** (`@spaarke/ui-components`, `SprkModal/presets`; ADR-050 / MODAL-DESIGN-SYSTEM / MODAL-DECISION-CRITERIA), not `RecordNavigationModalShell`.
 
 ---
 

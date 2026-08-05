@@ -3,7 +3,7 @@
   <metadata>
     <title>Indexed sprk_document.sprk_canonicalhash column + backfill decision</title>
     <phase>2 Pillar C — De-duplication</phase>
-    <gate>blocked: needs 001 (SPE spike 1 — quickXorHash stability)</gate>
+    <gate>startable</gate>
     <status>not-started</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New Dataverse schema surface (one indexed column) via dataverse-create-schema + a recorded backfill decision; no .cs/.ts code change. STANDARD per task-create Step 3.5.5.</rigor-reason>
@@ -13,7 +13,7 @@
     <parallel-group>schema-c</parallel-group>
     <parallel-safe>true</parallel-safe>
     <parallel-reason>Schema-only on `sprk_document`, disjoint from task 020's key on `sprk_communication`. No shared source files with any active worktree.</parallel-reason>
-    <deps>001</deps>
+    <deps>none</deps>
     <tags>dataverse, schema, dedup</tags>
     <estimated-effort>1.5-3 hours</estimated-effort>
   </metadata>
@@ -23,19 +23,19 @@
   <goal>An indexed string column `sprk_document.sprk_canonicalhash` exists, published, and carried in the managed solution; a recorded backfill decision (backfill now vs lazy-on-next-touch vs defer) with rationale + a modeled script path lives in notes/. Verified in `spaarkedev1`.</goal>
 
   <context>
-    <background>FR-C3 absorbs `sdap-file-duplication-detector-r1`. The detector (task 024) needs an indexed column on `sprk_document` holding the content hash so byte-identical uploads are found before a second canonical document is created. The chosen identity is `quickXorHash` (from `driveItem.file.hashes`); `sha256Hash` is deprecated on SPE. The `sprk_document` models live in `src/server/shared/Spaarke.Dataverse/Models.cs`. This task creates ONLY the column + records the backfill decision; task 024 wires the detector. It is GATED on task 001 (spike 1) because if spike 1 finds quickXorHash unstable/absent post-upload, the identity strategy (and column semantics) changes.</background>
+    <background>FR-C3 absorbs `sdap-file-duplication-detector-r1`. The detector (task 024) needs an indexed column on `sprk_document` holding the content hash so byte-identical uploads are found before a second canonical document is created. The chosen identity is `quickXorHash` (from `driveItem.file.hashes`); `sha256Hash` is deprecated on SPE. The `sprk_document` models live in `src/server/shared/Spaarke.Dataverse/Models.cs`. This task creates ONLY the column + records the backfill decision; task 024 wires the detector. Backfill is **forward-only** — no historical reprocessing of already-persisted documents (owner decision 2026-08-05). There is **no spike gate**: task 024's gate-after-write approach fixes the identity as `quickXorHash` (read from `driveItem.file.hashes` after upload completes), so the column semantics are settled and this task is startable now.</background>
     <relevant-files>
       <file role="modify">src/server/shared/Spaarke.Dataverse/Models.cs (sprk_document model — column mapping, added by task 024)</file>
       <file role="canonical-reference">scripts/Backfill-DocumentHasFile.ps1 (model the backfill script shape on this)</file>
       <file role="modify">Dataverse managed solution — sprk_document entity metadata</file>
     </relevant-files>
     <dependencies>
-      <dependency task="001" status="pending">SPE spike 1 confirms quickXorHash is present + stable post-upload; its outcome sets the column's identity semantics. If spike 1 fails, escalate before creating the column.</dependency>
+      <!-- Task 001 (SPE spike 1) removed: gate-after-write (task 024, owner decision 2026-08-05) settles the identity as quickXorHash read post-upload; no spike gate. This task is startable with no dependencies. -->
     </dependencies>
   </context>
 
   <constraints>
-    <constraint source="NFR-08">SCOPE: this column. It is spike-gated — do NOT create it (or fix its semantics) until task 001 confirms quickXorHash stability post-upload. If spike 1 found the hash unstable, STOP and escalate.</constraint>
+    <constraint source="project">SCOPE: identity + backfill + gating (owner decision 2026-08-05). The column's identity is `quickXorHash` (read from `driveItem.file.hashes` AFTER upload completes per task 024's gate-after-write). Backfill is **forward-only** — no historical reprocessing of already-persisted documents. There is **no spike gate**; this task is startable now (spike 1 retired).</constraint>
     <constraint source="ADR-027">SCOPE: the new column. Author into the managed solution + export so it deploys to every subscription; do NOT create it unmanaged in one environment.</constraint>
     <constraint source="project">SCOPE: indexing. The column MUST be indexed (queryable for equality-hit lookup at scale by task 024); a non-indexed column degrades detector performance.</constraint>
     <constraint source="project">SCOPE: identity source. The column holds `quickXorHash` from `driveItem.file.hashes` — `sha256Hash` is DEPRECATED on SPE and MUST NOT be used as the identity.</constraint>
@@ -59,7 +59,7 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="0" name="Context + rigor declaration">Load POML + project CLAUDE.md + spec FR-C3/NFR-08 + ADR-027/007 + the researcher SPE-dedup memo. Declare RIGOR LEVEL: STANDARD. Confirm task 001's spike-1 outcome (quickXorHash stable). If unstable → escalate. Invoke dataverse-create-schema.</step>
+    <step order="0" name="Context + rigor declaration">Load POML + project CLAUDE.md + spec FR-C3/NFR-08 + ADR-027/007 + the researcher SPE-dedup memo. Declare RIGOR LEVEL: STANDARD. Identity = quickXorHash, backfill forward-only, no spike gate (owner 2026-08-05). Invoke dataverse-create-schema.</step>
     <step order="1">Create the indexed string column `sprk_document.sprk_canonicalhash` (length sufficient for a quickXorHash value) via the skill; enable the index; poll to Active.</step>
     <step order="2">Add the entity + column to the managed solution; export; verify the column is in the export.</step>
     <step order="3">Decide + record the backfill strategy in notes/ (backfill-now vs lazy vs defer), with rationale and a modeled `scripts/Backfill-Document*Hash*.ps1` path. Do NOT execute a mass backfill without escalation.</step>
@@ -69,7 +69,7 @@
   </steps>
 
   <escalation>
-    <trigger>If task 001 (spike 1) found quickXorHash absent/unstable/late post-upload, STOP and escalate per CLAUDE.md §6/NFR-08 before creating the column — the identity semantics (and possibly the whole Tier-1 approach) change and must be re-decided with the owner.</trigger>
+    <trigger>If a quickXorHash value cannot fit the created column length or the column cannot be indexed for equality lookup at scale (e.g. the platform rejects the index on the chosen length), STOP and escalate per CLAUDE.md §6 before shipping a column that silently truncates the hash or cannot serve the detector's equality lookup.</trigger>
   </escalation>
 
   <justification>
@@ -94,10 +94,10 @@
     <criterion testable="true">Given the managed solution export, when inspected, then the column definition is present (deploys to every subscription per ADR-027).</criterion>
     <criterion testable="true">Given a sample quickXorHash value, when written to the column in `spaarkedev1`, then it persists and is queryable by equality.</criterion>
     <criterion testable="true">A backfill decision (backfill-now / lazy / defer) with rationale + a modeled script path is recorded in notes/.</criterion>
-    <criterion testable="true">Negative: if spike 1 (task 001) found quickXorHash unstable, the task escalated rather than creating the column on an unstable identity.</criterion>
+    <criterion testable="true">Negative: the column length is sufficient for a full quickXorHash value so a written hash is NOT silently truncated (a round-tripped sample hash equals the value written); if the chosen length/index cannot hold or index the hash, the task escalated rather than shipping a truncating column.</criterion>
   </acceptance-criteria>
 
-  <notes>spec FR-C3 + NFR-08; plan Phase 2 C3 (schema half). Pairs with task 020 in parallel-group schema-c. Feeds task 024 (detector). Identity = quickXorHash (sha256Hash deprecated). Tier-2 (near-dup / documentVector3072) is a separate, spike-2-gated fast-follow — NOT this task.</notes>
+  <notes>spec FR-C3; plan Phase 2 C3 (schema half). Pairs with task 020 in parallel-group schema-c. Feeds task 024 (detector). Identity = quickXorHash (sha256Hash deprecated). Backfill forward-only (owner 2026-08-05). Tier-2 (near-dup / documentVector3072) is deferred OUT of R2 (owner 2026-08-05) — NOT this task.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
