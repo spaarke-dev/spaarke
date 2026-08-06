@@ -128,7 +128,7 @@ public sealed class RiActionsViaSeamSeamTests
         // Three distinct create paths, each recording into the shared ordering log. With MockBehavior.Strict a
         // create that the code does NOT make (e.g. on the deny path) simply never fires — proving "no side effect".
         entity
-            .Setup(s => s.CreateAsync(It.Is<DataverseEntity>(e => e.LogicalName == "task"), It.IsAny<CancellationToken>()))
+            .Setup(s => s.CreateAsync(It.Is<DataverseEntity>(e => e.LogicalName == "sprk_event"), It.IsAny<CancellationToken>()))
             .ReturnsAsync((DataverseEntity e, CancellationToken _) => { creates.Add(e); events.Add("seam-task-create"); return Guid.NewGuid(); });
         entity
             .Setup(s => s.CreateAsync(It.Is<DataverseEntity>(e => e.LogicalName == "sprk_notificationoutbox"), It.IsAny<CancellationToken>()))
@@ -185,12 +185,13 @@ public sealed class RiActionsViaSeamSeamTests
 
         await h.Consumer.PublishAsync(Signal(h.CommunicationId, confidence: 0.9));
 
-        // (1) The domain record was created via the Layer-A seam — a `task` regarding the communication, owned by
-        //     the recipient — NOT a direct Dataverse write of some other shape.
-        var task = h.Creates.SingleOrDefault(e => e.LogicalName == "task");
+        // (1) The domain record was created via the Layer-A seam — a sprk_event (event type = Task) regarding the
+        //     communication's associated matter (sprk_event cannot regard a communication), owned by the recipient —
+        //     NOT a direct Dataverse write of some other shape.
+        var task = h.Creates.SingleOrDefault(e => e.LogicalName == "sprk_event");
         task.Should().NotBeNull("the RI action is created via the Layer-A seam (ADR-013), not a direct write");
-        task!.GetAttributeValue<string>("subject").Should().Contain("Settlement terms");
-        task.GetAttributeValue<EntityReference>("regardingobjectid")!.Id.Should().Be(h.CommunicationId);
+        task!.GetAttributeValue<string>("sprk_eventname").Should().Contain("Settlement terms");
+        task.GetAttributeValue<EntityReference>("sprk_regardingmatter")!.Id.Should().Be(h.MatterId);
         task.GetAttributeValue<EntityReference>("ownerid")!.Id.Should().Be(h.OwnerId);
 
         // (2) One outbox row, kind=communication-assessed, IDs + minimal display metadata + regardingRecordId only.
