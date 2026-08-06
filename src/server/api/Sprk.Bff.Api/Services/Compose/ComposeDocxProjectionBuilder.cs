@@ -916,7 +916,7 @@ public sealed class ComposeDocxProjectionBuilder
 
     private void RenderHyperlink(Hyperlink h, BuildContext ctx)
     {
-        var href = ResolveHyperlinkHref(h, ctx);
+        var href = ResolveHyperlinkHref(h, ctx.MainPart);
         if (href is null)
         {
             RenderInline(h, ctx); // unsafe/unknown target → emit the text without a link
@@ -929,7 +929,10 @@ public sealed class ComposeDocxProjectionBuilder
         ctx.Append("</a>");
     }
 
-    private static string? ResolveHyperlinkHref(Hyperlink h, BuildContext ctx)
+    // Task 020 (r6): takes MainDocumentPart (not BuildContext) so the canonical-model projection walk
+    // (BuildContentModel) shares this ONE resolver with the HTML render walk — same protocol allowlist,
+    // never two divergent implementations.
+    private static string? ResolveHyperlinkHref(Hyperlink h, MainDocumentPart mainPart)
     {
         // Internal anchor (bookmark) — safe, no relationship needed.
         if (!string.IsNullOrEmpty(h.Anchor?.Value))
@@ -940,7 +943,7 @@ public sealed class ComposeDocxProjectionBuilder
         if (string.IsNullOrEmpty(rid)) return null;
         try
         {
-            var rel = ctx.MainPart.HyperlinkRelationships.FirstOrDefault(r => r.Id == rid);
+            var rel = mainPart.HyperlinkRelationships.FirstOrDefault(r => r.Id == rid);
             var uri = rel?.Uri?.ToString();
             if (string.IsNullOrEmpty(uri)) return null;
             // Protocol allowlist (GPT §13): http/https/mailto only. Never resolve/fetch external relationships.
@@ -1702,6 +1705,497 @@ public sealed class ComposeDocxProjectionBuilder
             if (!seen.Contains(hex)) return hex;
         }
         throw new InvalidOperationException($"Unable to mint a unique w14:paraId after {MintRetryLimit} attempts.");
+    }
+
+    // ── canonical-model projection (task 020, spaarkeai-compose-r6 FR-03) ──────────────────────────────
+    // The docx → ComposeContentModel projector — the render-on-save hub's missing imported-doc SOURCE
+    // (see projects/spaarkeai-compose-r6/notes/020-canonical-hub-design.md). Same class, same traversal
+    // idioms as the HTML read walk above (RenderBlockChildren / RenderInline / RenderRun — kept mirrored,
+    // never merged: the read walk emits display HTML with atoms/overlog anchoring concerns; this walk
+    // emits the EDITABLE canonical model the renderer authors a fresh docx from). TOTAL / lenient by
+    // construction (ADR-049 Path-B flatten-tier): never throws; constructs the thin model cannot carry
+    // flatten to their nearest editable form (field → cached result text, opaque SDT → display text,
+    // tracked ins/del → settled prose kept) or drop (drawings/objects/pictures + their text boxes) with a
+    // counted warning — never a hard-fail, never a 422. Tasks 021–026 widen per-feature fidelity THROUGH
+    // this same model and retire the flatten warnings one by one; task 011 generalizes the renderer to
+    // author this model onto a preserved carrier package.
+
+    /// <summary>
+    /// Projects <paramref name="docx"/> into the canonical <see cref="ComposeContentModel"/> — the model
+    /// <see cref="ComposeDocumentRenderer.SynthesizeDocument"/> renders back out on the render-on-save
+    /// path. Never throws — an unreadable/empty/over-cap source degrades to
+    /// <see cref="ComposeProjectionStatus.Failed"/> with an empty model (mirrors <see cref="Build"/>'s
+    /// fail-closed posture; the caller must not render an empty model over a non-empty original).
+    /// </summary>
+    public ComposeCanonicalModelProjection BuildContentModel(ReadOnlyMemory<byte> docx, CancellationToken cancellationToken = default)
+    {
+        if (docx.IsEmpty)
+        {
+            return ComposeCanonicalModelProjection.Failed("empty-source");
+        }
+
+        WordprocessingDocument doc;
+        MemoryStream buffer;
+        try
+        {
+            buffer = new MemoryStream(docx.Length);
+            buffer.Write(docx.Span);
+            buffer.Position = 0;
+            doc = WordprocessingDocument.Open(buffer, isEditable: false);
+        }
+        catch (Exception ex) when (ex is OpenXmlPackageException or FileFormatException or InvalidDataException or ArgumentOutOfRangeException)
+        {
+            return ComposeCanonicalModelProjection.Failed("unreadable-source");
+        }
+
+        try
+        {
+            using (doc)
+            using (buffer)
+            {
+                var mainPart = doc.MainDocumentPart;
+                var body = mainPart?.Document?.Body;
+                if (mainPart is null || body is null)
+                {
+                    // A body-less package is a legitimately empty document — an empty model renders an
+                    // empty (valid) docx, mirroring Build()'s editable-empty case.
+                    return new ComposeCanonicalModelProjection { Status = ComposeProjectionStatus.Success };
+                }
+
+                var totalParagraphs = body.Descendants<Paragraph>().Count();
+                if (totalParagraphs > MaxParagraphs)
+                {
+                    return ComposeCanonicalModelProjection.Failed("resource-limit-paragraphs");
+                }
+
+                // Reuse the R4.5 numbering model (numbering.xml + styles.xml side-part read) for
+                // ordered-vs-bullet classification — the SAME closed model the NumberingComputationEngine
+                // replays Word's algorithm over, so this walk and the read walk never disagree on a
+                // paragraph's numbering source. (Label COMPUTATION is display data, not model data — the
+                // renderer re-authors numbering from Level/Ordered/StartsNewList; label parity through the
+                // round-trip is task 021's oracle.)
+                var numbering = BuildNumberingModel(mainPart);
+                var ctx = new ModelWalkContext(mainPart, numbering, cancellationToken);
+                var blocks = new List<ComposeBlock>();
+                ProjectBlockChildren(body, blocks, new ListContinuity(), ctx);
+
+                // Alignment guard (mirrors Build()'s F-03): paragraphs enumerated but never visited by the
+                // structural walk (text-box / AlternateContent-nested content) are a counted shortfall —
+                // degraded loudly, never silently (F-1). Task 026 widens the hard-tier surface.
+                if (ctx.VisitedParagraphs != totalParagraphs)
+                {
+                    ctx.AddWarning("unrendered-paragraphs", Math.Abs(totalParagraphs - ctx.VisitedParagraphs));
+                }
+
+                var warnings = ctx.Warnings;
+                return new ComposeCanonicalModelProjection
+                {
+                    Status = warnings.Count == 0 ? ComposeProjectionStatus.Success : ComposeProjectionStatus.Partial,
+                    Model = new ComposeContentModel { Blocks = blocks },
+                    Warnings = warnings,
+                };
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            // Defensive: any unexpected projection error fails closed rather than throwing out of the
+            // save path (the total-function contract — see ComposeCanonicalModelProjection remarks).
+            return ComposeCanonicalModelProjection.Failed("projection-error");
+        }
+    }
+
+    /// <summary>Per-container ordered-list continuity: <see cref="ComposeBlock.StartsNewList"/> is set on
+    /// the first item of each DISTINCT ordered list (numId change), so the renderer allocates a fresh
+    /// restart-at-1 num instance per source list rather than fusing all ordered items into one sequence.
+    /// Intervening non-list paragraphs do NOT reset continuity (same numId ⇒ same list — the interrupted-
+    /// run behavior the NumberingComputationEngine fixed on the read side). Table cells get a fresh
+    /// instance (a list never continues across a cell boundary — mirrors the read walk's CloseOpenList at
+    /// cell edges); transparent SDT recursion shares the parent's (its paragraphs continue the flow).</summary>
+    private sealed class ListContinuity
+    {
+        public int? LastOrderedNumId;
+    }
+
+    private void ProjectBlockChildren(OpenXmlElement container, List<ComposeBlock> sink, ListContinuity lists, ModelWalkContext ctx)
+    {
+        foreach (var child in container.Elements())
+        {
+            ctx.CancellationToken.ThrowIfCancellationRequested();
+            switch (child)
+            {
+                case Paragraph p:
+                    sink.Add(ProjectParagraph(p, lists, ctx));
+                    break;
+                case Table t:
+                    sink.Add(ProjectTable(t, ctx));
+                    break;
+                case SdtBlock sdt:
+                    if (IsSpecialSdtControl(sdt.SdtProperties))
+                    {
+                        // Hard-tier accept-flatten (baseline; task 026 adds the user-visible warning
+                        // surface): the control's cached DISPLAY text is preserved as a plain paragraph —
+                        // visible content survives, the control chrome does not. Never a hard-fail.
+                        var text = ExtractAtomDisplayText(sdt);
+                        if (text.Length > 0)
+                        {
+                            sink.Add(new ComposeBlock
+                            {
+                                Kind = ComposeBlockKind.Paragraph,
+                                Runs = new[] { new ComposeInlineRun { Text = ctx.ClampText(text) } },
+                            });
+                        }
+                        ctx.AddWarning("hard-tier-sdt-flattened", 1);
+                    }
+                    else
+                    {
+                        // Plain/rich-text content control: shell transparent, wrapped paragraphs stay
+                        // editable — the SAME escalation-boundary rule as the read walk (IsSpecialSdtControl
+                        // remarks); same warning code so the two paths report consistently.
+                        ctx.AddWarning("content-control", 1);
+                        var sdtContent = sdt.GetFirstChild<SdtContentBlock>();
+                        if (sdtContent is not null) ProjectBlockChildren(sdtContent, sink, lists, ctx);
+                    }
+                    break;
+                case AlternateContent:
+                    // A block-level mc:AlternateContent (markup-compatibility wrapper — floating shapes,
+                    // newer constructs): no model representation — dropped LOUDLY (F-1), like the run-level
+                    // case in ProjectRun. Its nested paragraphs surface via the unrendered-paragraphs guard.
+                    ctx.AddWarning("complex-object-dropped", 1);
+                    break;
+                default:
+                    // sectPr, bookmarks, and other non-block markup: nothing to model. (Text-box paragraphs
+                    // are reached only via a Drawing/AlternateContent run — dropped there with
+                    // complex-object-dropped + the unrendered-paragraphs guard.)
+                    break;
+            }
+        }
+    }
+
+    private ComposeBlock ProjectParagraph(Paragraph p, ListContinuity lists, ModelWalkContext ctx)
+    {
+        ctx.VisitedParagraphs++;
+        var runs = new List<ComposeInlineRun>();
+        ProjectInline(p, runs, href: null, ctx);
+
+        var paraId = p.ParagraphId?.Value?.ToUpperInvariant(); // renderer dedups/mints (AssignParaIds)
+        var alignment = MapAlignment(p);
+
+        // Classification mirrors RenderParagraph exactly: heading style wins; then a DIRECT paragraph
+        // w:numPr makes a list item (style-linked heading numbering is a heading, not a list).
+        var headingLevel = HeadingLevel(p);
+        if (headingLevel is int lvl)
+        {
+            return new ComposeBlock
+            {
+                Kind = ComposeBlockKind.Heading,
+                ParaId = paraId,
+                Level = lvl,
+                Runs = runs,
+                Alignment = alignment,
+            };
+        }
+
+        var numPr = p.ParagraphProperties?.NumberingProperties;
+        var numId = numPr?.NumberingId?.Val;
+        if (numId is not null)
+        {
+            var ilvl = numPr!.NumberingLevelReference?.Val?.Value ?? 0;
+            var ordered = ResolveOrderedFromModel(numId.Value, ilvl, ctx);
+            var startsNew = false;
+            if (ordered)
+            {
+                startsNew = lists.LastOrderedNumId != numId.Value;
+                lists.LastOrderedNumId = numId.Value;
+            }
+            return new ComposeBlock
+            {
+                Kind = ComposeBlockKind.ListItem,
+                ParaId = paraId,
+                Level = Math.Clamp(ilvl, 0, 8),
+                Ordered = ordered,
+                StartsNewList = startsNew,
+                Runs = runs,
+                Alignment = alignment,
+            };
+        }
+
+        return new ComposeBlock
+        {
+            Kind = ComposeBlockKind.Paragraph,
+            ParaId = paraId,
+            Runs = runs,
+            Alignment = alignment,
+        };
+    }
+
+    /// <summary>Ordered-vs-bullet from the R4.5 <see cref="NumberingModel"/> (override-aware via
+    /// <see cref="NumberingModel.ResolveLevel"/>), with <see cref="ResolveOrdered"/>'s tolerant posture:
+    /// an unresolvable numId warns and defaults to ordered. Falls back to the nearest defined lower level
+    /// when the exact ilvl is undefined (same tolerance as the read walk's first-level fallback).</summary>
+    private static bool ResolveOrderedFromModel(int numId, int ilvl, ModelWalkContext ctx)
+    {
+        var def = ctx.Numbering.ResolveLevel(numId, ilvl);
+        for (var probe = ilvl - 1; def is null && probe >= 0; probe--)
+        {
+            def = ctx.Numbering.ResolveLevel(numId, probe);
+        }
+        if (def is null)
+        {
+            ctx.AddWarning("numbering-unresolved", 1);
+            return true;
+        }
+        return def.NumFmt is null || def.NumFmt.Value != NumberFormatValues.Bullet;
+    }
+
+    private ComposeBlock ProjectTable(Table table, ModelWalkContext ctx)
+    {
+        var rows = new List<ComposeTableRow>();
+        foreach (var row in table.Elements<TableRow>())
+        {
+            var cells = new List<ComposeTableCell>();
+            foreach (var cell in row.Elements<TableCell>())
+            {
+                var cellBlocks = new List<ComposeBlock>();
+                // Fresh ListContinuity: a list never continues across a cell boundary (read walk's
+                // CloseOpenList at cell edges).
+                ProjectBlockChildren(cell, cellBlocks, new ListContinuity(), ctx);
+                cells.Add(new ComposeTableCell { Blocks = cellBlocks });
+            }
+            rows.Add(new ComposeTableRow { Cells = cells });
+        }
+        return new ComposeBlock
+        {
+            Kind = ComposeBlockKind.Table,
+            Table = new ComposeTable { Rows = rows },
+        };
+    }
+
+    private void ProjectInline(OpenXmlElement container, List<ComposeInlineRun> sink, string? href, ModelWalkContext ctx)
+    {
+        // Mirrors RenderInline's field-scan exactly (own FieldScanState instance — the established
+        // parallel-walk pattern, see FieldScanState remarks).
+        var field = new FieldScanState();
+        foreach (var child in container.Elements())
+        {
+            switch (child)
+            {
+                case Run r:
+                    if (TryAdvanceFieldScan(r, field, out var fieldClosed))
+                    {
+                        if (fieldClosed)
+                        {
+                            // Field flattens to its cached RESULT text as plain prose (the field's dynamic
+                            // behavior does not survive; its visible value does). 026 refines the surface.
+                            AddPlainRun(sink, ExtractRunsDisplayText(field.ResultRuns), href, ctx);
+                            ctx.AddWarning("field-flattened-to-text", 1);
+                            field.Reset();
+                        }
+                        break;
+                    }
+                    if (IsComplexObjectRun(r))
+                    {
+                        // Drawings / OLE objects / VML pictures — and the text boxes nested inside them —
+                        // have no model representation: dropped with a counted warning (the accept-flatten
+                        // baseline task 026 builds the user-visible warning surface on).
+                        ctx.AddWarning("complex-object-dropped", 1);
+                        break;
+                    }
+                    ProjectRun(r, sink, href, ctx);
+                    break;
+                case SimpleField sf:
+                    AddPlainRun(sink, ExtractAtomDisplayText(sf), href, ctx);
+                    ctx.AddWarning("field-flattened-to-text", 1);
+                    break;
+                case Hyperlink h:
+                    ProjectInline(h, sink, ResolveHyperlinkHref(h, ctx.MainPart) ?? href, ctx);
+                    break;
+                case InsertedRun ins:
+                    // Settled prose: inserted text kept, revision wrapper flattened (tracked-changes as
+                    // MODEL data is task 025; until then a render-from-model save settles the revision).
+                    ctx.AddWarning("tracked-insert-flattened", 1);
+                    ProjectInline(ins, sink, href, ctx);
+                    break;
+                case DeletedRun del:
+                    // No-text-loss default: pending-deleted text is KEPT as plain prose (flattening
+                    // resolves the revision by REJECTING the deletion — the conservative direction for a
+                    // legal document; accepting it would silently destroy text). Task 025 models the
+                    // revision first-class and retires this.
+                    ctx.AddWarning("tracked-delete-flattened-kept", 1);
+                    ProjectInline(del, sink, href, ctx);
+                    break;
+                case SdtRun sdtRun:
+                    if (IsSpecialSdtControl(sdtRun.SdtProperties))
+                    {
+                        AddPlainRun(sink, ExtractAtomDisplayText(sdtRun), href, ctx);
+                        ctx.AddWarning("hard-tier-sdt-flattened", 1);
+                    }
+                    else
+                    {
+                        var sdtContent = sdtRun.GetFirstChild<SdtContentRun>();
+                        if (sdtContent is not null) ProjectInline(sdtContent, sink, href, ctx);
+                    }
+                    break;
+                case AlternateContent:
+                    // Inline mc:AlternateContent (the NDA's text-box signature blocks live here — task
+                    // 004's confirmed breaker): a markup-compatibility wrapper around drawing/shape
+                    // content with no model representation. Dropped LOUDLY (F-1), never silently; nested
+                    // paragraphs surface via the unrendered-paragraphs guard. Task 026 widens this surface.
+                    ctx.AddWarning("complex-object-dropped", 1);
+                    break;
+                default:
+                    // ParagraphProperties, bookmarks, proofErr, etc. — no inline content.
+                    break;
+            }
+        }
+    }
+
+    private void ProjectRun(Run run, List<ComposeInlineRun> sink, string? href, ModelWalkContext ctx)
+    {
+        var rPr = run.RunProperties;
+        var bold = IsOn(rPr?.Bold);
+        var italic = IsOn(rPr?.Italic);
+        var underline = rPr?.Underline is { Val: not null } u && u.Val!.Value != UnderlineValues.None;
+
+        var sb = new StringBuilder();
+        foreach (var child in run.Elements())
+        {
+            switch (child)
+            {
+                case Text t:
+                    sb.Append(t.Text);
+                    break;
+                case DeletedText dt:
+                    sb.Append(dt.Text); // kept — see DeletedRun's no-text-loss rationale
+                    break;
+                case TabChar:
+                case PositionalTab:
+                    sb.Append(' '); // atom-display-text convention (ExtractRunsDisplayText)
+                    break;
+                case Break:
+                case CarriageReturn:
+                    // The model has no intra-paragraph line-break (a page-break block is task 023's
+                    // widening); flatten to a space rather than fusing words, with a counted warning.
+                    sb.Append(' ');
+                    ctx.AddWarning("line-break-flattened", 1);
+                    break;
+                case NoBreakHyphen:
+                    sb.Append('‑');
+                    break;
+                case SymbolChar sym:
+                    var glyph = ResolveSymbolGlyph(sym, out var mapped);
+                    sb.Append(glyph);
+                    if (!mapped) ctx.AddWarning("unmapped-symbol-char", 1);
+                    break;
+                case Ruby ruby:
+                    sb.Append(ExtractRunsDisplayText(RubyBaseRuns(ruby)));
+                    ctx.AddWarning("ruby-phonetic-guide-dropped", 1);
+                    break;
+                case FootnoteReference:
+                    ctx.AddWarning("unrepresented-footnote-reference", 1);
+                    break;
+                case EndnoteReference:
+                    ctx.AddWarning("unrepresented-endnote-reference", 1);
+                    break;
+                case AlternateContent:
+                    // A run-nested mc:AlternateContent (drawing/shape wrapper — IsComplexObjectRun only
+                    // sees a DIRECT w:drawing/w:object/w:pict child, so the wrapped form lands here):
+                    // dropped LOUDLY, same code as the direct case.
+                    ctx.AddWarning("complex-object-dropped", 1);
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        if (sb.Length == 0) return; // empty runs carry nothing the renderer needs
+
+        if (IsOn(rPr?.Strike))
+        {
+            // The model has no strikethrough mark (025 models real deletions; decorative strike is out of
+            // the thin tier) — text kept, decoration dropped, counted.
+            ctx.AddWarning("strikethrough-flattened", 1);
+        }
+
+        var text = ctx.ClampText(sb.ToString());
+        if (text.Length == 0) return;
+        sink.Add(new ComposeInlineRun { Text = text, Bold = bold, Italic = italic, Underline = underline, Href = href });
+    }
+
+    private static void AddPlainRun(List<ComposeInlineRun> sink, string text, string? href, ModelWalkContext ctx)
+    {
+        if (text.Length == 0) return;
+        var clamped = ctx.ClampText(text);
+        if (clamped.Length == 0) return;
+        sink.Add(new ComposeInlineRun { Text = clamped, Href = href });
+    }
+
+    private static ComposeParagraphAlignment MapAlignment(Paragraph p)
+    {
+        var j = p.ParagraphProperties?.Justification?.Val;
+        if (j is null) return ComposeParagraphAlignment.Default;
+        if (j.Value == JustificationValues.Center) return ComposeParagraphAlignment.Center;
+        if (j.Value == JustificationValues.Right) return ComposeParagraphAlignment.Right;
+        if (j.Value == JustificationValues.Both || j.Value == JustificationValues.Distribute) return ComposeParagraphAlignment.Justify;
+        if (j.Value == JustificationValues.Left) return ComposeParagraphAlignment.Left;
+        return ComposeParagraphAlignment.Default; // start/end/highKashida/… — inherit from style
+    }
+
+    /// <summary>Per-call state for the canonical-model walk: the main part (hyperlink relationships), the
+    /// R4.5 numbering model, counted warnings (codes only — Tier-1 safe), and the output-text budget
+    /// (mirrors <see cref="MaxOutputChars"/>; once exhausted, further text is dropped with ONE
+    /// resource-limit warning rather than aborting the whole projection).</summary>
+    private sealed class ModelWalkContext
+    {
+        private readonly Dictionary<string, int> _warnings = new(StringComparer.Ordinal);
+        private int _textBudget = MaxOutputChars;
+
+        public ModelWalkContext(MainDocumentPart mainPart, NumberingModel numbering, CancellationToken cancellationToken)
+        {
+            MainPart = mainPart;
+            Numbering = numbering;
+            CancellationToken = cancellationToken;
+        }
+
+        public MainDocumentPart MainPart { get; }
+        public NumberingModel Numbering { get; }
+        public CancellationToken CancellationToken { get; }
+
+        /// <summary>Paragraphs the structural walk actually visited — compared against the body's total
+        /// <c>Descendants&lt;Paragraph&gt;()</c> count for the unrendered-paragraphs guard (F-03 parity).</summary>
+        public int VisitedParagraphs { get; set; }
+
+        public IReadOnlyList<ComposeProjectionWarning> Warnings =>
+            _warnings.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                .Select(kv => new ComposeProjectionWarning(kv.Key, kv.Value))
+                .ToList();
+
+        public void AddWarning(string code, int count)
+        {
+            _warnings.TryGetValue(code, out var existing);
+            _warnings[code] = existing + count;
+        }
+
+        public string ClampText(string text)
+        {
+            if (_textBudget <= 0)
+            {
+                AddWarning("resource-limit-output", 1);
+                return string.Empty;
+            }
+            if (text.Length <= _textBudget)
+            {
+                _textBudget -= text.Length;
+                return text;
+            }
+            var clipped = text[.._textBudget];
+            _textBudget = 0;
+            AddWarning("resource-limit-output", 1);
+            return clipped;
+        }
     }
 
     // ── build context (per-call render state) ────────────────────────────────────────────────────────

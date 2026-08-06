@@ -2,12 +2,28 @@
 
 > Active-task tracker for context recovery. Reset per root `CLAUDE.md` §7 as tasks complete.
 
-## Status: Phase 0 ✅ · RE-SEQUENCED (model-first) ✅ · Active task → **020** (canonical model hub — the anchor)
+## Status: Phase 0 ✅ · RE-SEQUENCED (model-first) ✅ · Active task → **020 IN PROGRESS** (Steps 0–3 ✅ · projector SHIPPED, 12/12 seam green · next: remaining 020 gates)
 
 - **Project**: `spaarkeai-compose-r6`
 - **Branch**: `work/spaarkeai-compose-r6` (pushed; 0 behind master as of 2026-08-05)
 - **Active task**: **020** — Canonical document model hub (generalize ComposeContentModel/projection; build docx→canonical-model projection + render-out wiring). FULL, **opus**/high. deps 001, 004 (both ✅).
-- **Status**: re-sequence applied + committed; **020 not yet started** (next: task-execute Step 0 for 020).
+- **Status**: 020 STARTED. Steps 0–2 complete: rigor declared (FULL/opus/high), /conflict-check CLEAN (re-run before BFF PR), code map + design done. **Design = [notes/020-canonical-hub-design.md](notes/020-canonical-hub-design.md)** (READ FIRST on resume). Next: **Step 3 — implement the `docx→ComposeContentModel` projector** (lenient/total; reuse existing traversal + `NumberingComputationEngine:1357`).
+
+### 🧭 Task 020 design (locked this session — key decisions)
+- **Hub = `ComposeContentModel` (body, widened by 021–025) + server-retained source package ("carrier" = styles/numbering/hdr-ftr/theme/sectPr).** EXTENSION, not a parallel model → does NOT trip escalation trigger #1.
+- **Render-on-save unified** (`ComposeService.cs:714`): Authored → `SynthesizeDocument` (blank carrier, unchanged); Imported → open retained carrier, **replace body** with rendered model, preserve all other parts (generalize `AppendSection:191` from append→replace-body = task 011). No text-search / no anchoring → does NOT trip trigger #2.
+- **020's core new work** = the `docx→ComposeContentModel` projector: lenient/**total** (never throws; unrecognized → flatten-by-omission), reuse `ComposeDocxProjectionBuilder` traversal + `NumberingComputationEngine`. NDA saves no-422 comes FREE from render-on-save; fidelity built up by 021–026 before the 010 cutover.
+- Confirmed: `SynthesizeDocument:102` = `WordprocessingDocument.Create` (blank); `AppendSection:191` = `.Open` (preserves parts). `ComposeDocxProjectionBuilder.Build:92` emits **HTML**, not a ComposeContentModel (the gap).
+
+### Task 020 — steps completed
+- [x] Step 0: rigor FULL/opus/high declared; deps 001+004 ✅; /conflict-check CLEAN (Services/Compose window clear)
+- [x] Step 1: code map (ComposeContentModel.cs, ComposeDocxProjectionBuilder structure, SynthesizeDocument + AppendSection)
+- [x] Step 2: canonical-hub design → notes/020-canonical-hub-design.md
+- [x] Step 3: **projector SHIPPED** — `ComposeDocxProjectionBuilder.BuildContentModel` (total/lenient; AlternateContent handled loudly; F-03 parity guard) + `ComposeCanonicalModelProjection` envelope + shared `ResolveHyperlinkHref(h, MainDocumentPart)` refactor + seam slice `ComposeCanonicalModelRoundTripSeamTests` (12/12 green: corpus round-trip block-kind stability; NDA never refused; NDA rendered output = unique paraIds ⇒ count-gate condition impossible; fail-closed). Full Compose suite 407/409 — the 2 fails are PRE-EXISTING NDA-fixture reds since task 004 (stash-verified at HEAD, §F.3), routed to 026/027 (details in notes §8, incl. the NEW AppendSection dup-paraId I-4 finding).
+- [ ] Step 4: SaveAsync render-out wiring — SCOPED OUT of 020 per re-sequence (belongs to 010 cutover after 011+026); documented as directional deviation in notes §8
+- [ ] NEXT: model-shape seams for 021–025 only as needed; Step 6: publish size + delta vs 48.25 MB; re-run /conflict-check; Placement Justification
+- [ ] Step 7: Tier-1 NetArchTest verify (build + seam already green)
+- [ ] Step 9.5: code-review + adr-check (FULL/BFF)
 - **New critical path**: `001 → 020 → {011, 021–026} → 010 → 012 → {013, 027} → 014 → 060 → 061 → 090`.
 - **Conflict-check**: CLEAN window (no open-PR overlap; no sibling branch has unmerged commits on ComposeService.cs / ComposeDocumentRenderer.cs / ComposeBaselineParaIdStamper.cs). Verified 2026-08-05 (task-execute run 2). **Re-run before 020's BFF PR.**
 
