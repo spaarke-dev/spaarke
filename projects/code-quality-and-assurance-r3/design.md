@@ -87,6 +87,56 @@ Children carry their **own** hot-path declarations + Placement Justifications (�
 
 ---
 
+## 4A. Coordination model — how the umbrella and children stay aligned
+
+**The governing principle: children are aligned by shared *artifacts*, not by task-by-task messaging.** The umbrella and a surface child exchange information at exactly **two seams** — a rubric handed down at the start, a grade rolled up at the end. Between those seams their `/task-execute` runs are fully independent, because the surfaces are *disjoint* (different files, languages, and — usually — deploy targets). You do not coordinate work that never touches the same code.
+
+### The two seams (the entire coordination interface)
+
+| Seam | Direction | When | Mechanism | Frequency |
+|---|---|---|---|---|
+| **S1 — Rubric + method handoff** | umbrella → child | child kickoff | Child spec references `docs/standards/CODE-QUALITY-RUBRIC.md` (§5) + runs the shared `quality-assessment` workflow (§6). Alignment is by-construction — same ruler, same method. | Once per child |
+| **S2 — Grade + findings rollup** | child → umbrella | child wrap-up | Child appends its surface row to the umbrella scorecard `notes/SCORECARD.md` (append-only; no merge dance) and its remediation `design.md` link. | Once per child (updated on re-assessment) |
+
+There is **no S3.** Mid-execution, a child never blocks on, waits for, or negotiates with the umbrella or a sibling.
+
+### The shared artifacts (each written ONCE, referenced by all)
+
+1. **`docs/standards/CODE-QUALITY-RUBRIC.md`** — the single scoring contract (D1–D11). Every child spec cites it, so every surface is measured identically.
+2. **The `quality-assessment` workflow/skill** (§6) — every surface runs the same fan-out → adversarial-verify → design method. Consistency lives in the tool, not in a coordinator's head.
+3. **`projects/code-quality-and-assurance-r3/notes/SCORECARD.md`** — one living scorecard; each child owns exactly one row, appended at wrap-up. This is the aggregate A+ view.
+
+### What the umbrella owns vs. what children own (no duplication, no negotiation)
+
+| Concern | Owner | Why here |
+|---|---|---|
+| Rubric, scorecard, assessment method/workflow | **Umbrella** | Single source of truth; children consume, never fork |
+| **Forcing-functions** (ArchTests, analyzers, CI gates) — *authoring* | **Umbrella** | Cross-cutting; authored once so children don't duplicate or negotiate them (§9) |
+| **Forcing-function *activation* per surface** (flip `TreatWarningsAsErrors`, `--max-warnings 0` for that surface) | **Child** (its final task) | Removes the only real cross-project hazard — see below |
+| Horizontal sweeps (security, tests, deps, observability) | **Umbrella** (§8) | Cross-cutting; run once repo-wide, not per surface |
+| Deep remediation of one disjoint surface | **Child** | Independent files → independent plan, branch, worktree, PR, quiet-window |
+
+### The one genuine cross-project dependency — and its resolution
+
+The only hazard that could force coordination is flipping a **repo-wide enforcement gate** while a surface is still dirty (it would break that surface's build). **Resolution: gates are activated per-surface, owned by each child as its last task** (design decision, supersedes open-question #4). The umbrella *authors* the gate; each child *turns on its own* enforcement when its surface is clean. No repo-wide big-bang, no inter-project timing negotiation.
+
+### Tracking rollup is automatic (portfolio, not manual)
+
+The two tiers map onto the existing portfolio model with **zero manual typing**:
+- **Umbrella r3 → Epic** (portfolio rollup surface).
+- **Each surface child → a Project** under that Epic (`Parent issue` = the Epic).
+- The 9 `/devops-*` auto-hooks already sync each child's task-count / completion / status to Project #2 on every `/task-execute`; the Epic aggregates them. The umbrella's `SCORECARD.md` is the qualitative companion to the portfolio's quantitative rollup.
+
+### Merge / sequencing coordination reuses existing machinery
+
+Cross-project *file* contention (the real risk, given 30 active worktrees) is handled by the mechanisms every BFF project already uses — **not** a new process: [`projects/INDEX.md`](../INDEX.md) hot-path declarations + `/conflict-check` before each remediation PR. Assessments are read-only → conflict-free → run anytime; only remediation lands in per-surface quiet windows.
+
+### Net coordination cost
+
+Front-loaded and small: **write the rubric + workflow once (S1)**, then each child self-serves. Per child, ongoing coordination = **one scorecard-row append (S2)** + the automatic portfolio sync. No standing back-and-forth, no shared task plan, no cross-project task dependencies. Realistic project count is **umbrella + 2–3 heavy children** (BFF, likely shared-client-libs + dataverse-model); light surfaces fold their remediation directly into the umbrella (§4), further shrinking the surface that needs any coordination at all.
+
+---
+
 ## 5. The quality rubric (the A+ anchor)
 
 Every surface is scored against the **same** dimensions so grades are comparable and progress is measurable. This extends the R1 scorecard into a standing standard (deliverable: `docs/standards/CODE-QUALITY-RUBRIC.md`). Dimensions the senior panel grades:
@@ -152,6 +202,8 @@ A+ is sustained, not achieved once. Convert findings into enforced invariants (e
 
 ## 10. Sequencing & coordination
 
+> The umbrella↔child *alignment* contract (the two seams, shared artifacts, per-surface gate ownership, portfolio rollup) is defined in **§4A. Coordination model**. This section covers only *timing/merge* sequencing.
+
 - **Assess now, remediate in windows.** All Phase-0 assessments are read-only → start immediately regardless of the 30-worktree churn. Remediation lands per-surface in coordinated quiet windows.
 - **BFF is the most-contested surface** (19 active projects) → its child project already defines an A/B tranche split. Other surfaces (client libs, data model) are far less contested and can remediate sooner.
 - **`/conflict-check`** before every remediation PR against [`projects/INDEX.md`](../INDEX.md); surface children register their own hot-path declarations.
@@ -203,5 +255,5 @@ Umbrella deliverables are docs, ArchTests, and CI/build-config; direct product-c
 1. **Run the assessments under a multi-agent Workflow** (opt-in "use a workflow") for speed/consistency, or drive agent fan-out manually per surface?
 2. **Which surfaces get their own child project vs. fold into the umbrella?** Proposed children: shared-client-libs, PCF, dataverse-model. Confirm.
 3. **Portfolio**: register this reframed R3 on Project #2 (Epic parent) and register `bff-api-cleanup-remediation-r1` as a child? (Verify no orphan R3 Issue first.)
-4. **Forcing-function aggressiveness** — flip `TreatWarningsAsErrors`/`--max-warnings 0` repo-wide in one sweep, or per-surface as each is remediated (avoids a broken-build big-bang)?
+4. ~~**Forcing-function aggressiveness** — repo-wide sweep vs per-surface?~~ **RESOLVED** (§4A): per-surface activation, owned by each child as its final task. The umbrella authors the gate; each child turns on its own enforcement when its surface is clean — no repo-wide big-bang.
 5. **Grade authority** — self-scored against the rubric, or commission an external senior-panel review as the A+ acceptance gate?
