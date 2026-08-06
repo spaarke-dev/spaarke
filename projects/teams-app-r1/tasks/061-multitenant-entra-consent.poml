@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="teams-app-r1">
+  <metadata>
+    <title>Multitenant workforce Entra app + admin-consent onboarding</title>
+    <phase>6 Enterprise &amp; Routing</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>App-registration configuration + onboarding documentation following the established multitenant pattern; no new src/ code path.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>App-registration config + onboarding docs following the standard multitenant pattern</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>002</deps>
+    <tags>auth, azure, config</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Configure the REUSED Entra app `1e40baad-…` as a multitenant workforce app with per-customer admin consent. Document the admin-consent onboarding flow for a customer tenant admin. Capture the `webApplicationInfo { id, resource }` inputs the Teams manifest (task 070) needs. Use least-privilege delegated scopes only.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Microsoft Entra app registrations, multitenant "supported account types" configuration, admin-consent flows, and least-privilege delegated scope design. Follow ADRs strictly.</role>
+
+  <goal>
+    Entra app `1e40baad-…` is confirmed/configured as a multitenant workforce app (supported account types = any org directory) with the minimal set of least-privilege delegated scopes needed for the collaboration surface; a documented admin-consent onboarding procedure exists for a customer tenant admin; and the exact `webApplicationInfo { id, resource }` values are captured for task 070's Teams manifest.
+  </goal>
+
+  <context>
+    <background>
+      Per design.md §4 (D6) and §8, and spec FR-08: register ONE multitenant workforce Entra app (reuse `1e40baad-…`, which already carries `access_as_user` + Teams redirect URIs per root CLAUDE.md verified references); each customer org's admin consents. The multitenant badge concerns only where user identity lives — independent of hosting/data topology, which task 060's `tid`→env routing handles separately. This task does NOT touch routing; it configures the app registration and documents the consent flow.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/teams-app-r1/design.md</file>
+      <file role="canonical-reference">projects/teams-app-r1/spec.md</file>
+      <file role="new">projects/teams-app-r1/notes/admin-consent-onboarding.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">SCOPE: the app-registration configuration. The app MUST be configured as a multitenant workforce app (not single-tenant, not a new CIAM/external app) with per-customer admin consent — this is the A2-amendment posture (task 002); do NOT enable CIAM sign-in on this app registration.</constraint>
+    <constraint source="ADR-028">SCOPE: delegated scopes. Use least-privilege delegated scopes only — grant exactly what the collaboration surface needs (broker-only per NFR-02: the collaboration path does not need Graph delegated scopes beyond `access_as_user`/openid/profile for the BFF audience); do NOT add scopes for capabilities out of R1 scope (e.g., no Teams messaging/bot scopes).</constraint>
+    <constraint source="project">SCOPE: app identity. REUSE `1e40baad-…` — do NOT register a new Entra app. The multitenant badge on this app is independent of the hosting/data topology, which task 060 handles; do not conflate the two in this task's scope.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Multitenant workforce Entra app configuration + admin-consent onboarding</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Reused multitenant workforce app" location="Entra app 1e40baad-…">Already carries Teams redirect URIs + `access_as_user`; confirm/adjust "supported account types" and scope set rather than re-registering.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm `1e40baad-…`'s current "supported account types" setting; set/confirm it to multitenant (accounts in any organizational directory) if not already so configured.</step>
+    <step order="2">Enumerate and confirm the minimal least-privilege delegated scope set needed for Teams SSO/NAA to the BFF audience (per NFR-02 broker-only — no downstream Graph delegated scopes for the collaboration path beyond what Teams SSO itself requires); remove or flag any scope broader than required.</step>
+    <step order="3">Document the per-customer admin-consent flow (URL/procedure a customer tenant admin follows to consent the app for their org) in `projects/teams-app-r1/notes/admin-consent-onboarding.md`.</step>
+    <step order="4">Capture the exact `webApplicationInfo { id, resource }` values (app id `1e40baad-…` + the correct `resource` URI for the BFF audience/API) needed by task 070's Teams manifest; record them in the same notes file.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run Azure CLI / Entra admin-center configuration commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/teams-app-r1/notes/admin-consent-onboarding.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Entra app `1e40baad-…` is confirmed configured as multitenant (accounts in any organizational directory), with delegated scopes limited to the least-privilege set needed for Teams SSO/NAA to the BFF audience.</criterion>
+    <criterion testable="true">A second (customer) tenant admin, following the documented onboarding procedure, can consent and install the app.</criterion>
+    <criterion testable="true">The exact `webApplicationInfo { id, resource }` values are captured in `notes/admin-consent-onboarding.md` for task 070 to consume.</criterion>
+    <criterion testable="true">Given a tenant that has NOT admin-consented, that tenant's users CANNOT access the collaboration surface (consent is a hard gate, not advisory).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    No `<justification>` required — this task configures/reuses the existing app registration; it introduces no new surface. Feeds task 070 (Teams app manifest) directly via the captured `webApplicationInfo` values.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. This is a STANDARD-rigor task (Step 9.5 gates skipped).</protocol>
+  </execution>
+</task>

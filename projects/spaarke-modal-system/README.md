@@ -2,6 +2,7 @@
 
 > **Status**: **Complete (2026-08-02)** — 28 of 29 tasks ✅, 1 deferred with owner-visible follow-on (051 → [Issue #713](https://github.com/spaarke-dev/spaarke/issues/713)). Success Criteria verified with evidence: [`notes/success-criteria-verification.md`](notes/success-criteria-verification.md); test-diet gate: [`notes/test-diet-report.md`](notes/test-diet-report.md); one-time visual review outstanding (consolidated list in the criteria doc).
 > **Created**: 2026-07-31
+> **Portfolio**: Issue [#738](https://github.com/spaarke-dev/spaarke/issues/738) (closed, Completed) · Parent Epic [#432 IMPLEMENTATION](https://github.com/spaarke-dev/spaarke/issues/432) · [Project #2 board](https://github.com/users/spaarke-dev/projects/2)
 
 ## Graduation Criteria
 

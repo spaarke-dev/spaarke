@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="teams-app-r1">
+  <metadata>
+    <title>Access-Permission sharing gate on the grant modal (Option A: Restricted/Limited/Standard)</title>
+    <phase>4 Access-Management Surface (PCF)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Governs whether external access grants are permitted at all (FR-14 sharing gate) — a security-relevant authorization boundary on an existing modal; code-review + adr-check apply.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified conditional-logic addition to an existing modal; owner-confirmed mapping (Option A), no open design questions.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared TrackingFieldTrio component files; serialize the toolbar chain (040 → 041/042 → 043 → 045). Stream C runs concurrently with other streams.</parallel-reason>
+    <deps>041</deps>
+    <tags>pcf, react, frontend, fluent-ui</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Gate the access-grant modal (built in task 041) by the record-level Access-Permission OptionSet, already rendered by `TrackingFieldTrio` (Standard/Limited/Restricted), per the owner-confirmed Option A sharing-gate mapping (spec FR-14): **Restricted** = external grants blocked entirely (the modal blocks/prevents new external grants); **Limited** = named grants only, no standing-grant option; **Standard** = all grant types including standing grants and membership auto-approval flow. This gate is DISTINCT from the per-grant `sprk_accesslevel` field on each `sprk_externalrecordaccess` row — it governs whether the modal permits a grant type at all, not what access level an individual grant carries.
+  </prompt>
+
+  <role>SPAARKE frontend developer. Expert in Fluent UI v9 conditional-rendering patterns and the Spaarke Access-Permission / access-level distinction. Follow ADRs strictly.</role>
+
+  <goal>
+    The access-grant modal (task 041) reads the record's current Access-Permission value and: on Restricted, blocks/disables all external-grant actions (approve candidate, add named contact) with a clear explanation; on Limited, allows named/approved grants but disables or hides the standing-grant option; on Standard, allows every grant type including standing grants. The per-grant `sprk_accesslevel` field remains completely independent of this gate — this task does not touch it.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-14 and Owner Clarifications (2026-08-03), Access-Permission (Standard/Limited/Restricted) is a record-level **sharing gate** distinct from the per-grant `sprk_accesslevel`. Restricted = off, Limited = named-only (no standing/auto), Standard = all grant types incl. standing grants + membership auto-approval. This task only modifies the modal built in task 041 — it does not introduce any new component, table, or write path, so it carries no &lt;justification&gt; per the task-authoring rule (modification-only tasks are exempt from CLAUDE.md §11).
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/types.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-14 Option A mapping is fixed and owner-confirmed: Restricted = blocks all external grants; Limited = named grants only (standing-grant option disabled/hidden); Standard = all grant types (incl. standing + membership auto-approval). SCOPE: applies to the modal's grant-type availability logic only.</constraint>
+    <constraint source="ADR-021">Any new disabled/blocked-state UI (banners, disabled controls, explanatory text) uses Fluent v9 semantic tokens and is dark-mode correct. SCOPE: new gating UI added in this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Access-Permission sharing gate (Option A)</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Option A sharing gate" location="projects/teams-app-r1/spec.md">FR-14 + Resolved Decisions — Restricted/Limited/Standard governs the grant modal's available grant types; distinct from per-grant `sprk_accesslevel`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the current record's Access-Permission value (already available to `TrackingFieldTrio` as the `accessPermission` prop) and pass it into the `AccessGrantModal` (task 041) as a new prop.</step>
+    <step order="2">Implement the Restricted case: disable/hide the approve-candidate and add-named-contact actions; show a clear explanatory message that external access is off for this record.</step>
+    <step order="3">Implement the Limited case: allow approve-candidate and add-named-contact actions; disable/hide the standing-grant toggle per contact.</step>
+    <step order="4">Implement the Standard case: allow all grant types, including the standing-grant toggle and membership auto-approval flow, unchanged from task 041's baseline behavior.</step>
+    <step order="5">Verify the per-grant `sprk_accesslevel` field/logic (if present anywhere in the modal, e.g. a per-grant access-level selector) is untouched and remains independent of this gate.</step>
+    <step order="6">Write tests for all three Access-Permission states plus the independence of `sprk_accesslevel` from the gate; dark-mode render check.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test the shared library and PCF control</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/types.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/__tests__/AccessGrantModal.gating.test.tsx</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="restricted-blocks-external-grants">Render the modal with Access-Permission=Restricted and assert approve-candidate and add-named-contact actions are disabled/unavailable, with an explanatory message shown.</test>
+    <test name="limited-disables-standing">Render the modal with Access-Permission=Limited and assert named/approved grants are available but the standing-grant option is disabled/hidden.</test>
+    <test name="standard-enables-all">Render the modal with Access-Permission=Standard and assert all grant types (approve, named, standing) are available.</test>
+    <test name="adr-021-dark-mode">Render each of the three gating states in `webDarkTheme` and assert correct rendering with no console errors.</test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Restricted → the modal blocks all external-grant actions (approve candidate, add named contact) with an explanatory message.</criterion>
+    <criterion testable="true">Limited → named/approved grants remain available but the standing-grant option is unavailable (disabled or hidden).</criterion>
+    <criterion testable="true">Standard → all grant types (approve, named, standing) are available, matching task 041's baseline behavior.</criterion>
+    <criterion testable="true">The per-grant `sprk_accesslevel` field/selector (if present in the modal) remains functionally independent of this Access-Permission gate — changing Access-Permission does not alter or reset `sprk_accesslevel` values.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Modification-only task on the task-041 modal; no new component/table/endpoint introduced, so no &lt;justification&gt; section per the CLAUDE.md §11 modification exemption.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. FULL-rigor: code-review + adr-check gates apply at Step 9.5.</protocol>
+  </execution>
+</task>

@@ -16,10 +16,12 @@
     "refreshTypes": "pcf-scripts refreshTypes"
   },
   "dependencies": {
+    "@spaarke/auth": "file:../../shared/Spaarke.Auth",
     "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
     "ajv": "^8.20.0"
   },
   "devDependencies": {
+    "@azure/msal-browser": "^3.30.0",
     "@fluentui/react-components": "^9.46.0",
     "@fluentui/react-icons": "^2.0.0",
     "@microsoft/eslint-plugin-power-apps": "^0.2.51",

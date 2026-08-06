@@ -47,4 +47,30 @@ export interface ITrackingFieldTrioProps {
   onMonitorChange: (value: boolean) => void;
   onHighPriorityChange: (value: boolean) => void;
   onAccessPermissionChange: (value: number) => void;
+
+  // ---------------------------------------------------------------------
+  // Governance toolbar (person + email icons — task 040, teams-app-r1).
+  // Toolbar shell + callback wiring only; the modal (task 041) and the
+  // email-members action (task 042) supply the actual dialog contents by
+  // implementing these callbacks. All three props are optional so any
+  // existing consumer that hasn't wired the toolbar is unaffected
+  // (entity-agnostic, prop-injected — no baked-in entity/field values).
+  // ---------------------------------------------------------------------
+
+  /** Invoked when the person icon is clicked, to open the access-grant
+   * modal (task 041). When omitted, the person icon is NOT rendered — this
+   * keeps the toolbar opt-in per consumer. */
+  onOpenGrantModal?: () => void;
+  /** Invoked when the email icon is clicked, to open the email-members
+   * action (task 042, via the canonical EmailComposer/SendEmailDialog per
+   * ADR-045 — this component MUST NOT implement ad hoc send logic). When
+   * omitted, the email icon is NOT rendered. */
+  onOpenEmailMembers?: () => void;
+  /** Gates the person icon's enabled state. Defaults to `true` (enabled)
+   * when `onOpenGrantModal` is supplied and this prop is omitted. Pass
+   * `false` when the current user lacks grant privilege — the icon then
+   * renders genuinely disabled (native Fluent `disabled`, no attached
+   * click handler), never merely dimmed with a live handler, so there is
+   * no dead click. */
+  canGrantAccess?: boolean;
 }

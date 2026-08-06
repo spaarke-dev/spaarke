@@ -515,22 +515,24 @@ public class ExternalAccessEndpointTests
     [Fact]
     public void ExternalUserContext_WithValidCallerContext_ReturnsNonProblemResult()
     {
-        // Arrange
+        // Arrange — task 025: the handler now reads the plane-agnostic CallerPrincipal set by the
+        // CallerPrincipalAuthorizationFilter (works for a CIAM contact OR a workforce user).
         var contactId = Guid.NewGuid();
         var projectId = Guid.NewGuid();
 
-        var callerContext = new ExternalCallerContext
+        var caller = new CallerPrincipal
         {
+            Plane = CallerPrincipalPlane.CiamContact,
             ContactId = contactId,
             Email = "external@test.com",
-            Participations = new List<ExternalParticipation>
+            ProjectAccess = new List<CallerProjectAccess>
             {
                 new() { ProjectId = projectId, AccessLevel = ExternalAccessLevel.Collaborate }
             }
         };
 
         var httpContext = CreateHttpContext();
-        httpContext.Items[ExternalCallerContext.HttpContextItemsKey] = callerContext;
+        httpContext.Items[CallerPrincipal.HttpContextItemsKey] = caller;
 
         var logger = CreateLogger();
 

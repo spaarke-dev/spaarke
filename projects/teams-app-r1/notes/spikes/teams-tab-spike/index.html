@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Spaarke Teams Foundation Spike</title>
+  <!-- Teams JS SDK v2 (CDN is fine for a throwaway spike tab). -->
+  <script src="https://res.cdn.office.net/teams-js/2.24.0/js/MicrosoftTeams.min.js"
+          crossorigin="anonymous"></script>
+  <script src="./config.js"></script>
+  <script src="./teams-sso.js"></script>
+  <style>
+    /* Theme-aware-ish: mirror Teams light/dark via prefers-color-scheme (spike only). */
+    body { font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 16px; background: #fff; color: #242424; }
+    @media (prefers-color-scheme: dark) { body { background: #1f1f1f; color: #f5f5f5; } pre { background: #2b2b2b; } }
+    h1 { font-size: 16px; margin: 0 0 12px; }
+    .row { margin: 8px 0; }
+    .status { font-weight: 600; }
+    .ok { color: #0f7b0f; } .warn { color: #bc4b09; } .err { color: #c50f1f; }
+    pre { background: #f3f3f3; padding: 12px; border-radius: 6px; overflow: auto; font-size: 12px; max-height: 40vh; }
+    button { padding: 6px 14px; border-radius: 4px; border: 1px solid #888; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>Spaarke Teams Foundation Spike (FR-16)</h1>
+  <div class="row">Teams context: <span id="ctx">initializing…</span></div>
+  <div class="row status">Result: <span id="status">—</span></div>
+  <div class="row"><button id="run" disabled>Re-run membership check</button></div>
+  <div class="row"><strong>Token claims (display-only):</strong><pre id="claims">—</pre></div>
+  <div class="row"><strong>BFF response:</strong><pre id="resp">—</pre></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    function setStatus(text, cls) { const el = $('status'); el.textContent = text; el.className = 'status ' + (cls || ''); }
+
+    async function run() {
+      const cfg = window.SPIKE_CONFIG;
+      if (!cfg || cfg.appClientId.includes('XXXX')) {
+        setStatus('config.js not filled in (copy config.sample.js)', 'err'); return;
+      }
+      try {
+        setStatus('acquiring workforce token…', 'warn');
+        const token = await acquireWorkforceToken();
+        $('claims').textContent = JSON.stringify(decodeJwtClaims(token), null, 2);
+
+        setStatus('calling BFF membership endpoint…', 'warn');
+        const { status, body } = await callMembership(token, cfg);
+        $('resp').textContent = JSON.stringify(body, null, 2);
+
+        if (status === 200) {
+          const count = body && typeof body.count === 'number' ? body.count : '?';
+          setStatus(`200 OK — membership rows: ${count} (systemuser plane → Run A GO if >0)`, 'ok');
+        } else if (status === 401) {
+          setStatus('401 — expected for a contact-only user TODAY (Run B: confirms tasks 020/021 gap)', 'warn');
+        } else {
+          setStatus(`${status} — unexpected; see BFF response`, 'err');
+        }
+      } catch (e) {
+        setStatus('token acquisition FAILED — desktop popup/Conditional-Access block? This is a NO-GO signal (escalate).', 'err');
+        $('resp').textContent = String(e && e.message ? e.message : e);
+      }
+    }
+
+    (async function boot() {
+      try {
+        const ctx = await initTeams();
+        const theme = ctx && ctx.app ? ctx.app.theme : (ctx.theme || 'default');
+        $('ctx').textContent = `host=${(ctx.app && ctx.app.host && ctx.app.host.name) || ctx.hostName || 'unknown'}, theme=${theme}`;
+        $('run').disabled = false;
+        $('run').addEventListener('click', run);
+        await run();
+      } catch (e) {
+        $('ctx').textContent = 'NOT running inside Teams (app.initialize failed) — sideload as a Teams tab.';
+        setStatus('not in a Teams host', 'err');
+      }
+    })();
+  </script>
+</body>
+</html>
