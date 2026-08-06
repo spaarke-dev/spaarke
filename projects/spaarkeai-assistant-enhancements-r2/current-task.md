@@ -10,10 +10,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **024** (FR-B6) — **✅ COMPLETE** (2026-08-06, built + committed; deploy deferred to 025). **11 tasks done. Phase B implementation complete — only the B deploy (025) remains.** |
-| **Step** | Done. Ready for 025 (deploy + verify B). |
+| **Task** | **025** (Deploy+verify B) — **✅\* COMPLETE** (2026-08-06; deployed + programmatically verified; **owner E2E of live-UI chips pending** — see `notes/b-deploy-verify.md`). **🎉 PHASE B DONE (020–025).** 12 tasks done. Next phase: **D** (030–039). |
+| **Step** | Phase B complete. Ready for Phase D. |
 | **Status** | completed |
-| **Next Action** | Start **task 025** (Deploy + verify B — sonnet/high, STANDARD, deploy). Redeploy the SpaarkeAi code page (cache-clear + build + `Deploy-SpaarkeAi.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com`) to ship the accumulated 022+023+024 client changes; BFF already deployed. Then verify B success criteria (spec §2): content-specific chips per tab, once-per-tab, manual refresh, dev trace. **Owner E2E verify** of the proactive surface belongs here. |
+| **Next Action** | **Phase D** (History robustness & true resume — the largest workstream, 030–039). Per phasing E→A→B→**D**→C. Start with **wave D1** (030 awaited messages[0] Cosmos write + 031 404-on-missing history — 2 BFF tasks, parallelizable: persistence ∥ ChatEndpoints). 030 = sonnet/**xhigh**; 031 = sonnet/high. Both dep 001 (done). NOTE the BFF file-overlap serialization (TASK-INDEX): 031&032 share ChatEndpoints.cs; 030&033 share SessionPersistenceService.cs. **Owner may prefer to E2E-verify Phase B (+ FR-A) first** before starting D — good checkpoint. |
+
+### Phase B — COMPLETE (020–025, 2026-08-06)
+All deployed to spaarkedev1 (BFF `spaarke-bff-dev` + code page `sprk_spaarkeai`). Proactive grounded suggestion turn live: contextType pre-filter → SUGGEST-FOLLOWUPS Action (proposer, not dispatcher) → ≤3 content-specific chips once per tab; manual refresh; dev trace. Owner E2E checklist in `notes/b-deploy-verify.md` (document/summary tabs exercise full content-specificity today; **email tabs gated on Workstream C** 040–043).
 
 ### Task 024 — DONE (2026-08-06). Deploy deferred to 025.
 - Dev-only proactive-selection trace: `recordSuggestTrace` (module-level in ConversationPane.tsx) emits `console.debug("[sprk:suggest-trace]", …)` + a bounded `window.__sprkSuggestTrace` ring buffer, gated on `process.env.NODE_ENV === "production"` → Vite dead-code-eliminates it from the prod bundle (verified: 0 occurrences in dist). Records `{at, tabId, contextType, trigger, chips[]}`; each chip carries the model's `reason`. Server-side candidate list is already logged by AssistantSuggestionService.

@@ -4,7 +4,7 @@
     <title>Deploy + verify Workstream B (proactive chips: code page + catalog)</title>
     <phase>3 B — Proactive follow-ons</phase>
     <gate>blocked until 022,023,024</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment + verification</rigor-reason>
     <model-tier>sonnet</model-tier>
