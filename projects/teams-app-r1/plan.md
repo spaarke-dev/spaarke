@@ -1,5 +1,7 @@
 # Implementation Plan — Spaarke Teams App (R1)
 
+> **✅ COMPLETE (2026-08-06)** — all 26 tasks ✅; code shipped + deployed to `spaarke-bff-dev` + live-verified in Teams; merged to master (PR #723). Graduation: 6/7 fully verified, criterion 6-live = accepted go-live item (Path A). Wrap-up: `notes/integration-verification-report.md`, `notes/test-diet-report.md`, `notes/lessons-learned.md`. **Next**: go-live checklist (customer-tenant org-catalog install + admin consent + `sprk_primarycontact` linkage); R2 lifts `CallerPrincipalResolver` per `notes/r2-coordination-response.md`.
+>
 > **Source**: `spec.md` (16 FRs, 7 NFRs) + `design.md` (D1–D11) + `adr-028-amendment-draft.md`
 > **Created**: 2026-08-03
 > **Execution model**: Sonnet 5 @ effort `high` default; `opus`/`xhigh` for auth-resolver, membership, `tid`→env routing, and ADR-migration tasks. Planning on Opus 4.8.

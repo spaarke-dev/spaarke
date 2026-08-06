@@ -4,7 +4,7 @@
     <title>End-to-end integration verification against graduation criteria</title>
     <phase>8 Integration &amp; Wrap-Up</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Cross-cutting end-to-end verification of the auth→membership→enforcement spine, deployment posture, and dual-host parity; a false-positive pass would ship a broken graduation criterion.</rigor-reason>
     <model-tier>opus</model-tier>

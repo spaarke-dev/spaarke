@@ -4,7 +4,7 @@
     <title>Project wrap-up — gates, cleanup, docs, lessons, test-diet</title>
     <phase>8 Integration &amp; Wrap-Up</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Project-close gate sequence (code-review, adr-check, repo-cleanup, test-diet) that determines whether the project is marked complete — treated as FULL per root CLAUDE.md §7/§8 wrap-up convention.</rigor-reason>
     <model-tier>sonnet</model-tier>

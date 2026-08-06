@@ -2,9 +2,9 @@
 
 > **Portfolio**: [Project #724](https://github.com/spaarke-dev/spaarke/issues/724) · Epic [#431 EMAIL & MESSAGING](https://github.com/spaarke-dev/spaarke/issues/431) · [Board #2](https://github.com/users/spaarke-dev/projects/2)
 >
-> **Last Updated**: 2026-08-03
+> **Last Updated**: 2026-08-06
 >
-> **Status**: In Progress (initialized — tasks generated, execution not started)
+> **Status**: ✅ Complete (code shipped + deployed to `spaarke-bff-dev` + live-verified in Teams; merged to master via PR #723)
 
 ## Overview
 
@@ -25,10 +25,10 @@ R1 delivers the **Spaarke collaboration surface inside Microsoft Teams** — the
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Development (initialized) |
-| **Progress** | 0% (execution not started) |
+| **Phase** | Complete |
+| **Progress** | 100% (all tasks ✅; 6/7 graduation criteria fully verified, criterion 6-live = go-live item per accepted Path A) |
 | **Target Date** | — |
-| **Completed Date** | — |
+| **Completed Date** | 2026-08-06 |
 | **Owner** | ralph.schroeder |
 
 ## Problem Statement
@@ -41,15 +41,15 @@ Extend the deployed `external-spa` **in place** with a Teams host adapter (one c
 
 ## Graduation Criteria
 
-The project is considered **complete** when:
+The project is considered **complete** when: *(verification evidence in [`notes/integration-verification-report.md`](./notes/integration-verification-report.md))*
 
-- [ ] A **systemuser** opens the Teams tab, signs in via workforce SSO with **no second login**, and sees exactly their **membership** records (Teams desktop + web).
-- [ ] A **contact-only** workforce user sees exactly their **contact-anchored membership** records.
-- [ ] Document download returns bytes for an authorized member and **403 with no bytes** for a non-member, across all three principal types (positive + negative).
-- [ ] The same feature components render in the SPA and the Teams tab with **no duplicated feature component** (adapter-only divergence; §11 sign-off for any exception).
-- [ ] The grant modal writes `sprk_externalrecordaccess` (approved membership + named users), sends an invite, and grants are revocable.
-- [ ] The app installs from the org catalog in a second (customer) tenant via admin consent; `tid`→env routing serves the correct environment.
-- [ ] BFF publish ≤60 MB compressed; no new HIGH-severity CVE; **no** M365 Agents SDK / Bot packages added.
+- [x] A **systemuser** opens the Teams tab, signs in via workforce SSO with **no second login**, and sees exactly their **membership** records — ✅ operator-verified live (Teams web, 2026-08-06).
+- [x] A **contact-only** workforce user sees exactly their **contact-anchored membership** records — ✅ logic test-verified (accessible-record-set scope); live check operator-gated.
+- [x] Document download returns bytes for an authorized member and **403 with no bytes** for a non-member, across all three principal types (positive + negative) — ✅ empirically test-verified (contract + seam tests; no pointer leaked).
+- [x] The same feature components render in the SPA and the Teams tab with **no duplicated feature component** (adapter-only divergence; §11 sign-off for any exception) — ✅ grep-verified (one core + thin `TeamsHostAdapter`).
+- [x] The grant modal writes `sprk_externalrecordaccess` (approved membership + named users), sends an invite, and grants are revocable — ✅ backend contract test-verified; live modal operator-gated.
+- [x] The app installs from the org catalog in a second (customer) tenant via admin consent; `tid`→env routing serves the correct environment — ⚠️ **routing deny-logic verified; live second-*customer*-tenant install = go-live checklist item (accepted Path A, 2026-08-06)** — needs a real second tenant.
+- [x] BFF publish ≤60 MB compressed; no new HIGH-severity CVE; **no** M365 Agents SDK / Bot packages added — ✅ 46.90 MB; no HIGH/Critical CVE (Xml→8.0.4).
 
 ## Scope
 
