@@ -1346,13 +1346,16 @@ public class CommunicationIntegrationTests
             .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { accountEntity });
 
-        // Capture the sprk_communication entity created by the processor
+        // Capture the sprk_communication entity created by the processor. Task 021 re-routed the inbound
+        // create onto the race-proof ICommunicationDataverseService.CreateCommunicationRaceProofAsync
+        // (returns (Guid Id, bool WasDuplicate)); the Entity built is unchanged.
         dataverseMock
-            .Setup(d => d.CreateAsync(
+            .Setup(d => d.CreateCommunicationRaceProofAsync(
                 It.Is<DataverseEntity>(e => e.LogicalName == "sprk_communication"),
+                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<DataverseEntity, CancellationToken>((entity, _) => capturedEntity = entity)
-            .ReturnsAsync(expectedRecordId);
+            .Callback<DataverseEntity, string?, CancellationToken>((entity, _, _) => capturedEntity = entity)
+            .ReturnsAsync((expectedRecordId, false));
 
         var processor = BuildIncomingProcessor(graphFactoryMock, dataverseMock);
 
@@ -1436,11 +1439,12 @@ public class CommunicationIntegrationTests
             .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { accountEntity });
         dataverseMock
-            .Setup(d => d.CreateAsync(
+            .Setup(d => d.CreateCommunicationRaceProofAsync(
                 It.Is<DataverseEntity>(e => e.LogicalName == "sprk_communication"),
+                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<DataverseEntity, CancellationToken>((entity, _) => capturedEntity = entity)
-            .ReturnsAsync(Guid.NewGuid());
+            .Callback<DataverseEntity, string?, CancellationToken>((entity, _, _) => capturedEntity = entity)
+            .ReturnsAsync((Guid.NewGuid(), false));
 
         var processor = BuildIncomingProcessor(graphFactoryMock, dataverseMock);
 
@@ -1473,11 +1477,12 @@ public class CommunicationIntegrationTests
             .ReturnsAsync(Array.Empty<DataverseEntity>());
 
         dataverseMock
-            .Setup(d => d.CreateAsync(
+            .Setup(d => d.CreateCommunicationRaceProofAsync(
                 It.Is<DataverseEntity>(e => e.LogicalName == "sprk_communication"),
+                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<DataverseEntity, CancellationToken>((entity, _) => capturedEntity = entity)
-            .ReturnsAsync(Guid.NewGuid());
+            .Callback<DataverseEntity, string?, CancellationToken>((entity, _, _) => capturedEntity = entity)
+            .ReturnsAsync((Guid.NewGuid(), false));
 
         var processor = BuildIncomingProcessor(graphFactoryMock, dataverseMock);
 
@@ -1534,11 +1539,12 @@ public class CommunicationIntegrationTests
             .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<DataverseEntity>());
         dataverseMock
-            .Setup(d => d.CreateAsync(
+            .Setup(d => d.CreateCommunicationRaceProofAsync(
                 It.Is<DataverseEntity>(e => e.LogicalName == "sprk_communication"),
+                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<DataverseEntity, CancellationToken>((_, _) => createCallCount++)
-            .ReturnsAsync(Guid.NewGuid());
+            .Callback<DataverseEntity, string?, CancellationToken>((_, _, _) => createCallCount++)
+            .ReturnsAsync((Guid.NewGuid(), false));
 
         var processor = BuildIncomingProcessor(graphFactoryMock, dataverseMock);
 
