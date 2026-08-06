@@ -21,34 +21,12 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 public static class ExternalUserContextEndpoint
 {
     /// <summary>
-    /// Registers GET /me on the provided external user route group.
-    /// Applies ExternalCallerAuthorizationFilter to validate the portal JWT and
-    /// resolve Contact participation data before the handler runs.
-    /// </summary>
-    public static RouteGroupBuilder MapExternalUserContextEndpoint(this RouteGroupBuilder group)
-    {
-        group.MapGet("/me", Handle)
-            .WithName("GetExternalUserContext")
-            .WithSummary("Get authenticated portal user's project access context")
-            .WithDescription(
-                "Returns the Contact's project access list with access levels. " +
-                "Called by the Power Pages SPA on startup to initialize navigation. " +
-                "Requires a valid Power Pages portal-issued JWT token.")
-            .Produces<ExternalUserContextResponse>(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status500InternalServerError)
-            .AddExternalCallerAuthorizationFilter();
-
-        return group;
-    }
-
-    /// <summary>
     /// Handles GET /api/v1/external/me.
     ///
-    /// The ExternalCallerAuthorizationFilter (applied via AddExternalCallerAuthorizationFilter()
-    /// in ExternalAccessEndpoints.cs) has already validated the portal token and stored
-    /// the resolved ExternalCallerContext on HttpContext.Items before this handler runs.
+    /// The CallerPrincipalAuthorizationFilter (applied at the group level in ExternalAccessEndpoints.cs,
+    /// teams-app-r1 task 025) has already authenticated the caller on EITHER plane (CIAM external
+    /// contact or workforce user) and stored the resolved CallerPrincipal on HttpContext.Items before
+    /// this handler runs.
     /// </summary>
     /// <param name="httpContext">The current HTTP context (used to retrieve ExternalCallerContext).</param>
     /// <param name="logger">Logger for request tracing.</param>
@@ -61,15 +39,17 @@ public static class ExternalUserContextEndpoint
         HttpContext httpContext,
         ILogger<Program> logger)
     {
-        // ExternalCallerAuthorizationFilter has already run and set the context
-        var callerContext = httpContext.Items[ExternalCallerContext.HttpContextItemsKey] as ExternalCallerContext;
+        // CallerPrincipalAuthorizationFilter (task 025) has already run and set the principal —
+        // for EITHER plane (CIAM external contact or workforce user). Principal-agnostic: this handler
+        // does not branch on plane; it projects the resolved principal's project access uniformly.
+        var caller = httpContext.Items[CallerPrincipal.HttpContextItemsKey] as CallerPrincipal;
 
-        if (callerContext is null)
+        if (caller is null)
         {
             // Should not happen if the filter is correctly applied, but guard defensively
             logger.LogError(
-                "[EXT-ME] ExternalCallerContext not found in HttpContext.Items. " +
-                "Ensure AddExternalCallerAuthorizationFilter() is applied to this endpoint. TraceId={TraceId}",
+                "[EXT-ME] CallerPrincipal not found in HttpContext.Items. " +
+                "Ensure AddCallerPrincipalAuthorizationFilter() is applied to this group. TraceId={TraceId}",
                 httpContext.TraceIdentifier);
 
             return Results.Problem(
@@ -80,18 +60,18 @@ public static class ExternalUserContextEndpoint
         }
 
         logger.LogInformation(
-            "[EXT-ME] Contact {ContactId} requested context: {Count} project participations. TraceId={TraceId}",
-            callerContext.ContactId, callerContext.Participations.Count, httpContext.TraceIdentifier);
+            "[EXT-ME] Caller {ContactId} ({Plane}) requested context: {Count} accessible projects. TraceId={TraceId}",
+            caller.ContactId, caller.Plane, caller.ProjectAccess.Count, httpContext.TraceIdentifier);
 
-        var projects = callerContext.Participations
+        var projects = caller.ProjectAccess
             .Select(p => new ProjectAccessEntry(
                 p.ProjectId,
                 p.AccessLevel.ToString()))
             .ToList();
 
         var response = new ExternalUserContextResponse(
-            callerContext.ContactId,
-            callerContext.Email,
+            caller.ContactId,
+            caller.Email,
             projects);
 
         return Results.Ok(response);

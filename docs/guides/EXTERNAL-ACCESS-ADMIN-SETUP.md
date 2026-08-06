@@ -1,7 +1,7 @@
 # EXTERNAL ACCESS — ADMIN & OPERATIONS SETUP GUIDE
 
 > **Audience**: Azure / Power Platform admins and DevOps engineers configuring the external access environment
-> **Last Updated**: 2026-07-20
+> **Last Updated**: 2026-07-21
 > **Applies To**: Azure Static Web Apps, Microsoft Entra External ID (CIAM), Dataverse, Azure App Service (BFF)
 > **Architecture Reference**: [`docs/architecture/external-access-spa-architecture.md`](../architecture/external-access-spa-architecture.md)
 
@@ -173,6 +173,94 @@ Unchanged authorization model. A grant is one active record with:
 ## Section 5: Onboarding Flow (admin-initiated)
 
 There is **no self-service sign-up** in R1 (`isSignUpAllowed = false`). A core user onboards an external attorney; the attorney then sets a password via SSPR.
+
+> **⚠️ R1 reality — API-only, no UI button yet.** In R1 there is **no "Invite to Secure Workspace" button** on the Matter/Project form. Onboarding is done by a Spaarke **core user or admin calling the BFF endpoint directly** (curl / Postman / PowerShell / a thin admin script). The one-click ribbon/form command is deferred to **R2** (backlog item DI-029-01). Until then, follow Section 5.0 below — it is the entire onboarding process.
+
+### 5.0 Onboard a new external user — step-by-step (copy-paste)
+
+This is the complete, current process to give an outside attorney access to a Secure Project. It takes one API call.
+
+**Before you start, gather three things:**
+
+| Input | Where to get it | Example |
+|-------|-----------------|---------|
+| Attorney **email** | From the requesting core user | `jane.doe@outsidecounsel.com` |
+| **Project ID** (GUID) | The `sprk_project` record's ID (open the Project row → the `id` in the URL, or query Dataverse) | `3f2504e0-4f89-41d3-9a0c-0305e82c3301` |
+| **Access level** | Decide View / Collaborate / Full (see Section 8) | `100000001` (Collaborate) |
+
+Optional: `FirstName`, `LastName` (used only if the Contact doesn't already exist), `ExpiryDate` (`YYYY-MM-DD`, auto-revoke date), `AccountId` (the attorney's firm, for record-keeping only — it is **never** the grantee).
+
+---
+
+**Step 1 — Get a workforce admin token for the BFF.**
+
+The `/api/v1/external-access/*` management endpoints require a **workforce** (Spaarke staff) Entra token — the same identity a core user signs in with. The simplest way to mint one for a manual/admin call:
+
+```bash
+# Resource = the BFF workforce app-id URI (api://{bff-app-id}); find {bff-app-id} in the
+# BFF App Service setting AzureAd__ClientId (see auth-deployment-setup.md §3).
+TOKEN=$(az account get-access-token \
+  --resource "api://{bff-app-id}" \
+  --query accessToken -o tsv)
+```
+
+(In production this token comes from the signed-in core user's session, not the CLI — the CLI path is for admin/manual onboarding today.)
+
+---
+
+**Step 2 — Call `invite-and-grant` (onboard + grant in one action).**
+
+```bash
+curl -sS -X POST \
+  https://spaarke-bff-dev.azurewebsites.net/api/v1/external-access/invite-and-grant \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "email":       "jane.doe@outsidecounsel.com",
+        "projectId":   "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+        "accessLevel": 100000001,
+        "firstName":   "Jane",
+        "lastName":    "Doe"
+      }'
+```
+
+`accessLevel` is one of `100000000` (ViewOnly) · `100000001` (Collaborate) · `100000002` (FullAccess). `email` + `projectId` + `accessLevel` are **required**; `firstName`/`lastName`/`expiryDate`/`accountId` are optional.
+
+**Success response (HTTP 200):**
+
+```json
+{
+  "contactId":      "b1e2c3d4-....",   // the Dataverse Contact onboarded + granted
+  "onboardStatus":  "Provisioned",      // or "AlreadyProvisioned" (idempotent — see 5.3)
+  "accessRecordId": "a9f8e7d6-....",   // the sprk_externalrecordaccess grant
+  "portalUrl":      "https://green-dune-0c4f1221e.7.azurestaticapps.net"
+}
+```
+
+`onboardStatus = "Provisioned"` means a brand-new CIAM account was created and the onboarding email was sent. `"AlreadyProvisioned"` means the Contact was already linked to a CIAM identity — no second account, no new email — but the grant was still (re)issued.
+
+---
+
+**Step 3 — What the BFF does for you (automatic, one atomic action).**
+
+1. **Onboard (idempotent)** — resolves or creates the Dataverse Contact by email; if the Contact has no CIAM identity yet, creates a **CIAM local account** (Graph `POST /users`, cross-tenant) with a temporary password + `forceChangePasswordNextSignIn`, and stores the returned `oid` on `Contact.sprk_externalobjectid`. If already linked → skips (idempotent).
+2. **Grant** — creates the `sprk_externalrecordaccess` record (grantee = the Contact, audited via `sprk_grantedby`) and invalidates the Redis participation cache so access is visible immediately.
+3. **Email** — sends the onboarding email (portal link + "set your password" instruction).
+
+The temporary password is **never** returned to you or logged — the attorney sets their own via SSPR (Step 4).
+
+---
+
+**Step 4 — What the external user does (self-service, no admin action).**
+
+1. Receives the onboarding email.
+2. Opens the **portal URL** (`portalUrl` from the response — the SWA site) and clicks **"Forgot password"** → sets a password via SSPR (Email OTP).
+3. Signs in against the CIAM authority.
+4. The SPA calls `GET /api/v1/external/me` and shows their assigned project(s).
+
+That's it — no further admin step. To **add another project** for the same attorney later, call `invite-and-grant` again (or `/grant`) with the new `projectId`; onboarding is skipped and only the new grant is issued.
+
+---
 
 ### 5.1 Core-User "Invite to Secure Workspace" — `POST /api/v1/external-access/invite-and-grant`
 

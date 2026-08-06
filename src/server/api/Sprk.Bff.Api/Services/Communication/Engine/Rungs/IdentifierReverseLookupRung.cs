@@ -150,37 +150,42 @@ public sealed class IdentifierReverseLookupRung : IAssociationRung
             return Array.Empty<RungMatch>();
 
         var startTs = Stopwatch.GetTimestamp();
+
+        // Batched reverse lookup (FR-D2 / NFR-08). The old path queried once per (roster entry, token) pair
+        // (≈ up to MaxDistinctTokens × 7 types ≈ 175), deduped only by identical (numberField, value). Because
+        // two core types never share a number field, ONE In-filter query per roster entry over ALL distinct
+        // token values returns the same candidate set (≤7 queries). Each returned record's number-field value
+        // re-associates it to the token it matched, so the per-token grouping — hence the multi-entity check
+        // and confidence policy in BuildMatches — is byte-identical to the per-value loop.
+        var distinctValues = tokens.Select(t => t.Value).ToArray();
+        var matchesByValue = tokens.ToDictionary(
+            t => t.Value, _ => new List<Candidate>(), StringComparer.OrdinalIgnoreCase);
+
         var queryCount = 0;
+        foreach (var entry in roster)
+        {
+            var records = await SafeQueryBatchAsync(entry, distinctValues, ct);
+            queryCount++;
 
-        // token → its candidate matches (record per core type). Grouped so the confidence policy (single vs
-        // multi-entity) is applied per token.
+            foreach (var record in records)
+            {
+                if (record.Id == Guid.Empty)
+                    continue;
+                // Re-associate the record to the token whose value it matched (the In-filter returned it
+                // because its number field equals one of the token values). Case-insensitive, matching the
+                // token dedup in ExtractTokens; a value not in the set (shouldn't happen) degrades to skip.
+                var matchedValue = record.GetAttributeValue<string>(entry.NumberField)?.Trim();
+                if (string.IsNullOrEmpty(matchedValue) || !matchesByValue.TryGetValue(matchedValue, out var bucket))
+                    continue;
+                bucket.Add(new Candidate(entry, record.Id));
+            }
+        }
+
+        // Preserve token order for stable logs/provenance (BuildMatches is order-independent).
         var perToken = new List<(TokenCandidate Token, List<Candidate> Matches)>();
-
-        // Dedup identical (numberField, value) lookups across tokens/types — two core types never share a
-        // number field, so (numberField, value) uniquely identifies a query.
-        var queried = new Dictionary<(string Field, string Value), IReadOnlyList<Entity>>();
-
         foreach (var token in tokens)
         {
-            var matches = new List<Candidate>();
-            foreach (var entry in roster)
-            {
-                var key = (entry.NumberField, token.Value);
-                if (!queried.TryGetValue(key, out var records))
-                {
-                    records = await SafeQueryAsync(entry, token.Value, ct);
-                    queried[key] = records;
-                    queryCount++;
-                }
-
-                foreach (var record in records)
-                {
-                    if (record.Id == Guid.Empty)
-                        continue;
-                    matches.Add(new Candidate(entry, record.Id));
-                }
-            }
-
+            var matches = matchesByValue[token.Value];
             if (matches.Count > 0)
                 perToken.Add((token, matches));
         }
@@ -381,18 +386,20 @@ public sealed class IdentifierReverseLookupRung : IAssociationRung
         return built;
     }
 
-    private async Task<IReadOnlyList<Entity>> SafeQueryAsync(RosterEntry entry, string value, CancellationToken ct)
+    private async Task<IReadOnlyList<Entity>> SafeQueryBatchAsync(
+        RosterEntry entry, IReadOnlyCollection<string> values, CancellationToken ct)
     {
         try
         {
-            return await _communicationService.QueryRecordsByNumberFieldAsync(
-                entry.EntityLogicalName, entry.NumberField, value, ct) ?? Array.Empty<Entity>();
+            return await _communicationService.QueryRecordsByNumberFieldValuesAsync(
+                entry.EntityLogicalName, entry.NumberField, values, ct) ?? Array.Empty<Entity>();
         }
         catch (Exception ex)
         {
-            // Non-fatal (NFR-04): a single reverse-lookup failure degrades to no-match for that (type, value).
+            // Non-fatal (NFR-04): a batched reverse-lookup failure degrades to no-match for that number field,
+            // never throwing into capture.
             _logger.LogWarning(ex,
-                "Rung 0 (identifier reverse-lookup) — {Entity}.{Field} lookup failed; treating as no-match.",
+                "Rung 0 (identifier reverse-lookup) — {Entity}.{Field} batched lookup failed; treating as no-match.",
                 entry.EntityLogicalName, entry.NumberField);
             return Array.Empty<Entity>();
         }

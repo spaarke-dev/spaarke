@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="teams-app-r1">
+  <metadata>
+    <title>Access-grant modal (person icon) — approve membership candidates, named grants, standing grants, invite</title>
+    <phase>4 Access-Management Surface (PCF)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Writes an access-control table (`sprk_externalrecordaccess`), gates by grant privilege, and triggers an external invite/onboarding email — security-sensitive per root CLAUDE.md §6.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Complex multi-file UI + BFF-consuming work, but the underlying auth/grant mechanisms (table, endpoint, onboarding email) are already built — this is integration, not novel auth design.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared TrackingFieldTrio component files; serialize the toolbar chain (040 → 041/042 → 043 → 045). Stream C runs concurrently with other streams.</parallel-reason>
+    <deps>040</deps>
+    <tags>pcf, react, frontend, fluent-ui</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build the person-icon access-grant modal opened from the `TrackingFieldTrio` toolbar (task 040): (1) list the record's contact-role membership candidates (sourced from the contact-anchored membership resolver, task 021, already allowlist-filtered) with approve checkboxes — each approval materializes a `sprk_externalrecordaccess` row with provenance `membership-approved`; (2) a person-picker for arbitrary named contacts, producing explicit grant rows; (3) a per-contact standing-grant option; (4) send an access link/invite via the BUILT `InviteAndGrantExternalUserEndpoint` + `SendCiamOnboardingEmailAsync` for an external contact, or a deep-link notification for an internal workforce contact. Every grant carries `grantedby`/date provenance and is revocable from the modal.
+  </prompt>
+
+  <role>SPAARKE frontend developer with working knowledge of the BFF's external-access surface. Expert in Fluent UI v9 modal patterns, `SprkModal`/proprietary dialog authoring per MODAL-DECISION-CRITERIA, and consuming an existing REST endpoint from a PCF-hosted React component. Follow ADRs strictly.</role>
+
+  <goal>
+    Clicking the person icon (from task 040's `onOpenGrantModal` callback) opens a modal that: lists candidate contacts with approve checkboxes, offers a named-contact person-picker, offers a standing-grant toggle per added contact, writes `sprk_externalrecordaccess` rows on approval/add (with grantedby/date), triggers invite/notify best-effort (never blocking the grant write per NFR-06), and lets the user revoke an existing grant from the same modal.
+  </goal>
+
+  <context>
+    <background>
+      Per design.md §5.1 and spec FR-11/FR-12, this is the R1 grant-mediation UX: nothing is auto-granted to a contact — every grant is a deliberate human decision recorded through this modal. The candidate list comes from the contact-anchored membership resolver (task 021), which reuses `MembershipResolverService.BuildFetchXml` filtered to the access-conferring role allowlist. The write path and invite/notify mechanism already exist (`InviteAndGrantExternalUserEndpoint`, `SendCiamOnboardingEmailAsync`) — this task is the UI + wiring, not new backend grant logic.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx</file>
+      <file role="modify">src/client/pcf/TrackingFieldTrio/index.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/types.ts</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteAndGrantExternalUserEndpoint.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>The `sprk_externalrecordaccess` table already exists and is written by the BUILT `InviteAndGrantExternalUserEndpoint` (`/api/v1/external-access/invite-and-grant`); the CIAM onboarding email (`SendCiamOnboardingEmailAsync`) is already built for the external-contact branch.</existing>
+    <extension>Yes — this task is a new modal UI that reuses the built table + endpoint + onboarding email; it does NOT introduce a new grant mechanism, a second write path, or a duplicate of `sprk_externalrecordaccess`.</extension>
+    <cost-of-doing-nothing>Without this modal, there is no way to grant external record access from the record itself — the built endpoint and table have no record-level entry point, and FR-11/FR-12 (standing grants) have no UI to attach to.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="project">Use the canonical Fluent v9 proprietary dialog per `docs/standards/MODAL-DECISION-CRITERIA.md` / `docs/standards/MODAL-DESIGN-SYSTEM.md` (the `SprkModal` shell or an equivalent Fluent v9 Dialog) — this is a proprietary in-app modal, not an OOB `navigateTo`. SCOPE: applies to the modal shell/chrome; does not require adopting every preset in MODAL-DESIGN-SYSTEM if a simpler `FormModal`-style preset fits (state the choice in code comments).</constraint>
+    <constraint source="ADR-021">Dark-mode correct throughout the modal (Fluent v9 semantic tokens only). SCOPE: all new modal UI added in this task.</constraint>
+    <constraint source="project">Reuse `InviteAndGrantExternalUserEndpoint` for every grant write — MUST NOT introduce a new grant/invite REST path or write directly to `sprk_externalrecordaccess` from the client. SCOPE: applies to the write path for approvals, named-user adds, and standing-grant toggles; if the endpoint's existing contract cannot express one of these three modes, escalate per the &lt;escalation&gt; trigger rather than inventing a parallel path.</constraint>
+    <constraint source="project">Every grant carries `grantedby`/date provenance and is revocable from this modal. SCOPE: applies to all three grant types (membership-approved, named, standing).</constraint>
+    <constraint source="project">Best-effort notify (NFR-06): an invite/onboarding-email/deep-link failure MUST NOT fail the grant write — the grant row is written first (or independently), and notify failure surfaces as a non-blocking warning in the modal, not a rollback. SCOPE: applies to both the external-CIAM-email branch and the internal-deep-link branch.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Access-grant modal — reuse built grant/invite path</topic>
+    <files>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Grant-mediated access, never auto" location="projects/teams-app-r1/design.md">§5.1 — nothing is auto-granted to a contact; every grant (membership-approved, named, standing) is a deliberate human decision recorded via this modal.</pattern>
+      <pattern name="Built grant/invite endpoint" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteAndGrantExternalUserEndpoint.cs">The single write path for `sprk_externalrecordaccess` + invite; this task's modal calls it, never re-implements it.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the `InviteAndGrantExternalUserEndpoint` request/response contract and `ExternalCallerContext.HasProjectAccess` to understand exactly what fields the modal must supply (contact identity, record id, grant type, provenance, standing flag).</step>
+    <step order="2">Design the modal's three sections: (a) candidate list with approve checkboxes, sourced from the contact-anchored membership resolver (task 021) for the current record; (b) named-contact person-picker; (c) an existing-grants list with revoke actions.</step>
+    <step order="3">Build the modal shell per MODAL-DECISION-CRITERIA/MODAL-DESIGN-SYSTEM (proprietary Fluent v9 dialog), gated open only when `canGrantAccess` is true (from task 040's prop).</step>
+    <step order="4">Wire "approve" and "add named contact" actions to call `InviteAndGrantExternalUserEndpoint`, including the standing-grant toggle when the user opts in per contact.</step>
+    <step order="5">Wire the notify branch: external contact → CIAM onboarding email (built, via the endpoint); internal workforce contact → deep-link notification (small addition if not already covered by the endpoint) — implement as best-effort, non-blocking on the grant write per NFR-06.</step>
+    <step order="6">Implement revoke: an existing-grants list with a revoke action per row; confirm before revoking (per MODAL-DESIGN-SYSTEM dismiss conventions).</step>
+    <step order="7">Wire `TrackingFieldTrio`'s `onOpenGrantModal` (from task 040) to open this modal with the current record context.</step>
+    <step order="8">Write tests: modal opens from the person icon; approving a candidate writes a grant; a grant is revocable; a non-grant-privileged user cannot open the modal at all; an invite/notify failure does not roll back the grant write; dark-mode render; no console errors.</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the built `InviteAndGrantExternalUserEndpoint` contract cannot express the internal workforce-contact deep-link notify branch (e.g., it only supports the external CIAM-email path), STOP and escalate per root CLAUDE.md §6 rather than building a second write path or a parallel notify mechanism.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build/test the shared library and PCF control</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/types.ts</output>
+    <output type="code">src/client/pcf/TrackingFieldTrio/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/__tests__/AccessGrantModal.test.tsx</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="modal-opens-from-person-icon">Simulate the person-icon click (via `onOpenGrantModal`) and assert the modal renders with the candidate list, person-picker, and existing-grants list.</test>
+    <test name="approve-writes-grant">Approve a candidate and assert the endpoint call is made with provenance `membership-approved` and the UI reflects the new grant.</test>
+    <test name="grant-revocable">Revoke an existing grant and assert the revoke call is made and the grant is removed from the list.</test>
+    <test name="adr-021-dark-mode">Render the modal in `webDarkTheme` and assert all sections (list, picker, revoke list) render correctly.</test>
+    <test name="console-error-check">Render + interact with the modal (open, approve, revoke) and assert zero console errors/warnings.</test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Approving a membership candidate or adding a named contact writes an `sprk_externalrecordaccess` row via `InviteAndGrantExternalUserEndpoint` and, when applicable, sends an invite (CIAM email for external / deep-link for internal).</criterion>
+    <criterion testable="true">A user without grant privilege cannot open or submit the modal (the modal is not reachable/actionable — no dead click, no bypass via direct component mount).</criterion>
+    <criterion testable="true">Every grant is listed with `grantedby`/date and is revocable from the modal.</criterion>
+    <criterion testable="true">An invite/notify failure does NOT fail or roll back the grant write — the grant row persists and the failure surfaces as a non-blocking warning.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Task 043 layers the Access-Permission sharing gate (Restricted/Limited/Standard) on top of this modal — this task builds the modal assuming full (Standard) permission; 043 adds the gating logic without needing a &lt;justification&gt; since it only modifies this task's output.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. FULL-rigor: code-review + adr-check gates apply at Step 9.5. Respect the escalation trigger — do not silently work around a contract gap.</protocol>
+  </execution>
+</task>

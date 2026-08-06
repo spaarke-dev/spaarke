@@ -271,3 +271,11 @@ export * from './TrackingFieldTrio';
 // and dismiss semantics. No name collisions with existing exports (verified task
 // 009) -> a plain `export *`; see docs/standards/MODAL-DESIGN-SYSTEM.md + ADR-050.
 export * from './SprkModal';
+
+// AccessGrantModal - the person-icon access-grant modal opened from
+// TrackingFieldTrio's onOpenGrantModal (task 040 → 041, teams-app-r1). Built
+// directly on the SprkModal base shell (Family 2 per MODAL-DECISION-CRITERIA);
+// writes sprk_externalrecordaccess exclusively through the built BFF endpoints
+// (/grant, /invite-and-grant, /revoke) — context-agnostic (ADR-012), no Xrm
+// dependency in the shared core.
+export * from './AccessGrantModal';

@@ -31,7 +31,7 @@ Adopt **function-based auth as the only public contract** at every consumer boun
 - **MUST NOT** add `accessToken: string` or `token: string` props/fields anywhere in client code (except where required by third-party SDK contracts — Power BI `IReportEmbedConfiguration`, MSAL.js result objects — these are NOT Spaarke BFF tokens)
 - **MUST NOT** use `useState`/`useEffect` to snapshot a token (root cause of the 401-after-refresh bug v2 fixes)
 - **MUST NOT** write raw `fetch(url, { headers: { Authorization: \`Bearer ${...}\` } })` template literals — use `authenticatedFetch`. Limited D-AUTH-7 exceptions: SSE (EventSource ReadableStream), XHR uploads, Dataverse Web API direct calls (BFF-scoped wrapper would route wrong host), External SPA out-of-scope. Each carries `// Auth v2 (D-AUTH-7):` justification comment.
-- **MUST NOT** instantiate `PublicClientApplication` directly outside `@spaarke/auth` (internal surfaces). External Workspace SPA is exempted — the external portal uses direct MSAL + sessionStorage for per-tab isolation and authenticates against the **Entra External ID (CIAM) authority** per **Amendment A1** (not workforce B2B)
+- **MUST NOT** instantiate `PublicClientApplication` directly outside `@spaarke/auth` (internal **Xrm** surfaces). The **collaboration hosts are exempted** — the external SPA and the Teams tab share **one standalone-MSAL module** (direct `PublicClientApplication` + per-tab `sessionStorage` isolation) with a **pluggable authority**: **Entra External ID (CIAM)** for the external SPA (**Amendment A1**) and **workforce Entra (multitenant, Teams SSO/NAA)** for the Teams tab (**Amendment A2**). Neither uses workforce B2B guests. All A1 isolation invariants are preserved for both hosts.
 - **MUST NOT** reference removed symbols: `BridgeStrategy`, `XrmStrategy`, `window.__SPAARKE_BFF_TOKEN__`, `tokenBridge.ts`, `publishToken`, `bffAuthProvider` (deleted in v2)
 - **MUST NOT** add `/debug/*` endpoints on the BFF (all removed in v2)
 - **MUST NOT** add plaintext secrets to `appsettings*.json` — Key Vault references only (production); dev OK with plain values
@@ -58,7 +58,40 @@ Adopt **function-based auth as the only public contract** at every consumer boun
 
 **Direct-Office features for external users** — Word/Excel/PowerPoint **for Web co-authoring**, **desktop open via `webUrl`**, **user-identity Copilot grounding**, and **Microsoft Search** — REQUIRE the user's own workforce identity reaching SPE (OBO/delegated) and are therefore **not available to CIAM-only external users**. These remain **out of scope**. A future project needing them for external users must reintroduce workforce B2B guests for those users and file a superseding amendment.
 
-> **Note**: A separate full `docs/adr/ADR-028-*.md` does not currently exist (the "Full version" links are aspirational); this concise ADR is the canonical ADR-028 and carries Amendment A1.
+## Amendment A2 (2026-08-03): Workforce Auth for the Teams Collaboration Host
+
+> **Status**: Accepted (resolution path **B — amendment**, per root CLAUDE.md §6.5). **Driver project**: `teams-app-r1`. **Builds on Amendment A1.** Full draft + rationale: [`projects/teams-app-r1/adr-028-amendment-draft.md`](../../projects/teams-app-r1/adr-028-amendment-draft.md).
+
+**Why**: A1 sanctions a *CIAM* standalone SPA. `teams-app-r1` extends the same **collaboration product line** to a second host — a Microsoft **Teams tab / personal app** — with two properties A1 does not yet cover: (1) a **workforce-Entra-authenticated standalone (non-Xrm) app** — the Teams host authenticates the user's **workforce** identity via **Teams SSO / NAA** (multitenant) inside a non-Xrm app, which `@spaarke/auth` (Xrm-context-bound + MSAL v3) cannot serve; and (2) **one shared standalone-MSAL module with a pluggable authority** — the external SPA (CIAM) and the Teams host (workforce) are the same collaboration core over two hosts, sharing one auth module whose authority is config-driven (CIAM `*.ciamlogin.com` vs workforce `login.microsoftonline.com`, multitenant). The BFF **already** runs a workforce default JwtBearer scheme; A2 sanctions the workforce **client** plane for the collaboration line — it does **not** add a new IdP.
+
+### New MUST rules (collaboration Teams host only)
+
+- **MUST** authenticate Teams-host collaboration users with their **workforce Microsoft Entra identity** via Teams SSO / NAA against a **multitenant** app registration (per-customer admin consent). CIAM is not used inside Teams.
+- **MUST** serve both the external SPA (CIAM) and the Teams host (workforce) from **one shared standalone-MSAL module** whose **authority is config-driven / pluggable**; the module is exempt from the `@spaarke/auth`-only rule exactly as the A1 SPA is.
+- **MUST** keep the collaboration surface **broker-only** in both hosts (A1 invariant): the user token authenticates to the BFF **only** and **MUST NOT** be exchanged for a downstream Graph/SPE/Dataverse token (**no OBO on the collaboration path**). Document content streams **app-only**.
+- **MUST** resolve the workforce-authenticated caller to a **principal** — a `systemuser` (→ ADR-034 membership) or, for a non-systemuser, a `contact` (→ **contact-anchored membership**, see the ADR-034 cross-reference below) — and enforce authorization server-side via the **accessible-record-set** check. No Dataverse seat / OBO is required for read/download.
+
+### New MUST NOT rules
+
+- **MUST NOT** attempt CIAM / External-ID sign-in inside the Teams host (Teams is a workforce-identity host; a second in-tab login is an anti-pattern).
+- **MUST NOT** route the collaboration hosts through `@spaarke/auth` while it remains Xrm-bound + MSAL v3; the shared standalone-MSAL module is the sanctioned surface until a future consolidation (MSAL v3→v5 across the internal estate) is undertaken under a superseding amendment.
+
+### Scope + preserved invariants
+
+- **Collaboration hosts only.** A2 widens the A1 exemption from "external SPA" to "the **collaboration hosts** (external SPA + Teams tab)" with a **pluggable authority** (CIAM *or* workforce-multitenant). **Internal Xrm surfaces (`@spaarke/auth`, PCFs, Code Pages) are UNAFFECTED** — `@spaarke/auth` remains **canonical** for them; the collaboration line is the explicit, bounded exception, not a replacement.
+- **All A1 invariants preserved + unweakened**: direct `PublicClientApplication`, per-tab `sessionStorage` isolation, the Bearer-literal allowlist, and broker-only (no OBO; app-only SPE/Dataverse) all carry over to the workforce plane verbatim. A2 widens; it does not weaken.
+
+### ADR-034 cross-reference (contact-anchored membership entry)
+
+The non-systemuser (contact) principal resolves to membership via an **additive contact-anchored entry** on the existing membership engine (ADR-034 resolution **Path C**): the resolver reuses `MembershipResolverService` / `BuildFetchXml` (which already binds a `ContactId` for Contact-typed descriptors), filtered to the access-conferring `sprk_assigned*` role allowlist. This is a new *entry* path, not a second membership model — ADR-034 is complied with, not amended.
+
+### Alternatives considered (and rejected)
+
+- **CIAM inside the Teams tab** (reuse A1 unchanged) — rejected: Teams runs as a workforce identity; a separate in-tab CIAM login is double sign-in, is blocked by the desktop client's popup handling, and splits one person across two identities.
+- **Fold the collaboration hosts onto `@spaarke/auth` now** — rejected for R1: forces an MSAL v3→v5 migration across the entire internal consumer estate + de-Xrm-ing config resolution (large blast radius); deferred to a future consolidation amendment.
+- **Path C (comply within A1)** — not viable: A1 covers a CIAM standalone SPA only; it neither covers a workforce-authenticated standalone app nor the shared pluggable-authority module. Compliance would require *not* building the Teams host.
+
+> **Note**: A separate full `docs/adr/ADR-028-*.md` does not currently exist (the "Full version" links are aspirational); this concise ADR is the canonical ADR-028 and carries Amendments **A1 and A2**. (A2 was applied concise-only, mirroring how A1 was applied — task 002 prescriptive step 3 targeted a `docs/adr/` full copy that does not exist; creating one was declined as scope creep contradicting this note.)
 
 ## Documented MI exceptions
 

@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Inject signed tracking footer on the outbound send path</title>
+    <phase>1 Pillar A: Trusted threading &amp; external matching</phase>
+    <gate>blocked: 010,011</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the heavily-contended CommunicationService.SendAsync send path (.cs); auth-adjacent (signed token); Step 3.5.5 FULL.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified insertion point (pre-ResolveSender) consuming two already-built helpers (signer + config); no novel security decision — 010 owns the crypto.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits CommunicationService.cs (send path) — a top-contended shared file (messaging r1/r2/r3, notification-spine, email-r4); must run sequentially main-session with /conflict-check.</parallel-reason>
+    <deps>010,011</deps>
+    <tags>bff-api,communication,auth</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>On the outbound send path (CommunicationService.SendAsync), when the communication regards a record and the tracking footer is enabled for the tenant, inject a transparent, human-readable disclosure footer plus the HMAC-signed opaque token into the outbound body BEFORE the message is handed to ResolveSender(...).SendAsync. Injection is best-effort/non-fatal (NFR-04): a signer or config failure MUST NOT fail the send.</prompt>
+  <role>SPAARKE platform developer. Follow ADR-045 (non-fatal enrichment), ADR-018, ADR-028 strictly.</role>
+  <goal>SendAsync (both the app-only sender branch near L1047 and the OBO/user branch near L1374) injects, when TrackingFooterGate resolves Enabled=true for the request's tenant AND the request carries a regarding record, a transparent footer of the configured template with `{record-ref}` and the signed token from ITrackingTokenSigner appended to the outbound body (HTML + text); nothing is injected when disabled or when no regarding is present; a helper failure logs + proceeds. Unit-tested for enabled/disabled/no-regarding/signer-failure paths.</goal>
+
+  <context>
+    <background>FR-A1: outbound email regarding a record (Spaarke send path + add-in at compose) carries the transparent footer. This task does the SEND-PATH injection; the add-in compose-time injection is a separate Pillar 4 (B) task in src/client/office-addins/**. The footer must survive quoted reply/forward history so the TrackingTokenRung (013) can read it on return.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs — SendAsync at L948; inject before `_channelDispatcher.ResolveSender(...).SendAsync(...)` at the app-only branch (~L1047) AND the user/OBO branch (~L1374). Add a single private InjectTrackingFooter helper both branches call so the two send sites stay identical.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Tracking/ITrackingTokenSigner.cs — task 010's Sign(recordType,recordId,tenantId,issued).</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/TrackingFooterGate.cs — task 011's Resolve(tenantKey) → { Enabled, MessageTemplate, SigningKeySecretName }.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ExplicitReferenceRung.cs — how a caller-supplied regarding (context.CallerSuppliedRegarding: EntityType/EntityId/EntityName) is shaped; the send request's associations mirror it.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">ITrackingTokenSigner (the signer).</dependency>
+      <dependency task="011" status="pending">TrackingFooterGate + template + enable flag.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-045">Footer injection MUST be best-effort/non-fatal: wrap in try/catch, log-and-proceed; a signer/config/formatting failure NEVER fails SendAsync (NFR-04). Scope: the injection helper.</constraint>
+    <constraint source="ADR-018">Injection is gated by TrackingFooterGate.Resolve(tenantKey).Enabled read per send (no redeploy to toggle); when disabled, inject nothing. Scope: send path.</constraint>
+    <constraint source="ADR-028">The footer is TRANSPARENT — human-readable disclosure text + a visible opaque token; MUST NOT hide content in headers or invisible markup (that reintroduces the DLP/hidden-content risk the spec rejects). Scope: footer rendering.</constraint>
+    <constraint source="ADR-013">No AI-internal types; injection uses only the signer + config. Scope: helper deps.</constraint>
+    <constraint source="ADR-045">Inject into BOTH the HTML and plain-text bodies so the token survives client down-conversion and quoted history; do NOT fork the two send branches — share one helper. Scope: body construction.</constraint>
+    <constraint source="ADR-038">Update/extend CommunicationService send tests in tests/unit/Sprk.Bff.Api.Tests/Services/Communication/; ban Mock&lt;HttpMessageHandler&gt;/DI-registration/ctor-null tests. Scope: this task's tests.</constraint>
+    <constraint source="bff-extensions">Report publish size (absolute + delta); ≤60 MB; no new NuGet/CVE. Scope: this task's additions.</constraint>
+    <constraint source="project">Placement Justification: the injection extends the existing send path in place (no new service) — state in PR, cite .claude/constraints/bff-extensions.md. Scope: PR.</constraint>
+    <constraint source="project">Run /conflict-check before the PR — CommunicationService.cs is a top-contended shared file. Scope: shared send path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Outbound send path + non-fatal enrichment</topic>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Non-fatal enrichment call" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (CommunicationArrivedProducer remarks)">The send path already invokes best-effort producers after persist; mirror the try/catch-and-proceed discipline for footer injection before send.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML, 010/011 outputs, ADR-045/018/028; declare RIGOR LEVEL FULL + sonnet/high; read SendAsync L948–L1400 to confirm the two ResolveSender sites + the request's regarding shape + tenant key source.</step>
+    <step order="1">Add a private InjectTrackingFooter(request, tenantKey, ref bodies) helper: resolve TrackingFooterGate; if disabled or no regarding record on the request → return unchanged; else Sign the (recordType,recordId,tenantId,issued) and append the rendered template (record-ref + token) to both HTML and text bodies.</step>
+    <step order="2">Call the helper immediately before ResolveSender(...).SendAsync in BOTH the app-only branch (~L1047) and the OBO/user branch (~L1374); wrap in try/catch that logs and proceeds (NFR-04).</step>
+    <step order="3">Inject ITrackingTokenSigner + TrackingFooterGate into CommunicationService's ctor (both singletons; matches the class's singleton lifetime).</step>
+    <step order="4">Extend send unit tests: enabled+regarding → footer+token present in both bodies; disabled → unchanged; no regarding → unchanged; signer throws → send still succeeds, no footer. Build green.</step>
+    <step order="5">dotnet build + test; /conflict-check; record publish-size delta.</step>
+    <step order="6">Update TASK-INDEX.md: set task 012 status to ✅.</step>
+    <step order="7">Document any deviation (esp. the add-in compose injection deferred to Phase 4/B) in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If SendAsync's tenant key or regarding-record shape is not directly available at the two injection sites (needs threading a new param through the dispatcher), STOP and escalate per §6 — do not mutate the ChannelSendRequest contract without review (it is consumed by messaging channels too).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test the BFF.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (InjectTrackingFooter + both call sites + ctor deps)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceFooterTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given footer enabled for the tenant and a request that regards a record, when SendAsync runs, then the outbound HTML AND text bodies both contain the configured disclosure text with the record-ref and a signed token, appended before ResolveSender.SendAsync.</criterion>
+    <criterion testable="true">Given footer disabled (gate), when SendAsync runs, then no footer/token is injected and the body is unchanged.</criterion>
+    <criterion testable="true">Given a request with no regarding record, when SendAsync runs, then no footer is injected.</criterion>
+    <criterion testable="true">Negative (non-fatal): given the signer throws, when SendAsync runs, then the send still completes successfully with no footer and the error is logged (not propagated).</criterion>
+    <criterion testable="true">Both the app-only send branch and the OBO/user send branch call the SAME injection helper (no forked footer logic).</criterion>
+    <criterion testable="true">All unit tests pass; build is green; publish-size delta reported and ≤60 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-A1, NFR-04. Add-in compose-time injection is a separate Phase 4 (Pillar B) task in src/client/office-addins/** — note it, do not build it here. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

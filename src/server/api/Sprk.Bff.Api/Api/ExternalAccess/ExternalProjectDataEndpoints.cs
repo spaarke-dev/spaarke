@@ -42,8 +42,7 @@ public static class ExternalProjectDataEndpoints
             .WithSummary("List all Secure Projects the authenticated user can access")
             .Produces<ExternalCollectionResponse<ExternalProjectDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .AddExternalCallerAuthorizationFilter();
+            .ProducesProblem(StatusCodes.Status403Forbidden);
 
         // GET /api/v1/external/projects/{id} — single project
         group.MapGet("/projects/{id:guid}", GetProjectById)
@@ -52,8 +51,7 @@ public static class ExternalProjectDataEndpoints
             .Produces<ExternalProjectDto>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status404NotFound)
-            .AddExternalCallerAuthorizationFilter();
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         // GET /api/v1/external/projects/{id}/documents
         group.MapGet("/projects/{id:guid}/documents", GetDocuments)
@@ -61,8 +59,7 @@ public static class ExternalProjectDataEndpoints
             .WithSummary("Get documents for a Secure Project")
             .Produces<ExternalCollectionResponse<ExternalDocumentDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .AddExternalCallerAuthorizationFilter();
+            .ProducesProblem(StatusCodes.Status403Forbidden);
 
         // GET /api/v1/external/projects/{id}/documents/{documentId}/content — download document bytes.
         // Authz-before-stream (broker-only, app-only): HasProjectAccess + document->project scoping are
@@ -74,8 +71,7 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status409Conflict)
-            .AddExternalCallerAuthorizationFilter();
+            .ProducesProblem(StatusCodes.Status409Conflict);
 
         // GET /api/v1/external/projects/{id}/todos
         group.MapGet("/projects/{id:guid}/todos", GetTodos)
@@ -83,8 +79,7 @@ public static class ExternalProjectDataEndpoints
             .WithSummary("Get to-dos for a Secure Project (sprk_todo records regarding the project)")
             .Produces<ExternalCollectionResponse<ExternalTodoDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .AddExternalCallerAuthorizationFilter();
+            .ProducesProblem(StatusCodes.Status403Forbidden);
 
         // POST /api/v1/external/projects/{id}/todos — create a new to-do regarding the project
         group.MapPost("/projects/{id:guid}/todos", CreateTodo)
@@ -93,8 +88,7 @@ public static class ExternalProjectDataEndpoints
             .Produces<ExternalTodoDto>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .AddExternalCallerAuthorizationFilter();
+            .ProducesProblem(StatusCodes.Status403Forbidden);
 
         // GET /api/v1/external/projects/{id}/contacts
         group.MapGet("/projects/{id:guid}/contacts", GetContacts)
@@ -102,8 +96,7 @@ public static class ExternalProjectDataEndpoints
             .WithSummary("Get contacts with access to a Secure Project")
             .Produces<ExternalCollectionResponse<ExternalContactDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .AddExternalCallerAuthorizationFilter();
+            .ProducesProblem(StatusCodes.Status403Forbidden);
 
         // GET /api/v1/external/projects/{id}/organizations
         group.MapGet("/projects/{id:guid}/organizations", GetOrganizations)
@@ -111,8 +104,7 @@ public static class ExternalProjectDataEndpoints
             .WithSummary("Get organizations linked to contacts on a Secure Project")
             .Produces<ExternalCollectionResponse<ExternalOrganizationDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .AddExternalCallerAuthorizationFilter();
+            .ProducesProblem(StatusCodes.Status403Forbidden);
 
         // PATCH /api/v1/external/todos/{id} — update a to-do
         group.MapPatch("/todos/{id:guid}", UpdateTodo)
@@ -121,8 +113,7 @@ public static class ExternalProjectDataEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .AddExternalCallerAuthorizationFilter();
+            .ProducesProblem(StatusCodes.Status403Forbidden);
     }
 
     // =========================================================================
@@ -134,7 +125,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CancellationToken ct)
     {
-        var callerContext = GetCallerContext(httpContext);
+        var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         var projectIds = callerContext.GetAccessibleProjectIds().ToList();
@@ -151,7 +142,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CancellationToken ct)
     {
-        var callerContext = GetCallerContext(httpContext);
+        var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         if (!callerContext.HasProjectAccess(id))
@@ -168,7 +159,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CancellationToken ct)
     {
-        var callerContext = GetCallerContext(httpContext);
+        var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         if (!callerContext.HasProjectAccess(id))
@@ -198,7 +189,7 @@ public static class ExternalProjectDataEndpoints
         ILogger<Program> logger,
         CancellationToken ct)
     {
-        var callerContext = GetCallerContext(httpContext);
+        var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         // ── AUTHORIZATION FIRST — nothing below reads SPE/Graph until BOTH checks pass ──
@@ -261,7 +252,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CancellationToken ct)
     {
-        var callerContext = GetCallerContext(httpContext);
+        var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         if (!callerContext.HasProjectAccess(id))
@@ -279,7 +270,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CancellationToken ct)
     {
-        var callerContext = GetCallerContext(httpContext);
+        var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         if (!callerContext.HasProjectAccess(id))
@@ -306,7 +297,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CancellationToken ct)
     {
-        var callerContext = GetCallerContext(httpContext);
+        var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         if (!callerContext.HasProjectAccess(id))
@@ -323,7 +314,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CancellationToken ct)
     {
-        var callerContext = GetCallerContext(httpContext);
+        var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         if (!callerContext.HasProjectAccess(id))
@@ -341,7 +332,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CancellationToken ct)
     {
-        var callerContext = GetCallerContext(httpContext);
+        var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         // Note: for update, we can't easily check project membership without looking up the to-do.
@@ -357,12 +348,16 @@ public static class ExternalProjectDataEndpoints
     // Helpers
     // =========================================================================
 
-    private static ExternalCallerContext? GetCallerContext(HttpContext httpContext) =>
-        httpContext.Items[ExternalCallerContext.HttpContextItemsKey] as ExternalCallerContext;
+    // Principal-agnostic caller (teams-app-r1 task 025): the CallerPrincipalAuthorizationFilter
+    // (group-level) resolves EITHER a CIAM external contact OR a workforce user to a CallerPrincipal.
+    // CallerPrincipal exposes the same record-scope surface the handlers use — HasProjectAccess,
+    // GetAccessibleProjectIds, GetEffectiveRights — so every handler is plane-agnostic without change.
+    private static CallerPrincipal? GetCallerPrincipal(HttpContext httpContext) =>
+        httpContext.Items[CallerPrincipal.HttpContextItemsKey] as CallerPrincipal;
 
     private static IResult MissingContextResult() =>
         Results.Problem(
             statusCode: 500,
             title: "Internal Server Error",
-            detail: "Authentication context not available — ensure ExternalCallerAuthorizationFilter is applied");
+            detail: "Authentication context not available — ensure AddCallerPrincipalAuthorizationFilter is applied");
 }

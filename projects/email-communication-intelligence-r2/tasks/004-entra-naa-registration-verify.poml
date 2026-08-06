@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Entra NAA app-registration verify/provision for the Outlook add-in (FR-B0 prereq)</title>
+    <phase>0 Prerequisites &amp; spikes</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Deployment/runbook verification of an existing Entra app registration; no code change, no test surface. MINIMAL per task-create Step 3.5.5 (config/provisioning check with a runbook output). Note: touches auth config, so any DISCOVERED code change would re-trigger FULL — but this task's scope is verify/provision only.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Procedural provisioning against a documented runbook; Sonnet 5 default (CLAUDE.md §8.5).</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>P0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Operates on the Entra tenant app registration + writes a runbook note; no repo source, shared-lib, or .claude/ writes. Independent of 001/002/003.</parallel-reason>
+    <deps>none</deps>
+    <tags>deploy, auth, office-addin</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Verify (and provision if missing) the Outlook/Word add-in's Entra Nested App Authentication (NAA) app registration so the add-in can sign in against the BFF at runtime — the FR-B0 runtime prerequisite. Confirm: ADDIN_CLIENT_ID exists; the `brk-multihub://` redirect URI is registered; and the registration is pre-authorized to the BFF API scope. Produce a runbook note recording the verified/provisioned state and the exact values (client id, redirect, scope) needed by the add-in build. This is a runtime/config prerequisite, not add-in code work (that is FR-B0 proper in Phase 4).</prompt>
+  <role>SPAARKE platform / DevOps engineer with Entra ID + Office Add-in NAA expertise. Follow ADR-028 (Spaarke Auth v2; add-in NAA via `@spaarke/auth`) strictly. Do NOT commit secrets.</role>
+  <goal>A runbook note `notes/runbooks/004-entra-naa-registration.md` exists that: (1) confirms the add-in Entra app registration (ADDIN_CLIENT_ID) is present or records the provisioning steps taken; (2) confirms the `brk-multihub://{client-id}` redirect URI is registered; (3) confirms the app is pre-authorized to the BFF API scope (expose-an-API / pre-authorized apps); (4) records the exact non-secret values the add-in build/config consumes; (5) states any manual admin-consent step still required.</goal>
+
+  <context>
+    <background>FR-B0 (spec Pillar B) realigns the already-ADR-028-migrated add-in to production-current; the owner clarification notes the "likely-broken part is Entra registration." Spec Dependencies → Prerequisites lists "Entra NAA app registration for the add-in provisioned/verified (FR-B0)." NAA requires the `brk-multihub://` redirect scheme and the add-in app pre-authorized to the BFF scope so `@spaarke/auth`'s `OfficeNaaStrategy` can acquire a token silently.</background>
+    <relevant-files>
+      <file role="canonical-reference">docs/guides/auth-deployment-setup.md</file>
+      <file role="canonical-reference">docs/guides/office-addins-admin-guide.md</file>
+      <file role="new">projects/email-communication-intelligence-r2/notes/runbooks/004-entra-naa-registration.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No task dependency; requires Entra tenant admin access (or a request path to it) and the BFF API app registration id.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">The add-in auth path is Entra NAA via `@spaarke/auth`; verification MUST use the NAA `brk-multihub://` redirect + BFF scope pre-authorization model, NOT a legacy implicit/SPA redirect — scope: which registration shape to verify.</constraint>
+    <constraint source="project">Record only NON-secret identifiers (client id, redirect URI, scope URI) in the runbook note; any secret/credential stays in Key Vault and MUST NOT be written to the repo — scope: runbook content (CLAUDE.md §9).</constraint>
+    <constraint source="project">Scope is verify/provision + runbook ONLY; do NOT modify add-in code or the Word manifest here (that is FR-B0 in Phase 4) — scope: task boundary.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Entra NAA app registration for Office add-ins</topic>
+    <files>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>docs/guides/office-addins-admin-guide.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="NAA registration + BFF pre-authorization" location="docs/guides/auth-deployment-setup.md">Register `brk-multihub://{client-id}`; pre-authorize the add-in app to the BFF's exposed API scope so silent token acquisition works.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this task POML + project CLAUDE.md + spec FR-B0 + Dependencies; declare RIGOR LEVEL MINIMAL with reason.</step>
+    <step order="1">Read `auth-deployment-setup.md` + `office-addins-admin-guide.md` to confirm the exact NAA registration requirements (redirect scheme, BFF scope pre-authorization, required Graph delegated scopes).</step>
+    <step order="2">Using the `azure-deploy` skill / Entra tooling, look up the add-in app registration by ADDIN_CLIENT_ID. If present, record its state; if absent, provision it per the guide.</step>
+    <step order="3">Verify the `brk-multihub://{client-id}` redirect URI is registered on the add-in app; add it if missing.</step>
+    <step order="4">Verify the add-in app is pre-authorized to the BFF API scope (BFF app registration → Expose an API → pre-authorized apps includes ADDIN_CLIENT_ID); wire it if missing. Note any admin-consent still required.</step>
+    <step order="5">Write `notes/runbooks/004-entra-naa-registration.md` with: verified/provisioned state, the exact non-secret values (client id, redirect, scope), and any remaining manual admin-consent step. Do NOT record secrets.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation (e.g., lacked tenant admin rights — provisioning steps handed off) in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If provisioning requires Entra tenant-admin rights not available in this session, or the BFF API scope pre-authorization needs a security-review decision, STOP and escalate per CLAUDE.md §6 (auth is a security-sensitive surface) with the exact steps + values needed, rather than attempting a workaround or a broader-than-needed grant.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="azure-deploy">Inspect/provision the Entra app registration + redirect + pre-authorization via the deployment skill.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/email-communication-intelligence-r2/notes/runbooks/004-entra-naa-registration.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given ADDIN_CLIENT_ID, when the add-in app registration is looked up, then the runbook records it as present (verified) or records the provisioning steps taken to create it.</criterion>
+    <criterion testable="true">Given the add-in app, when its redirect URIs are inspected, then the runbook confirms `brk-multihub://{client-id}` is registered.</criterion>
+    <criterion testable="true">Given the BFF API registration, when its pre-authorized apps are inspected, then the runbook confirms the add-in app is pre-authorized to the BFF scope (or records the wiring done + any admin-consent still required).</criterion>
+    <criterion testable="true">Negative: no secret/credential value is written to the repo; if a step needs tenant-admin rights not available, the runbook records the hand-off and the escalation trigger is invoked rather than a partial/insecure grant.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows this task ✅ and any deviation is recorded under notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-B0, Dependencies → Prerequisites ("Entra NAA app registration provisioned/verified"), Owner Clarification (Outlook add-in "realign + verify; likely-broken part is Entra registration"). Runtime prerequisite gating the Phase-4 FR-B0 add-in realignment. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

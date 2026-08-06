@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="teams-app-r1">
+  <metadata>
+    <title>Teams app manifest v1.29 + M365 Agents Toolkit packaging</title>
+    <phase>7 Teams Package &amp; Deploy</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New file creation (manifest + appPackage) with no auth/authz code changes; Phase 7 packaging task per CLAUDE.md §8 rigor table.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>New manifest authoring following the Teams v1.29 schema.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>061,062</deps>
+    <tags>config, deploy, teams</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Author the Teams app manifest v1.29 (`staticTabs`, COMPLETE `validDomains`, and an EXACT `webApplicationInfo { id, resource }` matching the reused multitenant Entra app configured in task 061) and package it via the Microsoft 365 Agents Toolkit (`appPackage/` folder + zip) for org-catalog distribution. The CSP `frame-ancestors` framing headers are set by task 062 — this task consumes that already-framed host, it does not change framing headers itself.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in the Teams app manifest schema (v1.29), static-tab configuration, Microsoft 365 Agents Toolkit (formerly Teams Toolkit) packaging conventions, and Microsoft Entra multitenant app registration. Follow ADRs strictly.</role>
+
+  <goal>
+    A valid Teams app package (`appPackage/manifest.json` + icons + `env.*.json`) declaring a `staticTabs` entry pointing at the Teams-hosted collaboration core (task 012's adapter route), a `validDomains` list that covers every domain the tab or its framed content is served from, and a `webApplicationInfo.id`/`webApplicationInfo.resource` pair that is byte-exact with the reused Entra app `1e40baad-…` (task 061). The package builds/validates cleanly via the M365 Agents Toolkit and is ready for org-catalog upload (task 072 consumes this package).
+  </goal>
+
+  <context>
+    <background>
+      Per design.md §8 (Enterprise posture) and §9 (R1 scope), the Teams collaboration core is delivered as a static tab inside `external-spa` extended in place (D10), reusing the multitenant Entra app `1e40baad-…` already carrying `access_as_user` + Teams redirect URIs (task 061). Manifest v1.29 is the minimum schema version supporting the current `staticTabs`/`webApplicationInfo` shape; a mismatch between the manifest's `webApplicationInfo` and the actual registered Entra app breaks SSO silently (Teams issues a token for the wrong audience). `docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` §8 is the reference acceptance checklist for any embedded Teams host.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/solutions/CopilotAgent/appPackage/manifest.json</file>
+      <file role="canonical-reference">src/client/office-addins/outlook/manifest.json</file>
+      <file role="new">src/client/external-spa/appPackage/manifest.json</file>
+      <file role="new">src/client/external-spa/appPackage/env.dev.json</file>
+      <file role="new">src/client/external-spa/appPackage/color.png</file>
+      <file role="new">src/client/external-spa/appPackage/outline.png</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>No Teams app package exists anywhere in the repo for this collaboration surface — `src/solutions/CopilotAgent/appPackage/` is a devPreview declarative-agent manifest for a different app (Spaarke AI Copilot agent), not a v1.29 static-tab manifest, and cannot be reused or repointed.</existing>
+    <extension>No — this is net-new authoring. The CopilotAgent manifest is a useful structural reference (appPackage folder shape, developer/icons blocks) but uses a different `manifestVersion` (`devPreview`) and a different capability (`copilotAgents.declarativeAgents`) than the `staticTabs` capability this task needs.</extension>
+    <cost-of-doing-nothing>Without this manifest + package, the Teams app cannot be installed in Teams at all — there is no static-tab entry point, so FR-01 (Teams tab host) and FR-10 (Teams app package + framing + org catalog) have nothing to ship, and task 072's org-catalog distribution has no artifact to upload.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="project">Author manifest v1.29 (or higher, if the Toolkit's current schema requires it) with a `staticTabs` entry pointing at the Teams-adapter route from task 012; `validDomains` MUST be COMPLETE — list every domain the tab or any content it frames is served from (the external-spa SWA host, the BFF host if it is ever iframed directly, and any Teams-supplied domains the Toolkit requires); `webApplicationInfo.id` and `webApplicationInfo.resource` MUST be the EXACT values of the reused multitenant Entra app from task 061 (application client ID and the BFF API's App ID URI / audience) — a mismatch silently breaks SSO. SCOPE: applies to every field of the new manifest; do not invent placeholder GUIDs.</constraint>
+    <constraint source="ADR-029">Do NOT add any M365 Agents SDK or Bot Framework NuGet/npm packages as part of this packaging work (NFR-01) — this is a Teams **static tab**, not a bot; the M365 Agents Toolkit is a build/CLI tool used to package and publish the manifest, not a runtime dependency added to the BFF or the SPA bundle. SCOPE: applies to any new package.json/csproj dependency introduced by this task; the Toolkit's own dev-tooling dependency (if installed as a devDependency for packaging) is not itself an SDK/Bot package and is acceptable.</constraint>
+    <constraint source="project">Reference `docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` for the embedded-host requirements (theme ownership, sessionStorage sentinels, webApi shim, mount semantics) the static tab must satisfy once framed — this task's manifest/package MUST NOT declare a tab configuration that would violate that contract's mount semantics. SCOPE: applies to the `staticTabs` entry point and `contentUrl`/`websiteUrl` fields only; the contract's runtime requirements are enforced by tasks 010-012, not re-implemented here.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Teams app manifest v1.29 + M365 Agents Toolkit packaging</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="M365 Agents Toolkit appPackage folder shape" location="src/solutions/CopilotAgent/appPackage/manifest.json">developer/icons/id block shape and env.*.json convention to mirror structurally — NOT the manifestVersion or capability block, which differ (devPreview declarative-agent vs v1.29 staticTabs).</pattern>
+      <pattern name="Static-tab host framing contract" location="docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md">§8 host checklist is the acceptance test this manifest's tab configuration must be compatible with once the Teams-host adapter (task 012) is framed.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm the reused Entra app `1e40baad-…` client ID and the BFF API's App ID URI/audience (task 061 output) — record the exact GUIDs/URIs to use.</step>
+    <step order="2">Scaffold `src/client/external-spa/appPackage/` (manifest.json, color.png, outline.png, env.dev.json) using the M365 Agents Toolkit conventions, referencing `src/solutions/CopilotAgent/appPackage/` for folder shape only.</step>
+    <step order="3">Author `manifest.json` at schema version 1.29: `id`, `developer` (name, websiteUrl, privacyUrl, termsOfUseUrl), `name`/`description`, `icons`, `accentColor`, `staticTabs` (entityId, name, contentUrl pointing at the Teams-adapter route, scopes: personal).</step>
+    <step order="4">Set `validDomains` to the COMPLETE list of hosts the tab or its content is served from; do not omit any framed/loaded domain.</step>
+    <step order="5">Set `webApplicationInfo.id` = the exact reused Entra app client ID and `webApplicationInfo.resource` = the exact BFF API App ID URI, both matching task 061 verbatim.</step>
+    <step order="6">Run the M365 Agents Toolkit's manifest validation (`teamsapp validate` or Toolkit-equivalent) against the schema and fix any validation errors.</step>
+    <step order="7">Package the app (Toolkit build/package command) producing the distributable zip; confirm it contains manifest.json + icons and no stray dev artifacts.</step>
+    <step order="8">Manually side-load or Toolkit-preview the package in a dev Teams tenant to confirm the static tab installs and the `contentUrl` loads (visual smoke test only — full SSO validation is out of scope for this task, covered by task 001/foundation spike and Phase 1 auth tasks).</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the `webApplicationInfo { id, resource }` values do not match (or cannot be confirmed against) the reused Entra app configured in task 061, STOP and escalate per root CLAUDE.md §6 — do not invent or guess GUIDs, since a mismatch silently breaks Teams SSO.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Install/run the M365 Agents Toolkit CLI if consumed as a devDependency</tool>
+    <tool name="terminal">Run Toolkit validate/package commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/client/external-spa/appPackage/manifest.json</output>
+    <output type="config">src/client/external-spa/appPackage/env.dev.json</output>
+    <output type="config">src/client/external-spa/appPackage/color.png</output>
+    <output type="config">src/client/external-spa/appPackage/outline.png</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The manifest is schema version 1.29 (or the Toolkit's current minimum for `staticTabs`/`webApplicationInfo`) and passes Teams app validation with zero errors.</criterion>
+    <criterion testable="true">`staticTabs` contains an entry whose `contentUrl` resolves to the Teams-adapter route and the tab installs as a personal static tab in a dev Teams tenant.</criterion>
+    <criterion testable="true">`validDomains` covers every host the tab or its framed content is served from; a manual check confirms no framed domain is missing.</criterion>
+    <criterion testable="false">Negative: an intentionally omitted framed domain (temporarily removed from `validDomains` during verification) causes the tab to fail to load/frame in Teams — proving `validDomains` completeness is load-bearing, not decorative — after which the full list is restored.</criterion>
+    <criterion testable="true">`webApplicationInfo.id` and `webApplicationInfo.resource` are byte-exact matches to the reused Entra app / BFF App ID URI from task 061.</criterion>
+    <criterion testable="true">No M365 Agents SDK or Bot Framework runtime package is added to `src/client/external-spa/package.json` or any `.csproj` as part of this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task produces the package artifact only; it does NOT stand up CI (task 071) or perform org-catalog admin upload/approval (task 072). If task 061 or 062 has not landed with a confirmed Entra app ID / BFF resource URI by the time this task starts, treat that as a blocking dependency, not something to placeholder around.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Follow task-execute pre-execution checklist. STANDARD rigor — code-review/adr-check are skipped by default at Step 9.5 unless escalation fires.</protocol>
+  </execution>
+</task>

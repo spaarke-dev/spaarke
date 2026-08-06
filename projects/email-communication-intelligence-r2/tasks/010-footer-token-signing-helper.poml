@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>HMAC footer/token signing helper (Key Vault)</title>
+    <phase>1 Pillar A: Trusted threading &amp; external matching</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-critical crypto (HMAC signing key from Key Vault, tamper-evidence); NEW BFF surface; tags include auth; modifies .cs — Step 3.5.5 FULL triggers.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security/correctness-critical: a signing-key or verification defect defeats NFR-07 tamper-evidence and cannot be caught downstream. High blast radius.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Registers the signer in the shared CommunicationModule.cs DI file and is a prerequisite for 012/013; run first, main-session, before the A-rungs wave.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,auth,communication</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create an HMAC signing/verification helper that produces and validates the opaque token carried in the outbound tracking footer (FR-A1). The token signs the tuple `recordType|recordId|tenantId|issued`; the HMAC key is loaded from Azure Key Vault via DefaultAzureCredential (never from config, never `new`-ed). Verify-before-trust is the load-bearing security property (NFR-07).</prompt>
+  <role>SPAARKE platform developer with applied-cryptography + Azure Key Vault expertise. Follow ADR-028 (Spaarke Auth v2) and ADR-013 strictly.</role>
+  <goal>A new `ITrackingTokenSigner` + `TrackingTokenSigner` under Services/Communication/ that (1) `Sign(recordType, recordId, tenantId, issued)` → a URL-safe opaque token string, and (2) `TryVerify(token, out TrackingTokenPayload)` → bool that returns false for tampered/forged/malformed input WITHOUT throwing; registered unconditionally in CommunicationModule.cs; unit-tested for sign→verify round-trip and every tamper/negative case.</goal>
+
+  <context>
+    <background>FR-A1 delivers a transparent, signed reference footer so threads Spaarke originates are recognized on return with high trust. The token must be tamper-evident: a forged or edited token MUST fail signature validation and be ignored by the TrackingTokenRung (task 013). NFR-07 requires the HMAC key in Key Vault (ADR-028 Path A), signature verified before any trust. Per spec §New-Components the helper is genuinely new (no token signer exists in Communication).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Communication/Tracking/ITrackingTokenSigner.cs — the seam + payload record.</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Communication/Tracking/TrackingTokenSigner.cs — HMAC-SHA256 sign/verify; constant-time compare (CryptographicOperations.FixedTimeEquals); key resolved from Key Vault.</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs — unconditional registration (ADR-010).</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/CLAUDE.md — Auth v2 section: DefaultAzureCredential / managed identity; ClientSecretCredential is local-dev fallback ONLY. Mirror the named-API-key handler's FixedTimeEquals constant-time compare.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Configuration/AutoFileOptions.cs (at Configuration/AutoFileOptions.cs) — the IOptionsMonitor precedent task 011 clones; the signing KEY is NOT config, only the key-vault secret name / footer template are (011).</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Foundational — nothing precedes it.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">HMAC signing key MUST come from Key Vault resolved via DefaultAzureCredential (managed identity in Azure; ClientSecretCredential local-dev fallback only). MUST NOT `new` a credential, embed the key in config/appsettings, or log it. Scope: key acquisition in TrackingTokenSigner.</constraint>
+    <constraint source="ADR-028">Signature MUST be verified with a constant-time compare (CryptographicOperations.FixedTimeEquals) before a token payload is trusted; TryVerify returns false (never throws) on tamper/forgery/malformed input. Scope: verification path.</constraint>
+    <constraint source="ADR-045">Signing/verification MUST be best-effort/non-fatal to the send and capture paths (NFR-04): a signer failure degrades to "no footer / no token trust", never throws up the pipeline. Scope: helper callers (012/013).</constraint>
+    <constraint source="ADR-013">MUST NOT inject IOpenAiClient/IPlaybookService or any AI-internal type; no AI is used here. If AI were ever needed, only via Services/Ai/PublicContracts/. Scope: helper deps.</constraint>
+    <constraint source="ADR-010">Register ITrackingTokenSigner unconditionally in CommunicationModule.cs (no feature gate on the registration; enable/disable of the FEATURE lives in 011's config). Scope: DI.</constraint>
+    <constraint source="ADR-038">Unit tests in tests/unit/Sprk.Bff.Api.Tests/Services/Communication/; ban Mock&lt;HttpMessageHandler&gt;, DI-registration tests, and ctor null-check tests. Test crypto behavior, not wiring. Scope: this task's tests.</constraint>
+    <constraint source="bff-extensions">Report BFF publish size (absolute + delta vs ~45.9 MB excl-PDB baseline) in task notes; ceiling ≤60 MB compressed; no new HIGH CVE from any added package (prefer BCL crypto — no new NuGet). Scope: this task's BFF additions.</constraint>
+    <constraint source="project">Placement Justification: state in the PR that the signer lives in Services/Communication/Tracking beside its sole callers (send path + rung), citing .claude/constraints/bff-extensions.md. Scope: PR description.</constraint>
+    <constraint source="project">Run /conflict-check before the PR — CommunicationModule.cs is contended by r5 / messaging / notification-spine worktrees. Scope: shared DI file.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>HMAC token signing, Key Vault secret access, BFF auth</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Constant-time key compare" location="src/server/api/Sprk.Bff.Api/Infrastructure/Auth/">Named-API-key schemes use CryptographicOperations.FixedTimeEquals — mirror for signature compare.</pattern>
+      <pattern name="IOptionsMonitor config precedent" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AutoFileGate.cs">Resolve config fresh per call; task 011 supplies the key-vault secret name + footer template through this pattern.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML, CLAUDE.md, ADR-028/013/010, bff-extensions.md; declare RIGOR LEVEL FULL + model-tier opus/xhigh; confirm no AI dependency.</step>
+    <step order="1">Define ITrackingTokenSigner (Sign + TryVerify) and TrackingTokenPayload (RecordType, RecordId, TenantId, Issued) in Services/Communication/Tracking/.</step>
+    <step order="2">Implement TrackingTokenSigner: HMAC-SHA256 over the canonical `recordType|recordId|tenantId|issued` string; URL-safe base64 encode payload+signature; key fetched from Key Vault (secret name from 011 config) via the DI-injected central TokenCredential (DefaultAzureCredential).</step>
+    <step order="3">Implement TryVerify: parse, recompute HMAC, FixedTimeEquals compare; return false (no throw) on any parse/tamper/forgery. Bound the `issued` freshness only if the spec requires — otherwise carry it in payload for the rung.</step>
+    <step order="4">Register ITrackingTokenSigner unconditionally in CommunicationModule.cs (ADR-010); state the Placement Justification in code comment + PR.</step>
+    <step order="5">Write unit tests: sign→verify round-trip; tampered signature → false; edited payload → false; malformed/empty → false; forged key → false; verify NEVER throws. Build green.</step>
+    <step order="6">Run dotnet build + dotnet test; run /conflict-check; measure + record publish size delta.</step>
+    <step order="7">Update TASK-INDEX.md: set task 010 status to ✅.</step>
+    <step order="8">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If no central TokenCredential / Key Vault secret-access seam exists to reuse (grep Infrastructure for SecretClient/TokenCredential), STOP and escalate per CLAUDE.md §6 rather than inventing a second credential path — ADR-028 forbids `new`-ing credentials.</trigger>
+    <trigger>If the spec's tamper-evidence requirement appears to need more than HMAC (e.g. asymmetric signing / key rotation windows beyond a single Key Vault secret), STOP and escalate per §6.5 (ADR-028 Path A boundary).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>None — grep Services/Communication for "Signer"/"Hmac"/"token" finds no token signer (spec §New-Components confirms; only webhook HMAC validators exist in Infrastructure/Auth, which validate inbound Graph/Dataverse webhooks, not outbound record tokens).</existing>
+    <extension>No — the webhook HMAC validators sign/verify a different contract (subscription payloads) with a different key; reusing them would couple the footer token to webhook-key rotation. A dedicated signer keeps the footer contract isolated + testable.</extension>
+    <cost-of-doing-nothing>Without a tamper-evident signer, the footer token cannot be trusted: a forged/edited token would be indistinguishable from a genuine one, so the TrackingTokenRung (013) could auto-file to an attacker-chosen record — the exact misfile NFR-03/NFR-07 forbid.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test the BFF.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Tracking/ITrackingTokenSigner.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Tracking/TrackingTokenSigner.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/TrackingTokenSignerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a valid (recordType,recordId,tenantId,issued) tuple, when Sign then TryVerify, then TryVerify returns true and the round-tripped payload equals the input.</criterion>
+    <criterion testable="true">Negative (tamper): given a token with one altered signature/payload byte, when TryVerify, then it returns false and does not throw.</criterion>
+    <criterion testable="true">Negative (forgery): given a token signed with a different key, when TryVerify, then it returns false.</criterion>
+    <criterion testable="true">Negative (malformed): given empty/null/garbage input, when TryVerify, then it returns false and does not throw.</criterion>
+    <criterion testable="true">Signature comparison uses CryptographicOperations.FixedTimeEquals (constant-time); the HMAC key is read from Key Vault via DefaultAzureCredential — no credential is `new`-ed and the key never appears in config or logs.</criterion>
+    <criterion testable="true">ITrackingTokenSigner is registered unconditionally in CommunicationModule.cs.</criterion>
+    <criterion testable="true">All unit tests pass; build is green; publish-size delta reported and ≤60 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-A1, NFR-07, NFR-03, NFR-04. The KEY-VAULT SECRET NAME + footer template are operator config supplied by task 011; this task only consumes the secret name. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

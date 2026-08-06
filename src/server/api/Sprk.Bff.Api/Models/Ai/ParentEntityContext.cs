@@ -7,7 +7,7 @@ namespace Sprk.Bff.Api.Models.Ai;
 /// <remarks>
 /// <para>
 /// Parent entity context enables filtering search results by the business entity
-/// (Matter, Project, Invoice, Account, or Contact) that owns the documents.
+/// (Matter, Project, Service Request, Invoice, Account, or Contact) that owns the documents.
 /// </para>
 /// <para>
 /// All properties are required when a parent entity context is provided.
@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Models.Ai;
 /// </para>
 /// </remarks>
 /// <param name="EntityType">
-/// The type of parent entity. Valid values: matter, project, invoice, account, contact.
+/// The type of parent entity. Valid values: matter, project, servicerequest, invoice, account, contact.
 /// </param>
 /// <param name="EntityId">
 /// The unique identifier (GUID) of the parent entity in Dataverse.
@@ -40,6 +40,9 @@ public sealed record ParentEntityContext(
         /// <summary>Project entity type.</summary>
         public const string Project = "project";
 
+        /// <summary>Service request entity type (a core auto-file type alongside matter + project).</summary>
+        public const string ServiceRequest = "servicerequest";
+
         /// <summary>Invoice entity type.</summary>
         public const string Invoice = "invoice";
 
@@ -52,7 +55,7 @@ public sealed record ParentEntityContext(
         /// <summary>
         /// All valid entity types for validation.
         /// </summary>
-        public static readonly string[] All = [Matter, Project, Invoice, Account, Contact];
+        public static readonly string[] All = [Matter, Project, ServiceRequest, Invoice, Account, Contact];
 
         /// <summary>
         /// Validates whether the given type is a valid parent entity type.

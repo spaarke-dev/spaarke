@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Tracking-footer config (operator app setting, per-tenant)</title>
+    <phase>1 Pillar A: Trusted threading &amp; external matching</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF config surface consumed by the send path + rung; tags include bff-api; modifies .cs + DI — Step 3.5.5 FULL.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Clone of the well-specified AutoFileOptions/AutoFileGate IOptionsMonitor pattern — literal, low-ambiguity; no crypto or blast-radius decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Registers TrackingFooterOptions in the shared CommunicationModule.cs DI file and is a prerequisite for 012; sequence with 010 (also touches CommunicationModule.cs) before the A-rungs wave.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,communication,config</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Clone the AutoFileOptions/AutoFileGate pattern to add operator-managed configuration for the tracking footer (FR-A1): a global + per-tenant enable flag, the footer message template, and the Key Vault SECRET NAME of the HMAC signing key. Bound via IOptionsMonitor so an operator flips it on/off or edits the template with NO redeploy (ADR-018). When disabled, no footer is injected.</prompt>
+  <role>SPAARKE platform developer. Follow ADR-018 (feature flags / per-tenant kill-switch) and ADR-010 strictly.</role>
+  <goal>A new TrackingFooterOptions (bound from a Communication:TrackingFooter section) + a TrackingFooterGate (IOptionsMonitor resolver mirroring AutoFileGate) that resolves effective { Enabled, MessageTemplate, SigningKeySecretName } for an optional tenant key; registered unconditionally in CommunicationModule.cs; consumed by the send-path injection (012) and read by the rung (013). Unit-tested for global + per-tenant override + disabled resolution.</goal>
+
+  <context>
+    <background>FR-A1 mandates that footer enablement + wording are operator-managed deployment config — an App Service app setting bound via IOptionsMonitor (the existing ADR-018 pattern per AutoFileOptions): flip on/off + edit the message template with no redeploy, per-tenant override supported. The HMAC signing KEY lives in Key Vault (NFR-07) — config carries only the secret NAME, never the key. When disabled, no footer is injected and matching relies on the rest of the ladder.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Configuration/TrackingFooterOptions.cs — clone of AutoFileOptions shape (global fields + Tenants dict of TrackingFooterTenantOverride).</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/TrackingFooterGate.cs — clone of AutoFileGate (IOptionsMonitor.CurrentValue per call; per-tenant field-by-field override; returns a TrackingFooterSettings readonly record struct).</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs — services.Configure&lt;TrackingFooterOptions&gt;(section) + AddSingleton&lt;TrackingFooterGate&gt;() (unconditional, ADR-010).</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Configuration/AutoFileOptions.cs — EXACT shape to clone: SectionName const, global fields, per-tenant Tenants dict (OrdinalIgnoreCase), nullable override fields.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AutoFileGate.cs — EXACT resolver shape to clone: Resolve(string? tenantKey), CurrentValue per call, override.HasValue field merge, readonly record struct return.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Supplies ITrackingTokenSigner which consumes the SigningKeySecretName this config exposes (loose coupling — this task defines the config; 010 may land in parallel-sequence).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-018">Config MUST be consumed via IOptionsMonitor.CurrentValue read fresh per call so an App Service setting flip takes effect without redeploy; MUST support global + per-tenant override (mirror AutoFileOptions.Tenants). Scope: TrackingFooterGate.Resolve.</constraint>
+    <constraint source="ADR-028">The config carries only the Key Vault SECRET NAME of the signing key — never the key material itself. Scope: TrackingFooterOptions fields.</constraint>
+    <constraint source="ADR-010">Register TrackingFooterOptions (Configure) + TrackingFooterGate (AddSingleton) unconditionally; the gate is pure config resolution with no external dependency, so no Null-Object peer is required (mirror AutoFileGate's remark). Scope: DI.</constraint>
+    <constraint source="ADR-045">When Enabled=false the resolver signals "no footer" and 012 injects nothing — footer absence MUST NOT fail send (NFR-04). Scope: gate contract.</constraint>
+    <constraint source="ADR-038">Unit tests in tests/unit/Sprk.Bff.Api.Tests/Services/Communication/; test resolution behavior (global, per-tenant override, disabled), not DI wiring; ban Mock&lt;HttpMessageHandler&gt;/DI-registration/ctor-null tests. Scope: this task's tests.</constraint>
+    <constraint source="bff-extensions">Report publish size (absolute + delta vs ~45.9 MB excl-PDB baseline); ≤60 MB ceiling; no new NuGet expected (BCL + Options only); no new HIGH CVE. Scope: this task's BFF additions.</constraint>
+    <constraint source="project">Placement Justification: TrackingFooterOptions sits beside AutoFileOptions in Configuration/, the gate beside AutoFileGate in Engine/ — cite .claude/constraints/bff-extensions.md in the PR. Scope: PR.</constraint>
+    <constraint source="project">Run /conflict-check before the PR — CommunicationModule.cs + Configuration/ are contended by r5 / messaging / notification-spine worktrees. Scope: shared files.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Per-tenant operator config via IOptionsMonitor (ADR-018)</topic>
+    <files>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="AutoFile options+gate clone" location="src/server/api/Sprk.Bff.Api/Configuration/AutoFileOptions.cs + Services/Communication/Engine/AutoFileGate.cs">The canonical global+per-tenant IOptionsMonitor pattern to copy field-for-field; keep the SectionName/Tenants/readonly-record-struct shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML, ADR-018/010/028, AutoFileOptions.cs + AutoFileGate.cs; declare RIGOR LEVEL FULL + sonnet/high.</step>
+    <step order="1">Create TrackingFooterOptions (SectionName = "Communication:TrackingFooter"; fields: Enabled=false default, MessageTemplate with a sensible default matching the spec wording, SigningKeySecretName; Tenants dict of TrackingFooterTenantOverride with nullable fields).</step>
+    <step order="2">Create TrackingFooterGate mirroring AutoFileGate: Resolve(string? tenantKey) reads CurrentValue, applies per-tenant override field-by-field, returns TrackingFooterSettings readonly record struct.</step>
+    <step order="3">Register both unconditionally in CommunicationModule.cs beside the AutoFileOptions/AutoFileGate registrations.</step>
+    <step order="4">Write unit tests: global resolution; per-tenant override replaces fields; unknown tenant falls back to global; Enabled=false surfaces "no footer"; template edit reflected on next Resolve (CurrentValue freshness). Build green.</step>
+    <step order="5">dotnet build + test; /conflict-check; record publish-size delta.</step>
+    <step order="6">Update TASK-INDEX.md: set task 011 status to ✅.</step>
+    <step order="7">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the spec's per-tenant footer template needs richer templating than a single string with `{record-ref}`/`{signed-token}` placeholders (e.g. HTML fragments per firm), STOP and escalate per §6 rather than expanding scope — R2 explicitly defers a Dataverse self-service config surface.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>None — grep Configuration/ + Services/Communication for "Footer"/"TrackingFooter" finds no communication-footer settings surface (spec §New-Components row "Tracking-footer config" confirms).</existing>
+    <extension>No — AutoFileOptions governs auto-file threshold/kill-switch, a different concern; overloading it with footer wording would couple two independent operator toggles. Cloning the pattern (not the class) keeps each toggle independently tunable, which ADR-018 intends.</extension>
+    <cost-of-doing-nothing>Without operator config, a firm cannot turn tracking off (DLP/policy) or edit the disclosure wording, and 012 has no source for the footer template or the Key Vault secret name — the footer feature cannot ship configurably (violates FR-A1's operator-managed requirement).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test the BFF.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/TrackingFooterOptions.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/TrackingFooterGate.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/TrackingFooterGateTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the global config Enabled=true with a template, when Resolve(null), then it returns Enabled=true, that template, and the configured signing-key secret name.</criterion>
+    <criterion testable="true">Given a per-tenant override for tenant T, when Resolve(T), then the override fields replace the global ones field-by-field and unset override fields inherit global.</criterion>
+    <criterion testable="true">Given an unknown tenant key, when Resolve, then the global defaults apply.</criterion>
+    <criterion testable="true">Given Enabled=false (global or per-tenant), when Resolve, then the settings signal "no footer" (so 012 injects nothing).</criterion>
+    <criterion testable="true">Negative: the signing KEY material is never present in TrackingFooterOptions — only the Key Vault secret name is.</criterion>
+    <criterion testable="true">TrackingFooterOptions + TrackingFooterGate are registered unconditionally in CommunicationModule.cs.</criterion>
+    <criterion testable="true">All unit tests pass; build is green; publish-size delta reported and ≤60 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-A1, NFR-07, ADR-018. Mirror AutoFileOptions/AutoFileGate exactly — do not invent a new config mechanism.
+
+**COMPLETED 2026-08-05.** Cloned the AutoFileOptions/AutoFileGate IOptionsMonitor pattern field-for-field: new `Configuration/TrackingFooterOptions.cs` (SectionName `Communication:TrackingFooter`; Enabled=false default, MessageTemplate with `{record-ref}`/`{signed-token}` placeholders, SigningKeySecretName, Tenants dict of TrackingFooterTenantOverride) + `Services/Communication/Engine/TrackingFooterGate.cs` (Resolve(tenantKey) reads CurrentValue fresh, per-tenant field-by-field override, returns `TrackingFooterSettings` readonly record struct). Registered both unconditionally in `Infrastructure/DI/CommunicationModule.cs` beside AutoFileOptions/AutoFileGate (ADR-010). Config carries only the Key Vault secret NAME — no key material (ADR-028/NFR-07). `TrackingFooterGateTests` (8 tests: global / per-tenant replace / unset-inherits-global / unknown-tenant→global / disabled global + per-tenant / CurrentValue freshness / secret-name-not-key) 8/8 green. Build 0 err; 0 new packages → publish 46.88 MB (Δ≈0); no new CVE. adr-check + code-review clean. **Consumed by 012 (send-path injection) + 013 (TrackingTokenRung), both gated behind 010 (Key Vault signer).** /conflict-check clean on CommunicationModule.cs at execution; re-run before the PR.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

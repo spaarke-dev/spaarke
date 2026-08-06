@@ -1,0 +1,23 @@
+# teams-app-r1 — Lessons Learned
+
+> Captured at project close (2026-08-06). Both corrections (things that had to be fixed/re-done) and confirmed non-obvious approaches (with why they worked), for future collaboration-surface / dual-host / workforce-auth work.
+
+## Corrections (re-done / fixed mid-flight)
+
+- **The "generalize the endpoints" intent was under-specified in Phase 2 and mis-implemented as a parallel group.** Task 020 built a *separate* `/api/v1/collab` group (only `/me` + download) instead of generalizing `/api/v1/external`. This "proved auth" but left the workforce host with **no data endpoints** — the gap only surfaced at live integration (401 on every data call). Fix = task 025 (Option A, principal-agnostic `/external`). **Lesson**: for a "generalize surface X to plane Y" task, make the acceptance criterion *"plane Y calls the SAME endpoints as plane X and gets data"*, not *"plane Y authenticates"*. Auth-only success hides the data gap until E2E.
+- **Teams NAA needed the `brk-multihub://{host}` SPA redirect** — discovered only by peeling back `AADSTS700046`. MSAL v5 NAA sends `redirect_uri=brk-multihub://{swa-host}`; it must be a registered **SPA** reply address (not web). Also required: pre-authorizing the Teams client app-ids (`1fec8e78…` desktop, `5e3ce6c0…` web) on `access_as_user`. **Lesson**: budget an Entra-config discovery loop for any first NAA integration; the errors are cryptic and sequential.
+- **Catalog app-id collision** on sideload ("already an app in the catalog with the same app ID") — a stale id from a prior upload. Fix = fresh manifest id. **Lesson**: mint a fresh Teams app id per environment; don't reuse.
+- **Plaintext `AzureAd__ClientSecret`** in App Service settings (should be a Key Vault reference) — pre-existing ops condition, flagged for ops (not introduced here).
+
+## Confirmed non-obvious approaches (why they worked)
+
+- **One reusable `CallerPrincipalResolver` + scheme-selected strategies beats inline `if(ciam)…else…`.** Handlers depend on ONE plane-agnostic `CallerPrincipal` that replicates the old surface (`HasProjectAccess`/`GetAccessibleProjectIds`/`GetEffectiveRights`), so making 9 handlers principal-agnostic required *near-zero* body change — and a third auth plane plugs in with one DI registration. This is also exactly R2's FR-22 component, so the Teams work *became* R2 Phase-P1 rather than throwaway. **Why it worked**: the unified type absorbed the plane difference at resolution time; the handlers never learned there were two planes.
+- **Plane selection by the *validated* token's `iss`/`tid` is spoof-safe and deterministic.** A token validates against exactly one authority, so exactly one scheme succeeds and exactly one plane applies; reading `iss` post-validation can't be spoofed. Simpler + safer than trying to thread "which scheme authenticated" through the ASP.NET policy machinery.
+- **Record *scope* (which records) is separate from within-record *rights* (which verbs).** Enforcing NFR-08 = making workforce `ProjectAccess` == the composed accessible-record-set (task 022); the flat `Collaborate` level is a *separate*, deliberately-simple within-project decision left for R2's admin layer. Conflating the two would have over-scoped the task.
+- **CIAM byte-for-byte was cheap to guarantee** because the CIAM strategy *reuses* `ExternalParticipationService` (the same calls the old filter made) and the same access-level→rights mapping — so the HTTP output is identical by construction. The regression test asserts the output, not the internals.
+- **Reconciling master INTO the branch before the PR** (rather than letting auto-merge stall on conflicts) kept the merge clean — the only conflict was the shared `projects/INDEX.md` registry (resolve by union of rows). A bonus: the sync pulled in master's `System.Security.Cryptography.Xml` 8.0.4 CVE patch, closing a project deferral.
+- **Operator-gated criteria are a legitimate stop, not a failure.** The foundation spike (001) and the live E2E / second-tenant install (080) genuinely require a human in a real Teams client / a second tenant. Verifying everything empirically-possible autonomously (tests/grep/size/CVE) and honestly recording the operator-gated remainder — then getting an explicit Path A acceptance for the one un-dev-verifiable criterion — is the rigorous close, not a fabricated pass.
+
+## Reusable artifacts for the next collaboration-surface project
+- Entra NAA recipe: `notes/spa-v2-handoff-workforce-endpoint-gap.md` §"Entra recipe" + `notes/r2-coordination-response.md` §6.
+- The principal-agnostic pattern: `notes/r2-coordination-response.md` §2 (resolver shape + third-plane seam).

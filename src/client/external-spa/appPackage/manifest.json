@@ -1,0 +1,49 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.29/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.29",
+  "version": "1.0.0",
+  "id": "23610794-67de-4e6c-be61-ff80cc8cbe7f",
+  "developer": {
+    "name": "Spaarke",
+    "websiteUrl": "https://spaarke.com",
+    "privacyUrl": "https://spaarke.com/privacy",
+    "termsOfUseUrl": "https://spaarke.com/terms"
+  },
+  "name": {
+    "short": "Spaarke",
+    "full": "Spaarke Collaboration Workspace"
+  },
+  "description": {
+    "short": "Access your Spaarke projects and documents",
+    "full": "Spaarke's collaboration workspace brings your projects and documents into Teams. Sign in with your organization account to view the projects and documents your membership grants access to, and download files securely \u00e2\u20ac\u201d the same collaboration core available in the standalone Spaarke workspace, now inside Teams."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#4F6BED",
+  "staticTabs": [
+    {
+      "entityId": "spaarkeCollaborationHome",
+      "name": "Spaarke",
+      "contentUrl": "https://green-dune-0c4f1221e.7.azurestaticapps.net",
+      "websiteUrl": "https://green-dune-0c4f1221e.7.azurestaticapps.net",
+      "scopes": [
+        "personal"
+      ]
+    }
+  ],
+  "permissions": [
+    "identity"
+  ],
+  "validDomains": [
+    "green-dune-0c4f1221e.7.azurestaticapps.net",
+    "spaarke-bff-dev.azurewebsites.net",
+    "teams.microsoft.com",
+    "*.cloud.microsoft"
+  ],
+  "webApplicationInfo": {
+    "id": "1e40baad-e065-4aea-a8d4-4b7ab273458c",
+    "resource": "api://1e40baad-e065-4aea-a8d4-4b7ab273458c"
+  }
+}

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Deploy the Pillar B Outlook/Word add-in to Azure Static Web Apps</title>
+    <phase>4 Pillar B — Unified filing surfaces</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Build + deploy of an already-implemented add-in via the `office-addins-deploy` skill; no new production logic authored. STANDARD per task-create Step 3.5.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical build/deploy driven by an existing skill; Sonnet 5 default (CLAUDE.md §8.5).</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment task — irreversible external side-effect (SWA publish); run sequentially main-session after its dep tasks are green.</parallel-reason>
+    <deps>040, 042</deps>
+    <tags>deploy, office-addin</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build and deploy the realigned Pillar B Outlook/Word add-in (tasks 040 + 042) to Azure Static Web Apps via the `office-addins-deploy` skill (SWA CLI). Verify the deployed manifests point at the deployed origin (no hardcoded SWA origin) and that runtime sign-in + a JSON BFF call succeed post-deploy.</prompt>
+  <role>SPAARKE platform developer with Azure Static Web Apps + Office Add-ins deployment expertise. Follow the office-addins deployment checklist and ADR-028 (auth) strictly.</role>
+  <goal>The add-in is built (production) and deployed to the target SWA; the served Outlook + Word manifests reference the deployed origin (parameterized, no hardcode); sign-in via Entra NAA and a JSON BFF call succeed against the deployed add-in at runtime; the deployment is recorded in task notes.</goal>
+
+  <context>
+    <background>Plan Phase 4 — deploy the Pillar B add-in after 040 (realignment) + 042 (drag-to-matter + ribbon quick-save). The Word manifest was parameterized in 040; the ribbon quick-save + pre-selected picker were completed in 042. This task ships them.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/office-addins/staticwebapp.config.json</file>
+      <file role="canonical-reference">src/client/office-addins/outlook/manifest.json</file>
+      <file role="canonical-reference">src/client/office-addins/word/word-manifest.xml</file>
+      <file role="canonical-reference">docs/guides/office-addins-deployment-checklist.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">Add-in realignment (Entra NAA sign-in, Word manifest, authenticatedFetch).</dependency>
+      <dependency task="042" status="pending">Drag-to-matter pre-selection + finished ribbon quick-save.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use the `office-addins-deploy` skill (SWA CLI) — do NOT hand-deploy or bypass the deployment checklist — scope: this deployment.</constraint>
+    <constraint source="project">Build production (per the add-in build script), not a dev build — scope: build step.</constraint>
+    <constraint source="ADR-028">Deployed manifests + auth config MUST match the verified Entra NAA registration (task 004); no hardcoded SWA origin — scope: served manifests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office Add-ins SWA deployment</topic>
+    <files>
+      <file>docs/guides/office-addins-deployment-checklist.md</file>
+      <file>docs/guides/office-addins-admin-guide.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="office-addins-deploy" location=".claude/skills/office-addins-deploy/SKILL.md">Build + SWA CLI deploy the add-in; run the deployment checklist.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML + project CLAUDE.md; declare RIGOR LEVEL STANDARD with reason per CLAUDE.md §8. Confirm 040 + 042 are ✅ and green.</step>
+    <step order="1">Invoke the `office-addins-deploy` skill: production build + SWA CLI deploy to the target Static Web App; follow the deployment checklist.</step>
+    <step order="2">Verify the served Outlook + Word manifests reference the deployed origin (parameterized, no hardcode) and validate.</step>
+    <step order="3">Runtime smoke: sideload the deployed add-in, sign in via Entra NAA, make a JSON BFF call — confirm success (matches Success Criterion 7).</step>
+    <step order="4">Record the deployment (target SWA, URL, manifest URLs, timestamp) in projects/email-communication-intelligence-r2/notes/.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If post-deploy runtime sign-in fails against the BFF, STOP and escalate per CLAUDE.md §6 — treat as an Entra registration / SWA origin / consent configuration problem (not a code fix); do not redeploy repeatedly hoping it resolves.</trigger>
+  </escalation>
+
+  <justification>OMIT — deployment task (no new code/component).</justification>
+
+  <tools>
+    <tool name="npm">Production build of the add-in.</tool>
+    <tool name="swa">SWA CLI deploy via office-addins-deploy.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/email-communication-intelligence-r2/notes/ (deployment record)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given tasks 040 + 042 green, when `office-addins-deploy` runs, then the add-in is production-built and deployed to the target SWA without error.</criterion>
+    <criterion testable="true">Given the served manifests, when inspected, then they reference the deployed origin (parameterized, no hardcoded SWA origin) and validate.</criterion>
+    <criterion testable="true">Given the deployed add-in, when sideloaded, then Entra NAA sign-in and a JSON BFF call succeed at runtime (Success Criterion 7).</criterion>
+    <criterion testable="true">Negative: if runtime sign-in fails, the escalation is invoked and the failure (consent/redirect/scope/origin) is recorded — not silently retried.</criterion>
+    <criterion testable="true">The deployment is recorded in notes/. TASK-INDEX.md shows this task ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-B0/B2, Success Criterion 7. Deploys the output of 040 + 042. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
