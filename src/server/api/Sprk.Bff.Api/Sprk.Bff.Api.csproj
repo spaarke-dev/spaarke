@@ -138,10 +138,13 @@
 
     <!-- Security: Override vulnerable transitive dependency -->
     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
-    <!-- FR-B1 (task 044): patch System.Security.Cryptography.Xml transitive 8.0.1 -> 8.0.3 to fix
-         GHSA-37gx-xxp4-5rgx + GHSA-w3x6-4m5h-cxqf (both HIGH). Pulled in transitively via
-         Microsoft.IdentityModel.Tokens (JWT validation stack); same-major bump per Phase 2 MEDIUM-1. -->
-    <PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.3" />
+    <!-- Security: patch the vulnerable transitive System.Security.Cryptography.Xml to the latest 8.0.x
+         servicing. History: 8.0.1 -> 8.0.3 (FR-B1 / task 044: GHSA-37gx-xxp4-5rgx + GHSA-w3x6-4m5h-cxqf).
+         2026-08-05 (email-communication-intelligence-r2): 8.0.3 -> 8.0.4 — 8.0.3 itself carries HIGH
+         advisories GHSA-g8r8-53c2-pm3f + GHSA-8q5v-6pqq-x66h + GHSA-cvvh-rhrc-wg4q. Pulled transitively via
+         Microsoft.Identity.Web (DataProtection/TokenCache) AND the Dataverse client (ServiceModel.Primitives).
+         In-band 8.0.x servicing bump — net8.0 target, no major-version change. -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.4" />
     <!-- R4 task 080 (2026-05-27): patch OpenMcdf transitive 3.1.0 -> 3.1.4 to fix two CVEs:
          (1) CVE-2026-41511 / GHSA-jxpf-xq2m-q525 (Moderate, DoS via crafted CFB infinite-loop
              in directory traversal); fixed in 3.1.3.

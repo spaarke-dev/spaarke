@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>TrackingTokenRung — read + verify the signed footer</title>
+    <phase>1 Pillar A: Trusted threading &amp; external matching</phase>
+    <gate>blocked: 010,011</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New association rung (.cs) that gates auto-file on a signed token; security-adjacent (verify-before-trust); Step 3.5.5 FULL.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-adjacent trust decision: the confidence tiers (signed=1.0 auto-file vs forged=ignored) are the load-bearing correctness surface; a misjudged tier auto-files off a forged token.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A-rungs</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>010,011</deps>
+    <tags>bff-api,communication,auth</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a new TrackingTokenRung to the Association Engine that reads the tracking footer token from the captured message body — including quoted reply/forward history — verifies its HMAC signature via ITrackingTokenSigner (verify-before-trust), and emits a RungMatch to the referenced record. Reuse RungKind.ExplicitReference so NO AssociationStatusMapper change is needed. Confidence tiers encode trust: signed-valid=1.0 (auto-file-eligible), bare/edited reference=0.65 (corroborating), forged=ignored, deleted footer=graceful no-match, conflicting-forward=Ambiguous (via the existing mapper conflict path).</prompt>
+  <role>SPAARKE platform developer with Association-Engine + applied-crypto-consumer expertise. Follow ADR-045 (extend never fork), ADR-024, ADR-028 strictly.</role>
+  <goal>A new Rungs/TrackingTokenRung.cs implementing IAssociationRung with Kind=RungKind.ExplicitReference, an Order placing it among the deterministic rungs, and EvaluateAsync that: extracts the footer token from BodyText/BodyHtml (incl. quoted history), TryVerify via ITrackingTokenSigner, and emits a RungMatch(sprk_regarding{type}, target, confidence-by-tier, provenance) — or an empty list on no/deleted/forged token. Registered unconditionally in CommunicationModule.cs. Unit-tested across all six spec acceptance cases.</goal>
+
+  <context>
+    <background>FR-A1 acceptance: a present-and-signature-valid token yields a high-confidence, auto-file-eligible match; a bare/edited reference yields a medium corroborating match the ladder cross-checks; a deleted footer degrades to the other rungs with no error; a forged/tampered token fails signature validation and is ignored; a forwarded prior token that conflicts with other signals resolves to Ambiguous (never silent misfile). Reusing RungKind.ExplicitReference means the mapper already treats a signed match as auto-file-eligible (rung 0) and its existing conflict path yields Ambiguous — zero mapper change (spec Implementation Notes).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/TrackingTokenRung.cs — the rung.</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs — AddSingleton&lt;IAssociationRung, TrackingTokenRung&gt;() beside the other deterministic rungs (unconditional, ADR-010).</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ExplicitReferenceRung.cs — reference impl: IAssociationRung shape, RungMatch construction, RegardingFieldMap.FieldFor usage, EntityReference target, confidence 1.0/0.9 precedent.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Tracking/ITrackingTokenSigner.cs — TryVerify(token, out payload) → bool (task 010).</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs — FieldFor(entityLogicalName) → sprk_regarding* field for the token's recordType.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs — CONFIRM: ExplicitReference is auto-file-eligible (IsAutoFileEligible) and the two-distinct-targets-per-field conflict path yields Ambiguous. Do NOT modify it.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Models/NormalizedMessage.cs — BodyText/BodyHtml carry the full captured body incl. quoted history; the rung reads only the envelope (ADR-045).</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">ITrackingTokenSigner.TryVerify (verify-before-trust).</dependency>
+      <dependency task="011" status="pending">TrackingFooterGate/template (the footer wording the rung parses; the delimiter/format the token is wrapped in must match 012's rendering).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">MUST verify the HMAC signature (ITrackingTokenSigner.TryVerify) BEFORE trusting any token payload; a forged/tampered token yields an empty match list (ignored), never a low-confidence write. Scope: EvaluateAsync trust gate.</constraint>
+    <constraint source="ADR-045">MUST reuse RungKind.ExplicitReference (Kind property) so no mapper change is required; MUST NOT add a new RungKind or a second regarding mechanism; write regarding only via RegardingFieldMap.FieldFor typed lookups (ADR-024). Scope: rung Kind + writes.</constraint>
+    <constraint source="ADR-045">Best-effort/non-fatal: a throwing rung is treated as a non-match (NFR-04) — a deleted/absent/garbled footer returns Array.Empty&lt;RungMatch&gt;() with no error, degrading to the other rungs. Scope: EvaluateAsync.</constraint>
+    <constraint source="project">Confidence tiers: signed-valid=1.0 (auto-file-eligible via ExplicitReference); a bare/edited textual reference with NO valid signature = 0.65 corroborating (surfaces for review, reinforces, never auto-files alone); forged/invalid-signature = ignored (no match). A forwarded valid token whose record conflicts with another rung's high-confidence target flows through the mapper's existing conflict path → Ambiguous. Scope: match emission.</constraint>
+    <constraint source="ADR-013">No AI-internal types; the rung consumes only the signer + RegardingFieldMap. Scope: rung deps.</constraint>
+    <constraint source="ADR-010">Register unconditionally as IAssociationRung; the engine evaluates by Order so registration order is cosmetic. Scope: DI.</constraint>
+    <constraint source="ADR-038">Unit tests in tests/unit/Sprk.Bff.Api.Tests/Services/Communication/TrackingTokenRungTests.cs modeled on ExplicitReferenceRungTests.cs; ban Mock&lt;HttpMessageHandler&gt;/DI-registration/ctor-null tests. Scope: this task's tests.</constraint>
+    <constraint source="bff-extensions">Report publish size (absolute + delta); ≤60 MB; no new NuGet/CVE. Scope: this task's additions.</constraint>
+    <constraint source="project">Placement Justification: additive rung in the existing Rungs/ folder — state in PR, cite .claude/constraints/bff-extensions.md. Scope: PR.</constraint>
+    <constraint source="project">Run /conflict-check before the PR — Rungs/ + CommunicationModule.cs are contended. Scope: shared files.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Association rung authoring, signed-token trust</topic>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Deterministic rung" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ExplicitReferenceRung.cs">Copy the IAssociationRung skeleton, RungMatch emission, RegardingFieldMap.FieldFor(entityType) → typed lookup, and confidence weighting.</pattern>
+      <pattern name="Reuse-Kind zero-mapper-change" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (IdentifierReverseLookupRung comment)">IdentifierReverseLookupRung already reuses Kind=ExplicitReference/Order=0 — the exact precedent for a new rung that must NOT touch the mapper.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML, ExplicitReferenceRung, ITrackingTokenSigner, RegardingFieldMap, AssociationStatusMapper (read-only); declare RIGOR LEVEL FULL + opus/high; confirm ExplicitReference is auto-file-eligible and has a conflict→Ambiguous path (no mapper edit).</step>
+    <step order="1">Implement TrackingTokenRung: Kind=RungKind.ExplicitReference; extract the token substring from BodyText and BodyHtml incl. quoted history (match 012's footer delimiter/format).</step>
+    <step order="2">TryVerify each extracted token; on valid → RungMatch(RegardingFieldMap.FieldFor(payload.RecordType), EntityReference(payload.RecordType,payload.RecordId), 1.0, provenance "tracking-token:signed", Rung=ExplicitReference).</step>
+    <step order="3">On a bare/edited textual record-ref with NO valid signature → emit a 0.65 corroborating match (provenance "tracking-token:bare"); on forged/invalid signature → emit nothing; on absent/deleted footer → Array.Empty.</step>
+    <step order="4">Register unconditionally in CommunicationModule.cs beside the deterministic rungs.</step>
+    <step order="5">Unit tests for all six cases: signed-valid→1.0 auto-file-eligible; bare/edited→0.65; deleted→empty no-error; forged→ignored; conflicting-forward→(with a second rung target) mapper yields Ambiguous; quoted-history token still read. Build green.</step>
+    <step order="6">dotnet build + test; /conflict-check; record publish-size delta.</step>
+    <step order="7">Update TASK-INDEX.md: set task 013 status to ✅.</step>
+    <step order="8">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If, on inspection, ExplicitReference is NOT auto-file-eligible or lacks a conflict→Ambiguous path in the current AssociationStatusMapper (contradicting the spec's "zero mapper change" claim), STOP and escalate per §6.5 (ADR-045 tension) rather than editing the mapper unilaterally.</trigger>
+    <trigger>If a signed token's recordType has no RegardingFieldMap entry, skip that match (do not write an unknown lookup) and note it — do not invent a field.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>None — grep Rungs/ finds no rung that reads a signed footer (spec §New-Components row "TrackingTokenRung" confirms; ExplicitReferenceRung reads subject tokens + caller-supplied, not a signed body footer).</existing>
+    <extension>No — ExplicitReferenceRung's subject-token path resolves matter reference numbers, not a cryptographically-signed multi-type token; folding signature verification into it would muddy a pure deterministic-text rung with crypto. A dedicated rung isolates the trust logic and its tests, while REUSING RungKind.ExplicitReference for zero mapper change.</extension>
+    <cost-of-doing-nothing>Without the rung, the signed footer 012 injects is never read on return: threads Spaarke originates cannot be recognized with high trust, every reply re-runs prediction from scratch, and the tamper-evidence investment (010) yields no matching benefit.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test the BFF.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/TrackingTokenRung.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/TrackingTokenRungTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a captured body with a signature-valid token for matter M, when EvaluateAsync, then it emits one RungMatch(sprk_regardingmatter, M, confidence 1.0, Rung=ExplicitReference) that the unmodified mapper treats as auto-file-eligible.</criterion>
+    <criterion testable="true">Given a bare/edited textual reference with no valid signature, when EvaluateAsync, then it emits a 0.65 corroborating match (not auto-file-eligible alone).</criterion>
+    <criterion testable="true">Given a deleted/absent footer, when EvaluateAsync, then it returns an empty list with no error and the other rungs decide.</criterion>
+    <criterion testable="true">Negative (forgery): given a token whose signature fails verification, when EvaluateAsync, then it emits NO match (ignored).</criterion>
+    <criterion testable="true">Given a forwarded valid token whose record conflicts with another rung's ≥threshold target on the same field, when the mapper decides, then the status is Ambiguous (never a silent misfile).</criterion>
+    <criterion testable="true">Given the token appears only inside quoted reply/forward history, when EvaluateAsync, then it is still extracted and verified.</criterion>
+    <criterion testable="true">AssociationStatusMapper.cs is UNCHANGED; the rung is registered unconditionally; all unit tests pass; build green; publish-size ≤60 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-A1, NFR-03, NFR-07, NFR-04. Reuse RungKind.ExplicitReference — do NOT add a RungKind member here (that is 014/016's territory). Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

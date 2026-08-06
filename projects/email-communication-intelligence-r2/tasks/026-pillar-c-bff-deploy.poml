@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Deploy Pillar C BFF — publish-size + CVE gate</title>
+    <phase>2 Pillar C — De-duplication</phase>
+    <gate>blocked: needs 021,022,023,024,025</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment task (build + publish + deploy the BFF); no new source logic authored here. STANDARD per task-create Step 3.5.5; the code it deploys was gated at its own Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescribed deploy recipe (bff-deploy skill) with a mechanical publish-size + CVE verification; no design judgment.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploys the shared BFF App Service; must run after all Pillar C BFF tasks land and not concurrently with another BFF deploy. Sequential, main-session.</parallel-reason>
+    <deps>021, 022, 023, 024, 025</deps>
+    <tags>bff-api, deploy</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the accumulated Pillar C BFF changes (message-id dedup + context-merge + SPE content-dedup detector + cross-path reconciliation) to `spaarke-bff-dev` via the `bff-deploy` skill, and record the final publish-size (absolute compressed + delta vs the ~45.9 MB excl-PDB baseline, ≤60 MB ceiling) and CVE scan in task notes / the deploy record.</prompt>
+  <role>SPAARKE platform developer. Use the `bff-deploy` skill; follow the §10 BFF publish-size + CVE verification rule strictly.</role>
+  <goal>The BFF is built in Release, published, publish-size measured (absolute + delta, ≤60 MB), `dotnet list package --vulnerable --include-transitive` shows no new HIGH CVE, and the deploy to `spaarke-bff-dev` succeeds with the Pillar C dedup behavior live. The size + CVE report is recorded.</goal>
+
+  <context>
+    <background>Pillar C adds dedup logic across capture + upload + SPE. Per §10, every BFF-touching effort verifies publish-size + CVE; this task is the Pillar-C deploy + the consolidated size/CVE report gate. It runs after tasks 021-025 have merged so the deployed image reflects the full Pillar C surface. Schema tasks 020/023 deploy via the managed solution (their own outputs), not this task — but note their key/column MUST be present in the target environment for the dedup code to function.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/ (publish target)</file>
+      <file role="canonical-reference">.claude/constraints/bff-extensions.md (publish-size + CVE rule)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="021" status="pending">Canonical message-id dedup + SB idempotency.</dependency>
+      <dependency task="022" status="pending">Context-merge on duplicate.</dependency>
+      <dependency task="023" status="pending">canonicalhash column (managed-solution deployed; must be present in target env).</dependency>
+      <dependency task="024" status="pending">SPE content-dedup Tier-1 detector.</dependency>
+      <dependency task="025" status="pending">Cross-path reconciliation.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="§10-BFF">SCOPE: this deploy. Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, measure compressed output, and record absolute size + delta vs the prior baseline (~45.9 MB excl PDBs / ~49.6 MB incl); ceiling ≤60 MB (HARD STOP at 60; escalate at ≥55 cumulative or ≥+5 single-effort delta). State the PDB convention when reporting.</constraint>
+    <constraint source="§10-BFF">SCOPE: this deploy. Run `dotnet list package --vulnerable --include-transitive`; MUST show no new HIGH-severity CVE.</constraint>
+    <constraint source="project">SCOPE: prerequisite. Confirm the task-020 alternate key + task-023 column are present in the target environment BEFORE deploying the code that depends on them; if absent, deploy the managed solution first or escalate.</constraint>
+    <constraint source="project">SCOPE: deploy mechanism. Use the `bff-deploy` skill (the deployment script) — do NOT hand-run az CLI publish steps outside it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF deployment + publish-size/CVE verification gate</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+    </files>
+    <patterns>
+      <pattern name="bff-deploy" location=".claude/skills/bff-deploy/SKILL.md">The blessed BFF deploy recipe to spaarke-bff-dev.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load POML + project CLAUDE.md + §10 publish-size rule. Declare RIGOR LEVEL: STANDARD. Confirm 021-025 merged + the 020 key / 023 column present in target env. Invoke task-execute + bff-deploy.</step>
+    <step order="1">Build Release + `dotnet publish -c Release` to deploy/api-publish/; measure compressed size; compute delta vs baseline; record (state PDB convention).</step>
+    <step order="2">Run the CVE scan; confirm no new HIGH; record.</step>
+    <step order="3">If size ≥60 MB or a new HIGH CVE appears, STOP and escalate (do not deploy).</step>
+    <step order="4">Deploy to `spaarke-bff-dev` via bff-deploy; verify the app is healthy (`/healthz`).</step>
+    <step order="5">Smoke-verify the dedup path lightly (a duplicate capture does not create a second row) against the deployed env.</step>
+    <step order="6">Record the size + CVE + deploy result in projects/email-communication-intelligence-r2/notes/ (final Pillar-C publish-size report).</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If publish size ≥60 MB compressed, or a new HIGH-severity CVE appears, or the 020 key / 023 column is missing in the target environment, STOP and escalate per CLAUDE.md §6 / §10 — do NOT deploy past a HARD-STOP size ceiling or onto missing schema.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="bff-deploy">Deploy the BFF to spaarke-bff-dev</tool>
+    <tool name="dotnet">Release publish + size measurement + CVE scan</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">Pillar C BFF live on spaarke-bff-dev</output>
+    <output type="notes">projects/email-communication-intelligence-r2/notes/ — final publish-size (absolute + delta) + CVE report + deploy result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Release publish, when compressed size is measured, then it is ≤60 MB and the absolute + delta (vs baseline, with PDB convention stated) is recorded.</criterion>
+    <criterion testable="true">Given the CVE scan, when run, then no new HIGH-severity CVE is present and the result is recorded.</criterion>
+    <criterion testable="true">Given the deploy, when complete, then `spaarke-bff-dev` `/healthz` is healthy and a duplicate capture smoke-check creates no second `sprk_communication`.</criterion>
+    <criterion testable="true">Negative: if size ≥60 MB, a new HIGH CVE appears, or the 020 key / 023 column is missing in target, the task escalates rather than deploying.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec Pillar C + NFR-06; plan Phase 2. Deploy + consolidated publish-size/CVE gate for all Pillar C BFF tasks. Schema (020/023) deploys via managed solution separately but must be present before this code deploy.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

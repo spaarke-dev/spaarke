@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>R1 close-out — reconcile task 013 + pin R1 UAT golden misfile emails as regression fixtures</title>
+    <phase>0 Prerequisites &amp; spikes</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Reconciliation + fixture-pinning that feeds a later ADR-038 KEEP-path regression suite (FR-D3). No production .cs/.ts change in this task; it mines R1 notes and captures fixtures. STANDARD per task-create Step 3.5.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deterministic reconciliation + fixture capture with a closed output; Sonnet 5 default (CLAUDE.md §8.5).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Reads R1 project notes + captures fixtures into this project's notes/fixtures/ (or tests fixture dir); no shared-lib, no .claude/, no BFF source writes. Independent of 001/002/004.</parallel-reason>
+    <deps>none</deps>
+    <tags>testing, regression</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Reconcile the outstanding R1 task 013 state (taxonomy seed) and pin the R1 UAT golden misfile emails — PAT-942665, PAT-942404, REAL-2026-123456.02, and Invoice-10044725.pdf — as durable regression fixtures for FR-D3. Mine the R1 project notes (especially `notes/061-*` and `013-*`) to capture the exact expected outcomes (core-only auto-association; no contact/invoice auto-file; Ambiguous on conflicting matters) so the FR-D3 golden suite can later assert them. This task pins fixtures + expected outcomes; it does NOT build the test harness (that is FR-D3 / task in Phase 3).</prompt>
+  <role>SPAARKE platform developer familiar with the R1 communication engine and its UAT history. Follow ADR-038 (testing strategy; golden regression under a KEEP path) strictly.</role>
+  <goal>A fixtures note `notes/fixtures/r1-golden-emails.md` (plus captured fixture artifacts) exists that: (1) records the reconciled status of R1 task 013 (done / carried-over / obsolete + evidence); (2) pins each of the 4 golden items with its source, identifiers, and the exact expected engine outcome from R1 rounds 1/2/2b/3; (3) states where the fixtures live so the FR-D3 suite can consume them; (4) flags any fixture that could not be recovered.</goal>
+
+  <context>
+    <background>R1 shipped core-only auto-association (matter/project/service-request) after UAT round 3; `notes/061-uat-round3-core-only-autofile.md` records the final rule and the open follow-up: "Golden end-to-end regression using the UAT emails should be added at 090." R2 FR-D3 pins those emails as a KEEP-path regression suite. R1 task 013 (taxonomy seed) status must be reconciled as part of the R1 close-out prerequisite (spec Dependencies → Prerequisites).</background>
+    <relevant-files>
+      <file role="canonical-reference">../email-communication-intelligence-r1/projects/email-communication-intelligence-r1/notes/061-uat-round3-core-only-autofile.md</file>
+      <file role="canonical-reference">../email-communication-intelligence-r1/projects/email-communication-intelligence-r1/notes/013-taxonomy-seed.md</file>
+      <file role="new">projects/email-communication-intelligence-r2/notes/fixtures/r1-golden-emails.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No task dependency; requires read access to the R1 worktree notes (path under c:/code_files/spaarke-wt-email-communication-intelligence-r1).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Golden fixtures MUST be pinned so the eventual FR-D3 suite lands under an ADR-038 KEEP path (`tests/integration/seam/Communication/**` or the golden-regression KEEP category), not a scaffolding path — scope: fixture placement + the note's guidance to the FR-D3 task.</constraint>
+    <constraint source="project">Expected outcomes MUST be transcribed from the R1 UAT record verbatim-in-intent (core-only auto-file; contact/org/invoice suggest-only; Ambiguous on conflicting matters) — do NOT invent new expected outcomes — scope: the pinned assertions.</constraint>
+    <constraint source="project">This task pins fixtures + expected outcomes ONLY; it does NOT author the test harness or modify engine code — scope: task boundary (harness is FR-D3, Phase 3).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Golden regression fixtures / R1 UAT history</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>../email-communication-intelligence-r1/projects/email-communication-intelligence-r1/notes/061-uat-round3-core-only-autofile.md</file>
+    </files>
+    <patterns>
+      <pattern name="KEEP-path golden regression" location="docs/adr/ADR-038-testing-strategy.md">Golden end-to-end regression is a MUST KEEP category; pin fixtures + expected outcomes so the suite is CI-guardable.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this task POML + project CLAUDE.md + spec FR-D3 + Dependencies; declare RIGOR LEVEL STANDARD with reason.</step>
+    <step order="1">Read R1 `notes/013-taxonomy-seed.md` and reconcile its status: was the taxonomy seed applied, carried over, or superseded? Record evidence (what exists in `spaarkedev1` or the seed files).</step>
+    <step order="2">Mine R1 `notes/061-*` (and 042/050/051a as needed) for the final auto-association rule and the exact expected outcomes for the 4 golden items across rounds 1/2/2b/3.</step>
+    <step order="3">Locate/collect the 4 golden fixture artifacts (PAT-942665, PAT-942404, REAL-2026-123456.02, Invoice-10044725.pdf). If the raw `.eml`/PDF are recoverable, capture them under `notes/fixtures/`; if only described in notes, pin the descriptor + identifiers and flag the missing raw artifact.</step>
+    <step order="4">For each item, write the expected engine outcome: which core record it should (or should NOT) auto-file to, which entities must be suggest-only, and where Ambiguous is the correct result.</step>
+    <step order="5">Write `notes/fixtures/r1-golden-emails.md` with: R1 task-013 reconciliation, the 4 pinned fixtures + expected outcomes, the intended KEEP path for FR-D3, and any recovery gap.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation (e.g., a fixture's raw artifact could not be recovered) in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If R1 task 013 cannot be reconciled (state ambiguous — seed neither clearly applied nor obsolete) OR a golden fixture's expected outcome conflicts across R1 rounds without a resolving note, STOP and escalate per CLAUDE.md §6 rather than guessing the intended outcome — the FR-D3 suite's correctness depends on an unambiguous baseline.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="bash">Copy/inspect R1 fixture artifacts and notes.</tool>
+    <tool name="dataverse">Verify taxonomy-seed presence in spaarkedev1 if reconciling task 013 requires it.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/email-communication-intelligence-r2/notes/fixtures/r1-golden-emails.md</output>
+    <output type="fixture">projects/email-communication-intelligence-r2/notes/fixtures/ (captured .eml/PDF artifacts where recoverable)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given R1 task 013, when its state is investigated, then the note records done / carried-over / obsolete with concrete evidence.</criterion>
+    <criterion testable="true">Given the 4 golden items, when each is pinned, then the note lists its source + identifiers + the exact expected engine outcome (auto-file target or suggest-only or Ambiguous) transcribed from the R1 UAT record.</criterion>
+    <criterion testable="true">The note states the intended ADR-038 KEEP path the FR-D3 suite will use to consume these fixtures.</criterion>
+    <criterion testable="true">Negative: any golden item whose raw artifact or expected outcome could not be recovered/resolved is explicitly flagged (not silently omitted), and if unresolvable the escalation trigger is invoked.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows this task ✅ and any deviation is recorded under notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-D3, Dependencies → Prerequisites ("R1 formally closed — reconcile task 013, pin golden regression"). R1 open follow-up in `notes/061-*` explicitly requests this. Feeds the Phase-3 FR-D3 harness task.
+
+**COMPLETED 2026-08-05.** Output: `notes/fixtures/r1-golden-emails.md`. (1) R1 task 013 reconciled = **APPLIED/done** (7 taxonomy rows live in `spaarkedev1`, verdict PASS + row GUIDs). (2) The 4 golden items are identifiers/attachment inside ONE representative "new patent application" UAT email — pinned with exact expected outcomes transcribed from the R1 UAT record: two conflicting matters → **Ambiguous** (withheld); PAT numbers → **new-record-referenced** (E1 subject-tier ranked); embedded `123456` → **no invoice collision** (P1 guard); attached invoice → **Suggested, never Filed** (Fix B + round-2b surface-only); contact/org/invoice → **suggest-only**; only matter/project/service-request auto-file (round-3 core-only). (3) Intended KEEP path = `tests/integration/seam/Communication/**`. (4) Recovery gap flagged: no raw `.eml` exists (FR-D3 synthesizes from descriptor or re-hydrates from live provenance rows `47251eb3-…`/`cfd3f282-…`). Escalation trigger evaluated → did NOT fire (013 unambiguous; rounds are progressive fixes, no cross-round conflict).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Deploy the BFF with Pillar B additions (intake folder B1 + unified upload B3) — publish-size ≤60 MB + CVE check</title>
+    <phase>4 Pillar B — Unified filing surfaces</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Build + deploy of already-implemented BFF changes via `bff-deploy`; no new production logic authored here. STANDARD per task-create Step 3.5.5. (Publish-size + CVE verification are baked in per BFF §10.)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical publish/deploy driven by an existing skill + BFF §10 verification checklist; Sonnet 5 default (CLAUDE.md §8.5).</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment task — irreversible external side-effect (App Service publish to the shared BFF); run sequentially main-session after its dep tasks are green.</parallel-reason>
+    <deps>041, 043</deps>
+    <tags>deploy, bff-api</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the BFF carrying the Pillar B additions — the Spaarke intake folder (task 041 / FR-B1) and the unified user-upload path (task 043 / FR-B3) — to Azure App Service via the `bff-deploy` skill. Before deploy, verify publish size ≤60 MB compressed with the delta reported and no new HIGH CVE (BFF §10 / NFR-06).</prompt>
+  <role>SPAARKE platform developer with Azure App Service + BFF deployment expertise. Follow BFF §10 hygiene (publish-size ceiling, CVE, Placement Justification) and the azure-deployment constraints strictly.</role>
+  <goal>The BFF is published (Release), verified ≤60 MB compressed with delta vs baseline (~45.9 MB excl PDBs) reported and no new HIGH CVE, then deployed to the target App Service; the intake-folder + unified-upload behaviors are smoke-verified against the deployed BFF; the size/CVE/deploy facts are recorded in task notes.</goal>
+
+  <context>
+    <background>Plan Phase 4 — deploy the BFF after 041 (intake folder) + 043 (unified upload). Both touch `Services/Communication/**` / `Services/Office/**`; this task ships them under the §10 publish-size + CVE gate.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/</file>
+      <file role="canonical-reference">.claude/constraints/bff-extensions.md</file>
+      <file role="canonical-reference">.claude/constraints/azure-deployment.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="041" status="pending">FR-B1 intake folder (subscription/account config) merged + green.</dependency>
+      <dependency task="043" status="pending">FR-B3 unified upload path merged + green.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">BFF §10: publish size ≤60 MB compressed is a HARD ceiling; report absolute size + delta vs baseline; ≥+5 MB single-task delta needs justification; ≥55 MB cumulative → architecture review — scope: pre-deploy verification.</constraint>
+    <constraint source="project">Run `dotnet list package --vulnerable --include-transitive`; NO new HIGH-severity CVE may ship — scope: pre-deploy verification.</constraint>
+    <constraint source="ADR-013">Confirm no AI-internal type leaked into Communication/Office code (AI only via `Services/Ai/PublicContracts/`) as part of the pre-deploy sanity — scope: deployed surface check.</constraint>
+    <constraint source="project">Use the `bff-deploy` skill — do NOT hand-deploy or bypass the deployment script — scope: this deployment.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF App Service deployment + §10 hygiene</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="bff-deploy" location=".claude/skills/bff-deploy/SKILL.md">Publish (Release) + deploy to App Service via the deployment script; run the §10 verification first.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML + project CLAUDE.md + BFF §10 constraints; declare RIGOR LEVEL STANDARD with reason per CLAUDE.md §8. Confirm 041 + 043 are ✅ and green.</step>
+    <step order="1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed output; record absolute size + delta vs baseline (state the PDB convention). Fail closed if ≥60 MB.</step>
+    <step order="2">Run `dotnet list package --vulnerable --include-transitive`; confirm no new HIGH CVE.</step>
+    <step order="3">Invoke `bff-deploy` to deploy to the target App Service (spaarke-bff-dev per R1 precedent unless directed otherwise).</step>
+    <step order="4">Smoke-verify against the deployed BFF: an intake-folder drop and a user-upload both produce an engine-processed `sprk_communication` (deduped) — matching FR-B1/B3.</step>
+    <step order="5">Record size + delta + CVE result + deploy target/timestamp in projects/email-communication-intelligence-r2/notes/.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If publish size ≥60 MB compressed OR a new HIGH CVE appears, STOP and escalate per CLAUDE.md §6 / §10 — this is a HARD STOP, not a "deploy anyway"; report the offending delta/package and request a resolution path before deploying.</trigger>
+  </escalation>
+
+  <justification>OMIT — deployment task (no new code/component).</justification>
+
+  <tools>
+    <tool name="dotnet">Publish (Release) + vulnerability scan.</tool>
+    <tool name="bff-deploy">Deploy to App Service via the deployment script.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/email-communication-intelligence-r2/notes/ (publish-size + CVE + deploy record)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given 041 + 043 green, when the BFF is published (Release), then compressed size is ≤60 MB with absolute size + delta vs baseline recorded.</criterion>
+    <criterion testable="true">Given the publish, when `dotnet list package --vulnerable --include-transitive` runs, then no new HIGH-severity CVE is present.</criterion>
+    <criterion testable="true">Given the verified publish, when `bff-deploy` runs, then the BFF deploys to the target App Service without error.</criterion>
+    <criterion testable="true">Given the deployed BFF, when an intake-folder drop and a user-upload are smoke-tested, then each produces an engine-processed `sprk_communication` (deduped) per FR-B1/B3.</criterion>
+    <criterion testable="true">Negative: if size ≥60 MB or a new HIGH CVE appears, the deploy is blocked and the escalation is invoked (HARD STOP) — not shipped.</criterion>
+    <criterion testable="true">The size/CVE/deploy facts are recorded in notes/. TASK-INDEX.md shows this task ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-B1, FR-B3, NFR-06. Deploys the output of 041 + 043. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

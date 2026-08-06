@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Formalize external-reply self-association + regression test</title>
+    <phase>1 Pillar A: Trusted threading &amp; external matching</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>No new rung code — the behavior already exists in ThreadContinuityRung; this task formalizes it as a first-class guarantee + adds regression coverage. Note: it MODIFIES tests/**, so task-execute applies the TEST-MODIFYING override (code-review + adr-check at Step 9.5 unconditionally per CLAUDE.md §8).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Test authoring + documentation against existing, well-understood behavior; low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Adds a regression case that coordinates with the golden suite (Phase-3 D3 / 030-range tasks) — sequence it against that suite to avoid duplicate/colliding fixtures.</parallel-reason>
+    <deps>none</deps>
+    <tags>communication,testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Formalize FR-A3 as a first-class guarantee and prove it with a regression test: an external reply to any email Spaarke sent self-associates via ThreadContinuityRung on In-Reply-To/References — even when custom headers are stripped — inheriting the parent's regarding. NO new rung code (the behavior is already implemented: CopyParentRegarding + the P3 0.65 unconfirmed-parent guard). Add the regression test and document the guarantee.</prompt>
+  <role>SPAARKE platform developer with Association-Engine test expertise. Follow ADR-045 and ADR-038 strictly.</role>
+  <goal>A regression test (seam or unit, matching the golden-suite home) proving an external reply with custom headers stripped still inherits the parent communication's regarding via the RFC-2822 ancestry walk; plus a short first-class-guarantee note in project docs. No production rung change.</goal>
+
+  <context>
+    <background>FR-A3: an external reply to any email Spaarke sent self-associates via ThreadContinuityRung on In-Reply-To/References. Acceptance: a regression test proves an external reply (custom headers stripped) still inherits the parent's regarding; documented as a first-class guarantee. Per spec Implementation Notes this is already implemented in ThreadContinuityRung (CopyParentRegarding walks In-Reply-To then References newest→oldest and copies the nearest ancestor's regarding; the P3 guard inherits at 0.65 from a non-Resolved parent). The work folds into the golden regression suite (D3 / Phase 3, 030-range).</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ThreadContinuityRung.cs — the ALREADY-IMPLEMENTED behavior: CopyParentRegarding + InheritFromUnconfirmedParentConfidence=0.65. Do NOT change it.</file>
+      <file role="new">tests/integration/seam/Communication/ThreadSelfAssociationRegressionTests.cs — the FR-A3 regression case (or co-locate with the D3 golden suite if that lands first — coordinate, do not duplicate).</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/RungTestSupport.cs — existing rung-test scaffolding to reuse for building the parent + reply NormalizedMessage fixtures.</file>
+      <file role="canonical-reference">tests/integration/seam/Communication/ — the seam-test home (ADR-038 KEEP path) where the golden regression suite lives / will live.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Behavior already implemented; this is formalize + test only.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-045">MUST NOT add or modify rung code — FR-A3 is a formalization of existing ThreadContinuityRung behavior. If a real bug is found, STOP and escalate (do not silently fix under a test task). Scope: production code untouched.</constraint>
+    <constraint source="ADR-038">The regression test lives under a KEEP path (tests/integration/seam/Communication/ per the golden-suite convention); it is a MAINTAIN-class test, not scaffolding; ban Mock&lt;HttpMessageHandler&gt;/DI-registration/ctor-null tests. Coordinate with the D3 golden suite so there is ONE home, not two. Scope: this task's test.</constraint>
+    <constraint source="project">The test MUST strip custom (X-Spaarke-*) headers on the reply and rely ONLY on In-Reply-To/References — proving the guarantee holds without Spaarke-proprietary headers. Scope: fixture construction.</constraint>
+    <constraint source="project">Run /conflict-check before the PR — the golden regression suite is coordinated with r1/D3 (030-range) work. Scope: shared test suite.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Thread continuity self-association + golden regression</topic>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="RFC-2822 ancestry inherit" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ThreadContinuityRung.cs">CopyParentRegarding copies the nearest existing sprk_communication ancestor's regarding; the test asserts inheritance survives header stripping.</pattern>
+      <pattern name="Seam test DoD" location="tests/integration/seam/Communication/">ADR-038 vertical-slice seam category — the golden regression home.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML, ThreadContinuityRung, ADR-038, the seam-test dir; declare RIGOR LEVEL STANDARD + note the TEST-MODIFYING override (Step 9.5 gates run); sonnet/high.</step>
+    <step order="1">Confirm (read-only) the existing self-association behavior: In-Reply-To/References walk + CopyParentRegarding + P3 0.65 guard.</step>
+    <step order="2">Check whether the D3 golden suite already exists; if so co-locate the FR-A3 case there, else create ThreadSelfAssociationRegressionTests.cs under tests/integration/seam/Communication/.</step>
+    <step order="3">Write the regression: build a parent sprk_communication (Resolved, regarding matter M) + an external reply whose In-Reply-To/References point to the parent and whose custom X-Spaarke-* headers are stripped; assert the reply inherits regarding matter M.</step>
+    <step order="4">Add a short "first-class guarantee" note to projects/email-communication-intelligence-r2/notes/ (FR-A3 formalized; folds into D3).</step>
+    <step order="5">dotnet test; /conflict-check against the golden suite / D3.</step>
+    <step order="6">Update TASK-INDEX.md: set task 015 status to ✅.</step>
+    <step order="7">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the regression FAILS (an external reply with stripped headers does NOT inherit the parent's regarding), STOP and escalate per §6 — that is a production bug, not a test task, and must not be fixed silently under this STANDARD/test task.</trigger>
+    <trigger>If the D3 golden suite location/ownership is ambiguous (r1 vs r2), coordinate via /conflict-check before creating a second suite.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Run tests.</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/seam/Communication/ThreadSelfAssociationRegressionTests.cs (or the co-located D3 golden-suite case)</output>
+    <output type="doc">projects/email-communication-intelligence-r2/notes/ (FR-A3 first-class-guarantee note)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a parent sprk_communication regarding matter M and an external reply whose In-Reply-To/References reference it with all custom X-Spaarke-* headers stripped, when the engine evaluates the reply, then it inherits regarding matter M via ThreadContinuityRung.</criterion>
+    <criterion testable="true">The regression lives under a KEEP path (tests/integration/seam/Communication/) and is CI-guarded; it does NOT duplicate the D3 golden suite (co-located or coordinated).</criterion>
+    <criterion testable="true">No production rung code is modified (ThreadContinuityRung.cs unchanged in the diff).</criterion>
+    <criterion testable="true">FR-A3 is documented as a first-class guarantee in project notes.</criterion>
+    <criterion testable="true">All tests pass; build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-A3; folds into FR-D3 golden regression suite (Phase 3, 030-range). No new rung, no justification (modify/test only).
+
+**COMPLETED 2026-08-05.** Confirmed (read-only) `ThreadContinuityRung` reads ONLY the envelope's InReplyTo/References (never a custom header) → the FR-A3 guarantee holds by construction; production code UNCHANGED (ADR-045). New seam regression `tests/integration/seam/Communication/ThreadSelfAssociationRegressionTests.cs` (2 tests): external reply with X-Spaarke-* headers stripped inherits the Resolved parent's regarding matter M at 1.0 via (1) In-Reply-To and (2) References-chain-only. Drives the real rung; doubles only the `ICommunicationDataverseService` boundary. 2/2 pass (escalation trigger did NOT fire — behavior correct). Guarantee documented in `notes/015-fr-a3-self-association-guarantee.md`. D3 (task 032) should ABSORB this case — coordinate via /conflict-check; **re-run /conflict-check before the PR** (shared seam suite).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

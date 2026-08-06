@@ -377,6 +377,11 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
 
         var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
 
+        // FR-D1 / FR-06: tag the resolved regarding as the RAG grounding key on the outbound half too,
+        // so a matter-scoped query returns sent correspondence (was null). Best-effort/non-fatal (NFR-04).
+        var parentEntity = await RegardingParentEntityMapper.ResolveAsync(
+            _genericEntityService, communicationId, _logger, ct);
+
         var request = new PostUploadIndexingRequest(
             TenantId: tenantId,
             DriveId: driveId,
@@ -385,7 +390,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             FileSizeBytes: null,
             ContentType: null,
             DocumentId: archivedDocumentId.Value.ToString(),
-            ParentEntity: null,
+            ParentEntity: parentEntity,
             SearchIndexName: null, // handler runs the ISearchIndexNameResolver chain
             Source: "OutboundEmail",
             CorrelationId: communicationId.ToString("N"));

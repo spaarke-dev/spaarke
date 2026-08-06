@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Drag-to-matter + engine-predicted pre-selection in the add-in; finish the stubbed ribbon quick-save (FR-B2)</title>
+    <phase>4 Pillar B — Unified filing surfaces</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies add-in .ts + a UI surface, reuses the engine candidate model (`derivePrimaryReview`), and completes a stubbed ribbon command (GitHub #234) that files records; tags include office-addin + frontend + pcf. FULL per task-create Step 3.5.5 → code-review + adr-check at Step 9.5. UI-tests included (Step 3.65).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified add-in feature reusing an existing candidate-derivation function + finishing a stubbed command; Sonnet 5 default (CLAUDE.md §8.5).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>PB-b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Client add-in + ribbon (Dataverse solution) surface — isolated from the BFF work; gated sequentially by its dep on 041. No shared-lib or .claude/ writes. Uses `ribbon-edit` (export/import solution) — coordinate that solution edit is not concurrent with another ribbon-editing task.</parallel-reason>
+    <deps>041</deps>
+    <tags>office-addin, frontend, pcf</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Per FR-B2, extend the add-in so "Save to Spaarke" / drag-to-matter opens the matter picker PRE-SELECTED with the engine's predicted record (reuse `derivePrimaryReview`) plus alternates, and finish the stubbed one-click ribbon quick-save (GitHub #234) so it files directly to the predicted record. The candidate model must match the code-page review surface (same `derivePrimaryReview` output).</prompt>
+  <role>SPAARKE platform developer with Office Add-ins + Dataverse ribbon (ribbon-edit) + Communication candidate-model expertise. Follow ADR-028 (auth), ADR-021/022 (UI), ADR-045 (engine reuse) strictly.</role>
+  <goal>Opening "Save to Spaarke" shows the engine's predicted record pre-selected with alternates (candidate model identical to the code-page review surface via `derivePrimaryReview`); one-click ribbon quick-save (`outlook/commands/index.ts` `quickSave`, currently a #234 stub) files to the predicted record; the add-in builds green and the ribbon solution imports cleanly.</goal>
+
+  <context>
+    <background>FR-B2 (spec §Requirements Pillar B) + plan Phase 4 B2. The ribbon `quickSave` command is a tracked stub (`outlook/commands/index.ts` L31: "TRACKED: GitHub #234 - Implement quick save functionality"). `derivePrimaryReview` is the existing candidate-derivation used by the code-page review surface (`Spaarke.Communication.Components`), so the add-in picker matches the code-page candidate model by reusing it — no forked picker.</background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/outlook/commands/index.ts</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</file>
+      <file role="modify">src/client/office-addins/outlook/taskpane/ (matter picker surface)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Communication.Components/src/components/EmailAssociationsAndTracking/EmailConnectionsReview.tsx</file>
+      <file role="modify">ribbon customization (via ribbon-edit export/import of the Communication ribbon solution)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="041" status="pending">Intake pipeline entry — the quick-save/drag path files into the same capture engine wired in 041.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-045">Reuse `derivePrimaryReview` for candidate derivation — do NOT fork a second candidate model or a second picker; the add-in candidate model MUST match the code-page review surface — scope: picker candidates.</constraint>
+    <constraint source="ADR-028">All BFF calls via @spaarke/auth authenticatedFetch (per 040); the ribbon command uses the same auth path — scope: quick-save + picker BFF calls.</constraint>
+    <constraint source="ADR-021">Picker + taskpane UI use Fluent v9 semantic tokens with working dark-mode; no light-only hardcoded colors — scope: edited UI surfaces.</constraint>
+    <constraint source="ADR-022">Add-in/PCF UI stays React-version-agnostic per platform-libraries discipline where a shared component is reused — scope: reused components.</constraint>
+    <constraint source="project">Ribbon edits go through the `ribbon-edit` skill (solution export → edit → import); do NOT hand-edit deployed ribbon XML out of band — scope: ribbon quick-save button.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Add-in drag-to-file + Dataverse ribbon quick-save</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>docs/guides/office-addins-admin-guide.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="derivePrimaryReview candidate model" location="src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts">Reuse to derive the predicted record + alternates so the add-in picker matches the code-page review surface exactly.</pattern>
+      <pattern name="ribbon quick-save stub" location="src/client/office-addins/outlook/commands/index.ts">Complete `quickSave` (GitHub #234) to file to the predicted record via the same capture path.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML + project CLAUDE.md + spec FR-B2; declare RIGOR LEVEL FULL with reason per CLAUDE.md §8.</step>
+    <step order="1">Read `derivePrimaryReview` (`provenance.ts`) + `EmailConnectionsReview.tsx` to understand the code-page candidate model; read the add-in `useSaveFlow.ts` + `outlook/commands/index.ts` `quickSave` stub.</step>
+    <step order="2">Wire the "Save to Spaarke" / drag-to-matter picker to call the engine and pre-select the top predicted record (via `derivePrimaryReview`) with alternates listed — reusing the same candidate model as the code page.</step>
+    <step order="3">Implement `quickSave` (GitHub #234): one click files the current email to the engine-predicted record via the capture path wired in 041, using authenticatedFetch.</step>
+    <step order="4">Add the ribbon quick-save button via `ribbon-edit` (export the Communication ribbon solution → add/point the button at `quickSave` → import).</step>
+    <step order="5">Build the add-in; run jest tests; perform the ui-tests below (pre-selection, one-click file, dark-mode).</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the engine's candidate endpoint returns no prediction (cold email, no candidates), do NOT auto-file to a guessed record — fall back to the picker with no pre-selection and require an explicit choice. If `derivePrimaryReview` output cannot be reproduced identically in the add-in (model divergence from the code page), STOP and escalate per CLAUDE.md §6 rather than forking a second candidate model.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`derivePrimaryReview` + `EmailConnectionsReview` supply the code-page candidate model; the add-in has a `useSaveFlow` save path and a stubbed `quickSave` command. No add-in drag-to-matter pre-selection exists; the ribbon quick-save is an empty #234 stub.</existing>
+    <extension>Yes — reuse `derivePrimaryReview` (no new candidate model) and complete the existing `quickSave` stub. The only new surface is the pre-selected picker wiring + the ribbon button pointing at the finished command.</extension>
+    <cost-of-doing-nothing>Users must re-pick a record the engine already predicted (no in-Outlook suggestion), and the ribbon quick-save button does nothing — the two competitive FR-B2 gaps stay open.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Predicted record pre-selected">
+      <steps><step>Open "Save to Spaarke" on an email the engine can associate.</step></steps>
+      <expected>The matter picker opens with the engine's top predicted record pre-selected and alternates listed; the candidate set matches the code-page review surface.</expected>
+    </test>
+    <test name="One-click ribbon quick-save files">
+      <steps><step>Select an email; click the ribbon quick-save button.</step></steps>
+      <expected>The email files to the predicted record in one click (no picker round-trip) via the capture path; a confirmation is shown.</expected>
+    </test>
+    <test name="Dark-mode (ADR-021)">
+      <steps><step>Switch Outlook to dark theme; open the picker.</step></steps>
+      <expected>Picker renders with Fluent v9 dark tokens (no light-only hardcoded colors).</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build the add-in + run jest tests.</tool>
+    <tool name="pac">ribbon-edit solution export/import for the quick-save button.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/outlook/commands/index.ts (quickSave implemented)</output>
+    <output type="code">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</output>
+    <output type="code">Communication ribbon solution (quick-save button)</output>
+    <output type="test">src/client/office-addins/**/__tests__/ (picker pre-selection + quickSave)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an associable email, when "Save to Spaarke" opens, then the engine's predicted record is pre-selected with alternates, and the candidate model matches the code-page review surface (`derivePrimaryReview`).</criterion>
+    <criterion testable="true">Given an email, when the ribbon quick-save button is clicked, then the email files to the predicted record in one click via the capture path (GitHub #234 stub is fully implemented).</criterion>
+    <criterion testable="true">Negative: an already-filed email quick-saved again is deduped (inherits FR-C1) — not filed twice.</criterion>
+    <criterion testable="true">Negative: when the engine returns no prediction, the picker opens with NO pre-selection and requires an explicit choice (no auto-file to a guessed record).</criterion>
+    <criterion testable="true">Given the picker in dark theme, when rendered, then it uses Fluent v9 dark tokens (ADR-021).</criterion>
+    <criterion testable="true">The add-in builds green, jest tests pass, and the ribbon solution imports cleanly. TASK-INDEX.md shows this task ✅ and deviations recorded under notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-B2, Success Criterion 3 (drag-to-file parity). Ribbon edit uses `ribbon-edit`; deploy of the add-in in task 044. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

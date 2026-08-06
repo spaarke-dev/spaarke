@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Fix FR-06 RAG grounding — tag ParentEntity at index time (both sites) + backfill decision</title>
+    <phase>3 Pillar D — R1 carry-overs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF .cs on the capture/enrichment index path (tags bff-api); touches the RAG grounding contract that other queries depend on.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified brownfield edit at two named call sites; no architectural or security blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>pillar-d-independent</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only IncomingCommunicationProcessor.cs + CommunicationEnrichmentService.cs — disjoint from 031 (IdentifierReverseLookupRung) and 033 (tests). Cross-worktree: run /conflict-check on Services/Communication before the BFF PR.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,communication,ai,rag</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Replace the two in-scope `ParentEntity: null` RAG-index enqueue call sites with the communication's resolved regarding (record type + id) so matter-scoped RAG queries return that matter's indexed correspondence (currently zero), for both inbound and outbound mail. Record an explicit backfill decision for already-indexed correspondence.</prompt>
+  <role>SPAARKE platform developer. BFF .NET 8, Communication capture/enrichment pipeline, RAG post-upload indexing. Reach AI only via Services/Ai/PublicContracts. Follow ADRs strictly.</role>
+  <goal>Both `PostUploadIndexingRequest` constructions carry the resolved regarding as `ParentEntity` (inbound at IncomingCommunicationProcessor.cs L1031, outbound at CommunicationEnrichmentService.cs L388); the tagging is best-effort/non-fatal to capture and send; a documented backfill decision exists in notes/. A matter-scoped RAG query returns that matter's correspondence in a seam/integration check.</goal>
+
+  <context>
+    <background>FR-D1 / FR-06: R1 shipped RAG indexing for inbound + outbound email but passed `ParentEntity: null`, so indexed correspondence is not matter-scoped and matter RAG queries return zero. R2 tags the regarding at index time. The regarding is resolved earlier in the pipeline and persisted on `sprk_communication` (`sprk_regarding*` typed lookups via RegardingFieldMap, ADR-024).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionSeam.cs</file>
+      <file role="canonical-reference">.claude/patterns/ai/indexing-pipeline.md</file>
+      <file role="modify">tests/integration/seam/Communication</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Regarding is already resolved + persisted on sprk_communication by the R1 engine (this task reads it, does not compute it).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-045">SCOPE = capture/enrichment index path: extend the existing enqueue in place; MUST NOT fork the pipeline or add a parallel indexing mechanism.</constraint>
+    <constraint source="ADR-024">SCOPE = reading the regarding: read the typed `sprk_regarding*` lookup(s) via the RegardingFieldMap/resolved-regarding source of truth; MUST NOT re-derive a regarding from raw catalog columns.</constraint>
+    <constraint source="ADR-013">SCOPE = any AI/index-handler contact: reach it only through the shared `PostUploadIndexingRequest`/enqueuer already used here; MUST NOT inject IOpenAiClient/IPlaybookService/node executors into Communication code (NFR-05).</constraint>
+    <constraint source="project">SCOPE = both call sites: ParentEntity tagging MUST be best-effort/non-fatal (NFR-04) — an unresolved/absent regarding degrades to the current null behavior with a log, never fails capture or send.</constraint>
+    <constraint source="project">SCOPE = §10 BFF hygiene: state Placement Justification in the PR (extends existing Services/Communication in place); report publish-size absolute + delta (ceiling ≤60 MB compressed); no new HIGH CVE; update tests in the seam KEEP path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>RAG post-upload indexing grounding + Communication regarding</topic>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="indexing-pipeline" location=".claude/patterns/ai/indexing-pipeline.md">Shows how PostUploadIndexingRequest.ParentEntity flows to the ISearchIndexNameResolver chain + parent-scoped filter; the field is the grounding key a matter RAG query filters on.</pattern>
+      <pattern name="public-contracts-facade" location=".claude/patterns/ai/public-contracts-facade.md">Confirms Communication reaches AI only via PublicContracts — the enqueuer is already on the allowed side of the facade.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML, spec FR-D1, project CLAUDE.md, the two ADR-045/024 concise files, and the indexing-pipeline pattern. Declare RIGOR LEVEL: FULL with reason. Run /conflict-check against Services/Communication (r5 + messaging + notification-spine contenders).</step>
+    <step order="1">Determine the `ParentEntity` shape the indexing handler/resolver expects (entity logical name + id — inspect PostUploadIndexingRequest + the ISearchIndexNameResolver chain). Confirm whether it wants a single typed ref or a {type,id} pair.</step>
+    <step order="2">At IncomingCommunicationProcessor.cs (~L1031), obtain the communication's resolved regarding (retrieve the persisted sprk_regarding* / reuse an already-loaded value if present) and pass it as ParentEntity; keep null-degradation when no regarding is resolved.</step>
+    <step order="3">At CommunicationEnrichmentService.cs (~L388, outbound half), apply the identical tagging using the same regarding source; keep the existing informational log and Source="OutboundEmail" tag.</step>
+    <step order="4">Factor the regarding→ParentEntity mapping into one small shared helper if it would otherwise be duplicated verbatim across the two sites (§11 — extend, do not duplicate); otherwise keep it inline.</step>
+    <step order="5">Record the backfill decision for already-indexed correspondence = **forward-only** (owner decision 2026-08-05): tag ParentEntity from index-time forward only; NO historical re-index / no backfill job. Write the forward-only decision (and its rationale — matter-scoped grounding heals as new correspondence indexes; no bulk re-index) to notes/030-rag-backfill-decision.md and cite it in the PR.</step>
+    <step order="6">Add/extend a seam test under tests/integration/seam/Communication/** proving a matter-scoped RAG query returns the tagged correspondence and that an unresolved-regarding message still enqueues (degrades) without throwing.</step>
+    <step order="7">Build + test green; run dotnet publish -c Release and record compressed size + delta vs ~49.63 MB baseline; run dotnet list package --vulnerable --include-transitive.</step>
+    <step order="8">Run code-review + adr-check (Step 9.5).</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="10">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the handler's ParentEntity contract cannot represent the communication's resolved regarding (e.g. it expects a single type but the regarding is polymorphic in a way the resolver chain can't consume), STOP and escalate per CLAUDE.md §6 rather than inventing a second grounding key.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs</output>
+    <output type="test">tests/integration/seam/Communication/RagGroundingParentEntityTests.cs</output>
+    <output type="doc">projects/email-communication-intelligence-r2/notes/030-rag-backfill-decision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an inbound email whose regarding resolves to matter M, when it is RAG-indexed, then the enqueued PostUploadIndexingRequest carries ParentEntity = M (not null) at IncomingCommunicationProcessor L1031.</criterion>
+    <criterion testable="true">Given an outbound .eml archived with a resolved regarding, when the enrichment index enqueue runs, then ParentEntity = the resolved regarding at CommunicationEnrichmentService L388.</criterion>
+    <criterion testable="true">Given a matter-scoped RAG query for matter M after indexing, then that matter's tagged correspondence is returned (was zero before).</criterion>
+    <criterion testable="true">Negative: an email with NO resolved regarding still enqueues indexing (ParentEntity null) and does not throw into the capture or send path (NFR-04).</criterion>
+    <criterion testable="true">The backfill decision recorded in notes/030-rag-backfill-decision.md and cited in the PR is **forward-only** (owner 2026-08-05): tag from index-time forward, NO historical re-index / no backfill job.</criterion>
+    <criterion testable="true">Publish size ≤60 MB compressed with delta reported; no new HIGH CVE; all unit + seam tests pass; build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec §Requirements FR-D1; discovery: L1031 (EnqueueRagIndexingAsync) + L388 (outbound RAG index enqueue). The regarding is already persisted on sprk_communication — this task reads it, it does not re-run the engine. Backfill is **forward-only** (owner 2026-08-05): no historical re-index, no backfill job — matter-scoped grounding heals as new correspondence indexes.
+
+**COMPLETED 2026-08-05.** New shared static helper `Services/Communication/Engine/RegardingParentEntityMapper.cs` reads the communication's polymorphic regarding in `RegardingFieldMap.All` priority order → maps the PRIMARY (first-set) regarding to `ParentEntityContext` when representable (matter/project/invoice/account/contact), else degrades to null (no fall-through to a lower-priority regarding — misfile guard). Best-effort/non-fatal `ResolveAsync` (try/catch → null; NFR-04). Wired at BOTH sites: inbound `EnqueueRagIndexingAsync` (signature now takes `ParentEntityContext?`; caller `ProcessIncomingAttachmentsAsync` resolves ONCE before the attachment foreach — fixes a per-attachment N+1 found in code-review — and `ArchiveEmlAsync` resolves once) + outbound `RunRagIndexingAsync` (inline, single doc). Seam test `tests/integration/seam/Communication/RagGroundingParentEntitySeamTests.cs` (8 tests: matter/project mapping, priority preference, **non-representable-primary→null misfile guard**, no-regarding→null, name fallback, ResolveAsync map + NFR-04 degrade-on-throw) — 8/8 green. Build 0 err; publish 46.88 MB compressed (Δ≈0, 0 new packages); pre-existing HIGH CVE `System.Security.Cryptography.Xml 8.0.3` flagged (NOT introduced — 0 packages added). adr-check clean; code-review clean (N+1 fixed). **Known limitation** (service-request-primary → null grounding) filed `notes/defer-issues.md#DEFER-030-01`. Backfill decision `notes/030-rag-backfill-decision.md` = forward-only. **/conflict-check MUST re-run before the PR** (binding — soft-warn cleared at execution time).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

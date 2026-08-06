@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Context-merge on duplicate — record delivery/recipient/uploader context on the canonical row</title>
+    <phase>2 Pillar C — De-duplication</phase>
+    <gate>blocked: needs 021 (canonical dedup + reconcile hook)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF code on the contended capture/upload path; modifies persist behavior on the reconcile branch; tags include bff-api. code-review + adr-check MANDATORY at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified additive behavior on the reconcile branch task 021 exposes (merge context onto an existing row); no new concurrency primitive or architectural decision. Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies the same `Services/Communication` capture/upload persist path as 021 — contended with r5 / messaging worktrees. Sequential, main-session; `/conflict-check` before PR.</parallel-reason>
+    <deps>021</deps>
+    <tags>bff-api, communication, dedup, dataverse</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Implement FR-C2: when task 021's dedup detects a duplicate and reconciles to the single canonical `sprk_communication`, record the duplicate's delivery/recipient/uploader context ON that canonical row rather than dropping it — so the canonical record reflects every mailbox that received it and every user that saved it. No delivery fact is lost.</prompt>
+  <role>SPAARKE BFF developer. Follow ADR-045 (extend the capture path), ADR-024/027, ADR-010/032 strictly. Reach AI (if any) only via Services/Ai/PublicContracts/ — but this task needs none.</role>
+  <goal>On a deduplicated message, the canonical `sprk_communication` reflects all mailboxes/users that received or saved it (the merged context is queryable); the merge is idempotent (re-processing the same duplicate does not double-append); the merge is non-fatal (a merge failure never fails capture/upload). Unit + seam tests prove no delivery fact is lost.</goal>
+
+  <context>
+    <background>Task 021 collapses N/M copies of an email to one canonical row. FR-C2 requires the discarded copies' context — which mailbox delivered it, which recipients/uploaders touched it — to be MERGED onto the canonical row instead of dropped, so downstream review sees the full delivery picture. The persist path already maps `sprk_to`/`sprk_cc`/`sprk_from`/mailbox (IncomingCommunicationProcessor ~L540-580). This task adds the merge-on-reconcile behavior at the branch task 021 exposes.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/CommunicationService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="021" status="pending">Provides the dedup reconcile branch (the point where a duplicate is detected and the canonical row is resolved) that this task hangs the context-merge on.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-C2">SCOPE: duplicate handling. On a detected duplicate, delivery/recipient/uploader context MUST be recorded on the canonical row; no delivery fact may be silently dropped.</constraint>
+    <constraint source="project">SCOPE: merge field choice. Prefer additive merge into existing/append-friendly fields on `sprk_communication` (e.g. accumulate mailboxes/uploaders) over inventing a new child entity — answer the §11 three-question gate if any new column/field is proposed; a new entity requires explicit justification + escalation.</constraint>
+    <constraint source="project">SCOPE: idempotency. Re-processing the same duplicate (SB redelivery) MUST NOT double-append the same mailbox/uploader — the merge is set-union, not blind concatenation.</constraint>
+    <constraint source="NFR-04">SCOPE: merge logic. Context-merge MUST be non-fatal — a merge failure logs and degrades, never throws out of capture/upload.</constraint>
+    <constraint source="ADR-045">SCOPE: capture path. Extend the existing persist path in place; do NOT fork or add a parallel merge mechanism.</constraint>
+    <constraint source="§10-BFF">SCOPE: this BFF change. PR carries Placement Justification; report publish-size absolute + delta (≤60 MB ceiling); no new HIGH CVE. If a new `sprk_communication` column is added, it lands in the managed solution (ADR-027).</constraint>
+    <constraint source="ADR-038">SCOPE: tests. Extend the Communication seam suite to assert the canonical row reflects all N mailboxes + M uploaders after dedup; update unit tests. KEEP path; no banned test shapes.</constraint>
+    <constraint source="project">SCOPE: coordination. `/conflict-check` against r5 / messaging before the PR (shared Services/Communication).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Merging delivery context onto a canonical de-duplicated communication row</topic>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Persist mapping" location="src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs">The DataverseEntity build (~L540-580) maps sprk_from/to/cc/mailbox — the fields whose duplicate-copy values must be merged rather than dropped on reconcile.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load POML + project CLAUDE.md + spec FR-C2/NFR-04 + ADR-045/027. Declare RIGOR LEVEL: FULL. Invoke task-execute.</step>
+    <step order="1">At task 021's reconcile branch, capture the incoming duplicate's context (delivering mailbox, recipients, uploader identity) before it is discarded.</step>
+    <step order="2">Decide the merge target: prefer set-union append into an existing/additive field on the canonical `sprk_communication`. If a new column is genuinely required, answer the §11 gate and add it to the managed solution (ADR-027).</step>
+    <step order="3">Implement idempotent set-union merge (no double-append on SB redelivery); wrap non-fatal (NFR-04).</step>
+    <step order="4">Wire the same merge into the user-upload reconcile path (OfficeDocumentPersistence) so an uploader's context is recorded on the canonical row.</step>
+    <step order="5">Extend the Communication seam test: after N mailboxes + M uploaders dedup, assert the canonical row lists all of them; assert redelivery does not double-append. Update unit tests.</step>
+    <step order="6">Build/test/publish; record publish-size delta + CVE scan.</step>
+    <step order="7">Step 9.5: code-review + adr-check; PR carries Placement Justification + size/CVE results.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If recording the full delivery/recipient/uploader context cannot fit existing `sprk_communication` fields and appears to need a new child entity, STOP and escalate per CLAUDE.md §6/§11 before creating one (extend-not-fork; the canonical row stays the reconciliation unit).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish; publish-size; CVE scan</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs (+ CommunicationService.cs)</output>
+    <output type="test">tests/integration/seam/Communication/** + tests/unit/Sprk.Bff.Api.Tests/**</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an email deduplicated across N mailboxes and M uploaders, when processing completes, then the canonical `sprk_communication` reflects all N mailboxes + M uploaders (queryable) — no delivery fact lost.</criterion>
+    <criterion testable="true">Given the same duplicate redelivered (SB), when re-processed, then the merged context is unchanged (set-union, no double-append).</criterion>
+    <criterion testable="true">Negative (non-fatal): Given the merge throws internally, when capture/upload runs, then the exception is caught + logged and the primary path is not failed.</criterion>
+    <criterion testable="true">All unit + seam tests pass; build green; publish size ≤60 MB with delta reported; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-C2 + NFR-04; plan Phase 2 C2. Depends on 021's reconcile branch. Prefer additive merge over a new entity; any new column → managed solution (ADR-027) + §11 gate.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
