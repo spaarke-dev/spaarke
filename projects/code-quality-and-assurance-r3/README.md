@@ -1,6 +1,6 @@
 # Code Quality & Assurance R3
 
-> **Portfolio**: register under Epic **#427** `[Epic]: Code Quality` (one Project Issue; surfaces = workstreams, no per-surface Issues). Populated at `/project-pipeline` time.
+> **Portfolio**: [Project #741](https://github.com/spaarke-dev/spaarke/issues/741) under [Epic #427](https://github.com/spaarke-dev/spaarke/issues/427) `[Epic]: Code Quality` · [Board #2](https://github.com/users/spaarke-dev/projects/2) — one Project Issue; surfaces = workstreams, no per-surface Issues. Status=Active, 27 tasks, Start 2026-08-06.
 > **Status**: Initialized — assessment-first; execution operator-gated
 > **Branch**: `work/code-quality-and-assurance-r3` (single worktree; surfaces = workstreams)
 
