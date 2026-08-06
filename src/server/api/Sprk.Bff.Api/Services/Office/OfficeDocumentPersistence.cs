@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Documents;
 
 namespace Sprk.Bff.Api.Services.Office;
@@ -16,17 +17,27 @@ public class OfficeDocumentPersistence
     private readonly IProcessingJobService _jobService;
     private readonly ContentDedupDetector _dedupDetector;
     private readonly ILogger<OfficeDocumentPersistence> _logger;
+    // FR-C2 (task 022): the seams for the office-upload half — record the SAVING USER on the canonical
+    // sprk_communication (if the email was also captured inbound). Optional/null-tolerant so the existing bare
+    // test constructor keeps compiling; DI resolves both singletons in every host. Null → the uploader merge is
+    // a guarded no-op (best-effort by construction, NFR-04).
+    private readonly ICommunicationDataverseService? _communicationService;
+    private readonly IGenericEntityService? _genericEntityService;
 
     public OfficeDocumentPersistence(
         IDocumentDataverseService documentService,
         IProcessingJobService jobService,
         ContentDedupDetector dedupDetector,
-        ILogger<OfficeDocumentPersistence> logger)
+        ILogger<OfficeDocumentPersistence> logger,
+        ICommunicationDataverseService? communicationService = null,
+        IGenericEntityService? genericEntityService = null)
     {
         _documentService = documentService;
         _jobService = jobService;
         _dedupDetector = dedupDetector;
         _logger = logger;
+        _communicationService = communicationService;
+        _genericEntityService = genericEntityService;
     }
 
     /// <summary>
@@ -48,6 +59,12 @@ public class OfficeDocumentPersistence
         _logger.LogDebug(
             "Creating Document record with SPE pointers: DriveId={DriveId}, ItemId={ItemId}",
             driveId, itemId);
+
+        // ── FR-C2 (task 022): record the SAVING USER on the canonical communication ──────────
+        // If this is an email save AND the same email was captured inbound (a canonical sprk_communication
+        // exists for its internet-message-id), record THIS user as a saver on that canonical row — so the
+        // "M uploaders" delivery fact is not lost. Runs regardless of the document content-dedup outcome below.
+        await MergeUploaderOntoCanonicalCommunicationAsync(request, userId, cancellationToken);
 
         // ── FR-C3 content de-dup (gate-after-write, Tier-1 exact quickXorHash) ──────────────
         // The blob is already in SPE (upload happened upstream). Read its content identity and reconcile
@@ -141,6 +158,44 @@ public class OfficeDocumentPersistence
             documentId, driveId, itemId);
 
         return (documentId, false);
+    }
+
+    /// <summary>
+    /// FR-C2 (task 022) office-upload half: when an email is saved and the SAME email was also captured inbound
+    /// (a canonical <c>sprk_communication</c> exists for its internet-message-id), record the saving user on that
+    /// canonical row's <see cref="DeliveryContextMerge.SavedByUsersAttribute"/> set — so no "who saved it" fact is
+    /// lost. No-op when the seams are unavailable (bare test ctor), the save is not an email, there is no
+    /// internet-message-id, or no canonical communication exists (the email was never captured). Best-effort /
+    /// non-fatal (NFR-04): never throws out of the save.
+    /// </summary>
+    private async Task MergeUploaderOntoCanonicalCommunicationAsync(
+        SaveRequest request, string userId, CancellationToken ct)
+    {
+        if (_communicationService is null || _genericEntityService is null)
+            return;
+        if (request.ContentType != SaveContentType.Email)
+            return;
+
+        var internetMessageId = request.Email?.InternetMessageId;
+        if (string.IsNullOrWhiteSpace(internetMessageId) || string.IsNullOrWhiteSpace(userId))
+            return;
+
+        try
+        {
+            var canonical = await _communicationService
+                .GetCommunicationByInternetMessageIdAsync(internetMessageId, ct);
+            if (canonical is null)
+                return; // email not captured inbound → no canonical communication to record the saver on
+
+            await DeliveryContextMerge.MergeAsync(
+                _genericEntityService, canonical.Id,
+                DeliveryContextMerge.SavedByUsersAttribute, userId, _logger, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "FR-C2 uploader-context merge failed (non-fatal) for message {MessageId}.", internetMessageId);
+        }
     }
 
     /// <summary>

@@ -1,8 +1,10 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Documents;
 using Sprk.Bff.Api.Services.Office;
 using Xunit;
@@ -69,5 +71,50 @@ public class OfficeDocumentPersistenceDedupTests
         docSvc.Verify(d => d.CreateDocumentAsync(It.IsAny<CreateDocumentRequest>(), It.IsAny<CancellationToken>()), Times.Once);
         update.Should().NotBeNull();
         update!.CanonicalHash.Should().Be("hash-xyz", "the first writer stamps the content hash so future uploads dedup against it");
+    }
+
+    [Fact]
+    public async Task CreateDocumentWithSpePointers_EmailSave_MergesUploaderOntoCanonicalCommunication()
+    {
+        // FR-C2 (task 022) office half: an email save whose message was ALSO captured inbound (a canonical
+        // sprk_communication exists for its internet-message-id) records THIS user as a saver on that canonical.
+        const string messageId = "<msg-fr-c2-office@x.com>";
+        var canonicalCommId = Guid.NewGuid();
+        var detector = DetectorReturning(new DedupDecision("h", IsDuplicate: false, CanonicalDocumentId: null));
+
+        var docSvc = new Mock<IDocumentDataverseService>();
+        docSvc.Setup(d => d.CreateDocumentAsync(It.IsAny<CreateDocumentRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.NewGuid().ToString());
+        docSvc.Setup(d => d.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var comm = new Mock<ICommunicationDataverseService>();
+        var canonicalRow = new Entity("sprk_communication", canonicalCommId);
+        comm.Setup(c => c.GetCommunicationByInternetMessageIdAsync(messageId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(canonicalRow);
+
+        var generic = new Mock<IGenericEntityService>();
+        generic.Setup(g => g.RetrieveAsync("sprk_communication", canonicalCommId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(canonicalRow);
+        Dictionary<string, object>? written = null;
+        generic.Setup(g => g.UpdateAsync("sprk_communication", canonicalCommId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, f, _) => written = f)
+            .Returns(Task.CompletedTask);
+
+        var sut = new OfficeDocumentPersistence(
+            docSvc.Object, Mock.Of<IProcessingJobService>(), detector.Object,
+            NullLogger<OfficeDocumentPersistence>.Instance, comm.Object, generic.Object);
+
+        var request = new SaveRequest
+        {
+            ContentType = SaveContentType.Email,
+            Email = new EmailMetadata { Subject = "FR-C2 office test", SenderEmail = "sender@x.com", InternetMessageId = messageId },
+        };
+
+        await sut.CreateDocumentWithSpePointersAsync(
+            request, "drive1", "item2", "https://spe/web", "email.eml", 100, "user-oid-42", CancellationToken.None);
+
+        written.Should().NotBeNull("an email save whose message was captured inbound records the saver on the canonical communication (FR-C2)");
+        written![DeliveryContextMerge.SavedByUsersAttribute].Should().Be("user-oid-42");
     }
 }
