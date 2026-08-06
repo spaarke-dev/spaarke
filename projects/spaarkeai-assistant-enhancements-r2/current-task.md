@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-06 (context-handoff — Phase D wave D2 checkpoint; 033 impl awaiting owner go-ahead)
+> **Last Updated**: 2026-08-06 (task 033 DONE — safe per-doc TTL + warm-reload durability fix; both quality gates PASS; next: Phase D wave D3)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,11 +10,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **Wave D2** — **032 ✅ DONE + VERIFIED**; **033 spike ✅ (per-doc TTL feasible, safe path)** — **awaiting owner go-ahead to implement 033**. Also fixed a task-022 eval-catalog gap (GU-141). **15 tasks done** (deploy deferred to 039). |
-| **Step** | 032 done; 033 spike done. BLOCKED on owner approval to implement 033. |
-| **Status** | in-progress (033 impl pending owner) |
-| **033 Next Action (once approved)** | Implement the SAFE per-doc path (notes/d10-ttl-spike.md): add `[JsonPropertyName("ttl")] int? Ttl` to StoredSession; set `ttl = -1` on filed sessions — DERIVE from filed-state at map-to-StoredSession time so EVERY upsert re-asserts it (a later message turn's upsert must not reset a filed doc to the 90-day default); unfiled sessions leave ttl null (Cosmos-native 90-day expiry, unchanged). NO cleanup job, NO container change, NO expiresAt. Filing hook = `ChatSessionManager.PromoteSessionToAnalysisAsync` (filed signal = HostContext.EntityType == "sprk_analysisoutput"). Tests: filed doc ttl=-1 + STILL -1 after a later turn; unfiled ttl=null; promote sets -1. Then D3 (035∥037), D4 (036), D5 (038), D6 (034), D7 (039 deploy). |
-| **Next Action** | **Phase D wave D2**: **032** (stored writable title + `PATCH …/{id}` rename + cheap title-gen, FR-D4 — sonnet/high; ChatEndpoints, AFTER 031 ✓) + **033** (retention TTL spike-then-implement, FR-D10 — **opus/xhigh, DATA-LOSS blast radius**; SessionPersistenceService, AFTER 030 ✓). File-overlap OK now (031/030 done). 033 is spike-first — **surface the TTL approach to owner before implementing the fallback** (owner already directed: prefer per-doc Cosmos TTL extension on filing; fallback = remove container TTL + expiresAt + scheduled cleanup). Then D3 (035 rich-restore overwrite-hazard ∥ 037 HistoryOverlay), D4 (036), D5 (038), D6 (034), D7 (039 deploy). |
+| **Task** | **Wave D2 COMPLETE** — **032 ✅**, **033 ✅ (safe per-doc TTL, owner-approved + built + gates PASS)**. Also fixed task-022 eval-catalog gap (GU-141). **16 tasks done** (deploy deferred to 039). |
+| **Step** | Wave D2 done. Next: Phase D wave **D3** (035 rich-restore ∥ 037 HistoryOverlay). |
+| **Status** | in-progress (D3 not started) |
+| **Next Action** | **Phase D wave D3** (concurrency 2, diff files): **035** (route History through rich restore + clear/remount FIRST so tab restore isn't overwritten, FR-D1 — **opus/xhigh, overwrite hazard**; ConversationPane spine) ∥ **037** (HistoryOverlay rebuild: row=open, ⋮ menu Open/Rename/Set-related/Delete, preview+tab-summary, Today/Yesterday/This-week grouping + search, FR-D6/7/8 — sonnet/high; HistoryOverlay.tsx, separate file). 035 & 037 are different files → parallel-safe. Deps satisfied (031 ✓, 032 ✓). Then D4 (036 attach-chip rehydrate, dep 035), D5 (038 Reanalyze chip), D6 (034 Set-related rename, dep 037), D7 (039 deploy+verify D). |
+| **033 outcome** | SAFE per-doc TTL path built (owner "continue" = go-ahead). `StoredSession.Ttl` (int?, -1=never-expire) DERIVED from filed-state (`HostContext.EntityType=="sprk_analysisoutput"`) on every write-through; unfiled→null (90-day container default). **Code-review Critical caught+fixed**: filed-state (HostContext) now persists+restores through the Cosmos warm tier so a Redis-eviction+reload+next-turn can't silently revert a filed doc to 90 days (ADR-040 warm-restore-survival pattern). 5 new tests incl. warm-reload regression; 744 Chat/Sessions/persistence/restore tests green; publish 52.37 MB (<60, delta 0). Both gates PASS. Full record: notes/d10-ttl-spike.md "IMPLEMENTATION". Risky fallback (container-TTL removal + cleanup job) NOT built — escalation trigger did not fire (spike conclusive). |
 
 ### Task 032 — DONE (2026-08-06, subagent + orchestrator). Deploy deferred to 039.
 - Stored writable `Title` on StoredSession + ChatSession (additive); `PATCH /api/ai/chat/sessions/{id}` rename (204/400/404/401, mirrors 031's existence check); cheap title-gen at messages[0] via existing `IOpenAiClient.GetCompletionAsync` (maxOutputTokens:16 — reuses SummarizationCompressionService's primitive, ADR-039-clean, no fork). Fallback: generated → first-user-message (never a bare timestamp). Path C on the title-source-of-truth tension (ListRecentSessions prefers stored Title, legacy heuristic = fallback). Files: StoredSession, ChatSession, ChatSessionManager, SessionPersistenceService, ChatHistoryManager, ChatEndpoints + 8 tests. Verified: ChatEndpointsTests 20/20; full suite green. Publish ~47 MB, no packages.

@@ -4,7 +4,7 @@
     <title>Indefinite retention for filed analyses — per-doc TTL extension or expiresAt + cleanup (FR-D10)</title>
     <phase>4 D — History &amp; true resume</phase>
     <gate>blocked until 030</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Cosmos retention/persistence change with data-loss risk</rigor-reason>
     <model-tier>opus</model-tier>
@@ -74,7 +74,15 @@
     <criterion testable="true">Publish ≤60 MB.</criterion>
     <criterion testable="true">Tests pass.</criterion>
   </acceptance-criteria>
-  <notes>FR-D10, owner-directed 2026-08-05.</notes>
+  <notes>FR-D10, owner-directed 2026-08-05. IMPLEMENTED 2026-08-06 (safe per-doc TTL path, owner-approved).
+  Spike (step 1) conclusive: container DefaultTimeToLive=7776000s → per-item ttl override available → escalation
+  trigger did NOT fire, risky fallback (steps 3 = container-TTL removal + expiresAt + cleanup job) NOT built.
+  Implemented step 2 branch: StoredSession.Ttl (int?, -1=never-expire) DERIVED from filed-state
+  (HostContext.EntityType=="sprk_analysisoutput") on every write-through; unfiled → null (rides 90-day container
+  default). Code-review Critical caught+fixed: filed-state (HostContext) now persists+restores through the Cosmos
+  warm tier so a Redis-eviction+reload+next-turn cannot silently revert a filed doc to 90 days. 5 new tests
+  (incl. warm-reload regression + STJ round-trip); 744 Chat/Sessions/persistence/restore unit tests green; publish
+  52.37 MB compressed (&lt;60 ceiling, delta 0 — no packages). Full record: notes/d10-ttl-spike.md "IMPLEMENTATION".</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>

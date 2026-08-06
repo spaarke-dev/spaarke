@@ -676,6 +676,26 @@ public class ChatSessionManager
             // FR-D4 (task 032) — stored session title round-trips through the warm tier.
             Title = session.Title,
 
+            // FR-D10 (task 033) — persist the host context through the warm tier so filed-state SURVIVES
+            // a Redis eviction + Cosmos reload. This is what makes the ttl re-assertion below correct on
+            // every turn: without it, a reopened filed session would restore with a null HostContext and
+            // the next turn would re-derive ttl = null, silently reverting the doc to the 90-day default.
+            // Same "must survive warm-store restore" class as the document references above (ADR-040).
+            HostContext = session.HostContext,
+
+            // FR-D10 (task 033) — per-item Cosmos retention override, DERIVED from live filed-state so
+            // every write-through re-asserts it (a later turn's upsert must never reset a filed doc to
+            // the 90-day container default — filed-state now round-trips via HostContext above, so this
+            // holds even across a warm-tier reload). A session is "filed" once promoted to an Analysis —
+            // its HostContext.EntityType becomes AnalysisHostContextEntityType ("sprk_analysisoutput",
+            // set by PromoteSessionToAnalysisAsync). Filed → ttl = -1 (never expire, FR-D10); unfiled →
+            // null (rides the 90-day default, unchanged). No cleanup job, no container change — the spike
+            // (notes/d10-ttl-spike.md) confirmed the container DefaultTimeToLive is non-null so per-item
+            // overrides take effect.
+            Ttl = string.Equals(session.HostContext?.EntityType, AnalysisHostContextEntityType, StringComparison.Ordinal)
+                ? StoredSession.NeverExpireTtl
+                : null,
+
             // Document references (ADR-040 fix — file refs survive the warm store)
             DocumentId = session.DocumentId,
             AdditionalDocumentIds = session.AdditionalDocumentIds?.ToList() ?? [],
@@ -768,6 +788,14 @@ public class ChatSessionManager
         {
             // FR-D4 (task 032) — restore the stored session title from the warm tier.
             Title = stored.Title,
+
+            // FR-D10 (task 033) — restore the host context (filed-state) from the warm tier so a
+            // reopened filed session is still recognized as filed. This keeps the ttl re-derivation in
+            // MapChatSessionToStoredSession correct across a Redis-eviction + Cosmos-reload: the next
+            // turn re-asserts ttl = -1 instead of silently reverting to the 90-day default. Null for
+            // knowledge-only sessions or warm documents that pre-date the field (Dataverse remains the
+            // cold-tier authority for those). The ChatHostContext normalizer is idempotent on restore.
+            HostContext = stored.HostContext,
 
             // Session ledger (ADR-040 / FR-P0-01 — restored DARK at P0, zero readers).
             // Empty stored lists map to null ("no ledger entries yet").

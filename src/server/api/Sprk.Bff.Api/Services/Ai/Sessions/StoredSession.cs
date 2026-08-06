@@ -10,10 +10,18 @@ namespace Sprk.Bff.Api.Services.Ai.Sessions;
 /// by partition delete.
 ///
 /// Container: <c>sessions</c> (Cosmos DB database configured via CosmosPersistence:DatabaseName).
-/// Retention: 90 days default (defined at container provisioning time — ADR-015).
+/// Retention: 90 days default (container-level <c>DefaultTimeToLive = 7776000</c>, defined at
+/// provisioning time — ADR-015). FR-D10 (task 033) overrides this PER DOCUMENT via <see cref="Ttl"/>
+/// so a FILED analysis's session is retained indefinitely while unfiled sessions keep the 90-day
+/// default (spike: <c>projects/spaarkeai-assistant-enhancements-r2/notes/d10-ttl-spike.md</c>).
 /// </summary>
 public class StoredSession
 {
+    /// <summary>
+    /// FR-D10 (task 033) — Cosmos per-item <c>ttl</c> sentinel meaning "never expire". See <see cref="Ttl"/>.
+    /// </summary>
+    public const int NeverExpireTtl = -1;
+
     /// <summary>Cosmos DB document id — matches sessionId.</summary>
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
@@ -48,6 +56,28 @@ public class StoredSession
     /// <summary>Playbook that governs this session's agent behaviour. Nullable for knowledge-only sessions.</summary>
     [JsonPropertyName("playbookId")]
     public Guid? PlaybookId { get; set; }
+
+    /// <summary>
+    /// FR-D10 (task 033) — the session's host context (where it is embedded and, critically, whether
+    /// it has been FILED to an Analysis: <c>HostContext.EntityType == "sprk_analysisoutput"</c>).
+    ///
+    /// Persisted through the warm tier so filed-state SURVIVES a Redis eviction + Cosmos reload — the
+    /// same "must survive warm-store restore" class as <see cref="DocumentId"/> (ADR-040). Without
+    /// this, a reopened filed session would restore with a null host context, and the next message
+    /// turn's <see cref="Chat.ChatSessionManager"/>.<c>MapChatSessionToStoredSession</c> would
+    /// re-derive <see cref="Ttl"/> = null and silently revert the doc to the 90-day default — the
+    /// exact FR-D10 failure this feature prevents. Restored by
+    /// <c>MapStoredSessionToChatSession</c> so re-derivation stays correct on every turn.
+    ///
+    /// Stored as the domain record directly (same reuse rationale as <see cref="ActiveDocument"/> /
+    /// <see cref="AnchoredAnnotations"/> — no parallel Stored* shape where the record round-trips
+    /// cleanly, root CLAUDE.md §11). Null for knowledge-only sessions or Cosmos documents that
+    /// pre-date this field (additive per ADR-015; partition key unchanged). The
+    /// <c>ChatHostContext.EntityType</c> normalizer is idempotent, so re-normalizing an
+    /// already-normalized stored value on restore is a no-op.
+    /// </summary>
+    [JsonPropertyName("hostContext")]
+    public ChatHostContext? HostContext { get; set; }
 
     /// <summary>Ordered message history for the session.</summary>
     [JsonPropertyName("messages")]
@@ -85,6 +115,35 @@ public class StoredSession
     /// <summary>UTC timestamp of the most recent message or state update.</summary>
     [JsonPropertyName("lastActivity")]
     public DateTimeOffset LastActivity { get; set; }
+
+    /// <summary>
+    /// FR-D10 (task 033) — Cosmos per-item time-to-live override (seconds). Controls THIS document's
+    /// retention independently of the container-level <c>DefaultTimeToLive</c> (90 days / 7776000s):
+    /// <list type="bullet">
+    ///   <item><c>null</c> → the document rides the container's 90-day default (every UNFILED session;
+    ///     unchanged from before this field). Note: Cosmos treats an absent OR explicitly-null
+    ///     <c>ttl</c> identically — both defer to the container default — so this is safe regardless
+    ///     of whether the serializer omits the property.</item>
+    ///   <item><see cref="NeverExpireTtl"/> (<c>-1</c>) → the document NEVER expires (indefinite
+    ///     retention), set when the session is FILED to an Analysis so a filed analysis's
+    ///     transcript+tabs+redline survive past 90 days (FR-D10).</item>
+    /// </list>
+    /// DERIVED from the live filed-state on EVERY map-to-StoredSession
+    /// (<see cref="Chat.ChatSessionManager"/>.<c>MapChatSessionToStoredSession</c>), so every
+    /// write-through re-asserts it — a later message turn's upsert can never silently reset a filed
+    /// document back to the 90-day default. The <see cref="SessionPersistenceService"/> read-modify-write
+    /// paths (tabs / uploads / summary) load the existing document and round-trip this value, so they
+    /// preserve it without needing the source <c>ChatSession</c>.
+    ///
+    /// Per-item overrides require the container's <c>DefaultTimeToLive</c> to be non-null; the
+    /// <c>sessions</c> container is provisioned at 7776000s so overrides are enabled (spike:
+    /// <c>notes/d10-ttl-spike.md</c>). Omitted-when-null on the System.Text.Json write path so an
+    /// unfiled document carries no <c>ttl</c> at all; older documents deserialize cleanly to
+    /// <c>null</c> (additive per ADR-015; partition key unchanged).
+    /// </summary>
+    [JsonPropertyName("ttl")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Ttl { get; set; }
 
     /// <summary>
     /// Dataverse entity references in scope when the session was saved.

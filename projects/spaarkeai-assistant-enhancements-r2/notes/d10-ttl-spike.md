@@ -64,3 +64,27 @@ The BFF write path today sets **no** per-item `ttl` (`SessionPersistenceService.
 ## Decision requested
 
 The spike resolves to the **safe per-doc path** — no data-loss-risk change, no cleanup job, no container reconfiguration. **Owner: approve implementing the per-doc `ttl = -1`-on-filing path?** (This supersedes the fallback described in the POML step 3, which is now unnecessary.)
+
+---
+
+## IMPLEMENTATION (2026-08-06 — owner approved; safe per-doc path built)
+
+Owner approved the safe path ("continue"). Implemented exactly as recommended, with **one durability fix surfaced by code review** (below).
+
+**Files changed** (additive only; no `.csproj`/package/dependency change → publish-size delta = 0; absolute 52.37 MB compressed, well under the 60 MB ceiling):
+1. `StoredSession.cs` — `public const int NeverExpireTtl = -1;` + `[JsonPropertyName("ttl")] [JsonIgnore(WhenWritingNull)] public int? Ttl` + **`[JsonPropertyName("hostContext")] public ChatHostContext? HostContext`** (the fix — see below).
+2. `ChatSessionManager.MapChatSessionToStoredSession` — `Ttl` DERIVED from `HostContext?.EntityType == "sprk_analysisoutput"` (filed → -1, unfiled → null), re-asserted on every write-through; **`HostContext = session.HostContext`** persisted to the warm tier.
+3. `ChatSessionManager.MapStoredSessionToChatSession` — **`HostContext = stored.HostContext`** restored on Cosmos warm reload.
+4. `ChatSessionManagerTests.cs` — 5 new tests (unfiled→null, filed later-turn→-1, promote→-1, **warm-reload→still -1**, STJ round-trip incl. omit-when-null).
+
+### The durability fix (code-review Critical — caught + closed)
+The spike's guard ("re-assert ttl on every upsert, derived from filed-state") was correct but **incomplete**: filed-state lives in `ChatSession.HostContext`, which `StoredSession` did NOT persist and the Cosmos→ChatSession warm-restore mapper did NOT restore. So the original vector: filed session (ttl=-1) → Redis evicts after 24h → reopen hits the Cosmos **warm** tier (checked before Dataverse) → restored `ChatSession` had `HostContext = null` → next message turn re-derived `ttl = null` → **overwrote the persisted `ttl = -1` with the 90-day default** → the filed analysis would expire ~90 days later (the exact FR-D10 bug). The `SessionPersistenceService` RMW writers (tabs/uploads/summary/message) were never the vector — they load+re-upsert and round-trip `ttl`; the clobber was exclusively the ChatSessionManager message-turn re-derivation after a warm reload.
+
+**Fix**: persist `HostContext` through the warm tier (both mapper directions), the same "must survive warm-store restore" class as document references (ADR-040). Now filed-state survives eviction+reload, so re-derivation is correct on every turn. Regression test `GetSessionAsync_FiledSession_RestoredFromCosmos_NextTurnUpsert_KeepsNeverExpireTtl` reproduces the original failure and proves it closed. This is a strictly-more-correct behavior generally (a reopened filed session is now recognized as filed for all purposes, not just ttl).
+
+### Acceptance-criteria mapping (safe path vs the POML's fallback-worded criteria)
+- "Filed session resumable after >90 days" → ttl=-1 (Cosmos never expires it) — filed + promote + warm-reload tests. ✓
+- "Unfiled session purged after expiresAt" → **adapted**: unfiled rides the Cosmos-native 90-day container default (no `expiresAt` field — that was the fallback). ✓ (unfiled→null test)
+- "Cleanup idempotent / only deletes past-due unfiled" → **N/A / superseded**: the safe path has NO cleanup job; unfiled expiry is Cosmos-native. This is the key data-loss-blast-radius elimination vs the fallback. ✓
+- "A filed session is never deleted" → structural: ttl=-1 = never-expire; no ttl-driven deletion mechanism exists (DeleteSessionAsync is explicit GDPR erasure only). ✓
+- "Spike findings recorded / Publish ≤60 MB / Tests pass" → this doc / 52.37 MB / 744 Chat+Sessions+persistence+restore unit tests green. ✓
