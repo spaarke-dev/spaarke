@@ -31,9 +31,12 @@
 ### Standing reminders
 - **/conflict-check MUST re-run before the PR** (030/031/015/DEFER-030-01 touched shared Communication + the AI-owned `ParentEntityContext.cs`; cleared only at execution time). Publish baseline 46.88 MB. **CVE fixed** (Xml 8.0.4).
 
-### Files Modified This Session
-- **Task 003 ✅** (2026-08-05): created `notes/fixtures/r1-golden-emails.md` (R1 013 reconciled=applied; 4 golden items pinned w/ expected outcomes; KEEP path named; raw-.eml gap flagged). Updated task 003 POML status + TASK-INDEX.
-- Worktree synced to master (Update-Only) @ b2167eb21 — 0 behind.
+### Files Modified This Session (2026-08-06 — remediation R-1/R-2/R-3 + 021-drift; all committed)
+- **R-2** (`83f2496d9`): `Services/Compose/ComposeService.cs` (link-on-create + graduate; widened alt-key lookup), `Services/Documents/ContentDedupDetector.cs` (ResolveContentIdentityAsync + linked-copy exclusion + NotifyLinkedCopyAsync), `Spaarke.Dataverse/DataverseServiceClientImpl.cs` + `IGenericEntityService.cs` (DBNull clear-sentinel), tests `ContentDedupDetectorTests` + `ComposeContentDedupTests` (new), `tasks/027-canonicaldocument-selflookup-schema.poml` (new, GATED), TASK-INDEX row.
+- **R-3** (`ed62571d8`): `Services/Office/OfficeDocumentPersistence.cs` (tuple return), `OfficeService.cs` (skip finalization + delete blob on dup), `OfficeStorageUploader.cs` (DeleteFromSpeAsync), `Infrastructure/Graph/SpeFileStore.cs` (DeleteFileAsync virtual), tests `OfficeDocumentPersistenceDedupTests` + `OfficeStorageUploaderDeleteTests` (new).
+- **R-1** (`9d69d2ca2`): `Api/CommunicationEndpoints.cs` (POST /confirm-affinity), `Services/Communication/Engine/AffinityConfirmationRecorder.cs` + `Models/RecordAffinityConfirmation.cs` (new), `CommunicationModule.cs` (DI), client `ConnectionsWriteHandler.ts` (recordAffinity field) + `EmailConnectionsReview.tsx` (fire) + `EmailWorkspace.tsx` (BFF wire), tests `AffinityConfirmationRecorderTests` (new) + `EmailAssociationsAndTracking.test.tsx` (+2).
+- **021-drift** (`0e1ba86d3`): `tests/…/Integration/CommunicationIntegrationTests.cs` (4 inbound stubs → `CreateCommunicationRaceProofAsync`).
+- Memory saved: `closed-r5-projects-editable.md` (compose-r5 + email-communication-solution-r5 are CLOSED; edit directly).
 
 ### Critical Context
 **Open questions resolved 2026-08-05 — project runs spike-free** (tasks 001/002 removed): gate-after-write dedup · Tier-2 deferred out of R2 · FR-E5 = Path B (create via `IActionSeam` + PATCH; add base/final-due-date fields, task 034) · backfill forward-only · browse shell = `BrowseModal` preset. See CLAUDE.md → **Decisions Made** + TASK-INDEX → **Resolved decisions**. Pillar-E UI is prototype-validated (`spaarke-prototype/projects/email-communication-intelligence-r2-uat`). Heavily-contended shared surfaces — `/conflict-check` before every shared PR; `parallel-safe:false` on shared writers. Execution intentionally **not started** — operator review gate.
