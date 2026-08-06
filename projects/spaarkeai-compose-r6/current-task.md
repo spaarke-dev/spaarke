@@ -1,5 +1,38 @@
 # Current Task — Spaarke Compose R6
 
+> **Last Updated**: 2026-08-06 (by context-handoff, post-024 close-out)
+> **Recovery**: Read "Quick Recovery" first; full state below.
+
+## Quick Recovery (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Task** | NONE ACTIVE — clean boundary. 020/011/021/022/023/024 ALL ✅ complete + pushed |
+| **Next task** | **025 tracked-changes** (`projects/spaarkeai-compose-r6/tasks/` — grep `^025`) via task-execute |
+| **Status** | between tasks; branch `work/spaarkeai-compose-r6` pushed through `60e9ef105`; working tree CLEAN |
+| **Next Action** | On "continue": invoke task-execute for task 025 — declare FULL rigor (Step 0.5 override UP if POML says STANDARD; adr-check validated this reading twice), then Step 1 code map of tracked-changes handling (ins/del flatten sites in ComposeDocxProjectionBuilder ProjectInline + R5 tracked markup in ComposeShadowPatchEngine) |
+
+### Critical Context (3 sentences)
+Phase-2 fidelity wideners 021–024 are done SERIALLY on the shared Compose surface, each with the same
+execution shape: model widening → projector capture (LOUD counted flattens) → renderer emission →
+seam slice (SDK-authored source + corpus theory + OpenXmlValidator multiset) → Step 9.5 two-agent
+review on the committed SHA → fix commit → §7 close-out. 025 MUST sanitize client-posted
+authors/dates AT AUTHORING from the start (three consecutive tasks' top review finding was
+unvalidated client input reaching OOXML authoring — notes §14.1 pattern note) and owes the R4
+"barfoo" operator sign-off resolution. Publish gate convention: measure in a CLEAN WORKTREE only
+(local pdb artifact inflates ~4 MB); current 46.90 MB incl PDBs.
+
+### Files Modified This Session (all committed + pushed)
+- `Services/Compose/ComposeContentModel.cs` — 021 NumId · 022 table facts · 023 page breaks · 024 comments/anchors
+- `Services/Compose/ComposeDocxProjectionBuilder.cs` — projector capture for all four wideners
+- `Services/Compose/ComposeDocumentRenderer.cs` — renderer emission + carrier scans + client-input hardening
+- `Spaarke.Compose.Components/src/types/compose-contracts.ts` — additive mirrors (server-set fields)
+- `tests/integration/seam/Compose/` — 4 new seam files (Numbering/Table/HeaderFooterPageBreak/HyperlinkComment) + 2 updated
+- `projects/spaarkeai-compose-r6/` — notes §11–§14.1, 4 POMLs ✅, TASK-INDEX, this file
+
+---
+
+
 > Active-task tracker for context recovery. Reset per root `CLAUDE.md` §7 as tasks complete.
 
 ## Status: 020 ✅ · 011 ✅ · 021 ✅ · 022 ✅ · 023 ✅ · **024 ✅ COMPLETE** · Next → **025 tracked-changes** (then 026, SERIAL)
