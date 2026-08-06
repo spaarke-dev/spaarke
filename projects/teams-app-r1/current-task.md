@@ -11,10 +11,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 🔄 **025 — CODE COMPLETE; deploy + live E2E operator-gated.** Principal-agnostic /external (Option A). FULL rigor, opus@xhigh. |
-| **Step** | ✅ Code + tests GREEN (full BFF suite **9761 pass / 0 fail**, 27 new). ✅ Step 9.5 gates: adr-check PASS (0 violations), code-review PASS (0 Critical). ✅ publish-size 46.90 MB compressed (< 60 MB; ~-2.7 MB vs baseline). ✅ /conflict-check no overlap. ✅ r2-coordination-response.md written. |
-| **Status** | 🟢 Delivered: `CallerPrincipalResolver.cs` (ICallerPrincipalResolver + 2 ICallerPrincipalStrategy CIAM/workforce, plane-selected by issuer/tid) → `CallerPrincipal` via group-level `CallerPrincipalAuthorizationFilter`. `/api/v1/external` = dual-scheme `ExternalCollaboration` policy. Workforce scoped to accessible-record-set (NFR-08, NOT all projects); CIAM byte-for-byte. /collab transitional. |
-| **Next Action (OPERATOR)** | ✅ **BFF DEPLOYED** to `spaarke-bff-dev` (2026-08-06, hash-verified, /healthz 200, /api/v1/external/me → 401 route-live). ▶ **Operator: run the live Teams E2E** (080) — open the Teams tab as a workforce user, confirm the workspace + records load via `/api/v1/external/*`. On pass → set 025 ✅ + TASK-INDEX, then 090 wrap-up. |
+| **Task** | ✅ **025 COMPLETE** (principal-agnostic /external, Option A). Live Teams E2E PASSED (operator-verified 2026-08-06 — "the teams app opens", workspace loads). |
+| **Step** | Next work: **080** (full E2E graduation-criteria verification) → **090** (project wrap-up: gates + /test-diet + docs + deferrals). |
+| **Status** | 🟢 Shipped + deployed + live-verified: dual-scheme `/api/v1/external` serves CIAM + workforce via `CallerPrincipalResolver`; workforce scoped to accessible-record-set (NFR-08); CIAM byte-for-byte. BFF live on `spaarke-bff-dev`. R2 coordination note delivered. |
+| **Next Action** | Run **080** (verify all 7 graduation criteria), then **090** wrap-up. Deferrals for 090: 041 internal-notify Path A/C; pre-existing `System.Security.Cryptography.Xml 8.0.3` HIGH CVE; `Spaarke.Auth` node_modules gap; `AzureAd__ClientSecret` plaintext→KV-ref (ops); §7/§8-D2 cleanup (delete `/collab` transitional group + inert `ExternalCallerAuthorizationFilter`). |
 
 ### Task 025 BFF deploy (2026-08-06)
 - **Deployed** via `scripts/Deploy-BffApi.ps1` → `spaarke-bff-dev` / `rg-spaarke-dev`. Package 48.27 MB; 4 critical files SHA-256 verified; `/healthz` 200.

@@ -4,7 +4,7 @@
     <title>Principal-agnostic collaboration endpoints (Option A) — dual-scheme /api/v1/external for CIAM + workforce (R2 FR-22)</title>
     <phase>2 BFF Workforce→Principal Resolver &amp; Membership (generalization)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Auth-critical change to SHARED collaboration endpoints; CIAM-regression risk (FR-15); the accessible-record-set enforcement is the core authorization boundary. code-review + adr-check mandatory.</rigor-reason>
     <model-tier>opus</model-tier>
