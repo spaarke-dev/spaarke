@@ -7,35 +7,41 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **025 tracked-changes — IN PROGRESS (FULL rigor, POML-authored)** |
-| **Step** | Implementation done for model+projector+renderer (builds clean); NEXT: client contract mirrors → seam tests → gates → Step 9.5 |
-| **Status** | in-progress; uncommitted edits in ComposeContentModel.cs / ComposeDocxProjectionBuilder.cs / ComposeDocumentRenderer.cs |
-| **Next Action** | Add additive mirrors to Spaarke.Compose.Components/src/types/compose-contracts.ts (revision/formatChange/markRevision/propertiesChange — server-set, preserve on re-post), then write tests/integration/seam/Compose/ComposeTrackedChangesSeamTests.cs |
-
-### 025 design decisions (locked)
-- `ComposeInlineRun.Revision {Kind Inserted|Deleted, Author, Date-raw}` — renderer GROUPS consecutive same-identity runs into ONE w:ins/w:del wrapper; Deleted text → w:delText; ids ALWAYS server-minted via ListRenderState.NextRevisionId(), carrier-seeded by ScanCarrierRevisionIdSeed (read-only side open).
-- `ComposeBlock.MarkRevision` (pPr/rPr/ins|del — retires tracked-paragraph-mark-flattened) + `PropertiesChange`; `ComposeInlineRun.FormatChange` — pPrChange/rPrChange carried as identity + OPAQUE previous-props XML, gated at render by TryParsePreviousProperties (typed SDK parse + LocalName/ns check + OpenXmlValidator subtree validate + 32KB clamp; failure → whole record dropped).
-- Sanitized FROM START (021-F1/022-F1/024-F1 class): SanitizeRevisionAuthor (never empty — "Unknown", 255 clamp), TryValidRevisionDate (parse-gate, raw kept).
-- moveFrom/moveTo → downgraded del/ins + counted `tracked-move-downgraded`; nested ins⊃del → innermost wins + counted `tracked-nested-revision-simplified` (R4 "barfoo" warned baseline — surface to operator); mark-rPrChange → counted `tracked-format-change-flattened`. Retired: tracked-insert-flattened / tracked-delete-flattened-kept / tracked-paragraph-mark-flattened. Table revisions stay in 022 catch-all (026 owes typed carry).
-- Comment anchors NEVER carry Revision (emit outside wrappers); page-break markers DO.
+| **Task** | NONE ACTIVE — clean boundary. 020/011/021/022/023/024/**025** ALL COMPLETE + pushed |
+| **Next task** | **026 hard-tier graceful degradation** (`tasks/026-hardtier-graceful-degradation.poml`) via task-execute |
+| **Status** | between tasks; branch `work/spaarkeai-compose-r6`; 025 closed at `ea2cdce2a` + close-out commit |
+| **Next Action** | On "continue": invoke task-execute for task 026 — declare FULL rigor (override UP if authored STANDARD), Step 1 code map of the hard-tier drop sites (AlternateContent/complex-object/field/sdt paths in ComposeDocxProjectionBuilder) + the accumulated 026 routing ledger below |
 
 ### Critical Context (3 sentences)
-Phase-2 fidelity wideners 021–024 are done SERIALLY on the shared Compose surface, each with the same
-execution shape: model widening → projector capture (LOUD counted flattens) → renderer emission →
-seam slice (SDK-authored source + corpus theory + OpenXmlValidator multiset) → Step 9.5 two-agent
-review on the committed SHA → fix commit → §7 close-out. 025 MUST sanitize client-posted
-authors/dates AT AUTHORING from the start (three consecutive tasks' top review finding was
-unvalidated client input reaching OOXML authoring — notes §14.1 pattern note) and owes the R4
-"barfoo" operator sign-off resolution. Publish gate convention: measure in a CLEAN WORKTREE only
-(local pdb artifact inflates ~4 MB); current 46.90 MB incl PDBs.
+Phase-2 wideners 021-025 are ALL DONE serially on the shared Compose surface with the same execution
+shape (model widening → projector LOUD capture → renderer emission → seam slice → two-agent Step 9.5 on
+the committed SHA → fix commit → §7 close-out). 025 landed tracked-changes as MODEL data (w:ins/w:del
+grouped wrappers + delText, mark revisions incl. moves, pPrChange/rPrChange opaque-validated carry,
+xsd-date gate at BOTH capture and render, ids server-minted carrier-seeded) — client-input hardening was
+applied FROM THE START and the review still found 3 empirically-proven Majors (hyperlink nesting, mark
+moves, date lexical gate), all fixed in `ea2cdce2a`. Publish gate convention: CLEAN WORKTREE only
+(46.90 MB incl PDBs, ±0.00 across 021-025); suite floor: 3 pre-existing NDA reds (026/027 own them).
 
-### Files Modified This Session (all committed + pushed)
-- `Services/Compose/ComposeContentModel.cs` — 021 NumId · 022 table facts · 023 page breaks · 024 comments/anchors
-- `Services/Compose/ComposeDocxProjectionBuilder.cs` — projector capture for all four wideners
-- `Services/Compose/ComposeDocumentRenderer.cs` — renderer emission + carrier scans + client-input hardening
-- `Spaarke.Compose.Components/src/types/compose-contracts.ts` — additive mirrors (server-set fields)
-- `tests/integration/seam/Compose/` — 4 new seam files (Numbering/Table/HeaderFooterPageBreak/HyperlinkComment) + 2 updated
-- `projects/spaarkeai-compose-r6/` — notes §11–§14.1, 4 POMLs ✅, TASK-INDEX, this file
+### 026 ROUTING LEDGER (owes)
+custom-style-linked numbering (020-R7) · localized heading ids (011-P8) · hMerge/tblLayout typed carry
+(022-F2) · bookmarks + internal links (024) · dangling-anchor loud counter (024) · **renderer-side loud
+counters for dropped format-change records (025-F4/F7 posture)** · **024 comments-part date gate →
+xsd lexical (025-F3 same-class hole)** · typed move + table-revision carry (025 downgrades) ·
+AlternateContent surface · dup-paraId I-4 · U+FFFD R5 operator sign-off · pageBreakBefore tri-state
+(023-F2). **027 owes:** REAL multi-author redlined corpus fixture (corpus has ZERO revision markup —
+025-F6). **010/012 owe (CUTOVER OBLIGATION):** client mapper preserves ALL server-set fields on re-post —
+numId (021) · table facts (022) · page breaks (023) · comments/anchors (024) · **revision/formatChange/
+markRevision/propertiesChange (025 — dropping them silently SETTLES every redline)**. ⚠️ OPERATOR
+SIGN-OFFS PENDING: R4 "barfoo" (shipped as warned innermost-wins baseline — tracked-nested-revision-
+simplified) · R5 U+FFFD (026).
+
+### Files Modified (025 — all committed + pushed)
+- `Services/Compose/ComposeContentModel.cs` — ComposeRevision/ComposeFormatChange + run/block fields
+- `Services/Compose/ComposeDocxProjectionBuilder.cs` — revision context threading + capture + normalization
+- `Services/Compose/ComposeDocumentRenderer.cs` — wrapper grouping/delText/link nesting + hardening gates + seed scan
+- `Spaarke.Compose.Components/src/types/compose-contracts.ts` — additive mirrors (server-set)
+- `tests/integration/seam/Compose/ComposeTrackedChangesSeamTests.cs` — 17 green
+- `projects/spaarkeai-compose-r6/` — notes §15/§15.1, POML ✅, TASK-INDEX, this file
 
 ---
 

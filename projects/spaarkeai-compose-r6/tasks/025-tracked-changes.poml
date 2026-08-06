@@ -4,7 +4,7 @@
     <title>Tracked-changes (redlines) through the canonical model</title>
     <phase>2 Canonical model + fidelity widening</phase>
     <gate>dep:020</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tracked-changes markup (w:ins/w:del/w:*Change) is legal-correctness critical — invalid revision markup breaks Word accept/reject and a silent-loss redline is data loss. Modifies shared Services/Compose files on the most-contested BFF surface; save/projection change requires ADR-038 seam DoD. code-review + adr-check run at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -106,6 +106,31 @@
     <criterion testable="true">Given a save, then revision markup is authored from the canonical model on the render-on-save path with no surgical byte-patch and no text-search, reusing the R5 redline representation.</criterion>
     <criterion testable="true">Negative / no-regression: redline handling is NOT re-built (R5 reused); Tier-1 NetArchTest passes; docxBridge.ts not deleted; BFF publish ≤60 MB with delta reported vs ~49.63 MB; seam slice uses no banned mock/DI/ctor shapes.</criterion>
   </acceptance-criteria>
+
+  <completion-note>
+    COMPLETED 2026-08-06 (commits 1f27e0291 + Step-9.5 fixes ea2cdce2a). Tracked-changes are MODEL data:
+    ComposeInlineRun.Revision {Kind,Author,Date} for w:ins/w:del (delText authored for pending-deleted
+    content; consecutive same-identity runs grouped into ONE wrapper; ids ALWAYS server-minted, seeded
+    above the carrier via read-only ScanCarrierRevisionIdSeed — the R5 SeedRevisionId analog);
+    ComposeBlock.MarkRevision for paragraph-mark ins/del/moveFrom/moveTo; ComposeFormatChange for
+    pPrChange/rPrChange (identity + OPAQUE previous-props XML, typed-SDK-parse + OpenXmlValidator gated at
+    render). Revised linked runs author Word-canonical w:hyperlink⊃w:ins⊃w:r. RETIRED:
+    tracked-insert-flattened / tracked-delete-flattened-kept / tracked-paragraph-mark-flattened. New LOUD
+    codes: tracked-move-downgraded, tracked-nested-revision-simplified (the R4 "barfoo" warned baseline —
+    OPERATOR SIGN-OFF STILL PENDING), tracked-format-change-flattened. Client-input hardening applied FROM
+    THE START (021-F1/022-F1/024-F1 class): author sanitize/clamp/"Unknown" fallback, xsd:dateTime lexical
+    date gate (applied at capture AND render), ids never client-controlled. R5 representation REUSED
+    (adr-check verified against ComposeShadowPatchEngine conventions; engines untouched). Seam slice
+    ComposeTrackedChangesSeamTests: 17 green. Suite: full 9770/9874 + Compose 952/955 (only the 3
+    pre-existing NDA reds). ArchTests unchanged (ADR-013 PASS). Publish clean-worktree 46.90 MB incl PDBs
+    (delta ±0.00). adr-check PASS 8/8; code-review REQUEST-CHANGES with 3 empirically-proven Majors, all
+    fixed (hyperlink nesting, mark moves, xsd date gate) + minors. ROUTED: 026 — renderer-side loud
+    counters (dropped format-change records + dangling anchors) + 024 comments-part date-gate tighten +
+    typed move/table-revision carry; 027 — add a REAL multi-author redlined corpus fixture (corpus has
+    ZERO revision markup today); 010/012 — client mapper MUST preserve revision/formatChange/markRevision/
+    propertiesChange on re-post or an edited save silently SETTLES every redline. Full record: notes
+    020-canonical-hub-design.md §15/§15.1.
+  </completion-note>
 
   <notes>Spec FR-04; plan.md §5 Phase 2. Reuse the R5 tracked-change/redline work (compose-r5 G11/G12/tables). Builds on 020; seam-tested with the rest in 027. Coordinate with spaarkeai-compose-r5. parallel-safe=false. Run /conflict-check before the BFF PR.</notes>
 

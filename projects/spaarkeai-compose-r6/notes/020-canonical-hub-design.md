@@ -485,4 +485,96 @@ of authoring FROM THE START, not wait for review.
 
 ---
 
-*Steps 1–3 artifact + gates + tasks 020/011/021/022/023/024 records. Checkpoint in `current-task.md`.*
+## 15. Task 025 — tracked-changes (redlines) through the canonical model (2026-08-06)
+
+**Commit `1f27e0291`** (+ Step-9.5 fix commit if any — see §15.1). Spec FR-04 / 020-R11. The pivot: the
+model walk no longer SETTLES revisions — redlines are model data with real accept/reject in Word after a
+render-from-model save.
+
+**Mechanism ("carry the identity, mint the id"):**
+- `ComposeInlineRun.Revision {Kind Inserted|Deleted, Author, Date(raw)}` — captured by threading a
+  revision context through `ProjectInline`/`ProjectRun` (default-param recursion, same shape as `href`).
+  Pending-deleted text is ordinary model `Text`; the renderer authors it as `w:delText` inside `w:del`.
+- Renderer GROUPS consecutive same-identity runs (record value equality kind+author+date) into ONE
+  `w:ins`/`w:del` wrapper. Revision `w:id` is ALWAYS server-minted (`ListRenderState.NextRevisionId()`),
+  seeded ABOVE the carrier's max via `ScanCarrierRevisionIdSeed` (read-only side open — the R5
+  `SeedRevisionId` analog; skipped for revision-free models).
+- Paragraph-MARK revisions: `ComposeBlock.MarkRevision` → `w:pPr/w:rPr/w:ins|w:del` (Deleted = accepting
+  merges with next paragraph). RETIRES `tracked-paragraph-mark-flattened`.
+- Formatting-change history: `ComposeFormatChange {Author, Date, PreviousPropertiesXml}` for
+  `w:pPrChange` (block) / `w:rPrChange` (run — first-flush-only on page-break splits). The previous
+  properties are an OPAQUE server-set XML carry — a typed carry would mis-state the reject target (the
+  old pPr can hold indentation/spacing/tabs far outside the thin model). Render gate
+  `TryParsePreviousProperties<T>`: typed SDK parse (never string injection) + LocalName/namespace check +
+  `OpenXmlValidator` subtree validation + 32 KB clamp; ANY failure drops the whole change record
+  (= accepting the formatting change; renderer-side loud counter routed to 026 with dangling-anchor).
+- Downgrades (LOUD, counted): `tracked-move-downgraded` (moveFrom→del / moveTo→ins; move identity lost,
+  accept/reject semantics preserved); `tracked-nested-revision-simplified` (stacked ins⊃del → innermost
+  wins — the **R4 "barfoo" warned-flatten baseline, operator sign-off still pending**);
+  `tracked-format-change-flattened` (mark rPrChange). Table revisions (trPr/tcPr ins/del/cellIns/cellDel)
+  stay in 022's `table-formatting-flattened` catch-all — 026 owes typed carry.
+- RETIRED warning codes: `tracked-insert-flattened`, `tracked-delete-flattened-kept`,
+  `tracked-paragraph-mark-flattened`.
+- Marker interplay: page-break markers CARRY revision (a break can be inside an insertion); comment
+  anchors NEVER do (emitted at paragraph level outside wrappers — wrapper content-model caution + the
+  anchor id contract).
+
+**§14.1 pattern note APPLIED FROM THE START** (021-F1/022-F1/024-F1 class): `SanitizeRevisionAuthor`
+(control chars stripped, 255 clamp, empty→"Unknown" — `@w:author` schema-required), `TryValidRevisionDate`
+(parse-gate, raw kept — the 024 comments-part recipe), previous-props XML SDK-parse+validator-gated,
+ids never client-controlled. The seam slice pins all of it (`Render_SanitizesHostileClientRevisionInput`).
+
+**Client contract mirrors** (additive): `revision`/`formatChange` on runs, `markRevision`/
+`propertiesChange` on blocks — all server-set, preserve-untouched-on-re-post. **010/012 cutover
+obligation extended**: the mapper must now ALSO preserve revision facts or an edited re-post silently
+SETTLES every redline (the exact data-loss class this task closes).
+
+**Seam slice:** `ComposeTrackedChangesSeamTests` — 15 green (capture incl. mark/pPrChange/rPrChange;
+move+nested downgrades loud; Word-valid carrier round-trip w/ delText-only under w:del, unique minted
+ids > carrier max, validator multiset; fixed point; grouping split-on-identity; hostile-input hardening;
+corpus theory w/ revision-fact stability).
+
+**Gates:** BFF build clean · full suite 9770/9874 (only the 3 pre-existing NDA reds) · ArchTests
+unchanged (ADR-013 Compose PASS) · client tsc 28 errors before AND after (stash-verified; all
+pre-existing workspace resolution) · publish clean-worktree **46.90 MB incl PDBs, task delta ±0.00** ·
+no NEW HIGH CVE (Crypto.Xml HIGHs pre-existing; patched on master, resolves at pre-PR merge).
+
+### 15.1 Step-9.5 review (commits `1f27e0291` → fix `ea2cdce2a`)
+
+Two parallel agents on the committed SHA. **adr-check: PASS 8/8** (render-from-model preserved; scans
+read-only; additive widening; the opaque PreviousPropertiesXml carry judged COMPLIANT — outside-the-thin-
+model content, ADR-049 opaque-atom precedent, server-set/client-opaque, injection-gated; R5 representation
+faithfully reused incl. landing the R5-deferred rPrChange refinement; both engines untouched — 0 hunks).
+**code-review: REQUEST-CHANGES** — the reviewer EMPIRICALLY reproduced every Major in a scratch harness:
+
+- **F1 (Major) FIXED** — a revised linked run rendered `w:ins ⊃ w:hyperlink` (schema-INVALID; CT_RunTrackChange
+  does not admit hyperlink). Now Word's canonical `w:hyperlink ⊃ w:ins ⊃ w:r` (wrapper inside the link;
+  hyperlink boundary breaks grouping). Seam test added.
+- **F2 (Major) FIXED** — paragraph-mark `w:moveFrom`/`w:moveTo` (whole-paragraph move) vanished UNCOUNTED.
+  Now downgrades to Deleted/Inserted mark revision + `tracked-move-downgraded`, symmetric with run level.
+- **F3 (Major) FIXED** — the date gate (DateTime.TryParse, the 024 recipe) admitted culture formats
+  ("08/01/2026") that are schema-INVALID as `@w:date`. Now an xsd:dateTime LEXICAL gate (TryParseExact +K).
+  ⚠️ The 024 comments-part gate has the same hole — routed to 026 (loud-counter batch) rather than
+  touching shipped 024 behavior in this commit.
+- **F5 FIXED** — dates normalize through the same gate at CAPTURE (model canonical; empty/junk→null) so
+  the fixed point holds for degenerate source attribution; oracle distinguishes null vs empty.
+- **F4 FIXED** — LocalName/ns check was dead code (typed elements always report their class name); the SDK
+  typed-parse ctor (throws on wrong root, prohibits DTD — reviewer-proven) is the real gate; comments fixed.
+- **F7 FIXED** — validator-gate branch now exercised (well-formed schema-invalid rPr fixture) + F3 date fixture.
+- **F8 FIXED** — seed scan extended: comments part + SectionPropertiesChange/TblPr/TrPr/TcPr/TblGridChange.
+- **F9 (documented)** — AppendSection takes no revision seed; callers author settled AI content (noted inline).
+- **F10 FIXED** — per-call OpenXmlValidator (instance thread-safety not contractual; subtree validation cheap).
+- **F6 (routed → 027)** — the corpus contains ZERO revision markup (even the "track changes" PAT doc is a
+  settled comparison result) — the corpus theory pins nothing tracked-changes-specific; 027 should add a
+  genuine multi-author redlined fixture (tracked hyperlink + paragraph move included).
+
+Reviewer-proven CLEAN: pPr/rPr child order; delText-only under del; anchors-outside-wrappers loses nothing
+(anchors ARE legal in ins — positional coverage identical); table-cell revision threading; budget clamp
+covered; grouping fixed point; no client path to w:id; DTD prohibited; id-smuggling via previous-props
+blocked by the validator gate.
+
+**Post-fix:** seam slice 17 green; Compose scope 952/955 (same 3 pre-existing NDA reds).
+
+---
+
+*Steps 1–3 artifact + gates + tasks 020/011/021/022/023/024/025 records. Checkpoint in `current-task.md`.*
