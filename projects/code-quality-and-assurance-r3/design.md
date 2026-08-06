@@ -69,13 +69,13 @@ Net: **no item dropped silently.** Most fold into a surface assessment or the fo
 - The **forcing-functions** (§9) — ArchTests, analyzers, CI gates — so the grade holds.
 - Every surface **workstream's** remediation, executed as small PRs off the one branch.
 
-Surface *folders* (e.g. [`bff-api-cleanup-remediation-r1`](../bff-api-cleanup-remediation-r1/)) may exist as **semantic organization for a workstream's design/findings** — they are not separate execution units. Keeping or merging them is cosmetic.
+Surface *folders* (e.g. [`bff-api-cleanup-remediation-r1`](workstreams/bff-api/)) may exist as **semantic organization for a workstream's design/findings** — they are not separate execution units. Keeping or merging them is cosmetic.
 
 ### Surface-workstream registry (all executed in this one project)
 
 | # | Surface / workstream | Design | Status |
 |---|---|---|---|
-| 1 | BFF API (`Sprk.Bff.Api`) | [`bff-api-cleanup-remediation-r1/design.md`](../bff-api-cleanup-remediation-r1/) | **assessed + design drafted** 2026-08-06; 2 prod bugs + security decision; A/B tranche split (bugs+hygiene first, wide consolidations later) |
+| 1 | BFF API (`Sprk.Bff.Api`) | [`bff-api-cleanup-remediation-r1/design.md`](workstreams/bff-api/) | **assessed + design drafted** 2026-08-06; 2 prod bugs + security decision; A/B tranche split (bugs+hygiene first, wide consolidations later) |
 | 2 | Shared client libs (`Spaarke.*`, 16 pkgs, ~39k LOC) | assessment pending | not started — **highest leverage next** |
 | 3 | Shared server libs (`Spaarke.Core/Dataverse/Scheduling`, ~10k LOC) | assessment pending | not started — roots the two-Dataverse-stacks question |
 | 4 | PCF controls (36, ~49.5k LOC) | assessment pending | not started — lifecycle + dead-control sweep (cf. prior `pcf-orphan-cleanup-r1`) |

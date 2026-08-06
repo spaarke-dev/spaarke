@@ -2,7 +2,7 @@
 
 > **Status**: Ready for Implementation
 > **Created**: 2026-08-06
-> **Source**: `projects/code-quality-and-assurance-r3/design.md` (program) + `projects/bff-api-cleanup-remediation-r1/design.md` (BFF surface workstream #1)
+> **Source**: `projects/code-quality-and-assurance-r3/design.md` (program) + `projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md` (BFF surface workstream #1)
 > **Lineage**: r1 (quality *system* — tooling/scorecard, C→B) → r2 (first *structural* remediation, 17 tasks ✅, B→A-) → **r3 (standing quality *program*)**
 
 ## Executive Summary
@@ -188,7 +188,7 @@ All other work is deletion, rename, move, in-place consolidation, or extension o
 
 ### Prerequisites
 
-- BFF surface assessment (workstream #1) — **DONE** (`bff-api-cleanup-remediation-r1/design.md`).
+- BFF surface assessment (workstream #1) — **DONE** (`workstreams/bff-api/design.md`).
 - Existing R1 CI/nightly quality layer + `Spaarke.ArchTests` project (to extend).
 - Epic **#427** `[Epic]: Code Quality` (registration parent — verify at execution; verify no orphan R3 Issue first).
 - Operator per-run opt-in for the Workflow tool ("use a workflow") on each assessment turn.
@@ -217,7 +217,7 @@ All other work is deletion, rename, move, in-place consolidation, or extension o
 - **Epic parent**: Epic **#427** is the correct registration parent (per session handoff); verified at `/project-pipeline` time.
 - **`@spaarke/auth` web-resource support**: assumed feasible for the `sprk_subgrid_parent_rollup.js` caller; if a real gap exists, FR-09 escalates it to FR-17 as a broader fix.
 - **Publish-size direction**: BFF work assumed to *reduce* compressed publish size from 46.89 MB; reported per task regardless.
-- **Single-branch execution**: all workstreams execute on `work/code-quality-and-assurance-r3`; surface folders (`bff-api-cleanup-remediation-r1/`) are semantic homes only, not separate execution units.
+- **Single-branch execution**: all workstreams execute on `work/code-quality-and-assurance-r3`; surface folders (`workstreams/{surface}/`, e.g. `workstreams/bff-api/`) are semantic homes only, not separate execution units.
 
 ## Unresolved Questions
 
@@ -226,4 +226,4 @@ All other work is deletion, rename, move, in-place consolidation, or extension o
 - [ ] **Phase-5 boilerplate consolidation depth** — the app-only HTTP boilerplate consolidation (approved) may reveal more sites than expected; scope confirmed against the assessment. Blocks: FR-12 final task sizing.
 
 ---
-*AI-optimized specification. Original design: `projects/code-quality-and-assurance-r3/design.md` + `projects/bff-api-cleanup-remediation-r1/design.md`. Both preserved as project artifacts.*
+*AI-optimized specification. Original design: `projects/code-quality-and-assurance-r3/design.md` + `projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md`. Both preserved as project artifacts.*

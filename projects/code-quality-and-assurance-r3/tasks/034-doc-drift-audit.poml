@@ -63,7 +63,7 @@
     <criterion testable="true">Given .claude/ fixes, they were applied in the main session (not by a sub-agent) per §3.</criterion>
   </acceptance-criteria>
 
-  <notes>Maps spec.md FR-21 / design.md §8.</notes>
+  <notes>Maps spec.md FR-21 / design.md §8. Known drift (verification addendum MF-2): `.claude/patterns/webresource/subgrid-parent-rollup.md` mandates the AllowAnonymous anti-pattern; its rewrite is OWNED by task 023 (lands with the auth fix). This audit VERIFIES it was corrected (not re-introduced), rather than re-fixing it.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

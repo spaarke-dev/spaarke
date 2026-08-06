@@ -12,7 +12,7 @@ Lineage: `code-quality-and-assurance-r1` (tooling/scorecard, C→B) → `r2` (17
 
 ## Operating model (owner-decided 2026-08-06 — do not re-litigate)
 
-**SINGLE project, SINGLE worktree.** No separate per-surface projects/worktrees/branches. Each surface (BFF, shared client libs, shared server libs, PCF, Dataverse model, code pages) is a **workstream/phase** in ONE `TASK-INDEX.md`, executed as small PRs off THIS branch. Surface folders (e.g. `projects/bff-api-cleanup-remediation-r1/`) are semantic homes for design/findings only.
+**SINGLE project, SINGLE worktree.** No separate per-surface projects/worktrees/branches. Each surface (BFF, shared client libs, shared server libs, PCF, Dataverse model, code pages) is a **workstream/phase** in ONE `TASK-INDEX.md`, executed as small PRs off THIS branch. Surface folders (e.g. `projects/code-quality-and-assurance-r3/workstreams/bff-api/`) are semantic homes for design/findings only.
 
 ### The 5 locked decisions (design §15)
 1. **Assessment engine = multi-agent Workflow** (build a reusable `quality-assessment` workflow; manual agent fan-out is fallback).
@@ -25,7 +25,7 @@ Lineage: `code-quality-and-assurance-r1` (tooling/scorecard, C→B) → `r2` (17
 
 - Design drafts committed + pushed on this branch (through `786b27c72`):
   - `projects/code-quality-and-assurance-r3/design.md` — the program design (READ FIRST: §4 structure, §4A coordination, §5 rubric D1–D11, §6 method, §7 surface sequence, §11 hot-path).
-  - `projects/bff-api-cleanup-remediation-r1/design.md` — BFF surface workstream #1 (assessed).
+  - `projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md` — BFF surface workstream #1 (assessed).
 - **No `/design-to-spec` or `/project-pipeline` run yet.** No spec.md, plan.md, tasks/, README, current-task.md.
 - Portfolio registration + `projects/INDEX.md` row are **pending** — they happen automatically at `/project-pipeline` time (devops hooks). Parent = Epic **#427**.
 

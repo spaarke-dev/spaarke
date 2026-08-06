@@ -66,7 +66,7 @@
 - `docs/standards/TEST-ARCHITECTURE.md`; `.claude/patterns/auth/spaarke-sso-binding.md`
 
 **Reusable Code / patterns**:
-- BFF assessment (proven method) — `projects/bff-api-cleanup-remediation-r1/design.md`
+- BFF assessment (proven method) — `projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md`
 - `CommunicationTriageAi` / `CommunicationEnrichmentService` — facade reference for A-1
 - `Spaarke.Dataverse/DataverseServiceClientImpl` — home for `UnwrapServiceClient`
 - `Spaarke.ArchTests` — extend into fitness functions
@@ -141,7 +141,7 @@ Phase 9: Wrap-up (reconciliation, /test-diet, final SCORECARD aggregate)
 - [ ] `Endpoints/`→`Api/` migration + `CommunicationModule` decomposition + Finance rename (Dataverse pre-check) + optional Phase-5 helpers
 - [ ] Repo hygiene (2 tarballs untracked, artifacts removed)
 
-**Inputs**: `bff-api-cleanup-remediation-r1/design.md`. **Outputs**: cleaned BFF; publish-size + Dataverse-precheck reports.
+**Inputs**: `workstreams/bff-api/design.md`. **Outputs**: cleaned BFF; publish-size + Dataverse-precheck reports.
 
 ### Phase 3: Horizontal Sweeps
 
@@ -176,7 +176,7 @@ Task-created after each Phase-1 assessment design exists. Not decomposed in this
 
 | Dependency | Location | Status |
 |------------|----------|--------|
-| BFF assessment design | `projects/bff-api-cleanup-remediation-r1/` | Complete |
+| BFF assessment design | `projects/code-quality-and-assurance-r3/workstreams/bff-api/` | Complete |
 | `Spaarke.ArchTests` | `tests/**/Spaarke.ArchTests/` | Extend |
 | `ci-cd-unit-test-remediation-r1` | owns `.github/workflows` edits | Coordinate |
 

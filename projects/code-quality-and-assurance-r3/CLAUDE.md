@@ -19,7 +19,7 @@
 ### Key Files
 - [`spec.md`](spec.md) - AI implementation specification (permanent reference)
 - [`design.md`](design.md) - Program design (umbrella)
-- [`../bff-api-cleanup-remediation-r1/design.md`](../bff-api-cleanup-remediation-r1/design.md) - BFF surface workstream #1 (assessed)
+- [`workstreams/bff-api/design.md`](workstreams/bff-api/design.md) - BFF surface workstream #1 (assessed)
 - [`README.md`](README.md) - Project overview and graduation criteria
 - [`plan.md`](plan.md) - Implementation plan and WBS
 - [`current-task.md`](current-task.md) - **Active task state** (for context recovery)
@@ -140,7 +140,7 @@ Invoke `/project-defer-issue-tracking` (alias `/defer`) — it writes to BOTH in
 - **ADR-028** (auth v2 / `@spaarke/auth`), **ADR-013** (AI facade), **ADR-032** (null-object kill-switch), **ADR-038** (testing), **ADR-010** (DI minimalism), **ADR-022** (PCF platform libs), **ADR-002** (plugins)
 
 ### Related Projects
-- `bff-api-cleanup-remediation-r1` — BFF surface workstream #1 (semantic home; executes in THIS worktree)
+- BFF surface workstream #1 — design at [`workstreams/bff-api/design.md`](workstreams/bff-api/design.md) (executes in THIS worktree; relocated 2026-08-06 from the standalone `bff-api-cleanup-remediation-r1/` folder)
 - `code-quality-and-assurance-r1` / `-r2` — predecessors (system → structural → program)
 - `ci-cd-unit-test-remediation-r1` — owns `.github/workflows` edits (coordinate); ADR-038 authority
 - NG1 → separate Idea (two-Dataverse-stacks unification, needs its own ADR)

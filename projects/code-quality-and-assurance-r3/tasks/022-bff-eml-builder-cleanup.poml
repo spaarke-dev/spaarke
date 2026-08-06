@@ -3,6 +3,7 @@
   <metadata>
     <title>BFF: remove dead EmailToEmlConverter builder half + unify dual registration</title>
     <phase>2 BFF Remediation</phase>
+    <tranche>A</tranche>
     <gate>startable</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
@@ -14,7 +15,7 @@
     <parallel-safe>false</parallel-safe>
     <parallel-reason>BFF hot-path contention (19 worktrees); Email files are contested; /conflict-check before each PR; small sequential PRs.</parallel-reason>
     <deps>none</deps>
-    <tags>bff,dead-code,email</tags>
+    <tags>bff,dead-code,email,tranche-a</tags>
   </metadata>
 
   <prompt>Remove the dead builder half of Services/Email/EmailToEmlConverter.cs (~450 LOC: ConvertToEmlAsync / GenerateEmlFileNameAsync / BuildMimeMessage / Fetch*), keeping the live parser half ExtractAttachments (line 681, live via UploadFinalizationWorker.cs:1047). Unify the conflicting dual registration (scoped EmailServicesModule.cs:44-46 vs singleton OfficeWorkersModule.cs:31) into a single correct registration. Share only the Windows-strict SanitizeFileName helper. Do NOT merge the two LIVE .eml builders (NG2).</prompt>
@@ -28,7 +29,7 @@
       <file role="modify">src/server/api/Sprk.Bff.Api/(EmailServicesModule.cs — registration at 44-46)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/(OfficeWorkersModule.cs — registration at 31)</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/(UploadFinalizationWorker.cs:1047 — live ExtractAttachments consumer)</file>
-      <file role="canonical-reference">projects/bff-api-cleanup-remediation-r1/design.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
     </relevant-files>
     <dependencies>
       <dependency task="none" status="complete">BFF already assessed; dead-builder + dual-registration verified.</dependency>
@@ -39,12 +40,13 @@
     <constraint source="project">Scope (BFF Bug-2 only): remove the dead builder methods; keep ExtractAttachments (line 681); unify the dual registration into ONE correct lifetime; share only SanitizeFileName. Do NOT merge EmlGenerationService or GraphMessageToEmlConverter (NG2).</constraint>
     <constraint source="project">Scope: verify ExtractAttachments has no other consumers before touching its signature; the live path (UploadFinalizationWorker.cs:1047) MUST behave identically.</constraint>
     <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 46.89 MB); report absolute + delta. No new NuGet packages. Run /conflict-check before the PR.</constraint>
+    <constraint source="verification-2026-08-06">Scope (MF-4 captive-dependency): the last-wins IEmailToEmlConverter registration is the SCOPED one (EmailServicesModule.cs:44-46, after OfficeWorkersModule.cs:31 singleton in Program.cs order), and it is captured by the SINGLETON hosted UploadFinalizationWorker (ctor :54/:88). The final single registration lifetime MUST be safe for that singleton hosted worker — do not leave a scoped service captured by a singleton.</constraint>
   </constraints>
 
   <knowledge>
     <topic>BFF email .eml converter cleanup</topic>
     <files>
-      <file>projects/bff-api-cleanup-remediation-r1/design.md</file>
+      <file>projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
       <file>.claude/constraints/bff-extensions.md</file>
     </files>
   </knowledge>
@@ -74,6 +76,7 @@
     <criterion testable="true">Given the live path, UploadFinalizationWorker.cs:1047 → ExtractAttachments behaves identically (build + full test green).</criterion>
     <criterion testable="true">Negative: the two live builders (EmlGenerationService, GraphMessageToEmlConverter) are unchanged (NG2 respected).</criterion>
     <criterion testable="true">Publish ≤ 60 MB with delta vs 46.89 MB reported; no new NuGet package.</criterion>
+    <criterion testable="true">The final single IEmailToEmlConverter registration lifetime is compatible with the singleton hosted UploadFinalizationWorker (no scoped-captured-by-singleton); build validates DI at startup.</criterion>
   </acceptance-criteria>
 
   <notes>Maps spec.md FR-07 (Bug-2) / bff design §3.3 + Phase 2b.</notes>

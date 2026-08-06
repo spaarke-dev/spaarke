@@ -18,7 +18,7 @@
 
   <prompt>Run the quality-assessment Workflow READ-ONLY across the Dataverse data model + solution ALM: entity/attribute naming, option-sets, relationships, solution segmentation, and field-mapping configuration. This is where Power-Apps panel scrutiny bites hardest. Produce a Fable-verified prioritized remediation design.md and append this surface's SCORECARD row. Modify NO source or Dataverse data.</prompt>
   <role>SPAARKE platform developer with deep Power Apps / Dataverse ALM expertise, running the standing quality-assessment method. Follow ADRs strictly; the assessment is read-only.</role>
-  <goal>projects/dataverse-model-alm-remediation-r1/design.md exists — a Fable-verified prioritized remediation design covering naming, option-sets, relationships, segmentation, and field-mapping config — and notes/SCORECARD.md carries this surface's verified D1–D11 row.</goal>
+  <goal>projects/code-quality-and-assurance-r3/workstreams/dataverse-model-alm/design.md exists — a Fable-verified prioritized remediation design covering naming, option-sets, relationships, segmentation, and field-mapping config — and notes/SCORECARD.md carries this surface's verified D1–D11 row.</goal>
 
   <context>
     <background>spec.md FR-05 + design.md §7 (surface #4). The senior Power-Apps panel scrutinizes ALM hardest: solution segmentation, option-set hygiene, relationship correctness, naming conventions, and the field-mapping config surface. This is a read-only assessment; any Dataverse config check is read-only (describe/read_query), never a write.</background>
@@ -27,7 +27,7 @@
       <file role="canonical-reference">docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
       <file role="canonical-reference">docs/standards/CODE-QUALITY-RUBRIC.md</file>
       <file role="canonical-reference">projects/code-quality-and-assurance-r3/notes/quality-assessment.workflow.js</file>
-      <file role="output">projects/dataverse-model-alm-remediation-r1/design.md</file>
+      <file role="output">projects/code-quality-and-assurance-r3/workstreams/dataverse-model-alm/design.md</file>
       <file role="output">projects/code-quality-and-assurance-r3/notes/SCORECARD.md</file>
     </relevant-files>
     <dependencies>
@@ -56,7 +56,7 @@
     <step order="1">Fan-out: read-only finders per rubric dimension across the data model + ALM (naming, option-sets, relationships, segmentation, field-mapping config), evidence cited to schema files / read-only Dataverse describe output.</step>
     <step order="2">Mandatory Fable adversarial-verification stage; confirm any data-driven dispatch config against Dataverse read-only, refute false positives.</step>
     <step order="3">If verification refutes &gt;30% of findings or cannot confirm evidence, invoke the escalation trigger.</step>
-    <step order="4">Synthesize projects/dataverse-model-alm-remediation-r1/design.md (severity/LOC/effort/risk + tranche split).</step>
+    <step order="4">Synthesize projects/code-quality-and-assurance-r3/workstreams/dataverse-model-alm/design.md (severity/LOC/effort/risk + tranche split).</step>
     <step order="5">Append this surface's verified D1–D11 row to notes/SCORECARD.md.</step>
     <step order="6">Update TASK-INDEX.md: set task 013 status to ✅.</step>
     <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
@@ -67,12 +67,12 @@
   </escalation>
 
   <outputs>
-    <output type="doc">projects/dataverse-model-alm-remediation-r1/design.md</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/workstreams/dataverse-model-alm/design.md</output>
     <output type="doc">projects/code-quality-and-assurance-r3/notes/SCORECARD.md (row appended)</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Given the run, projects/dataverse-model-alm-remediation-r1/design.md exists, Fable-verified, covering naming, option-sets, relationships, segmentation, field-mapping config, with severity/LOC/effort/risk + tranche split.</criterion>
+    <criterion testable="true">Given the run, projects/code-quality-and-assurance-r3/workstreams/dataverse-model-alm/design.md exists, Fable-verified, covering naming, option-sets, relationships, segmentation, field-mapping config, with severity/LOC/effort/risk + tranche split.</criterion>
     <criterion testable="true">Given the run, notes/SCORECARD.md has this surface's verified row appended; no aggregate published.</criterion>
     <criterion testable="true">Negative: no src/ file modified and no Dataverse write performed (read-only inspection only).</criterion>
   </acceptance-criteria>

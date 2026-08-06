@@ -3,7 +3,8 @@
   <metadata>
     <title>BFF: decompose CommunicationModule + rename Finance handler after Dataverse pre-check</title>
     <phase>2 BFF Remediation</phase>
-    <gate>startable</gate>
+    <tranche>B</tranche>
+    <gate>quiet-window (after Tranche A)</gate>
     <status>not-started</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Behavior-neutral DI decomposition (registrations identical) + a rename gated by a Dataverse pre-check; not test-modifying — STANDARD.</rigor-reason>
@@ -14,7 +15,7 @@
     <parallel-safe>false</parallel-safe>
     <parallel-reason>BFF hot-path contention (19 worktrees); Communication + Finance files contested; /conflict-check before each PR; small sequential PRs.</parallel-reason>
     <deps>none</deps>
-    <tags>bff,di,dataverse-precheck</tags>
+    <tags>bff,di,dataverse-precheck,tranche-b</tags>
   </metadata>
 
   <prompt>Decompose CommunicationModule.cs (490 lines / 75 registrations / one method / zero helpers) into cohesive helpers AddChannelSenders / AddAssociationEngine / AddThreadResolution / AddMembershipReconciliation / AddCommunicationHostedServices (registrations identical). Rename Services/Finance/Tools/FinancialCalculationToolHandler → FinanceTotalsCalculator ONLY AFTER a mandatory Dataverse sprk_analysistool.sprk_handlerclass pre-check. Include the optional Phase-5 helpers (shared circuit-breaker-registry wiring + app-only HTTP boilerplate consolidation, owner-APPROVED).</prompt>
@@ -27,7 +28,7 @@
       <file role="modify">src/server/api/Sprk.Bff.Api/(CommunicationModule.cs — decompose into 5 helpers)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Tools/FinancialCalculationToolHandler.cs (→ FinanceTotalsCalculator, gated)</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ (the two R6 handlers — KEEP both, do not rename)</file>
-      <file role="canonical-reference">projects/bff-api-cleanup-remediation-r1/design.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
       <file role="output">projects/code-quality-and-assurance-r3/notes/dataverse-precheck.md</file>
     </relevant-files>
     <dependencies>
@@ -45,7 +46,7 @@
     <topic>BFF DI decomposition + data-driven rename</topic>
     <files>
       <file>.claude/adr/ADR-010-di-minimalism.md</file>
-      <file>projects/bff-api-cleanup-remediation-r1/design.md</file>
+      <file>projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
       <file>.claude/constraints/bff-extensions.md</file>
     </files>
   </knowledge>
@@ -62,7 +63,7 @@
   </steps>
 
   <escalation>
-    <trigger>Before renaming any handler/tool, run the Dataverse sprk_analysistool.sprk_handlerclass pre-check and record it in notes/dataverse-precheck.md; if ANY sprk_analysistool row references the class, STOP — never touch a HandlerId string (NFR-08).</trigger>
+    <trigger>Before renaming Finance/Tools/FinancialCalculationToolHandler, run TWO pre-checks (verification addendum): (1) the Dataverse sprk_analysistool.sprk_handlerclass pre-check for the two Ai/Handlers HandlerIds ("FinancialCalculationToolHandler", "FinancialCalculatorHandler") — never touch a HandlerId string (NFR-08); AND (2) because the Finance/Tools handler is an IAiToolHandler discovered by CLASS NAME via /api/ai/tools/handlers (HandlerEndpoints.cs:9,22-34; dual reg FinanceModule.cs:136-137), verify no playbook/config references the class name. Record both in notes/dataverse-precheck.md; if either is referenced, STOP and escalate.</trigger>
   </escalation>
 
   <outputs>

@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>BFF Tranche B: consolidate the 13 ServiceClient downcasts into one UnwrapServiceClient extension</title>
+    <phase>2 BFF Remediation</phase>
+    <tranche>B</tranche>
+    <gate>quiet-window (after Tranche A; deps 021)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a shared extension consumed across 17 call sites with a focused test (touches tests/) — FULL; wide blast radius.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Brownfield sweep across 13 implementations / 17 call sites in contested BFF areas; Opus for the blast radius.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Wide edit across Services/Dataverse/Finance/Workspace/Ai — highest contention surface; quiet-window PR; /conflict-check first.</parallel-reason>
+    <deps>021</deps>
+    <tags>bff,dry,dataverse,testing,tranche-b</tags>
+  </metadata>
+
+  <prompt>Add UnwrapServiceClient(this IDataverseService, string consumerName) (throws with consumer context) and TryUnwrapServiceClient(...) (null+log) in Spaarke.Dataverse next to DataverseServiceClientImpl; replace ALL copy-pasted downcast implementations / call sites (bff design §3.3 — ~13 impls / ~17 sites; VERIFY the current count via grep) with calls to the shared extension, INCLUDING the 3 invoice-path sites fixed in-place by task 021. This kills the `IDataverseService as/is ServiceClient` bug class permanently.</prompt>
+  <role>SPAARKE platform developer with Dataverse plumbing + BFF DRY expertise. Follow root CLAUDE.md §10 + ADR-038. Behavior-preserving consolidation.</role>
+  <goal>One shared UnwrapServiceClient/TryUnwrapServiceClient extension exists in Spaarke.Dataverse; zero IDataverseService as/is ServiceClient casts remain outside it (grep-verified across the whole BFF); build + full test green; publish-size delta reported.</goal>
+
+  <context>
+    <background>spec.md FR-08. Tranche B (quiet window) per the BFF A/B split — this is the wide edit deferred from the fast Bug-1 fix (task 021). ~13 copy-pasted downcasts across Services/Dataverse/* (5), Services/Finance/* (3), Services/Workspace/TodoGenerationService.cs, Services/Ai/Membership/MembershipFieldDiscoveryService.cs, + inline copies in FetchService.cs, UserPrivilegeChecker.cs, Finance/Tools/FinancialCalculationToolHandler.cs (×2). DataverseServiceExtensions.cs exists but has NO unwrap helper. Task 021 already fixed the 3 broken invoice casts in-place; this task supersedes those with the canonical extension.</background>
+    <relevant-files>
+      <file role="new">src/server/shared/Spaarke.Dataverse (UnwrapServiceClient / TryUnwrapServiceClient extension, next to DataverseServiceClientImpl)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/ (5 downcast sites)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/ (incl. the 3 sites task 021 fixed in-place)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipFieldDiscoveryService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/Extensions/DataverseServiceExtensions.cs</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="021" status="pending">Task 021 fixed the invoice-path casts in-place (Tranche A); this consolidates all sites into the shared extension.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (downcast consolidation only): add the extension in Spaarke.Dataverse next to DataverseServiceClientImpl; replace every copy/call site. Do NOT unify the two Dataverse stacks (NG1) — this is boilerplate consolidation within the app-only HTTP camp only.</constraint>
+    <constraint source="ADR-038">Scope: keep/extend the invoice-totals behavior test from task 021; no Mock&lt;HttpMessageHandler&gt;, no DI-registration/ctor-null-check tests.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 46.89 MB); report absolute + delta. No new NuGet packages. Run /conflict-check (Services/Dataverse+Finance+Ai are highly contested) before the PR; land in a quiet window.</constraint>
+    <constraint source="verification-2026-08-06">Scope caution (addendum): in MembershipFieldDiscoveryService the unwrap is called inside a `protected virtual FetchLookupAttributesAsync` (:415, impl :558) — the consolidation MUST preserve the subclass-override seam (do not seal or inline in a way that breaks overrides). Exact 13-impl/17-site list is in the verification addendum.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse ServiceClient unwrap consolidation</topic>
+    <files>
+      <file>projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL). Read bff design §3.3; run /conflict-check across Services/Dataverse+Finance+Workspace+Ai; confirm a quiet window.</step>
+    <step order="1">Add UnwrapServiceClient(this IDataverseService, string consumerName) (throws with consumer context) + TryUnwrapServiceClient(...) (returns null + logs) in Spaarke.Dataverse next to DataverseServiceClientImpl.</step>
+    <step order="2">grep the whole BFF for `as ServiceClient` / `is ServiceClient` and inline unwrap copies; enumerate the current exact count (bff design says ~13 impls / ~17 sites — verify).</step>
+    <step order="3">Replace every copy/call site with the shared extension, including the 3 invoice-path sites task 021 fixed in-place.</step>
+    <step order="4">grep-verify zero IDataverseService as/is ServiceClient casts remain outside the shared extension.</step>
+    <step order="5">dotnet build + full dotnet test green (invoice-totals test still passes); run dotnet publish and record size delta vs 46.89 MB.</step>
+    <step order="6">Update TASK-INDEX.md: set task 028 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>Services/Dataverse/Extensions/DataverseServiceExtensions.cs exists (DI-only, no unwrap helper); ~13 private copies of the downcast are scattered across Services/Dataverse/*, Services/Finance/*, Workspace, Membership, and inline copies (bff design §3.3).</existing>
+    <extension>No new concept — this IS the extraction of ~13 existing copies into one canonical extension next to DataverseServiceClientImpl.</extension>
+    <cost-of-doing-nothing>The copies persist and the next author copies the broken cast pattern (already copied 3×, and re-broke the invoice path) — the bug class is not eliminated until there is one canonical unwrap.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/shared/Spaarke.Dataverse (UnwrapServiceClient/TryUnwrapServiceClient)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/ (all downcast sites routed through the extension)</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/publish-size-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the change, grep confirms zero IDataverseService as/is ServiceClient casts remain outside the single shared extension.</criterion>
+    <criterion testable="true">Negative: TryUnwrapServiceClient returns null + logs (does not throw) when the impl is not a ServiceClient; UnwrapServiceClient throws with the consumer name.</criterion>
+    <criterion testable="true">The invoice-totals behavior test (from task 021) still passes after routing through the extension.</criterion>
+    <criterion testable="true">dotnet build + full dotnet test green; publish ≤ 60 MB with delta vs 46.89 MB; no new NuGet package; two Dataverse stacks NOT unified.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-08 / bff design §3.3 + §9 row 1, Phase 2b. **Tranche B** (quiet window) — supersedes the in-place fix in task 021.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -3,7 +3,8 @@
   <metadata>
     <title>BFF: finish Endpoints/→Api/ folder migration (namespace-only) + delete legacy tree</title>
     <phase>2 BFF Remediation</phase>
-    <gate>startable</gate>
+    <tranche>B</tranche>
+    <gate>quiet-window (after Tranche A)</gate>
     <status>not-started</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Behavior-neutral namespace-only move (zero route change); not a bug/auth/test-modifying change — STANDARD.</rigor-reason>
@@ -14,7 +15,7 @@
     <parallel-safe>false</parallel-safe>
     <parallel-reason>BFF hot-path contention (19 worktrees); moves endpoint files; /conflict-check before each PR; small sequential PRs.</parallel-reason>
     <deps>none</deps>
-    <tags>bff,refactor</tags>
+    <tags>bff,refactor,tranche-b</tags>
   </metadata>
 
   <prompt>Finish the Endpoints/→Api/ migration: move the 6 remaining files (namespace-only, zero route change; both target namespaces already imported; 5 test-line usings to update) and delete the legacy Endpoints/ tree. The route table MUST be byte-identical before/after (route-dump diff).</prompt>
@@ -25,7 +26,7 @@
     <background>spec.md FR-11 / bff design §3.6. 6 files remain in the legacy Endpoints/ folder under Sprk.Bff.Api.Endpoints.*, all still mapped, split across two namespaces. Moves are namespace-only, zero route change (route strings are literals; extension-method names unchanged); both target namespaces already imported. 5 test-line usings + the _archive follow-up. Then delete the Endpoints/ tree.</background>
     <relevant-files>
       <file role="modify">src/server/api/Sprk.Bff.Api/Endpoints/ (6 files → Api/)</file>
-      <file role="canonical-reference">projects/bff-api-cleanup-remediation-r1/design.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
     </relevant-files>
     <dependencies>
       <dependency task="none" status="complete">BFF already assessed; migration scope verified.</dependency>
@@ -41,7 +42,7 @@
   <knowledge>
     <topic>BFF endpoint folder migration</topic>
     <files>
-      <file>projects/bff-api-cleanup-remediation-r1/design.md</file>
+      <file>projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
       <file>.claude/constraints/bff-extensions.md</file>
     </files>
   </knowledge>

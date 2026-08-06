@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="027" project="code-quality-and-assurance-r3">
   <metadata>
-    <title>BFF: untrack 2 committed tarballs + delete 6 build artifacts (~127 MB)</title>
+    <title>BFF: untrack the 2 committed tarballs (31.8 MB) + close the .gitignore *.tar.gz gap</title>
     <phase>2 BFF Remediation</phase>
+    <tranche>A</tranche>
     <gate>startable</gate>
     <status>not-started</status>
     <rigor>STANDARD</rigor>
@@ -14,18 +15,18 @@
     <parallel-safe>false</parallel-safe>
     <parallel-reason>BFF hot-path repo state (19 worktrees); .gitignore/tracked-file changes; /conflict-check before each PR; small sequential PRs.</parallel-reason>
     <deps>none</deps>
-    <tags>bff,hygiene,git</tags>
+    <tags>bff,hygiene,git,tranche-a</tags>
   </metadata>
 
-  <prompt>git rm --cached the 2 committed tarballs (deployment.tar.gz, spe-bff-api-deployment.tar.gz); delete all 6 build artifacts from the working tree (~127 MB: app.zip, deploy.zip, deployment.zip, bff-api-deploy.zip + the 2 tarballs); confirm .gitignore covers the patterns.</prompt>
+  <prompt>git rm --cached the 2 committed tarballs (src/server/api/Sprk.Bff.Api/deployment.tar.gz 15.88 MB + spe-bff-api-deployment.tar.gz 15.95 MB); delete them from the working tree; and CLOSE THE .gitignore GAP — `.gitignore` covers `*.zip` (line 63) but has NO `*.tar.gz` pattern, so the tarballs re-commit unless it is added. (Per the Fable verification addendum DC-1, the 4 loose zips app.zip/deploy.zip/deployment.zip/bff-api-deploy.zip are NOT present in this worktree — treat loose zips as per-machine cleanup, not a tracked-file task.)</prompt>
   <role>SPAARKE platform developer. Follow root CLAUDE.md §9 (never commit build artifacts) + §10. Pure repo hygiene.</role>
   <goal>Both tarballs are git-untracked, all 6 build artifacts removed from the working tree, and .gitignore covers the patterns so they cannot re-enter; git ls-files shows no tarballs; build unaffected.</goal>
 
   <context>
-    <background>spec.md FR-13 / bff design §3.6 (G8). 127 MB of build/deploy artifacts sit in the source dir: app.zip, deploy.zip, deployment.zip, bff-api-deploy.zip (gitignored, local clutter) PLUS deployment.tar.gz and spe-bff-api-deployment.tar.gz which are committed to git. Untrack the 2 tarballs, delete all 6 from the working tree, confirm .gitignore covers the patterns.</background>
+    <background>spec.md FR-13 / bff design §3.6 (G8), corrected by the Fable verification addendum (DC-1): the "127 MB / 6 artifacts" figure was measured in a DIFFERENT worktree. In THIS worktree only the 2 committed tarballs exist (31.8 MB total). The real gap is the missing `*.tar.gz` .gitignore pattern (`*.zip` is at line 63). Out-of-scope owner flag: projects/pcf-orphan-cleanup-r1/backups-2026-06-22/*.zip (10 solution zips) are also tracked — note for the owner, not this BFF task.</background>
     <relevant-files>
       <file role="modify">.gitignore (verify patterns)</file>
-      <file role="canonical-reference">projects/bff-api-cleanup-remediation-r1/design.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
     </relevant-files>
     <dependencies>
       <dependency task="none" status="complete">BFF already assessed; artifact list verified.</dependency>
@@ -41,16 +42,16 @@
   <knowledge>
     <topic>Repo hygiene / build-artifact untracking</topic>
     <files>
-      <file>projects/bff-api-cleanup-remediation-r1/design.md</file>
+      <file>projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
     </files>
   </knowledge>
 
   <steps mode="directional">
     <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Read bff design §3.6 (G8); run /conflict-check.</step>
-    <step order="1">git rm --cached deployment.tar.gz and spe-bff-api-deployment.tar.gz (untrack, keep-or-delete handled in step 2).</step>
-    <step order="2">Delete all 6 artifacts from the working tree: app.zip, deploy.zip, deployment.zip, bff-api-deploy.zip, deployment.tar.gz, spe-bff-api-deployment.tar.gz.</step>
-    <step order="3">Verify .gitignore covers all 6 patterns; add any missing patterns.</step>
-    <step order="4">Confirm git ls-files shows no tarballs and dotnet build still succeeds.</step>
+    <step order="1">git rm --cached src/server/api/Sprk.Bff.Api/deployment.tar.gz and spe-bff-api-deployment.tar.gz; delete them from the working tree.</step>
+    <step order="2">Add `*.tar.gz` to .gitignore (near the existing `*.zip` at line 63); verify with `git check-ignore` that both tarball paths are now ignored.</step>
+    <step order="3">Remove any loose zips present on THIS machine (app.zip/deploy.zip/deployment.zip/bff-api-deploy.zip) if they exist — per-machine cleanup, not a tracked-file change.</step>
+    <step order="4">Confirm `git ls-files | grep -E '\.(tar\.gz|zip)$'` shows no BFF tarballs and dotnet build still succeeds.</step>
     <step order="5">Update TASK-INDEX.md: set task 027 status to ✅.</step>
     <step order="6">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
   </steps>
@@ -60,8 +61,8 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Given the change, git ls-files shows no tarballs (deployment.tar.gz + spe-bff-api-deployment.tar.gz untracked).</criterion>
-    <criterion testable="true">Given the working tree, all 6 build artifacts are removed and .gitignore covers their patterns.</criterion>
+    <criterion testable="true">Given the change, git ls-files shows no BFF tarballs (both untracked + deleted from the working tree).</criterion>
+    <criterion testable="true">.gitignore now contains a `*.tar.gz` pattern; `git check-ignore` confirms both tarball paths are ignored (they cannot re-commit).</criterion>
     <criterion testable="true">Negative: no source file was deleted; dotnet build still succeeds.</criterion>
   </acceptance-criteria>
 

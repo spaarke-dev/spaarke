@@ -70,7 +70,7 @@
     <criterion testable="true">Given the cleanup, warnings were fixed, not suppressed wholesale.</criterion>
   </acceptance-criteria>
 
-  <notes>Maps spec.md FR-15 / design.md §9 + §4A + archived-R3 items #5, #6.</notes>
+  <notes>Maps spec.md FR-15 / design.md §9 + §4A + archived-R3 items #5, #6. Verification addendum MF-7: the BFF Release publish currently emits 3× CS0618 (DemoExpirationService.cs:347-348 re DemoProvisioningOptions — matches design NG4, a known deferred migration). Before TreatWarningsAsErrors flips on the Office/Demo surface, these must be resolved or explicitly suppressed-with-justification — do not silently blanket-suppress CS0618.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

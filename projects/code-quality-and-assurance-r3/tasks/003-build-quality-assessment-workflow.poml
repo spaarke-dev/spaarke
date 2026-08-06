@@ -24,7 +24,7 @@
     <background>design.md §6 locks the assessment engine as a multi-agent Workflow (owner Q1): parallel finders per dimension, per-finding adversarial verification, synthesized report. spec.md FR-02 requires it run end-to-end on one surface producing a verified design; NFR-05 makes the Fable verification pass non-negotiable (it caught 2 real BFF bugs and corrected 2 false-positive dead-code claims). The Workflow tool requires operator per-run opt-in ("use a workflow"); manual agent fan-out is the documented fallback only.</background>
     <relevant-files>
       <file role="new">projects/code-quality-and-assurance-r3/notes/quality-assessment.workflow.js</file>
-      <file role="canonical-reference">projects/bff-api-cleanup-remediation-r1/design.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
       <file role="canonical-reference">docs/standards/CODE-QUALITY-RUBRIC.md</file>
       <file role="canonical-reference">projects/code-quality-and-assurance-r3/design.md</file>
     </relevant-files>
@@ -44,11 +44,11 @@
     <topic>Multi-agent assessment workflow</topic>
     <files>
       <file>projects/code-quality-and-assurance-r3/design.md</file>
-      <file>projects/bff-api-cleanup-remediation-r1/design.md</file>
+      <file>projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
       <file>docs/standards/CODE-QUALITY-RUBRIC.md</file>
     </files>
     <patterns>
-      <pattern name="Proven BFF assessment pass" location="projects/bff-api-cleanup-remediation-r1/design.md">6 parallel read-only investigations + 3-agent Fable verification; extract this exact shape into the reusable workflow.</pattern>
+      <pattern name="Proven BFF assessment pass" location="projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md">6 parallel read-only investigations + 3-agent Fable verification; extract this exact shape into the reusable workflow.</pattern>
     </patterns>
   </knowledge>
 
@@ -69,7 +69,7 @@
   </escalation>
 
   <justification>
-    <existing>The one-off BFF assessment fan-out exists only as a narrative in bff-api-cleanup-remediation-r1/design.md (manual, not reusable); no reusable workflow script exists (grep of notes/ + scripts/ for "workflow" assessment returns none).</existing>
+    <existing>The one-off BFF assessment fan-out exists only as a narrative in workstreams/bff-api/design.md (manual, not reusable); no reusable workflow script exists (grep of notes/ + scripts/ for "workflow" assessment returns none).</existing>
     <extension>No — the BFF pass was manual and un-encoded; this task extracts that method into a reusable, operator-invokable Workflow so every surface runs the identical fan-out+verify.</extension>
     <cost-of-doing-nothing>Without it, each surface (010–015) re-improvises fan-out + verification, producing inconsistent, error-prone assessments and risking a skipped Fable stage (which previously caught 2 real bugs + 2 false positives).</cost-of-doing-nothing>
   </justification>

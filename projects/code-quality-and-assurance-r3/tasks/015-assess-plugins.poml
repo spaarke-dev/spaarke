@@ -18,7 +18,7 @@
 
   <prompt>Run the quality-assessment Workflow READ-ONLY across src/dataverse/plugins/** (small surface): score against the rubric and specifically resolve the BaseProxyPlugin invert-vs-decommission question (archived-R3 item #9, ADR-002 thin-plugins). Produce a Fable-verified prioritized remediation design.md and append this surface's SCORECARD row. Modify NO source.</prompt>
   <role>SPAARKE platform developer running the standing quality-assessment method with Dataverse plugin + ADR-002 expertise. Follow ADRs strictly; the assessment is read-only.</role>
-  <goal>projects/plugins-remediation-r1/design.md exists — a Fable-verified prioritized remediation design that makes an explicit invert-vs-decommission recommendation for BaseProxyPlugin against ADR-002 — and notes/SCORECARD.md carries this surface's verified D1–D11 row.</goal>
+  <goal>projects/code-quality-and-assurance-r3/workstreams/plugins/design.md exists — a Fable-verified prioritized remediation design that makes an explicit invert-vs-decommission recommendation for BaseProxyPlugin against ADR-002 — and notes/SCORECARD.md carries this surface's verified D1–D11 row.</goal>
 
   <context>
     <background>spec.md FR-05 + design.md §7 (surface #6, small). Archived-R3 item #9: BaseProxyPlugin full inversion vs decommission per ADR-002 (thin plugins). Decide invert-vs-decommission with evidence; this is the smallest surface.</background>
@@ -27,7 +27,7 @@
       <file role="canonical-reference">.claude/adr/ADR-002-thin-plugins.md</file>
       <file role="canonical-reference">docs/standards/CODE-QUALITY-RUBRIC.md</file>
       <file role="canonical-reference">projects/code-quality-and-assurance-r3/notes/quality-assessment.workflow.js</file>
-      <file role="output">projects/plugins-remediation-r1/design.md</file>
+      <file role="output">projects/code-quality-and-assurance-r3/workstreams/plugins/design.md</file>
       <file role="output">projects/code-quality-and-assurance-r3/notes/SCORECARD.md</file>
     </relevant-files>
     <dependencies>
@@ -56,7 +56,7 @@
     <step order="1">Fan-out: read-only finders per rubric dimension across src/dataverse/plugins/**, file:line evidence; include an ADR-002 thin-plugins finder for BaseProxyPlugin.</step>
     <step order="2">Mandatory Fable adversarial-verification stage; refute false positives.</step>
     <step order="3">If verification refutes &gt;30% of findings or cannot confirm evidence, invoke the escalation trigger.</step>
-    <step order="4">Synthesize projects/plugins-remediation-r1/design.md with an explicit BaseProxyPlugin invert-vs-decommission recommendation.</step>
+    <step order="4">Synthesize projects/code-quality-and-assurance-r3/workstreams/plugins/design.md with an explicit BaseProxyPlugin invert-vs-decommission recommendation.</step>
     <step order="5">Append this surface's verified D1–D11 row to notes/SCORECARD.md.</step>
     <step order="6">Update TASK-INDEX.md: set task 015 status to ✅.</step>
     <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
@@ -67,12 +67,12 @@
   </escalation>
 
   <outputs>
-    <output type="doc">projects/plugins-remediation-r1/design.md</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/workstreams/plugins/design.md</output>
     <output type="doc">projects/code-quality-and-assurance-r3/notes/SCORECARD.md (row appended)</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Given the run, projects/plugins-remediation-r1/design.md exists, Fable-verified, with an explicit BaseProxyPlugin invert-vs-decommission recommendation and severity/LOC/effort/risk + tranche split.</criterion>
+    <criterion testable="true">Given the run, projects/code-quality-and-assurance-r3/workstreams/plugins/design.md exists, Fable-verified, with an explicit BaseProxyPlugin invert-vs-decommission recommendation and severity/LOC/effort/risk + tranche split.</criterion>
     <criterion testable="true">Given the run, notes/SCORECARD.md has this surface's verified row appended; no aggregate published.</criterion>
     <criterion testable="true">Negative: no file under src/ was modified.</criterion>
   </acceptance-criteria>

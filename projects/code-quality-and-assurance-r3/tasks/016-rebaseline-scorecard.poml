@@ -25,12 +25,12 @@
     <relevant-files>
       <file role="output">projects/code-quality-and-assurance-r3/notes/SCORECARD.md</file>
       <file role="canonical-reference">docs/standards/CODE-QUALITY-RUBRIC.md</file>
-      <file role="canonical-reference">projects/shared-client-libs-remediation-r1/design.md</file>
-      <file role="canonical-reference">projects/shared-server-libs-remediation-r1/design.md</file>
-      <file role="canonical-reference">projects/pcf-controls-remediation-r1/design.md</file>
-      <file role="canonical-reference">projects/dataverse-model-alm-remediation-r1/design.md</file>
-      <file role="canonical-reference">projects/code-pages-build-sprawl-remediation-r1/design.md</file>
-      <file role="canonical-reference">projects/plugins-remediation-r1/design.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/workstreams/shared-client-libs/design.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/workstreams/shared-server-libs/design.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/workstreams/pcf-controls/design.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/workstreams/dataverse-model-alm/design.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/workstreams/code-pages-build-sprawl/design.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/workstreams/plugins/design.md</file>
     </relevant-files>
     <dependencies>
       <dependency task="010" status="pending">Shared-client-libs assessment row.</dependency>

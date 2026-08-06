@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>BFF Tranche A: fix the broken invoice-totals ServiceClient casts in-place (Bug-1) + focused test</title>
+    <phase>2 BFF Remediation</phase>
+    <tranche>A</tranche>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Fixes a latent production correctness bug with a focused test (touches tests/) — FULL; TEST-MODIFYING override also applies.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Brownfield root-cause on a live invoice path (3 always-failing casts); correctness-critical — Opus.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>BFF hot-path contention; Finance files are among the most-contested; /conflict-check before the PR; small sequential PRs.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff,correctness,dataverse,testing,tranche-a</tags>
+  </metadata>
+
+  <prompt>Fix Bug-1 in-place (Tranche A — fast production correctness fix, NARROW): the 3 broken `IDataverseService as/is ServiceClient` casts on the live invoice-totals path — FinanceRollupService.cs:228 and Services/Finance/Tools/FinancialCalculationToolHandler.cs:140-146 and ~205-211 (reached via InvoiceExtractionJobHandler.cs:253). The sole registered impl DataverseServiceClientImpl does NOT derive from ServiceClient, so those casts always throw InvalidOperationException. Correct these 3 sites so the invoice-totals path works, and add a focused test. Do NOT do the wide 13-site consolidation here — that is Tranche B (task 028), which supersedes this in-place fix with the shared extension.</prompt>
+  <role>SPAARKE platform developer with Dataverse plumbing + BFF correctness expertise. Follow root CLAUDE.md §10 + ADR-038. Behavior-preserving except the intended bug fix.</role>
+  <goal>The invoice financial-totals path computes instead of throwing (the 3 broken casts corrected in-place); a focused behavior test for the invoice-totals path passes; build + full test green; publish-size delta reported.</goal>
+
+  <context>
+    <background>spec.md FR-07 (Bug-1). Split from the original 021 per the BFF workstream A/B tranche model (handoff §4): ship the production correctness fix FAST in Tranche A without waiting for the wide-edit quiet window. The full 13-copy consolidation into a shared UnwrapServiceClient extension is Tranche B (task 028, deps 021) — it replaces these in-place fixes with the canonical extension and kills the bug class permanently.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/FinanceRollupService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Tools/FinancialCalculationToolHandler.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/InvoiceExtractionJobHandler.cs</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">BFF already assessed; broken-cast sites verified.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (Bug-1 in-place only): correct exactly the 3 broken casts on the invoice-totals path so it no longer throws. Do NOT introduce the shared extension here (task 028) and do NOT touch the other 10 downcast sites. Do NOT unify the two Dataverse stacks (NG1).</constraint>
+    <constraint source="ADR-038">Scope: add a focused behavior test for the invoice-totals path (KEEP category); no Mock&lt;HttpMessageHandler&gt;, no DI-registration/ctor-null-check tests.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 46.89 MB); report absolute + delta. No new NuGet packages. Run /conflict-check (Finance files are highly contested) before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse ServiceClient unwrap — invoice-totals bug</topic>
+    <files>
+      <file>projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + TEST-MODIFYING). Read bff design §3.2 Bug-1; run /conflict-check on the Finance files.</step>
+    <step order="1">Confirm the runtime type behind IDataverseService (DataverseServiceClientImpl) and how the invoice path obtains a ServiceClient; correct the 3 casts (FinanceRollupService.cs:228; Finance/Tools/FinancialCalculationToolHandler.cs:140-146 and ~205-211) so the path resolves the underlying ServiceClient correctly (or fails loud with consumer context, never silently).</step>
+    <step order="2">Add a focused behavior test for the invoice-totals path (InvoiceExtractionJobHandler → FinancialCalculationToolHandler.ExecuteAsync) asserting totals compute instead of throwing InvalidOperationException.</step>
+    <step order="3">dotnet build + full dotnet test green; run dotnet publish and record size delta vs 46.89 MB in notes/publish-size-report.md.</step>
+    <step order="4">Update TASK-INDEX.md: set task 021 status to ✅.</step>
+    <step order="5">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/ (3 broken casts corrected)</output>
+    <output type="test">invoice-totals path focused test</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/publish-size-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the invoice-totals test, totals compute successfully (no InvalidOperationException) — the previously-broken path passes.</criterion>
+    <criterion testable="true">Negative: when the underlying impl is not a ServiceClient, the path fails loud with consumer context (never a silent wrong result).</criterion>
+    <criterion testable="true">dotnet build + full dotnet test green; publish ≤ 60 MB with delta vs 46.89 MB reported; no new NuGet package; two Dataverse stacks NOT unified.</criterion>
+    <criterion testable="true">Scope guard: only the 3 invoice-path cast sites changed (task 028 owns the other 10 + the shared extension).</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-07 (Bug-1) / bff design §3.2, Phase 2a. **Tranche A** — fast prod fix. Superseded by task 028 (Tranche B) which consolidates all 13 downcasts into the shared extension.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

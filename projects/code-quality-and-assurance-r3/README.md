@@ -10,7 +10,7 @@
 - [tasks/TASK-INDEX.md](tasks/TASK-INDEX.md) — task tracker + parallel groups
 - [spec.md](spec.md) — AI implementation specification
 - [design.md](design.md) — program design (umbrella)
-- [../bff-api-cleanup-remediation-r1/design.md](../bff-api-cleanup-remediation-r1/design.md) — BFF surface workstream #1 (assessed)
+- [workstreams/bff-api/design.md](workstreams/bff-api/design.md) — BFF surface workstream #1 (assessed)
 
 ## Overview
 

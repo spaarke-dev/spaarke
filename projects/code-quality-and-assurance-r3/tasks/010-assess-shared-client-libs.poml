@@ -18,7 +18,7 @@
 
   <prompt>Run the quality-assessment Workflow (fan-out per rubric dimension → mandatory Fable adversarial-verification → synthesized remediation design.md) READ-ONLY across the shared client libraries at src/client/shared/Spaarke.* (16 packages, ~39k LOC). Produce a Fable-verified prioritized remediation design.md and append this surface's row to notes/SCORECARD.md. Modify NO source.</prompt>
   <role>SPAARKE platform developer running the standing quality-assessment method. This surface is the highest-leverage client nucleus (consumed by PCF + Code Pages) — fixes multiply. Follow ADRs strictly; the assessment is read-only.</role>
-  <goal>projects/shared-client-libs-remediation-r1/design.md exists — a Fable-verified prioritized remediation design (severity/LOC/effort/risk + tranche split) for the shared client libs — and notes/SCORECARD.md carries this surface's verified D1–D11 row.</goal>
+  <goal>projects/code-quality-and-assurance-r3/workstreams/shared-client-libs/design.md exists — a Fable-verified prioritized remediation design (severity/LOC/effort/risk + tranche split) for the shared client libs — and notes/SCORECARD.md carries this surface's verified D1–D11 row.</goal>
 
   <context>
     <background>spec.md FR-05: run the quality-assessment workflow (Fable-verified) across each remaining surface, each producing a prioritized remediation design.md. Assessments are read-only ⇒ conflict-free ⇒ may run anytime (NFR-03). design.md §7 orders this surface FIRST by leverage — React-version drift, cross-package duplication, dead exports, bundle size, @spaarke/auth package hygiene (old R3 item #3). This design is the GATING deliverable from which the surface's remediation tasks are later created.</background>
@@ -27,7 +27,7 @@
       <file role="canonical-reference">src/client/shared</file>
       <file role="canonical-reference">docs/standards/CODE-QUALITY-RUBRIC.md</file>
       <file role="canonical-reference">projects/code-quality-and-assurance-r3/notes/quality-assessment.workflow.js</file>
-      <file role="output">projects/shared-client-libs-remediation-r1/design.md</file>
+      <file role="output">projects/code-quality-and-assurance-r3/workstreams/shared-client-libs/design.md</file>
       <file role="output">projects/code-quality-and-assurance-r3/notes/SCORECARD.md</file>
     </relevant-files>
     <dependencies>
@@ -57,7 +57,7 @@
     <step order="1">Run the fan-out: one read-only finder per rubric dimension across src/client/shared/Spaarke.* (16 pkgs), each returning file:line evidence.</step>
     <step order="2">Run the mandatory Fable adversarial-verification stage: verify each finding's file:line, refute false positives, check test-only consumers + data-driven dispatch.</step>
     <step order="3">If verification confirms &lt;70% of first-pass findings or cannot confirm evidence, invoke the escalation trigger instead of synthesizing.</step>
-    <step order="4">Synthesize the prioritized remediation design.md (severity/LOC/effort/risk + tranche split) at projects/shared-client-libs-remediation-r1/design.md.</step>
+    <step order="4">Synthesize the prioritized remediation design.md (severity/LOC/effort/risk + tranche split) at projects/code-quality-and-assurance-r3/workstreams/shared-client-libs/design.md.</step>
     <step order="5">Append this surface's verified D1–D11 row to notes/SCORECARD.md (do NOT publish an aggregate).</step>
     <step order="6">Update TASK-INDEX.md: set task 010 status to ✅.</step>
     <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
@@ -68,12 +68,12 @@
   </escalation>
 
   <outputs>
-    <output type="doc">projects/shared-client-libs-remediation-r1/design.md</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/workstreams/shared-client-libs/design.md</output>
     <output type="doc">projects/code-quality-and-assurance-r3/notes/SCORECARD.md (row appended)</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Given the run, projects/shared-client-libs-remediation-r1/design.md exists with per-finding severity/LOC/effort/risk and a tranche split, every finding Fable-verified.</criterion>
+    <criterion testable="true">Given the run, projects/code-quality-and-assurance-r3/workstreams/shared-client-libs/design.md exists with per-finding severity/LOC/effort/risk and a tranche split, every finding Fable-verified.</criterion>
     <criterion testable="true">Given the run, notes/SCORECARD.md has this surface's verified D1–D11 row appended and no aggregate published.</criterion>
     <criterion testable="true">Negative: no file under src/ was modified by this assessment.</criterion>
     <criterion testable="true">Negative: if &gt;30% of findings were refuted, the design was NOT synthesized and the escalation was raised instead.</criterion>

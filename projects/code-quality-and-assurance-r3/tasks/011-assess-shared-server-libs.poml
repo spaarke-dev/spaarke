@@ -18,7 +18,7 @@
 
   <prompt>Run the quality-assessment Workflow READ-ONLY across the shared server libraries — src/server/shared/Spaarke.Core, Spaarke.Dataverse, Spaarke.Scheduling (~10k LOC). Produce a Fable-verified prioritized remediation design.md and append this surface's SCORECARD row. This surface roots the two-Dataverse-stacks question (NG1). Modify NO source.</prompt>
   <role>SPAARKE platform developer running the standing quality-assessment method. This surface underpins the BFF + plugins; the ServiceClient-vs-raw-HTTP stack split originates here. Follow ADRs strictly; the assessment is read-only.</role>
-  <goal>projects/shared-server-libs-remediation-r1/design.md exists — a Fable-verified prioritized remediation design for the shared server libs, explicitly characterizing (but NOT resolving) the two-Dataverse-stacks question as NG1 — and notes/SCORECARD.md carries this surface's verified D1–D11 row.</goal>
+  <goal>projects/code-quality-and-assurance-r3/workstreams/shared-server-libs/design.md exists — a Fable-verified prioritized remediation design for the shared server libs, explicitly characterizing (but NOT resolving) the two-Dataverse-stacks question as NG1 — and notes/SCORECARD.md carries this surface's verified D1–D11 row.</goal>
 
   <context>
     <background>spec.md FR-05 + design.md §7 (surface #2, roots the Dataverse-stack question). The BFF pass already confirmed DataverseServiceClientImpl vs raw-HTTP stack + always-failing casts; full stack unification is deferred as NG1 (a separate architecture project needing its own ADR — spec Out of Scope / FR-23). This assessment characterizes the shared-server debt and feeds the NG1 Idea, but does not unify the stacks.</background>
@@ -28,7 +28,7 @@
       <file role="canonical-reference">src/server/shared/Spaarke.Scheduling</file>
       <file role="canonical-reference">docs/standards/CODE-QUALITY-RUBRIC.md</file>
       <file role="canonical-reference">projects/code-quality-and-assurance-r3/notes/quality-assessment.workflow.js</file>
-      <file role="output">projects/shared-server-libs-remediation-r1/design.md</file>
+      <file role="output">projects/code-quality-and-assurance-r3/workstreams/shared-server-libs/design.md</file>
       <file role="output">projects/code-quality-and-assurance-r3/notes/SCORECARD.md</file>
     </relevant-files>
     <dependencies>
@@ -48,7 +48,7 @@
     <files>
       <file>docs/standards/CODE-QUALITY-RUBRIC.md</file>
       <file>projects/code-quality-and-assurance-r3/design.md</file>
-      <file>projects/bff-api-cleanup-remediation-r1/design.md</file>
+      <file>projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
     </files>
   </knowledge>
 
@@ -57,7 +57,7 @@
     <step order="1">Fan-out: one read-only finder per rubric dimension across the three shared-server packages, file:line evidence.</step>
     <step order="2">Mandatory Fable adversarial-verification stage; refute false positives; check test-only consumers + data-driven dispatch.</step>
     <step order="3">If verification refutes &gt;30% of findings or cannot confirm evidence, invoke the escalation trigger.</step>
-    <step order="4">Synthesize projects/shared-server-libs-remediation-r1/design.md; explicitly mark the two-Dataverse-stacks item as NG1 (route to Idea, do not scope here).</step>
+    <step order="4">Synthesize projects/code-quality-and-assurance-r3/workstreams/shared-server-libs/design.md; explicitly mark the two-Dataverse-stacks item as NG1 (route to Idea, do not scope here).</step>
     <step order="5">Append this surface's verified D1–D11 row to notes/SCORECARD.md.</step>
     <step order="6">Update TASK-INDEX.md: set task 011 status to ✅.</step>
     <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
@@ -68,12 +68,12 @@
   </escalation>
 
   <outputs>
-    <output type="doc">projects/shared-server-libs-remediation-r1/design.md</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/workstreams/shared-server-libs/design.md</output>
     <output type="doc">projects/code-quality-and-assurance-r3/notes/SCORECARD.md (row appended)</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Given the run, projects/shared-server-libs-remediation-r1/design.md exists, Fable-verified, with severity/LOC/effort/risk + tranche split.</criterion>
+    <criterion testable="true">Given the run, projects/code-quality-and-assurance-r3/workstreams/shared-server-libs/design.md exists, Fable-verified, with severity/LOC/effort/risk + tranche split.</criterion>
     <criterion testable="true">Given the design, the two-Dataverse-stacks item is characterized and routed to NG1 (Idea) — NOT scoped as remediation here.</criterion>
     <criterion testable="true">Given the run, notes/SCORECARD.md has this surface's verified row appended; no aggregate published.</criterion>
     <criterion testable="true">Negative: no file under src/ was modified.</criterion>
