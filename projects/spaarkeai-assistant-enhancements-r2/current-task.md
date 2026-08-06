@@ -10,10 +10,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Next = **022** (FR-B3/B5) — proactive suggestion turn cached per tabId, ≤3 chips filtered by active-tab contextType. **021 COMPLETE + deployed.** |
-| **Step** | 021 not-started → **done**. 8 tasks now complete (001/002/010/011/012/013/020/**021**). |
-| **Status** | not-started (next = 022) |
-| **Next Action** | Begin task 022 (opus/xhigh, ConvPane spine). It CONSUMES `Binding.ContextTypeTags` (021's carrier) — filters candidate Bindings by the active tab's `contextType`, renders ≤3 chips via the **reactive** `useConsumerChips` surface. Reanalyze binding `9c29b488-4291-f111-b8db-7ced8ddc4a05` feeds FR-D11/task 038. |
+| **Task** | **022** (FR-B3/B5) — **Option B chosen** (owner 2026-08-06). POML re-scoped to BFF suggest path + client. Ready to build (unblocked). (021 complete + deployed; 8 tasks done.) |
+| **Step** | Not started (re-scoped). |
+| **Status** | not-started (ready) |
+| **Next Action** | Build 022 Option B via task-execute. **BFF**: contextType pre-filter over `Binding.ContextTypeTags` (ConsumerRoutingService) + a grounded suggest service reusing SprkChatAgentFactory (selects/phrases ≤3 content-specific chips) + `POST /api/ai/chat/sessions/{id}/suggest` (no transcript pollution) + DI/test/deploy. **Client**: once-per-tab trigger in the `usePaneEvent("workspace")` handler (ConversationPane.tsx:2331; Set<string> ref like `wizardAutoRunHandledRef` :596; render via `chips.acceptChips` :550 → `transcriptFooter` :2472). Full design + anchors in the re-scoped POML + `notes/deviations.md` §"Task 022 Option B". |
+
+### Task 022 Option B (design locked)
+Server-side contextType filtering (CapabilityDto exposure NOT needed). ADR-039 clean: deterministic pre-filter + ONE grounded turn. `useSuggestionCards` deleted (no resurrection); `SuggestionCard.tsx` retained (do not re-wire). Client seam fully mapped in POML. Large BFF+client build — consider `/compact` for a fresh context before starting.
 
 ### Seeded BindingIds (task 021)
 - **Reanalyze** (created): `9c29b488-4291-f111-b8db-7ced8ddc4a05` → `document` (chat-summarize/reanalyze, reuses summarize Action `eeb05bfd-1260-f111-ab0b-70a8a59455f4`).
