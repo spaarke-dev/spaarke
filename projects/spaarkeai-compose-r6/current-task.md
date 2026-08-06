@@ -2,32 +2,29 @@
 
 > Active-task tracker for context recovery. Reset per root `CLAUDE.md` §7 as tasks complete.
 
-## Status: 020 ✅ · 011 ✅ · 021 ✅ · **022 ✅ COMPLETE** · Next → **023 headers/footers + page-breaks** (then 024 → 025 → 026, SERIAL)
+## Status: 020 ✅ · 011 ✅ · 021 ✅ · 022 ✅ · **023 ✅ COMPLETE** · Next → **024 hyperlinks + comments** (then 025 → 026, SERIAL)
 
-- **Project**: `spaarkeai-compose-r6` · **Branch**: `work/spaarkeai-compose-r6` (pushed through `c5567f74d`)
-- **✅ 022 COMPLETE** (`cef2cd988` + `be0b253b3`): tables through the canonical model. Closed structural set on
-  ComposeTable/Row/Cell (StyleId/Width/Borders-TRI-STATE/grid widths/LookHex · RepeatAsHeaderRow ·
-  GridSpan/VMerge/Width/VerticalAlignment); Borders = mode discriminator (null = legacy chrome bit-stable;
-  empty = BORDERLESS — signature tables no longer grow borders on save); CATCH-ALL table-formatting-flattened
-  counting; R5 tracked-table op layer reused AS-IS (untouched, md5-verified). Seam: rich-source capture +
-  rendered-structure + OpenXmlValidator multiset + corpus full-fact fixed point + chrome pins. Step 9.5:
-  adr-check PASS 8/8; code-review F1-F11 fixed (F4 style-chain vAlign — real design error caught), F12 → 010/012.
-  Record: notes §12 + §12.1.
-- **✅ 021 COMPLETE** (`cc9ac812b` + `3ca774e28`): numbering identity through the model; golden-label oracle LIVE;
-  numbering.xml byte-identical on pure round-trips; 020-R1 closed (per-level list-run state). Record: notes §11 + §11.1.
-- **NEXT: 023** — headers/footers + page-breaks widener (read `tasks/TASK-INDEX.md` for the exact POML filename).
-  Then 024 hyperlinks+comments → 025 tracked-changes → 026 hard-tier. All `parallel-safe:false` → SERIAL.
-- **026 owes (updated)**: custom-style-linked numbering (020-R7) + localized heading-id mapping (011-P8) + typed
-  carry of hMerge/tblLayout (022-F2) + prior scope (AlternateContent surface, dup-paraId I-4, U+FFFD R5 sign-off).
-- **010/012 owe (updated)**: client mapper preservation of server-set numId (021-F3) AND table structural facts
-  (022-F12) on re-post — without both, EDITED imported saves lose the fidelity 021/022 establish; P-10 audit
-  carve-out; P-2 preamble extraction.
-- **⚠️ Operator sign-off pending (flatten-tier):** R4 ins+del→"barfoo" (→025) · R5 U+FFFD persisted (→026).
-- **Pre-existing reds (stash-verified §F.3, routed 026/027):** 2 NDA seam + stamper unit (NDA dup-paraId class).
-  ArchTests: 4 pre-existing master fails (ADR-007/010 Communication).
-- **Publish measurement convention:** clean-worktree fresh publish ONLY (this local worktree's pdb inflates
-  readings by ~4 MB). Current: 46.89 MB incl PDBs (021 + 022 both delta ≈ 0).
-- **Master delta:** ~26 commits behind origin/master (no Compose overlap; Crypto.Xml patched there). Merge before PR.
+- **Project**: `spaarkeai-compose-r6` · **Branch**: `work/spaarkeai-compose-r6` (pushed through the 023 close-out)
+- **✅ 023 COMPLETE** (`5951f173b` + `b9f15df02`, FULL rigor via Step 0.5 override UP): headers/footers ride the
+  CARRIER (parts byte-identical; references PROVEN to resolve); page breaks are MODEL data (IsPageBreak at exact
+  inline position via ProjectRun flush-split + PageBreakBefore; both re-authored); interior section breaks flatten
+  LOUDLY (section-break-flattened) EXCEPT the 011-P1 promotion shape (no-warn, renderer promotes losslessly).
+  Step 9.5: adr-check PASS 8/8; review APPROVE-WITH-MINORS → F1/F3/F4 fixed, F2 documented. Notes §13 + §13.1.
+- **✅ 022** tables (notes §12/§12.1) · **✅ 021** numbering (notes §11/§11.1) · **✅ 020/011** hub + carrier author.
+- **NEXT: 024** — hyperlinks + comments widener (read `tasks/TASK-INDEX.md` for the POML filename). Note G5
+  hyperlinks (Href) ALREADY flow through the model on the clean path — 024's likely real scope is comments +
+  hyperlink fidelity gaps (anchors/internal links). Then 025 tracked-changes → 026 hard-tier. SERIAL.
+- **026 owes**: custom-style-linked numbering (020-R7) · localized heading ids (011-P8) · typed hMerge/tblLayout
+  (022-F2) · pageBreakBefore val=false tri-state IF it surfaces (023-F2) · field/atom page-break surface (023-F3)
+  · AlternateContent surface · dup-paraId I-4 · U+FFFD R5 sign-off.
+- **010/012 owe**: client mapper preservation of server-set numId (021-F3), table facts (022-F12), page-break
+  fields (023-F7) on re-post — EDITED imported saves lose 021–023 fidelity without it; P-10 audit carve-out; P-2.
+- **⚠️ Operator sign-off pending:** R4 ins+del→"barfoo" (→025) · R5 U+FFFD persisted (→026).
+- **Pre-existing reds (§F.3-verified, routed 026/027):** 2 NDA seam + stamper unit. ArchTests: 4 pre-existing
+  master fails (ADR-007/010 Communication).
+- **Publish convention:** clean-worktree fresh publish ONLY (local pdb artifact inflates ~4 MB). Current:
+  46.89 MB incl PDBs — 021/022/023 all delta ≈ 0.
+- **Master delta:** ~26 behind origin/master (no Compose overlap). Merge before PR.
 
 ### 🧭 Task 020 design (locked this session — key decisions)
 - **Hub = `ComposeContentModel` (body, widened by 021–025) + server-retained source package ("carrier" = styles/numbering/hdr-ftr/theme/sectPr).** EXTENSION, not a parallel model → does NOT trip escalation trigger #1.

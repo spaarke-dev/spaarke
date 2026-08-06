@@ -4,7 +4,27 @@
     <title>Headers/footers + page breaks through the canonical model</title>
     <phase>2 Canonical model + fidelity widening</phase>
     <gate>dep:020</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-note>COMPLETED 2026-08-06 (commits 5951f173b + b9f15df02, pushed). Executed at FULL rigor
+      (Step 0.5 override UP from authored STANDARD — modifies .cs on the BFF hot-path, bff-api tags;
+      adr-check confirmed the escalation as the correct protocol reading). Two mechanisms: (1)
+      HEADERS/FOOTERS ride the CARRIER — parts preserved byte-identically by RenderIntoCarrier and the
+      trailing sectPr's headerReference/footerReference PROVEN to resolve post-round-trip (per-doc +
+      corpus-wide theory); editing header content is not an editor capability and template part-merge is
+      Phase 3. (2) PAGE BREAKS are MODEL data — the real gap (a manual w:br type=page degraded to a SPACE
+      before this task): ComposeInlineRun.IsPageBreak captured at the EXACT inline position (ProjectRun
+      flush-split) + ComposeBlock.PageBreakBefore (OnOff), both re-authored (BuildRun break-run;
+      ApplyPageBreakBefore in CT_PPr order across all three builders). Interior section breaks flatten
+      LOUDLY via the new counted section-break-flattened warning — EXCEPT the 011-P1 promotion shape,
+      which the renderer promotes losslessly and therefore must not warn (Step-9.5 F1). Soft line/column
+      breaks remain warned flattens. SEAM: ComposeHeaderFooterPageBreakSeamTests (14) — exact-position
+      capture, parts identity + reference resolution, break fixed point, interior-section loud flatten +
+      no-hard-fail (landscape final section preserved), P-1 no-warn + promotion, corpus reference +
+      break-count stability, multiset validator. Step 9.5: adr-check PASS 8/8; code-review
+      APPROVE-WITH-MINORS → F1/F3/F4 fixed, F2 documented degradation (pageBreakBefore val=false
+      collapse), F5-F8 recorded. Gates: suite 719/722 (3 pre-existing NDA-class reds); ADR-013 green;
+      publish 46.89 MB incl PDBs clean-worktree (task delta 0.00); no package/DI/endpoint change.
+      Record: notes/020-canonical-hub-design.md §13 + §13.1.</completion-note>
     <rigor>STANDARD</rigor>
     <rigor-reason>Per plan.md §5 Phase 2 — feature-adapter task routing headers/footers + page breaks through the canonical model. Modifies shared Services/Compose (BFF hot-path) so the BFF task obligations (publish-size, conflict-check, seam DoD) still apply, but it is a narrower construct set than 020/021/022 with an existing render precedent (AppendSection sectPr handling). Step 9.5 gates skipped at STANDARD; task-execute may escalate to FULL if it touches the save discriminant.</rigor-reason>
     <model-tier>sonnet</model-tier>

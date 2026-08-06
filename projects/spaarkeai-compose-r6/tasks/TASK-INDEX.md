@@ -29,7 +29,7 @@ Overlapping worktrees: `spaarkeai-compose-r5` (active on `ComposeService.cs`/`Co
 | 020 | Canonical document model — generalize ComposeContentModel/projection as the hub | 2 | 001, 004 | none | false | FULL | opus/high | ✅ |
 | 021 | Numbering/lists through the model (reuse NumberingComputationEngine) | 2 | 020 | none | false | FULL | sonnet/high | ✅ |
 | 022 | Tables through the model (reuse R5 tracked-table work) | 2 | 020 | none | false | FULL | sonnet/high | ✅ |
-| 023 | Headers/footers + page breaks through the model | 2 | 020 | none | false | STANDARD | sonnet/high | 🔲 |
+| 023 | Headers/footers + page breaks through the model | 2 | 020 | none | false | STANDARD | sonnet/high | ✅ |
 | 024 | Hyperlinks + comments through the model | 2 | 020 | none | false | STANDARD | sonnet/high | 🔲 |
 | 025 | Tracked-changes (redlines) through the model | 2 | 020 | none | false | FULL | sonnet/high | 🔲 |
 | 026 | Hard-tier graceful degradation (text boxes/drawings/fields/content controls → accept-flatten + warning) | 2 | 020 | none | false | FULL | sonnet/high | 🔲 |
