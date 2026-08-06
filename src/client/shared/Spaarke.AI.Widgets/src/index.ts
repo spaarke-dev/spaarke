@@ -61,7 +61,8 @@ export type {
 
 // WidgetMetadata — canonical definition from shared.ts (task AIPU2-071).
 // Required by WorkspaceWidgetRegistry.registerWorkspaceWidget().
-export type { WidgetMetadata } from './types/shared';
+// WidgetContextType — closed contextType union (FR-B1 + FR-C3, task 020).
+export type { WidgetMetadata, WidgetContextType } from './types/shared';
 
 // ---------------------------------------------------------------------------
 // Types — Canonical WorkspaceTab (R6 Pillar 6a gate; FR-31)

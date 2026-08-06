@@ -181,6 +181,8 @@ safeRegisterWidget(
     icon: 'DocumentCompareRegular',
     allowMultiple: true,
     defaultOrder: 40,
+    // FR-B1/FR-C3 (task 020): side-by-side document clause comparison.
+    contextType: 'document',
   },
   wrapFactory(
     () =>
@@ -294,6 +296,8 @@ registerWorkspaceWidget(
      * and SearchResults (20) but before AnalysisEditor (30).
      */
     defaultOrder: 25,
+    // FR-B1/FR-C3 (task 020): a document diff is a document-viewing surface.
+    contextType: 'document',
   },
   () =>
     import('./RedlineViewerWidget') as Promise<{
@@ -576,6 +580,9 @@ registerWorkspaceWidget(
      * find-similar 130).
      */
     defaultOrder: 140,
+    // FR-B1/FR-C3 (task 020): the workspace-layout dispatcher mounts the
+    // embedded LegalWorkspaceApp dashboard surface.
+    contextType: 'dashboard',
   },
   () =>
     import('./WorkspaceLayoutWidget').then(m => ({
@@ -676,6 +683,8 @@ registerWorkspaceWidget(
     icon: 'DocumentRegular',
     allowMultiple: true,
     defaultOrder: 200,
+    // FR-B1/FR-C3 (task 020): Dataverse entity-view grid.
+    contextType: 'matter-grid',
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.documents),
   tableWidgetVisibility
@@ -689,6 +698,8 @@ safeRegisterWidget(
     icon: 'BriefcaseSearchRegular',
     allowMultiple: true,
     defaultOrder: 205,
+    // FR-B1/FR-C3 (task 020): the canonical matter-grid entity-view widget.
+    contextType: 'matter-grid',
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.matters),
   tableWidgetVisibility
@@ -702,6 +713,8 @@ registerWorkspaceWidget(
     icon: 'FolderRegular',
     allowMultiple: true,
     defaultOrder: 210,
+    // FR-B1/FR-C3 (task 020): Dataverse entity-view grid.
+    contextType: 'matter-grid',
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.projects),
   tableWidgetVisibility
@@ -715,6 +728,8 @@ registerWorkspaceWidget(
     icon: 'ReceiptRegular',
     allowMultiple: true,
     defaultOrder: 220,
+    // FR-B1/FR-C3 (task 020): Dataverse entity-view grid.
+    contextType: 'matter-grid',
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.invoices),
   tableWidgetVisibility
@@ -728,6 +743,8 @@ registerWorkspaceWidget(
     icon: 'BriefcaseRegular',
     allowMultiple: true,
     defaultOrder: 230,
+    // FR-B1/FR-C3 (task 020): Dataverse entity-view grid.
+    contextType: 'matter-grid',
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.workAssignments),
   tableWidgetVisibility
@@ -746,6 +763,8 @@ registerWorkspaceWidget(
     icon: 'TaskListSquareLtrRegular',
     allowMultiple: false,
     defaultOrder: 235,
+    // FR-B1/FR-C3 (task 020): Dataverse entity-view grid (DataverseEntityViewWidget-backed).
+    contextType: 'matter-grid',
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.myTasks),
   tableWidgetVisibility
@@ -777,6 +796,10 @@ registerWorkspaceWidget(
     icon: 'MailRegular',
     allowMultiple: true,
     defaultOrder: 240,
+    // FR-B1/FR-C3 (task 020): rich Pattern D widget embeds a DataGrid over
+    // communication records — the entity-grid bucket is the closest honest
+    // fit among the six values.
+    contextType: 'matter-grid',
   },
   () =>
     import('@spaarke/communication-components').then(m => ({
@@ -809,6 +832,10 @@ safeRegisterWidget(
     // defaultOrder=245: positioned immediately after Communications (240),
     // before the metrics dashboards (300+).
     defaultOrder: 245,
+    // FR-B1/FR-C3 (task 020, BINDING): the email direct widget declares the
+    // 'email' contextType — required so proactive-chip scoping (Workstream B)
+    // can recognize an email tab as the active surface.
+    contextType: 'email',
   },
   () =>
     import('./EmailWorkspaceWidget').then(m => ({
@@ -864,6 +891,8 @@ registerWorkspaceWidget(
     icon: 'DataBarVerticalRegular',
     allowMultiple: false,
     defaultOrder: 300,
+    // FR-B1/FR-C3 (task 020): metrics/report dashboard surface.
+    contextType: 'dashboard',
   },
   createMetricsDashboardFactory('matters-dashboard')
 );

@@ -64,6 +64,18 @@ describe('deriveActiveTabFocusStamp', () => {
     });
   });
 
+  it('passes through the registry-resolved widgetContextType (FR-B1/FR-C3, task 020)', () => {
+    const event = {
+      type: 'active_widget_changed',
+      widgetType: 'email',
+      widgetContextType: 'email',
+      tabId: 'tab-email-1',
+      displayName: 'Email',
+    } as unknown as WorkspacePaneEvent;
+
+    expect(deriveActiveTabFocusStamp(event)?.contextType).toBe('email');
+  });
+
   it('leaves compactState undefined when the event carries no widgetData', () => {
     const event = {
       type: 'active_widget_changed',

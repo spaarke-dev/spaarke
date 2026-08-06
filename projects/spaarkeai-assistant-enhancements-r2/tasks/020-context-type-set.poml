@@ -4,7 +4,7 @@
     <title>Declare the closed contextType set on widget-registry metadata (FR-B1, FR-C3)</title>
     <phase>3 B — Proactive follow-ons</phase>
     <gate>blocked until 001</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Shared-lib TypeScript type + registry metadata change</rigor-reason>
     <model-tier>sonnet</model-tier>

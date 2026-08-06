@@ -585,6 +585,11 @@ export function WorkspacePane(): React.JSX.Element {
       dispatch('workspace', {
         type: 'active_widget_changed',
         widgetType: snapshot.widgetType,
+        // FR-B1/FR-C3 (task 020): resolve the widget's declared closed
+        // contextType from the registry so subscribers (e.g. the FR-A1 focus
+        // stamp) can scope to the active tab's surface kind. `undefined` for
+        // widgets that declared none (registry lookup miss or omitted field).
+        widgetContextType: getWorkspaceWidgetMetadata(snapshot.widgetType)?.contextType,
         widgetData: snapshot.widgetData,
         tabId: snapshot.tabId,
         displayName: snapshot.displayName ?? snapshot.widgetType,

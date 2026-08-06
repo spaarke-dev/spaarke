@@ -166,6 +166,10 @@ const COMPOSE_WIDGET_METADATA: WidgetMetadata = {
   // After the document-category output widgets (ContractComparison 40) and
   // before StatusSummary (50); keeps Compose in the document cluster.
   defaultOrder: 45,
+  // FR-B1/FR-C3 (task 020): Compose is the drafting/editing surface — the
+  // dedicated 'compose-doc' bucket (distinct from the read-only 'document'
+  // viewer bucket used by DocumentViewerWidget/redline-viewer/ContractComparison).
+  contextType: "compose-doc",
 };
 
 let _registered = false;

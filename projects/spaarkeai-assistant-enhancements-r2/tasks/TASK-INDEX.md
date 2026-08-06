@@ -18,7 +18,7 @@ Tier: `sonnet` (default) · `opus` (high-blast/judgment) — effort: `high` (def
 | 011 | activeContext focus-stamp decorate (FR-A2) | 2 A | ✅ | 010 | sonnet / high | FULL | none (ConvPane spine) |
 | 012 | Server: thread activeContext + prefer focus-stamp (FR-A3/A4) | 2 A | ✅ | 001 | **opus / xhigh** | FULL | Group A (BFF) |
 | 013 | Deploy + verify A | 2 A | ✅* | 011,012 | sonnet / high | STANDARD | none (deploy) |
-| 020 | Closed contextType set on widget metadata (FR-B1/C3) | 3 B | 🔲 | 001 | sonnet / high | FULL | Group B1 (shared-lib) |
+| 020 | Closed contextType set on widget metadata (FR-B1/C3) | 3 B | ✅ | 001 | sonnet / high | FULL | Group B1 (shared-lib) |
 | 021 | Catalog context-type tags + Reanalyze binding (FR-B2/D11) | 3 B | 🔲 | 020 | sonnet / high | STANDARD | Group B1 (catalog data) |
 | 022 | Proactive suggestion turn cached per tabId + ≤3 chips (FR-B3/B5) | 3 B | 🔲 | 020,021 | **opus / xhigh** | FULL | none (ConvPane spine) |
 | 023 | Manual refresh-suggestions affordance (FR-B4) | 3 B | 🔲 | 022 | sonnet / high | FULL | none (ConvPane spine) |

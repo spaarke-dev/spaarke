@@ -33,7 +33,7 @@ import type React from 'react';
 import type { WorkspaceWidgetComponent } from '../types/widget-types';
 // Use the canonical WidgetMetadata from shared.ts (task AIPU2-071) — it is the
 // richer definition with icon, required allowMultiple, and required defaultOrder.
-import type { WidgetMetadata } from '../types/shared';
+import type { WidgetMetadata, WidgetContextType } from '../types/shared';
 // Pillar 9 widget-visibility serialization contract (task 071, FR-55). The
 // registry's optional `getVisibleState` field returns a variant of this
 // discriminated union; see RegistryGetAgentVisibleState below for the full
@@ -338,6 +338,7 @@ export function clearWorkspaceRegistry(): void {
 
 export type { WorkspaceWidgetRegistration };
 
-// Re-export WidgetMetadata from its canonical source (shared.ts) for callers
-// that import metadata types via the registry module.
-export type { WidgetMetadata };
+// Re-export WidgetMetadata (+ the closed WidgetContextType union, task 020)
+// from its canonical source (shared.ts) for callers that import metadata
+// types via the registry module.
+export type { WidgetMetadata, WidgetContextType };

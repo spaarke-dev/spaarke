@@ -17,7 +17,7 @@
  * @see ADR-030 — PaneEventBus channels + additive event-type discriminants
  */
 
-import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
+import type { WorkspacePaneEvent, WidgetContextType } from "@spaarke/ai-widgets";
 
 /**
  * The shape held in `ConversationPane`'s `activeTabFocusRef`, stamped whenever the active Workspace
@@ -25,15 +25,18 @@ import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
  *
  * - `widgetType` / `tabId` / `displayName` mirror the dispatching `WorkspacePaneEvent` fields
  *   (`WorkspacePane.tsx`'s `broadcastActiveTabChange`).
- * - `contextType` is the FR-B1 closed-set discriminant ({@code email | document | compose-doc |
- *   matter-grid | dashboard | calendar}); that set is introduced by a later task (020) — left
- *   `undefined` here rather than guessed.
+ * - `contextType` is the FR-B1/FR-C3 closed-set discriminant ({@code email | document | compose-doc |
+ *   matter-grid | dashboard | calendar}, task 020) declared on the widget's registry metadata and
+ *   resolved server-side (client-side here) by `WorkspacePane.broadcastActiveTabChange`, which
+ *   passes it through on the event as `widgetContextType`. `undefined` when the widget declared no
+ *   contextType (or the widgetType is unregistered) — this is NOT a guess-and-default; it mirrors
+ *   the registry's own "none" state.
  * - `compactState` is the widget's compact visible-state shape (from the event's `widgetData`), if
  *   the dispatching widget supplied one; `undefined` otherwise.
  */
 export interface ActiveTabFocusStamp {
   widgetType: string;
-  contextType?: string;
+  contextType?: WidgetContextType;
   tabId: string;
   displayName: string;
   compactState?: unknown;
@@ -56,7 +59,7 @@ export function deriveActiveTabFocusStamp(event: WorkspacePaneEvent): ActiveTabF
 
   return {
     widgetType: event.widgetType ?? "",
-    contextType: undefined,
+    contextType: event.widgetContextType,
     tabId: event.tabId ?? "",
     displayName: event.displayName ?? event.widgetType ?? "",
     compactState: event.widgetData,
