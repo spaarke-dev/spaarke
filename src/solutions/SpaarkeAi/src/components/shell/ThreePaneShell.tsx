@@ -536,12 +536,19 @@ function ShellStageManager({ children }: ShellStageManagerProps): React.JSX.Elem
 // ---------------------------------------------------------------------------
 
 export interface RestoreContextValue {
+  /** The restored session id — lets panes gate restore-derived UI to the session it belongs to. */
+  sessionId: string;
   /** Conversation summary from the restore spec (null if no summary or no restore). */
   conversationSummary: string | null;
   /** Recent messages from the restore spec (empty if no restore). */
   recentMessages: SessionRestoreSpec["recentMessages"];
   /** Whether entities have changed since the session was saved. */
   hasStaleEntities: boolean;
+  /**
+   * FR-D5 — the restored session's uploaded-files manifest (empty when none). ConversationPane
+   * reads this to rehydrate the attachment chip on cold-load restore (ADR-040: existing manifest).
+   */
+  uploadedFiles: SessionRestoreSpec["uploadedFiles"];
 }
 
 export const RestoreContext = React.createContext<RestoreContextValue | null>(null);
@@ -666,9 +673,11 @@ function SessionRestoreManager({ children, sessionId }: SessionRestoreManagerPro
     () =>
       restoreSpec
         ? {
+            sessionId: restoreSpec.sessionId,
             conversationSummary: restoreSpec.conversationSummary,
             recentMessages: restoreSpec.recentMessages,
             hasStaleEntities: restoreSpec.hasStaleEntities,
+            uploadedFiles: restoreSpec.uploadedFiles,
           }
         : null,
     [restoreSpec]

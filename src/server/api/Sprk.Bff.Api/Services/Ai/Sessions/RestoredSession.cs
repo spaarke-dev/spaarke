@@ -36,6 +36,14 @@ namespace Sprk.Bff.Api.Services.Ai.Sessions;
 /// Wall-clock time in milliseconds for the complete restore (load + staleness + reconstruct).
 /// Logged and surfaced for NFR compliance: &lt;500ms p95 target.
 /// </param>
+/// <param name="UploadedFiles">
+/// Minimal projection of the session's uploaded-files manifest
+/// (<see cref="StoredSession.UploadedFiles"/>), so the client can rehydrate the attachment chip
+/// on restore (spaarkeai-assistant-enhancements-r2 FR-D5). Identifier/display metadata ONLY —
+/// deliberately excludes SummaryText / Sections / Citations (ADR-015 Tier-2: never ship enriched
+/// content through the restore projection; ADR-040: read the existing manifest, no new store).
+/// Empty when the session has no uploaded files.
+/// </param>
 public record RestoredSession(
     string SessionId,
     string TenantId,
@@ -46,4 +54,21 @@ public record RestoredSession(
     bool WasSummarized,
     DateTimeOffset RestoredAt,
     long RestoreLatencyMs,
-    IReadOnlyList<SessionMessage> RecentMessages);
+    IReadOnlyList<SessionMessage> RecentMessages,
+    IReadOnlyList<RestoredUploadedFile> UploadedFiles);
+
+/// <summary>
+/// Minimal per-file projection carried on <see cref="RestoredSession"/> for client attachment-chip
+/// rehydration (FR-D5). A strict subset of <see cref="StoredUploadedFile"/> — identifier + display
+/// fields only. Enriched fields (summary, sections, citations, extracted text) are intentionally NOT
+/// projected: the chip needs a name + size + type, nothing more (ADR-015 Tier-2 minimisation).
+/// </summary>
+/// <param name="FileId">Stable session-scoped file id.</param>
+/// <param name="FileName">Original upload file name (chip label).</param>
+/// <param name="ContentType">MIME content type as reported on upload.</param>
+/// <param name="SizeBytes">Original (uncompressed) file size in bytes.</param>
+public record RestoredUploadedFile(
+    string FileId,
+    string FileName,
+    string ContentType,
+    long SizeBytes);

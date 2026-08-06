@@ -137,6 +137,7 @@ import {
   AssistantModelTier,
   useConversationPaneLayoutStyles,
 } from "./ConversationPaneChrome";
+import type { AttachedFileSummary } from "./ConversationPaneChrome";
 
 // Public pure-helper surface (tests import these from '../ConversationPane').
 export {
@@ -2568,6 +2569,31 @@ export function ConversationPane(): React.JSX.Element {
     }));
   }, [restoreCtx?.recentMessages]);
 
+  // FR-D5 (task 036): rehydrate the attachment chip on cold-load restore from the server
+  // UploadedFiles manifest (surfaced via restoreCtx; ADR-040 — the EXISTING manifest, no new store).
+  // Display-only projection: the files are already promoted + indexed server-side (they live in the
+  // session manifest), so this drives NOTHING beyond the chip — it deliberately does NOT feed
+  // SprkChat's `useChatFileAttachment` state (which would re-fire onAttachmentsChanged → the
+  // useAttachments ready-transition side-effects: "File attached" messages, files_staged dispatch,
+  // and the task-024 new-session prompt on a restored session that has prior messages). It renders
+  // through the same host-owned FilesAttachedIndicator the live path uses.
+  //
+  // Gated on `chatSessionId === restoreCtx.sessionId` so the restored files show ONLY while the pane
+  // is still on the restored session (a subsequent New Session / History reopen changes chatSessionId
+  // and clears them). Live attachments take precedence: once the user attaches a file this session,
+  // `attachments.uploadedFileCount > 0` and the live indicator renders instead.
+  const restoredAttachmentFiles = React.useMemo<AttachedFileSummary[]>(() => {
+    const files = restoreCtx?.uploadedFiles;
+    if (!files || files.length === 0) return [];
+    if (!chatSessionId || chatSessionId !== restoreCtx?.sessionId) return [];
+    return files.map((f) => ({ id: f.fileId, filename: f.fileName, status: "ready" }));
+  }, [restoreCtx?.uploadedFiles, restoreCtx?.sessionId, chatSessionId]);
+
+  // Prefer the LIVE attachment strip; fall back to the restored manifest only when there are no live
+  // attachments yet (the reopened-session case FR-D5 targets).
+  const showRestoredAttachments =
+    attachments.uploadedFileCount === 0 && restoredAttachmentFiles.length > 0;
+
   // FIX #1a — the post-mount document-level action chips (Summarize / Add to DMS / Draft email) now
   // render INSIDE the transcript footer, directly BENEATH the "Your file is available to edit…" ask
   // message (next-step affordances), instead of ABOVE the whole chat. Combined with the Click-path
@@ -2853,6 +2879,19 @@ export function ConversationPane(): React.JSX.Element {
               // R5-1 (UAT 2026-07-20): "Revise in Compose" moved OUT of this tray row and into an
               // in-line action card alongside the post-attach cards (see getAppendedLocalChips +
               // LOCAL_CHIP.reviseInCompose). No onRevise button here anymore.
+            />
+          )}
+
+          {/* FR-D5 (task 036): restore-rehydrated attachment chip. Renders ONLY when there are no
+              live attachments (showRestoredAttachments) — the reopened-session case. Files are
+              already indexed server-side (they came from the persisted manifest), so promotedCount
+              equals the count. Same host-owned indicator as the live path — dark-mode safe (ADR-021,
+              Fluent tokens only). */}
+          {showRestoredAttachments && (
+            <FilesAttachedIndicator
+              uploadedFileCount={restoredAttachmentFiles.length}
+              promotedCount={restoredAttachmentFiles.length}
+              files={restoredAttachmentFiles}
             />
           )}
 

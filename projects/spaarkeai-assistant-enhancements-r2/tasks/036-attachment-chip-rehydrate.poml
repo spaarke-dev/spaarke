@@ -4,7 +4,7 @@
     <title>Rehydrate the client attachment chip from the UploadedFiles manifest on restore (FR-D5)</title>
     <phase>4 D — History &amp; true resume</phase>
     <gate>blocked until 035</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend restore wiring</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -59,7 +59,27 @@
     <criterion testable="true">Reopening a session with an attached file shows the file chip.</criterion>
     <criterion testable="true">No new persistence added.</criterion>
   </acceptance-criteria>
-  <notes>FR-D5.</notes>
+  <notes>FR-D5. DONE 2026-08-06 (owner-approved full paired slice; file-scope lifted). Layers:
+    (1) BFF — added minimal `RestoredUploadedFile(FileId,FileName,ContentType,SizeBytes)` projection to
+    `RestoredSession` + `SessionRestoreService` (projects the ALREADY-loaded `StoredSession.UploadedFiles`;
+    ADR-040 no new store/query) + `SessionRestoreUploadedFileDto` on `SessionRestoreResponse` mapped in
+    `RestoreSessionAsync`. Enriched fields (SummaryText/Sections/Citations/ExtractedText) deliberately
+    excluded (ADR-015 Tier-2). 3 unit tests (`SessionRestoreServiceUploadedFilesTests`) pass. BFF build
+    clean; publish 46.97 MB compressed incl PDBs (≤60, no package delta).
+    (2) Client — `useSessionRestore.ts` `SessionRestoreSpec.uploadedFiles` (+backward-compat normalize);
+    `ThreePaneShell` RestoreContextValue += `sessionId` + `uploadedFiles`; `ConversationPane` reads
+    `restoreCtx.uploadedFiles`, gates on `chatSessionId===restoreCtx.sessionId` + live-count==0, renders the
+    restored chip through the SAME host-owned `FilesAttachedIndicator`.
+    SprkChat `initialAttachments` seam AVOIDED (coordinator's sanctioned fallback): seeding
+    `useChatFileAttachment` would re-fire `onAttachmentsChanged` → useAttachments ready-transition
+    side-effects (spurious "File attached" msgs, `files_staged` dispatch, task-024 new-session prompt on a
+    restored session that has prior messages). Shared lib `@spaarke/ui-components` UNTOUCHED (ADR-012) — no
+    rebuild needed. typecheck Surface-owned:0; 618/618 ConvPane Jest tests pass incl new
+    `ConversationPane.restore-attachment-chip.test.tsx` (chip shows / empty-hidden / session-gated / dark-mode
+    ADR-021). Step 9.5 code-review + adr-check: 0 Critical, 0 violations. NOT committed (orchestrator does the
+    consolidated build+commit). NOTE: this rehydrates the COLD-LOAD restore path (`/restore` via
+    useSessionRestore); the in-session History-menu reopen (035's `/tabs`+loadHistory, WorkspacePane-owned) is
+    a separate carrier not covered here.</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>

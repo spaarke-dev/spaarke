@@ -1980,7 +1980,10 @@ public static class ChatEndpoints
         string? ConversationSummary,
         IReadOnlyList<SessionRestoreMessageDto> RecentMessages,
         bool HasStaleEntities,
-        long RestoreLatencyMs);
+        long RestoreLatencyMs,
+        // spaarkeai-assistant-enhancements-r2 FR-D5: minimal uploaded-files manifest so the client
+        // rehydrates the attachment chip on restore. Identifier/display fields only (ADR-015 Tier-2).
+        IReadOnlyList<SessionRestoreUploadedFileDto> UploadedFiles);
 
     /// <summary>
     /// A single message in the restore response — minimal projection of SessionMessage.
@@ -1989,6 +1992,17 @@ public static class ChatEndpoints
         string Role,
         string Content,
         DateTimeOffset Timestamp);
+
+    /// <summary>
+    /// A single uploaded file in the restore response — minimal projection of the session manifest
+    /// (FR-D5). Camel-cased on the wire by System.Text.Json (fileId/fileName/contentType/sizeBytes),
+    /// matching the client <c>SessionRestoreUploadedFile</c> shape in <c>useSessionRestore.ts</c>.
+    /// </summary>
+    internal record SessionRestoreUploadedFileDto(
+        string FileId,
+        string FileName,
+        string ContentType,
+        long SizeBytes);
 
     /// <summary>
     /// GET /api/ai/chat/sessions/{sessionId}/restore
@@ -2025,6 +2039,12 @@ public static class ChatEndpoints
 
         var stage = restored.WidgetStates.Count > 0 ? "active-chat" : "loading";
 
+        // FR-D5: project the restored uploaded-files manifest to the wire DTO (already minimal — the
+        // restore service dropped enriched fields). Empty list when the session had no attachments.
+        var uploadedFiles = restored.UploadedFiles
+            .Select(f => new SessionRestoreUploadedFileDto(f.FileId, f.FileName, f.ContentType, f.SizeBytes))
+            .ToList();
+
         var response = new SessionRestoreResponse(
             SessionId: restored.SessionId,
             PlaybookId: restored.PlaybookId,
@@ -2033,7 +2053,8 @@ public static class ChatEndpoints
             ConversationSummary: restored.WasSummarized ? restored.ReconstructedContext : null,
             RecentMessages: recentMessages,
             HasStaleEntities: restored.StaleEntityRefs.Count > 0,
-            RestoreLatencyMs: restored.RestoreLatencyMs);
+            RestoreLatencyMs: restored.RestoreLatencyMs,
+            UploadedFiles: uploadedFiles);
 
         return Results.Ok(response);
     }
