@@ -10,10 +10,20 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **22/25 ✅ — both deploys LIVE.** BFF (065) + PCF (045) deployed. Remaining = operator-gated: **080** (live-Teams E2E) + **090** (wrap-up) + **001 🔄** spike. |
-| **Step** | 065 ✅ BFF → spaarke-bff-dev (hash-verified, health-passed, collab routes 401). 045 ✅ PCF v1.0.11 → spaarkedev1 (imported+published clean). |
-| **Status** | Deploys done on the master-synced branch (BFF carries full merged state incl. master AI work; 46.9 MB). Remaining tasks REQUIRE a live Teams client (080 E2E: 7 graduation criteria in Teams desktop+web; 001 spike go/no-go) — operator-run. |
-| **Next Action** | **Operator**: run 080 live E2E (workforce SSO→membership→download 403/bytes, both Teams clients) + interactive PCF form smoke-test (045 step 9) + 001 spike validation. Then I drive **090 wrap-up** (code-review/adr-check/repo-cleanup//test-diet + 041 Path-A/C decision + CVE defer-issue). Findings: fix Spaarke.Auth node_modules gap (flag to team); pre-existing System.Security.Cryptography.Xml 8.0.3 HIGH CVE. |
+| **Task** | ▶ **NEXT: execute task 025** (principal-agnostic collab endpoints — Option A). 22/25 core done; both deploys live; live Teams E2E blocked on 025. |
+| **Step** | Live Teams integration reached auth-complete but 401s on data. R2 decided Option A (dual-scheme /external). Task 025 spec written. Phase 0 verified (no audience blocker). |
+| **Status** | 🟢 Auth chain PROVEN live in Teams (NAA workforce token acquired). ❌ Data 401: SPA calls CIAM-only /api/v1/external/*; workforce plane (/collab) has only /me+download. Fix = task 025. |
+| **Next Action (post-compact)** | **Execute `tasks/025-principal-agnostic-collab-endpoints.poml`** via task-execute (opus@xhigh, main-session/opus-subagent). It has the full binding R2 guardrails. Then rebuild+redeploy BFF (065 mechanism), operator re-runs live Teams E2E (080), then 090 wrap-up. |
+
+### Live deploy + integration state (2026-08-05)
+- **BFF (065) ✅ deployed** → `spaarke-bff-dev` (hash-verified, health-passed). Workforce scheme = the `1e40baad` app; `AzureAd__Audience = api://1e40baad-…` **accepts the Teams token — no config change (Phase 0 GREEN)**.
+- **PCF v1.0.11 (045) ✅ deployed** → `spaarkedev1` (imported+published clean).
+- **external-spa SWA ✅ deployed** → `green-dune-0c4f1221e.7.azurestaticapps.net` (Teams framing header live). `deploy-external-spa.yml` now injects `VITE_TEAMS_MSAL_CLIENT_ID/SCOPE`.
+- **Teams app package** → `src/client/external-spa/appPackage/build/SpaarkeTeamsApp.zip` (app id `23610794-…`; sideloaded OK).
+- **Entra app `1e40baad-…` config APPLIED** (object id `c2aab303-…`): multitenant; Teams clients `1fec8e78`+`5e3ce6c0` pre-authorized on `access_as_user`; SPA redirects include `https://green-dune-…` + **`brk-multihub://green-dune-…`** (the NAA `AADSTS700046` fix) + per-broker brk- URIs.
+- **R2 decision doc**: `notes/teams-app-r1-coordination.md` (Option A + 8 guardrails — BINDING). Handoff that prompted it: `notes/spa-v2-handoff-workforce-endpoint-gap.md`.
+- **Deferred at 090**: 041 internal-notify Path A/C; pre-existing `System.Security.Cryptography.Xml 8.0.3` HIGH CVE; `Spaarke.Auth` node_modules gap (flag to team); `AzureAd__ClientSecret` plaintext in App Service settings (should be KV ref — flag to ops).
+- **git**: branch pushed (`5555108ab`+ deploy/workflow commits); backups `backup-teams-{wave4,premaster,postmaster,wave5,presync2}`.
 
 ### Files Modified This Session
 - `notes/spikes/foundation-spike-findings.md` — code-verified go/no-go per path + operator runbook (NEW)
