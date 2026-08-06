@@ -165,4 +165,92 @@ public class ContentDedupDetectorTests
         decision.IsDuplicate.Should().BeTrue();
         notification.Should().NotBeNull("a detected duplicate must NOTIFY the uploader — never silent");
     }
+
+    // ── FR-C3 graduate-on-divergence (email-communication-intelligence-r2) ──────────────────────────
+
+    [Fact]
+    public async Task ResolveContentIdentityAsync_HashMatchesCanonical_ReturnsHashAndCanonicalId_NoSideEffects()
+    {
+        var canonical = Guid.NewGuid();
+        var spe = BuildSpeMock("hashLink");
+        var ds = new Mock<IGenericEntityService>();
+        ds.Setup(g => g.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_document"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Docs(canonical));
+        // Strict on notification would blow up if the pure resolver notified — it MUST NOT.
+        ds.Setup(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("ResolveContentIdentityAsync must not create/notify"));
+
+        var (hash, canonicalId) = await Detector(spe, ds).ResolveContentIdentityAsync("drive1", "item2");
+
+        hash.Should().Be("hashLink");
+        canonicalId.Should().Be(canonical, "the pure resolver reports the canonical without suppressing or notifying");
+    }
+
+    [Fact]
+    public async Task ResolveContentIdentityAsync_HashUnavailable_ReturnsNullsAndSkipsLookup()
+    {
+        var spe = BuildSpeMock(null);
+        var ds = new Mock<IGenericEntityService>(MockBehavior.Strict); // any Dataverse call = failure
+
+        var (hash, canonicalId) = await Detector(spe, ds).ResolveContentIdentityAsync("drive1", "item2");
+
+        hash.Should().BeNull();
+        canonicalId.Should().BeNull();
+        ds.Verify(g => g.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task FindCanonicalByHash_ExcludesLinkedCopies_QueryFiltersCanonicalDocumentNull()
+    {
+        // A hash-linked COPY (sprk_canonicaldocument set) must NEVER be returned as canonical — otherwise a
+        // third identical upload would dedup/link against a copy that is about to graduate. Guard: the lookup
+        // query MUST filter sprk_canonicaldocument IS NULL.
+        var spe = BuildSpeMock("hashX");
+        var ds = new Mock<IGenericEntityService>();
+        QueryExpression? captured = null;
+        ds.Setup(g => g.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<QueryExpression, CancellationToken>((q, _) => captured = q)
+            .ReturnsAsync(new EntityCollection());
+
+        await Detector(spe, ds).ResolveContentIdentityAsync("drive1", "item2");
+
+        captured.Should().NotBeNull();
+        captured!.Criteria.Conditions.Should().ContainSingle(c =>
+            c.AttributeName == "sprk_canonicaldocument" && c.Operator == ConditionOperator.Null,
+            "linked copies must be excluded from the canonical lookup (graduate-on-divergence)");
+    }
+
+    [Fact]
+    public async Task NotifyLinkedCopyAsync_ResolvableOwner_EmitsLinkedNotification()
+    {
+        var canonical = Guid.NewGuid();
+        var oid = Guid.NewGuid();
+        var systemUserId = Guid.NewGuid();
+        var spe = BuildSpeMock("hashE"); // unused by NotifyLinkedCopyAsync but Detector needs a SpeFileStore
+        var ds = new Mock<IGenericEntityService>();
+        var user = new EntityCollection();
+        user.Entities.Add(new Entity("systemuser", systemUserId));
+        ds.Setup(g => g.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "systemuser"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(user);
+
+        Entity? notification = null;
+        ds.Setup(g => g.CreateAsync(It.Is<Entity>(e => e.LogicalName == "appnotification"), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => notification = e)
+            .ReturnsAsync(Guid.NewGuid());
+
+        await Detector(spe, ds).NotifyLinkedCopyAsync(oid.ToString(), canonical, "draft.docx");
+
+        notification.Should().NotBeNull("a hash-linked editable copy must NOTIFY the uploader — never silent");
+    }
+
+    [Fact]
+    public async Task NotifyLinkedCopyAsync_UnresolvableOwner_IsNonFatalNoNotification()
+    {
+        var spe = BuildSpeMock("hashE");
+        var ds = new Mock<IGenericEntityService>(MockBehavior.Strict); // no Dataverse call permitted
+
+        var act = async () => await Detector(spe, ds).NotifyLinkedCopyAsync("not-a-guid", Guid.NewGuid(), "draft.docx");
+
+        await act.Should().NotThrowAsync("a non-resolvable uploader degrades to a log, never throws");
+    }
 }

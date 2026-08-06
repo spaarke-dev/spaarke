@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>sprk_document.sprk_canonicaldocument self-lookup (FR-C3 graduate-on-divergence) — GATED schema</title>
+    <phase>2 Pillar C — De-duplication</phase>
+    <gate>operator-go-ahead</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New Dataverse schema surface (one self-referential lookup) via dataverse-create-schema; no .cs code change (the consuming code shipped in R-2). STANDARD per task-create Step 3.5.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single schema artifact (one self-lookup) with a known recipe (mirror task 023). No architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>schema-c</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Schema-only on `sprk_document`, disjoint from task 020's key on `sprk_communication`. No shared source files with any active worktree.</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse, schema, dedup</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create a new self-referential lookup `sprk_document.sprk_canonicaldocument` (target = `sprk_document`), packed into the managed solution (ADR-027). `null` ⇒ this row is a CANONICAL document; non-null ⇒ this row is a hash-linked COPY of the referenced canonical (byte-identical now, same `sprk_canonicalhash`; graduates to its own canonical when its content diverges). This is the discriminator the R-2 graduate-on-divergence code (already merged in `ComposeService.PromoteIfEphemeralAsync` + `ContentDedupDetector.FindCanonicalByHashAsync`) reads + writes. It is DISTINCT from `sprk_parentdocument` (attachment→parent-email) — a document can be both.</prompt>
+  <role>SPAARKE platform developer with Dataverse schema expertise. Use `dataverse-create-schema` (Web API + PowerShell — no `pac column create`). Follow ADR-027 strictly.</role>
+  <goal>A self-referential lookup `sprk_document.sprk_canonicaldocument` (target `sprk_document`) exists, published, and carried in the managed solution; verified in `spaarkedev1` (a row can point at another `sprk_document` and be cleared back to null). The R-2 code then dedups/links/graduates end-to-end.</goal>
+
+  <context>
+    <background>R-2 (email-communication-intelligence-r2) implemented FR-C3 graduate-on-divergence for the editable Compose path in CODE (merged): a byte-identical Compose save is recorded as a hash-linked COPY (sets `sprk_canonicaldocument` + notifies) rather than suppressed, and GRADUATES to its own canonical (clears the link) the moment its content diverges. `ContentDedupDetector.FindCanonicalByHashAsync` excludes linked copies (`sprk_canonicaldocument IS NULL`) so dedup always resolves to the true canonical. The generic `IGenericEntityService.UpdateAsync` gained a `DBNull.Value` clear-sentinel to sever the lookup. ALL of that code ships behind this column: until it exists, writes to it degrade non-fatally (NFR-04) — so this is the gated ENABLEMENT step, not a blocker to the code merge. See `notes/R-2-compose-content-dedup-graduate-complete.md`. Mechanism mirrors task 023 (`sprk_canonicalhash`) exactly.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/email-communication-intelligence-r2/tasks/023-canonicalhash-column-schema.poml (the sibling schema task — same recipe)</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (PromoteIfEphemeralAsync — the writer/graduator)</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Documents/ContentDedupDetector.cs (FindCanonicalByHashAsync — the reader/excluder)</file>
+      <file role="modify">Dataverse managed solution — sprk_document entity metadata</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: one self-referential lookup `sprk_canonicaldocument` (target `sprk_document`). Nullable (null = canonical; the DEFAULT). Do NOT make it required.</constraint>
+    <constraint source="project">SCOPE: distinct from `sprk_parentdocument`. Do NOT reuse or repurpose the existing attachment→parent-email self-lookup — a document can be both an attachment AND a hash-linked copy (§11).</constraint>
+    <constraint source="ADR-027">Author into the managed solution + export so it deploys to every subscription; do NOT create it unmanaged in one environment.</constraint>
+    <constraint source="project">SCOPE: schema mechanism. Use `dataverse-create-schema` (Web API + PowerShell); PAC CLI has no lookup-create path here.</constraint>
+    <constraint source="project">SCOPE: this task is GATED on operator go-ahead (it mutates live Dataverse schema in `spaarkedev1`). Do NOT run autonomously.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse self-referential lookup for content-dedup canonical linkage</topic>
+    <files>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>projects/email-communication-intelligence-r2/notes/R-2-compose-content-dedup-graduate-complete.md</file>
+      <file>docs/data-model/entity-relationship-model.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-create-schema" location=".claude/skills/dataverse-create-schema/SKILL.md">Create the lookup via Web API; set target = sprk_document; pack to solution.</pattern>
+      <pattern name="sibling schema task" location="projects/email-communication-intelligence-r2/tasks/023-canonicalhash-column-schema.poml">Same recipe used for sprk_canonicalhash.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load POML + R-2 completion note + ADR-027. Declare RIGOR LEVEL: STANDARD. Confirm operator go-ahead before touching schema. Invoke dataverse-create-schema.</step>
+    <step order="1">Create the self-referential lookup `sprk_document.sprk_canonicaldocument` (target entity = `sprk_document`, nullable) via the skill; poll to Active.</step>
+    <step order="2">Add the attribute to the managed solution; export; verify the lookup is in the export.</step>
+    <step order="3">Verify in `spaarkedev1`: a `sprk_document` row can set `sprk_canonicaldocument` to another `sprk_document` and clear it back to null (the graduate path). Confirm the R-2 code links/graduates end-to-end against a real column.</step>
+    <step order="4">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="5">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the platform rejects a self-referential lookup on `sprk_document` or requires a relationship name that collides with `sprk_parentdocument`, STOP and escalate per CLAUDE.md §6 before shipping a schema shape the R-2 code cannot read/write.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`sprk_parentdocument` (self-lookup) exists but is semantically taken — attachment→parent-email (docs/data-model/entity-relationship-model.md). It cannot also hold copy→canonical (a doc can be both).</existing>
+    <extension>No — reusing `sprk_parentdocument` conflates two distinct relationships and one lookup can't hold both values; `sprk_canonicalhash` is a hash string, not a document pointer, so it can't distinguish a copy from its canonical either.</extension>
+    <cost-of-doing-nothing>Without this column the R-2 graduate-on-divergence code cannot distinguish a hash-linked copy from a true canonical: dedup would either suppress editable copies (data loss + session cross-wiring) or never dedup them at all. The discriminator IS the feature.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dataverse-create-schema">Create the self-referential lookup via Web API + PowerShell</tool>
+    <tool name="pwsh">Solution export</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">Self-referential lookup sprk_document.sprk_canonicaldocument (target sprk_document, nullable)</output>
+    <output type="solution">Managed solution export containing the lookup</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the deployed schema, when the attribute is queried, then `sprk_document.sprk_canonicaldocument` exists as a Lookup targeting `sprk_document` and is nullable.</criterion>
+    <criterion testable="true">Given the managed solution export, when inspected, then the lookup definition is present (deploys to every subscription per ADR-027).</criterion>
+    <criterion testable="true">Given a `sprk_document` row in `spaarkedev1`, when `sprk_canonicaldocument` is set to another `sprk_document` and then cleared to null, then both writes persist (the link + the graduate).</criterion>
+    <criterion testable="true">Negative: the relationship name does NOT collide with `sprk_parentdocument`; a document may carry BOTH lookups simultaneously.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-C3 "copy graduates to its own document on content divergence". Enables the R-2 code (merged) end-to-end. Sibling of task 023 (schema-c). GATED on operator go-ahead (live schema mutation). Forward-only (no backfill — pre-existing docs have null = canonical, which is correct).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

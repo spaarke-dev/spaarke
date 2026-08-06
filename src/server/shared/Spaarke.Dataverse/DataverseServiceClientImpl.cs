@@ -1782,10 +1782,14 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             foreach (var field in fields)
             {
-                if (field.Value != null)
-                {
-                    entity[field.Key] = field.Value;
-                }
+                // C# null → SKIP (preserve "only update the fields I provided" semantics — every existing
+                // caller relies on this). DBNull.Value → explicit CLEAR (set the attribute to null so the SDK
+                // clears the column / severs a lookup) — the only way to null a field through this generic
+                // seam. Added for FR-C3 graduate-on-divergence (clearing sprk_canonicaldocument); no existing
+                // caller passes DBNull, so behavior is unchanged for them.
+                if (field.Value is null)
+                    continue;
+                entity[field.Key] = field.Value is DBNull ? null : field.Value;
             }
 
             await _serviceClient.UpdateAsync(entity, ct);

@@ -11,6 +11,12 @@ public interface IGenericEntityService
 {
     Task<Entity> RetrieveAsync(string entityLogicalName, Guid id, string[] columns, CancellationToken ct = default);
     Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default);
+    /// <summary>
+    /// Updates the provided fields on an existing record. A <c>fields</c> value of C# <c>null</c> SKIPS that key
+    /// (only the fields you supply are written — the default convenience). A value of <see cref="DBNull.Value"/>
+    /// explicitly CLEARS that column to null (e.g. severing a lookup) — the only way to null a field through this
+    /// generic seam (added for FR-C3 graduate-on-divergence clearing <c>sprk_canonicaldocument</c>).
+    /// </summary>
     Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default);
     Task BulkUpdateAsync(string entityLogicalName, List<(Guid id, Dictionary<string, object> fields)> updates, CancellationToken ct = default);
     Task<Entity> RetrieveByAlternateKeyAsync(string entityLogicalName, KeyAttributeCollection alternateKeyValues, string[]? columns = null, CancellationToken ct = default);

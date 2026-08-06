@@ -16,6 +16,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Compose.Operations;
+using Sprk.Bff.Api.Services.Documents;
 using Sprk.Bff.Api.Services.Jobs;
 
 namespace Sprk.Bff.Api.Services.Compose;
@@ -72,6 +73,14 @@ public class ComposeService : IComposeService
     // record in place instead of minting duplicates (the 8-duplicate defect). Resolve by KEY, never by
     // content (I-7/NFR-02).
     private const string ComposeTransientKeyAttribute = "sprk_composetransientkey";
+    // FR-C3 (email-communication-intelligence-r2, graduate-on-divergence): the SPE content identity
+    // (quickXorHash, task 023 indexed column) + the self-referential canonical link. A create-on-save
+    // stamps sprk_canonicalhash; on a byte-identical hit it also LINKS via sprk_canonicaldocument (this
+    // editable copy is byte-identical NOW). The link is CLEARED the moment content diverges (first edit),
+    // graduating the copy to its own canonical — see the create + idempotent branches of
+    // PromoteIfEphemeralAsync. Distinct from sprk_parentdocument (attachment→parent-email).
+    private const string CanonicalHashAttribute = "sprk_canonicalhash";
+    private const string CanonicalDocumentAttribute = "sprk_canonicaldocument";
 
     // FR-05 create-on-save backbone — the consumer-declared ordered step set the
     // JobAwareCompletionStateProjector projects (container → record → profile-analysis → indexing).
@@ -90,6 +99,12 @@ public class ComposeService : IComposeService
     private readonly IGenericEntityService _dataverse;
     private readonly IPostUploadIndexingEnqueuer _indexing;
     private readonly ILogger<ComposeService> _logger;
+    // FR-C3 (email-communication-intelligence-r2): SPE content-dedup detector for the create-on-save
+    // graduate-on-divergence hook. Optional + defaults null so the single bare test constructor
+    // (ComposeServiceCreateOnSaveTests) + any legacy construction keep compiling; DI resolves the real
+    // scoped ContentDedupDetector in every non-test host. Null → the dedup hook is a guarded no-op
+    // (behavior identical to pre-R2 create-on-save). Best-effort/non-fatal by construction (NFR-04).
+    private readonly ContentDedupDetector? _dedupDetector;
     // FR-05 Fork C (compose-r2, UAT #7b): the ADR-013-safe profile seam is the OBO-capable
     // IDocumentProfileAi facade (Services/Ai/PublicContracts). ComposeService injects ONLY this
     // facade — NOT IAppOnlyAnalysisService / IOpenAiClient / IPlaybookService / IConsumerRoutingService
@@ -192,7 +207,8 @@ public class ComposeService : IComposeService
         ComposeDocumentRenderer? documentRenderer = null,
         DocxAnnotationReader? annotationReader = null,
         ComposeBaselineParaIdStamper? baselineParaIdStamper = null,
-        ComposeDocxProjectionBuilder? projectionBuilder = null)
+        ComposeDocxProjectionBuilder? projectionBuilder = null,
+        ContentDedupDetector? dedupDetector = null)
     {
         _spe = spe;
         _sessions = sessions;
@@ -211,6 +227,9 @@ public class ComposeService : IComposeService
         _projectionBuilder = projectionBuilder ?? new ComposeDocxProjectionBuilder();
         _appLifetime = appLifetime;
         _memoryCapture = memoryCapture;
+        // FR-C3 (email-communication-intelligence-r2): null in a bare test constructor (dedup hook = no-op),
+        // the real scoped detector in every non-test host.
+        _dedupDetector = dedupDetector;
         // FR-08 (task 050): ADR-009 Redis when present in every non-test host, null (no staleness
         // re-anchor) in a bare test constructor.
         _cache = cache;
@@ -2014,15 +2033,17 @@ public class ComposeService : IComposeService
         if (string.IsNullOrWhiteSpace(request.TenantId))
             throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
 
-        // 1) Idempotency check by SPE drive-item id (alt key sprk_graphitemid_uk).
-        var existingId = await TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
+        // 1) Idempotency check by SPE drive-item id (alt key sprk_graphitemid_uk). The lookup also carries the
+        //    FR-C3 dedup columns so graduate-on-divergence needs no extra round-trip.
+        var existingRow = await TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
             .ConfigureAwait(false);
 
-        if (existingId.HasValue)
+        if (existingRow is not null)
         {
+            var existingId = existingRow.Id;
             _logger.LogDebug(
                 "Compose promote: existing sprk_document {DocumentRecordId} found for driveItem={DocumentSpeId} — idempotent no-op",
-                existingId.Value, request.DocumentSpeId);
+                existingId, request.DocumentSpeId);
 
             // FR-07 rebind is OPTIONAL (task 110): skip entirely when no session is bound
             // (transient Browse/local-file first Save). RebindSessionDocumentIdAsync is already
@@ -2033,16 +2054,21 @@ public class ComposeService : IComposeService
                         tenantId: request.TenantId,
                         sessionId: request.SessionId,
                         currentDocumentId: request.DocumentSpeId,
-                        newDocumentId: existingId.Value.ToString(),
+                        newDocumentId: existingId.ToString(),
                         cancellationToken)
                     .ConfigureAwait(false);
             }
+
+            // FR-C3 graduate-on-divergence: if this existing row is a hash-linked COPY whose content has now
+            // diverged from the canonical it was linked at, sever the link so it becomes its own canonical.
+            await GraduateLinkedCopyIfDivergedAsync(existingRow, request, cancellationToken)
+                .ConfigureAwait(false);
 
             return new PromoteComposeDocumentResult
             {
                 DocumentSpeId = request.DocumentSpeId,
                 SessionId = request.SessionId,
-                DocumentRecordId = existingId.Value,
+                DocumentRecordId = existingId,
                 WasCreated = false,
             };
         }
@@ -2112,6 +2138,40 @@ public class ComposeService : IComposeService
             entity[FilePathAttribute] = request.FilePath!;
         }
 
+        // ── FR-C3 content-dedup, graduate-on-divergence (CREATE branch) ─────────────────────────────
+        // Read the just-uploaded item's content identity (quickXorHash) and record it. On a byte-identical
+        // hit against an existing CANONICAL, LINK this editable copy (sprk_canonicaldocument) rather than
+        // suppressing it: a Compose document is a living document that diverges on first edit — the idempotent
+        // branch above graduates it then. NOTIFY (never silent). Best-effort/non-fatal (NFR-04): any failure →
+        // create proceeds unstamped. No-op when the detector is absent (bare test ctor) or the drive id is
+        // unknown. Suppression is deliberately NOT used here (that is the immutable email-attachment path's
+        // behavior; suppressing an editable copy would cross-wire the session onto a foreign drive-item).
+        if (_dedupDetector is not null && !string.IsNullOrWhiteSpace(request.GraphDriveId))
+        {
+            try
+            {
+                var (contentHash, canonicalId) = await _dedupDetector
+                    .ResolveContentIdentityAsync(request.GraphDriveId!, request.DocumentSpeId, cancellationToken)
+                    .ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(contentHash))
+                    entity[CanonicalHashAttribute] = contentHash!;
+                if (canonicalId is { } canonical)
+                {
+                    entity[CanonicalDocumentAttribute] = new EntityReference(DocumentLogicalName, canonical);
+                    var ownerOid = httpContext.User?.FindFirst("oid")?.Value;
+                    await _dedupDetector
+                        .NotifyLinkedCopyAsync(ownerOid, canonical, effectiveFileName, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Compose content-dedup (create) failed (non-fatal) for driveItem={DocumentSpeId}; creating without dedup stamp.",
+                    request.DocumentSpeId);
+            }
+        }
+
         Guid newId;
         try
         {
@@ -2134,8 +2194,8 @@ public class ComposeService : IComposeService
                 "Compose promote: create failed for driveItem={DocumentSpeId} — likely concurrent promotion. Re-resolving via alternate key (graphItemId, then transientKey).",
                 request.DocumentSpeId);
 
-            var raceWinnerId = await TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
-                .ConfigureAwait(false);
+            Guid? raceWinnerId = (await TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
+                .ConfigureAwait(false))?.Id;
 
             if (!raceWinnerId.HasValue && !string.IsNullOrWhiteSpace(request.TransientKey))
             {
@@ -2675,7 +2735,64 @@ public class ComposeService : IComposeService
     /// <c>sprk_graphitemid_uk</c> alternate key. Returns the <c>sprk_documentid</c> or
     /// <c>null</c> when no row exists.
     /// </summary>
-    private async Task<Guid?> TryFindDocumentByGraphItemIdAsync(
+    /// <summary>
+    /// FR-C3 graduate-on-divergence (email-communication-intelligence-r2): when a subsequent Compose save
+    /// routes through <see cref="PromoteIfEphemeralAsync"/>'s idempotent existing-row branch, check whether the
+    /// row is a hash-linked COPY (<c>sprk_canonicaldocument</c> set) whose LIVE content has diverged from the
+    /// hash it was linked at (<c>sprk_canonicalhash</c>). If so, sever the link (clear
+    /// <c>sprk_canonicaldocument</c> via the <see cref="DBNull"/> clear-sentinel) and stamp the new content hash
+    /// — the copy graduates to its own canonical. The row's dedup columns are already in hand from the idempotent
+    /// alt-key lookup (no extra retrieve). Best-effort / non-fatal (NFR-04): every failure logs and leaves the
+    /// row unchanged (re-evaluated on the next save); never fails the save. No-op when the detector is absent
+    /// (bare test ctor), the drive id is unknown, or the row is a true canonical (no link to sever).
+    /// </summary>
+    private async Task GraduateLinkedCopyIfDivergedAsync(
+        Entity existingRow,
+        PromoteComposeDocumentRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (_dedupDetector is null || string.IsNullOrWhiteSpace(request.GraphDriveId))
+            return;
+
+        // Only a hash-linked COPY can graduate — a true canonical has no sprk_canonicaldocument link.
+        if (existingRow.GetAttributeValue<EntityReference>(CanonicalDocumentAttribute) is null)
+            return;
+
+        try
+        {
+            var linkedHash = existingRow.GetAttributeValue<string>(CanonicalHashAttribute);
+            var (liveHash, _) = await _dedupDetector
+                .ResolveContentIdentityAsync(request.GraphDriveId!, request.DocumentSpeId, cancellationToken)
+                .ConfigureAwait(false);
+
+            // No live hash (unavailable) OR still identical → not diverged; leave the link intact.
+            if (string.IsNullOrWhiteSpace(liveHash) || string.Equals(liveHash, linkedHash, StringComparison.Ordinal))
+                return;
+
+            await _dataverse.UpdateAsync(
+                    DocumentLogicalName,
+                    existingRow.Id,
+                    new Dictionary<string, object>
+                    {
+                        [CanonicalDocumentAttribute] = DBNull.Value, // sever the link (DBNull clear-sentinel)
+                        [CanonicalHashAttribute] = liveHash!,        // stamp the diverged content's own identity
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Compose content-dedup: sprk_document {DocumentId} diverged from its linked canonical; graduated to its own document.",
+                existingRow.Id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose content-dedup (graduate) failed (non-fatal) for document {DocumentId}; leaving link intact.",
+                existingRow.Id);
+        }
+    }
+
+    private async Task<Entity?> TryFindDocumentByGraphItemIdAsync(
         string driveItemId,
         CancellationToken cancellationToken)
     {
@@ -2686,13 +2803,15 @@ public class ComposeService : IComposeService
 
         try
         {
+            // Fetch the FR-C3 dedup columns alongside the id so the idempotent branch can evaluate
+            // graduate-on-divergence WITHOUT a second Dataverse round-trip on the save hot path.
             var entity = await _dataverse.RetrieveByAlternateKeyAsync(
                 DocumentLogicalName,
                 key,
-                new[] { DocumentIdAttribute },
+                new[] { DocumentIdAttribute, CanonicalDocumentAttribute, CanonicalHashAttribute },
                 cancellationToken).ConfigureAwait(false);
 
-            return entity?.Id;
+            return entity;
         }
         catch (InvalidOperationException ex)
         {

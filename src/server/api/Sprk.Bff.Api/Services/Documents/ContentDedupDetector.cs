@@ -68,7 +68,37 @@ public class ContentDedupDetector
     public virtual async Task<DedupDecision> ReconcileAsync(
         string driveId, string itemId, string? ownerOid, string? fileName, CancellationToken ct = default)
     {
-        // 1. Read the content identity (facade already non-throwing; guard defensively anyway).
+        // Pure content-identity resolution (hash read + canonical lookup); side-effect-free + non-fatal.
+        var (hash, canonicalId) = await ResolveContentIdentityAsync(driveId, itemId, ct);
+        if (string.IsNullOrWhiteSpace(hash))
+            return DedupDecision.NoDedup;          // no identity → cannot dedup; caller proceeds
+        if (canonicalId is null)
+            return new DedupDecision(hash, false, null); // first writer (or lookup failed) → caller stamps + creates
+
+        // Byte-identical hit for an IMMUTABLE caller (email-attachment / Assistant persist): NOTIFY (never
+        // silent) + report the canonical so the caller SUPPRESSES the second document. An archival copy never
+        // diverges, so suppress-forever is correct here (contrast the Compose LINK path — see ComposeService).
+        _logger.LogInformation(
+            "Content duplicate detected for {FileName}: quickXorHash matches canonical sprk_document {CanonicalId}; suppressing the second document.",
+            fileName, canonicalId);
+        await NotifyDuplicateAsync(ownerOid, canonicalId.Value, fileName, ct);
+        return new DedupDecision(hash, true, canonicalId.Value);
+    }
+
+    /// <summary>
+    /// Pure content-identity resolution (FR-C3): reads the item's <c>quickXorHash</c> via the
+    /// <see cref="SpeFileStore"/> facade (ADR-007) and resolves the current CANONICAL <c>sprk_document</c> for
+    /// that content (hash-linked copies excluded — see <see cref="FindCanonicalByHashAsync"/>). NO notification,
+    /// NO suppression — the caller decides suppress (immutable, <see cref="ReconcileAsync"/>) vs. link
+    /// (editable Compose, <c>ComposeService.PromoteIfEphemeralAsync</c>). Never throws (NFR-04): a hash-read
+    /// failure returns <c>(null, null)</c>; a lookup failure returns <c>(hash, null)</c> so the caller still
+    /// stamps the known hash. <c>virtual</c> for substitution at the module boundary in tests.
+    /// </summary>
+    /// <returns><c>Hash</c> = the content identity (null when unavailable); <c>CanonicalId</c> = the existing
+    /// canonical <c>sprk_document</c> whose content this matches, or null when this is the first writer.</returns>
+    public virtual async Task<(string? Hash, Guid? CanonicalId)> ResolveContentIdentityAsync(
+        string driveId, string itemId, CancellationToken ct = default)
+    {
         string? hash;
         try
         {
@@ -77,32 +107,21 @@ public class ContentDedupDetector
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Content-dedup hash read failed (non-fatal) for item {ItemId}.", itemId);
-            return DedupDecision.NoDedup;
+            return (null, null);
         }
         if (string.IsNullOrWhiteSpace(hash))
-            return DedupDecision.NoDedup; // no identity → cannot dedup; caller proceeds
+            return (null, null); // no identity → cannot dedup
 
-        // 2. Reconcile against the cross-container authority index.
-        Guid? canonicalId;
         try
         {
-            canonicalId = await FindCanonicalByHashAsync(hash, ct);
+            var canonicalId = await FindCanonicalByHashAsync(hash, ct);
+            return (hash, canonicalId);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Content-dedup lookup failed (non-fatal) for item {ItemId}.", itemId);
-            return new DedupDecision(hash, false, null); // hash known → caller still stamps it; no suppression
+            return (hash, null); // hash known → caller still stamps it; no suppression
         }
-
-        if (canonicalId is null)
-            return new DedupDecision(hash, false, null); // first writer for this content
-
-        // 3. Byte-identical hit — NOTIFY (never silent), report the canonical for the caller to suppress the copy.
-        _logger.LogInformation(
-            "Content duplicate detected for {FileName}: quickXorHash matches canonical sprk_document {CanonicalId}; suppressing the second document.",
-            fileName, canonicalId);
-        await NotifyDuplicateAsync(ownerOid, canonicalId.Value, fileName, ct);
-        return new DedupDecision(hash, true, canonicalId.Value);
     }
 
     private async Task<Guid?> FindCanonicalByHashAsync(string hash, CancellationToken ct)
@@ -114,6 +133,10 @@ public class ContentDedupDetector
         };
         query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
         query.Criteria.AddCondition("sprk_canonicalhash", ConditionOperator.Equal, hash);
+        // Graduate-on-divergence (FR-C3): a hash-linked COPY (sprk_canonicaldocument set) is NOT a canonical —
+        // exclude it so dedup always resolves to the TRUE canonical (never links a third upload to a copy that
+        // is about to graduate). A true canonical has sprk_canonicaldocument null.
+        query.Criteria.AddCondition("sprk_canonicaldocument", ConditionOperator.Null);
         var result = await _genericEntityService.RetrieveMultipleAsync(query, ct);
         return result.Entities.Count > 0 ? result.Entities[0].Id : null;
     }
@@ -149,6 +172,47 @@ public class ContentDedupDetector
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Duplicate-detected notification failed (non-fatal) for {FileName}.", fileName);
+        }
+    }
+
+    /// <summary>
+    /// Graduate-on-divergence (FR-C3, Compose LINK path): NOTIFY (never silent) that a just-saved EDITABLE
+    /// document is currently byte-identical to an existing canonical and was recorded as a hash-linked copy —
+    /// it becomes its own document the moment the user edits it. Distinct from <see cref="NotifyDuplicateAsync"/>
+    /// (which announces a SUPPRESSED immutable copy). Best-effort / non-fatal (NFR-04): never throws out of the
+    /// save path. <c>virtual</c> so it is substitutable at the module boundary in tests.
+    /// </summary>
+    public virtual async Task NotifyLinkedCopyAsync(string? ownerOid, Guid canonicalId, string? fileName, CancellationToken ct = default)
+    {
+        try
+        {
+            if (!Guid.TryParse(ownerOid, out var oid))
+            {
+                _logger.LogWarning(
+                    "Content of {FileName} is byte-identical to canonical {CanonicalId} (linked copy) but no resolvable uploader oid to notify.",
+                    fileName, canonicalId);
+                return;
+            }
+            var systemUserId = await _notificationService.ResolveSystemUserIdAsync(oid, ct);
+            if (systemUserId is null)
+            {
+                _logger.LogWarning(
+                    "Content of {FileName} is byte-identical to canonical {CanonicalId} (linked copy) but oid {Oid} did not resolve to a system user.",
+                    fileName, canonicalId, oid);
+                return;
+            }
+
+            await _notificationService.CreateNotificationAsync(
+                userId: systemUserId.Value,
+                title: "Linked to an existing document",
+                body: $"\"{fileName}\" is currently identical to an existing document, so it was linked. It becomes its own document as soon as you edit it.",
+                category: "documents",
+                regardingId: canonicalId,
+                cancellationToken: ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Linked-copy notification failed (non-fatal) for {FileName}.", fileName);
         }
     }
 }
