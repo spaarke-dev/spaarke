@@ -131,6 +131,11 @@ public sealed record ComposeBlock
     /// <summary>Optional paragraph alignment for Paragraph / Heading / ListItem.</summary>
     public ComposeParagraphAlignment Alignment { get; init; } = ComposeParagraphAlignment.Default;
 
+    /// <summary>Task 023: <c>w:pPr/w:pageBreakBefore</c> — the paragraph starts on a new page. Carried for
+    /// Paragraph / Heading / ListItem; captured by the server projection (mirrors Word's paragraph-level
+    /// page-break idiom, distinct from the run-level <see cref="ComposeInlineRun.IsPageBreak"/>).</summary>
+    public bool PageBreakBefore { get; init; }
+
     /// <summary><see cref="ComposeBlockKind.Table"/> only: the table's rows/cells. Null for other kinds.</summary>
     public ComposeTable? Table { get; init; }
 }
@@ -161,6 +166,15 @@ public sealed record ComposeInlineRun
     /// hyperlink representation (mirrors the TipTap <c>link</c> mark's <c>href</c>). Null for a plain run.
     /// </summary>
     public string? Href { get; init; }
+
+    /// <summary>
+    /// Task 023: this run IS a manual page break (<c>w:br w:type="page"</c>). When true the renderer emits
+    /// exactly that break run and every other field on this run (<see cref="Text"/>, marks,
+    /// <see cref="Href"/>) is ignored. Captured by the server projection at the break's exact inline
+    /// position (splitting the surrounding text into separate runs); soft line/column breaks remain the
+    /// counted <c>line-break-flattened</c> degradation.
+    /// </summary>
+    public bool IsPageBreak { get; init; }
 }
 
 /// <summary>A native table (<c>w:tbl</c>): an ordered list of rows plus the STRUCTURAL facts the render-on-save

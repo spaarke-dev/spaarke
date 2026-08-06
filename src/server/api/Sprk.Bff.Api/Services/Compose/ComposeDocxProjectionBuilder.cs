@@ -1902,6 +1902,15 @@ public sealed class ComposeDocxProjectionBuilder
         if (p.ParagraphProperties?.Indentation is not null) ctx.AddWarning("indentation-dropped", 1);
         if (p.ParagraphProperties?.ParagraphMarkRunProperties?.Deleted is not null) ctx.AddWarning("tracked-paragraph-mark-flattened", 1);
 
+        // Task 023: an INTERIOR section break (pPr-nested w:sectPr — this paragraph ends a section) is not
+        // model data; on render its content joins the FINAL section's page setup — a real pagination/
+        // header-scope change, counted LOUDLY. Full multi-section modeling is a follow-up (the trailing
+        // body-level sectPr is preserved by RenderIntoCarrier and is not this warning's subject).
+        if (p.ParagraphProperties?.SectionProperties is not null) ctx.AddWarning("section-break-flattened", 1);
+
+        // Task 023: paragraph-level page break — model data (w:pPr/w:pageBreakBefore, OnOff semantics).
+        var pageBreakBefore = IsOn(p.ParagraphProperties?.PageBreakBefore);
+
         // Classification mirrors RenderParagraph exactly: heading style wins; then a DIRECT paragraph
         // w:numPr makes a list item (style-linked heading numbering is a heading, not a list).
         var headingLevel = HeadingLevel(p);
@@ -1920,6 +1929,7 @@ public sealed class ComposeDocxProjectionBuilder
                 Level = lvl,
                 Runs = runs,
                 Alignment = alignment,
+                PageBreakBefore = pageBreakBefore,
             };
         }
 
@@ -1943,6 +1953,7 @@ public sealed class ComposeDocxProjectionBuilder
                 NumId = numId.Value,
                 Runs = runs,
                 Alignment = alignment,
+                PageBreakBefore = pageBreakBefore,
             };
         }
 
@@ -1975,6 +1986,7 @@ public sealed class ComposeDocxProjectionBuilder
             ParaId = paraId,
             Runs = runs,
             Alignment = alignment,
+            PageBreakBefore = pageBreakBefore,
         };
     }
 
@@ -2330,6 +2342,27 @@ public sealed class ComposeDocxProjectionBuilder
         var underline = rPr?.Underline is { Val: not null } u && u.Val!.Value != UnderlineValues.None;
 
         var sb = new StringBuilder();
+        var strikeWarned = false;
+
+        // Flushes the accumulated text as one model run (task 023: page breaks split a source run at the
+        // break's exact inline position, so the text before/after lands in separate model runs and the
+        // break run sits between them).
+        void FlushText()
+        {
+            if (sb.Length == 0) return;
+            if (IsOn(rPr?.Strike) && !strikeWarned)
+            {
+                // The model has no strikethrough mark (025 models real deletions; decorative strike is out
+                // of the thin tier) — text kept, decoration dropped, counted once per source run.
+                ctx.AddWarning("strikethrough-flattened", 1);
+                strikeWarned = true;
+            }
+            var text = ctx.ClampText(sb.ToString());
+            sb.Clear();
+            if (text.Length == 0) return;
+            sink.Add(new ComposeInlineRun { Text = text, Bold = bold, Italic = italic, Underline = underline, Href = href });
+        }
+
         foreach (var child in run.Elements())
         {
             switch (child)
@@ -2347,10 +2380,16 @@ public sealed class ComposeDocxProjectionBuilder
                     sb.Append(' ');
                     ctx.AddWarning("tab-flattened", 1);
                     break;
+                case Break pageBreak when pageBreak.Type is not null && pageBreak.Type.Value == BreakValues.Page:
+                    // Task 023: a MANUAL PAGE BREAK is model data (ComposeInlineRun.IsPageBreak) — emitted
+                    // at its exact inline position, no longer a line-break-flattened space.
+                    FlushText();
+                    sink.Add(new ComposeInlineRun { IsPageBreak = true });
+                    break;
                 case Break:
                 case CarriageReturn:
-                    // The model has no intra-paragraph line-break (a page-break block is task 023's
-                    // widening); flatten to a space rather than fusing words, with a counted warning.
+                    // The model has no intra-paragraph soft line/column break: flatten to a space rather
+                    // than fusing words, with a counted warning. (Manual PAGE breaks are model data above.)
                     sb.Append(' ');
                     ctx.AddWarning("line-break-flattened", 1);
                     break;
@@ -2383,18 +2422,7 @@ public sealed class ComposeDocxProjectionBuilder
             }
         }
 
-        if (sb.Length == 0) return; // empty runs carry nothing the renderer needs
-
-        if (IsOn(rPr?.Strike))
-        {
-            // The model has no strikethrough mark (025 models real deletions; decorative strike is out of
-            // the thin tier) — text kept, decoration dropped, counted.
-            ctx.AddWarning("strikethrough-flattened", 1);
-        }
-
-        var text = ctx.ClampText(sb.ToString());
-        if (text.Length == 0) return;
-        sink.Add(new ComposeInlineRun { Text = text, Bold = bold, Italic = italic, Underline = underline, Href = href });
+        FlushText(); // trailing text after the last break (or the whole run when no break split it)
     }
 
     private static void AddPlainRun(List<ComposeInlineRun> sink, string text, string? href, ModelWalkContext ctx)

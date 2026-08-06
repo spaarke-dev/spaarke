@@ -329,4 +329,43 @@ delta 0.00** (measured on `cef2cd988`; fix commit is code-only).
 
 ---
 
-*Steps 1–3 artifact + gates + tasks 020/011/021/022 records. Checkpoint in `current-task.md`.*
+## 13. Task 023 — headers/footers + page breaks through the canonical model (2026-08-06)
+
+**Rigor note:** POML authored STANDARD; executed at **FULL** per task-execute Step 0.5 (modifies `.cs` on the
+BFF hot-path, `bff-api` tags — and Step 9.5 caught live-path Majors on both prior wideners on this surface).
+
+**Two mechanisms (directional interpretation):**
+- **Headers/footers ride the CARRIER, not the model.** RenderIntoCarrier already preserves header/footer
+  PARTS byte-identically and re-attaches the trailing sectPr (which carries the headerReference/
+  footerReference relationship ids). 023's contribution is the PROOF: parts byte-identical + references
+  RESOLVE post-round-trip (relationship integrity), seam-pinned per-doc and corpus-wide. Editing header
+  CONTENT is not an editor capability; template-chrome part-merge is Phase 3 — carrying header content in
+  the model would be scope creep against both.
+- **Page breaks are MODEL data** (the actual gap: a manual `w:br type="page"` degraded to a SPACE via
+  `line-break-flattened` before this task): run-level breaks project to a dedicated
+  `ComposeInlineRun.IsPageBreak` at the EXACT inline position (ProjectRun flush-split — text before/after
+  in separate runs), `w:pPr/pageBreakBefore` projects to `ComposeBlock.PageBreakBefore` (OnOff semantics
+  via IsOn); the renderer authors both back out (`BuildRun` break-run; `ApplyPageBreakBefore` in CT_PPr
+  order across all three paragraph builders). Soft line/column breaks remain warned flattens.
+- **Interior section breaks (pPr-nested sectPr) flatten LOUDLY** via the NEW counted
+  `section-break-flattened` warning (content joins the FINAL section — a real pagination/header-scope
+  change, honestly counted). Full multi-section modeling deferred (corpus manifest row 8 = placeholder;
+  no multi-section corpus doc exists). Trailing-section preservation unaffected.
+
+**Seam slice** — `ComposeHeaderFooterPageBreakSeamTests.cs` (13 tests): exact-position break capture
+(3-run split, warning-free) · carrier round-trip (parts byte-identical + references resolve + breaks
+re-authored in-paragraph + multiset validator) · break-fact fixed point · interior-section loud flatten +
+no-hard-fail round-trip (landscape final section preserved) · corpus-wide reference-resolution +
+page-break-count stability theory.
+
+**Gates:** suite 718/721 (same 3 pre-existing NDA-class reds). ADR-013 facade green. No package/DI/endpoint
+change. Publish: clean-worktree measurement post-commit (per §11.1 convention).
+
+**Placement Justification (root §10):** modify/extend of existing Services/Compose files only. §11:
+existing = ProjectRun/ProjectParagraph/BuildRun/paragraph builders (extended in place); cost-of-doing-nothing
+= a legal document's manual page breaks become SPACES on save (agreement signature pages flow into the
+preceding clause — visible structural corruption).
+
+---
+
+*Steps 1–3 artifact + gates + tasks 020/011/021/022/023 records. Checkpoint in `current-task.md`.*

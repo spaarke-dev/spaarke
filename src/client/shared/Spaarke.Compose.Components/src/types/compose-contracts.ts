@@ -469,6 +469,9 @@ export interface ComposeInlineRun {
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
+  /** Server task 023: this run IS a manual page break (`w:br w:type="page"`); every other field is
+   * ignored when true. Server-set by the docx→model projection; preserve untouched on re-post. */
+  isPageBreak?: boolean;
 }
 
 /** A table cell — nested block content (mirrors the server `ComposeTableCell`).
@@ -554,6 +557,9 @@ export interface ComposeContentBlock {
   runs?: ComposeInlineRun[];
   alignment?: ComposeAlignment;
   table?: ComposeTable;
+  /** Server task 023: `w:pPr/w:pageBreakBefore` — the paragraph starts on a new page. Server-set by the
+   * docx→model projection; preserve untouched on re-post. */
+  pageBreakBefore?: boolean;
 }
 
 /**

@@ -691,6 +691,7 @@ public sealed partial class ComposeDocumentRenderer
     private static Paragraph BuildParagraph(ComposeBlock block)
     {
         var pPr = new ParagraphProperties();
+        ApplyPageBreakBefore(pPr, block);
         ApplyAlignment(pPr, block.Alignment);
         return AssembleParagraph(pPr, block);
     }
@@ -701,6 +702,7 @@ public sealed partial class ComposeDocumentRenderer
         var pPr = new ParagraphProperties(new ParagraphStyleId { Val = HeadingStyleId(level) });
         // NO w:numPr here — the number is supplied by the Heading{level} STYLE's numPr (style-linked). A
         // direct numId here would double-number (FR-27).
+        ApplyPageBreakBefore(pPr, block);
         ApplyAlignment(pPr, block.Alignment);
         return AssembleParagraph(pPr, block);
     }
@@ -708,14 +710,25 @@ public sealed partial class ComposeDocumentRenderer
     private static Paragraph BuildListItem(ComposeBlock block, int numInstanceId)
     {
         var ilvl = Math.Clamp(block.Level, 0, 8);
-        var pPr = new ParagraphProperties(
-            new ParagraphStyleId { Val = ListParagraphStyleId },
-            // DIRECT numPr: ListParagraph carries no style numbering, so this is not double-numbering.
-            new NumberingProperties(
-                new NumberingLevelReference { Val = ilvl },
-                new NumberingId { Val = numInstanceId }));
+        // CT_PPr order: pStyle < pageBreakBefore < numPr < jc — built sequentially in that order.
+        var pPr = new ParagraphProperties(new ParagraphStyleId { Val = ListParagraphStyleId });
+        ApplyPageBreakBefore(pPr, block);
+        // DIRECT numPr: ListParagraph carries no style numbering, so this is not double-numbering.
+        pPr.AppendChild(new NumberingProperties(
+            new NumberingLevelReference { Val = ilvl },
+            new NumberingId { Val = numInstanceId }));
         ApplyAlignment(pPr, block.Alignment);
         return AssembleParagraph(pPr, block);
+    }
+
+    /// <summary>Task 023: <c>w:pageBreakBefore</c> — appended in CT_PPr order (after <c>pStyle</c>, before
+    /// <c>numPr</c>/<c>jc</c>; each builder calls this at exactly that point in its sequential build).</summary>
+    private static void ApplyPageBreakBefore(ParagraphProperties pPr, ComposeBlock block)
+    {
+        if (block.PageBreakBefore)
+        {
+            pPr.AppendChild(new PageBreakBefore());
+        }
     }
 
     /// <summary>Assembles a paragraph from its <paramref name="pPr"/> + the block's inline runs, carrying a
@@ -748,6 +761,13 @@ public sealed partial class ComposeDocumentRenderer
 
     private static OpenXmlElement BuildRun(ComposeInlineRun run)
     {
+        // Task 023: a page-break run IS the break — every other field is ignored by contract
+        // (ComposeInlineRun.IsPageBreak). Same markup AppendSection's page-broken section uses.
+        if (run.IsPageBreak)
+        {
+            return new Run(new Break { Type = BreakValues.Page });
+        }
+
         var element = new Run();
         if (run.Bold || run.Italic || run.Underline)
         {
