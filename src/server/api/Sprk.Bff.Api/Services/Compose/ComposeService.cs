@@ -704,16 +704,29 @@ public class ComposeService : IComposeService
         // mode selection) — but it is PERSISTED onto sprk_document ONLY at create-on-save (see the
         // PromoteComposeDocumentRequest.Origin wiring below); a replace-path save of an already-promoted
         // document never mutates the stored value.
-        // UAT #1A hardening (task 050): Authored requires a ContentModel AND no retained original bytes — i.e. a
-        // genuine born-in-editor doc with no baseline to delta onto. A save that carries retained original bytes
-        // (Content) is IMPORTED even if a ContentModel is also (erroneously) present, so a client-side routing
-        // slip can never durably mis-stamp an imported doc Authored (which would force every later op-log save
-        // onto the clean branch and silently drop redlines — the SEV-1 UAT regression). ContentModel absent →
-        // Imported. Still resolved ONLY from server-side request shape — never from SPE-id presence or a
-        // content/text match (NFR-02, I-7).
-        var origin = request.ContentModel is not null && request.Content.IsEmpty
+        // UAT #1A hardening (task 050) + task 010 cutover: Authored requires a ContentModel AND no baseline
+        // SOURCE at all — no retained original bytes AND no version-fetch coordinates. A save carrying a
+        // baseline source is IMPORTED even when a ContentModel is present: post-cutover that combination IS
+        // the designed imported render-on-save shape (model + carrier via RenderIntoCarrier), and pre-cutover
+        // it was the erroneous-routing case UAT #1A already labeled Imported — either way the label is
+        // Imported, so a routing slip can never durably mis-stamp an imported doc Authored (which would force
+        // every later save onto the clean branch and silently drop redlines — the SEV-1 UAT regression).
+        // ContentModel absent → Imported. Still resolved ONLY from server-side request shape — never from
+        // SPE-id presence or a content/text match (NFR-02, I-7).
+        var origin = request.ContentModel is not null
+            && request.Content.IsEmpty
+            && !HasBaselineVersionCoordinates(request)
             ? ComposeOrigin.Authored
             : ComposeOrigin.Imported;
+
+        // Task 010: on the render-on-save path an op-log cannot apply (the model IS the document state);
+        // a client that sends both is on a mixed contract — the ops are ignored LOUDLY, never half-applied.
+        if (request.ContentModel is not null && hasOperations)
+        {
+            _logger.LogWarning(
+                "Compose save: request carries BOTH a ContentModel and an operation log ({OpCount} op(s)) — the render-on-save path ignores the op-log (the model is the authoritative document state). session={SessionId}",
+                request.OperationLog!.Operations.Count, request.SessionId);
+        }
 
         // G2 (FR-02, task 021 / R5-D2 Candidate A): the CLEAN-APPLY decision for the op-log/engine path.
         // A reopened AUTHORED doc sends an op-log (ContentModel null) — the ContentModel discriminant above
@@ -1204,23 +1217,46 @@ public class ComposeService : IComposeService
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        // (a0) BORN-IN-EDITOR (FR-01a, task 026): a document authored IN the editor (AI-drafted / blank /
-        //      browse-local) has NO retained original — its client CONTENT MODEL is the authoring source.
-        //      Render the high-fidelity .docx server-side (real styles + style-linked multi-level numbering +
-        //      native tables + minted w14:paraId) — the deterministic replacement for the removed client
-        //      docx.js exporter (task 027). This is NOT an AI dispatch (ADR-039 complied — design §11). No
-        //      EditedParagraphs/Annotations layer onto it (the whole document is authored here); the rendered
-        //      bytes ARE contentToPersist. Checked FIRST: ContentModel is mutually exclusive with Content /
-        //      BaselineVersionId (a born-in-editor doc has no baseline to delta onto).
         if (request.ContentModel is not null)
         {
-            // Task 026 (FR-04): collect the render-side degradation warnings (dropped anchors /
-            // format-change records / hrefs) so the save can report SUCCESS-WITH-WARNINGS — a degraded
-            // construct is surfaced to the user, never a 422 and never silent.
+            // Task 026 (FR-04): the render degradation sink — dropped anchors / format-change records /
+            // hrefs surface as SUCCESS-WITH-WARNINGS, never a 422 and never silent.
             var renderDegradations = new List<ComposeProjectionWarning>();
-            var rendered = _documentRenderer.SynthesizeDocument(
-                request.ContentModel, ResolveRevisionAuthor(httpContext), renderDegradations);
-            return (rendered, renderDegradations.Count > 0 ? renderDegradations : null);
+            var revisionAuthor = ResolveRevisionAuthor(httpContext);
+
+            // (a1) IMPORTED RENDER-ON-SAVE (task 010 — the cutover; spec FR-01/FR-02, ADR-049 Path-B
+            //      amendment): a ContentModel WITH a resolvable retained baseline renders INTO that
+            //      carrier (RenderIntoCarrier) — the model (projected at load through the 020-026
+            //      canonical hub, edited in TipTap, re-posted with every server-set fact preserved) is
+            //      the authoring source, and the carrier contributes the parts the thin model cannot
+            //      carry (styles / numbering / headers / footers / theme / comments part). NO surgical
+            //      byte-patch and NO count-gate on this path — the anchor-reconciliation 422 class
+            //      (the NDA) is unreachable by construction. Hard-tier constructs accept-flattened at
+            //      projection (026) render as degraded prose; the prior version stays retrievable via
+            //      SPE version history (FR-07 safety net).
+            if (!request.Content.IsEmpty)
+            {
+                var carrierRendered = _documentRenderer.RenderIntoCarrier(
+                    request.Content.ToArray(), request.ContentModel, revisionAuthor, renderDegradations);
+                return (carrierRendered, renderDegradations.Count > 0 ? renderDegradations : null);
+            }
+
+            if (HasBaselineVersionCoordinates(request))
+            {
+                var carrierBytes = await FetchBaselineVersionBytesAsync(request, httpContext, cancellationToken)
+                    .ConfigureAwait(false);
+                var carrierRendered = _documentRenderer.RenderIntoCarrier(
+                    carrierBytes, request.ContentModel, revisionAuthor, renderDegradations);
+                return (carrierRendered, renderDegradations.Count > 0 ? renderDegradations : null);
+            }
+
+            // (a0) BORN-IN-EDITOR (FR-01a, task 026): no retained original at all (AI-drafted / blank) —
+            //      the model is the WHOLE document; render the high-fidelity .docx from a blank package
+            //      (real styles + style-linked multi-level numbering + native tables + minted
+            //      w14:paraId). Deterministic authoring, NOT an AI dispatch (ADR-039 — design §11).
+            var synthesized = _documentRenderer.SynthesizeDocument(
+                request.ContentModel, revisionAuthor, renderDegradations);
+            return (synthesized, renderDegradations.Count > 0 ? renderDegradations : null);
         }
 
         // (a) Same-session fast-path: the client still holds the retained ORIGINAL bytes.
@@ -1231,28 +1267,11 @@ public class ComposeService : IComposeService
 
         // (b) FR-06 primary: re-fetch the LOAD-TIME SPE version by versionId (task 002), behind the
         //     SpeFileStore facade (ADR-007 — no Microsoft.Graph type crosses into Services/Compose).
-        if (!string.IsNullOrWhiteSpace(request.BaselineVersionId)
-            && !string.IsNullOrWhiteSpace(request.DriveId)
-            && !string.IsNullOrWhiteSpace(request.DocumentSpeId))
+        if (HasBaselineVersionCoordinates(request))
         {
-            var stream = await _spe.DownloadFileVersionAsUserAsync(
-                    httpContext, request.DriveId!, request.DocumentSpeId!, request.BaselineVersionId!, cancellationToken)
+            var baseline = await FetchBaselineVersionBytesAsync(request, httpContext, cancellationToken)
                 .ConfigureAwait(false);
-
-            if (stream is not null)
-            {
-                await using (stream.ConfigureAwait(false))
-                {
-                    using var buffer = new MemoryStream();
-                    await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
-                    return (buffer.ToArray(), null);
-                }
-            }
-
-            throw new InvalidOperationException(
-                $"Compose save: the load-time baseline version was not found (drive={request.DriveId} " +
-                $"item={request.DocumentSpeId} version={request.BaselineVersionId}). A dirty save must apply " +
-                "onto the load-time original — it will not fall back to a reconstruction (FR-01/FR-06).");
+            return (baseline, null);
         }
 
         // No baseline resolvable. A dirty save NEVER falls back to a client reconstruction (FR-01).
@@ -1261,6 +1280,41 @@ public class ComposeService : IComposeService
             "a same-session save, or a BaselineVersionId (+ DriveId + DocumentSpeId) to re-fetch the " +
             "load-time version (FR-06). A docx.js reconstruction is not a valid baseline (FR-01).",
             nameof(request));
+    }
+
+    /// <summary>Whether the request carries the full coordinate set for an FR-06 load-time-version
+    /// re-fetch (versionId + driveId + speId).</summary>
+    private static bool HasBaselineVersionCoordinates(SaveComposeDocumentRequest request) =>
+        !string.IsNullOrWhiteSpace(request.BaselineVersionId)
+        && !string.IsNullOrWhiteSpace(request.DriveId)
+        && !string.IsNullOrWhiteSpace(request.DocumentSpeId);
+
+    /// <summary>FR-06: downloads the load-time SPE version's exact bytes (the retained baseline / render
+    /// carrier) behind the SpeFileStore facade. Throws when the version is gone — a dirty save never
+    /// falls back to a reconstruction (FR-01).</summary>
+    private async Task<byte[]> FetchBaselineVersionBytesAsync(
+        SaveComposeDocumentRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var stream = await _spe.DownloadFileVersionAsUserAsync(
+                httpContext, request.DriveId!, request.DocumentSpeId!, request.BaselineVersionId!, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (stream is not null)
+        {
+            await using (stream.ConfigureAwait(false))
+            {
+                using var buffer = new MemoryStream();
+                await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+                return buffer.ToArray();
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Compose save: the load-time baseline version was not found (drive={request.DriveId} " +
+            $"item={request.DocumentSpeId} version={request.BaselineVersionId}). A dirty save must apply " +
+            "onto the load-time original — it will not fall back to a reconstruction (FR-01/FR-06).");
     }
 
     // =========================================================================
