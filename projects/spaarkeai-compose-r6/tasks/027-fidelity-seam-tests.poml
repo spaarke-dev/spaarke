@@ -4,7 +4,7 @@
     <title>Fidelity seam tests across the corpus — per-feature round-trip; hard-tier warns-not-fails</title>
     <phase>2 Canonical model + fidelity widening</phase>
     <gate>dep:021,022,023,024,025,026,012 — RE-SEQUENCED 2026-08-05: also gated on 012 (surgical retired) so the fidelity seam suite tests the SHIPPED render-on-save path, not the transitional state.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Test-modifying task (tags include testing/seam) → FULL rigor UNCONDITIONALLY per root §8 TEST-MODIFYING override. Adds the through-the-wire seam coverage that is the Phase-2 fidelity DoD (ADR-038); asserts the graceful-degradation guarantee (hard-tier warns-not-fails) and golden-label numbering parity across the corpus. code-review + adr-check run at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -107,7 +107,13 @@
     <criterion testable="true">Negative / no-regression: all slices are ADR-038 through-the-wire seam tests under tests/integration/seam/Compose/; no Mock&lt;HttpMessageHandler&gt;, DI-registration, or ctor-null tests; the suite is green; docxBridge.ts not deleted.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-03/FR-04 acceptance; plan.md §5 Phase 2 + §6 critical path (020 → 027 → 060/061). Distinct from the Phase-6 CI harness (060/061) — this is per-feature seam coverage. Depends on 021-026. Test-modifying → FULL rigor (root §8 override). parallel-safe=false. Run /conflict-check before the PR.</notes>
+  <notes>Spec FR-03/FR-04 acceptance; plan.md §5 Phase 2 + §6 critical path (020 → 027 → 060/061). Distinct from the Phase-6 CI harness (060/061) — this is per-feature seam coverage. Depends on 021-026. Test-modifying → FULL rigor (root §8 override). parallel-safe=false. Run /conflict-check before the PR.
+
+COMPLETED 2026-08-06 — commits f7bd052f0 (suite + fixture) + 6b00765e9 (Step-9.5 strengthenings F1-F6). ComposeFidelityRoundTripSeamTests: 11 through-the-wire slices with ONE shared load→edit→save→reopen driver (self-proving reopen leg) — numbering golden-label continuity (interrupted "1."-"6." · multilevel incl. level reset · style-linked incl. the FR-12 "4.2" example, asserted from paraIdMap[].computedNumber vs manifest §1.5 goldens; ZERO 020-R7 gap — style identity survives), tables, headers/footers (all 6 CIPO carrier parts + footer SDT semantic assert), page breaks, hyperlinks, comments (part + reference + range markers), tracked-changes on the NEW corpus fixture (authors+dates, delText, mark-del, rPrChange/pPrChange, hyperlink⊃ins never inverted, new-edit save-author attribution, unique w:id), hard-tier warns-not-fails (text-box-flattened wire-visible + no-422 + signature text), duplicate-paraId load probe (first-wins pinned). NEW FIXTURE multi-author-redline-synthetic.docx (manifest §1.7 row 15, raw-OOXML synthetic, OpenXmlValidator 0 errors, LFS; fills 025-F6 — the corpus had zero revision markup; row-4 owner placeholder stays OPEN). AppendSection w:ins oracle re-baselined (count-unchanged + appended-subset-empty). T-2 narrative refreshed; ops notes (transitional-telemetry decay chart + post-save re-projection perf watch) in notes §20 for 014.
+
+ACCEPTANCE: all 4 criteria verified (per-feature round-trips no hard-fail; goldens equal; hard-tier accept-flatten + warning + no 422 + new version; seam paths only, no banned shapes, suite green, docxBridge untouched). Publish 46.91 MB clean-worktree (flat — tests not shipped); CVE set unchanged (tests-only diff); zero production-code changes (empty src/ diff — verified).
+
+STEP 9.5: code-review APPROVE-WITH-MINORS (3 minors + 3 nits — ALL applied in 6b00765e9; oracle-strength probes confirmed the goldens non-vacuous and the fixture sound). The independent adr-check agent was terminated by the session usage limit; its axes were verified INLINE with evidence (banned shapes/KEEP-path/no-byte-identity-asserts empirically confirmed by the code reviewer's probes; LFS registration + row-4-open + zero-production-diff + publish/CVE verified in the main session) — recorded transparently, not silently skipped. Suites: fidelity 11/11 · full Compose 1020/1020, zero reds.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

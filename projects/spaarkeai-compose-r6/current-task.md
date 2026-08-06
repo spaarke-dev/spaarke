@@ -1,48 +1,49 @@
 # Current Task — Spaarke Compose R6
 
-> **Last Updated**: 2026-08-06 (task 013 close-out — clean boundary)
+> **Last Updated**: 2026-08-06 (task 027 close-out — clean boundary; PHASE 1 + PHASE 2 FULLY COMPLETE)
 > **Recovery**: Read "Quick Recovery" first; full state below.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **027 — Fidelity seam tests across the corpus** (`tasks/027-fidelity-seam-tests.poml`) — IN PROGRESS |
-| **Status** | Done so far (UNCOMMITTED): multi-author redline fixture `multi-author-redline-synthetic.docx` GENERATED (raw-OOXML method; 0 validator errors; projector captures 4 revision runs both authors + mark-del + rPrChange + pPrChange + tracked hyperlink) + manifest §1.7 row 15 (row-4 owner placeholder stays OPEN) + AppendSection w:ins oracle re-baselined to count-unchanged (corpus now has live redlines). Suite 1009/1009. |
-| **Agents** | fidelity-suite agent (resumed tests-013) authoring ComposeFidelityRoundTripSeamTests — per-feature wire round-trips + golden labels + hard-tier warns-not-fails + dup-paraId probe |
-| **Next Action** | On agent completion: integrate + run suite, doc residuals (T-2 refresh · dashboards note · perf note), commit, Step 9.5 two-agent review + clean-worktree publish, close out |
+| **Task** | NONE ACTIVE — clean boundary. **027 COMPLETE** — and with it EVERY task on the render-on-save critical path except the deploy gate: 001/002/003/004 (Phase 0) · 020/011/021-026 (Phase 2) · 010/012/013/027 (Phase 1 + fidelity DoD) all ✅. |
+| **Next task** | **014 — Deploy + UAT gate (render-on-save + fidelity) — BFF + sprk_spaarkeai together** (`tasks/014-*.poml`; deps 013 ✅ + 027 ✅ SATISFIED). ⚠️ **HUMAN-IN-LOOP** — deployment is not safe to run unattended (project Phase-1 gating note + root §6). DO NOT auto-execute on a bare "continue": present the deploy plan and get explicit operator go-ahead. |
+| **Status** | 027 closed at `6b00765e9`; to be pushed |
+| **Next Action** | Push, then STOP at the human gate: on "continue", read `tasks/014-*.poml`, present the deploy/UAT plan (incl. the pre-deploy master merge + /conflict-check), and WAIT for operator confirmation. |
 
 ### Critical Context (3 sentences)
-013 commits: e2adc5130 (RenderOnSaveSeamTests wire round-trip + NdaSaveNo422RegressionTests + the 3
-pre-existing NDA reds re-baselined green + F6 comment-id-collision warn + F7 contentModelWarnings
-mount-door → first-model-save fold) + 06631ba57 (review minors: F6 test pins, banner copy, dead wrapper,
-doc fixes). Step 9.5: adr-check PASS 6/6, code-review APPROVE-WITH-MINORS all fixed. Publish 46.91 MB
-±0.00; no new HIGH CVE; suite floor ZERO reds — any future red is a REAL regression.
+027 commits: f7bd052f0 (ComposeFidelityRoundTripSeamTests — 11 wire slices, self-proving driver, goldens
+from manifest §1.5, ZERO adapter gaps; NEW multi-author-redline-synthetic.docx corpus fixture §1.7 filling
+025-F6; T-2 narrative refresh) + 6b00765e9 (review strengthenings F1-F6). Suites: full Compose 1020/1020
+ZERO reds; publish 46.91 MB flat; zero production-code changes. The adr-check agent hit the session usage
+limit mid-run — its axes were verified inline with evidence and recorded transparently in the POML note.
 
-### 027 OBLIGATIONS (accumulated)
-1. **REAL multi-author redlined corpus fixture** (025-F6): the corpus has ZERO revision markup — 027 owes
-   a genuine multi-author tracked-changes document (or a Word-authored fixture) exercising 025's
-   capture/render round-trip at seam level.
-2. Pre-first-save duplicate-paraId reference-resolution probe (013 adr-check residual 1): between load
-   and first save the package carries source-duplicate ids under first-wins reference semantics — probe
-   citation/reference resolution on a not-yet-saved duplicate-id document.
-3. FR-08 harness posture: corpus round-trip breadth (all fixtures through load→model→save→reopen),
-   incl. a carrier-with-comments + new-comment append case at seam level.
-4. Smaller residuals if in reach: R4.5 T-2 narrative refresh (/project mint+echo); transitional-telemetry
-   dashboards note; post-save re-projection perf watch note.
+### 014 PRE-DEPLOY OBLIGATIONS (from the standing items + notes §20)
+1. **Merge origin/master first** (~67 behind; Crypto.Xml HIGH patched there) + re-run /conflict-check
+   (Services/Compose most-contested; last check clean 2026-08-06).
+2. **BFF + `sprk_spaarkeai` deploy TOGETHER** (atomic window): an old client on the new server drops
+   separate-comments LOUDLY (`comments-ignored`) — acceptable only within the window.
+3. Ops notes (notes §20): dashboards should chart the `TRANSITIONAL op-log save shape` Warning decay
+   (its hitting zero = the signal to delete the transitional path + engine/count-gate); watch save
+   latency on very large docs (post-save re-projection) at UAT.
+4. UAT focus: the NDA end-to-end (load → edit → save → no 422 → reopen), imported-doc redlines in real
+   Word, clean-save byte-identity (FR-06a), comment round-trip, version history retrievability (002's
+   live v3-after-v4 human gate is still open).
+
+### Remaining project phases after 014
+Phases 3-7: 030-033 (template part-merge) · 040-042 (PDF intake) · 050-052 (version history UX) ·
+060/061 (CI fidelity harness — seeds from the corpus incl. the new §1.7 fixture) · 090 (wrap-up,
+/test-diet gate). Check TASK-INDEX deps as each unblocks.
 
 ### Standing items
-- **014 deploy note**: BFF + `sprk_spaarkeai` deploy together; old client on new server drops
-  separate-comments LOUDLY (`comments-ignored`) — acceptable only within the atomic-deploy window.
 - Operator principle: best fidelity on common cases; rare shapes degrade LOUDLY, never silently.
-- Execution shape per task: implement → seam/unit slice → commit → Step 9.5 (TWO parallel background
-  agents on the committed SHA) + clean-worktree publish (46.91 MB baseline) → fix commit → close-out.
 - NEVER delete docxBridge.ts. Commit --no-verify + Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>.
-- /conflict-check before every BFF PR. Before the eventual PR: merge origin/master (~67 behind;
-  Crypto.Xml HIGH patched there) + re-run /conflict-check.
-- Client tsc baseline: 28 pre-existing sibling-dist errors; client full-jest has 10 pre-existing
-  stepOperationInterceptor reds (op-log machinery, untouched since compose-r5) — NOT this project's.
-- Fidelity-widener backlog in notes §16; sign-offs R4/R5 RESOLVED to warned baselines.
+- Execution shape per task: implement → slice → commit → Step 9.5 (two background agents on the SHA) +
+  clean-worktree publish (46.91 MB baseline) → fix commit → close-out.
+- Client baselines: tsc 28 pre-existing sibling-dist errors; full-jest 10 pre-existing
+  stepOperationInterceptor reds (untouched since compose-r5).
+- Sign-offs R4/R5 RESOLVED to warned baselines; fidelity-widener backlog notes §16.
 
 ## Steps completed this task
 (none — no active task)
@@ -51,4 +52,4 @@ doc fixes). Step 9.5: adr-check PASS 6/6, code-review APPROVE-WITH-MINORS all fi
 (none)
 
 ## Decisions
-(none — see notes §19 for 013's record)
+(none — see notes §20 for 027's record)
