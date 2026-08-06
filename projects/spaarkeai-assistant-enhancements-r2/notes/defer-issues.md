@@ -20,8 +20,10 @@
 - **Recommended home**: a small dedicated task in Phase D, OR fold into **task 039** (deploy+verify D) since it's BFF and deploys with D. Owner to slot.
 - **GitHub issue**: PENDING.
 
-## DI-04 — FR-D9 "Set related record" needs the ADR-024 regarding machinery (not expressible on the promote endpoint) — task 034 escalated
+## DI-04 — FR-D9 "Set related record" needs the ADR-024 regarding machinery (not expressible on the promote endpoint) — task 034 escalated → **RESOLVED (owner Path B; committed 3402b4f02)**
 
+- **STATUS: RESOLVED 2026-08-06** — owner chose Path B; implemented in task 034 (server-side ADR-024 regarding write on `sprk_analysis` via `DataverseServiceClientImpl.StageAnalysisRegardingFields` + relaxed doc-anchor + self-contained HistoryOverlay picker). Independent ADR-024 review PASSed the core write; W1-W5 fixed. No GitHub issue needed (delivered). Two §6.5 Path-A deviations documented in `deviations.md` (reduced ADR-024 set: `sprk_regardingrecordurl` not deployed on `sprk_analysis`; resolver-duplication across the BFF/Dataverse layer boundary).
+- **Original escalation record (for history):**
 - **Discovered**: 2026-08-06, task 034 (FR-D9) — escalation trigger FIRED; **no code changed**; working tree clean.
 - **Concrete failing behavior**: filing an otherwise-unassociated analysis to a matter so it "appears on the matter's Analyses tab" (Success Criterion 7 / FR-D9 criterion #3) does not work as scoped. Ground truth: the Matter Analyses subgrid is driven by `sprk_analysis.sprk_regardingmatter` (ADR-024 dual-field; `sprk_matter/FormXml/.../matter-analyses-tab.xml`, relationship `sprk_analysis_RegardingMatter_sprk_matter`) — so it REQUIRES an ADR-024 `regarding` field-set write on the created `sprk_analysis`.
 - **Why blocked in scope**:
@@ -37,8 +39,10 @@
 - **Note**: criterion #1 ("action named 'Set related record'") is ALREADY satisfied — task 037's committed overflow menu already shows that label (wired to a documented no-op). Leaving the no-op avoids shipping a broken/misleading prompt.
 - **GitHub issue**: PENDING.
 
-## DI-03 — FR-D5 attachment-chip rehydrate is a paired server+client slice (manifest not client-exposed; SprkChat has no restore seam) — task 036 escalated
+## DI-03 — FR-D5 attachment-chip rehydrate is a paired server+client slice (manifest not client-exposed; SprkChat has no restore seam) — task 036 escalated → **RESOLVED (owner: full slice; committed 0278396b6)**
 
+- **STATUS: RESOLVED 2026-08-06** — owner chose the full paired slice; implemented in task 036 (BFF restore-DTO `uploadedFiles` projection + display-only chip rehydrate through the host-owned `FilesAttachedIndicator`; the SprkChat `initialAttachments` seam was AVOIDED — its `onAttachmentsChanged` side-effect cascade was verified real — so `@spaarke/ui-components` is untouched). No GitHub issue needed (delivered).
+- **Original escalation record (for history):**
 - **Discovered**: 2026-08-06, task 036 (attachment chip rehydrate) — STOPPED at Step 1 and escalated (§6) rather than fabricate chip data; **no code changed**.
 - **Concrete failing behavior**: reopening a session that had a file attached does NOT show the file chip (Success Criterion 4). The POML assumed a trivial client-only rehydrate; two blockers make it a paired slice:
   1. **Server**: the `UploadedFiles` manifest (`StoredSession.UploadedFiles`, written by `SessionPersistenceService.UpdateUploadedFilesAsync`) is read server-side ONLY (to build agent tool context on message-send at `ChatEndpoints.cs:671`). It is **not projected into any client-facing restore GET** — traced `/restore` (`SessionRestoreResponse`/`RestoredSession`), `/tabs` (`SessionTabsResponse`), `/history` (`ChatHistoryResponse`): none carry it. So there is no wire contract to rehydrate from.
