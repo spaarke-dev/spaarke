@@ -1,0 +1,33 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.29/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.29",
+  "version": "0.0.1",
+  "id": "TODO-teams-app-guid",
+  "developer": {
+    "name": "Spaarke",
+    "websiteUrl": "https://TODO-host.example.net",
+    "privacyUrl": "https://TODO-host.example.net/privacy",
+    "termsOfUseUrl": "https://TODO-host.example.net/terms"
+  },
+  "name": { "short": "Spaarke Spike", "full": "Spaarke Teams Foundation Spike" },
+  "description": {
+    "short": "Throwaway FR-16 workforce-SSO → membership spike.",
+    "full": "Throwaway foundation spike validating Teams workforce SSO to the Spaarke BFF membership endpoint. Not for production."
+  },
+  "icons": { "color": "color.png", "outline": "outline.png" },
+  "accentColor": "#5B2E91",
+  "staticTabs": [
+    {
+      "entityId": "spaarkeSpikeTab",
+      "name": "Membership Spike",
+      "contentUrl": "https://TODO-host.example.net/index.html",
+      "scopes": ["personal"]
+    }
+  ],
+  "permissions": ["identity"],
+  "validDomains": ["TODO-host.example.net"],
+  "webApplicationInfo": {
+    "id": "1e40baad-XXXX-XXXX-XXXX-XXXXXXXXXXXX",
+    "resource": "api://TODO-host.example.net/1e40baad-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
+  }
+}

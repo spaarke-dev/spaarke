@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="057" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Reconciliation routing — category→team assignment (ADR-018 config) + per-team gridconfiguration views + DataGrid membershipFilter (no new entity)</title>
+    <phase>5 Pillar E — Reconciliation UI</phase>
+    <gate>deps 050 complete (grid + behavior.membershipFilter)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Config-driven routing + per-team savedquery views reusing existing DataGrid membershipFilter behavior; no new entity, no new write path; STANDARD per §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Applies an existing ADR-018 config pattern + existing membershipFilter behavior; fully specified — sonnet default.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches shared DataGrid membershipFilter behavior + Communication config + the triage assignment path (co-owned with r5 / dataset-grid-framework-r2). Serialize main-session; /conflict-check before the PR.</parallel-reason>
+    <deps>050</deps>
+    <tags>frontend, datagrid, communication, config, routing, pillar-e</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Route reconciliations to specific users/teams WITHOUT a new entity (the `sprk_communication` stays the
+    reconciliation unit — ADR-045). Two parts: (a) a `sprk_triagecategory → team/owner` ASSIGNMENT rule applied at
+    triage time (config-driven, ADR-018 `IOptionsMonitor` style — the `AutoFileOptions`/`AutoFileGate` pattern) that
+    sets the communication's owner/assigned-team; and (b) per-team FILTERED grid views — `sprk_gridconfiguration`
+    savedqueries scoped by category/owning-team, reusing the DataGrid `behavior.membershipFilter` (host-injected
+    membershipResolver). With a category→team map configured, a captured email of that category is assigned to the
+    mapped team, and that team's grid view lists only its reconciliations. No `sprk_reconciliation`-style entity.
+  </prompt>
+  <role>SPAARKE platform developer. ADR-018 operator-config (IOptionsMonitor) + the DataGrid membershipFilter behavior + Dataverse savedquery views. Follow ADRs strictly.</role>
+  <goal>A category→team assignment map (ADR-018 app setting) assigns each captured email of a mapped category to the mapped team at triage time; per-team sprk_gridconfiguration views + membershipFilter show each team only its reconciliations; no new entity is introduced.</goal>
+
+  <context>
+    <background>
+      FR-E7 (spec §107): route reconciliations to users/teams without a new entity. (a) category→team assignment rule =
+      config-driven ADR-018 (same pattern as FR-A1 footer config / `AutoFileOptions`), applied at triage time, setting
+      owner/assigned-team on the `sprk_communication`. (b) per-group filtered grid views = `sprk_gridconfiguration`
+      savedqueries scoped by category/owning-team, reusing the DataGrid `behavior.membershipFilter` (a host-injected
+      membershipResolver). Assignment-rule config is operator-managed (no new admin UI this task). Extend, not fork.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/ReconciliationGrid.tsx</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/per-team.gridconfiguration.json</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Configuration/AutoFileOptions.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">The reconciliation grid + behavior.membershipFilter seam the per-team views bind to.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-045">SCOPE: routing model. No `sprk_reconciliation`-style entity — the `sprk_communication` stays the unit; routing = assignment + filtered views only.</constraint>
+    <constraint source="ADR-018">SCOPE: the category→team map. Operator-managed app setting via IOptionsMonitor (the AutoFileOptions/AutoFileGate pattern); on/off + per-tenant override, no redeploy. Do NOT hard-code the map.</constraint>
+    <constraint source="ADR-024">SCOPE: assignment write. Assigning owner/team is an ownership set on the communication at triage time — do NOT introduce a second regarding/write path.</constraint>
+    <constraint source="ADR-012">SCOPE: filtered views. Use the DataGrid framework's own membershipFilter + savedquery views; do NOT hand-roll a bespoke client filter outside the framework.</constraint>
+    <constraint source="project">SCOPE: shared-lib PR. /conflict-check against dataset-grid-framework-r2 (membershipFilter) + r5 before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Category→team routing + filtered grid views</topic>
+    <files>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="ADR-018 operator config" location="src/server/api/Sprk.Bff.Api/Services/Communication/Configuration/AutoFileOptions.cs">Clone the IOptionsMonitor pattern for the category→team map (no redeploy, per-tenant override).</pattern>
+      <pattern name="membershipFilter" location="src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts">behavior.membershipFilter + a host-injected membershipResolver scope per-team savedquery views.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; declare RIGOR: STANDARD. Study AutoFileOptions (config pattern) + membershipFilter behavior.</step>
+    <step order="1">Define the category→team assignment map as an ADR-018 app setting (clone AutoFileOptions shape) and apply it at triage time to set owner/assigned-team on the communication.</step>
+    <step order="2">Author per-team.gridconfiguration.json savedqueries scoped by category/owning-team.</step>
+    <step order="3">Wire the reconciliation grid to behavior.membershipFilter with a host-injected membershipResolver so each team's view lists only its reconciliations.</step>
+    <step order="4">Add tests (mapped category → assigned team; team view shows only its rows; unmapped category → default/unassigned; no new entity).</step>
+    <step order="5">Update TASK-INDEX.md: set 057 status to ✅.</step>
+    <step order="6">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If category→team assignment appears to need a new entity or a second write path to be correct, STOP and escalate per CLAUDE.md §6.5 — FR-E7 is explicitly "extend, not fork" (assignment + filtered views only); a new entity is an ADR-045 decision.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Team view shows only its reconciliations">
+      <steps><step>Configure a category→team map; capture an email of that category; open the mapped team's grid view.</step></steps>
+      <expected>The email is assigned to the mapped team; the team's view lists only its reconciliations (membershipFilter), not other teams'.</expected>
+    </test>
+    <test name="Unmapped category">
+      <steps><step>Capture an email whose category has no team mapping.</step></steps>
+      <expected>It lands in the default/unassigned view (no crash); no forced mis-assignment.</expected>
+    </test>
+  </ui-tests>
+  <tools><tool name="npm">Build/test the shared lib.</tool><tool name="dotnet">Build/test the config binding if server-side.</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/per-team.gridconfiguration.json</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/__tests__/reconciliation-routing.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a configured category→team map, when an email of that category is captured, then it is assigned to the mapped team at triage time (owner/assigned-team set).</criterion>
+    <criterion testable="true">Given per-team views, when a team opens its grid, then it lists only that team's reconciliations via membershipFilter (framework mechanism, not a bespoke client filter).</criterion>
+    <criterion testable="true">The category→team map is an ADR-018 operator app setting (no redeploy, per-tenant override); it is not hard-coded.</criterion>
+    <criterion testable="true">No `sprk_reconciliation`-style entity is introduced (extend, not fork); no second regarding/write path.</criterion>
+    <criterion testable="true">Negative: an unmapped category routes to the default/unassigned view (no crash, no forced mis-assignment); all tests pass; builds green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-E7 (§107). Assignment-rule config = operator-managed, same ADR-018 pattern as FR-A1. Reuses DataGrid membershipFilter from task 050.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

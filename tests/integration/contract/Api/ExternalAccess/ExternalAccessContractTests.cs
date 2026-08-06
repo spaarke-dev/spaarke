@@ -390,10 +390,17 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
                 options.DefaultChallengeScheme = TestScheme;
             });
 
-            // Re-point the CiamExternal policy at the fake scheme (real "Ciam" JwtBearer needs live token infra).
+            // Re-point the external collaboration policies at the fake scheme (the real "Ciam" + workforce
+            // JwtBearer schemes need live token infra). ExternalCollaboration (task 025) is the dual-scheme
+            // policy now on /api/v1/external; CiamExternal is retained for reference.
             services.Configure<AuthorizationOptions>(options =>
             {
                 options.AddPolicy(AuthPolicies.CiamExternal, policy =>
+                {
+                    policy.AuthenticationSchemes = new[] { TestScheme };
+                    policy.RequireAuthenticatedUser();
+                });
+                options.AddPolicy(AuthPolicies.ExternalCollaboration, policy =>
                 {
                     policy.AuthenticationSchemes = new[] { TestScheme };
                     policy.RequireAuthenticatedUser();
@@ -484,6 +491,10 @@ internal sealed class ExternalTestAuthHandler : AuthenticationHandler<Authentica
             new Claim("oid", "00000000-0000-0000-0000-0000000000a1"),
             new Claim("tid", "00000000-0000-0000-0000-0000000000b1"),
             new Claim(ClaimTypes.NameIdentifier, "00000000-0000-0000-0000-0000000000a1"),
+            // teams-app-r1 task 025: the CallerPrincipalResolver selects the plane by token issuer.
+            // These external tests exercise the CIAM plane, so the fake token carries a *.ciamlogin.com
+            // issuer → CallerPrincipalResolver routes to the CIAM strategy (StubExternalParticipationService).
+            new Claim("iss", "https://spaarketest.ciamlogin.com/00000000-0000-0000-0000-0000000000c1/v2.0"),
         };
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, Scheme.Name));
         return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(principal, Scheme.Name)));

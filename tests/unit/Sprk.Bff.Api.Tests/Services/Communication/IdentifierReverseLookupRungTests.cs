@@ -18,6 +18,14 @@ namespace Sprk.Bff.Api.Tests.Services.Communication;
 /// drive the mapper to Ambiguous; a dirty catalog row is read defensively (no wrong-field query, no throw);
 /// cross-tenant numbering works with only catalog config; the per-message query count is gated + reported
 /// (NFR-08); and a lookup failure degrades to no-match (NFR-04).
+///
+/// <para><b>Batched seam (task 031, FR-D2 / NFR-08).</b> The rung now issues ONE
+/// <see cref="ICommunicationDataverseService.QueryRecordsByNumberFieldValuesAsync"/> In-filter query per
+/// distinct number field (≤7) instead of one per (field, value) pair (≈175). These tests exercise that
+/// batched seam and assert IDENTICAL RungMatch outcomes to the per-value path (the confidence policy,
+/// multi-entity cap, FR-12 demotion, and P1 substring guard are all unchanged) — the differential proof —
+/// plus the ≤7 query-count reduction. Returned records carry their number-field attribute so the rung
+/// re-associates each match to the token it matched.</para>
 /// </summary>
 public class IdentifierReverseLookupRungTests
 {
@@ -50,7 +58,16 @@ public class IdentifierReverseLookupRungTests
     private static DataverseEntity[] FullRoster() =>
         CoreSeven.Select(t => RosterRow(t.Entity, t.NumberField)).ToArray();
 
-    private static DataverseEntity Record(string entity, Guid id) => new(entity) { Id = id };
+    /// <summary>
+    /// A matched record carrying its number-field attribute set to <paramref name="value"/> — the batched
+    /// query SELECTs the number field, and the rung reads it to re-associate the record to its token.
+    /// </summary>
+    private static DataverseEntity Record(string entity, Guid id, string numberField, string value)
+    {
+        var e = new DataverseEntity(entity) { Id = id };
+        e[numberField] = value;
+        return e;
+    }
 
     private static NormalizedMessage Envelope(string? subject = null, string? body = null) =>
         new() { Direction = CommunicationDirection.Incoming, Subject = subject, BodyText = body };
@@ -58,11 +75,23 @@ public class IdentifierReverseLookupRungTests
     private void SetupRoster(params DataverseEntity[] rows) =>
         _dv.Setup(d => d.QueryAllRecordTypeRefsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(rows);
 
-    /// <summary>Default: every reverse lookup returns empty; individual tests override the matching one.</summary>
+    /// <summary>Default: every batched reverse lookup returns empty; individual tests override the matching one.</summary>
     private void SetupNoRecordMatches() =>
-        _dv.Setup(d => d.QueryRecordsByNumberFieldAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _dv.Setup(d => d.QueryRecordsByNumberFieldValuesAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<DataverseEntity>());
+
+    /// <summary>
+    /// Stub the batched query for (entity, numberField): when the queried value-set CONTAINS
+    /// <paramref name="value"/>, return one record per id, each carrying numberField == value (so the rung
+    /// re-associates it to that token). Registered AFTER <see cref="SetupNoRecordMatches"/> so it wins.
+    /// </summary>
+    private void SetupMatch(string entity, string numberField, string value, params Guid[] ids) =>
+        _dv.Setup(d => d.QueryRecordsByNumberFieldValuesAsync(
+                entity, numberField,
+                It.Is<IReadOnlyCollection<string>>(vs => vs.Contains(value, StringComparer.OrdinalIgnoreCase)),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ids.Select(id => Record(entity, id, numberField, value)).ToArray());
 
     // ── 1. Well-formed identifier for EACH of the 7 types → correct record + field at 0.90 ──────────
 
@@ -80,8 +109,7 @@ public class IdentifierReverseLookupRungTests
         SetupRoster(FullRoster());
         SetupNoRecordMatches();
         var recordId = Guid.NewGuid();
-        _dv.Setup(d => d.QueryRecordsByNumberFieldAsync(entity, numberField, token, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Record(entity, recordId) });
+        SetupMatch(entity, numberField, token, recordId);
 
         var matches = await Rung().EvaluateAsync(Envelope(subject: $"Re: {token} update"), new AssociationContext(), CancellationToken.None);
 
@@ -101,8 +129,7 @@ public class IdentifierReverseLookupRungTests
         SetupRoster(FullRoster());
         SetupNoRecordMatches();
         var matterId = Guid.NewGuid();
-        _dv.Setup(d => d.QueryRecordsByNumberFieldAsync("sprk_matter", "sprk_matternumber", "441482", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Record("sprk_matter", matterId) });
+        SetupMatch("sprk_matter", "sprk_matternumber", "441482", matterId);
 
         var matches = await Rung().EvaluateAsync(Envelope(body: "regarding 441482 please advise"), new AssociationContext(), CancellationToken.None);
 
@@ -121,10 +148,8 @@ public class IdentifierReverseLookupRungTests
         SetupNoRecordMatches();
         var projectId = Guid.NewGuid();
         var invoiceId = Guid.NewGuid();
-        _dv.Setup(d => d.QueryRecordsByNumberFieldAsync("sprk_project", "sprk_projectnumber", "SHRD-42", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Record("sprk_project", projectId) });
-        _dv.Setup(d => d.QueryRecordsByNumberFieldAsync("sprk_invoice", "sprk_invoicenumber", "SHRD-42", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Record("sprk_invoice", invoiceId) });
+        SetupMatch("sprk_project", "sprk_projectnumber", "SHRD-42", projectId);
+        SetupMatch("sprk_invoice", "sprk_invoicenumber", "SHRD-42", invoiceId);
 
         var matches = await Rung().EvaluateAsync(Envelope(subject: "SHRD-42"), new AssociationContext(), CancellationToken.None);
 
@@ -143,8 +168,7 @@ public class IdentifierReverseLookupRungTests
         SetupNoRecordMatches();
         var matterA = Guid.NewGuid();
         var matterB = Guid.NewGuid();
-        _dv.Setup(d => d.QueryRecordsByNumberFieldAsync("sprk_matter", "sprk_matternumber", "DUP-42", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Record("sprk_matter", matterA), Record("sprk_matter", matterB) });
+        SetupMatch("sprk_matter", "sprk_matternumber", "DUP-42", matterA, matterB);
 
         var matches = await Rung().EvaluateAsync(Envelope(subject: "DUP-42"), new AssociationContext(), CancellationToken.None);
 
@@ -166,8 +190,7 @@ public class IdentifierReverseLookupRungTests
         SetupRoster(FullRoster());
         SetupNoRecordMatches();
         var matterId = Guid.NewGuid();
-        _dv.Setup(d => d.QueryRecordsByNumberFieldAsync("sprk_matter", "sprk_matternumber", "MAT-123", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Record("sprk_matter", matterId) });
+        SetupMatch("sprk_matter", "sprk_matternumber", "MAT-123", matterId);
 
         var matches = await Rung().EvaluateAsync(
             Envelope(subject: "New matter", body: "This is a new litigation matter related to MAT-123"),
@@ -189,8 +212,7 @@ public class IdentifierReverseLookupRungTests
         SetupRoster(FullRoster());
         SetupNoRecordMatches();
         var matterId = Guid.NewGuid();
-        _dv.Setup(d => d.QueryRecordsByNumberFieldAsync("sprk_matter", "sprk_matternumber", "MAT-123", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Record("sprk_matter", matterId) });
+        SetupMatch("sprk_matter", "sprk_matternumber", "MAT-123", matterId);
 
         var matches = await Rung().EvaluateAsync(
             Envelope(subject: "Re: MAT-123", body: "Please file this correspondence onto MAT-123"),
@@ -214,12 +236,10 @@ public class IdentifierReverseLookupRungTests
         SetupRoster(FullRoster());
         SetupNoRecordMatches();
         var matterId = Guid.NewGuid();
-        _dv.Setup(d => d.QueryRecordsByNumberFieldAsync("sprk_matter", "sprk_matternumber", "REAL-2026-123456.02", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Record("sprk_matter", matterId) });
+        SetupMatch("sprk_matter", "sprk_matternumber", "REAL-2026-123456.02", matterId);
         // A trap: an invoice #123456 exists. If "123456" were still extracted, this would wrongly match.
         var invoiceId = Guid.NewGuid();
-        _dv.Setup(d => d.QueryRecordsByNumberFieldAsync("sprk_invoice", "sprk_invoicenumber", "123456", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Record("sprk_invoice", invoiceId) });
+        SetupMatch("sprk_invoice", "sprk_invoicenumber", "123456", invoiceId);
 
         var matches = await Rung().EvaluateAsync(
             Envelope(subject: "Fw: REAL-2026-123456.02 real estate", body: "Regarding REAL-2026-123456.02 please advise"),
@@ -229,9 +249,13 @@ public class IdentifierReverseLookupRungTests
         matches[0].Target!.Id.Should().Be(matterId);
         matches[0].RegardingFieldName.Should().Be("sprk_regardingmatter");
         // The inner digit-runs "123456" and "2026" must never have been queried against any number field.
-        _dv.Verify(d => d.QueryRecordsByNumberFieldAsync(It.IsAny<string>(), It.IsAny<string>(), "123456", It.IsAny<CancellationToken>()), Times.Never,
+        _dv.Verify(d => d.QueryRecordsByNumberFieldValuesAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.Is<IReadOnlyCollection<string>>(vs => vs.Contains("123456")), It.IsAny<CancellationToken>()), Times.Never,
             "the '123456' segment of the matter number must not collide with an unrelated invoice");
-        _dv.Verify(d => d.QueryRecordsByNumberFieldAsync(It.IsAny<string>(), It.IsAny<string>(), "2026", It.IsAny<CancellationToken>()), Times.Never);
+        _dv.Verify(d => d.QueryRecordsByNumberFieldValuesAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.Is<IReadOnlyCollection<string>>(vs => vs.Contains("2026")), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -242,8 +266,7 @@ public class IdentifierReverseLookupRungTests
         SetupRoster(FullRoster());
         SetupNoRecordMatches();
         var matterId = Guid.NewGuid();
-        _dv.Setup(d => d.QueryRecordsByNumberFieldAsync("sprk_matter", "sprk_matternumber", "778899", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Record("sprk_matter", matterId) });
+        SetupMatch("sprk_matter", "sprk_matternumber", "778899", matterId);
 
         var matches = await Rung().EvaluateAsync(Envelope(body: "please advise on 778899"), new AssociationContext(), CancellationToken.None);
 
@@ -264,8 +287,8 @@ public class IdentifierReverseLookupRungTests
         var matches = await Rung().EvaluateAsync(Envelope(subject: "Re: MAT-1 hello"), new AssociationContext(), CancellationToken.None);
 
         matches.Should().BeEmpty();
-        _dv.Verify(d => d.QueryRecordsByNumberFieldAsync(
-            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _dv.Verify(d => d.QueryRecordsByNumberFieldValuesAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // ── 5. Cross-tenant: a tenant-custom number field logical name works with ONLY catalog config ──
@@ -277,16 +300,17 @@ public class IdentifierReverseLookupRungTests
         SetupRoster(RosterRow("sprk_matter", "new_customnumber"));
         SetupNoRecordMatches();
         var matterId = Guid.NewGuid();
-        _dv.Setup(d => d.QueryRecordsByNumberFieldAsync("sprk_matter", "new_customnumber", "CUST-42", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Record("sprk_matter", matterId) });
+        SetupMatch("sprk_matter", "new_customnumber", "CUST-42", matterId);
 
         var matches = await Rung().EvaluateAsync(Envelope(subject: "CUST-42"), new AssociationContext(), CancellationToken.None);
 
         matches.Should().ContainSingle().Which.Target!.Id.Should().Be(matterId);
-        _dv.Verify(d => d.QueryRecordsByNumberFieldAsync("sprk_matter", "new_customnumber", "CUST-42", It.IsAny<CancellationToken>()), Times.Once);
+        _dv.Verify(d => d.QueryRecordsByNumberFieldValuesAsync(
+                "sprk_matter", "new_customnumber",
+                It.Is<IReadOnlyCollection<string>>(vs => vs.Contains("CUST-42")), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // ── 6. NFR-08: no reverse lookup when there are no candidate tokens; per-message query count reported ──
+    // ── 6. NFR-08 / FR-D2: batched — ≤1 query per distinct number field; per-message query count reported ──
 
     [Fact]
     public async Task Nfr08_NoCandidateTokens_NoRosterRead_NoLookups()
@@ -298,8 +322,8 @@ public class IdentifierReverseLookupRungTests
 
         matches.Should().BeEmpty();
         _dv.Verify(d => d.QueryAllRecordTypeRefsAsync(It.IsAny<CancellationToken>()), Times.Never);
-        _dv.Verify(d => d.QueryRecordsByNumberFieldAsync(
-            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _dv.Verify(d => d.QueryRecordsByNumberFieldValuesAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -311,12 +335,44 @@ public class IdentifierReverseLookupRungTests
 
         await Rung(logger).EvaluateAsync(Envelope(subject: "Re: MAT-123"), new AssociationContext(), CancellationToken.None);
 
-        // One token × 7 core types = 7 reverse-lookup queries (deduped by (field,value)).
-        _dv.Verify(d => d.QueryRecordsByNumberFieldAsync(
-            It.IsAny<string>(), It.IsAny<string>(), "MAT-123", It.IsAny<CancellationToken>()), Times.Exactly(7));
+        // Batched: ONE In-filter query per core type = 7 (was 7 single-value queries; unchanged count here,
+        // the reduction shows with MULTIPLE tokens — see Fr_D2 test below).
+        _dv.Verify(d => d.QueryRecordsByNumberFieldValuesAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()), Times.Exactly(7));
 
         var fired = logger.Entries.Should().ContainSingle(e => e.Field("QueryCount") != null).Subject;
         fired.Field("QueryCount").Should().Be(7);
+    }
+
+    [Fact]
+    public async Task FrD2_ManyDistinctTokens_StillAtMostSevenQueries_OnePerNumberField()
+    {
+        // FR-D2 core: N distinct tokens across the 7 core types issue ≤7 queries (one In-filter per number
+        // field carrying ALL distinct token values), NOT N×7. Three well-formed tokens matching three
+        // different types resolve correctly in exactly 7 batched queries (was up to 21 single-value calls).
+        SetupRoster(FullRoster());
+        SetupNoRecordMatches();
+        var matterId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var invoiceId = Guid.NewGuid();
+        SetupMatch("sprk_matter", "sprk_matternumber", "MAT-11", matterId);
+        SetupMatch("sprk_project", "sprk_projectnumber", "PRJT-22", projectId);
+        SetupMatch("sprk_invoice", "sprk_invoicenumber", "INV-33", invoiceId);
+
+        var matches = await Rung().EvaluateAsync(
+            Envelope(subject: "MAT-11 PRJT-22 INV-33"), new AssociationContext(), CancellationToken.None);
+
+        matches.Select(m => m.Target!.Id).Should().BeEquivalentTo(new[] { matterId, projectId, invoiceId });
+        matches.Should().OnlyContain(m => m.Confidence == 0.90, "each is a well-formed single-type match");
+
+        // Exactly one query per distinct number field (7), regardless of the 3 distinct tokens.
+        _dv.Verify(d => d.QueryRecordsByNumberFieldValuesAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()), Times.Exactly(7));
+        // The matter query carries ALL three distinct token values in ONE In-filter (not one query per value).
+        _dv.Verify(d => d.QueryRecordsByNumberFieldValuesAsync(
+            "sprk_matter", "sprk_matternumber",
+            It.Is<IReadOnlyCollection<string>>(vs => vs.Contains("MAT-11") && vs.Contains("PRJT-22") && vs.Contains("INV-33")),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ── 7. NFR-04: a lookup failure degrades to no-match, never propagates ─────────────────────────
@@ -325,8 +381,8 @@ public class IdentifierReverseLookupRungTests
     public async Task Nfr04_LookupThrows_DegradesToEmpty_NoPropagation()
     {
         SetupRoster(FullRoster());
-        _dv.Setup(d => d.QueryRecordsByNumberFieldAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _dv.Setup(d => d.QueryRecordsByNumberFieldValuesAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
 
         var act = async () => await Rung().EvaluateAsync(Envelope(subject: "Re: MAT-123"), new AssociationContext(), CancellationToken.None);

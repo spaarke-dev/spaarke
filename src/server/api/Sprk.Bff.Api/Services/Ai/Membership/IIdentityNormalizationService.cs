@@ -39,4 +39,30 @@ public interface IIdentityNormalizationService
     /// Dataverse returns. Cached for 10 minutes per ADR-009.
     /// </returns>
     Task<PersonIdentity> ResolveAsync(Guid systemUserId, CancellationToken ct);
+
+    /// <summary>
+    /// Resolves a workforce-authenticated caller (who has <b>no</b> systemuser row) to a
+    /// Dataverse <c>contact</c>, for the contact-only branch of the workforce→principal
+    /// resolver (ADR-028 Amendment A2 · teams-app-r1 FR-04). Reuses the existing AAD-oid→contact
+    /// cross-reference (<c>contact.azureactivedirectoryobjectid == oid</c>) and, when that field is
+    /// unpopulated for the caller, falls back to a <b>verified-email</b> match on
+    /// <c>contact.emailaddress1</c>. The email is taken from the already-validated workforce token
+    /// (tenant-verified by Entra), so no oid-binding / first-login hijack protection is required here
+    /// (that concern is specific to the CIAM external path in <c>ExternalParticipationService</c>).
+    /// </summary>
+    /// <param name="aadObjectId">The workforce token's AAD object id (<c>oid</c> claim). Primary key.</param>
+    /// <param name="verifiedEmail">
+    /// The caller's tenant-verified email/UPN from the workforce token; used only when the oid
+    /// cross-reference returns no contact. May be <c>null</c> (then only the oid path is attempted).
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// The resolved <c>contactid</c>, or <c>null</c> when the caller matches neither a contact by
+    /// oid nor by verified email. A single-path failure (query error) is isolated and yields
+    /// <c>null</c>, never an exception.
+    /// </returns>
+    Task<Guid?> TryResolveContactByWorkforceIdentityAsync(
+        Guid aadObjectId,
+        string? verifiedEmail,
+        CancellationToken ct);
 }

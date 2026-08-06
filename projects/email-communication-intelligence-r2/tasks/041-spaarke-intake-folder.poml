@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Real Spaarke intake folder — shared mailbox+folder AND add-in drag target feed the full pipeline, deduped (FR-B1)</title>
+    <phase>4 Pillar B — Unified filing surfaces</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF capture/subscription code (`Services/Communication/**`, .cs) that governs the full intelligence pipeline; tags include bff-api + communication. FULL per task-create Step 3.5.5 → code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified extension of existing subscription/account config on the established capture pipeline; Sonnet 5 default (CLAUDE.md §8.5). No cryptographic/race-critical logic (that is C1).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>PB-a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>BFF-only work — different surface from 040's client work — so the two run concurrently as wave PB-a. Touches the contended `Services/Communication/**` path: run `/conflict-check` against messaging-communication-app r1/r2/r3, spaarke-notification-spine-r1, email-communication-solution-r4 before the PR (hot-path coordination). No shared-lib or .claude/ writes.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, communication, office-addin</tags>
+    <estimated-effort>6-9 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement a real single "Spaarke" intake folder per FR-B1 via BOTH mechanisms: (1) a shared "Spaarke" mailbox+folder monitored by Graph subscriptions, and (2) the add-in drag target — each pushes a dropped email into the FULL intelligence pipeline (association + triage + provenance), identical to a mailbox-captured email, and deduped like any capture. Extend `GraphSubscriptionManager` + `CommunicationAccountService` for intake-folder/account config; the drop routes into the existing `IncomingCommunicationProcessor` capture path.</prompt>
+  <role>SPAARKE platform developer with Microsoft Graph webhooks + Communication capture-pipeline expertise. Follow ADR-045 (extend never fork), ADR-013 (AI facade), ADR-007 (SpeFileStore), ADR-027 (solution mgmt), and BFF §10 hygiene strictly.</role>
+  <goal>An email dragged into the shared Spaarke intake folder OR the add-in drag target produces a `sprk_communication` with association + triage + provenance identical to a mailbox-captured email, and is deduped like any capture (inheriting the FR-C1 message-id dedup once task 021 is merged). Intake account/folder is operator-configurable (ADR-018). BFF publish size ≤60 MB with delta reported.</goal>
+
+  <context>
+    <background>FR-B1 (spec §Requirements Pillar B) + plan Phase 4 B1. Owner decision: BOTH a folder and the add-in drag target. The intake mechanism must feed the same `IncomingCommunicationProcessor` so intake emails get the full engine output, not a lesser archive path. The spec §11 table lists "Intake-folder account/config" as extend `GraphSubscriptionManager` (monitors per-account single folder) + a shared intake account.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/GraphSubscriptionManager.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationAccountService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</file>
+      <file role="canonical-reference">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Communication/ (intake-folder config binding, if a new options type is required)</file>
+      <file role="test">tests/integration/seam/Communication/ (intake→pipeline parity seam test)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="021" status="pending">FR-C1 message-id dedup + Dataverse alternate key — intake emails inherit its dedup once merged (soft: intake wiring itself does not block on it, but the "already-filed → deduped" acceptance is validated with C1 present).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-045">Route intake into the EXISTING `IncomingCommunicationProcessor` capture path — do NOT fork a parallel capture pipeline or revive the node-graph engine; regarding writes stay via `RegardingFieldMap` (ADR-024) — scope: intake capture flow.</constraint>
+    <constraint source="ADR-013">Any AI/triage reached ONLY via `Services/Ai/PublicContracts/`; MUST NOT inject `IOpenAiClient`/`IPlaybookService`/node executors into intake code — scope: intake triage.</constraint>
+    <constraint source="ADR-018">Intake account + folder are operator-managed app settings via `IOptionsMonitor` (AutoFileOptions pattern), enable/disable + account/folder config with no redeploy — scope: intake config.</constraint>
+    <constraint source="ADR-010/032">Register any new intake service unconditionally; feature-gate via config using Null-Object/kill-switch, not conditional DI — scope: DI registration.</constraint>
+    <constraint source="NFR-04">Intake capture is best-effort/non-fatal — a failure in intake routing MUST NOT throw out of the send/capture path — scope: intake handler.</constraint>
+    <constraint source="project">BFF §10: state Placement Justification in the PR; run `dotnet publish -c Release` and report absolute compressed size + delta vs baseline (~45.9 MB excl PDBs); no new HIGH CVE; update tests in `tests/unit/Sprk.Bff.Api.Tests/` — scope: this BFF task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Graph mailbox/folder webhooks + Communication capture</topic>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/patterns/auth/graph-webhooks.md</file>
+      <file>docs/guides/COMMUNICATION-ADMIN-GUIDE.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Graph subscription per account/folder" location="src/server/api/Sprk.Bff.Api/Services/Communication/GraphSubscriptionManager.cs">Extend to subscribe the shared Spaarke intake account/folder; mirror the existing per-account single-folder monitoring shape.</pattern>
+      <pattern name="Capture pipeline entry" location="src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs">Intake drops MUST enter here so association+triage+provenance are identical to mailbox capture.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML + project CLAUDE.md + spec FR-B1 + BFF §10 constraints; declare RIGOR LEVEL FULL with reason per CLAUDE.md §8. Run `/conflict-check` on `Services/Communication/**`.</step>
+    <step order="1">Read `GraphSubscriptionManager.cs`, `CommunicationAccountService.cs`, `IncomingCommunicationProcessor.cs` to map how a monitored account/folder currently produces a `sprk_communication`.</step>
+    <step order="2">Add operator-managed intake config (ADR-018 IOptionsMonitor, AutoFileOptions clone): shared intake account + folder identity, enable/disable. Register unconditionally with Null-Object when disabled (ADR-010/032).</step>
+    <step order="3">Extend `GraphSubscriptionManager` to subscribe the shared Spaarke intake folder and route its notifications into `IncomingCommunicationProcessor` (full pipeline).</step>
+    <step order="4">Wire the add-in drag target (`useSaveFlow.ts` drop path) to the same intake entry so a dragged email flows through the identical capture path (not a lesser archive). Keep the client JSON call on authenticatedFetch (per 040).</step>
+    <step order="5">Ensure intake capture inherits the standard dedup (message-id, FR-C1/task 021) — do not add a second dedup mechanism.</step>
+    <step order="6">Add a seam test under `tests/integration/seam/Communication/` proving intake→pipeline parity (association + triage + provenance identical to mailbox capture) + a dedup case (already-filed intake email → single canonical row). Update `tests/unit/Sprk.Bff.Api.Tests/` as needed.</step>
+    <step order="7">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; record absolute compressed size + delta vs baseline; run `dotnet list package --vulnerable --include-transitive` (no new HIGH). Write Placement Justification into task notes for the PR.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a shared "Spaarke" intake mailbox cannot be provisioned/monitored in the target tenant (spec Assumption), STOP and escalate per CLAUDE.md §6 — this is a tenant/provisioning decision, not a code workaround. The add-in drag-target mechanism can ship independently; do NOT silently substitute a per-user folder for the shared intake account.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`GraphSubscriptionManager` already monitors a per-account single folder; `CommunicationAccountService` holds account config (grep: Services/Communication/*.cs). No shared "intake" account concept exists.</existing>
+    <extension>Yes — extend `GraphSubscriptionManager` + `CommunicationAccountService` with a shared-intake account/folder config; the drop routes into the existing `IncomingCommunicationProcessor`. Only genuinely-new surface is the intake config binding.</extension>
+    <cost-of-doing-nothing>Email not sent to an already-monitored mailbox never enters the engine — a firm cannot say "drop anything here and Spaarke files it," which is the core FR-B1 promise.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test the BFF; publish for size measurement.</tool>
+    <tool name="npm">Build the add-in drag-target wiring.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/GraphSubscriptionManager.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationAccountService.cs</output>
+    <output type="test">tests/integration/seam/Communication/ (intake parity + dedup seam test)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an email dragged into the shared Spaarke intake folder, when captured, then it produces a `sprk_communication` with association + triage + provenance identical to a mailbox-captured email.</criterion>
+    <criterion testable="true">Given the add-in drag target, when an email is dropped, then it enters the same `IncomingCommunicationProcessor` capture path and yields the same engine output.</criterion>
+    <criterion testable="true">Negative: dragging an already-filed email (same internet-message-id) is deduped to the single canonical row (inheriting FR-C1), not a second `sprk_communication`.</criterion>
+    <criterion testable="true">Given intake disabled via config, when set, then no intake subscription runs and the service registers via Null-Object (unconditional DI, ADR-010/032) — no redeploy needed to toggle.</criterion>
+    <criterion testable="true">Negative: an intake routing failure is non-fatal (NFR-04) — it does not throw out of the capture path.</criterion>
+    <criterion testable="true">BFF publish size ≤60 MB compressed with delta reported; no new HIGH CVE; tests in `tests/unit/Sprk.Bff.Api.Tests/` updated; seam test green.</criterion>
+    <criterion testable="true">All unit tests pass; build is green. TASK-INDEX.md shows this task ✅ and deviations recorded under notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-B1, Success Criterion 3 (drag-to-file and mailbox-capture identical output), Owner Clarification "Intake mechanism = Both". `/conflict-check` before the PR (contended Services/Communication path). Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

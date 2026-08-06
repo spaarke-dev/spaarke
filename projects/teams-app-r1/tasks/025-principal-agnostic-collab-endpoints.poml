@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="teams-app-r1">
+  <metadata>
+    <title>Principal-agnostic collaboration endpoints (Option A) — dual-scheme /api/v1/external for CIAM + workforce (R2 FR-22)</title>
+    <phase>2 BFF Workforce→Principal Resolver &amp; Membership (generalization)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth-critical change to SHARED collaboration endpoints; CIAM-regression risk (FR-15); the accessible-record-set enforcement is the core authorization boundary. code-review + adr-check mandatory.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security/auth-sensitive generalization of shared endpoints across two auth planes; high blast radius (CIAM regression) + becomes R2 platform foundation.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial BFF auth spine; shared ExternalAccess endpoints + AuthorizationModule.</parallel-reason>
+    <deps>020,021,022,030,051,065</deps>
+    <tags>bff-api, auth, endpoints</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Generalize the collaboration BFF endpoints to be PRINCIPAL-AGNOSTIC (R2 FR-22): dual-scheme the existing /api/v1/external/* read + download endpoints to accept BOTH the CIAM scheme AND the workforce default scheme, resolve a plane-agnostic caller via a reusable CallerPrincipalResolver (CIAM contact by oid | workforce systemuser/contact via task 020's WorkforcePrincipalResolver), compose the common accessible-record-set (task 022) and apply the module's Tier-2 record predicate. Preserve the CIAM path EXACTLY (FR-15). This unblocks the Teams live E2E (task 080) AND is R2 Phase-P1 delivered early (per projects/teams-app-r1/notes/teams-app-r1-coordination.md — R2's decision was "proceed with Option A; it is foundational, not throwaway; do NOT build the parallel /collab data set (Option B)").
+  </prompt>
+
+  <role>SPAARKE platform + authorization engineer. Expert in ASP.NET Core minimal-API multi-scheme auth (Microsoft.Identity.Web workforce scheme + a second CIAM JwtBearer scheme), the Spaarke external-access model (ExternalCallerContext, sprk_externalrecordaccess), the teams-app-r1 workforce plane (WorkforcePrincipalResolver 020, AccessibleRecordSetService 022, ContactStandingGrantReader 051), and two-tier authorization (module entitlement vs record scope). Follow ADRs + the R2 coordination guardrails strictly.</role>
+
+  <goal>
+    The /api/v1/external/* collaboration READ + DOWNLOAD endpoints (/me, /projects, /projects/{id}/documents, /projects/{id}/events|todos|contacts|organizations, document download) serve BOTH a CIAM external contact AND a workforce user (systemuser or contact) through ONE endpoint set, via a reusable CallerPrincipalResolver abstraction — never inline if(ciam)…else… . Each handler resolves caller → common accessible-record-set → applies the record predicate, so a workforce user sees ONLY their entitled records (NOT all projects). The CIAM path is byte-for-byte unchanged (regression-tested). /api/v1/collab is folded in or marked transitional. The live Teams tab loads records end-to-end. A coordination note is returned to R2 with the 8 required items.
+  </goal>
+
+  <context>
+    <background>
+      Integration finding (2026-08-05): the Teams host authenticates via workforce NAA end-to-end, but the SPA's data layer (src/client/external-spa/src/api/web-api-client.ts) targets /api/v1/external/* which is CIAM-scheme-only (RequireAuthorization(AuthPolicies.CiamExternal), ExternalAccessEndpoints.cs ~L50-52). Task 020 built the workforce plane as a SEPARATE /api/v1/collab group with only /me (WorkforcePrincipalContextEndpoint) + broker download (task 030) — not the full data surface — so the workforce host 401s on every data call. R2 (spaarke-SPA-external-access-platform-r2, FR-22 principal-agnostic endpoints + NFR-08 two-tier authz) decided Option A is the canonical pattern and this work is R2-P1 done early; Option B (parallel /collab data set + host-aware client) is rejected as throwaway.
+
+      PHASE-0 VERIFIED (no config blocker): the BFF workforce default scheme IS the 1e40baad app — deployed AzureAd__Audience = api://1e40baad-e065-4aea-a8d4-4b7ab273458c, AzureAd__ClientId = 1e40baad-… (SDAP-BFF-SPE-API). The Teams NAA token (aud api://1e40baad-…, v1) validates against the workforce scheme with NO config change. AuthorizationModule.cs registers: workforce = JwtBearerDefaults.AuthenticationScheme via AddMicrosoftIdentityWebApi(AzureAd); CIAM = AuthSchemes.Ciam via AddJwtBearer. AuthPolicies.CiamExternal pins /api/v1/external to the Ciam scheme.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalUserContextEndpoint.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/WorkforceCollaborationDownloadEndpoint.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</file>
+      <file role="output">projects/teams-app-r1/notes/r2-coordination-response.md</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>Two parallel entry points today: /api/v1/external/* (CIAM, full data) + /api/v1/collab/* (workforce, only /me + download). WorkforcePrincipalResolver (020), AccessibleRecordSetService (022), ExternalCallerContext (CIAM) all exist.</existing>
+    <extension>Yes — generalize the EXISTING /external endpoints + reuse AccessibleRecordSetService as the common set; the new CallerPrincipalResolver composes the two existing resolvers behind one abstraction. No new data endpoints, no new URL surface (R2 guardrail #4).</extension>
+    <cost-of-doing-nothing>Without this, the Teams workforce host authenticates but has zero data endpoints (401 on every /external call); the dual-host product cannot function, task 080 E2E cannot pass, and R2's FR-22 foundation is unbuilt.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="R2-guardrail-1">Build a single reusable CallerPrincipalResolver (ICallerPrincipalResolver + two strategies: CiamContactPrincipalStrategy resolving CIAM contact by oid/sprk_externalobjectid reusing ExternalCallerContext; WorkforcePrincipalStrategy wrapping task 020's WorkforcePrincipalResolver). Strategy is selected by WHICH SCHEME authenticated the request (inspect the authenticated identity's scheme/issuer), NOT by inline if(ciam)…else… in handlers. Handlers depend on the abstraction only. R2 lifts this component into the module framework as-is.</constraint>
+    <constraint source="R2-guardrail-2">Handlers become principal-agnostic: resolve caller → { principal, accessibleRecordSet } (via AccessibleRecordSetService, task 022) → apply the module's Tier-2 record predicate to that set. No CIAM-contact assumptions baked into handler bodies.</constraint>
+    <constraint source="R2-guardrail-3">Preserve the CIAM external path byte-for-byte in shape/behavior (R1 FR-15). Add a REGRESSION test asserting CIAM /me + /projects + /projects/{id}/documents + document-download responses are identical pre/post. NON-NEGOTIABLE.</constraint>
+    <constraint source="R2-guardrail-4">Keep the /api/v1/external path — do NOT rename, fork, or invest in new URL surface. The resolver + dual-scheme logic carries forward if R2 later relocates the path.</constraint>
+    <constraint source="R2-guardrail-5">Consolidate /api/v1/collab: fold its /me + download into the principal-agnostic /external surface (the SPA already calls /external/*), OR explicitly mark /collab transitional + slated for removal with a removal note. Do NOT leave two workforce entry points maintained indefinitely.</constraint>
+    <constraint source="R2-guardrail-6 / ADR-028 NFR-02">Workforce path stays broker-only / no-OBO: the workforce token authenticates to the BFF only; downstream SPE/Dataverse stays app-only. MUST NOT exchange the workforce token downstream.</constraint>
+    <constraint source="R2-guardrail-7">The workforce scheme audience acceptance is Phase-0-VERIFIED (AzureAd audience = api://1e40baad-…, matches the Teams token; v1 issuer handled by Microsoft.Identity.Web). Confirm this holds after the change and record it in the coordination note. No AzureAd audience config change is expected.</constraint>
+    <constraint source="R2-NFR-08 (TWO-TIER — the priority item)">The workforce Tier-2 RECORD-SCOPE predicate MUST be a real, enforced predicate — a workforce user MUST NOT see all secure projects merely by authenticating. It is the accessible-record-set from AccessibleRecordSetService: systemuser → ADR-034 membership only; contact → sprk_externalrecordaccess grants ∪ standing-grant runtime membership (task 051). VERIFY the generalized /projects (and every read) handler filters by this set for a workforce caller, and DOCUMENT the exact predicate + code path in the coordination note. If any path today would grant a workforce user all projects, STOP and escalate — do not ship it.</constraint>
+    <constraint source="ADR-029">Publish size ≤60 MB compressed (baseline ~49.63 MB); report the delta; no M365 Agents SDK/Bot packages ADDED by this task (the pre-existing Microsoft.Agents.* from master are not this task's). Run /conflict-check before the BFF deploy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Principal-agnostic dual-scheme collaboration endpoints (R2 FR-22)</topic>
+    <files>
+      <file>projects/teams-app-r1/notes/teams-app-r1-coordination.md</file>
+      <file>projects/teams-app-r1/notes/spa-v2-handoff-workforce-endpoint-gap.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Multi-scheme policy" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs">Workforce (JwtBearerDefaults) + Ciam schemes already registered; a policy can set AuthenticationSchemes to accept BOTH so either token authenticates the /external group.</pattern>
+      <pattern name="Common accessible-record-set" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs">Already composes per principal (systemuser membership; contact grants ∪ standing) — this is R2's common accessible-record-set; reuse it as the Tier-2 source for BOTH planes.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">PHASE 0 (already done, re-confirm): workforce scheme accepts api://1e40baad-… — verify no AzureAd audience change is needed.</step>
+    <step order="2">PHASE 1 — CallerPrincipalResolver: define ICallerPrincipalResolver returning a plane-agnostic CallerPrincipal (kind, systemUserId?, contactId?, oid, tenantId, plane). Implement CiamContactPrincipalStrategy (reuse ExternalCallerContext CIAM resolution) + WorkforcePrincipalStrategy (wrap WorkforcePrincipalResolver). Select strategy by the authenticated scheme. Register in ExternalAccessModule DI.</step>
+    <step order="3">PHASE 2 — Dual-scheme /api/v1/external: change the group auth to accept BOTH Ciam + workforce schemes (a policy with both AuthenticationSchemes, or per-endpoint). Refactor the read + download handlers to resolve caller via CallerPrincipalResolver → AccessibleRecordSetService → record predicate. Do NOT change the URL. Do NOT inline plane branching in handlers.</step>
+    <step order="4">PHASE 3 — Workforce Tier-2 record-scope: verify each read handler filters by the accessible-record-set for a workforce caller (systemuser→membership; contact→grants∪standing). Confirm a workforce user does NOT get all projects. Capture the exact predicate + code path for the coordination note.</step>
+    <step order="5">PHASE 4 — Consolidate /api/v1/collab: fold /me + download into /external (SPA calls /external/*), or mark /collab transitional with a removal note. No two workforce entry points.</step>
+    <step order="6">PHASE 5 — Tests: (a) CIAM regression — /me + /projects + /documents + download identical pre/post (guardrail #3); (b) workforce — systemuser sees only membership projects, contact sees grants, non-member record → 403/omitted; (c) plane selection — Ciam token → CIAM strategy, workforce token → workforce strategy, no cross-selection.</step>
+    <step order="7">PHASE 6 — dotnet build + dotnet test; publish-size report (≤60 MB); /conflict-check; deploy BFF to spaarke-bff-dev via scripts/Deploy-BffApi.ps1 (pwsh, hash-verify + health-check); smoke-test /api/v1/external/me unauthenticated = 401 (route registered).</step>
+    <step order="8">PHASE 7 — write projects/teams-app-r1/notes/r2-coordination-response.md with the 8 items R2 requested (files touched; CallerPrincipalResolver shape + where a 3rd plane plugs in; workforce Tier-2 predicate + code path; CIAM regression evidence; v1 api://1e40baad audience confirmation; Entra recipe applied; /collab disposition; deviations).</step>
+    <step order="9">Update TASK-INDEX.md: set 025 ✅. Then the operator re-runs the live Teams E2E (task 080).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If dual-scheming /external cannot preserve the CIAM path byte-for-byte (a shared code path forces a CIAM behavior change), OR if the only way to make a read handler work for workforce is to grant all projects (violating NFR-08 Tier-2), STOP and escalate per root CLAUDE.md §6 / §6.5 — do not ship a CIAM regression or an over-broad workforce scope.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test the BFF; publish-size; deploy via Deploy-BffApi.ps1</tool>
+    <tool name="terminal">Run shell commands, /conflict-check, pwsh deploy</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ + tests/integration/** (CIAM regression + workforce + plane-selection)</output>
+    <output type="docs">projects/teams-app-r1/notes/r2-coordination-response.md</output>
+    <output type="deploy">Azure App Service spaarke-bff-dev (Sprk.Bff.Api)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A CallerPrincipalResolver abstraction exists with two strategies (CIAM contact, workforce), selected by the authenticated scheme; handlers depend on it, with NO inline if(ciam)…else… plane branching.</criterion>
+    <criterion testable="true">The /api/v1/external/* read + download endpoints authenticate BOTH a CIAM contact token AND a workforce token; the URL path is unchanged.</criterion>
+    <criterion testable="true">A workforce systemuser sees ONLY their ADR-034 membership projects (NOT all projects); a workforce contact sees only grants ∪ standing-grant records; a non-member record returns 403/omitted — verified by test.</criterion>
+    <criterion testable="true">The CIAM external path is byte-for-byte unchanged: a regression test asserts CIAM /me + /projects + /documents + download responses identical pre/post.</criterion>
+    <criterion testable="true">The workforce scheme validates the api://1e40baad-… (v1) audience with no AzureAd config change; confirmed + recorded.</criterion>
+    <criterion testable="true">/api/v1/collab is folded into /external OR explicitly marked transitional with a removal note (no two maintained workforce entry points).</criterion>
+    <criterion testable="true">BFF builds, tests pass, publish ≤60 MB, deployed to spaarke-bff-dev; the coordination note r2-coordination-response.md exists with all 8 R2 items.</criterion>
+    <criterion testable="true">Post-deploy, the live Teams tab loads the workspace + records for a workforce user (task 080 unblocked) — operator-verified in a live Teams client.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Net-new scope beyond the original minimal /collab plane — explicitly R2 Phase-P1 delivered early per the R2 coordination decision (notes/teams-app-r1-coordination.md). Do NOT build Option B (parallel /collab data set + host-aware client). The workforce Tier-2 record-scope predicate is the single most important thing to get right + document (R2 NFR-08). Entra config (multitenant, access_as_user, Teams client pre-auth 1fec8e78 + 5e3ce6c0, brk-multihub://green-dune-… SPA redirect, CSP framing) is ALREADY APPLIED to app 1e40baad on spaarkedev1/a221a95e — see notes/spa-v2-handoff-workforce-endpoint-gap.md §"Entra recipe". This task blocks task 080 (E2E) and the final wrap-up (090).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all &lt;knowledge&gt;&lt;files&gt; (esp. notes/teams-app-r1-coordination.md — the binding R2 guardrails). FULL-rigor: code-review + adr-check at Step 9.5. This is main-session or opus-subagent; auth-critical + shared endpoints — verify the CIAM regression test passes before deploying.</protocol>
+  </execution>
+</task>

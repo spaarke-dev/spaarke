@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Deploy Pillar D BFF changes — publish-size ≤60 MB + delta, CVE scan, deploy to spaarke-bff-dev</title>
+    <phase>3 Pillar D — R1 carry-overs</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment task (no new code authored) gated on merged Pillar D BFF work; prescriptive verification + deploy sequence.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runs an existing deploy skill + records verification metrics; no design judgment.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploys the shared BFF App Service — a serialized environment operation; must follow the code tasks it depends on.</parallel-reason>
+    <deps>030,031,034</deps>
+    <tags>bff-api,deploy</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>After the Pillar D BFF code tasks (030 RAG grounding, 031 batched query, 034 Job C apply) are merged, publish and deploy the BFF to spaarke-bff-dev via the bff-deploy skill, verifying compressed publish size ≤60 MB with the delta vs baseline and no new HIGH CVE.</prompt>
+  <role>SPAARKE platform developer. BFF .NET 8 deployment, Azure App Service, §10 BFF hygiene gates. Follow ADRs strictly.</role>
+  <goal>The Pillar D BFF changes are deployed to spaarke-bff-dev; the publish-size report (absolute compressed + delta vs ~49.63 MB incl-PDBs baseline) and the CVE scan result are recorded in task notes; the /proposals apply family + create-task endpoint respond in the deployed environment (smoke check).</goal>
+
+  <context>
+    <background>Pillar D adds/edits BFF surface (RAG index tagging, batched rung query, Job C create-task apply endpoint + queue-feed kind). Per CLAUDE.md §10 every BFF-touching change reports publish size + CVE; this task performs the consolidated Pillar-D deploy + verification once the code is merged.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file role="new">projects/email-communication-intelligence-r2/notes/035-pillar-d-deploy-report.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">RAG grounding fix (ParentEntity tagging).</dependency>
+      <dependency task="031" status="pending">Batched identifier query.</dependency>
+      <dependency task="034" status="pending">Job C create-task apply endpoint + queue-feed kind.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE = §10 BFF hygiene gate: run dotnet publish -c Release to deploy/api-publish/, measure compressed output, report absolute + delta vs ~49.63 MB baseline; ≥+5 MB single delta needs justification, ≥55 MB cumulative → architecture review, ≥60 MB → HARD STOP (do not deploy).</constraint>
+    <constraint source="project">SCOPE = CVE gate: dotnet list package --vulnerable --include-transitive MUST show no new HIGH-severity CVE vs baseline; a new HIGH blocks deploy.</constraint>
+    <constraint source="ADR-027">SCOPE = environment: deploy to spaarke-bff-dev; if task 033's allow-list seed is required for the smoke check, confirm it is present in the target environment first.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF deploy + publish-size/CVE verification</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+    </files>
+    <patterns>
+      <pattern name="bff-deploy" location=".claude/skills/bff-deploy/SKILL.md">The canonical BFF publish + deploy sequence to Azure App Service.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Confirm 030/031/034 are merged to the working branch. Declare RIGOR LEVEL: STANDARD with reason. Run /conflict-check before deploying shared BFF.</step>
+    <step order="1">Run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/; measure compressed size; compute delta vs ~49.63 MB incl-PDBs baseline (state the PDB convention). HARD STOP if ≥60 MB.</step>
+    <step order="2">Run dotnet list package --vulnerable --include-transitive; confirm no new HIGH CVE vs baseline. Block on a new HIGH.</step>
+    <step order="3">Deploy to spaarke-bff-dev via the bff-deploy skill.</step>
+    <step order="4">Smoke check: the /proposals/{reviewLogId}/apply family + the new create-task apply endpoint respond (auth-gated) in the deployed environment; a matter-scoped RAG query returns tagged correspondence (FR-D1).</step>
+    <step order="5">Record the publish-size report + CVE result + smoke result in notes/035-pillar-d-deploy-report.md; cite it for the PR.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If compressed publish size ≥60 MB, or a new HIGH-severity CVE appears, STOP and escalate per CLAUDE.md §6/§10 (HARD STOP) rather than deploying.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Publish + CVE scan the BFF.</tool>
+    <tool name="bff-deploy">Deploy to spaarke-bff-dev.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/email-communication-intelligence-r2/notes/035-pillar-d-deploy-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given 030/031/034 merged, when the BFF is published, then compressed size is ≤60 MB and the absolute + delta vs baseline is recorded.</criterion>
+    <criterion testable="true">The CVE scan shows no new HIGH-severity vulnerability vs baseline.</criterion>
+    <criterion testable="true">The BFF deploys to spaarke-bff-dev and the apply-family + create-task apply endpoints respond (auth-gated) in a smoke check.</criterion>
+    <criterion testable="true">Negative: a ≥60 MB publish or a new HIGH CVE HARD-STOPS the deploy (not shipped) and is escalated.</criterion>
+    <criterion testable="true">The deploy report (size + delta + CVE + smoke) is recorded in notes/ and cited in the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>Consolidated Pillar-D deploy. Baseline ~49.63 MB incl PDBs / ~45.87 MB excl (CLAUDE.md §10, 2026-07-08). Depends on 030/031/034; 032 (tests) + 033 (seed) do not gate the BFF binary but 033 may be needed for the smoke check. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

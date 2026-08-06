@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Project wrap-up — test-diet, lessons-learned, doc-drift, coordination + INDEX, final publish-size</title>
+    <phase>6 Wrap-up</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Project-close reconciliation task. Per CLAUDE.md §7 project-close gate + §8 TEST-MODIFYING override, `/test-diet` runs here and may emit `git rm`/`git mv` for tests — so the test-reconciliation portion is treated with test-modifying rigor. Otherwise doc/report work is STANDARD. Declared STANDARD with the test-diet gate honored explicitly.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reconciliation + reporting against machine-verifiable end-states (publish size, test classification, doc drift); Sonnet 5 default (CLAUDE.md §8.5).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Runs only after all other tasks complete; reconciles whole-project state (tests, docs, coordination contract, INDEX) — must be sequential main-session, not parallelized.</parallel-reason>
+    <deps>003, 004</deps>
+    <tags>wrap-up, testing, docs</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close out the project: run `/test-diet` to reconcile tests added/modified during R2 against the ADR-038 build-vs-maintain classifier; write `notes/lessons-learned.md`; run the doc-drift audit; update the r5 coordination contract + `projects/INDEX.md`; produce the final BFF publish-size report (≤60 MB compressed) with delta vs baseline; and flip the project README status to Complete. This is the §7 project-close gate — do not skip `/test-diet`.</prompt>
+  <role>SPAARKE platform developer performing project close-out. Follow ADR-038 (test build-vs-maintain), CLAUDE.md §7 (project-close test-diet gate) and §10 (BFF publish-size) strictly.</role>
+  <goal>All wrap-up artifacts exist and the project is marked complete: `notes/test-diet-report.md` (from `/test-diet`), `notes/lessons-learned.md`, a doc-drift audit result, the updated r5 coordination note, an updated `projects/INDEX.md` row, a final publish-size report line in notes, and the README status flipped to Complete with TASK-INDEX fully ✅.</goal>
+
+  <context>
+    <background>Per CLAUDE.md §7, when the just-completed task is a `090-wrapup-*` task, `task-execute` Step 11 invokes `/test-diet` BEFORE marking the project complete (ADR-038 §7 build-vs-maintain classifier). The project touches heavily-contended shared surfaces (Pillar E), so the r5 coordination contract (`projects/email-communication-solution-r5/notes/email-intelligence-r1-coordination.md`, FR-E6) and `projects/INDEX.md` hot-path registry must be reconciled at close. BFF-touching → final publish-size report per §10 (ceiling ≤60 MB; baseline ~45.9 MB excl PDBs).</background>
+    <relevant-files>
+      <file role="modify">projects/email-communication-intelligence-r2/README.md</file>
+      <file role="modify">projects/email-communication-intelligence-r2/tasks/TASK-INDEX.md</file>
+      <file role="modify">projects/INDEX.md</file>
+      <file role="modify">projects/email-communication-solution-r5/notes/email-intelligence-r1-coordination.md</file>
+      <file role="new">projects/email-communication-intelligence-r2/notes/lessons-learned.md</file>
+      <file role="new">projects/email-communication-intelligence-r2/notes/test-diet-report.md</file>
+    </relevant-files>
+    <dependencies>
+      <!-- Tasks 001 (SPE spike 1) + 002 (SPE spike 2) removed: spikes retired by the 2026-08-05 gate-after-write + Tier-2-deferred owner decisions; lessons-learned references those decisions instead. -->
+      <dependency task="003" status="pending">R1 close-out + golden fixtures — referenced in test-diet reconciliation.</dependency>
+      <dependency task="004" status="pending">Entra NAA registration verified — referenced in lessons-learned/runbook status.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">`/test-diet` MUST classify every test added/modified during R2 as MAINTAIN (keep at KEEP path) vs SCAFFOLDING (delete) vs AMBIGUOUS (reviewer judgment); the skill is read-only and emits `git rm`/`git mv` for the reviewer — do NOT auto-execute deletions — scope: test reconciliation (CLAUDE.md §7).</constraint>
+    <constraint source="project">The final publish-size report MUST state absolute compressed size + delta vs the ~45.9 MB (excl PDBs) baseline and the PDB convention; ≤60 MB is a HARD ceiling — scope: BFF §10 close-out obligation.</constraint>
+    <constraint source="project">The r5 coordination note MUST record R2 ownership of the Pillar E reconciliation grid + reconcile modals (states D/E/F + Exceptions Queue) per FR-E6 — scope: cross-worktree coordination.</constraint>
+    <constraint source="project">Run `/conflict-check` if the coordination-note or any shared-surface update is committed as part of wrap-up — scope: shared-surface hygiene (project CLAUDE.md hot-path rule).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project close-out / test reconciliation / BFF publish-size</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/INDEX.md</file>
+    </files>
+    <patterns>
+      <pattern name="Project-close test-diet gate" location="docs/adr/ADR-038-testing-strategy.md">Reconcile MAINTAIN vs SCAFFOLDING tests at close; output `notes/test-diet-report.md`; skipping is a HARD WARNING.</pattern>
+      <pattern name="BFF publish-size verification" location=".claude/constraints/azure-deployment.md">`dotnet publish -c Release` → measure compressed → report absolute + delta vs baseline.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Confirm all prior tasks are ✅ in TASK-INDEX; load this POML + project CLAUDE.md + ADR-038 §7 + §10; declare RIGOR LEVEL STANDARD with the test-diet gate honored.</step>
+    <step order="1">Invoke `/test-diet` — classify every test added/modified during R2 (incl. the FR-D3 golden suite) as MAINTAIN/SCAFFOLDING/AMBIGUOUS; write `notes/test-diet-report.md`; surface the emitted `git rm`/`git mv` commands for reviewer action (do NOT auto-execute).</step>
+    <step order="2">Run the doc-drift audit (`doc-drift-audit` skill) over the R2-touched docs/.claude surfaces; record findings + fixes (or a clean result).</step>
+    <step order="3">Produce the final BFF publish-size report: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, measure compressed output, record absolute + delta vs ~45.9 MB (excl PDBs) baseline + the PDB convention; verify ≤60 MB and no new HIGH CVE (`dotnet list package --vulnerable --include-transitive`).</step>
+    <step order="4">Update the r5 coordination note (`projects/email-communication-solution-r5/notes/email-intelligence-r1-coordination.md`) to record R2 ownership of the Pillar E surfaces (FR-E6); run `/conflict-check` before committing the shared-surface update.</step>
+    <step order="5">Update `projects/INDEX.md` — mark the R2 worktree's status at close (retain the hot-path declaration row per the registry convention).</step>
+    <step order="6">Write `notes/lessons-learned.md` — the gate-after-write + Tier-2-deferred decisions (2026-08-05, spikes retired), dedup/token/Pillar-E decisions, shared-surface coordination notes, and anything for a future R3.</step>
+    <step order="7">Flip `projects/email-communication-intelligence-r2/README.md` status → Complete; ensure `current-task.md` is reset to "none" (project complete).</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ (and confirm all other rows are ✅).</step>
+    <step order="9">Document any deviation (e.g., a HARD-WARNING test-diet skip rationale, or a publish-size escalation) in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the final publish-size is ≥55 MB cumulative (architecture review) or ≥60 MB (HARD STOP per §10), or `/test-diet` flags AMBIGUOUS tests that need reviewer judgment, or a new HIGH-severity CVE appears, STOP and escalate per CLAUDE.md §6 / §10 rather than marking the project complete — the close-out gate is not satisfied until these are resolved or explicitly signed off.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Publish + size measurement + CVE scan.</tool>
+    <tool name="bash">Measure compressed publish output; git status for test reconciliation.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/email-communication-intelligence-r2/notes/test-diet-report.md</output>
+    <output type="doc">projects/email-communication-intelligence-r2/notes/lessons-learned.md</output>
+    <output type="doc">projects/email-communication-solution-r5/notes/email-intelligence-r1-coordination.md</output>
+    <output type="doc">projects/INDEX.md</output>
+    <output type="doc">projects/email-communication-intelligence-r2/README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the tests added/modified during R2, when `/test-diet` runs, then `notes/test-diet-report.md` exists classifying each as MAINTAIN/SCAFFOLDING/AMBIGUOUS with emitted (not auto-executed) `git rm`/`git mv` commands.</criterion>
+    <criterion testable="true">Given the BFF build at close, when publish-size is measured, then the report states absolute compressed size + delta vs the ~45.9 MB baseline (PDB convention noted) and confirms ≤60 MB with no new HIGH CVE.</criterion>
+    <criterion testable="true">Given FR-E6, when the r5 coordination note is updated, then it records R2 ownership of the Pillar E reconciliation grid + reconcile modals, and `/conflict-check` was run before the shared-surface commit.</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` exists; `projects/INDEX.md` is updated; README status is Complete; TASK-INDEX shows all rows ✅; `current-task.md` reset to none.</criterion>
+    <criterion testable="true">Negative: if publish-size breaches the ≥55/≥60 MB thresholds, or test-diet leaves AMBIGUOUS items, or a new HIGH CVE appears, the project is NOT marked complete — the escalation trigger fires and the blocker is recorded under notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: plan.md Phase 6; CLAUDE.md §7 project-close test-diet gate; §10 BFF publish-size; FR-E6 r5 coordination. Deps = all prior tasks. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -56,6 +56,56 @@ public interface IMembershipResolverService
         string entityType,
         MembershipResolveOptions? options,
         CancellationToken ct);
+
+    /// <summary>
+    /// Contact-anchored membership entry point (teams-app-r1 task 021, ADR-034
+    /// Path C additive reuse). Given a bare <paramref name="contactId"/> — with
+    /// NO systemuser — builds a contact-only <see cref="PersonIdentity"/> and
+    /// resolves the same membership record set the systemuser path returns, but
+    /// <b>filtered to the access-conferring role allowlist</b> (spec.md NFR-05):
+    /// only <c>contact</c>-target lookups whose logical name matches the
+    /// configured convention (default <c>sprk_assigned*</c>, via
+    /// <see cref="IMembershipFieldDiscoveryService"/> metadata discovery) minus a
+    /// config/data-driven exclusion list. Adverse/informational contact fields
+    /// (opposing-counsel lookups) and polymorphic <c>sprk_regardingrecord*</c>
+    /// fields NEVER confer access. Reuses the same discovery + FetchXml engine as
+    /// <see cref="ResolveAsync"/> — it does not fork the resolution pipeline.
+    /// <para>
+    /// This entry point exists for non-systemuser workforce users (Owner
+    /// Clarifications "Option B") whose principal (task 020) carries a contactId
+    /// but no systemuserid. Transitive expansion (<c>includeRelated</c>) is not
+    /// applied on this path; <see cref="MembershipResponse.RelatedByRole"/> is
+    /// always <c>null</c>.
+    /// </para>
+    /// </summary>
+    /// <param name="contactId">
+    /// Dataverse <c>contactid</c>. MUST NOT be <see cref="Guid.Empty"/>.
+    /// </param>
+    /// <param name="entityType">
+    /// Target entity logical name (e.g., <c>sprk_project</c>). MUST NOT be
+    /// null/empty/whitespace.
+    /// </param>
+    /// <param name="options">
+    /// Optional role/identity-type filters + paging, applied AFTER the
+    /// access-conferring allowlist filter. <c>null</c> means: all allowlisted
+    /// contact roles, default limit, no continuation.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// A non-null <see cref="MembershipResponse"/> whose <c>PersonIdentity</c>
+    /// carries the supplied <c>ContactId</c> and an empty <c>SystemUserId</c>.
+    /// Contacts with no allowlisted role membership return empty <c>ids</c> +
+    /// <c>count: 0</c>.
+    /// </returns>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="contactId"/> is <see cref="Guid.Empty"/>, or
+    /// <paramref name="entityType"/> is null/empty/whitespace.
+    /// </exception>
+    Task<MembershipResponse> ResolveByContactAsync(
+        Guid contactId,
+        string entityType,
+        MembershipResolveOptions? options,
+        CancellationToken ct);
 }
 
 /// <summary>

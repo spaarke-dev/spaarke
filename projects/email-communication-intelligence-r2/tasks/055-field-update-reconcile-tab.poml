@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Field-update reconcile tab (Job B) — FormModal current→matched, editable-before-Accept, apply under audit (NFR-10 gated)</title>
+    <phase>5 Pillar E — Reconciliation UI</phase>
+    <gate>deps 052,053 complete (confirmed association + reader/citation shell)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>User-facing write surface (.tsx) that POSTs an apply-under-audit; correctness-critical (writes a proposed value onto a record — NFR-10 gating); §8 FULL.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>FormModal preset + queue-feed consumption + a known apply endpoint; fully specified — sonnet default.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes shared Spaarke.Communication.Components (r5-owned). Serialize main-session; /conflict-check before the PR.</parallel-reason>
+    <deps>052,053</deps>
+    <tags>frontend, fluent-ui, communication, proposals, pillar-e</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build the Fields reconcile tab (Job B) as a `SprkModal` `FormModal` preset. For the CONFIRMED record only (NFR-10),
+    list that record's Job B proposals from the queue-feed — each showing CURRENT value → MATCHED value, its clickable
+    citation (jumps to the reader via task 054), and confidence — with Accept / Reject / Hold. The matched value is
+    EDITABLE before Accept (the reviewer may override the AI's value and write their own). Accept →
+    `POST /api/communications/proposals/{reviewLogId}/apply` under audit; Reject → terminal-dismiss; Hold → leave
+    `Proposed`. The tab consumes `queue-feed?regarding={type}:{guid}` for the confirmed record and RE-SCOPES (reloads)
+    when the association is overridden. The same tab also mounts on the email record form (dual-use).
+  </prompt>
+  <role>SPAARKE platform developer. SprkModal FormModal preset + the communication proposals queue-feed/apply contract. Follow ADRs strictly.</role>
+  <goal>A Fields tab (FormModal) lists the confirmed record's Job B proposals current→matched with clickable citations; the matched value is editable; Accept POSTs apply under audit; Reject/Hold follow the state map; the tab is gated on a confirmed association and re-scopes on override; mounts on grid shell AND email record form.</goal>
+
+  <context>
+    <background>
+      FR-E4 (spec §104) + NFR-10 (§119): proposals are downstream of the confirmed association — actionable ONLY once
+      Related-to is confirmed (task 052), and re-selecting a different record RE-SCOPES the applicable proposals; a
+      proposal is never applied against an unconfirmed/overridden record. Data: `queue-feed?regarding={type}:{guid}`
+      (`QueueFeedModels.cs`); apply: `POST /api/communications/proposals/{reviewLogId}/apply` (Job B apply). Each
+      proposal shows current→matched + a clickable citation (task 054) + confidence; the matched value is editable
+      before Accept. Reject = terminal-dismiss; Hold = leave `Proposed`. UI = the `FormModal` preset (ADR-050;
+      Cancel-left/Save-right, explicit dismiss). Dual-use: also mounts on the email record form (ADR-022).
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/FormModal.tsx</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Models/QueueFeedModels.cs</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationBrowseShell/ReconciliationBrowseShell.tsx</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/FieldUpdateReconcileTab.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="052" status="pending">The confirmed association (NFR-10 precondition) + re-scope signal on override.</dependency>
+      <dependency task="053" status="pending">The reader/browse shell + right-pane tab slot; citations click through to task 054's anchoring.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-050">SCOPE: the tab modal. Use the SprkModal FormModal preset (Cancel-left, Save/Accept-right, explicit dismiss); do NOT hand-roll a form dialog.</constraint>
+    <constraint source="NFR-10">SCOPE: gating. Fields are actionable ONLY for a confirmed record; on association override the proposal list RE-SCOPES (reloads for the new record); NEVER apply against an unconfirmed/overridden record.</constraint>
+    <constraint source="ADR-021">SCOPE: the tab. Fluent v9 tokens; light + dark themes.</constraint>
+    <constraint source="ADR-022">SCOPE: the tab. React-version-agnostic (dual-use on the email record form); deep-import /logic where host-version-sensitive.</constraint>
+    <constraint source="project">SCOPE: apply. Accept POSTs `/api/communications/proposals/{reviewLogId}/apply` (the possibly-edited value) under audit; Reject=terminal-dismiss; Hold=leave Proposed. Do NOT write the field via any other path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Job B field-update reconcile tab</topic>
+    <files>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+    </files>
+    <patterns>
+      <pattern name="FormModal preset" location="src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/FormModal.tsx">Mount the tab body in FormModal; Accept = the Save action; Cancel-left. Do not fork.</pattern>
+      <pattern name="queue-feed" location="src/server/api/Sprk.Bff.Api/Services/Communication/Models/QueueFeedModels.cs">GET /api/communications/queue-feed?regarding={type}:{guid} for the confirmed record; re-fetch on override.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; declare RIGOR: FULL. Study FormModal + the queue-feed/apply contract (proposal shape, reviewLogId, state map).</step>
+    <step order="1">Author FieldUpdateReconcileTab.tsx in a FormModal: for the confirmed record, fetch queue-feed?regarding= and list Job B proposals (current→matched + citation + confidence).</step>
+    <step order="2">Gate on NFR-10: render an "confirm the record first" state when no association is confirmed; re-fetch/re-scope when the confirmed record changes.</step>
+    <step order="3">Make the matched value editable before Accept; on Accept POST /proposals/{reviewLogId}/apply with the (possibly-edited) value under audit.</step>
+    <step order="4">Wire Reject=terminal-dismiss, Hold=leave Proposed per the state map; wire each proposal's citation to task 054's jump/highlight.</step>
+    <step order="5">Mount the tab in the browse-shell right pane AND on the email record form (dual-use).</step>
+    <step order="6">Add ui-tests (current→proposed shown; editable value; Accept applies edited value; gated when unconfirmed; re-scope on override; ADR-021 dark-mode) and run them.</step>
+    <step order="7">Update TASK-INDEX.md: set 055 status to ✅.</step>
+    <step order="8">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the apply endpoint or queue-feed cannot key strictly to the CONFIRMED record (risking a write against an overridden record), STOP and escalate per CLAUDE.md §6 — NFR-10's "never apply against an unconfirmed/overridden record" is a hard invariant, not a best-effort.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Proposal shows current→proposed + editable">
+      <steps><step>Open Fields for a confirmed record with a Job B proposal.</step></steps>
+      <expected>The proposal shows current value → matched value, a clickable citation, confidence; the matched value is editable.</expected>
+    </test>
+    <test name="Accept applies edited value under audit">
+      <steps><step>Edit the matched value; click Accept.</step></steps>
+      <expected>POST /api/communications/proposals/{reviewLogId}/apply fires with the edited value; the proposal moves out of Proposed.</expected>
+    </test>
+    <test name="Gated + re-scope (NFR-10)">
+      <steps><step>Open Fields with NO confirmed association; then confirm record A; then override to record B.</step></steps>
+      <expected>Unconfirmed → tab shows "confirm the record first" (no actionable proposals); after A → A's proposals; after override to B → the list RE-SCOPES to B's proposals (A's are gone).</expected>
+    </test>
+    <test name="ADR-021 dark-mode">
+      <steps><step>Render the tab under the dark Fluent theme.</step></steps>
+      <expected>FormModal + proposal rows render with correct contrast via Fluent tokens.</expected>
+    </test>
+  </ui-tests>
+  <tools><tool name="npm">Build/test the shared lib.</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/FieldUpdateReconcileTab.tsx</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/__tests__/FieldUpdateReconcileTab.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a confirmed record with a Job B proposal, when Fields renders, then it shows current→matched, a clickable citation, and confidence in a FormModal.</criterion>
+    <criterion testable="true">Given the matched value is edited, when Accept is clicked, then POST /proposals/{reviewLogId}/apply carries the edited value under audit; Reject terminal-dismisses; Hold leaves Proposed.</criterion>
+    <criterion testable="true">Given no confirmed association, when Fields opens, then no proposal is actionable (NFR-10 gated) and the tab prompts to confirm the record first.</criterion>
+    <criterion testable="true">Given the association is overridden to a different record, when it changes, then the proposal list re-scopes (reloads) to the new record and never applies against the old one.</criterion>
+    <criterion testable="true">The tab mounts both in the browse-shell right pane and on the email record form (dual-use).</criterion>
+    <criterion testable="true">Negative: applying against an unconfirmed/overridden record is impossible (asserted); ADR-021 dark-mode passes; all unit/ui tests pass; shared-lib build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-E4 (§104) + NFR-10 (§119). Apply endpoint = Job B apply `POST /api/communications/proposals/{reviewLogId}/apply`. Citation click-through = task 054.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

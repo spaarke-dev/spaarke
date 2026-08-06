@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="teams-app-r1">
+  <metadata>
+    <title>Apply ADR-028 Amendment A2 (workforce auth for the Teams collaboration host) — Path B</title>
+    <phase>0 Foundation Spike &amp; ADR</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>ADR-migration (architecture governance change); must land before/with the dependent auth code.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>ADR amendment authoring — architectural governance, must preserve A1 invariants while widening the exemption.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/adr/ and docs/adr/ — main-session-only (Sub-Agent Write Boundary, root CLAUDE.md §3).</parallel-reason>
+    <deps>none</deps>
+    <tags>auth, adr, docs</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Apply Amendment A2 to the canonical ADR-028 (both the concise .claude/adr/ copy and the full docs/adr/ copy), promoting the draft at projects/teams-app-r1/adr-028-amendment-draft.md from DRAFT to applied. A2 generalizes the A1 external-SPA standalone-MSAL exemption to the collaboration hosts (external SPA + Teams tab) with a pluggable authority (CIAM or workforce-multitenant), adds the workforce-plane MUST/MUST NOT rules, and preserves every A1 invariant. This is resolution Path B (ADR amendment) per root CLAUDE.md §6.5 and MUST merge before/with the Phase-1 auth code.
+  </prompt>
+
+  <role>SPAARKE platform developer + architecture steward. Expert in the Spaarke auth architecture (ADR-028 + A1) and the §6.5 ADR-amendment protocol. Follow ADRs strictly.</role>
+
+  <goal>
+    ADR-028 (concise + full) carries Amendment A2 as applied text: the A1 exemption generalized to the collaboration hosts with pluggable authority; the new workforce-plane MUST/MUST NOT rules; a note that @spaarke/auth remains canonical for internal Xrm surfaces; and a cross-reference to the ADR-034 contact-anchored extension. The draft file is marked applied.
+  </goal>
+
+  <context>
+    <background>
+      spec ADR Tensions declares ADR-028 → Path B. The Teams host is a workforce-authenticated non-Xrm standalone app that @spaarke/auth (Xrm-bound + MSAL v3) cannot serve; A1 only sanctions a CIAM standalone SPA. The full rationale, proposed rule text, alternatives-rejected, and impact are in the draft — this task transcribes them into the canonical ADRs faithfully.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/teams-app-r1/adr-028-amendment-draft.md</file>
+      <file role="modify">.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file role="modify">docs/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Preserve ALL A1 exemptions (direct PublicClientApplication, per-tab sessionStorage isolation, Bearer-literal allowlist) when generalizing A1 → collaboration hosts; A2 widens, it does not weaken.</constraint>
+    <constraint source="project">Every A2 rule change applies to the COLLABORATION HOSTS ONLY — internal Xrm surfaces (@spaarke/auth, PCFs, Code Pages) MUST remain unaffected; state this explicitly in the applied text.</constraint>
+    <constraint source="project">Broker-only invariant (no OBO on the collaboration path; app-only downstream) MUST be carried into the workforce plane rules verbatim from the draft.</constraint>
+    <constraint source="project">Apply the SAME amendment to both the concise (.claude/adr/) and full (docs/adr/) copies; note the ADR-034 contact-anchored-entry extension where membership is discussed. Add the CHANGELOG entry required for .claude/ changes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ADR amendment (Path B) — Spaarke auth</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/teams-app-r1/adr-028-amendment-draft.md</file>
+    </files>
+    <patterns>
+      <pattern name="§6.5 Path B amendment" location="projects/teams-app-r1/adr-028-amendment-draft.md">The draft already contains the applied-text shape (new MUST/MUST NOT, edits to existing text, alternatives-rejected, impact) — transcribe faithfully.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Read the draft and both canonical ADR-028 files; locate the A1 exemption section in each.</step>
+    <step order="2">In the concise .claude/adr/ADR-028, add the A2 section: generalize A1 (external SPA → collaboration hosts, pluggable authority) preserving A1 invariants; add the workforce-plane MUST + MUST NOT rules; add the "@spaarke/auth remains canonical for internal Xrm surfaces" note.</step>
+    <step order="3">Apply the identical amendment to the full docs/adr/ADR-028; keep the two copies consistent.</step>
+    <step order="4">Add the ADR-034 cross-reference note (contact-anchored entry) where membership is discussed.</step>
+    <step order="5">Mark projects/teams-app-r1/adr-028-amendment-draft.md status from DRAFT to APPLIED (with date) and add the required entry to .claude/CHANGELOG.md.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If applying A2 would contradict or weaken an existing A1 invariant (rather than widen it), STOP and escalate per root CLAUDE.md §6.5 — the amendment scope may need owner refinement.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/adr/ADR-028-spaarke-auth-architecture.md</output>
+    <output type="docs">docs/adr/ADR-028-spaarke-auth-architecture.md</output>
+    <output type="docs">projects/teams-app-r1/adr-028-amendment-draft.md</output>
+    <output type="docs">.claude/CHANGELOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both ADR-028 copies (concise + full) contain the applied A2 text with the workforce-plane MUST/MUST NOT rules and the generalized-A1 pluggable-authority exemption.</criterion>
+    <criterion testable="true">All A1 invariants remain present and unweakened; the amendment is scoped to collaboration hosts only, with internal-Xrm-surfaces-unaffected stated explicitly.</criterion>
+    <criterion testable="true">The draft file is marked APPLIED and a .claude/CHANGELOG.md entry exists.</criterion>
+    <criterion testable="true">An ADR-034 contact-anchored-entry cross-reference note is present where membership is discussed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Main-session-only (.claude/ + docs/adr/ writes). Order this before the Phase-1 auth tasks (010/011/012) and BFF resolver (020) so the governing rule is in place before the dependent code — the whole point of Path B.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the draft + both ADR copies before editing. Main-session-only. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Canonical internet-message-id dedup — race-proof create + SB idempotency</title>
+    <phase>2 Pillar C — De-duplication</phase>
+    <gate>blocked: needs 020 (alternate key active)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF code implementation on the contended `Services/Communication/**` capture+upload path; race-proof structural change (concurrency-critical, NFR-02); tags include bff-api. code-review + adr-check MANDATORY at Step 9.5.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Race-proof concurrent-insert reconciliation against a Dataverse unique key is a correctness/concurrency-critical structural change (NFR-02) with high blast radius across capture + upload; per project CLAUDE.md C1 is an Opus/xhigh task.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies `Services/Communication/IncomingCommunicationProcessor.cs` (+ CommunicationService dedup surface) — heavily contended with r5 / messaging / notification-spine worktrees. Execute sequentially, main-session; `/conflict-check` before the PR.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, communication, dedup, dataverse, concurrency</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Implement FR-C1: extend the capture dedup from per-mailbox `sprk_graphmessageid` to the canonical `sprk_internetmessageid`, backed by a RACE-PROOF create against the task-020 alternate key (catch the platform duplicate-key error and reconcile to the single canonical row — never check-then-insert alone), and key Service Bus idempotency on the internet-message-id. This dedup MUST span BOTH the mailbox-capture path AND the user-upload ("Save to Spaarke") path so N mailboxes × M users collapse to exactly one `sprk_communication`.</prompt>
+  <role>SPAARKE BFF developer with Dataverse concurrency + Service Bus expertise. Follow ADR-045 (extend the capture path, do not fork), ADR-004 (job/idempotency contract), ADR-027, ADR-010/032 (DI) strictly.</role>
+  <goal>The same email delivered to N monitored mailboxes and saved by M users yields exactly one `sprk_communication`; concurrent inserts of the same internet-message-id race-fail gracefully to that single row (duplicate-key error caught → reconcile, no unhandled exception, no second row); Service Bus idempotency is keyed on message-id; all non-fatal (a dedup failure never fails capture or send). Unit + seam tests prove it.</goal>
+
+  <context>
+    <background>Step-1 dedup today = `ExistsByGraphMessageIdAsync` (per-mailbox only) delegating to `_communicationService.ExistsCommunicationByGraphMessageIdAsync`. The internet-message-id is already written at IncomingCommunicationProcessor L572 but is not the dedup key. Task 020 adds the Dataverse UNIQUE alternate key on it. This task makes internet-message-id the canonical dedup key across capture AND the user-upload path (Services/Office), reconciles concurrent inserts against the platform key rather than relying on the app-level pre-check (which has an unavoidable check-then-insert race window), and keys the Service Bus idempotency on the internet-message-id (ADR-004). NFR-02 is explicit: enforcement is structural (the alternate key), not app-check-alone.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/CommunicationService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="new">tests/integration/seam/Communication/** (dedup seam test)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">Provides the active UNIQUE alternate key on sprk_internetmessageid + the exact duplicate-key error class to catch.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-02">SCOPE: message-level dedup. Enforcement MUST be structural — attempt the create and CATCH the Dataverse duplicate-key error from the task-020 alternate key, then reconcile to the existing canonical row. An app-level `Exists…` pre-check MAY be kept as a fast-path, but it MUST NOT be the sole guard (it cannot close the concurrent-insert race).</constraint>
+    <constraint source="ADR-004">SCOPE: capture + upload jobs. Service Bus idempotency key MUST be derived from the internet-message-id (canonical identity), so the same message across mailboxes/uploads dedups at the queue layer too.</constraint>
+    <constraint source="ADR-045">SCOPE: capture path. Extend the existing dedup in place (IncomingCommunicationProcessor + CommunicationService); MUST NOT fork the capture pipeline or add a parallel dedup mechanism. The user-upload path runs the SAME dedup, not a copy.</constraint>
+    <constraint source="NFR-04">SCOPE: dedup logic. Dedup MUST be non-fatal — a dedup/reconcile failure logs and degrades (worst case a rare duplicate), it MUST NOT throw out of capture or the send/upload path.</constraint>
+    <constraint source="ADR-010">SCOPE: any new service/helper. Register unconditionally; if feature-gated, use the Null-Object/kill-switch pattern (ADR-032). No conditional `if(flag){AddScoped}` asymmetric registration.</constraint>
+    <constraint source="§10-BFF">SCOPE: this BFF change. Include a Placement Justification in the PR (extends existing Services/Communication + Services/Office in place — no new microservice); run `dotnet publish -c Release` and report absolute compressed size + delta vs the ~45.9 MB (excl PDBs) baseline; ceiling ≤60 MB; verify no new HIGH CVE.</constraint>
+    <constraint source="ADR-038">SCOPE: tests. Add a dedup seam test under `tests/integration/seam/Communication/**` (KEEP path) covering the N-mailboxes/M-users → one-row and the concurrent-insert race cases; update `tests/unit/Sprk.Bff.Api.Tests/` for the reconcile logic. No banned test shapes (no mocked HttpMessageHandler / DI-registration / ctor-null tests).</constraint>
+    <constraint source="project">SCOPE: shared-surface coordination. Run `/conflict-check` against r5 / messaging / notification-spine before the PR (shared `Services/Communication/**`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Race-proof Dataverse dedup against a unique alternate key + Service Bus idempotency on the capture/upload path</topic>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing multi-layer dedup" location="src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs">The Layer 1-4 dedup comment block (L480+) documents webhook cache / SB idempotency / Dataverse query / duplicate-detection-rule layers — extend Layer 2 (SB key) + Layer 3/4 (key on internet-message-id), keep the graceful fallback shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load POML + project CLAUDE.md + spec FR-C1/NFR-02/NFR-04 + ADRs 045/004/027/010/032/038. Declare RIGOR LEVEL: FULL. Confirm task 020's key is active and note its duplicate-key error class. Invoke task-execute.</step>
+    <step order="1">Add/confirm a `ExistsCommunicationByInternetMessageIdAsync` fast-path on CommunicationService (fast-path only, NOT the sole guard); keep `sprk_graphmessageid` path for logging/telemetry parity.</step>
+    <step order="2">Implement the race-proof create: attempt the `sprk_communication` create; catch the task-020 duplicate-key error; on catch, resolve the existing canonical row by internet-message-id and return it (reconcile) instead of throwing. Ensure the whole path is non-fatal (NFR-04).</step>
+    <step order="3">Re-key Service Bus idempotency on the internet-message-id (ADR-004) in the webhook/enqueue path so cross-mailbox/upload messages dedup at the queue layer.</step>
+    <step order="4">Wire the SAME dedup into the user-upload path (OfficeDocumentPersistence / OfficeService) so a user-saved email dedups against capture and other users via internet-message-id (FR-B3 dependency; this task delivers the C1 half).</step>
+    <step order="5">Add the dedup seam test (N mailboxes × M users → one row; concurrent-insert race → single row, no unhandled error) under tests/integration/seam/Communication/**; update unit tests for the reconcile branch.</step>
+    <step order="6">Run `dotnet build` + `dotnet test`; run `dotnet publish -c Release` and record compressed size + delta; run `dotnet list package --vulnerable --include-transitive`.</step>
+    <step order="7">Step 9.5 quality gates: code-review + adr-check. Write the Placement Justification + publish-size + CVE results into the PR description.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document any deviation (e.g., duplicate-key error class differing from task-020's note) in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Dataverse SDK does not surface a catchable, deterministic duplicate-key error for the task-020 alternate key (so the concurrent-insert race cannot be closed structurally), STOP and escalate per CLAUDE.md §6/§6.5 — do NOT fall back to check-then-insert-only, which violates NFR-02.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF; measure publish size; CVE scan</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs (+ CommunicationService.cs)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs (upload-path dedup)</output>
+    <output type="test">tests/integration/seam/Communication/** + tests/unit/Sprk.Bff.Api.Tests/**</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given one email delivered to N monitored mailboxes and saved by M users, when all are processed, then exactly one `sprk_communication` exists (keyed on internet-message-id).</criterion>
+    <criterion testable="true">Negative (race): Given two concurrent inserts of the same internet-message-id, when both run, then one succeeds and the other catches the duplicate-key error and reconciles to the single canonical row — no unhandled exception, no second row.</criterion>
+    <criterion testable="true">Given a user-upload ("Save to Spaarke") of an email already captured, when persisted, then it dedups to the existing canonical row (does not create a duplicate).</criterion>
+    <criterion testable="true">Given Service Bus redelivery of the same message, when dequeued, then the internet-message-id idempotency key suppresses the duplicate.</criterion>
+    <criterion testable="true">Negative (non-fatal): Given the dedup/reconcile path throws internally, when capture/upload runs, then the exception is caught and logged and the primary path is NOT failed (NFR-04).</criterion>
+    <criterion testable="true">All unit + seam tests pass; build is green; publish size ≤60 MB compressed with delta reported; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-C1 + FR-B3 (upload half) + NFR-02/04; plan Phase 2 C1. Opus/xhigh per project CLAUDE.md. Precedes 022 (context-merge) + 025 (cross-path reconciliation). The existing Layer 1-4 dedup comment (IncomingCommunicationProcessor L480+) is the shape to extend — keep graceful fallback semantics.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
