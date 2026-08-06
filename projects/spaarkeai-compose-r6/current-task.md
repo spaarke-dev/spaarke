@@ -2,16 +2,34 @@
 
 > Active-task tracker for context recovery. Reset per root `CLAUDE.md` §7 as tasks complete.
 
-## Status: Phase 0 ✅ · RE-SEQUENCED ✅ · **020 ✅ · 011 ✅ COMPLETE** · Next → **021–026 fan-out** (Phase-2 wideners; all dep on 020 ✅ = startable)
+## Status: 020 ✅ · 011 ✅ · **021 ✅ COMPLETE** · Next → **022 tables** (then 023 → 024 → 025 → 026, SERIAL)
 
 - **Project**: `spaarkeai-compose-r6`
-- **Branch**: `work/spaarkeai-compose-r6` (pushed; 0 behind master as of 2026-08-05)
-- **✅ 020 COMPLETE** (`f3179b819` + `12d357e27`): docx→ComposeContentModel projector (the hub source). Record: [notes/020-canonical-hub-design.md](notes/020-canonical-hub-design.md) §8-§9.
-- **✅ 011 COMPLETE** (`e24ceefbc` + Step-9.5 fix commit): `RenderIntoCarrier` — imported-doc render-on-save author (replace-body-preserve-parts; collision-safe numbering merge; carrier styles win; non-body parts BYTE-IDENTICAL proven corpus-wide, incl. the autoSave numbering-rewrite bug the hardened oracle caught). Step 9.5: adr-check PASS 11/11; code-review APPROVE-WITH-MINORS → M-1/P-1/P-3/P-8/T-1..T-5 fixed, P-2/P-5/P-6/P-10/T-6 deferred-documented. Record: notes §10.
-- **Render-on-save machinery now COMPLETE at component level**: project (020) → edit → render-into-carrier (011). Remaining before the 010 cutover: fidelity wideners 021–026, then 010/012/013/014.
-- **NEXT: 021–026** (all dep 020 ✅). All `parallel-safe:false` (shared Compose surface) → SERIAL execution. Suggested order per plan: 021 numbering/lists (FULL/sonnet) → 022 tables → 023 headers/footers+page-breaks → 024 hyperlinks+comments → 025 tracked-changes → 026 hard-tier. 021 also owes: golden-label parity oracle (020/011 deviation), renderer-side ordered-list continuation (020-R1), localized heading-id mapping (011-P8, w/ 026).
-- **010 cutover prep notes**: P-10 — write-path text-search audit needs a scoped sentinel carve-out (`.StartsWith` on relationship-id sentinels) when the renderer joins the audited path.
-- **⚠️ Operator sign-off pending (flatten-tier, no user impact until 010 wires the caller):** R4 ins+del→"barfoo" (→025) · R5 U+FFFD persisted (→026).
+- **Branch**: `work/spaarkeai-compose-r6` (pushed through `3ca774e28`)
+- **✅ 021 COMPLETE** (`cc9ac812b` + `3ca774e28`): numbering/lists through the canonical model. `ComposeBlock.NumId`
+  (source identity; scheme stays in carrier); renderer `ListRenderState` — carrier-direct reference (golden parity BY
+  CONSTRUCTION; numbering.xml BYTE-IDENTICAL on pure round-trips) / per-source-id map (blank-package continuity) /
+  PER-LEVEL StartsNewList contract for editor items (020-R1 closed; nested-sibling restarts; nested-bullet live bug
+  fixed). Engine REUSED; `ordered-list-continuity-lost` RETIRED. GOLDEN ORACLE LIVE: carrier round-trip label
+  sequences == manifest §1.5 golden Word labels (rows 9/10/11/13) — `ComposeNumberingCanonicalModelSeamTests`.
+  Step 9.5: adr-check PASS 8/8; code-review → F1 (nested-sibling merge, Major) / F2 (foreign-carrier kind guard) /
+  F4/F5/F6 fixed; F3 (client numId carry-through) deferred-documented → **010/012 MUST implement mapper preservation
+  of server-set numId or edited imported saves lose parity**. Record: notes §11 + §11.1.
+- **NEXT: 022 tables** (`tasks/022-tables.poml`), then 023 headers/footers+page-breaks → 024 hyperlinks+comments →
+  025 tracked-changes → 026 hard-tier. All `parallel-safe:false` → SERIAL.
+- **026 owes (updated)**: custom-style-linked numbering (020-R7) + localized heading-id mapping (011-P8) + prior
+  026 scope (AlternateContent surface, dup-paraId I-4, U+FFFD R5 sign-off).
+- **010/012 owe (updated)**: client mapper numId preservation on re-post (021-F3); P-10 text-search-audit sentinel
+  carve-out; P-2 preamble extraction.
+- **⚠️ Operator sign-off pending (flatten-tier):** R4 ins+del→"barfoo" (→025) · R5 U+FFFD persisted (→026).
+- **Pre-existing reds (stash-verified §F.3, routed 026/027):** 2 NDA seam (AppendSection OuterXml I-4 / TextExactness
+  text-box runs) + `ComposeBaselineParaIdStamperTests.MintAndPersist_AcrossTheFidelityCorpus` (same NDA dup-paraId
+  class; retiring count-gate component). ArchTests: 4 pre-existing master fails (ADR-007/010, Communication).
+- **Publish measurement note:** clean-worktree fresh publish = 46.89 MB incl PDBs (task delta +0.01). This LOCAL
+  worktree's publish reads 50.92 MB purely from a 6.3 MB-vs-2.1 MB `Sprk.Bff.Api.pdb` environment artifact —
+  measure publish gates in a clean checkout (or compare pdb-free: 46.04 MB).
+- **Master delta note:** branch is ~26 commits behind origin/master (no Compose overlap; master patched
+  Crypto.Xml → 8.0.4). Merge master before the PR.
 
 ### 🧭 Task 020 design (locked this session — key decisions)
 - **Hub = `ComposeContentModel` (body, widened by 021–025) + server-retained source package ("carrier" = styles/numbering/hdr-ftr/theme/sectPr).** EXTENSION, not a parallel model → does NOT trip escalation trigger #1.
