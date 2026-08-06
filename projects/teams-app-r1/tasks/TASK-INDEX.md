@@ -22,7 +22,7 @@ Tier: model-tier @ effort (dispatch each subagent at these per root CLAUDE.md §
 | 020 | Workforce→principal resolver (collaboration endpoints) | 2 | ✅ | 001,002 | opus@xhigh | FULL | ❌ (serial BFF auth spine) | B |
 | 021 | Contact-anchored membership entry (role-allowlist filtered) | 2 | ✅ | 020 | opus@xhigh | FULL | ❌ (serial; membership engine) | B |
 | 022 | Accessible-record-set composition + enforcement gate | 2 | ✅ | 020,021 | opus@xhigh | FULL | ❌ (serial; enforcement) | B |
-| 025 | **Principal-agnostic collab endpoints (Option A, dual-scheme /external) — R2 FR-22** | 2 | 🔲 | 020,021,022,030,051,065 | opus@xhigh | FULL | ❌ (serial; shared auth endpoints) | B |
+| 025 | **Principal-agnostic collab endpoints (Option A, dual-scheme /external) — R2 FR-22** | 2 | 🔄 | 020,021,022,030,051,065 | opus@xhigh | FULL | ❌ (serial; shared auth endpoints) | B |
 | 030 | Broker-only SPE download gated by accessible-set | 3 | ✅ | 022 | opus@high | FULL | ❌ (serial; BFF download path) | B |
 | 040 | TrackingFieldTrio two-icon governance toolbar | 4 | ✅ | 021 | sonnet@high | FULL | ❌ (serial PCF chain; shared component) | C |
 | 041 | Access-grant modal (candidates + named users → grant + invite) | 4 | ✅ | 040 | sonnet@xhigh | FULL | ❌ (serial; shared component) | C |

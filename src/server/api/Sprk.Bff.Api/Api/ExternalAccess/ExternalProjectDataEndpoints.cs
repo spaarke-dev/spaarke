@@ -125,7 +125,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CancellationToken ct)
     {
-        var callerContext = GetCallerContext(httpContext);
+        var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         var projectIds = callerContext.GetAccessibleProjectIds().ToList();
@@ -142,7 +142,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CancellationToken ct)
     {
-        var callerContext = GetCallerContext(httpContext);
+        var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         if (!callerContext.HasProjectAccess(id))
@@ -159,7 +159,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CancellationToken ct)
     {
-        var callerContext = GetCallerContext(httpContext);
+        var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         if (!callerContext.HasProjectAccess(id))
@@ -189,7 +189,7 @@ public static class ExternalProjectDataEndpoints
         ILogger<Program> logger,
         CancellationToken ct)
     {
-        var callerContext = GetCallerContext(httpContext);
+        var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         // ── AUTHORIZATION FIRST — nothing below reads SPE/Graph until BOTH checks pass ──
@@ -252,7 +252,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CancellationToken ct)
     {
-        var callerContext = GetCallerContext(httpContext);
+        var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         if (!callerContext.HasProjectAccess(id))
@@ -270,7 +270,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CancellationToken ct)
     {
-        var callerContext = GetCallerContext(httpContext);
+        var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         if (!callerContext.HasProjectAccess(id))
@@ -297,7 +297,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CancellationToken ct)
     {
-        var callerContext = GetCallerContext(httpContext);
+        var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         if (!callerContext.HasProjectAccess(id))
@@ -314,7 +314,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CancellationToken ct)
     {
-        var callerContext = GetCallerContext(httpContext);
+        var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         if (!callerContext.HasProjectAccess(id))
@@ -332,7 +332,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         CancellationToken ct)
     {
-        var callerContext = GetCallerContext(httpContext);
+        var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         // Note: for update, we can't easily check project membership without looking up the to-do.
@@ -352,7 +352,7 @@ public static class ExternalProjectDataEndpoints
     // (group-level) resolves EITHER a CIAM external contact OR a workforce user to a CallerPrincipal.
     // CallerPrincipal exposes the same record-scope surface the handlers use — HasProjectAccess,
     // GetAccessibleProjectIds, GetEffectiveRights — so every handler is plane-agnostic without change.
-    private static CallerPrincipal? GetCallerContext(HttpContext httpContext) =>
+    private static CallerPrincipal? GetCallerPrincipal(HttpContext httpContext) =>
         httpContext.Items[CallerPrincipal.HttpContextItemsKey] as CallerPrincipal;
 
     private static IResult MissingContextResult() =>

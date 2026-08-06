@@ -11,10 +11,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 🔄 **025 IN PROGRESS** (principal-agnostic collab endpoints — Option A dual-scheme /external). FULL rigor, opus@xhigh. |
-| **Step** | ✅ Code + tests DONE & GREEN (176/176 ExternalAccess+CallerPrincipal incl. 27 new). Next: full-suite regression check → Step 9.5 gates → publish-size → /conflict-check → deploy BFF → r2-coordination-response.md → set 025 ✅. |
-| **Status** | 🟢 Design locked. Plan: new `CallerPrincipalResolver.cs` (ICallerPrincipalResolver + 2 ICallerPrincipalStrategy: CIAM/workforce, plane-selected by issuer/tid) → unified `CallerPrincipal` (ProjectAccess + rights) on HttpContext.Items via `AddCallerPrincipalAuthorizationFilter`. Group `/api/v1/external` policy → new `ExternalCollaboration` (schemes {Ciam, JwtBearerDefaults}). Handlers read CallerPrincipal. Workforce projects→Collaborate rights. /collab marked transitional. CIAM byte-for-byte preserved. |
-| **Next Action** | Finish code + tests (CIAM regression, workforce scope, plane-selection), build+test, publish-size, /conflict-check, deploy BFF, write r2-coordination-response.md, set 025 ✅. |
+| **Task** | 🔄 **025 — CODE COMPLETE; deploy + live E2E operator-gated.** Principal-agnostic /external (Option A). FULL rigor, opus@xhigh. |
+| **Step** | ✅ Code + tests GREEN (full BFF suite **9761 pass / 0 fail**, 27 new). ✅ Step 9.5 gates: adr-check PASS (0 violations), code-review PASS (0 Critical). ✅ publish-size 46.90 MB compressed (< 60 MB; ~-2.7 MB vs baseline). ✅ /conflict-check no overlap. ✅ r2-coordination-response.md written. |
+| **Status** | 🟢 Delivered: `CallerPrincipalResolver.cs` (ICallerPrincipalResolver + 2 ICallerPrincipalStrategy CIAM/workforce, plane-selected by issuer/tid) → `CallerPrincipal` via group-level `CallerPrincipalAuthorizationFilter`. `/api/v1/external` = dual-scheme `ExternalCollaboration` policy. Workforce scoped to accessible-record-set (NFR-08, NOT all projects); CIAM byte-for-byte. /collab transitional. |
+| **Next Action (OPERATOR-GATED)** | ⏸ **Awaiting user go for LIVE deploy** to shared `spaarke-bff-dev` (065 mechanism: `scripts/Deploy-BffApi.ps1`). Then operator re-runs live Teams E2E (080). On E2E pass → set 025 ✅ + TASK-INDEX, then 090 wrap-up. |
 
 ### Task 025 design decisions (locked 2026-08-05)
 - **Plane selection**: CIAM iff token `iss` contains `ciamlogin.com` OR `tid`==Ciam:TenantId; else workforce. Deterministic, config-light.
