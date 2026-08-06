@@ -172,6 +172,12 @@ public static class CommunicationModule
         // emit sub-threshold (never auto-file alone); multi-entity tokens are capped (never a guessed auto-file).
         // Registered unconditionally (mirrors the other deterministic rungs; ADR-010).
         services.AddSingleton<IAssociationRung, IdentifierReverseLookupRung>(); // rung 0 — identifier reverse-lookup
+        // rung 0 (tier) — recipient-alias (FR-A2). Parses To/Cc/Bcc for a per-record intake address
+        // (matter-{ref}@) and resolves it to a matter — a deliberate routing instruction, so it is
+        // auto-file-eligible like an explicit reference (AssociationStatusMapper.IsAutoFileEligible). Reads
+        // NormalizedMessage.Bcc (mapped at the Graph boundary); Bcc-only delivery associates deterministically.
+        // Registered unconditionally (mirrors the other deterministic rungs; ADR-010).
+        services.AddSingleton<IAssociationRung, RecipientAliasRung>();         // rung 0 — recipient-alias
         services.AddSingleton<IAssociationRung, ThreadContinuityRung>();       // rung 1 — thread continuity
         services.AddSingleton<IAssociationRung, ParticipantCorrelationRung>(); // rung 2 — participant correlation
         // rung 3 — structural detectors (NFR-04: adding a detector is a new IStructuralDetector

@@ -25,6 +25,7 @@ public sealed class GraphMessageNormalizer
 
         var to = AddressesOf(message.ToRecipients);
         var cc = AddressesOf(message.CcRecipients);
+        var bcc = AddressesOf(message.BccRecipients);
 
         var isHtml = message.Body?.ContentType == BodyType.Html;
         var bodyContent = message.Body?.Content;
@@ -35,6 +36,7 @@ public sealed class GraphMessageNormalizer
             From = message.From?.EmailAddress?.Address,
             To = to,
             Cc = cc,
+            Bcc = bcc,
             Subject = message.Subject,
             // BodyText is the text-consuming rungs' input (AI classification, semantic
             // match). For HTML bodies — the common case — reduce to plain text; leaving

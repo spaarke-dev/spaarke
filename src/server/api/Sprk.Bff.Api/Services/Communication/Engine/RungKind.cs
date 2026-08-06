@@ -69,4 +69,17 @@ public enum RungKind
     /// name, or a name resolving to no contact, matches nothing) — bias to precision over recall.
     /// </summary>
     ContactNameMatch = 7,
+
+    /// <summary>
+    /// Rung 0 (tier) — recipient-alias (FR-A2). A per-record intake address in any recipient field
+    /// (To/Cc/<b>Bcc</b>) — e.g. <c>matter-12345@intake.example.com</c> — is a deliberate, unambiguous
+    /// routing instruction, so it is treated as an <b>explicit reference</b>-tier deterministic signal:
+    /// AUTO-FILE-ELIGIBLE (see <see cref="AssociationStatusMapper.IsAutoFileEligible"/>). A distinct
+    /// <see cref="RungKind"/> (rather than reusing <see cref="ExplicitReference"/>) so the alias signal is
+    /// isolated + independently testable and reinforces distinctly. Delivered via a targeted Exchange
+    /// mail-flow rule (NOT tenant-wide plus-addressing); Bcc-only delivery is the common pattern, so it
+    /// must associate deterministically. MVP scope = the <c>matter-{ref}@</c> scheme only (no per-tenant
+    /// address catalog — see <c>RecipientAliasRung</c>).
+    /// </summary>
+    RecipientAlias = 9,
 }

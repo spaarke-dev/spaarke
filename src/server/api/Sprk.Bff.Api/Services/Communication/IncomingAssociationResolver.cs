@@ -265,6 +265,9 @@ public sealed class IncomingAssociationResolver
         kind is RungKind.ExplicitReference or RungKind.ThreadContinuity
              or RungKind.ParticipantCorrelation or RungKind.StructuralDetector
              or RungKind.RecordNameMatch
+             // RecipientAlias (FR-A2) — a per-record intake address, parsed + resolved with zero AI cost,
+             // belongs in the always-run deterministic pass (and IS auto-file-eligible per the mapper).
+             or RungKind.RecipientAlias
              // ContactNameMatch (rung 3.6) is an exact, verified full-name→contact appearance (regex + exact
              // Dataverse lookup, no AI cost), so it belongs in the deterministic pass — even though the mapper
              // keeps it OUT of auto-file eligibility (owner: surface-for-review, never auto-file).

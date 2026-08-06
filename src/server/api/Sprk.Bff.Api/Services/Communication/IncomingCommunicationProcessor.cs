@@ -228,7 +228,7 @@ public sealed class IncomingCommunicationProcessor
                     config.QueryParameters.Select = new[]
                     {
                         "id", "internetMessageId", "internetMessageHeaders", "conversationId",
-                        "from", "toRecipients", "ccRecipients",
+                        "from", "toRecipients", "ccRecipients", "bccRecipients",
                         "subject", "body", "uniqueBody",
                         "receivedDateTime", "hasAttachments"
                     };

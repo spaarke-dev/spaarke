@@ -416,7 +416,13 @@ public sealed class AssociationStatusMapper
     /// primary among matches), never auto-filed.
     /// </summary>
     private static bool IsAutoFileEligible(RungKind kind, bool includeRung23) =>
-        kind is RungKind.ExplicitReference or RungKind.ThreadContinuity
+        // RecipientAlias (FR-A2) is a per-record intake address — a deliberate, unambiguous routing
+        // instruction as authoritative as an explicit subject reference, so it is auto-file-eligible
+        // UNCONDITIONALLY (rung-0 tier), not gated behind the rung-2/3 kill-switch. This does not widen the
+        // C-1 misfile surface: C-1 narrows auto-file to EXPLICIT deterministic signals precisely to avoid
+        // misfiling on weaker participant/structural inference — an alias resolved to one specific record is
+        // the strongest explicit signal there is, so it belongs with ExplicitReference/ThreadContinuity.
+        kind is RungKind.ExplicitReference or RungKind.ThreadContinuity or RungKind.RecipientAlias
              || (includeRung23 && kind is RungKind.ParticipantCorrelation or RungKind.StructuralDetector);
 
     /// <summary>
@@ -432,7 +438,10 @@ public sealed class AssociationStatusMapper
     /// </summary>
     private static bool IsDeterministicWriteEligible(RungKind kind) =>
         kind is RungKind.ExplicitReference or RungKind.ThreadContinuity
-             or RungKind.ParticipantCorrelation or RungKind.StructuralDetector;
+             or RungKind.ParticipantCorrelation or RungKind.StructuralDetector
+             // RecipientAlias (FR-A2) is a hard-deterministic rung-0 signal — written like ExplicitReference
+             // when a communication auto-files, so its association is never dropped.
+             or RungKind.RecipientAlias;
 
     /// <summary>Genuine AI rungs (semantic + LLM classify) — these set the provenance "AI involved" flag.</summary>
     private static bool IsAi(RungKind kind) =>

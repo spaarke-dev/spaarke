@@ -16,7 +16,7 @@
 | 011 | Footer config (operator app setting, per-tenant) | 1·A | ✅ | — | sonnet·high | ❌ false |
 | 012 | Inject signed footer on outbound send path | 1·A | 🔲 | 010,011 | sonnet·high | ❌ false |
 | 013 | `TrackingTokenRung` (reuse RungKind.ExplicitReference) | 1·A | 🔲 | 010,011 | **opus·high** | ✅ true (A-rungs) |
-| 014 | `RecipientAliasRung` + Bcc plumbing | 1·A | 🔲 | 011 | sonnet·high | ✅ true (A-rungs) |
+| 014 | `RecipientAliasRung` + Bcc plumbing | 1·A | ✅ | 011 | sonnet·high | ✅ true (A-rungs) |
 | 015 | Formalize external-reply self-association + test | 1·A | ✅ | — | sonnet·high | ❌ false |
 | 016 | `AffinityRung` + `sprk_affinity` store | 1·A | 🔲 | 011 | **opus·high** | ✅ true (A-rungs) |
 | 017 | Pillar A BFF deploy (size/CVE) | 1·A | 🔲 | 010–016 | sonnet·med | ❌ false |

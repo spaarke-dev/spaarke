@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Safe-autonomous code-only lane COMPLETE (003, 030, 031, 015 ✅ + CVE fix). Awaiting operator direction. |
+| **Task** | 014 ✅ COMPLETE — RecipientAliasRung + Bcc plumbing (FR-A2). Safe code-only lane now exhausted. |
 | **Step** | — |
-| **Status** | 003 ✅, 030 ✅, 031 ✅, 015 ✅, CVE fix ✅ — all committed. |
-| **Next Action** | GATE. Remaining startable tasks are cloud/security (004 Entra, 020/023 Dataverse schema, 033 Dataverse seed, 010 Key Vault — need operator go-ahead), sequential shared-lib (Pillar E), or dep-gated (032 golden suite absorbs 015; 034 opus-contract). No more pure code-only-autonomous work remains. |
+| **Status** | 014 ✅ (build 0 err; 77/77 targeted; 876 pass/0 fail Communication+seam; publish 50.91 MB ≤60). Committing. |
+| **Next Action** | GATE. Remaining Pillar-A rungs 013 (deps 010 Key Vault) + 016 (needs `sprk_affinity` schema + opus) are gated. All other startable tasks are cloud/security/schema/seed (004/010/020/023/033/034) or sequential shared-lib (Pillar E). Need operator go-ahead. |
 
 ### Completed this session (all committed)
 - **Task 003 ✅** — `notes/fixtures/r1-golden-emails.md`.
