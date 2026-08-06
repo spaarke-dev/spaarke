@@ -114,13 +114,15 @@ public sealed class ComposeTableCanonicalModelSeamTests
         return doc.MainDocumentPart!.Document!.Body!.Elements<Table>().Select(t => (Table)t.CloneNode(true)).ToList();
     }
 
-    private static IReadOnlyList<string> ValidationErrors(byte[] docx)
+    /// <summary>Per-description error COUNTS (multiset — review 022-F9: set-based Except would let the
+    /// rendered package add MORE instances of an error class the source already had once).</summary>
+    private static Dictionary<string, int> ValidationErrorCounts(byte[] docx)
     {
         using var doc = WordprocessingDocument.Open(new MemoryStream(docx, writable: false), isEditable: false);
         return new OpenXmlValidator(FileFormatVersions.Office2019)
             .Validate(doc)
-            .Select(e => e.Description)
-            .ToList();
+            .GroupBy(e => e.Description)
+            .ToDictionary(g => g.Key, g => g.Count());
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -161,8 +163,9 @@ public sealed class ComposeTableCanonicalModelSeamTests
         styled.Rows[1].Cells[0].VMerge.Should().Be(ComposeVerticalMerge.Restart);
         styled.Rows[2].Cells[0].VMerge.Should().Be(ComposeVerticalMerge.Continue);
         styled.Rows[1].Cells[1].VerticalAlignment.Should().Be("bottom");
-        styled.Rows[0].Cells[1].VerticalAlignment.Should().Be("top",
-            "a projected cell without explicit vAlign carries Word's default 'top' — never the editor's center chrome");
+        styled.Rows[0].Cells[1].VerticalAlignment.Should().BeNull(
+            "a cell without a DIRECT vAlign stays null so the table-style chain governs on render (022-F4) — " +
+            "an explicit default would override a styled table's own alignment");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -203,6 +206,9 @@ public sealed class ComposeTableCanonicalModelSeamTests
             .GetFirstChild<VerticalMerge>().Should().NotBeNull("the continue cell keeps its vMerge");
         rows[1].Elements<TableCell>().ElementAt(1).TableCellProperties!
             .GetFirstChild<TableCellVerticalAlignment>()!.Val!.Value.Should().Be(TableVerticalAlignmentValues.Bottom);
+        rows[0].Elements<TableCell>().ElementAt(1).TableCellProperties?
+            .GetFirstChild<TableCellVerticalAlignment>().Should().BeNull(
+                "a vAlign-less source cell emits NO vAlign in source-faithful mode — the style chain governs (022-F4)");
         rows[0].Elements<TableCell>().First().TableCellProperties!
             .GetFirstChild<TableCellWidth>()!.Width!.Value.Should().Be("4320");
     }
@@ -215,12 +221,15 @@ public sealed class ComposeTableCanonicalModelSeamTests
     public void RenderIntoCarrier_RichTableRoundTrip_IntroducesNoNewSchemaValidationErrors()
     {
         var source = BuildRichTableSource();
-        var sourceErrors = ValidationErrors(source);
+        var sourceErrors = ValidationErrorCounts(source);
 
         var rendered = _renderer.RenderIntoCarrier(source, _builder.BuildContentModel(source).Model, author: "seam-test");
-        var newErrors = ValidationErrors(rendered).Except(sourceErrors).ToList();
+        var newErrors = ValidationErrorCounts(rendered)
+            .Where(kv => kv.Value > (sourceErrors.TryGetValue(kv.Key, out var had) ? had : 0))
+            .Select(kv => kv.Key)
+            .ToList();
 
-        newErrors.Should().BeEmpty("the render-on-save path must emit Word-valid table markup");
+        newErrors.Should().BeEmpty("the render-on-save path must emit Word-valid table markup (multiset diff — no new error instances)");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -231,11 +240,24 @@ public sealed class ComposeTableCanonicalModelSeamTests
     public static IEnumerable<object[]> CorpusDocuments() =>
         ComposeCorpusFixtureLocator.EnumerateDocumentPaths().Select(path => new object[] { path });
 
-    private static IEnumerable<(int RowCount, string CellShape)> TableShapeFacts(ComposeContentModel model) =>
-        model.Blocks.Where(b => b.Kind == ComposeBlockKind.Table).Select(b => (
-            b.Table!.Rows.Count,
-            string.Join("|", b.Table.Rows.Select(r =>
-                string.Join(",", r.Cells.Select(c => $"{c.GridSpan}:{c.VMerge}"))))));
+    /// <summary>The FULL structural-fact fold per table (review 022-F11): rows/cells/span/merge shape PLUS
+    /// style identity, width, borders, grid widths, look, header rows, and cell vAlign/width — so the
+    /// corpus fixed point covers every fact the model carries, not just the merge shape.</summary>
+    private static IEnumerable<string> TableShapeFacts(ComposeContentModel model) =>
+        model.Blocks.Where(b => b.Kind == ComposeBlockKind.Table).Select(b =>
+        {
+            var t = b.Table!;
+            static string W(ComposeTableWidth? w) => w is null ? "-" : $"{w.Type}={w.Value}";
+            static string E(ComposeTableBorderEdge? e) => e is null ? "-" : $"{e.Val}/{e.Size}/{e.Color}";
+            var borders = t.Borders is null
+                ? "editor"
+                : string.Join("+", new[] { t.Borders.Top, t.Borders.Left, t.Borders.Bottom, t.Borders.Right, t.Borders.InsideHorizontal, t.Borders.InsideVertical }.Select(E));
+            var grid = t.GridColumnWidthsTwips is null ? "-" : string.Join(";", t.GridColumnWidthsTwips);
+            var rows = string.Join("|", t.Rows.Select(r =>
+                (r.RepeatAsHeaderRow ? "H:" : string.Empty) +
+                string.Join(",", r.Cells.Select(c => $"{c.GridSpan}:{c.VMerge}:{c.VerticalAlignment ?? "-"}:{W(c.Width)}"))));
+            return $"{t.StyleId ?? "-"}~{W(t.Width)}~{borders}~{grid}~{t.LookHex ?? "-"}~{t.Rows.Count}~{rows}";
+        });
 
     [Theory]
     [MemberData(nameof(CorpusDocuments))]
@@ -247,9 +269,20 @@ public sealed class ComposeTableCanonicalModelSeamTests
         var projection = _builder.BuildContentModel(original);
         projection.Status.Should().NotBe(ComposeProjectionStatus.Failed, $"'{docName}' must project");
         var sourceFacts = TableShapeFacts(projection.Model).ToList();
+
+        // Vacuity guard (review 022-F10): a projector that silently stopped modelling tables must FAIL
+        // here, not early-return. Direct body children only (nested/cell tables are inside their parents).
+        int rawBodyTables;
+        using (var doc = WordprocessingDocument.Open(new MemoryStream(original, writable: false), isEditable: false))
+        {
+            rawBodyTables = doc.MainDocumentPart!.Document!.Body!
+                .Elements<Table>().Count(t => t.Elements<TableRow>().Any());
+        }
+        sourceFacts.Count.Should().BeGreaterThanOrEqualTo(rawBodyTables,
+            $"'{docName}' has {rawBodyTables} non-empty body table(s) — each must appear in the model");
         if (sourceFacts.Count == 0)
         {
-            return; // no body tables in this doc — nothing to prove here
+            return; // genuinely no body tables in this doc — nothing to prove here
         }
 
         var rendered = _renderer.RenderIntoCarrier(original, projection.Model, author: "seam-test");

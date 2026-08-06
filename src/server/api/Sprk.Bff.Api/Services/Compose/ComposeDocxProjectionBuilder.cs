@@ -2022,9 +2022,17 @@ public sealed class ComposeDocxProjectionBuilder
                 Cells = cells,
                 RepeatAsHeaderRow = row.TableRowProperties?.GetFirstChild<TableHeader>() is not null,
             });
-            if (row.TableRowProperties?.GetFirstChild<TableRowHeight>() is not null)
+            // Catch-all loudness (review 022-F2): EVERY trPr child outside the modeled set counts —
+            // trHeight, cantSplit, jc, hidden, cnfStyle, … — never a silent drop. Row-level tblPrEx
+            // (legacy per-row table-property exceptions) likewise.
+            var unmodeledRowProps = row.TableRowProperties?.ChildElements.Count(e => e is not TableHeader) ?? 0;
+            if (unmodeledRowProps > 0)
             {
-                ctx.AddWarning("table-formatting-flattened", 1); // trHeight — row height not model data
+                ctx.AddWarning("table-formatting-flattened", unmodeledRowProps);
+            }
+            if (row.GetFirstChild<TablePropertyExceptions>() is not null)
+            {
+                ctx.AddWarning("table-formatting-flattened", 1);
             }
         }
         if (rows.Count == 0)
@@ -2061,17 +2069,25 @@ public sealed class ComposeDocxProjectionBuilder
             {
                 gridWidths = widths!;
             }
+            else if (widths.Any(w => !string.IsNullOrEmpty(w)))
+            {
+                // Review 022-F7: a PARTIALLY-widthed grid is discarded wholesale (the renderer regenerates
+                // a width-less grid) — counted, never silent.
+                ctx.AddWarning("table-formatting-flattened", 1);
+            }
         }
 
-        // Loud flattens for the chrome outside the closed set (one count each).
+        // Catch-all loudness (review 022-F2): EVERY tblPr child outside the modeled set counts — tblpPr
+        // (floating), jc, shd, tblInd, tblCellMar, tblCellSpacing, tblLayout (fixed-layout reflows!),
+        // bidiVisual, band sizes, caption/description, … — never a silent drop. Widening is 026 scope.
         if (tblPr is not null)
         {
-            if (tblPr.GetFirstChild<TableJustification>() is not null) ctx.AddWarning("table-formatting-flattened", 1);
-            if (tblPr.GetFirstChild<Shading>() is not null) ctx.AddWarning("table-formatting-flattened", 1);
-            if (tblPr.GetFirstChild<TableIndentation>() is not null) ctx.AddWarning("table-formatting-flattened", 1);
-            if (tblPr.GetFirstChild<TableCellMarginDefault>() is not null) ctx.AddWarning("table-formatting-flattened", 1);
-            if (tblPr.GetFirstChild<TableCellSpacing>() is not null) ctx.AddWarning("table-formatting-flattened", 1);
-            if (tblPr.GetFirstChild<TablePositionProperties>() is not null) ctx.AddWarning("table-formatting-flattened", 1); // floating table → flows inline
+            var unmodeled = tblPr.ChildElements.Count(e =>
+                e is not TableStyle and not TableWidth and not TableBorders and not TableLook);
+            if (unmodeled > 0)
+            {
+                ctx.AddWarning("table-formatting-flattened", unmodeled);
+            }
         }
 
         return new ComposeTable
@@ -2083,8 +2099,35 @@ public sealed class ComposeDocxProjectionBuilder
             // the renderer must NOT apply its born-in-editor border chrome to a source table.
             Borders = ProjectTableBorders(tblPr?.GetFirstChild<TableBorders>()),
             GridColumnWidthsTwips = gridWidths,
-            LookHex = tblPr?.GetFirstChild<TableLook>()?.Val?.Value,
+            LookHex = ProjectLookHex(tblPr?.GetFirstChild<TableLook>()),
         };
+    }
+
+    /// <summary>
+    /// Review 022-F3: <c>w:tblLook</c> exists in two representations — a <c>@w:val</c> hex bitmask
+    /// (transitional) and/or the six boolean attributes (strict). Val wins when present; otherwise the
+    /// hex is SYNTHESIZED from the booleans (0x20 firstRow · 0x40 lastRow · 0x80 firstColumn ·
+    /// 0x100 lastColumn · 0x200 noHBand · 0x400 noVBand) so style banding survives either authoring.
+    /// An element carrying neither is semantically empty — nothing to carry.
+    /// </summary>
+    private static string? ProjectLookHex(TableLook? look)
+    {
+        if (look is null)
+        {
+            return null;
+        }
+        if (look.Val?.Value is { } val)
+        {
+            return val;
+        }
+        var bits = 0;
+        if (look.FirstRow?.Value == true) bits |= 0x20;
+        if (look.LastRow?.Value == true) bits |= 0x40;
+        if (look.FirstColumn?.Value == true) bits |= 0x80;
+        if (look.LastColumn?.Value == true) bits |= 0x100;
+        if (look.NoHorizontalBand?.Value == true) bits |= 0x200;
+        if (look.NoVerticalBand?.Value == true) bits |= 0x400;
+        return bits == 0 ? null : bits.ToString("X4", CultureInfo.InvariantCulture);
     }
 
     private ComposeTableCell ProjectCellFacts(TableCell cell, List<ComposeBlock> blocks, ModelWalkContext ctx)
@@ -2100,12 +2143,17 @@ public sealed class ComposeDocxProjectionBuilder
                 : ComposeVerticalMerge.Continue;
         }
 
+        // Catch-all loudness (review 022-F2): EVERY tcPr child outside the modeled set counts — shd,
+        // tcBorders, tcMar, textDirection, hMerge (legacy horizontal merge — STRUCTURAL), noWrap,
+        // tcFitText, hideMark, cnfStyle, … — never a silent drop. Widening is 026 scope.
         if (tcPr is not null)
         {
-            if (tcPr.GetFirstChild<Shading>() is not null) ctx.AddWarning("table-formatting-flattened", 1);
-            if (tcPr.GetFirstChild<TableCellBorders>() is not null) ctx.AddWarning("table-formatting-flattened", 1);
-            if (tcPr.GetFirstChild<TableCellMargin>() is not null) ctx.AddWarning("table-formatting-flattened", 1);
-            if (tcPr.GetFirstChild<TextDirection>() is not null) ctx.AddWarning("table-formatting-flattened", 1);
+            var unmodeled = tcPr.ChildElements.Count(e =>
+                e is not GridSpan and not VerticalMerge and not TableCellWidth and not TableCellVerticalAlignment);
+            if (unmodeled > 0)
+            {
+                ctx.AddWarning("table-formatting-flattened", unmodeled);
+            }
         }
 
         return new ComposeTableCell
@@ -2114,17 +2162,27 @@ public sealed class ComposeDocxProjectionBuilder
             GridSpan = Math.Max(1, tcPr?.GetFirstChild<GridSpan>()?.Val?.Value ?? 1),
             VMerge = vMerge,
             Width = ProjectWidth(tcPr?.GetFirstChild<TableCellWidth>()),
-            // Explicit source value, else Word's default "top" — a projected cell must never inherit the
-            // renderer's born-in-editor "center" chrome (see ComposeTableCell.VerticalAlignment).
-            VerticalAlignment = MapVerticalAlignment(tcPr?.GetFirstChild<TableCellVerticalAlignment>()) ?? "top",
+            // Source value only — NULL when the cell carries no direct vAlign (review 022-F4: stamping an
+            // explicit "top" would OVERRIDE a table-style-inherited center/bottom; the renderer's
+            // source-faithful mode emits nothing for null, letting the style chain govern exactly as in
+            // the source).
+            VerticalAlignment = MapVerticalAlignment(tcPr?.GetFirstChild<TableCellVerticalAlignment>()),
         };
     }
 
     private static ComposeTableWidth? ProjectWidth(TableWidthType? width)
     {
-        if (width?.Type is null)
+        if (width is null)
         {
             return null;
+        }
+        if (width.Type is null)
+        {
+            // Review 022-F6: a type-less width with a numeric @w:w is Word's legacy dxa idiom — keep it
+            // rather than silently dropping the width. Type-less AND value-less carries nothing.
+            return width.Width?.Value is { Length: > 0 } bare
+                ? new ComposeTableWidth { Type = "dxa", Value = bare }
+                : null;
         }
         var type = width.Type.Value;
         return new ComposeTableWidth

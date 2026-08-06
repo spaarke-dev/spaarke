@@ -496,8 +496,10 @@ export interface ComposeTableRow {
  *
  * The optional structural-fact fields (server task 022) are SERVER-set by the docx→model projection for
  * imported documents: style identity, width, borders (tri-state: absent = born-in-editor renderer chrome;
- * present-but-all-edges-omitted = borderless), explicit grid widths, and `tblLook` hex. The client mapper
- * never sets them; preserve untouched on edit-and-repost. */
+ * present-but-all-edges-omitted = borderless), explicit grid widths, and `tblLook` hex. `borders` is ALSO
+ * the mode discriminator: `styleId`/`width`/`lookHex` are honored only when `borders` is present. The
+ * client mapper never sets any of these; preserve untouched on edit-and-repost (like `numId`, dropping
+ * them regresses imported-table fidelity — mapper preservation is the 010/012 cutover's obligation). */
 export interface ComposeTable {
   rows: ComposeTableRow[];
   styleId?: string;

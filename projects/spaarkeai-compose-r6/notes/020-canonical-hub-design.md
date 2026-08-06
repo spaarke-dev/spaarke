@@ -297,4 +297,36 @@ structural corruption of legal signature/schedule tables).
 
 ---
 
+### §12.1 Task 022 Step 9.5 triage (2026-08-06, commit `cef2cd988` + fix commit)
+
+**code-review: REQUEST-CHANGES → all warranted findings resolved:**
+- **F1 (Major, live endpoint) FIXED** — client-supplied border token unvalidated (`new BorderValues(garbage)`
+  → schema-invalid XML; JSON `"val": null` → ArgumentNullException 500). Fix: `AppendEdge` validates via
+  `IEnumValue.IsValid`, coerces null/garbage → `single`.
+- **F2 (Major, F-1 contract) FIXED** — the loud-degradation enumeration was incomplete (hMerge, tblLayout,
+  noWrap, cantSplit, tblPrEx, bidiVisual… dropped SILENTLY). Fix: CATCH-ALL counting — every tblPr/trPr/tcPr
+  child outside the modeled set counts `table-formatting-flattened`, plus row-level `tblPrEx`. Carrying
+  hMerge/tblLayout typed → 026.
+- **F3 (Major) FIXED** — boolean-attrs-only `tblLook` (strict authoring) was silently dropped, killing style
+  banding. Fix: `ProjectLookHex` synthesizes the hex bitmask from the six booleans when `@w:val` absent.
+- **F4 (Major — reviewer right, my design wrong) FIXED** — forced explicit `vAlign=top` OVERRODE
+  table-style-inherited alignment. Fix: model carries the DIRECT source value or null; renderer emits
+  nothing for null in source-faithful mode (style chain governs; `Borders != null` is the mode
+  discriminator, threaded to `BuildCellProperties`), legacy center only in editor mode.
+- **F5 FIXED (docs)** — the Borders tri-state is documented as the mode discriminator (StyleId/Width/LookHex
+  honored only source-faithful) in model XML docs + TS contract.
+- **F6 FIXED** — type-less width with `@w:w` = legacy dxa idiom, kept (was silently dropped).
+- **F7 FIXED** — partially-widthed grid discard now counted.
+- **F8 FIXED** — case-insensitive vAlign/width-type mapping; unknown coerces (documented).
+- **F9/F10/F11 FIXED (tests)** — validator diff is a per-description MULTISET; corpus theory vacuity-guarded
+  against raw body-table count; `TableShapeFacts` fold extended to ALL carried facts (style/width/borders/
+  grid/look/header/vAlign/cell-width) corpus-wide.
+- **F12 (documented deferral)** — client-mapper preservation of server-set table facts on re-post → 010/012
+  (same routing class as 021-F3 numId preservation; TS contract states the obligation).
+
+**Post-fix:** suite 705/708 (same 3 pre-existing). Publish (clean-worktree): **46.89 MB incl PDBs, task
+delta 0.00** (measured on `cef2cd988`; fix commit is code-only).
+
+---
+
 *Steps 1–3 artifact + gates + tasks 020/011/021/022 records. Checkpoint in `current-task.md`.*

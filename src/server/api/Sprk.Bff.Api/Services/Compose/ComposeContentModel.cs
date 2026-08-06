@@ -187,6 +187,10 @@ public sealed record ComposeTable
     /// legacy look); NON-null = source-faithful mode — only the edges present are emitted, and an instance
     /// with ALL edges null reproduces a BORDERLESS table (legal signature-block layout tables must not grow
     /// borders on save). The PROJECTOR always sets this (possibly empty) for projected tables.
+    /// NOTE (022-F5): this field is ALSO the mode discriminator — <see cref="StyleId"/>, <see cref="Width"/>
+    /// and <see cref="LookHex"/> are honored only in source-faithful mode (Borders non-null); in legacy mode
+    /// the chrome replaces them wholesale. Cell/row facts (spans, merges, header rows, grid widths) are
+    /// honored in both modes.
     /// </summary>
     public ComposeTableBorders? Borders { get; init; }
 
@@ -282,8 +286,10 @@ public sealed record ComposeTableCell
     public ComposeTableWidth? Width { get; init; }
 
     /// <summary>Task 022: vertical alignment (<c>w:tcPr/w:vAlign</c>: <c>top</c> / <c>center</c> /
-    /// <c>bottom</c>). The PROJECTOR always sets an explicit value (source value, else Word's default
-    /// <c>top</c>) so a projected cell never inherits the renderer's born-in-editor <c>center</c> chrome;
-    /// null (client-authored) keeps that legacy center default.</summary>
+    /// <c>bottom</c>). Null = the cell carries no DIRECT vAlign — in the renderer's source-faithful mode
+    /// (table <see cref="ComposeTable.Borders"/> non-null) nothing is emitted so the TABLE-STYLE chain
+    /// governs exactly as in the source (review 022-F4: stamping a default here would override a styled
+    /// table's center/bottom); in born-in-editor mode (Borders null) the legacy <c>center</c> chrome
+    /// applies.</summary>
     public string? VerticalAlignment { get; init; }
 }

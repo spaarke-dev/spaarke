@@ -841,6 +841,11 @@ public sealed partial class ComposeDocumentRenderer
         }
         table.AppendChild(grid);
 
+        // Source-faithful vs born-in-editor cell chrome follows the table's own tri-state discriminator
+        // (Borders — see BuildTableProperties): in source-faithful mode a vAlign-less cell emits NOTHING
+        // (the table style chain governs, review 022-F4); in legacy mode it keeps the center chrome.
+        var sourceFaithful = model.Borders is not null;
+
         foreach (var row in model.Rows)
         {
             var tableRow = new TableRow();
@@ -851,7 +856,7 @@ public sealed partial class ComposeDocumentRenderer
             }
             foreach (var cell in row.Cells)
             {
-                tableRow.AppendChild(BuildTableCell(cell, state));
+                tableRow.AppendChild(BuildTableCell(cell, state, sourceFaithful));
             }
             table.AppendChild(tableRow);
         }
@@ -924,7 +929,16 @@ public sealed partial class ComposeDocumentRenderer
         {
             return;
         }
-        var element = new TEdge { Val = new BorderValues(edge.Val) };
+        // Review 022-F1: the model reaches this method from CLIENT JSON (ComposeService save path), so the
+        // token must be validated — a null (System.Text.Json ignores the C# default under NRT) or garbage
+        // token would emit schema-invalid XML or throw out of the save path. Coerce to the safe visible
+        // default rather than fail the save.
+        var val = string.IsNullOrEmpty(edge.Val) ? BorderValues.Single : new BorderValues(edge.Val);
+        if (!((IEnumValue)val).IsValid)
+        {
+            val = BorderValues.Single;
+        }
+        var element = new TEdge { Val = val };
         if (edge.Size is { } size)
         {
             element.Size = size;
@@ -936,18 +950,18 @@ public sealed partial class ComposeDocumentRenderer
         borders.AppendChild(element);
     }
 
-    private static TableWidthUnitValues MapWidthType(string type) => type switch
+    private static TableWidthUnitValues MapWidthType(string? type) => type?.ToLowerInvariant() switch
     {
         "dxa" => TableWidthUnitValues.Dxa,
         "pct" => TableWidthUnitValues.Pct,
         "nil" => TableWidthUnitValues.Nil,
-        _ => TableWidthUnitValues.Auto,
+        _ => TableWidthUnitValues.Auto, // unknown/garbage client token coerces to auto (022-F8)
     };
 
-    private TableCell BuildTableCell(ComposeTableCell cell, ListRenderState state)
+    private TableCell BuildTableCell(ComposeTableCell cell, ListRenderState state, bool sourceFaithful = false)
     {
         var tableCell = new TableCell();
-        tableCell.AppendChild(BuildCellProperties(cell));
+        tableCell.AppendChild(BuildCellProperties(cell, sourceFaithful));
 
         if (cell.Blocks.Count == 0)
         {
@@ -963,10 +977,11 @@ public sealed partial class ComposeDocumentRenderer
         return tableCell;
     }
 
-    /// <summary>Task 022 — CT_TcPr schema order: tcW, gridSpan, vMerge, vAlign. A null
-    /// <see cref="ComposeTableCell.VerticalAlignment"/> keeps the legacy born-in-editor <c>center</c>;
-    /// projected cells always carry an explicit value (source, else Word's default <c>top</c>).</summary>
-    private static TableCellProperties BuildCellProperties(ComposeTableCell cell)
+    /// <summary>Task 022 — CT_TcPr schema order: tcW, gridSpan, vMerge, vAlign. vAlign emission (review
+    /// 022-F4): an explicit model value is always emitted (case-insensitive, unknown → top); a NULL value
+    /// emits NOTHING in source-faithful mode (the table style chain governs, exactly as in the source) and
+    /// keeps the legacy <c>center</c> chrome in born-in-editor mode.</summary>
+    private static TableCellProperties BuildCellProperties(ComposeTableCell cell, bool sourceFaithful)
     {
         var tcPr = new TableCellProperties();
         if (cell.Width is { } width)
@@ -985,15 +1000,22 @@ public sealed partial class ComposeDocumentRenderer
         {
             tcPr.AppendChild(new VerticalMerge()); // no @w:val = continue (ECMA-376 default)
         }
-        tcPr.AppendChild(new TableCellVerticalAlignment
+        if (cell.VerticalAlignment is { } vAlign)
         {
-            Val = cell.VerticalAlignment switch
+            tcPr.AppendChild(new TableCellVerticalAlignment
             {
-                null or "center" => TableVerticalAlignmentValues.Center,
-                "bottom" => TableVerticalAlignmentValues.Bottom,
-                _ => TableVerticalAlignmentValues.Top,
-            },
-        });
+                Val = vAlign.ToLowerInvariant() switch
+                {
+                    "center" => TableVerticalAlignmentValues.Center,
+                    "bottom" => TableVerticalAlignmentValues.Bottom,
+                    _ => TableVerticalAlignmentValues.Top,
+                },
+            });
+        }
+        else if (!sourceFaithful)
+        {
+            tcPr.AppendChild(new TableCellVerticalAlignment { Val = TableVerticalAlignmentValues.Center });
+        }
         return tcPr;
     }
 
