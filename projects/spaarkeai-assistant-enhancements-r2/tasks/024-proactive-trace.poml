@@ -4,7 +4,7 @@
     <title>Dev-visible proactive-selection trace (FR-B6)</title>
     <phase>3 B — Proactive follow-ons</phase>
     <gate>blocked until 022</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Adds a dev-only observability trace (no product behavior change)</rigor-reason>
     <model-tier>sonnet</model-tier>

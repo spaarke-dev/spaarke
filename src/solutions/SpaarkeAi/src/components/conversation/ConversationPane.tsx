@@ -282,6 +282,42 @@ export const WIZARD_AUTO_RUN_BRIDGE_FAILURE_MESSAGE =
  */
 export const WIZARD_AUTO_RUN_WATCHDOG_MS = 30_000;
 
+/**
+ * task 024 (FR-B6) — one dev-only proactive-selection trace entry. Records what the CLIENT observed
+ * at the selection point of a proactive suggestion turn (task 022): the focused tab's context type,
+ * the tab id, what triggered the turn, and the ≤3 chips the grounded turn selected — each chip carries
+ * the model's per-chip `reason` (from the SUGGEST-FOLLOWUPS Action output). The server-side candidate
+ * Binding list that fed the selection is separately logged by `AssistantSuggestionService`
+ * (candidateCount + bindingIds), so the two together make the otherwise-opaque selection inspectable.
+ */
+interface SuggestTraceEntry {
+  at: number;
+  tabId: string;
+  contextType: string;
+  trigger: "first-open" | "refresh";
+  chips: unknown[];
+}
+
+/** Bounded ring-buffer size for the dev trace stashed on `window.__sprkSuggestTrace`. */
+const SUGGEST_TRACE_MAX = 20;
+
+/**
+ * Emit the FR-B6 dev-only proactive-selection trace: `console.debug` + a bounded
+ * `window.__sprkSuggestTrace` ring buffer for inspection. Guarded by
+ * `process.env.NODE_ENV === "production"` — Vite replaces that literal at build time, so the entire
+ * body is dead-code-eliminated from the production bundle (zero production UI/behavior change, FR-B6).
+ * In dev and under test (`NODE_ENV !== "production"`) the trace runs.
+ */
+function recordSuggestTrace(entry: SuggestTraceEntry): void {
+  if (process.env.NODE_ENV === "production") return;
+  const w = window as unknown as { __sprkSuggestTrace?: SuggestTraceEntry[] };
+  const buffer = (w.__sprkSuggestTrace ??= []);
+  buffer.push(entry);
+  if (buffer.length > SUGGEST_TRACE_MAX) buffer.shift();
+  // eslint-disable-next-line no-console
+  console.debug("[sprk:suggest-trace]", entry);
+}
+
 export function ConversationPane(): React.JSX.Element {
   const styles = useConversationPaneLayoutStyles();
 
@@ -911,6 +947,15 @@ export function ConversationPane(): React.JSX.Element {
           if (!response.ok) return;
           const data = (await response.json()) as { chips?: unknown[] };
           const top = Array.isArray(data?.chips) ? data.chips.slice(0, 3) : [];
+          // task 024 (FR-B6) — dev-only trace of the selection outcome (contextType + tab + trigger +
+          // the selected chips, each carrying the model's per-chip reason). Inert in production.
+          recordSuggestTrace({
+            at: Date.now(),
+            tabId,
+            contextType,
+            trigger: force ? "refresh" : "first-open",
+            chips: top,
+          });
           if (top.length > 0) {
             acceptChipsRef.current(top);
           }

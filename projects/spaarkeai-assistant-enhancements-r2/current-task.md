@@ -10,10 +10,14 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **023** (FR-B4) — **✅ COMPLETE** (2026-08-06, built + committed; deploy deferred to 025). **10 tasks done.** Next: **024** (FR-B6 dev trace). |
-| **Step** | Done. Ready for 024. |
+| **Task** | **024** (FR-B6) — **✅ COMPLETE** (2026-08-06, built + committed; deploy deferred to 025). **11 tasks done. Phase B implementation complete — only the B deploy (025) remains.** |
+| **Step** | Done. Ready for 025 (deploy + verify B). |
 | **Status** | completed |
-| **Next Action** | Start **task 024** (FR-B6 — dev-visible proactive-selection trace; ConvPane spine; sonnet/high; STANDARD rigor). The BFF already returns the `reason` per chip (`ChatSuggestChip.Reason`, from the Action's output schema) — 024 surfaces it in a dev-only trace view. Then 025 (deploy + verify B — deploys the accumulated 022/023/024 client changes + verifies). |
+| **Next Action** | Start **task 025** (Deploy + verify B — sonnet/high, STANDARD, deploy). Redeploy the SpaarkeAi code page (cache-clear + build + `Deploy-SpaarkeAi.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com`) to ship the accumulated 022+023+024 client changes; BFF already deployed. Then verify B success criteria (spec §2): content-specific chips per tab, once-per-tab, manual refresh, dev trace. **Owner E2E verify** of the proactive surface belongs here. |
+
+### Task 024 — DONE (2026-08-06). Deploy deferred to 025.
+- Dev-only proactive-selection trace: `recordSuggestTrace` (module-level in ConversationPane.tsx) emits `console.debug("[sprk:suggest-trace]", …)` + a bounded `window.__sprkSuggestTrace` ring buffer, gated on `process.env.NODE_ENV === "production"` → Vite dead-code-eliminates it from the prod bundle (verified: 0 occurrences in dist). Records `{at, tabId, contextType, trigger, chips[]}`; each chip carries the model's `reason`. Server-side candidate list is already logged by AssistantSuggestionService.
+- Called in `fireProactiveSuggestion` at the selection point (both first-open + refresh). Test: assertion in `ConversationPane.proactive-suggest.e2e.test.tsx` (trace populates in dev). typecheck Surface-owned:0; prod-strip verified.
 
 ### Task 023 — DONE (2026-08-06). Deploy deferred to 025.
 - Manual "Refresh suggestions" control in `transcriptFooter`, gated on `chips.hasChips` (new reactive flag on `useConsumerChips`). Click → `handleRefreshSuggestions` → `fireProactiveSuggestion(stamp, force=true)` re-runs the 022 turn for the active tab, bypassing the once-per-tab guard (the ONLY re-fire path besides first-open, NFR-02). Fluent subtle Button + `ArrowClockwiseRegular` (dark-mode safe, ADR-021).

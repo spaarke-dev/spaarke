@@ -146,6 +146,8 @@ function suggestCalls(): unknown[] {
 
 beforeEach(() => {
   authenticatedFetchMock.mockClear();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (window as any).__sprkSuggestTrace = [];
 });
 
 describe('task 022 (FR-B3/B5): proactive suggestion trigger', () => {
@@ -184,6 +186,18 @@ describe('task 022 (FR-B3/B5): proactive suggestion trigger', () => {
     await publishFocus(bus, { tabId: 'tab-doc-2' });
 
     expect(suggestCalls()).toHaveLength(2);
+  });
+
+  it('task 024 (FR-B6): records a dev-inspectable selection trace (contextType + trigger + selected chips)', async () => {
+    const bus = renderPane();
+
+    await publishFocus(bus, { tabId: 'tab-doc-1' });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const trace = (window as any).__sprkSuggestTrace as Array<Record<string, unknown>>;
+    expect(trace).toHaveLength(1);
+    expect(trace[0]).toMatchObject({ tabId: 'tab-doc-1', contextType: 'document', trigger: 'first-open' });
+    expect((trace[0].chips as unknown[]).length).toBe(2); // the two chips the mock returned
   });
 
   it('does NOT fire (and does not consume the tab one-shot) when the focus event carries no context type', async () => {
