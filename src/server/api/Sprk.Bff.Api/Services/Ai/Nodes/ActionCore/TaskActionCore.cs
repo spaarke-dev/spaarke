@@ -49,8 +49,9 @@ internal sealed class TaskActionCore
     /// A caller-supplied regarding (polymorphic on the OOB task) maps to <c>sprk_event</c>'s TYPED regarding
     /// lookup for that target entity. This is <c>sprk_event</c>'s OWN regarding family — it differs from the
     /// <c>sprk_communication</c> <c>RegardingFieldMap</c> (e.g. <c>contact</c> → <c>sprk_regardingcontact</c> here vs
-    /// <c>sprk_regardingperson</c> there), so it is NOT reused. Field names match the deployed schema exactly —
-    /// including the schema's own <c>sprk_regardingorganziation</c> misspelling (do not "fix" it in code).
+    /// <c>sprk_regardingperson</c> there), so it is NOT reused. The complete family, verified against the deployed
+    /// <c>sprk_event</c> schema — including the schema's own <c>sprk_regardingorganziation</c> misspelling (do not
+    /// "fix" it in code) and <c>sprk_regardingcommunication</c> (a task CAN regard the communication it follows up).
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> RegardingFieldByEntity =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -58,9 +59,13 @@ internal sealed class TaskActionCore
             ["sprk_matter"] = "sprk_regardingmatter",
             ["sprk_project"] = "sprk_regardingproject",
             ["sprk_invoice"] = "sprk_regardinginvoice",
+            ["sprk_servicerequest"] = "sprk_regardingservicerequest",
             ["sprk_workassignment"] = "sprk_regardingworkassignment",
             ["sprk_analysis"] = "sprk_regardinganalysis",
             ["sprk_budget"] = "sprk_regardingbudget",
+            ["sprk_reportcard"] = "sprk_regardingreportcard",
+            ["sprk_event"] = "sprk_regardingevent",
+            ["sprk_communication"] = "sprk_regardingcommunication",
             ["sprk_organization"] = "sprk_regardingorganziation", // schema spelling (SIC)
             ["sprk_recordtype_ref"] = "sprk_regardingrecordtype",
             ["account"] = "sprk_regardingaccount",

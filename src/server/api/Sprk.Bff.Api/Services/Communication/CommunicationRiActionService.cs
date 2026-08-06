@@ -174,20 +174,17 @@ public sealed class CommunicationRiActionService
 
             var subject = BuildActionSubject(signal);
 
-            // 2) Layer-A seam (ADR-013): create the domain RI action (a follow-up task owned by the
-            //    responsible user). A Spaarke task is a sprk_event (event type = Task), which CANNOT regard a
-            //    sprk_communication — so the follow-up task regards the communication's associated record (its
-            //    matter/project, from sprk_regardingrecordid/type) instead, which appears in that record's task
-            //    views; the specific communication linkage is carried in the description. Never a direct
+            // 2) Layer-A seam (ADR-013): create the domain RI action (a follow-up task regarding the
+            //    communication, owned by the responsible user). A Spaarke task is a sprk_event (event type = Task),
+            //    which regards the communication via its typed sprk_regardingcommunication lookup. Never a direct
             //    Dataverse write. Degraded success (TaskId == Guid.Empty) is logged but does not abort below.
-            Guid? taskRegardingId = Guid.TryParse(regardingId, out var parsedRegardingId) ? parsedRegardingId : null;
             var taskResult = await _seam.CreateTaskAsync(
                 new CreateTaskRequest
                 {
                     Subject = subject,
                     Description = BuildActionDescription(signal, decision),
-                    RegardingObjectId = taskRegardingId,
-                    RegardingObjectType = regardingType,
+                    RegardingObjectId = signal.CommunicationId,
+                    RegardingObjectType = CommunicationEntity,
                     OwnerId = recipientSystemUserId,
                 },
                 ct).ConfigureAwait(false);

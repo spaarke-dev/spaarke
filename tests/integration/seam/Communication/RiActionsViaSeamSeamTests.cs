@@ -186,12 +186,12 @@ public sealed class RiActionsViaSeamSeamTests
         await h.Consumer.PublishAsync(Signal(h.CommunicationId, confidence: 0.9));
 
         // (1) The domain record was created via the Layer-A seam — a sprk_event (event type = Task) regarding the
-        //     communication's associated matter (sprk_event cannot regard a communication), owned by the recipient —
-        //     NOT a direct Dataverse write of some other shape.
+        //     communication via its typed sprk_regardingcommunication lookup, owned by the recipient — NOT a direct
+        //     Dataverse write of some other shape.
         var task = h.Creates.SingleOrDefault(e => e.LogicalName == "sprk_event");
         task.Should().NotBeNull("the RI action is created via the Layer-A seam (ADR-013), not a direct write");
         task!.GetAttributeValue<string>("sprk_eventname").Should().Contain("Settlement terms");
-        task.GetAttributeValue<EntityReference>("sprk_regardingmatter")!.Id.Should().Be(h.MatterId);
+        task.GetAttributeValue<EntityReference>("sprk_regardingcommunication")!.Id.Should().Be(h.CommunicationId);
         task.GetAttributeValue<EntityReference>("ownerid")!.Id.Should().Be(h.OwnerId);
 
         // (2) One outbox row, kind=communication-assessed, IDs + minimal display metadata + regardingRecordId only.
