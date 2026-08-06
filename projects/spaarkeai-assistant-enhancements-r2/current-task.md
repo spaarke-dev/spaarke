@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-05
+> **Last Updated**: 2026-08-05 (context-handoff before compaction)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,118 +10,69 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | E + A DONE & DEPLOYED (001,002,010,011,012,013) → next: **Phase B** (020 ∥ 021) |
-| **Step** | — |
-| **Status** | not-started |
-| **Next Action** | Owner E2E check pending (notes/a-deploy-verify.md: "summarize this" → focused email on spaarkedev1). To continue building: `work on task 020` (closed contextType set, shared-lib Spaarke.AI.Widgets) — parallelizable with 021 (catalog data). Deploys 025/039/043 batch later. |
+| **Task** | Next = **021** (FR-B2 context-type tags) — **RE-SCOPED to Option C** (new column + BFF), owner-approved |
+| **Step** | Not started |
+| **Status** | not-started (7 tasks done + deployed; awaiting 021 build) |
+| **Next Action** | Re-scope 021 POML to Option C, then build it. See "Task 021 re-scope" below + `notes/deviations.md` §"Task 021 Option C". |
 
-### Files Modified This Session
-- Task 010 (FR-A1, ✅ complete): ConversationPane.tsx (added `activeTabFocusRef` + extended the existing `usePaneEvent('workspace', …)` handler with an `active_widget_changed` branch), new `activeTabFocusStamp.ts` (pure derivation helper + `ActiveTabFocusStamp` type), new `__tests__/activeTabFocusStamp.test.ts` (seam test, 5/5 passing). Quality gates clean (code-review 1 low-severity note for 011/012 awareness; adr-check ADR-030 clean). Not committed — left staged/unstaged for orchestrator to commit after build-verifying the wave.
-- Task 001 (FR-E1): ConversationPane.tsx (removed suggestion hook + render), deleted useSuggestionCards.tsx, trimmed SuggestionCard.test.tsx
-- Project artifacts (earlier): README, plan, CLAUDE.md, TASK-INDEX
+### Files Modified This Session (all COMMITTED + PUSHED)
+Branch `work/spaarkeai-assistant-enhancements-r2` @ `9aacda4bf` (pushed). Commits this session:
+- `de94ebba4` pipeline init (artifacts + 27 POMLs) · `cdbc5e48f` overlap-warning correction
+- `fdbe5755e` task 001 (FR-E1 banner removal) · `43bdec027` wave A1 (010+012) · `2c6eb02fd` task 011
+- `b679f6410` deploy E+A to spaarkedev1 · `419c13768`/`9aacda4bf` task 020 (contextType set)
 
 ### Critical Context
-5 phases E→A→B→D→C. `ConversationPane.tsx` is a sequential spine (E/A/B/D edit it). **001 done** (banner removed; SuggestionCard.tsx retained — see notes/deviations.md). **010 done** (active-tab focus ref wired; see task 010 POML `<notes>` for full completion detail). No live cross-worktree overlap (spine-r1 + analysis-hub-r1 merged). Wave A1 sibling: 012 (BFF SprkChatAgentFactory/ChatEndpoints — opus/xhigh, ADR-015 boundary) may still be running in parallel. Note 012 & 041 both edit SprkChatAgentFactory.cs, and 012 & 031 both edit ChatEndpoints.cs → don't run those concurrently later. Task 010 deviation: extracted the event→stamp mapping into a pure `deriveActiveTabFocusStamp` helper (new file `activeTabFocusStamp.ts`) instead of inlining it in the `usePaneEvent` handler, so the seam test unit-tests the pure logic directly rather than rendering the full pane to poke a private ref (mirrors the file's existing `routeSummarizeIntent`/`normalizeReviewDepth` pattern).
+5 phases E→A→B→D→C. `ConversationPane.tsx` is a **sequential spine** (E/A/B/D edit it). No live cross-worktree overlap (spine-r1 + analysis-hub-r1 merged to master). Phasing stays E→B→D→C (owner: "continue B as planned" — did NOT reorder C forward).
 
 ---
 
-## Active Task (Full Details)
+## Progress — 7 tasks DONE
 
-| Field | Value |
-|-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | not-started |
-| **Started** | — |
+| Task | What | Status |
+|---|---|---|
+| 001 (FR-E1) | Remove spine suggestion surface (banner). **Deviation:** kept `SuggestionCard.tsx` (reused by `useRerunFullAnalysisCard`) — see `notes/deviations.md`. | ✅ deployed |
+| 002 | Deploy+verify E | ✅ deployed (banner gone — owner UAT ✓) |
+| 010 (FR-A1) | ConversationPane `active_widget_changed` subscriber → `activeTabFocusRef`; new `activeTabFocusStamp.ts` | ✅ deployed |
+| 011 (FR-A2) | `activeContext` on outbound body via decorate seam | ✅ deployed |
+| 012 (FR-A3/A4) | Server `ChatActiveContext` DTO; prefer focus-stamp over UpdatedAt; ADR-015 active=compact/background=metadata | ✅ deployed |
+| 013 | Deploy+verify A (BFF `spaarke-bff-dev` + code page `sprk_spaarkeai` @ spaarkedev1) | ✅* (owner E2E pending) |
+| 020 (FR-B1/C3) | Closed `WidgetContextType` set on WidgetMetadata; email→'email'; wired through WorkspacePane broadcast → activeTabFocusStamp | ✅ (not yet deployed) |
 
----
-
-## Progress
-
-### Completed Steps
-
-*No steps completed yet*
-
-### Current Step
-
-*Project just initialized — no active task*
-
-### Files Modified (All Task)
-
-*No files modified yet*
-
-### Decisions Made
-
-*No decisions recorded yet*
+**Owner UAT (2026-08-05):** banner gone ✓; "summarize this → email" does NOT work yet — **EXPECTED**: email visibility is Workstream C (040/041/042, not built). A only makes the server know *which* tab is focused; the email widget contributes no content until C. Owner chose to keep C last.
 
 ---
 
-## Next Action
+## Task 021 re-scope (DO THIS FIRST when resuming) — Option C, owner-approved
 
-**Next Step**: Start task 001 (Phase 1 / Workstream E — Remove Notifications banner)
+FR-B2 "no deploy" is **overridden** (§6.5 Path A) — no context-type field exists today, so a column is needed. Full rationale + work items in `notes/deviations.md` §"Task 021 Option C". Summary:
+1. Edit `tasks/021-catalog-context-tags.poml`: rigor STANDARD→**FULL**; tags += `bff-api, dataverse`; rewrite steps for the column+BFF+seed+deploy work; add the §6.5 Path A note.
+2. New Dataverse column `sprk_contexttypetags` (CSV/multi of the closed set) on `sprk_playbookconsumer` via `dataverse-create-schema` (target: spaarkedev1).
+3. `Binding.cs` new `ContextTypeTags` field + `ConsumerRoutingService.cs` maps it (attribute read ~line 857) + candidate-filter logic.
+4. Seed tag values on relevant Bindings + author the **Reanalyze** Binding (FR-D11 data).
+5. BFF redeploy (`Deploy-BffApi.ps1`, publish ≤60 MB — baseline currently ~48.25 MB).
 
-**Pre-conditions**:
-- Review TASK-INDEX.md
-- (No cross-worktree blocker — notification-spine-r1 + analysis-hub-r1 both merged to master)
+Then 022 (FR-B3/B5, **opus/xhigh**, ConversationPane spine): proactive suggestion turn cached per tabId, filters candidate Bindings by active-tab `contextType` (via the new field), renders ≤3 chips through the **reactive** `useConsumerChips` surface (NOT the removed useSuggestionCards). Then 023, 024, 025 (deploy B).
 
-**Key Context**:
-- Refer to `spec.md` FR-E1 for the exact files to remove/preserve
-- Preserve `notificationsBootstrap.ts`; delete `useSuggestionCards.tsx` + `SuggestionCard.tsx`
+---
 
-**Expected Output**:
-- Banner + suggestion cards removed; spine + Daily Briefing + Communications badge intact
+## Environment / deploy facts
+- **BFF**: App Service `spaarke-bff-dev` / RG `rg-spaarke-dev`; deploy `pwsh -File <abs>\scripts\Deploy-BffApi.ps1`; health https://spaarke-bff-dev.azurewebsites.net/healthz. Baseline publish ~48.25 MB.
+- **Code page**: `sprk_spaarkeai` on **spaarkedev1** (`https://spaarkedev1.crm.dynamics.com`); deploy `pwsh -File <abs>\scripts\Deploy-SpaarkeAi.ps1 -DataverseUrl 'https://spaarkedev1.crm.dynamics.com'` (needs a pre-built `dist/spaarkeai.html` — run `npm run build` in `src/solutions/SpaarkeAi` after `rm -rf dist/ node_modules/.vite/ .vite/`).
+- **Auth**: `az` logged into Spaarke Dev subscription; PAC active = SPAARKE DEV 1.
+- **Verify gates**: SpaarkeAi `npm run typecheck` must show "Surface-owned: 0" (pre-existing shared-lib errors OK). BFF `dotnet build src/server/api/Sprk.Bff.Api/`.
+- **Parallel-execution note**: BFF file overlaps — 012&041 both edit `SprkChatAgentFactory.cs`; 012&031 both edit `ChatEndpoints.cs`; 030&033 both edit `SessionPersistenceService.cs`; 037&034 both edit `HistoryOverlay.tsx`. Don't run those pairs concurrently.
 
 ---
 
 ## Blockers
-
-**Status**: None
-
----
-
-## Session Notes
-
-### Current Session
-- Started: 2026-08-05
-- Focus: Project initialization (/project-pipeline) — artifacts + task generation
-
-### Key Learnings
-
-- Branch fast-forwarded to origin/master @ 0cdc67c5a; the 8 pulled commits don't touch R2's surface.
-
-### Handoff Notes
-
-*No handoff notes*
-
----
-
-## Quick Reference
-
-### Project Context
-- **Project**: spaarkeai-assistant-enhancements-r2
-- **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
-- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
-
-### Applicable ADRs
-- ADR-039 (grounded catalog), ADR-015 (metadata-only — Path A), ADR-040 (Cosmos), ADR-024 (regarding), ADR-047 (spine), ADR-030 (PaneEventBus), ADR-007 (SpeFileStore), ADR-049 (Compose)
-
-### Knowledge Files Loaded
-- `spec.md`, `plan.md` — loaded at init
+**Status**: None. (021 design fork RESOLVED → Option C, owner-approved.)
 
 ---
 
 ## Recovery Instructions
+1. Read Quick Recovery + Progress above.
+2. Read `notes/deviations.md` (001 SuggestionCard retention; 021 Option C).
+3. Resume: re-scope `tasks/021-catalog-context-tags.poml` to Option C, then execute via task-execute.
+4. Dispatch pattern: subagents per task at `<model-tier>`/`<effort>`; build-verify between waves; commit per task; update TASK-INDEX + this file.
 
-1. **Quick Recovery**: Read the "Quick Recovery" section above
-2. **If more context needed**: Read Active Task and Progress sections
-3. **Load task file**: `tasks/{task-id}-*.poml`
-4. **Load knowledge files**: From task's `<knowledge>` section
-5. **Resume**: From the "Next Action" section
-
-**Commands**: `/project-continue` · `/context-handoff` · "where was I?"
-
----
-
-*This file is the primary source of truth for active work state. Keep it updated.*
+**Commands**: `/project-continue` · "where was I?" · `work on task 021`
