@@ -250,6 +250,11 @@ public sealed partial class ComposeDocumentRenderer
             // old blank-package plan allocated from FirstListNumInstanceId regardless of the target's own
             // numbering, so an appended list could capture (or dangle against) an existing target instance.
             // Gated on list presence like RenderIntoCarrier (011-T2: list-free appends never touch the part).
+            // Task 025 note (Step-9.5 F9): AppendSection takes NO revision-id seed — its callers (the
+            // Summary Page generator) author settled AI content and never send revision-carrying blocks.
+            // If a future caller appends revisions, thread ScanCarrierRevisionIdSeed here like
+            // RenderIntoCarrier (ids would otherwise mint from 1 against the target's existing ids —
+            // Word-tolerated but collision-unclean).
             var plan = new NumberingPlan();
             var state = new ListRenderState(plan);
             var maxExistingAbstractId = 0;
@@ -940,7 +945,7 @@ public sealed partial class ComposeDocumentRenderer
         // child, so the whole record is dropped when the opaque carry is missing or fails the SDK parse
         // gate (client junk never reaches the package; the current formatting simply stands).
         if (block.PropertiesChange is { } propsChange
-            && TryParsePreviousProperties<ParagraphPropertiesExtended>(propsChange.PreviousPropertiesXml, "pPr") is { } previousPPr)
+            && TryParsePreviousProperties<ParagraphPropertiesExtended>(propsChange.PreviousPropertiesXml) is { } previousPPr)
         {
             pPr.AppendChild(new ParagraphPropertiesChange(previousPPr)
             {
@@ -1001,14 +1006,22 @@ public sealed partial class ComposeDocumentRenderer
                 continue;
             }
 
+            // Step-9.5 F1: a REVISED LINKED run authors Word's canonical nesting — w:hyperlink OUTSIDE,
+            // w:ins/w:del INSIDE (CT_RunTrackChange does not admit w:hyperlink; the reverse nesting is
+            // schema-invalid and risks Word's repair prompt). The hyperlink boundary always breaks
+            // wrapper grouping.
+            if (!string.IsNullOrWhiteSpace(run.Href))
+            {
+                CloseWrapper();
+                OpenXmlElement linkedWrapper = NewRevisionWrapper(revision, state);
+                linkedWrapper.AppendChild(BuildRun(run with { Href = null }, state, deleted: revision.Kind == ComposeRevisionKind.Deleted));
+                paragraph.AppendChild(new Hyperlink(linkedWrapper) { Id = HyperlinkPendingIdPrefix + run.Href!.Trim() });
+                continue;
+            }
+
             if (wrapper is null || wrapperRevision != revision)
             {
-                var id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture);
-                var author = SanitizeRevisionAuthor(revision.Author);
-                var date = TryValidRevisionDate(revision.Date);
-                wrapper = revision.Kind == ComposeRevisionKind.Inserted
-                    ? new InsertedRun { Id = id, Author = author, Date = date }
-                    : new DeletedRun { Id = id, Author = author, Date = date };
+                wrapper = NewRevisionWrapper(revision, state);
                 wrapperRevision = revision;
                 paragraph.AppendChild(wrapper);
             }
@@ -1018,6 +1031,16 @@ public sealed partial class ComposeDocumentRenderer
         }
 
         return paragraph;
+    }
+
+    private static OpenXmlElement NewRevisionWrapper(ComposeRevision revision, ListRenderState state)
+    {
+        var id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture);
+        var author = SanitizeRevisionAuthor(revision.Author);
+        var date = TryValidRevisionDate(revision.Date);
+        return revision.Kind == ComposeRevisionKind.Inserted
+            ? new InsertedRun { Id = id, Author = author, Date = date }
+            : new DeletedRun { Id = id, Author = author, Date = date };
     }
 
     // G5 (FR-05, task 033): sentinel prefix stashing a run's href on the temporary Hyperlink.Id during the
@@ -1040,7 +1063,7 @@ public sealed partial class ComposeDocumentRenderer
         // Task 025: a tracked run-formatting change (w:rPrChange) forces an rPr even on an unmarked run —
         // the change record lives inside it (LAST in CT_RPr order).
         var formatChange = run.FormatChange is { } change
-            ? (Change: change, Previous: TryParsePreviousProperties<PreviousRunProperties>(change.PreviousPropertiesXml, "rPr"))
+            ? (Change: change, Previous: TryParsePreviousProperties<PreviousRunProperties>(change.PreviousPropertiesXml))
             : ((ComposeFormatChange Change, PreviousRunProperties? Previous)?)null;
         if (run.Bold || run.Italic || run.Underline || formatChange?.Previous is not null)
         {
@@ -1705,9 +1728,25 @@ public sealed partial class ComposeDocumentRenderer
 
     private const int MaxRevisionAuthorChars = 255;
     private const int MaxPreviousPropertiesXmlChars = 32 * 1024;
-    private const string WNamespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
-    private static readonly OpenXmlValidator PreviousPropertiesValidator = new(FileFormatVersions.Office2019);
+    // Step-9.5 F3: the xsd:dateTime LEXICAL forms (K covers Z / ±hh:mm / no-zone). A merely
+    // DateTime.TryParse-able string ("08/01/2026") is NOT a valid @w:date and must be dropped.
+    private static readonly string[] XsdDateTimeFormats =
+    {
+        "yyyy-MM-ddTHH:mm:ssK",
+        "yyyy-MM-ddTHH:mm:ss.FFFFFFFK",
+    };
+
+    /// <summary>Step-9.5 F3/F5: returns <paramref name="raw"/> when it is a valid <c>xsd:dateTime</c>
+    /// lexical form (kept RAW for byte-faithful re-authoring), else null. Used at BOTH ends: the
+    /// projection normalizes captured dates through this (so the model is canonical and the render
+    /// fixed point holds for degenerate source attribution), and the render gate drops anything a
+    /// client posted that would be a schema-invalid <c>@w:date</c>.</summary>
+    internal static string? NormalizeXsdDateTime(string? raw) =>
+        !string.IsNullOrEmpty(raw)
+            && DateTime.TryParseExact(raw, XsdDateTimeFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out _)
+            ? raw
+            : null;
 
     private static string SanitizeRevisionAuthor(string? author)
     {
@@ -1719,23 +1758,24 @@ public sealed partial class ComposeDocumentRenderer
         return sanitized.Length <= MaxRevisionAuthorChars ? sanitized : sanitized[..MaxRevisionAuthorChars];
     }
 
-    /// <summary>Emits the revision date only when the raw string parses as a round-trip timestamp (the
-    /// comments-part gate from task 024, F1) — projection-sourced dates pass; client junk is omitted
-    /// (<c>@w:date</c> is schema-optional). The RAW string is kept for byte-faithful re-authoring.</summary>
+    /// <summary>Emits the revision date only when the raw string is a valid <c>xsd:dateTime</c> lexical
+    /// form (Step-9.5 F3 — strictly tighter than the 024 comments-part <c>TryParse</c> gate, which admits
+    /// culture formats that are schema-invalid as <c>@w:date</c>); junk is omitted (the attribute is
+    /// schema-optional). The RAW string is kept for byte-faithful re-authoring.</summary>
     private static DateTimeValue? TryValidRevisionDate(string? date) =>
-        !string.IsNullOrEmpty(date)
-            && DateTime.TryParse(date, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out _)
-            ? new DateTimeValue { InnerText = date }
-            : null;
+        NormalizeXsdDateTime(date) is { } valid ? new DateTimeValue { InnerText = valid } : null;
 
     /// <summary>
     /// The <see cref="ComposeFormatChange.PreviousPropertiesXml"/> gate: parses the opaque carry through
-    /// the TYPED SDK class (never string-injection into the package), verifies element identity
-    /// (<paramref name="expectedLocalName"/> in the WordprocessingML namespace), and schema-validates the
-    /// parsed subtree — any failure drops the whole change record (the current formatting simply stands;
-    /// equivalent to accepting the formatting change). Size-clamped against hostile payloads.
+    /// the TYPED SDK class — the generated ctor VALIDATES the root element (name + namespace; a
+    /// wrong-root or malformed fragment throws <c>ArgumentException</c>, and DTDs are prohibited by the
+    /// SDK reader) — then schema-validates the parsed subtree; any failure drops the whole change record
+    /// (the current formatting simply stands; equivalent to accepting the formatting change). Never
+    /// string-injection into the package. Size-clamped against hostile payloads. The validator is
+    /// per-call — <c>OpenXmlValidator</c> instance thread-safety is not contractually guaranteed and
+    /// this runs on concurrent request paths (Step-9.5 F10); a subtree validation is cheap.
     /// </summary>
-    private static T? TryParsePreviousProperties<T>(string? xml, string expectedLocalName) where T : OpenXmlElement
+    private static T? TryParsePreviousProperties<T>(string? xml) where T : OpenXmlElement
     {
         if (string.IsNullOrWhiteSpace(xml) || xml.Length > MaxPreviousPropertiesXmlChars)
         {
@@ -1744,12 +1784,8 @@ public sealed partial class ComposeDocumentRenderer
         try
         {
             var element = (T)Activator.CreateInstance(typeof(T), xml)!;
-            if (element.LocalName != expectedLocalName || element.NamespaceUri != WNamespace)
-            {
-                return null;
-            }
             _ = element.OuterXml; // force the lazy parse before validation
-            return PreviousPropertiesValidator.Validate(element).Any() ? null : element;
+            return new OpenXmlValidator(FileFormatVersions.Office2019).Validate(element).Any() ? null : element;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -1801,6 +1837,12 @@ public sealed partial class ComposeDocumentRenderer
                         ParagraphPropertiesChange pc => pc.Id?.Value,
                         CellInsertion ci => ci.Id?.Value,
                         CellDeletion cd => cd.Id?.Value,
+                        // Step-9.5 F8: the remaining *Change family preserved parts can carry.
+                        SectionPropertiesChange sc => sc.Id?.Value,
+                        TablePropertiesChange tpc => tpc.Id?.Value,
+                        TableRowPropertiesChange trc => trc.Id?.Value,
+                        TableCellPropertiesChange tcc => tcc.Id?.Value,
+                        TableGridChange tgc => tgc.Id?.Value,
                         _ => null,
                     };
                     if (id is not null
@@ -1817,6 +1859,9 @@ public sealed partial class ComposeDocumentRenderer
             foreach (var footer in main.FooterParts) Scan(footer.Footer);
             Scan(main.FootnotesPart?.Footnotes);
             Scan(main.EndnotesPart?.Endnotes);
+            // Step-9.5 F8: comment TEXT can itself carry tracked changes; the part is preserved
+            // byte-identically (task 024), so its ids join the collision base too.
+            Scan(main.WordprocessingCommentsPart?.Comments);
             return max;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)

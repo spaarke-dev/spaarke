@@ -1932,15 +1932,31 @@ public sealed class ComposeDocxProjectionBuilder
         // Task 025 (020-R11): paragraph-MARK revisions are MODEL data — w:pPr/w:rPr/w:del (mark pending-
         // deleted; accepting merges with the next paragraph) or w:ins (paragraph created while tracking).
         // Retires `tracked-paragraph-mark-flattened`. Both present (invalid stacking) → Deleted wins.
-        // A tracked change OF the mark's formatting (w:pPr/w:rPr/w:rPrChange) stays out of the thin tier —
-        // counted, never silent.
+        // Step-9.5 F2: a MOVED paragraph's mark (w:pPr/w:rPr/w:moveFrom|w:moveTo) downgrades to the
+        // matching del/ins kind — LOUD, symmetric with the run-level move downgrade. A tracked change OF
+        // the mark's formatting (w:pPr/w:rPr/w:rPrChange) stays out of the thin tier — counted, never
+        // silent. Dates normalize through the render-side xsd gate at CAPTURE (Step-9.5 F5), so the model
+        // is canonical and the round-trip fixed point holds for degenerate source attribution.
         var markRpr = p.ParagraphProperties?.ParagraphMarkRunProperties;
         ComposeRevision? markRevision = markRpr switch
         {
-            { Deleted: { } markDel } => new ComposeRevision { Kind = ComposeRevisionKind.Deleted, Author = markDel.Author?.Value ?? string.Empty, Date = markDel.Date?.InnerText },
-            { Inserted: { } markIns } => new ComposeRevision { Kind = ComposeRevisionKind.Inserted, Author = markIns.Author?.Value ?? string.Empty, Date = markIns.Date?.InnerText },
+            { Deleted: { } markDel } => CaptureRevision(ComposeRevisionKind.Deleted, markDel.Author?.Value, markDel.Date?.InnerText),
+            { Inserted: { } markIns } => CaptureRevision(ComposeRevisionKind.Inserted, markIns.Author?.Value, markIns.Date?.InnerText),
             _ => null,
         };
+        if (markRevision is null && markRpr is not null)
+        {
+            if (markRpr.GetFirstChild<MoveFrom>() is { } markMoveFrom)
+            {
+                ctx.AddWarning("tracked-move-downgraded", 1);
+                markRevision = CaptureRevision(ComposeRevisionKind.Deleted, markMoveFrom.Author?.Value, markMoveFrom.Date?.InnerText);
+            }
+            else if (markRpr.GetFirstChild<MoveTo>() is { } markMoveTo)
+            {
+                ctx.AddWarning("tracked-move-downgraded", 1);
+                markRevision = CaptureRevision(ComposeRevisionKind.Inserted, markMoveTo.Author?.Value, markMoveTo.Date?.InnerText);
+            }
+        }
         if (markRpr?.Elements().Any(e => e.LocalName == "rPrChange") == true)
         {
             ctx.AddWarning("tracked-format-change-flattened", 1);
@@ -1954,7 +1970,7 @@ public sealed class ComposeDocxProjectionBuilder
             propertiesChange = new ComposeFormatChange
             {
                 Author = pPrChange.Author?.Value ?? string.Empty,
-                Date = pPrChange.Date?.InnerText,
+                Date = ComposeDocumentRenderer.NormalizeXsdDateTime(pPrChange.Date?.InnerText),
                 PreviousPropertiesXml = pPrChange.GetFirstChild<ParagraphPropertiesExtended>()?.OuterXml,
             };
         }
@@ -2520,8 +2536,15 @@ public sealed class ComposeDocxProjectionBuilder
         {
             ctx.AddWarning("tracked-nested-revision-simplified", 1);
         }
-        return new ComposeRevision { Kind = kind, Author = author ?? string.Empty, Date = date };
+        return CaptureRevision(kind, author, date);
     }
+
+    /// <summary>Step-9.5 F5: revision facts enter the model in CANONICAL form — the date passes the same
+    /// xsd:dateTime gate the renderer applies (junk/empty → null at capture), so project → render →
+    /// re-project is a fixed point even for degenerate source attribution, and record equality (the
+    /// renderer's wrapper-grouping key) is not split by empty-vs-null noise.</summary>
+    private static ComposeRevision CaptureRevision(ComposeRevisionKind kind, string? author, string? date) =>
+        new() { Kind = kind, Author = author ?? string.Empty, Date = ComposeDocumentRenderer.NormalizeXsdDateTime(date) };
 
     private void ProjectRun(Run run, List<ComposeInlineRun> sink, string? href, ModelWalkContext ctx, ComposeRevision? revision = null)
     {
@@ -2665,7 +2688,7 @@ public sealed class ComposeDocxProjectionBuilder
         return new ComposeFormatChange
         {
             Author = change.Author?.Value ?? string.Empty,
-            Date = change.Date?.InnerText,
+            Date = ComposeDocumentRenderer.NormalizeXsdDateTime(change.Date?.InnerText),
             PreviousPropertiesXml = change.GetFirstChild<PreviousRunProperties>()?.OuterXml,
         };
     }

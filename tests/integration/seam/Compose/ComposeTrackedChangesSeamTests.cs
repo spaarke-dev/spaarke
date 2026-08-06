@@ -136,13 +136,14 @@ public sealed class ComposeTrackedChangesSeamTests
 
     /// <summary>Per-paragraph revision fact string — the round-trip stability oracle (text + revision
     /// identity, mark revision, and format-change identities; the previous-properties XML compares by
-    /// PRESENCE, not bytes — the SDK may normalize attribute serialization on re-author).</summary>
+    /// PRESENCE, not bytes — the SDK may normalize attribute serialization on re-author). A null date
+    /// renders distinctly from an empty string (Step-9.5 F5 — the oracle must see empty→null drift).</summary>
     private static IEnumerable<string> RevisionFacts(ComposeContentModel model) =>
         model.Blocks.Select(b =>
-            $"mark={(b.MarkRevision is { } m ? $"{m.Kind}:{m.Author}:{m.Date}" : "-")}"
-            + $";pchg={(b.PropertiesChange is { } p ? $"{p.Author}:{p.Date}:{(p.PreviousPropertiesXml is null ? "noxml" : "xml")}" : "-")}"
+            $"mark={(b.MarkRevision is { } m ? $"{m.Kind}:{m.Author}:{m.Date ?? "∅"}" : "-")}"
+            + $";pchg={(b.PropertiesChange is { } p ? $"{p.Author}:{p.Date ?? "∅"}:{(p.PreviousPropertiesXml is null ? "noxml" : "xml")}" : "-")}"
             + ";runs=" + string.Join("|", b.Runs.Select(r =>
-                (r.Revision is { } rev ? $"<{rev.Kind}:{rev.Author}:{rev.Date}>" : "<->")
+                (r.Revision is { } rev ? $"<{rev.Kind}:{rev.Author}:{rev.Date ?? "∅"}>" : "<->")
                 + (r.FormatChange is { } fc ? $"<rchg:{fc.Author}:{(fc.PreviousPropertiesXml is null ? "noxml" : "xml")}>" : "")
                 + (r.IsPageBreak ? "<BR>" : r.Text))));
 
@@ -378,8 +379,34 @@ public sealed class ComposeTrackedChangesSeamTests
                         new ComposeInlineRun
                         {
                             Text = "wrong-root formatting change",
-                            // A pPr posted where an rPr is required — identity check must reject it.
+                            // A pPr posted where an rPr is required — the SDK typed-parse ctor rejects the
+                            // wrong root (ArgumentException, swallowed → record dropped).
                             FormatChange = new ComposeFormatChange { Author = "Y", PreviousPropertiesXml = "<w:pPr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"/>" },
+                        },
+                    },
+                },
+                new ComposeBlock
+                {
+                    Kind = ComposeBlockKind.Paragraph,
+                    Runs = new[]
+                    {
+                        new ComposeInlineRun
+                        {
+                            // Step-9.5 F3: a TryParse-able but NON-xsd date ("08/01/2026") would be a
+                            // schema-invalid @w:date — the lexical gate must omit it.
+                            Text = "culture-format date",
+                            Revision = new ComposeRevision { Kind = ComposeRevisionKind.Inserted, Author = "Carol", Date = "08/01/2026" },
+                        },
+                        new ComposeInlineRun
+                        {
+                            // Step-9.5 F7: WELL-FORMED but schema-INVALID previous-rPr (jc is not a run
+                            // property) — must fail the OpenXmlValidator subtree gate, not just the ctor.
+                            Text = "schema-invalid previous props",
+                            FormatChange = new ComposeFormatChange
+                            {
+                                Author = "Dave",
+                                PreviousPropertiesXml = "<w:rPr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:jc w:val=\"center\"/></w:rPr>",
+                            },
                         },
                     },
                 },
@@ -391,9 +418,12 @@ public sealed class ComposeTrackedChangesSeamTests
         using var doc = WordprocessingDocument.Open(new MemoryStream(rendered, writable: false), isEditable: false);
         var body = doc.MainDocumentPart!.Document!.Body!;
 
-        var ins = body.Descendants<InsertedRun>().Single();
-        ins.Author!.Value.Should().Be("EvilAuthor", "control chars are stripped at authoring");
-        ins.Date.Should().BeNull("a date that does not parse is omitted (@w:date is optional)");
+        var wrappers = body.Descendants<InsertedRun>().ToList();
+        wrappers.Should().HaveCount(2);
+        wrappers[0].Author!.Value.Should().Be("EvilAuthor", "control chars are stripped at authoring");
+        wrappers[0].Date.Should().BeNull("a date that does not parse is omitted (@w:date is optional)");
+        wrappers[1].Author!.Value.Should().Be("Carol");
+        wrappers[1].Date.Should().BeNull("a TryParse-able but non-xsd date is still schema-invalid @w:date — omitted (F3)");
 
         var del = body.Descendants<DeletedRun>().Single();
         del.Author!.Value.Should().Be("Unknown", "@w:author is schema-required — empty-after-sanitize falls back");
@@ -404,10 +434,103 @@ public sealed class ComposeTrackedChangesSeamTests
         markDel.Date.Should().BeNull();
 
         body.Descendants<ParagraphPropertiesChange>().Should().BeEmpty("malformed previous-pPr XML drops the record");
-        body.Descendants<RunPropertiesChange>().Should().BeEmpty("a wrong-root previous-props fragment drops the record");
+        body.Descendants<RunPropertiesChange>().Should().BeEmpty(
+            "a wrong-root fragment fails the SDK typed-parse ctor and a well-formed-but-schema-invalid one fails the validator gate (F7)");
 
         // The hardened output is schema-clean from a blank package.
         ValidationErrorCounts(rendered).Should().BeEmpty();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 3b. Step-9.5 fixes F1/F2 — the two data-integrity shapes the first review proved broken.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void RoundTrip_TrackedHyperlink_AuthorsWrapperInsideHyperlink()
+    {
+        // Word's canonical tracked-inserted link: w:hyperlink ⊃ w:ins ⊃ w:r. The reverse nesting
+        // (w:ins ⊃ w:hyperlink) is schema-invalid (CT_RunTrackChange does not admit hyperlink).
+        byte[] source;
+        using (var stream = new MemoryStream())
+        {
+            using (var doc = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document))
+            {
+                var main = doc.AddMainDocumentPart();
+                var rel = main.AddHyperlinkRelationship(new Uri("https://example.com/precedent"), isExternal: true);
+                main.Document = new Document(new Body(
+                    new Paragraph(
+                        new Run(new Text("See ") { Space = SpaceProcessingModeValues.Preserve }),
+                        new Hyperlink(
+                            new InsertedRun(
+                                new Run(new Text("the precedent library")))
+                            { Id = "301", Author = "Alice Redliner", Date = new DateTimeValue { InnerText = "2026-08-05T08:00:00Z" } })
+                        { Id = rel.Id },
+                        new Run(new Text(".") { Space = SpaceProcessingModeValues.Preserve })),
+                    new SectionProperties(new PageSize { Width = 12240, Height = 15840 })));
+                main.Document.Save();
+            }
+            source = stream.ToArray();
+        }
+
+        var projection = _builder.BuildContentModel(source);
+        var linked = projection.Model.Blocks[0].Runs.Single(r => r.Href is not null);
+        linked.Revision!.Kind.Should().Be(ComposeRevisionKind.Inserted);
+
+        var rendered = _renderer.RenderIntoCarrier(source, projection.Model, author: "seam-test");
+        using var reopened = WordprocessingDocument.Open(new MemoryStream(rendered, writable: false), isEditable: false);
+        var body = reopened.MainDocumentPart!.Document!.Body!;
+
+        var hyperlink = body.Descendants<Hyperlink>().Should().ContainSingle().Subject;
+        var insInsideLink = hyperlink.Elements<InsertedRun>().Should().ContainSingle("the wrapper nests INSIDE the hyperlink").Subject;
+        insInsideLink.Author!.Value.Should().Be("Alice Redliner");
+        insInsideLink.InnerText.Should().Be("the precedent library");
+        body.Descendants<InsertedRun>().SelectMany(w => w.Elements<Hyperlink>())
+            .Should().BeEmpty("w:ins ⊃ w:hyperlink is schema-invalid and must never be authored");
+
+        var sourceErrors = ValidationErrorCounts(source);
+        ValidationErrorCounts(rendered)
+            .Where(kv => kv.Value > (sourceErrors.TryGetValue(kv.Key, out var had) ? had : 0))
+            .Should().BeEmpty("no new schema errors (multiset)");
+    }
+
+    [Fact]
+    public void Projection_ParagraphMarkMove_DowngradesLoudly()
+    {
+        // A moved paragraph's MARK (w:pPr/w:rPr/w:moveFrom) — Word's whole-paragraph-move shape. Must
+        // downgrade to a Deleted mark revision with the loud move count, never vanish uncounted.
+        byte[] source;
+        using (var stream = new MemoryStream())
+        {
+            using (var doc = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document))
+            {
+                var main = doc.AddMainDocumentPart();
+                main.Document = new Document(new Body(
+                    new Paragraph(
+                        new ParagraphProperties(new ParagraphMarkRunProperties(
+                            new MoveFrom { Id = "401", Author = "Mover", Date = new DateTimeValue { InnerText = "2026-08-05T09:00:00Z" } })),
+                        new MoveFromRun(
+                            new Run(new Text("Relocated clause.") { Space = SpaceProcessingModeValues.Preserve }))
+                        { Id = "402", Author = "Mover", Date = new DateTimeValue { InnerText = "2026-08-05T09:00:00Z" } }),
+                    new Paragraph(
+                        new ParagraphProperties(new ParagraphMarkRunProperties(
+                            new MoveTo { Id = "403", Author = "Mover", Date = new DateTimeValue { InnerText = "2026-08-05T09:00:00Z" } })),
+                        new MoveToRun(
+                            new Run(new Text("Relocated clause.") { Space = SpaceProcessingModeValues.Preserve }))
+                        { Id = "404", Author = "Mover", Date = new DateTimeValue { InnerText = "2026-08-05T09:00:00Z" } }),
+                    new SectionProperties(new PageSize { Width = 12240, Height = 15840 })));
+                main.Document.Save();
+            }
+            source = stream.ToArray();
+        }
+
+        var projection = _builder.BuildContentModel(source);
+
+        projection.Model.Blocks[0].MarkRevision!.Kind.Should().Be(ComposeRevisionKind.Deleted, "a moveFrom mark is the deletion half");
+        projection.Model.Blocks[0].MarkRevision!.Author.Should().Be("Mover");
+        projection.Model.Blocks[1].MarkRevision!.Kind.Should().Be(ComposeRevisionKind.Inserted, "a moveTo mark is the insertion half");
+        // 2 run-level + 2 mark-level downgrades, every one counted.
+        projection.Warnings.Should().ContainSingle(w => w.Code == "tracked-move-downgraded")
+            .Which.Count.Should().Be(4);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
