@@ -39,7 +39,14 @@ configured vault) with a prod-specific value; grant the prod BFF MI `Key Vault S
 > PAC CLI has **no** key/column create path — use the Web API recipe. All of these must land in the **managed
 > solution** so they deploy to every subscription.
 
-### Task 020 — UNIQUE alternate key on `sprk_communication` (READY — create now)
+### STATUS (2026-08-05, verified against spaarkedev1)
+- **KV**: ✅ `footer-hmac-key` created in `spaarke-spekvcert`; MI `mi-bff-api-dev` has Secrets User. (App setting still to set — see §1.)
+- **023** `sprk_document.sprk_canonicalhash`: ✅ created by operator.
+- **016** `sprk_affinity` table + columns: ✅ created by operator (primary-name key only; composite key skipped — fine, code can read-then-increment).
+- **020** unique key on `sprk_internetmessageid`: ⚠️ **BLOCKED** — operator reduced the column to 850 and added `sprk_InternetMessageIdKey`, but the index is **Pending → will FAIL**: 13 pre-existing duplicate non-null message-id pairs in dev (117 non-null values, 104 distinct; 93 nulls are fine). These are duplicated R1 test emails — the exact FR-C1 duplication. **Needs 13 redundant rows deleted (keep earliest of each pair) before the key can activate.** Awaiting operator approval to delete (task 020 escalation rule: never silently mutate rows).
+- **034**: ✅ **no schema needed** — see below.
+
+### Task 020 — UNIQUE alternate key on `sprk_communication` (⚠️ blocked on duplicate cleanup — see STATUS)
 - **Entity**: `sprk_communication`
 - **Alternate key (EntityKey)**: **UNIQUE**, over the **single** attribute `sprk_internetmessageid`.
 - **Suggested key schema name**: `sprk_communication_internetmessageid_key`
@@ -76,18 +83,16 @@ participant index). Create the table + these columns:
 | *(alternate key, recommended)* | EntityKey | Over (`sprk_tenantkey`, `sprk_signaltype`, `sprk_signalvalue`, `sprk_targetentity`, `sprk_targetid`) for **idempotent increment-on-confirmation** (upsert) |
 - **Ownership**: user/team-owned table (standard). No ML fields — deterministic counting only.
 
-### Task 034 — two new task-entity fields — ⚠️ CONFIRM TARGET ENTITY FIRST (do NOT create blind)
-- **Fields to add**: `sprk_basedate` (Date and Time) + `sprk_finalduedate` (Date and Time).
-- **⚠️ Open question — which entity?** The current write core (`ActionSeam.CreateTaskAsync` →
-  `TaskActionCore.CreateAsync`) creates the **OOB `task` activity** (`new Entity("task")`), but the 034 POML
-  assumes a task entity that **already has `status` + `completed-date`** and elsewhere the codebase references a
-  **custom `sprk_task`**. These don't line up. Before creating fields:
-  - If Job C tasks should be the **OOB `task`** activity → add `sprk_basedate` + `sprk_finalduedate` as custom
-    columns on `task` (status = `statecode`/`statuscode`; "completed-date" ≈ `actualend`).
-  - If Job C tasks should be **`sprk_task`** (custom) → add them there (and `TaskActionCore` must be pointed at
-    `sprk_task` in the 034 code work).
-  - **Recommendation**: **hold 034 schema** until we confirm the target entity at 034 execution (I'll resolve it
-    then). Creating on the wrong entity is worse than waiting. 016/020/023 have no such ambiguity — create those now.
+### Task 034 — task-entity fields — ✅ RESOLVED (operator, 2026-08-05): NO schema needed
+- **Operator clarification**: Spaarke "tasks" are **`sprk_event` records with type = task** — NOT the OOB
+  Dataverse `task` activity, and NOT `sprk_task`. **`sprk_basedate` + `sprk_finalduedate` already exist on
+  `sprk_event`.** So task 034 needs **no new schema**.
+- **⚠️ Code implication for 034 execution (not schema)**: the current write core
+  `ActionSeam.CreateTaskAsync → TaskActionCore.CreateAsync` creates `new Entity("task")` (the OOB activity),
+  which **contradicts** "we use `sprk_event` type=task". Task 034's CODE must create/patch a **`sprk_event`
+  (type=task)** — mapping name/description/due/regarding + the base-date/final-due-date/status/completed-date
+  fields onto `sprk_event` — rather than the OOB `task`. This reconciliation is part of 034's code work (flag at
+  execution; may also affect the existing `RunEmailCreateTaskAsync` Job C orchestration).
 
 ---
 
