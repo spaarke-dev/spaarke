@@ -4,7 +4,7 @@
     <title>Seam + regression tests: NDA saves (no 422), edits land, new SPE version produced</title>
     <phase>1 Render-on-save core</phase>
     <gate>blocked — requires 004 (NDA fixture) + 012 (surgical save path retired)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Test-modifying task (tags testing/seam; modifies tests/**) — FULL UNCONDITIONALLY per root §8 TEST-MODIFYING override.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -84,7 +84,13 @@
     <criterion testable="true">All new + existing tests pass; dotnet test is green.</criterion>
   </acceptance-criteria>
 
-  <notes>Critical path 001→010→011→012→013→014. Proves Success Criterion 1 at the seam level; the fidelity harness (060) later seeds from the same NDA fixture. spec FR-01/FR-02/NFR-05.</notes>
+  <notes>Critical path 001→010→011→012→013→014. Proves Success Criterion 1 at the seam level; the fidelity harness (060) later seeds from the same NDA fixture. spec FR-01/FR-02/NFR-05.
+
+COMPLETED 2026-08-06 — commits e2adc5130 (implementation) + 06631ba57 (Step-9.5 minors). Delivered the two POML outputs THROUGH THE WIRE (RenderOnSaveSeamTests: NDA load→edit→save→reopen, no 422, InsertedRun edit lands, new version, unique paraIds, signature text survives; NdaSaveNo422RegressionTests: hostile count-mismatched paraIdMap → 200 never-422, mixed op-log contract → op-log-ignored + null reanchorSummary/partialApply + op text absent from every OPC part — behavioral no-engine-execution proof) PLUS the five 012-routed obligations: the 3 pre-existing NDA reds RE-BASELINED green (TextExactness skips txbxContent/Fallback interiors per the 026 accept-flatten contract with the host-level pin in ComposeHardTierDegradationSeamTests; AppendSection exempts source-duplicated-id subtrees via ids-stripped strict comparison — reviewer-probed to fail on any non-paraId change; MintAndPersist asserts no-NEW-duplicates per the fill-gaps-only contract) → SUITE FLOOR NOW ZERO EXPECTED REDS (987/987); F6 comment-id-collision warn (ScanCarrierComments, prefix-tolerant, test-pinned incl. no-false-positive cases) + accurate banner copy; F7 contentModelWarnings on all mount doors + client fold into the FIRST model-path save's degradation banner (cleared on model adoption).
+
+ACCEPTANCE: all 4 criteria verified (no-422 + edit + new version through the wire; behavioral no-surgical proof; zero banned shapes — adr-check-verified; suite green). Publish 46.91 MB clean-worktree (±0.00); no new HIGH CVE (pre-existing Crypto.Xml only).
+
+STEP 9.5: adr-check PASS 6/6 (re-baselines confirmed honest with compensating pins; AppendSection dup re-mint confirmed a deliberate AssignParaIds invariant, not a blessed bug). code-review APPROVE-WITH-MINORS — all 3 minors fixed in 06631ba57. Residuals routed to 014/027: pre-first-save duplicate-paraId reference-resolution probe (027); R4.5 T-2 narrative refresh; transitional-telemetry dashboards note; perf watch; multi-author redlined corpus fixture (025-F6, 027).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
