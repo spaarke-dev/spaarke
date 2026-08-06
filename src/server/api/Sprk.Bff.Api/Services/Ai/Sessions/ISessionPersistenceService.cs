@@ -161,6 +161,13 @@ public interface ISessionPersistenceService
 /// Lightweight projection of a session for the History list (R4-8). Never carries the message body —
 /// only what the dropdown renders (a display title + last-activity timestamp + optional entity/playbook
 /// labels). Maps 1:1 to the client's history row contract.
+///
+/// <para><b>FR-D7 (spaarkeai-assistant-enhancements-r2, DI-01)</b> adds <see cref="Preview"/>,
+/// <see cref="MessageCount"/>, and <see cref="TabSummary"/> so the History row can render a
+/// last-message preview + message count + tab summary ("Email · Compose"), completing the
+/// client-side rendering `HistoryOverlay.tsx` shipped forward-compatible in task 037. All three
+/// are bounded/optional — a session that predates these fields (or has none of the underlying
+/// content) simply omits them; the client already renders that state gracefully.</para>
 /// </summary>
 public record RecentSessionInfo(
     string SessionId,
@@ -168,4 +175,7 @@ public record RecentSessionInfo(
     string? EntityType,
     string? EntityName,
     string? PlaybookName,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string? Preview,
+    int? MessageCount,
+    string? TabSummary);

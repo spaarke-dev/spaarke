@@ -1925,6 +1925,13 @@ public static class ChatEndpoints
 
     /// <summary>
     /// DTO for recent session list items.
+    ///
+    /// FR-D7 (spaarkeai-assistant-enhancements-r2, DI-01) adds <see cref="Preview"/>,
+    /// <see cref="MessageCount"/>, and <see cref="TabSummary"/> — property names chosen to match
+    /// the client's `HistoryOverlay.tsx` `mapSession` reads EXACTLY under the default camelCase
+    /// wire policy (`Preview` → `preview`, `MessageCount` → `messageCount`,
+    /// `TabSummary` → `tabSummary`). All three are optional; the client already renders their
+    /// absence gracefully (task 037 forward-compatible mapping).
     /// </summary>
     internal record RecentSessionDto(
         string Id,
@@ -1932,7 +1939,10 @@ public static class ChatEndpoints
         string? EntityType,
         string? EntityName,
         string? PlaybookName,
-        DateTimeOffset UpdatedAt);
+        DateTimeOffset UpdatedAt,
+        string? Preview,
+        int? MessageCount,
+        string? TabSummary);
 
     /// <summary>
     /// GET /api/ai/chat/sessions — lists recent sessions for the current tenant.
@@ -1962,7 +1972,10 @@ public static class ChatEndpoints
                 EntityType: s.EntityType,
                 EntityName: s.EntityName,
                 PlaybookName: s.PlaybookName,
-                UpdatedAt: s.UpdatedAt))
+                UpdatedAt: s.UpdatedAt,
+                Preview: s.Preview,
+                MessageCount: s.MessageCount,
+                TabSummary: s.TabSummary))
             .ToList();
 
         return Results.Ok(sessions);
