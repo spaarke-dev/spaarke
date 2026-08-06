@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 014 ✅ + 058 ✅ + 041 ✅ (re-scoped, Option A) this session. Awaiting operator KV + schema to unblock more. |
+| **Task** | Unblock wave DONE: 014 ✅ 058 ✅ 041 ✅ + KV ✅ + 020 ✅ + 023 ✅ (schema) + 016-schema ✅ + 034 no-schema. |
 | **Step** | — |
-| **Status** | 014 ✅ (dad2d610a) · 058 ✅ (a5740b60d) · 041 ✅ re-scoped Option A (mech-1 = config documented in COMMUNICATION-ADMIN-GUIDE; mech-2 → task 043). Operator-unblock guide written (notes/operator-unblock-guide.md). |
-| **Next Action** | OPERATOR: KV secret `footer-hmac-key` in spe-kv-dev-67e2xz (→010) + create schema 020/023/016 (034 confirm entity first). Then agent resumes: 010→012/013 chain, 021/024 dedup, 016 AffinityRung code. All per notes/operator-unblock-guide.md. |
+| **Status** | KV `footer-hmac-key` created in `spaarke-spekvcert` (MI has access). **020 unique key ACTIVE** (13 dup test rows deleted w/ approval; dup error = HTTP 412 / 0x80060892 → for 021). 023 column + 016 `sprk_affinity` table created by operator. 034 needs NO schema (sprk_event type=task; base/final-due exist) — code must target sprk_event not OOB task. |
+| **Next Action** | NOW UNBLOCKED (agent code work): **021** (race-proof dedup, catch 412/0x80060892) → 022/025; **024** (SPE detector, deps 023); **016** AffinityRung code (schema ready, opus); **010** HMAC signer (KV ready) → 012/013. Still gated: 004 Entra (→040), Pillar E sequential. |
 
 ### Completed this session (all committed)
 - **Task 003 ✅** — `notes/fixtures/r1-golden-emails.md`.

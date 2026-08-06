@@ -20,10 +20,10 @@
 | 015 | Formalize external-reply self-association + test | 1·A | ✅ | — | sonnet·high | ❌ false |
 | 016 | `AffinityRung` + `sprk_affinity` store | 1·A | 🔲 | 011 | **opus·high** | ✅ true (A-rungs) |
 | 017 | Pillar A BFF deploy (size/CVE) | 1·A | 🔲 | 010–016 | sonnet·med | ❌ false |
-| 020 | Alternate key on `sprk_communication.sprk_internetmessageid` | 2·C | 🔲 | — | sonnet·high | ✅ true (schema-c) |
+| 020 | Alternate key on `sprk_communication.sprk_internetmessageid` | 2·C | ✅ | — | sonnet·high | ✅ true (schema-c) |
 | 021 | Canonical message-id dedup — race-proof create + SB idempotency | 2·C | 🔲 | 020 | **opus·xhigh** | ❌ false |
 | 022 | Context-merge on duplicate | 2·C | 🔲 | 021 | sonnet·high | ❌ false |
-| 023 | Indexed `sprk_document.sprk_canonicalhash` column (forward-only) | 2·C | 🔲 | — | sonnet·high | ✅ true (schema-c) |
+| 023 | Indexed `sprk_document.sprk_canonicalhash` column (forward-only) | 2·C | ✅ | — | sonnet·high | ✅ true (schema-c) |
 | 024 | SPE content dedup Tier-1 — **gate-after-write** (quickXorHash detector) | 2·C | 🔲 | 023 | **opus·high** | ❌ false |
 | 025 | Cross-path reconciliation (comm ↔ document via message-id) | 2·C | 🔲 | 021 | sonnet·high | ❌ false |
 | 026 | Pillar C BFF deploy (size/CVE) | 2·C | 🔲 | 021,022,023,024,025 | sonnet·med | ❌ false |
