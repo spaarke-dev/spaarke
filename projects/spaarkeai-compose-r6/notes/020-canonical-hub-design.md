@@ -133,4 +133,82 @@
 
 ---
 
-*Steps 1–3 artifact + gates + tasks 020/011 records. Checkpoint in `current-task.md`.*
+## 11. Task 021 — numbering/lists through the canonical model (2026-08-06)
+
+**Design: carry the IDENTITY, reference the SCHEME.** The model gains ONE additive field —
+`ComposeBlock.NumId` (the source `w:numPr/w:numId`, ListItem only, null for born-in-editor). The
+numbering SCHEME (abstractNum levels, numFmt/lvlText) stays in the carrier per the hub design (§3:
+model = body, carrier = styles/numbering/…). The `NumberingComputationEngine` is REUSED untouched —
+no parallel numbering path (POML constraint + §11 reuse).
+
+**Renderer (`ListRenderState`, document-scoped):**
+- `NumId` present in the carrier ⇒ the rendered `numPr` references that instance DIRECTLY — Word's
+  per-instance counters reproduce the source labels (golden parity BY CONSTRUCTION: continuity,
+  multi-level composition, style/glyph). A fully carrier-referencing render allocates nothing →
+  `numbering.xml` never touched → BYTE-IDENTICAL (upgrades 011's "numbering.xml may be merged"
+  carve-out for the pure round-trip).
+- `NumId` unknown to the target (blank-package synthesize / foreign carrier) ⇒ per-DISTINCT-source-id
+  map to allocated instances — identity therefore continuity preserved under the renderer's own scheme.
+- `NumId` null (born-in-editor) ⇒ the `StartsNewList` CONTRACT is now honored (020-R1 CLOSED): the
+  renderer no longer clears its current ordered instance on every non-ordered block; `StartsNewList=true`
+  remains the explicit restart. Safe for the live client: `docxBridge.buildContentModel` flags every
+  distinct top-level ordered list `startsNewList=true`. BONUS FIX: a nested bullet inside an ordered
+  list no longer restarts the parent run (live-client bug under the old clear-on-interrupt).
+- Carrier numbering inspected via a SEPARATE READ-ONLY open of the carrier bytes (`ScanCarrierNumbering`)
+  — the editable package's Numbering DOM is never read unless a merge actually happens, eliminating the
+  autoSave-rewrite hazard class (011-T2) instead of gating around it.
+
+**Projector:** captures `NumId`; `StartsNewList` = first appearance of the numId; `ListContinuity`
+reduced to the seen-set; **`ordered-list-continuity-lost` RETIRED** (continuity is now carried, not
+lost). `heading-direct-numbering-dropped` / `style-linked-numbering-dropped` (custom non-Heading
+styles) / `paragraph-style-flattened` remain — custom/localized STYLE identity is 026's scope (021
+routes the 020-R7 comment there explicitly).
+
+**Client contract:** `compose-contracts.ts` gains optional `numId?: number` (server-set; mapper never
+sets it; preserve-on-repost documented). `docxBridge.ts` untouched (NEVER deleted).
+
+**Seam slice** — `ComposeNumberingCanonicalModelSeamTests.cs` (new) + updates to the R4.5 agreement
+file `ComposeNumberingRoundTripSeamTests.cs`:
+- **THE golden oracle (owed since 020/011):** carrier round-trip computed-label SEQUENCE == manifest
+  §1.5 golden Word labels for all four golden exemplars (rows 9/10/11/13) — source anchored to golden,
+  rendered equal to golden. Sequence assertion is stronger than the per-paragraph R4.5 Theory (no
+  numbered paragraph may appear/disappear).
+- Label-sequence STABILITY over all five §1.5 exemplars incl. `symbol-section-mark.docx` (Wingdings
+  bullet glyph — no golden constant by design, equality-only).
+- `numbering.xml` BYTE-IDENTITY over all five exemplars.
+- Blank-package synthesize of the interrupted-clauses model keeps clauses 1..6 continuous via the
+  identity map (the heading's own "1" mid-sequence is the synthesize scheme's FR-27 style-linked
+  heading number — documented divergence from carrier mode, where carrier styles govern).
+- Projector capture facts + retired-warning fact + nested-bullet no-restart fact.
+- R4.5 agreement file §3 UPDATED to the new write-side contract: continuation when
+  `StartsNewList=false` + explicit-restart companion test (both green — read/write counter models agree).
+
+**Gates (2026-08-06):** BFF build 0 errors. Compose seam+unit 688/691 — 3 reds ALL pre-existing,
+stash-verified at HEAD per §F.3 (2 known NDA seam reds + `ComposeBaselineParaIdStamperTests.MintAndPersist_
+AcrossTheFidelityCorpus` — same NDA dup-paraId class, in the RETIRING count-gate component; routed
+026/027 with the others). ArchTests 24/28 — same 4 pre-existing master fails (ADR-007/010,
+Communication surface); ADR-013 Compose facade green. Publish **46.88 MB** incl. PDBs (−1.37 vs 48.25
+task-003 baseline; ≤60 ✓). CVE: no NEW HIGH (pre-existing `System.Security.Cryptography.Xml` 8.0.3
+×5 High; master `0455d8658` already patches to 8.0.4 — resolves on merge). Client: contracts file
+parses; worktree-wide TS module-resolution errors are pre-existing (unbuilt workspace deps), untouched
+by the additive optional field.
+
+**Placement Justification (root §10, citing `.claude/constraints/bff-extensions.md`):** modify/extend
+of existing `Services/Compose` files only — no new service, no new endpoint, no DI change, no package.
+§11 three questions: existing = `NumberingPlan`/`RenderBlocks`/`BuildContentModel` (extended in place);
+extension chosen over a new component; cost-of-doing-nothing = golden-label parity impossible (an
+imported numbered doc re-renders with renderer-scheme numbering — wrong legal labels ⇒ wrong legal
+references).
+
+**Deviations / routed:**
+- Custom/localized paragraph-style-linked numbering (non-Heading styles; 020-R7) → **026** (style
+  identity is the carrier concept it rides on; the §1.5 exemplar surface — the task's acceptance
+  oracle — is fully covered without it).
+- Localized heading-id mapping (011-P8) → **026** (unchanged routing; heading-style parity for
+  standard `Heading1..6` ids IS proven here via row 10).
+- Client mapper preservation of server-set `numId` on re-post → **010/012** (the cutover tasks own the
+  imported-doc client edit loop; documented in the TS contract comment).
+
+---
+
+*Steps 1–3 artifact + gates + tasks 020/011/021 records. Checkpoint in `current-task.md`.*

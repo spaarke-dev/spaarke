@@ -499,6 +499,13 @@ export interface ComposeContentBlock {
   level?: number;
   ordered?: boolean;
   startsNewList?: boolean;
+  /**
+   * ListItem only (server task 021): the SOURCE document's numbering-instance identity (`w:numId`),
+   * captured by the SERVER-side docx→model projection for imported documents. The client mapper never
+   * sets this (born-in-editor items use `startsNewList`); when a server-supplied model is edited and
+   * re-posted, preserve the value untouched — the renderer keys list identity/continuity on it.
+   */
+  numId?: number;
   runs?: ComposeInlineRun[];
   alignment?: ComposeAlignment;
   table?: ComposeTable;

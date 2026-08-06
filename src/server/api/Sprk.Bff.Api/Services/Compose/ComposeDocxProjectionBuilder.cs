@@ -1772,8 +1772,9 @@ public sealed class ComposeDocxProjectionBuilder
                 // ordered-vs-bullet classification — the SAME closed model the NumberingComputationEngine
                 // replays Word's algorithm over, so this walk and the read walk never disagree on a
                 // paragraph's numbering source. (Label COMPUTATION is display data, not model data — the
-                // renderer re-authors numbering from Level/Ordered/StartsNewList; label parity through the
-                // round-trip is task 021's oracle.)
+                // model carries the numbering-instance IDENTITY (ComposeBlock.NumId, task 021) and the
+                // renderer references the carrier's scheme through it; golden-label parity through the
+                // round-trip is proven by ComposeNumberingRoundTripSeamTests.)
                 var numbering = BuildNumberingModel(mainPart);
                 var ctx = new ModelWalkContext(mainPart, numbering, cancellationToken);
                 var blocks = new List<ComposeBlock>();
@@ -1808,25 +1809,19 @@ public sealed class ComposeDocxProjectionBuilder
         }
     }
 
-    /// <summary>Per-container ordered-list continuity state. <see cref="ComposeBlock.StartsNewList"/> is set
-    /// whenever the immediately-preceding emitted block was NOT an ordered item of the same numId — which is
-    /// exactly when <c>ComposeDocumentRenderer.RenderBlocks</c> allocates a fresh restart-at-1 num instance
-    /// (the renderer clears its current-list state on EVERY non-ordered block, so an interrupted or
-    /// interleaved ordered run RESTARTS on render regardless of this flag — review finding 020-R1). Because
-    /// the SOURCE may have continued numbering across the interruption (Word's per-numId counters, the exact
-    /// behavior the read-side NumberingComputationEngine replays), that restart is a COUNTED fidelity loss:
-    /// <c>ordered-list-continuity-lost</c> fires when an ordered numId re-appears after an interruption or
-    /// interleave. Renderer-side same-numId continuation is task 021's scope. Table cells get a fresh
-    /// instance (a list never continues across a cell boundary — mirrors the read walk's CloseOpenList at
-    /// cell edges); transparent SDT/customXml recursion shares the parent's (paragraphs continue the flow).</summary>
+    /// <summary>Per-container ordered-list continuity state (task 021 simplification). Every projected list
+    /// item now carries its SOURCE <see cref="ComposeBlock.NumId"/>, and the renderer treats that identity as
+    /// authoritative — same source numId ⇒ same rendered instance, so an interrupted/interleaved ordered run
+    /// CONTINUES on render exactly as Word's per-numId counters do (retires the <c>ordered-list-continuity-lost</c>
+    /// warning; review finding 020-R1 closed). <see cref="ComposeBlock.StartsNewList"/> therefore reduces to
+    /// "first appearance of this numId in this container" — informative for model consumers, ignored by the
+    /// renderer when <c>NumId</c> is present. Table cells get fresh state (mirrors the read walk's
+    /// CloseOpenList at cell edges); transparent SDT/customXml recursion shares the parent's (paragraphs
+    /// continue the flow).</summary>
     private sealed class ListContinuity
     {
-        /// <summary>numId of the immediately-preceding emitted block IF it was an ordered list item; null
-        /// after any other block (mirrors the renderer's clear-on-every-non-ordered-block behavior).</summary>
-        public int? PrevOrderedNumId;
-
-        /// <summary>Every ordered numId already seen in this container — a re-appearance after an
-        /// interruption/interleave means the source continued a list the render will restart.</summary>
+        /// <summary>Every ordered numId already seen in this container — first appearance sets
+        /// <see cref="ComposeBlock.StartsNewList"/>.</summary>
         public readonly HashSet<int> SeenOrderedNumIds = new();
     }
 
@@ -1841,7 +1836,6 @@ public sealed class ComposeDocxProjectionBuilder
                     sink.Add(ProjectParagraph(p, lists, ctx));
                     break;
                 case Table t:
-                    lists.PrevOrderedNumId = null; // renderer clears its list state at a table boundary
                     var tableBlock = ProjectTable(t, ctx);
                     if (tableBlock is not null) sink.Add(tableBlock);
                     break;
@@ -1864,7 +1858,6 @@ public sealed class ComposeDocxProjectionBuilder
                                 Kind = ComposeBlockKind.Paragraph,
                                 Runs = new[] { new ComposeInlineRun { Text = ctx.ClampText(text) } },
                             });
-                            lists.PrevOrderedNumId = null;
                         }
                         ctx.AddWarning("hard-tier-sdt-flattened", 1);
                     }
@@ -1920,7 +1913,6 @@ public sealed class ComposeDocxProjectionBuilder
             // A heading carrying a DIRECT w:numPr: heading wins (read-walk rule) and the direct numbering
             // is flattened — counted, never silent (review finding 020-R3).
             if (numId is not null) ctx.AddWarning("heading-direct-numbering-dropped", 1);
-            lists.PrevOrderedNumId = null; // renderer clears its list state on any non-ordered block
             return new ComposeBlock
             {
                 Kind = ComposeBlockKind.Heading,
@@ -1935,24 +1927,12 @@ public sealed class ComposeDocxProjectionBuilder
         {
             var ilvl = numPr!.NumberingLevelReference?.Val?.Value ?? 0;
             var ordered = ResolveOrderedFromModel(numId.Value, ilvl, ctx);
-            var startsNew = false;
-            if (ordered)
-            {
-                startsNew = lists.PrevOrderedNumId != numId.Value;
-                if (startsNew && lists.SeenOrderedNumIds.Contains(numId.Value))
-                {
-                    // The source CONTINUED this numId across an interruption/interleave (Word's per-numId
-                    // counter), but the renderer restarts a fresh instance at 1 — counted fidelity loss
-                    // (review findings 020-R1/R2); renderer-side continuation is task 021's scope.
-                    ctx.AddWarning("ordered-list-continuity-lost", 1);
-                }
-                lists.SeenOrderedNumIds.Add(numId.Value);
-                lists.PrevOrderedNumId = numId.Value;
-            }
-            else
-            {
-                lists.PrevOrderedNumId = null; // a bullet item interrupts an ordered run on render
-            }
+            // Task 021: the SOURCE numbering-instance identity travels in the model (ComposeBlock.NumId),
+            // and the renderer keys instance selection on it — same source numId ⇒ same rendered instance,
+            // so interruption-continuity survives the round-trip by construction (retired the
+            // ordered-list-continuity-lost warning; 020-R1/R2 closed). StartsNewList reduces to "first
+            // appearance of this numId" (HashSet.Add returns true exactly then).
+            var startsNew = ordered && lists.SeenOrderedNumIds.Add(numId.Value);
             return new ComposeBlock
             {
                 Kind = ComposeBlockKind.ListItem,
@@ -1960,14 +1940,18 @@ public sealed class ComposeDocxProjectionBuilder
                 Level = Math.Clamp(ilvl, 0, 8),
                 Ordered = ordered,
                 StartsNewList = startsNew,
+                NumId = numId.Value,
                 Runs = runs,
                 Alignment = alignment,
             };
         }
 
         // Style-linked numbering on a NON-Heading style (FR-12 — e.g. a firm template's "ClauseL1"): the
-        // thin model cannot carry the style identity, so the number is lost on this path — counted, never
-        // silent (review finding 020-R7); projecting it faithfully is task 021's scope.
+        // thin model cannot carry the CUSTOM STYLE identity the number rides on, so the number is lost on
+        // this path — counted, never silent (review finding 020-R7). Task 021 deliberately scoped this OUT:
+        // it carries the numbering-INSTANCE identity (ComposeBlock.NumId) for direct/heading-style numbering
+        // (the §1.5 exemplar surface), while custom/localized paragraph-STYLE identity — which this number
+        // rides on — is task 026's style-identity scope (with 011-P8 below).
         if (ResolveParagraphNumbering(p, ctx.Numbering) is { StyleLinked: true })
         {
             ctx.AddWarning("style-linked-numbering-dropped", 1);
@@ -1985,7 +1969,6 @@ public sealed class ComposeDocxProjectionBuilder
             ctx.AddWarning("paragraph-style-flattened", 1);
         }
 
-        lists.PrevOrderedNumId = null; // plain paragraph interrupts an ordered run on render
         return new ComposeBlock
         {
             Kind = ComposeBlockKind.Paragraph,

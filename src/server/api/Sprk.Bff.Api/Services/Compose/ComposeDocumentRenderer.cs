@@ -112,9 +112,10 @@ public sealed partial class ComposeDocumentRenderer
             var body = mainPart.Document.AppendChild(new Body());
 
             // A NumberingPlan accumulates the ordered/bullet num instances the body render allocates, so the
-            // numbering part authored afterwards references exactly the ids the body used.
+            // numbering part authored afterwards references exactly the ids the body used. (Blank package —
+            // no carrier numbering exists, so source NumIds map to allocated instances; see ListRenderState.)
             var plan = new NumberingPlan();
-            RenderBlocks(body, model.Blocks, plan);
+            RenderBlocks(body, model.Blocks, new ListRenderState(plan));
 
             // G5 (FR-05, task 033): swap each BuildRun href-sentinel for a real EXTERNAL hyperlink
             // relationship on the main part (the part is in scope here; BuildRun was not). Before save.
@@ -236,7 +237,7 @@ public sealed partial class ComposeDocumentRenderer
             body.AppendChild(new Paragraph(new Run(new Break { Type = BreakValues.Page })));
 
             var plan = new NumberingPlan();
-            RenderBlocks(body, blocks, plan);
+            RenderBlocks(body, blocks, new ListRenderState(plan));
 
             // G5 (FR-05, task 033): resolve any href-sentinels in the appended section too (parity with
             // SynthesizeDocument; the Summary Page generator emits none today, so this is a no-op there).
@@ -299,11 +300,16 @@ public sealed partial class ComposeDocumentRenderer
     /// carrier-faithful degradation (review 011-P7).
     /// </para>
     /// <para>
-    /// <b>Collision-safe numbering merge</b>: list instances allocate ABOVE the carrier's max <c>numId</c> and
-    /// reference renderer abstracts appended ABOVE the carrier's max <c>abstractNumId</c>
-    /// (<see cref="MergeNumberingDefinitions"/>) — a rendered list can never capture a carrier num definition
-    /// and no carrier-owned abstract/instance is touched. The heading abstract/instance is NOT merged
-    /// (headings follow carrier styles, see above).
+    /// <b>Carrier-referenced numbering first; collision-safe merge second (task 021)</b>: a list item whose
+    /// <see cref="ComposeBlock.NumId"/> exists in the carrier REFERENCES that instance directly — the
+    /// carrier's own scheme + Word's per-instance counters reproduce the source labels exactly (golden-label
+    /// parity, incl. interruption-continuity and multi-level composition), and a fully carrier-referencing
+    /// render never touches the numbering part at all (numbering.xml stays byte-identical). Only items whose
+    /// identity is unknown to the carrier (born-in-editor, foreign source) allocate: those instances
+    /// allocate ABOVE the carrier's max <c>numId</c> and reference renderer abstracts appended ABOVE the
+    /// carrier's max <c>abstractNumId</c> (<see cref="MergeNumberingDefinitions"/>) — a rendered list can
+    /// never capture a carrier num definition and no carrier-owned abstract/instance is touched. The heading
+    /// abstract/instance is NOT merged (headings follow carrier styles, see above).
     /// </para>
     /// <para>
     /// <b>Final section preserved; interior sections flatten</b>: the trailing body <c>sectPr</c> (page size /
@@ -384,22 +390,26 @@ public sealed partial class ComposeDocumentRenderer
             body.RemoveAllChildren();
 
             // Collision-safe allocation base (see remarks), computed BEFORE the render so the plan's ids
-            // are correct in the paragraphs' direct numPr as they are built — but ONLY when the model
-            // actually carries list items: merely READING the carrier's Numbering root loads its DOM, and
-            // autoSave re-serializes (normalizes) the part on dispose — rewriting an otherwise-untouched
-            // numbering.xml and breaking the preserve-parts byte-identity contract for list-free renders
-            // (caught by the 011-T2 hardened seam oracle).
+            // are correct in the paragraphs' direct numPr as they are built. Task 021: the carrier's
+            // numbering is inspected via a SEPARATE READ-ONLY open of the carrier bytes — touching the
+            // editable package's Numbering DOM would mark the part for autoSave re-serialization on
+            // dispose, rewriting an otherwise-untouched numbering.xml and breaking the preserve-parts
+            // byte-identity contract (caught by the 011-T2 hardened seam oracle). The scan also collects
+            // the carrier's numId set, so a model item whose ComposeBlock.NumId exists in the carrier
+            // REFERENCES it directly (golden-label parity by construction) — a fully carrier-referencing
+            // render allocates nothing and the numbering part is never touched at all.
             var plan = new NumberingPlan();
+            var state = new ListRenderState(plan);
             var maxExistingAbstractId = 0;
             if (ModelContainsListItem(model.Blocks))
             {
-                var existingNumbering = mainPart.NumberingDefinitionsPart?.Numbering;
-                var maxExistingNumId = existingNumbering?.Elements<NumberingInstance>().Max(n => n.NumberID?.Value) ?? 0;
-                maxExistingAbstractId = existingNumbering?.Elements<AbstractNum>().Max(a => a.AbstractNumberId?.Value) ?? 0;
-                plan = new NumberingPlan(Math.Max(FirstListNumInstanceId, maxExistingNumId + 1));
+                var carrierNumbering = ScanCarrierNumbering(carrierBytes);
+                maxExistingAbstractId = carrierNumbering.MaxAbstractNumId;
+                plan = new NumberingPlan(Math.Max(FirstListNumInstanceId, carrierNumbering.MaxNumId + 1));
+                state = new ListRenderState(plan, carrierNumbering.NumIds);
             }
 
-            RenderBlocks(body, model.Blocks, plan);
+            RenderBlocks(body, model.Blocks, state);
             ResolveHyperlinkRelationships(body, mainPart);
 
             if (mainPart.StyleDefinitionsPart is null)
@@ -542,11 +552,16 @@ public sealed partial class ComposeDocumentRenderer
     // Body render
     // ────────────────────────────────────────────────────────────────────────────────────────────
 
-    private void RenderBlocks(OpenXmlElement container, IReadOnlyList<ComposeBlock> blocks, NumberingPlan plan)
+    private void RenderBlocks(OpenXmlElement container, IReadOnlyList<ComposeBlock> blocks, ListRenderState state)
     {
-        // Ordered-list continuity: a run of consecutive ordered ListItem blocks shares one num instance;
-        // any non-ordered-list block (or an ordered item flagged StartsNewList) breaks the run so the next
-        // ordered list restarts at 1 via a fresh instance.
+        // Ordered-list continuity (task 021, review 020-R1): the model contract — not block adjacency —
+        // governs instance selection. An item carrying a source NumId resolves through ListRenderState
+        // (carrier-direct or per-source-id mapped), so same source numId ⇒ same rendered instance and an
+        // interrupted run CONTINUES exactly as Word's per-numId counters do. A NumId-less (born-in-editor)
+        // item continues the CURRENT ordered instance unless it flags StartsNewList — intervening
+        // non-list blocks no longer break the run (the live client mapper flags every distinct top-level
+        // ordered list StartsNewList=true, so restarts remain explicit). currentOrderedNumId is local per
+        // container: a table-cell boundary still starts fresh (a list never continues across cells).
         int? currentOrderedNumId = null;
 
         foreach (var block in blocks)
@@ -554,34 +569,42 @@ public sealed partial class ComposeDocumentRenderer
             switch (block.Kind)
             {
                 case ComposeBlockKind.Heading:
-                    currentOrderedNumId = null;
                     container.AppendChild(BuildHeading(block));
                     break;
 
                 case ComposeBlockKind.ListItem when block.Ordered:
-                    if (currentOrderedNumId is null || block.StartsNewList)
+                    int effectiveNumId;
+                    if (block.NumId is int sourceNumId)
                     {
-                        currentOrderedNumId = plan.NewOrderedInstance();
+                        effectiveNumId = state.ResolveOrdered(sourceNumId);
                     }
-                    container.AppendChild(BuildListItem(block, currentOrderedNumId.Value));
+                    else if (currentOrderedNumId is null || block.StartsNewList)
+                    {
+                        effectiveNumId = state.Plan.NewOrderedInstance();
+                    }
+                    else
+                    {
+                        effectiveNumId = currentOrderedNumId.Value;
+                    }
+                    // A following NumId-less continuation item joins THIS list (natural editing: the user
+                    // adds an item to an imported list and it numbers with it).
+                    currentOrderedNumId = effectiveNumId;
+                    container.AppendChild(BuildListItem(block, effectiveNumId));
                     break;
 
                 case ComposeBlockKind.ListItem: // bullet
-                    currentOrderedNumId = null;
-                    container.AppendChild(BuildListItem(block, plan.BulletInstance()));
+                    container.AppendChild(BuildListItem(block, state.ResolveBullet(block.NumId)));
                     break;
 
                 case ComposeBlockKind.Table:
-                    currentOrderedNumId = null;
                     if (block.Table is { Rows.Count: > 0 })
                     {
-                        container.AppendChild(BuildTable(block.Table, plan));
+                        container.AppendChild(BuildTable(block.Table, state));
                     }
                     break;
 
                 case ComposeBlockKind.Paragraph:
                 default:
-                    currentOrderedNumId = null;
                     container.AppendChild(BuildParagraph(block));
                     break;
             }
@@ -715,7 +738,7 @@ public sealed partial class ComposeDocumentRenderer
 
     // ── tables ───────────────────────────────────────────────────────────────────────────────────
 
-    private Table BuildTable(ComposeTable model, NumberingPlan plan)
+    private Table BuildTable(ComposeTable model, ListRenderState state)
     {
         var table = new Table();
         table.AppendChild(new TableProperties(
@@ -745,7 +768,7 @@ public sealed partial class ComposeDocumentRenderer
             var tableRow = new TableRow();
             foreach (var cell in row.Cells)
             {
-                tableRow.AppendChild(BuildTableCell(cell, plan));
+                tableRow.AppendChild(BuildTableCell(cell, state));
             }
             table.AppendChild(tableRow);
         }
@@ -753,7 +776,7 @@ public sealed partial class ComposeDocumentRenderer
         return table;
     }
 
-    private TableCell BuildTableCell(ComposeTableCell cell, NumberingPlan plan)
+    private TableCell BuildTableCell(ComposeTableCell cell, ListRenderState state)
     {
         var tableCell = new TableCell();
         tableCell.AppendChild(new TableCellProperties(
@@ -769,7 +792,7 @@ public sealed partial class ComposeDocumentRenderer
         // A header cell bolds its runs (cosmetic). Render the cell's nested blocks recursively so nested
         // tables + lists inside a cell are supported.
         var blocks = cell.IsHeader ? cell.Blocks.Select(EmphasizeBlock).ToList() : cell.Blocks;
-        RenderBlocks(tableCell, blocks, plan);
+        RenderBlocks(tableCell, blocks, state);
         return tableCell;
     }
 
@@ -1147,6 +1170,96 @@ public sealed partial class ComposeDocumentRenderer
 
     [GeneratedRegex(@"[\x00-\x08\x0B\x0C\x0E-\x1F]")]
     private static partial Regex XmlInvalidCharPattern();
+
+    /// <summary>
+    /// Task 021 — document-scoped list-identity state threaded through one body render. Resolves each list
+    /// item's EFFECTIVE <c>w:num</c> instance id from its <see cref="ComposeBlock.NumId"/> source identity:
+    /// a source id present in <paramref name="carrierNumIds"/> is referenced DIRECTLY (the carrier's own
+    /// scheme + Word's per-instance counters reproduce the source labels — golden parity by construction,
+    /// and a fully carrier-referencing render never touches the numbering part); a source id unknown to the
+    /// render target (blank-package synthesize, foreign carrier) maps per-DISTINCT-source-id to one
+    /// allocated plan instance, preserving list identity — and therefore interruption-continuity — under
+    /// the renderer's own scheme. Shared across table-cell recursion deliberately: the same source numId in
+    /// body and cell is the same Word list. NumId-less (born-in-editor) items never reach this map — they
+    /// use <c>RenderBlocks</c>' per-container current-instance + <see cref="ComposeBlock.StartsNewList"/> contract.
+    /// </summary>
+    private sealed class ListRenderState
+    {
+        private static readonly IReadOnlySet<int> Empty = new HashSet<int>();
+        private readonly IReadOnlySet<int> _carrierNumIds;
+        private readonly Dictionary<int, int> _orderedBySourceId = new();
+
+        public ListRenderState(NumberingPlan plan, IReadOnlySet<int>? carrierNumIds = null)
+        {
+            Plan = plan;
+            _carrierNumIds = carrierNumIds ?? Empty;
+        }
+
+        public NumberingPlan Plan { get; }
+
+        /// <summary>Effective instance id for an ordered item carrying <paramref name="sourceNumId"/>.</summary>
+        public int ResolveOrdered(int sourceNumId)
+        {
+            if (_carrierNumIds.Contains(sourceNumId))
+            {
+                return sourceNumId;
+            }
+            if (!_orderedBySourceId.TryGetValue(sourceNumId, out var allocated))
+            {
+                allocated = Plan.NewOrderedInstance();
+                _orderedBySourceId.Add(sourceNumId, allocated);
+            }
+            return allocated;
+        }
+
+        /// <summary>Effective instance id for a bullet item: carrier-direct when the source id exists there
+        /// (preserves the carrier's bullet glyph scheme); otherwise the shared renderer bullet instance (the
+        /// glyph scheme is not model data — all fallback bullets share one instance).</summary>
+        public int ResolveBullet(int? sourceNumId) =>
+            sourceNumId is int src && _carrierNumIds.Contains(src) ? src : Plan.BulletInstance();
+    }
+
+    /// <summary>The carrier numbering facts <see cref="RenderIntoCarrier"/> needs BEFORE rendering.</summary>
+    private readonly record struct CarrierNumberingScan(IReadOnlySet<int> NumIds, int MaxNumId, int MaxAbstractNumId);
+
+    /// <summary>
+    /// Task 021: inspects the carrier's numbering part via a SEPARATE READ-ONLY open of the carrier bytes —
+    /// never the editable package, whose Numbering DOM would be marked for autoSave re-serialization by the
+    /// mere read (the 011-T2 preserve-parts hazard). Returns the carrier's <c>w:num</c> id set (for direct
+    /// reference) and max instance/abstract ids (the collision-safe allocation base).
+    /// </summary>
+    private static CarrierNumberingScan ScanCarrierNumbering(byte[] carrierBytes)
+    {
+        using var stream = new MemoryStream(carrierBytes, writable: false);
+        using var doc = WordprocessingDocument.Open(stream, isEditable: false);
+        var numbering = doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
+        if (numbering is null)
+        {
+            return new CarrierNumberingScan(new HashSet<int>(), 0, 0);
+        }
+
+        var numIds = new HashSet<int>();
+        var maxNumId = 0;
+        foreach (var instance in numbering.Elements<NumberingInstance>())
+        {
+            if (instance.NumberID?.Value is int id)
+            {
+                numIds.Add(id);
+                maxNumId = Math.Max(maxNumId, id);
+            }
+        }
+
+        var maxAbstractId = 0;
+        foreach (var abstractNum in numbering.Elements<AbstractNum>())
+        {
+            if (abstractNum.AbstractNumberId?.Value is int id)
+            {
+                maxAbstractId = Math.Max(maxAbstractId, id);
+            }
+        }
+
+        return new CarrierNumberingScan(numIds, maxNumId, maxAbstractId);
+    }
 
     /// <summary>
     /// Accumulates the list <c>w:num</c> instances a body render allocates: a single shared bullet instance

@@ -98,9 +98,26 @@ public sealed record ComposeBlock
     /// <summary>
     /// <see cref="ComposeBlockKind.ListItem"/> + <see cref="Ordered"/> only: <c>true</c> marks the FIRST
     /// item of a distinct ordered list that must RESTART numbering at 1 (a fresh <c>w:num</c> instance with
-    /// a <c>startOverride</c>). <c>false</c> continues the current ordered list. Ignored otherwise.
+    /// a <c>startOverride</c>). <c>false</c> continues the current ordered list — honored ACROSS intervening
+    /// non-list blocks (task 021 / review 020-R1: the renderer keeps the current ordered instance open until
+    /// a <c>StartsNewList</c> item or a table-cell boundary, mirroring Word's per-<c>numId</c> counters).
+    /// Ignored when <see cref="NumId"/> is set (source identity is authoritative) and for other kinds.
     /// </summary>
     public bool StartsNewList { get; init; }
+
+    /// <summary>
+    /// <see cref="ComposeBlockKind.ListItem"/> only (task 021): the SOURCE document's numbering-instance
+    /// identity — the <c>w:numPr/w:numId</c> the paragraph carried when the server-side projection
+    /// (<c>ComposeDocxProjectionBuilder.BuildContentModel</c>) captured it. The model carries only the
+    /// IDENTITY; the numbering SCHEME (<c>w:abstractNum</c> levels, <c>numFmt</c>/<c>lvlText</c>) stays in
+    /// the retained source package ("carrier"). On render, an item whose <c>NumId</c> exists in the carrier
+    /// references it DIRECTLY — Word's per-instance counters then reproduce the source labels exactly
+    /// (golden-label parity by construction; interruption-continuity included). A <c>NumId</c> unknown to
+    /// the render target (blank-package synthesize, or a foreign carrier) maps per-distinct-source-id to an
+    /// allocated instance, preserving list identity/continuity under the renderer's own scheme. Null =
+    /// born-in-editor item (the client mapper never sets this; <see cref="StartsNewList"/> governs).
+    /// </summary>
+    public int? NumId { get; init; }
 
     /// <summary>Inline runs for Paragraph / Heading / ListItem (empty → an empty paragraph). Ignored for
     /// Table.</summary>
