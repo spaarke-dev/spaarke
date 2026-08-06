@@ -4,7 +4,19 @@
     <title>Canonical document model — generalize ComposeContentModel/projection as the single hub between every source and the editor</title>
     <phase>2 Canonical model + fidelity widening</phase>
     <gate>startable — deps 001 (ADR-049 Path-B amendment, committed on branch) + 004 (NDA fixture). RE-SEQUENCED 2026-08-05: this is the render-on-save ANCHOR (was gated on 014; that was a dependency inversion — see plan.md §5 banner). Run /conflict-check before the BFF PR.</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-note>COMPLETED 2026-08-05 (commits f3179b819 + 12d357e27). Core delivered: docx→ComposeContentModel
+      projector (ComposeDocxProjectionBuilder.BuildContentModel — total/lenient, counted accept-flatten,
+      NumberingModel-classified, AlternateContent handled loudly, F-03 parity guard) + ComposeCanonicalModelProjection
+      envelope + seam slice (corpus round-trip block-kind fixed-point; NDA never refused; NDA rendered output carries
+      unique paraIds ⇒ count-gate mismatch impossible). All gates passed: publish 46.88 MB (−1.37 vs baseline), no NEW
+      HIGH CVE, ADR-013 ArchTest green, conflict-check CLEAN, Step 9.5 adr-check PASS + code-review
+      APPROVE-WITH-MINORS (10 findings fixed). SCOPE DEVIATIONS (directional, documented in
+      notes/020-canonical-hub-design.md §8-§9): (a) SaveAsync render-out wiring → tasks 010/011 per the 2026-08-05
+      re-sequence; (b) strict golden-label numbering parity → task 021 (labels are display data computed from the
+      scheme the thin model cannot yet carry); (c) two flatten-tier operator sign-offs routed → 025 (ins+del both-texts)
+      + 026 (unmapped w:sym U+FFFD persistence). PDF-ready-by-shape: satisfied — the model is source-agnostic
+      (block/inline, no docx-coupled field).</completion-note>
     <rigor>FULL</rigor>
     <rigor-reason>Architectural pivot: generalizes the editor projection into THE canonical hub every downstream fidelity task (021-026) builds on. Modifies shared Services/Compose files on the most-contested BFF surface; a wrong model shape cascades into every feature adapter. FR-03 core. code-review + adr-check run at Step 9.5 (FULL/BFF/architecture).</rigor-reason>
     <model-tier>opus</model-tier>

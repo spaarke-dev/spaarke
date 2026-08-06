@@ -269,6 +269,198 @@ public sealed partial class ComposeDocumentRenderer
         return buffer.ToArray();
     }
 
+    /// <summary>
+    /// Task 011 (spaarkeai-compose-r6, FR-03) — the CARRIER render: replaces an existing package's BODY with
+    /// content rendered from <paramref name="model"/> while preserving every other part (styles, numbering,
+    /// headers/footers, theme, settings, fonts — the document-level identity the thin model cannot carry).
+    /// This is the render-on-save author for IMPORTED documents (the 010 cutover's callee): the canonical
+    /// model (projected by <c>ComposeDocxProjectionBuilder.BuildContentModel</c>, edited by the client)
+    /// renders back INTO the retained source package — the third authoring mode alongside
+    /// <see cref="SynthesizeDocument"/> (blank package, born-in-editor) and <see cref="AppendSection"/>
+    /// (additive, whose preserve-parts + trailing-sectPr discipline this generalizes).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>No anchoring, ADR-049 Path-B by construction</b>: the body is replaced WHOLESALE from the model and
+    /// carrier parts are preserved WHOLESALE — nothing is located, matched, or patched; no text-search; no
+    /// <c>ComposeShadowPatchEngine</c>. The count-gate's mismatch condition cannot exist on this path.
+    /// </para>
+    /// <para>
+    /// <b>Carrier styles WIN (the fidelity point)</b>: when the carrier has a StyleDefinitionsPart, its
+    /// Heading1..6 / ListParagraph / Normal definitions govern the rendered look (a firm template's heading
+    /// scheme survives the save). The renderer's own catalog is authored ONLY when the carrier has no styles
+    /// part at all — the same defensive rule as <see cref="AppendSection"/>. A carrier whose Heading styles
+    /// carry no style-linked numbering yields unnumbered headings: faithful to the carrier's own look.
+    /// </para>
+    /// <para>
+    /// <b>Collision-safe numbering merge</b>: list instances allocate ABOVE the carrier's max <c>numId</c> and
+    /// reference renderer abstracts appended ABOVE the carrier's max <c>abstractNumId</c>
+    /// (<see cref="MergeNumberingDefinitions"/>) — a rendered list can never capture a carrier num definition
+    /// and no carrier-owned abstract/instance is touched. The heading abstract/instance is NOT merged
+    /// (headings follow carrier styles, see above).
+    /// </para>
+    /// <para>
+    /// <b>Final section preserved; interior sections flatten</b>: the trailing body <c>sectPr</c> (page size /
+    /// margins / header-footer references of the FINAL section) is detached and re-attached around the body
+    /// swap, so the rendered content lands inside the same page setup and the carrier's header/footer parts
+    /// stay referenced. INTERIOR section breaks live in paragraphs being replaced — their loss is a projection-
+    /// side counted flatten (task 023 widens sections). A carrier body with no trailing sectPr gets
+    /// <see cref="SynthesizeDocument"/>'s default single-section setup.
+    /// </para>
+    /// <para>
+    /// <b>Carrier metadata preserved</b>: core properties (creator etc.) are left untouched when present;
+    /// <paramref name="author"/> is used only when the carrier lacks a core-properties part entirely.
+    /// Orphaned parts (images/footnotes referenced only by the replaced body) remain in the package as inert
+    /// weight — harmless, and version history retains the original anyway (ADR-049 safety net).
+    /// </para>
+    /// </remarks>
+    /// <param name="carrierBytes">The retained source package (a valid WordprocessingML OPC package).</param>
+    /// <param name="model">The canonical content model to render as the new body.</param>
+    /// <param name="author">Attribution used ONLY when the carrier has no core-properties part.</param>
+    /// <exception cref="ArgumentException"><paramref name="carrierBytes"/> is null/empty.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="model"/> is null.</exception>
+    /// <exception cref="ComposePatchException">The carrier is not a readable package or has no main part/body.</exception>
+    public byte[] RenderIntoCarrier(byte[] carrierBytes, ComposeContentModel model, string author)
+    {
+        if (carrierBytes is null || carrierBytes.Length == 0)
+        {
+            throw new ArgumentException("carrierBytes is required and must be non-empty.", nameof(carrierBytes));
+        }
+
+        ArgumentNullException.ThrowIfNull(model);
+
+        using var buffer = new MemoryStream();
+        buffer.Write(carrierBytes, 0, carrierBytes.Length);
+        buffer.Position = 0;
+
+        WordprocessingDocument doc;
+        try
+        {
+            doc = WordprocessingDocument.Open(buffer, isEditable: true);
+        }
+        catch (Exception ex) when (ex is OpenXmlPackageException or FileFormatException or InvalidDataException or ArgumentOutOfRangeException)
+        {
+            throw new ComposePatchException(
+                ComposePatchErrorKind.MalformedDocument,
+                "The supplied carrier bytes are not a readable .docx (WordprocessingML) package.",
+                ex);
+        }
+
+        using (doc)
+        {
+            var mainPart = doc.MainDocumentPart
+                ?? throw new ComposePatchException(ComposePatchErrorKind.MalformedDocument, "The carrier .docx has no main document part.");
+            var body = mainPart.Document?.Body
+                ?? throw new ComposePatchException(ComposePatchErrorKind.MalformedDocument, "The carrier .docx main document part has no body.");
+
+            // Detach the FINAL section's sectPr before the swap; re-attached below (see remarks).
+            var trailingSectPr = body.Elements<SectionProperties>().LastOrDefault();
+            trailingSectPr?.Remove();
+
+            body.RemoveAllChildren();
+
+            // Collision-safe allocation base (see remarks). Computed BEFORE the render so the plan's ids
+            // are correct in the paragraphs' direct numPr as they are built.
+            var existingNumbering = mainPart.NumberingDefinitionsPart?.Numbering;
+            var maxExistingNumId = existingNumbering?.Elements<NumberingInstance>().Max(n => n.NumberID?.Value) ?? 0;
+            var maxExistingAbstractId = existingNumbering?.Elements<AbstractNum>().Max(a => a.AbstractNumberId?.Value) ?? 0;
+            var plan = new NumberingPlan(Math.Max(FirstListNumInstanceId, maxExistingNumId + 1));
+
+            RenderBlocks(body, model.Blocks, plan);
+            ResolveHyperlinkRelationships(body, mainPart);
+
+            if (mainPart.StyleDefinitionsPart is null)
+            {
+                AddStyleDefinitions(mainPart); // carrier has no styles at all — author the catalog
+            }
+
+            if (plan.OrderedInstanceIds.Count > 0 || plan.BulletInstanceId is not null)
+            {
+                if (mainPart.NumberingDefinitionsPart is null)
+                {
+                    AddNumberingDefinitions(mainPart, plan);
+                }
+                else
+                {
+                    MergeNumberingDefinitions(
+                        mainPart.NumberingDefinitionsPart,
+                        plan,
+                        orderedAbstractId: maxExistingAbstractId + 1,
+                        bulletAbstractId: maxExistingAbstractId + 2);
+                }
+            }
+
+            if (trailingSectPr is not null)
+            {
+                body.AppendChild(trailingSectPr);
+            }
+            else
+            {
+                // Carrier had no trailing sectPr (schema-degenerate): default single-section setup,
+                // mirroring SynthesizeDocument.
+                body.AppendChild(new SectionProperties(
+                    new PageSize { Width = 12240, Height = 15840 },
+                    new PageMargin { Top = 1440, Right = 1440, Bottom = 1440, Left = 1440, Header = 720, Footer = 720, Gutter = 0 }));
+            }
+
+            AssignParaIds(body);
+
+            if (doc.CoreFilePropertiesPart is null)
+            {
+                AddCoreProperties(doc, string.IsNullOrWhiteSpace(author) ? "Spaarke Compose" : author.Trim());
+            }
+
+            mainPart.Document!.Save();
+        }
+
+        return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// Task 011: merges the plan's list instances into an EXISTING carrier numbering part. Renderer abstracts
+    /// are inserted with REMAPPED ids above the carrier's own (schema order: AbstractNum before Num — inserted
+    /// before the first existing instance), and every plan instance references those remapped abstracts. No
+    /// carrier-owned abstract or instance is modified. The heading abstract/instance is deliberately absent —
+    /// carrier styles govern headings (see <see cref="RenderIntoCarrier"/> remarks).
+    /// </summary>
+    private static void MergeNumberingDefinitions(
+        NumberingDefinitionsPart numberingPart, NumberingPlan plan, int orderedAbstractId, int bulletAbstractId)
+    {
+        var numbering = numberingPart.Numbering ??= new Numbering();
+        var firstInstance = numbering.Elements<NumberingInstance>().FirstOrDefault();
+
+        void InsertAbstract(AbstractNum abstractNum)
+        {
+            if (firstInstance is not null)
+            {
+                numbering.InsertBefore(abstractNum, firstInstance);
+            }
+            else
+            {
+                numbering.AppendChild(abstractNum);
+            }
+        }
+
+        if (plan.OrderedInstanceIds.Count > 0)
+        {
+            InsertAbstract(BuildOrderedAbstractNum(orderedAbstractId));
+            foreach (var orderedId in plan.OrderedInstanceIds)
+            {
+                var instance = new NumberingInstance(new AbstractNumId { Val = orderedAbstractId }) { NumberID = orderedId };
+                instance.AppendChild(new LevelOverride(new StartOverrideNumberingValue { Val = 1 }) { LevelIndex = 0 });
+                numbering.AppendChild(instance);
+            }
+        }
+
+        if (plan.BulletInstanceId is { } bulletId)
+        {
+            InsertAbstract(BuildBulletAbstractNum(bulletAbstractId));
+            numbering.AppendChild(new NumberingInstance(new AbstractNumId { Val = bulletAbstractId }) { NumberID = bulletId });
+        }
+
+        numberingPart.Numbering.Save();
+    }
+
     // ────────────────────────────────────────────────────────────────────────────────────────────
     // Body render
     // ────────────────────────────────────────────────────────────────────────────────────────────
@@ -658,13 +850,14 @@ public sealed partial class ComposeDocumentRenderer
     }
 
     /// <summary>The ordered-list scheme: 9 decimal levels (<c>%N.</c>), consumed via a DIRECT numPr on
-    /// ListParagraph items. No style link (lists are not styled-numbered).</summary>
-    private static AbstractNum BuildOrderedAbstractNum()
+    /// ListParagraph items. No style link (lists are not styled-numbered). <paramref name="abstractNumId"/>
+    /// defaults to the blank-package id; carrier mode (task 011) passes a remapped id above the carrier's own.</summary>
+    private static AbstractNum BuildOrderedAbstractNum(int abstractNumId = OrderedAbstractNumId)
     {
         var abstractNum = new AbstractNum(
             new Nsid { Val = "0E7D0001" },
             new MultiLevelType { Val = MultiLevelValues.HybridMultilevel })
-        { AbstractNumberId = OrderedAbstractNumId };
+        { AbstractNumberId = abstractNumId };
 
         for (var ilvl = 0; ilvl <= 8; ilvl++)
         {
@@ -683,13 +876,14 @@ public sealed partial class ComposeDocumentRenderer
         return abstractNum;
     }
 
-    /// <summary>The bullet-list scheme: 9 bullet levels (Symbol-font glyphs), consumed via a DIRECT numPr.</summary>
-    private static AbstractNum BuildBulletAbstractNum()
+    /// <summary>The bullet-list scheme: 9 bullet levels (Symbol-font glyphs), consumed via a DIRECT numPr.
+    /// <paramref name="abstractNumId"/> defaults to the blank-package id; carrier mode remaps (task 011).</summary>
+    private static AbstractNum BuildBulletAbstractNum(int abstractNumId = BulletAbstractNumId)
     {
         var abstractNum = new AbstractNum(
             new Nsid { Val = "0E7D0002" },
             new MultiLevelType { Val = MultiLevelValues.HybridMultilevel })
-        { AbstractNumberId = BulletAbstractNumId };
+        { AbstractNumberId = abstractNumId };
 
         // Cycle the three classic Word bullet glyphs across depths.
         var glyphs = new[] { "", "o", "" }; // • (Symbol), o (Courier), ▪ (Wingdings)
@@ -876,7 +1070,14 @@ public sealed partial class ComposeDocumentRenderer
     /// </summary>
     private sealed class NumberingPlan
     {
-        private int _nextNumId = FirstListNumInstanceId;
+        private int _nextNumId;
+
+        /// <summary>Blank-package authoring — instances allocate from <see cref="FirstListNumInstanceId"/>.</summary>
+        public NumberingPlan() : this(FirstListNumInstanceId) { }
+
+        /// <summary>Task 011 (carrier mode): allocate instances from <paramref name="firstNumId"/> — set
+        /// ABOVE the carrier's own max numId so a rendered list can never capture a carrier num definition.</summary>
+        public NumberingPlan(int firstNumId) => _nextNumId = firstNumId;
 
         /// <summary>The allocated ordered-list instance ids, in allocation order (each restarts at 1).</summary>
         public List<int> OrderedInstanceIds { get; } = new();
