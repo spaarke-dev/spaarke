@@ -4,7 +4,25 @@
     <title>Tables through the canonical model (reuse the R5 tracked-table work)</title>
     <phase>2 Canonical model + fidelity widening</phase>
     <gate>dep:020</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-note>COMPLETED 2026-08-06 (commits cef2cd988 + be0b253b3, pushed). R5-reuse interpretation
+      (directional, adr-check-validated): the R5 tracked-table OP layer (ComposeShadowPatchEngine.ApplyTableOperation)
+      is reused AS-IS on the op-log path (untouched — md5-verified); render-on-save needs the MODEL to carry table
+      structure (tables live in the replaced body — no carrier part to reference). Delivered the CLOSED structural
+      set extended in place on ComposeTable/Row/Cell: StyleId/Width/Borders/GridColumnWidthsTwips/LookHex ·
+      RepeatAsHeaderRow · GridSpan/VMerge/Width/VerticalAlignment. Borders is TRI-STATE and the mode discriminator:
+      null = born-in-editor legacy chrome (bit-stable, pinned); non-null = source-faithful (only present facts
+      emitted; all-edges-null = BORDERLESS — imported signature-block layout tables no longer grow borders on save).
+      Out-of-set chrome flattens LOUDLY via CATCH-ALL counting (every unmodeled tblPr/trPr/tcPr child + tblPrEx →
+      table-formatting-flattened); grid sizing gridSpan-aware; tblLook hex synthesized from boolean-only authoring;
+      client-supplied border tokens validated (IEnumValue.IsValid). SEAM: ComposeTableCanonicalModelSeamTests —
+      SDK-authored rich source capture + rendered-OOXML structure reproduction + OpenXmlValidator no-new-errors
+      (multiset) + corpus-wide full-fact fixed point (vacuity-guarded) + loud-degradation pin + legacy-chrome pin.
+      Step 9.5: adr-check PASS 8/8; code-review REQUEST-CHANGES → F1-F11 fixed (incl. F4: style-chain vAlign —
+      reviewer-caught design error), F12 routed → 010/012 (client mapper must preserve server-set table facts +
+      numId on re-post). Gates: suite 705/708 (3 pre-existing NDA-class reds); ADR-013 facade green; publish
+      46.89 MB incl PDBs clean-worktree (task delta 0.00); no package/DI/endpoint change. Typed carry of
+      hMerge/tblLayout → 026. Record: notes/020-canonical-hub-design.md §12 + §12.1.</completion-note>
     <rigor>FULL</rigor>
     <rigor-reason>Tables are the most complex OOXML construct (w:tbl/w:tr/w:tc); invalid markup breaks Word. Modifies shared Services/Compose files on the most-contested BFF surface; save/projection change requires ADR-038 seam DoD + round-trip parity. code-review + adr-check run at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>
