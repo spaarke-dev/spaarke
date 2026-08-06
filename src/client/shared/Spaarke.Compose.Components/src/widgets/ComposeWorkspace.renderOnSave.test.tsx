@@ -3,11 +3,15 @@
  *
  * Drives the REAL `ComposeWorkspace.triggerSave` with a stubbed `ComposeEditor` handle and the
  * `@spaarke/auth` fetch boundary mocked, and asserts the render-on-save cutover:
- *   1. MODEL PATH — a loaded/imported doc whose Load response carried `contentModel` saves by
+ *   1. MODEL PATH — a DIRTY loaded/imported doc whose Load response carried `contentModel` saves by
  *      posting `{ contentModel: built.model, content }` with NO operationLog / paraIdMap / comments /
  *      baselineVersionId; `buildImportedContentModel` receives the LOADED model + the BINDING
- *      trackChanges default (null origin → imported → true); `recaptureBaselineSnapshot` +
- *      `commitSaved` fire exactly once after the 200.
+ *      trackChanges default (null origin → imported → true); `adoptBaselineSnapshot(built.snapshot)`
+ *      (sibling F4 — the BUILD-TIME snapshot, never a live-doc recapture that would mask mid-flight
+ *      edits) + `commitSaved` fire exactly once after the 200, with `recaptureBaselineSnapshot` as
+ *      the older-editor-build fallback only.
+ *   1b. CLEAN GATE (review F3, CRITICAL) — a CLEAN imported save (editor not dirty) keeps the
+ *      pre-012 byte-identical content-only passthrough (FR-06a): no contentModel, mapper not called.
  *   2. WARNING FAMILY (026-F5) — server `degradationWarnings` merge with the mapper's warnings
  *      (counts summed per code) into the SEPARATE save-degradation banner, which renders even though
  *      the workspace passes `hideImportWarnings`; a subsequent CLEAN save clears the banner.
@@ -50,19 +54,31 @@ const BORN_MODEL = { blocks: [{ kind: 'Paragraph', runs: [{ text: 'Born in edito
 const CAPTURED_OP = { type: 'insertText', paraId: 'AAAA0001', at: { runIndex: 0, offset: 3 }, text: 'x' };
 const STUB_COMMENT = { paraId: 'AAAA0001', start: 0, end: 4, text: 'a session comment' };
 
+// Sibling F4: the BUILD-TIME {paraId → rejectText} snapshot the posted model was derived from —
+// the workspace must round-trip it VERBATIM into adoptBaselineSnapshot on save-200 (never a
+// live-doc recapture, which would mask edits typed during the in-flight save).
+const BUILT_SNAPSHOT = { AAAA0001: 'Loaded clause.' };
+
 // ── Mutable per-test config the fetch mock + editor stub read ──
 const config: {
   loadContentModel: unknown; // undefined = older BFF (field omitted)
   loadOrigin: 'authored' | 'imported' | undefined;
   saveDegradationWarnings: Array<{ code: string; count: number }> | undefined;
   saveContentModel: unknown;
-  builtResult: { model: unknown; warnings: Array<{ code: string; count: number }> } | null;
+  builtResult: { model: unknown; warnings: Array<{ code: string; count: number }>; snapshot?: unknown } | null;
+  /** Review F3: whether the stubbed editor reports unsaved changes (drives the model-path dirty gate). */
+  editorDirty: boolean;
+  /** Sibling F4: expose adoptBaselineSnapshot on the handle (false = older editor build → the
+   * workspace must fall back to recaptureBaselineSnapshot). */
+  exposeAdoptBaseline: boolean;
 } = {
   loadContentModel: undefined,
   loadOrigin: undefined,
   saveDegradationWarnings: undefined,
   saveContentModel: undefined,
-  builtResult: { model: BUILT_MODEL, warnings: [] },
+  builtResult: { model: BUILT_MODEL, warnings: [], snapshot: BUILT_SNAPSHOT },
+  editorDirty: true,
+  exposeAdoptBaseline: true,
 };
 
 const saveRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
@@ -185,9 +201,11 @@ jest.mock('./ComposeToolbar', () => ({
   ComposeToolbar: () => <div data-testid="compose-toolbar-stub" />,
 }));
 
-// ── ComposeEditor stub — dirty imported handle with the task-012 model-mapper members. ──
+// ── ComposeEditor stub — imported handle with the task-012 model-mapper members. Dirty state and
+//    adoptBaselineSnapshot exposure are config-driven (F3 clean-gate + F4 fallback coverage). ──
 const commitSavedMock = jest.fn();
 const recaptureBaselineSnapshotMock = jest.fn();
+const adoptBaselineSnapshotMock = jest.fn();
 const serializeOperationLogMock = jest.fn(() => ({
   orderedOps: [{ operation: { ...CAPTURED_OP }, deletedContentFlag: false }],
   baseVersion: 'v-load',
@@ -206,10 +224,12 @@ jest.mock('./ComposeEditor', () => {
       ) => {
         editorProps.current = props;
         ReactLib.useEffect(() => {
-          props.onDirtyChange?.(true);
+          props.onDirtyChange?.(config.editorDirty);
         }, []);
         ReactLib.useImperativeHandle(ref, () => ({
-          isDirty: () => true,
+          // Read live from config so a clean-save test drives the F3 gate through the editor's OWN
+          // authoritative dirty flag (the one triggerSave reads), not just the toolbar state.
+          isDirty: () => config.editorDirty,
           serializeOperationLog: serializeOperationLogMock,
           commitSaved: commitSavedMock,
           getBaselineParaIdMap: () => [{ paraId: 'AAAA0001', text: 'Loaded clause.' }],
@@ -221,6 +241,9 @@ jest.mock('./ComposeEditor', () => {
           buildContentModel: () => BORN_MODEL,
           buildImportedContentModel: buildImportedContentModelMock,
           recaptureBaselineSnapshot: recaptureBaselineSnapshotMock,
+          // Sibling F4: conditionally exposed so one test exercises the older-editor-build fallback
+          // (workspace must degrade to recaptureBaselineSnapshot when this member is absent).
+          ...(config.exposeAdoptBaseline ? { adoptBaselineSnapshot: adoptBaselineSnapshotMock } : {}),
           getCounts: () => ({ characters: 0, words: 0 }),
         }));
         return <div data-testid="compose-editor-stub" />;
@@ -280,6 +303,7 @@ beforeEach(() => {
   authenticatedFetchMock.mockClear();
   commitSavedMock.mockClear();
   recaptureBaselineSnapshotMock.mockClear();
+  adoptBaselineSnapshotMock.mockClear();
   serializeOperationLogMock.mockClear();
   buildImportedContentModelMock.mockClear();
   saveRequests.length = 0;
@@ -288,7 +312,9 @@ beforeEach(() => {
   config.loadOrigin = undefined;
   config.saveDegradationWarnings = undefined;
   config.saveContentModel = undefined;
-  config.builtResult = { model: BUILT_MODEL, warnings: [] };
+  config.builtResult = { model: BUILT_MODEL, warnings: [], snapshot: BUILT_SNAPSHOT };
+  config.editorDirty = true;
+  config.exposeAdoptBaseline = true;
 });
 
 async function waitForEditor(): Promise<void> {
@@ -331,8 +357,54 @@ describe('ComposeWorkspace — imported save-routing flip (task 012)', () => {
     expect(serializeOperationLogMock.mock.invocationCallOrder[0]).toBeLessThan(
       buildImportedContentModelMock.mock.invocationCallOrder[0]
     );
-    // Post-200: baseline recapture + exactly ONE commit.
+    // Post-200 (sibling F4): the BUILD-TIME snapshot the posted model was derived from is adopted
+    // verbatim — NEVER a live-doc recapture (which would mask edits typed mid-flight) — + exactly
+    // ONE commit.
     await waitFor(() => expect(commitSavedMock).toHaveBeenCalledTimes(1));
+    expect(adoptBaselineSnapshotMock).toHaveBeenCalledTimes(1);
+    expect(adoptBaselineSnapshotMock).toHaveBeenCalledWith(BUILT_SNAPSHOT);
+    expect(recaptureBaselineSnapshotMock).not.toHaveBeenCalled();
+  });
+
+  it('CLEAN imported save (review F3): keeps the byte-identical content-only passthrough — no contentModel, mapper never called', async () => {
+    config.loadContentModel = LOADED_MODEL; // model IS retained…
+    config.editorDirty = false; // …but the editor has NO unsaved changes (zero-edit Ctrl+S)
+    renderStoredDoc();
+    // canSave stays false for a clean stored doc — wait for the load/mount only, then drive
+    // triggerSave directly via onSave (the Ctrl+S / bridge entry points do the same).
+    await waitFor(() => expect(screen.getByTestId('compose-editor-stub')).toBeInTheDocument());
+
+    await clickSave();
+    await waitFor(() => expect(saveRequests).toHaveLength(1));
+
+    const body = saveRequests[0].body;
+    // Pre-012 FR-06a shape, unchanged: retained bytes byte-identical, NOTHING that would make the
+    // server re-render the body from the flatten-tier model (which drops e.g. signature text-boxes).
+    expect(body.contentModel).toBeUndefined();
+    expect(body.content).toBe(CONTENT_B64);
+    expect(body.operationLog).toBeUndefined(); // clean → no op-log
+    expect(body.baselineVersionId).toBe('v-load');
+    expect(body.comments).toEqual([STUB_COMMENT]);
+    expect(body.paraIdMap).toEqual([{ paraId: 'AAAA0001', text: 'Loaded clause.' }]);
+    expect(buildImportedContentModelMock).not.toHaveBeenCalled();
+    // No model path → no baseline adoption; and no op-log sent → no commit either.
+    expect(adoptBaselineSnapshotMock).not.toHaveBeenCalled();
+    expect(recaptureBaselineSnapshotMock).not.toHaveBeenCalled();
+    expect(commitSavedMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to recaptureBaselineSnapshot when the editor build lacks adoptBaselineSnapshot (older handle)', async () => {
+    config.loadContentModel = LOADED_MODEL;
+    config.exposeAdoptBaseline = false;
+    renderStoredDoc();
+    await waitForEditor();
+
+    await clickSave();
+    await waitFor(() => expect(saveRequests).toHaveLength(1));
+    expect(saveRequests[0].body.contentModel).toEqual(BUILT_MODEL); // model path still taken
+
+    await waitFor(() => expect(commitSavedMock).toHaveBeenCalledTimes(1));
+    expect(adoptBaselineSnapshotMock).not.toHaveBeenCalled();
     expect(recaptureBaselineSnapshotMock).toHaveBeenCalledTimes(1);
   });
 

@@ -63,7 +63,17 @@ describe('buildImportedContentModel — verbatim pass-through', () => {
     const editor = makeEditor();
     editor.commands.setContent('<p>Alpha clause.</p><p>Beta clause.</p>');
     stamp(editor, ['AAAA0001', 'BBBB0002']);
+    // Mount-realism (F1): the loaded block's Inserted-revision run ("clause.") renders as an
+    // IMPORTED insertion mark in the editor (applyImportedRevisions) — apply it BEFORE the snapshot,
+    // exactly like the mount does, so the formatting signature aligns (both sides exclude the span).
+    editor.commands.setTextSelection({ from: 7, to: 14 }); // "clause."
+    editor.commands.setMark('insertion', {
+      ledgerRef: 'imported:0',
+      author: 'Jane Doe',
+      date: '2026-01-01T00:00:00Z',
+    });
     const snapshot = captureParaIdSnapshot(editor);
+    expect(snapshot.get('AAAA0001')).toBe('Alpha '); // reject-state excludes the imported insertion
 
     const loaded: ComposeContentModel = {
       blocks: [
@@ -160,7 +170,9 @@ describe('buildImportedContentModel — verbatim pass-through', () => {
 describe('buildImportedContentModel — props-only change', () => {
   it('overrides editable props from the editor while keeping the loaded runs + facts untouched', () => {
     const editor = makeEditor();
-    editor.commands.setContent('<h2>Title</h2>');
+    // Bold in the editor mirrors the loaded run's bold (F1: the formatting signature must align for
+    // the props-only tier to apply — only the LEVEL differs here).
+    editor.commands.setContent('<h2><strong>Title</strong></h2>');
     stamp(editor, ['AAAA0001']);
     const snapshot = captureParaIdSnapshot(editor);
 
@@ -417,13 +429,15 @@ describe('buildImportedContentModel — comment folding', () => {
     editor.destroy();
   });
 
-  it('keeps an IMPORTED comment anchor id and never re-appends its comment', () => {
+  it("keeps an IMPORTED comment anchor id (runtime 'imported-thread:<n>' mark shape) and never re-appends its comment", () => {
     const editor = makeEditor();
     editor.commands.setContent('<p>Keep imported anchor.</p>');
     stamp(editor, ['AAAA0001']);
 
     editor.commands.setTextSelection({ from: 6, to: 14 }); // "imported"
-    editor.commands.setMark('commentAnchor', { commentId: '3' }); // the imported comment's own id
+    // F2 (step-9.5 review): the RUNTIME mark id shape is `imported-thread:<n>`
+    // (applyImportedCommentAnchors / IMPORTED_COMMENT_THREAD_PREFIX), NOT the bare numeric id.
+    editor.commands.setMark('commentAnchor', { commentId: 'imported-thread:3' });
 
     const snapshot = captureParaIdSnapshot(editor);
     editor.commands.insertContentAt(1, 'Now '); // user edit forces the rebuild path
@@ -443,6 +457,67 @@ describe('buildImportedContentModel — comment folding', () => {
     expect(runs).toContainEqual({ text: '', commentAnchor: { kind: 'Start', id: 3 } });
     expect(runs).toContainEqual({ text: '', commentAnchor: { kind: 'End', id: 3 } });
     expect(runs).toContainEqual({ text: 'Now ', revision: { kind: 'Inserted' } });
+    expect(warnings).toEqual([]);
+    editor.destroy();
+  });
+
+  it('also accepts a bare-numeric imported anchor id', () => {
+    const editor = makeEditor();
+    editor.commands.setContent('<p>Bare numeric id.</p>');
+    stamp(editor, ['AAAA0001']);
+
+    editor.commands.setTextSelection({ from: 1, to: 5 }); // "Bare"
+    editor.commands.setMark('commentAnchor', { commentId: '3' });
+
+    const snapshot = captureParaIdSnapshot(editor);
+    editor.commands.insertContentAt(editor.state.doc.content.size - 1, ' X'); // force rebuild
+
+    const loaded: ComposeContentModel = {
+      blocks: [{ kind: 'Paragraph', paraId: 'AAAA0001', runs: [{ text: 'Bare numeric id.' }] }],
+      comments: [{ id: 3, author: 'Bob', text: 'imported comment' }],
+    };
+
+    const { model, warnings } = buildImportedContentModel(editor, loaded, snapshot, {
+      trackChanges: true,
+      sessionThreads: NO_THREADS,
+    });
+
+    expect(model.comments).toEqual([{ id: 3, author: 'Bob', text: 'imported comment' }]);
+    expect(model.blocks[0].runs).toContainEqual({ text: '', commentAnchor: { kind: 'Start', id: 3 } });
+    expect(warnings).toEqual([]);
+    editor.destroy();
+  });
+
+  it('F2 regression: an UNTOUCHED paragraph whose only anchor is an imported-thread mark stays VERBATIM', () => {
+    const editor = makeEditor();
+    editor.commands.setContent('<p>Keep imported anchor.</p>');
+    stamp(editor, ['AAAA0001']);
+    editor.commands.setTextSelection({ from: 6, to: 14 }); // "imported"
+    editor.commands.setMark('commentAnchor', { commentId: 'imported-thread:3' });
+    const snapshot = captureParaIdSnapshot(editor);
+
+    const loaded: ComposeContentModel = {
+      blocks: [
+        {
+          kind: 'Paragraph',
+          paraId: 'AAAA0001',
+          runs: [
+            { text: '', commentAnchor: { kind: 'Start', id: 3 } },
+            { text: 'Keep imported anchor.' },
+            { text: '', commentAnchor: { kind: 'End', id: 3 } },
+            { text: '', isPageBreak: true }, // fact that a wrong force-rebuild would have dropped
+          ],
+        },
+      ],
+      comments: [{ id: 3, author: 'Bob', text: 'imported comment' }],
+    };
+
+    const { model, warnings } = buildImportedContentModel(editor, loaded, snapshot, {
+      trackChanges: true,
+      sessionThreads: NO_THREADS,
+    });
+
+    expect(model.blocks[0]).toBe(loaded.blocks[0]); // NOT force-rebuilt (the pre-fix behavior)
     expect(warnings).toEqual([]);
     editor.destroy();
   });
@@ -590,6 +665,65 @@ describe('buildImportedContentModel — fidelity warnings', () => {
     expect(table.lookHex).toBe('04A0');
     expect(table.rows[0].cells[0].gridSpan).toBe(2); // positionally-paired cell fact preserved
     expect(warnings).toContainEqual({ code: 'edited-table-structure-rebuilt', count: 1 });
+    editor.destroy();
+  });
+});
+
+describe('buildImportedContentModel — formatting-only edits (F1, step-9.5 review)', () => {
+  it('rebuilds a block whose ONLY change is formatting, carrying the new formatting without diff revisions', () => {
+    const editor = makeEditor();
+    editor.commands.setContent('<p>Make this bold</p>');
+    stamp(editor, ['AAAA0001']);
+    const snapshot = captureParaIdSnapshot(editor);
+
+    editor.commands.setTextSelection({ from: 11, to: 15 }); // "bold"
+    editor.commands.setMark('bold');
+
+    const loaded: ComposeContentModel = {
+      blocks: [
+        { kind: 'Paragraph', paraId: 'AAAA0001', runs: [{ text: 'Make this bold' }], pageBreakBefore: true },
+      ],
+    };
+
+    const { model } = buildImportedContentModel(editor, loaded, snapshot, {
+      trackChanges: true,
+      sessionThreads: NO_THREADS,
+    });
+
+    // Pre-fix behavior: verbatim identity — the bold silently lost. Now: rebuilt with the bold.
+    expect(model.blocks[0]).not.toBe(loaded.blocks[0]);
+    expect(model.blocks[0].runs).toEqual([{ text: 'Make this ' }, { text: 'bold', bold: true }]);
+    // Formatting changes are NOT redlined (text unchanged → no diff-derived revisions) — matches the
+    // retired op-log path's untracked SetMark behavior.
+    expect(model.blocks[0].runs!.every(r => r.revision === undefined)).toBe(true);
+    expect(model.blocks[0].pageBreakBefore).toBe(true); // server-set facts survive the rebuild
+    editor.destroy();
+  });
+});
+
+describe('buildImportedContentModel — build-time snapshot (F4, step-9.5 review)', () => {
+  it('returns the build-time reject-state snapshot, unaffected by edits made after building', () => {
+    const editor = makeEditor();
+    editor.commands.setContent('<p>Original text</p>');
+    stamp(editor, ['AAAA0001']);
+    const snapshot = captureParaIdSnapshot(editor);
+    editor.commands.insertContentAt(editor.state.doc.content.size - 1, ' edited');
+
+    const loaded: ComposeContentModel = {
+      blocks: [{ kind: 'Paragraph', paraId: 'AAAA0001', runs: [{ text: 'Original text' }] }],
+    };
+    const result = buildImportedContentModel(editor, loaded, snapshot, {
+      trackChanges: true,
+      sessionThreads: NO_THREADS,
+    });
+
+    expect(result.snapshot.get('AAAA0001')).toBe('Original text edited'); // the build-time state
+
+    // A mid-flight edit AFTER build must not leak into the returned snapshot (adopting it on 200
+    // keeps that edit different from the baseline, so it still saves next time).
+    editor.commands.insertContentAt(editor.state.doc.content.size - 1, ' MORE');
+    expect(result.snapshot.get('AAAA0001')).toBe('Original text edited');
+    expect(captureParaIdSnapshot(editor).get('AAAA0001')).toBe('Original text edited MORE'); // live doc moved on
     editor.destroy();
   });
 });

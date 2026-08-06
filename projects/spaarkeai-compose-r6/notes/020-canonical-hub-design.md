@@ -768,13 +768,56 @@ NEVER rendered). Clean save clears; friendly per-code copy; server + mapper warn
 - **P-2**: `ScanCarrierBytes<T>` extraction (the triple-duplicated read-only side-open preamble);
   exception policy deliberately stays per-caller.
 
+### Step 9.5 (independent agents on `09b79eaae`)
+
+**adr-check: PASS 8/8** — engine/count-gate reachability confirmed transitional-only; I-7 audit green over
+the widened slice; scope guard intact; ADR-007/013/039/040/038/§10 all clean; /project minted-bytes echo
+ruled a pure echo (no persistence channel). ONE §6.5 finding: amendment point-4's "transitional
+clean-apply path" wording NARROWER than the reachable set (imported tracked op-log saves are not
+clean-apply) → resolved SAME-TASK as the recommended Path-B micro-amendment (point 4 reworded to "the
+transitional op-log path (`ContentModel`-null)", aligning letter with intent + the FR-08 bullet).
+
+**code-review: REQUEST-CHANGES → all fixed same-task** (each empirically demonstrated by the reviewer):
+- **F1 Critical** — formatting-only edits (bold/italic/underline/link on unchanged text) passed the loaded
+  block through VERBATIM — silent edit loss. Fixed: per-character formatting-signature comparison added to
+  the untouched predicate (editor segments vs loaded runs, marker + Inserted-revision runs aligned);
+  mismatch → rebuild tier. Formatting changes stay untracked (op-log SetMark parity).
+- **F2 Critical** — imported comment anchors used runtime id shape `imported-thread:<n>` but the mapper
+  required bare digits → untouched imported-comment paragraphs force-rebuilt (dropping isPageBreak/
+  formatChange) AND anchors orphaned. Fixed: both shapes recognized + verified against loaded comment ids;
+  the wrong-contract test pin corrected; verbatim-identity regression test added.
+- **F3 Critical** — the model-path probe lacked an `editorIsDirty` gate → a ZERO-EDIT save of a browse/
+  loaded doc re-rendered through the flatten-tier model (NDA signature boxes dropped on clean Ctrl+S)
+  instead of the FR-06a byte-identical passthrough. Fixed: dirty-gate first; clean saves keep the
+  pre-012 content-only shapes; pinned by test.
+- **F4 Major** — post-save snapshot recapture read the LIVE doc → edits typed during an in-flight save
+  matched the recaptured baseline and were masked from every later save. Fixed: the snapshot is captured
+  at BUILD time from the same getJSON as the model, returned on ImportedModelResult, adopted verbatim on
+  200 (`adoptBaselineSnapshot`); recapture kept only as an older-editor fallback.
+- **F5 Minor** — dirty flag reset at build time left Save disabled after a FAILED save. Fixed: reset
+  removed; `buildImportedContentModel` records the op-log committed boundary (the serializeOperationLog
+  mechanism) so the existing `commitSaved()` on 200 recomputes dirty; mid-flight edits stay dirty.
+- **F6 Minor (→ 013)** — session-comment id allocation could collide with a carrier comment id absent
+  from the loaded model (projection-flattened comment) → anchor binds to the wrong carrier comment.
+  Server-side `comment-id-collision` warn or server-echoed allocation floor — 013 scope.
+- **F7 Minor (→ 013)** — load-time canonical-projection flatten warnings are server-log-only; the save
+  that MATERIALIZES the loss shows no warning. Return projection warnings on the mount doors + fold into
+  the first model-path save's warning set — 013 scope (pairs with the FR-08 harness).
+
+**Also routed → 013** (adr-check residuals): R4.5 T-2 narrative refresh for the /project mint+echo;
+FR-08 harness case for carrier-with-comments + new-comment append; transitional-telemetry dashboards note;
+post-save re-projection perf watch on large docs. **Deploy note for 014**: BFF + sprk_spaarkeai MUST
+deploy together (standing rule) — an old client on the new server drops separate-comments LOUDLY
+(`comments-ignored`), acceptable only within the atomic-deploy window.
+
 ### Tests
 
 Server: ComposeServiceImportedRenderSaveTests 11/11 (5 new: post-save model · clean-save null ·
 comments-ignored + no bake · carrier comment append preserving existing · author fallback vs carried
 author); 025 hostile-input seam updated to fallback semantics; Compose suite 979/982 (the 3 pre-existing
-NDA reds — 013/027 own them). Client: docxBridge.importedModel.test.ts 18/18 + workspace routing tests
-(see the cutover commit).
+NDA reds — 013/027 own them). Client (post-fix): docxBridge.importedModel 22/22 · renderOnSave 9/9 · renderOnSave.reducer 9/9 ·
+BannerStack 24/24 · saveBaseline 6/6 · contentModel/paraId regression 15/15 — integrated run 78/78;
+tsc at the 28-error pre-existing baseline (sibling dist), zero new.
 
 ---
 

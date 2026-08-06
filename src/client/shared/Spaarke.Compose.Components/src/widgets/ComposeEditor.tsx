@@ -876,10 +876,17 @@ export interface ComposeEditorHandle {
    * (redlined when `opts.trackChanges`; plain for reopened AUTHORED docs), pending AI / imported Word
    * revision marks translate to revision facts, and session + advisory comment threads fold in as
    * Start/End anchor runs + appended `model.comments` (imported threads excluded — they ride
-   * `loadedModel.comments`). Resets the dirty flag (parity with {@link buildContentModel}); the host
-   * re-baselines via {@link recaptureBaselineSnapshot} only after the save CONFIRMS. Returns `null`
-   * when the editor is unmounted. Warnings are aggregated `{ code, count }` fidelity notices (e.g.
-   * dropped line/page breaks on an edited paragraph) — surfaced by the host, never blocking.
+   * `loadedModel.comments`). Returns `null` when the editor is unmounted. Warnings are aggregated
+   * `{ code, count }` fidelity notices (e.g. dropped line/page breaks on an edited paragraph) —
+   * surfaced by the host, never blocking.
+   *
+   * F5 (step-9.5 review): does NOT reset the dirty flag at build time (a failed save must leave the
+   * document dirty for retry). It records the op-log high-water mark exactly like
+   * {@link serializeOperationLog} does, so the host's existing {@link commitSaved} on a confirmed 200
+   * drops the batch this model captured and recomputes dirty — edits typed mid-flight survive as
+   * still-dirty. F4: the result carries the build-time `snapshot` to hand back via
+   * {@link adoptBaselineSnapshot} after the 200 (never re-capture from the live doc — a mid-flight
+   * edit would silently vanish into a live re-capture).
    */
   buildImportedContentModel(
     loadedModel: ComposeContentModel,
@@ -887,11 +894,22 @@ export interface ComposeEditorHandle {
   ): ImportedModelResult | null;
 
   /**
+   * F4 (step-9.5 review): ADOPT a build-time baseline snapshot — the one
+   * {@link buildImportedContentModel} returned — as the diff baseline for the next save and the live
+   * Track Changes overlay. Called by the workspace on a CONFIRMED 200 for the save that posted that
+   * model. Replaces {@link recaptureBaselineSnapshot} for the model-save path: adopting the
+   * build-time map (instead of re-capturing the live doc) keeps any edit typed while the save was in
+   * flight DIFFERENT from the baseline, so it still redlines/saves next time. No dirty-flag side
+   * effect.
+   */
+  adoptBaselineSnapshot(snapshot: ReadonlyMap<string, string>): void;
+
+  /**
    * R6 (task 012): re-capture the `{ paraId → reject-state text }` baseline snapshot from the CURRENT
-   * document (same capture as the load-time {@link captureParaIdSnapshot} pass). Called by the
-   * workspace after a SUCCESSFUL model-path save so the next {@link buildImportedContentModel} diff —
-   * and the live Track Changes overlay — baseline against the just-persisted state instead of the
-   * original load. No dirty-flag side effect.
+   * document (same capture as the load-time {@link captureParaIdSnapshot} pass). No dirty-flag side
+   * effect. Prefer {@link adoptBaselineSnapshot} after a model-path save (F4: a live re-capture at
+   * 200-time silently absorbs mid-flight edits); kept for compatibility and for callers that
+   * deliberately want a live re-baseline.
    */
   recaptureBaselineSnapshot(): void;
 
@@ -2814,18 +2832,25 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           return model;
         },
         // R6 (task 012, render-on-save cutover): the imported-doc merged model — see the handle JSDoc.
+        // F5 (step-9.5 review): NO dirty reset at build time — a rejected save must leave the Save
+        // button live for retry. Instead record the op-log high-water mark (the SAME mechanism
+        // serializeOperationLog uses) so commitSaved() on a confirmed 200 drops exactly the batch
+        // this model captured and recomputes dirty from whatever the user typed mid-flight.
         buildImportedContentModel: (loadedModel, opts) => {
           if (!editor) return null;
-          const result = buildImportedContentModel(editor, loadedModel, paraIdSnapshotRef.current, {
+          if (opLogRef.current) committedBoundaryRef.current = opLogRef.current.nextSeq;
+          return buildImportedContentModel(editor, loadedModel, paraIdSnapshotRef.current, {
             trackChanges: opts.trackChanges,
             sessionThreads: collectSessionThreadInputs(),
           });
-          dirtyRef.current = false;
-          onDirtyChange?.(false);
-          return result;
         },
-        // R6 (task 012): re-baseline the mapper diff + Track Changes overlay after a CONFIRMED
-        // model-path save (the workspace calls this on 200, never on a rejected save).
+        // F4 (step-9.5 review): adopt the BUILD-TIME snapshot handed back by the mapper after a
+        // confirmed 200 — mid-flight edits stay different from the baseline and save next time.
+        adoptBaselineSnapshot: snapshot => {
+          paraIdSnapshotRef.current = new Map(snapshot);
+        },
+        // R6 (task 012): LIVE re-capture of the baseline. Prefer adoptBaselineSnapshot after a
+        // model-path save (F4); kept for compatibility / deliberate live re-baselines.
         recaptureBaselineSnapshot: () => {
           if (!editor) return;
           paraIdSnapshotRef.current = captureParaIdSnapshot(editor);

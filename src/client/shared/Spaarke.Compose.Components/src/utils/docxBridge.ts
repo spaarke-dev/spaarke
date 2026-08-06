@@ -383,10 +383,19 @@ export interface ImportedModelWarning {
   count: number;
 }
 
-/** The mapper result: the merged model + aggregated fidelity warnings. */
+/** The mapper result: the merged model + aggregated fidelity warnings + the build-time baseline. */
 export interface ImportedModelResult {
   model: ComposeContentModel;
   warnings: ImportedModelWarning[];
+  /**
+   * F4 (step-9.5 review): the `{ paraId → reject-state text }` snapshot captured from the SAME
+   * document JSON this model was built from. After the save CONFIRMS (200) the host hands it back
+   * via `adoptBaselineSnapshot` so the next diff baselines against exactly what was persisted. A
+   * live re-capture at 200-time instead would silently absorb any edit typed while the save was in
+   * flight — that edit would then equal the recaptured baseline and pass the STALE loaded block
+   * through verbatim on every later save.
+   */
+  snapshot: ReadonlyMap<string, string>;
 }
 
 /** A session/advisory comment thread to fold into the model (imported threads EXCLUDED by caller). */
@@ -526,19 +535,41 @@ function warn(ctx: MapperContext, code: string, count = 1): void {
   ctx.warnings.set(code, (ctx.warnings.get(code) ?? 0) + count);
 }
 
+/**
+ * F2 (step-9.5 review): mirror of `IMPORTED_COMMENT_THREAD_PREFIX` in `../widgets/importedComments.ts`
+ * — the RUNTIME id shape of an imported comment thread's anchor mark is `'imported-thread:<n>'`, not
+ * the bare numeric `<n>`. NOT imported from that module: it transitively pulls `@spaarke/auth` (via
+ * `ComposeCommentThread.types` → `useComposeWordShuttle`), which would break this module's pure/leaf
+ * status (and its jest suites). Keep in sync with `importedComments.ts`.
+ */
+const IMPORTED_THREAD_ID_PREFIX = 'imported-thread:';
+
+/** Parse a `commentAnchor` mark's commentId into the imported comment id it preserves, or null.
+ * Accepts BOTH runtime shapes: `'imported-thread:<n>'` (applyImportedCommentAnchors, the live mount
+ * shape) and bare `'<n>'`; the id must exist in loadedModel.comments to count as preserved. */
+function parsePreservedCommentId(ctx: MapperContext, commentId: string): number | null {
+  const raw = commentId.startsWith(IMPORTED_THREAD_ID_PREFIX)
+    ? commentId.slice(IMPORTED_THREAD_ID_PREFIX.length)
+    : commentId;
+  if (!/^\d+$/.test(raw)) return null;
+  const id = Number(raw);
+  return ctx.comment.preservedIds.has(id) ? id : null;
+}
+
 /** True when `commentId` is an imported anchor id preserved from the loaded model's comments. */
 function isPreservedCommentId(ctx: MapperContext, commentId: string): boolean {
-  return /^\d+$/.test(commentId) && ctx.comment.preservedIds.has(Number(commentId));
+  return parsePreservedCommentId(ctx, commentId) !== null;
 }
 
 /**
  * Resolve a `commentAnchor` mark's commentId to the integer id(s) its Start/End runs carry:
- * imported id (exists in loadedModel.comments) → that single id, preserved; session/advisory thread
- * → freshly-allocated ids (root + one per reply, memoized) with the thread's comments appended to
- * the output list; unknown → null + `comment-anchor-unresolved`.
+ * imported id (exists in loadedModel.comments — bare or `imported-thread:`-prefixed) → that single
+ * id, preserved; session/advisory thread → freshly-allocated ids (root + one per reply, memoized)
+ * with the thread's comments appended to the output list; unknown → null + `comment-anchor-unresolved`.
  */
 function resolveCommentAnchorIds(ctx: MapperContext, commentId: string): number[] | null {
-  if (isPreservedCommentId(ctx, commentId)) return [Number(commentId)];
+  const preserved = parsePreservedCommentId(ctx, commentId);
+  if (preserved !== null) return [preserved];
   const prior = ctx.comment.allocated.get(commentId);
   if (prior) return prior;
   const thread = ctx.comment.threadsById.get(commentId);
@@ -841,6 +872,58 @@ function loadedRejectText(block: ComposeContentBlock): string {
     .join('');
 }
 
+/** One character's inline-formatting signature (F1 — step-9.5 review). */
+interface CharFormat {
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  href: string | undefined;
+}
+
+/**
+ * F1 (step-9.5 review): per-character (bold, italic, underline, href) signature comparison between
+ * the editor's reject-state content and the loaded block's runs. A formatting-ONLY edit (setBold on
+ * otherwise-unchanged text) leaves the reject TEXT equal to the baseline, so without this check the
+ * loaded block passed through verbatim and the edit was silently lost.
+ *
+ * Alignment of the two char streams: the editor side skips insertion-marked segments (excluded from
+ * reject state) and hardBreak segments (formatting-less '\n' nodes); the loaded side skips marker
+ * runs (isPageBreak / commentAnchor), Inserted-revision runs (they render as insertion-marked in
+ * the editor — the same exclusion), and strips any literal '\n'. Both texts should then be equal
+ * for a genuinely untouched block (both derive from the same paraId-minted bytes); if they are NOT
+ * equal the streams cannot be positionally compared, and we conservatively report "changed" — the
+ * rebuild tier preserves the user's content and its fact drops are warned, whereas a wrong verbatim
+ * pass-through is silent loss.
+ */
+function formattingUnchanged(segments: readonly InlineSegment[], loaded: ComposeContentBlock): boolean {
+  const editorText: string[] = [];
+  const editorFormats: CharFormat[] = [];
+  for (const s of segments) {
+    if (s.insertion !== undefined || s.isHardBreak) continue;
+    for (let i = 0; i < s.text.length; i++) {
+      editorText.push(s.text[i]);
+      editorFormats.push({ bold: s.bold, italic: s.italic, underline: s.underline, href: s.href });
+    }
+  }
+  const loadedText: string[] = [];
+  const loadedFormats: CharFormat[] = [];
+  for (const r of loaded.runs ?? []) {
+    if (r.isPageBreak || r.commentAnchor !== undefined || r.revision?.kind === 'Inserted') continue;
+    for (let i = 0; i < r.text.length; i++) {
+      if (r.text[i] === '\n') continue;
+      loadedText.push(r.text[i]);
+      loadedFormats.push({ bold: r.bold ?? false, italic: r.italic ?? false, underline: r.underline ?? false, href: r.href });
+    }
+  }
+  if (editorText.length !== loadedFormats.length || editorText.join('') !== loadedText.join('')) {
+    return false; // cannot positionally align — treat as changed (rebuild; never a silent pass-through)
+  }
+  return editorFormats.every((f, i) => {
+    const l = loadedFormats[i];
+    return f.bold === l.bold && f.italic === l.italic && f.underline === l.underline && f.href === l.href;
+  });
+}
+
 function editablePropsMatch(u: EditorLeafUnit, loaded: ComposeContentBlock, alignment: ComposeAlignment | undefined): boolean {
   if (loaded.kind !== u.blockKind) return false;
   if (u.blockKind === 'Heading' && (loaded.level ?? 1) !== (u.level ?? 1)) return false;
@@ -866,7 +949,14 @@ function mergeLeafBlock(u: EditorLeafUnit, loaded: ComposeContentBlock, ctx: Map
     s => (s.insertion !== undefined && !isImportedMark(s.insertion)) || (s.deletion !== undefined && !isImportedMark(s.deletion))
   );
   const hasSessionAnchors = segments.some(s => s.commentIds.some(id => !isPreservedCommentId(ctx, id)));
-  const textUntouched = baseline !== undefined && rejectText === baseline && !hasNonImportedRevisionMarks && !hasSessionAnchors;
+  // F1 (step-9.5 review): a formatting-only edit leaves the reject TEXT untouched — the per-char
+  // formatting signature must ALSO match the loaded runs or the block falls to the rebuild tier.
+  const textUntouched =
+    baseline !== undefined &&
+    rejectText === baseline &&
+    !hasNonImportedRevisionMarks &&
+    !hasSessionAnchors &&
+    formattingUnchanged(segments, loaded);
 
   if (textUntouched) {
     if (editablePropsMatch(u, loaded, alignment)) {
@@ -1152,9 +1242,16 @@ export function buildImportedContentModel(
 ): ImportedModelResult {
   const doc = editor.getJSON() as TipTapNode;
   const editorParaIds = new Set<string>();
+  // F4 (step-9.5 review): capture the NEXT baseline from the SAME doc JSON the model is built from,
+  // returned on the result for the host to adopt only after the save CONFIRMS (never re-captured
+  // from the live doc at 200-time — a mid-flight edit would silently vanish into the baseline).
+  const buildSnapshot = new Map<string, string>();
   forEachBlock(doc, b => {
     const p = paraIdOf(b);
-    if (p !== undefined) editorParaIds.add(p);
+    if (p !== undefined) {
+      editorParaIds.add(p);
+      buildSnapshot.set(p, rejectStateText(b));
+    }
   });
   const ctx = makeMapperContext(
     'imported',
@@ -1171,7 +1268,7 @@ export function buildImportedContentModel(
   if (loadedModel.comments !== undefined || ctx.comment.appended.length > 0) {
     model.comments = [...(loadedModel.comments ?? []), ...ctx.comment.appended];
   }
-  return { model, warnings: toWarningList(ctx) };
+  return { model, warnings: toWarningList(ctx), snapshot: buildSnapshot };
 }
 
 /**
@@ -1187,14 +1284,20 @@ export function buildContentModelWithComments(
   sessionThreads: ImportedModelThreadInput[]
 ): ImportedModelResult {
   if (sessionThreads.length === 0) {
-    return { model: buildContentModel(editor), warnings: [] };
+    return { model: buildContentModel(editor), warnings: [], snapshot: captureParaIdSnapshot(editor) };
   }
   const ctx = makeMapperContext('parity', false, new Map(), new Set(), sessionThreads, undefined);
   const doc = editor.getJSON() as TipTapNode;
+  // F4 parity: the build-time snapshot rides the result here too (same doc JSON as the model).
+  const buildSnapshot = new Map<string, string>();
+  forEachBlock(doc, b => {
+    const p = paraIdOf(b);
+    if (p !== undefined) buildSnapshot.set(p, rejectStateText(b));
+  });
   const units: EditorUnit[] = [];
   flattenEditorUnits(doc.content ?? [], 0, units);
   const blocks = mergeBlockLists(units, [], ctx);
   const model: ComposeContentModel = { blocks };
   if (ctx.comment.appended.length > 0) model.comments = [...ctx.comment.appended];
-  return { model, warnings: toWarningList(ctx) };
+  return { model, warnings: toWarningList(ctx), snapshot: buildSnapshot };
 }

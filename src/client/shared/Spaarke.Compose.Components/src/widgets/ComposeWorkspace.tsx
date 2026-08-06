@@ -268,13 +268,21 @@ function base64ToArrayBuffer(b64: string): ArrayBuffer {
  */
 interface ComposeEditorImportedModelHandle {
   /** Folds the editor's edits + session/advisory comment threads onto the loaded canonical model;
-   * resets the editor dirty flag. Null when the editor is unavailable → op-log fallback. */
+   * resets the editor dirty flag. Null when the editor is unavailable → op-log fallback.
+   * `snapshot` (sibling F4) is the BUILD-TIME `{paraId → rejectText}` baseline map the posted model
+   * was derived from — passed back verbatim to {@link adoptBaselineSnapshot} on save-200 so edits
+   * typed DURING the in-flight save are never masked by a live-doc recapture. Typed opaque here
+   * (`unknown`): this host never inspects it, only round-trips it. */
   buildImportedContentModel?: (
     loadedModel: ComposeContentModel,
     opts: { trackChanges: boolean }
-  ) => { model: ComposeContentModel; warnings: Array<{ code: string; count: number }> } | null;
-  /** Recaptures the editor's baseline snapshot after a confirmed model-path save so subsequent
-   * edits diff against the just-saved state. */
+  ) => { model: ComposeContentModel; warnings: Array<{ code: string; count: number }>; snapshot?: unknown } | null;
+  /** Sibling F4: adopt the BUILD-TIME snapshot the posted model was built from as the editor's new
+   * baseline (NOT a live-doc recapture — that would mask mid-flight edits). Preferred on save-200. */
+  adoptBaselineSnapshot?: (snapshot: unknown) => void;
+  /** Recaptures the editor's baseline snapshot from the LIVE doc after a confirmed model-path save.
+   * FALLBACK ONLY (older editor build without {@link adoptBaselineSnapshot}) — a live recapture can
+   * mask edits typed during the in-flight save. */
   recaptureBaselineSnapshot?: () => void;
 }
 
@@ -1423,11 +1431,16 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         const encodeRetained = arrayBufferToBase64;
 
         // ── task 012 (r6, render-on-save cutover): the IMPORTED model-path probe ──
-        // An imported/loaded doc (retained bytes present) whose mount captured the canonical model
-        // (`state.loadedContentModel` — Load/Upload/Project responses, commit 70be80006) now saves by
-        // sending the MERGED content model: `buildImportedContentModel` folds the editor's edits AND
-        // the session+advisory comment threads onto the loaded model (so the model shape sends NO
-        // separate `comments` field) and resets the editor dirty flag. Guards, in order:
+        // A DIRTY imported/loaded doc (retained bytes present) whose mount captured the canonical
+        // model (`state.loadedContentModel` — Load/Upload/Project responses, commit 70be80006) now
+        // saves by sending the MERGED content model: `buildImportedContentModel` folds the editor's
+        // edits AND the session+advisory comment threads onto the loaded model (so the model shape
+        // sends NO separate `comments` field) and resets the editor dirty flag. Guards, in order:
+        //   • `editorIsDirty` (review F3, CRITICAL) — a CLEAN imported save MUST keep the pre-012
+        //     byte-identical passthrough (FR-06a): re-rendering an unedited doc from the flatten-tier
+        //     model would silently drop content the render path degrades (e.g. an NDA's signature
+        //     text-boxes) on a zero-edit Ctrl+S. Clean saves fall through to the unchanged
+        //     content-only shapes below (operationLog is undefined there → byte-identical persist).
         //   • `state.docxBytes` — both imported branches hold retained bytes; born-in-editor stays out.
         //   • `state.loadedContentModel` — legacy session / older BFF / failed canonical projection
         //     → null → the transitional op-log shape below runs completely unchanged.
@@ -1437,12 +1450,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // only a durable 'authored' marker saves clean.
         // Op-log discipline: `serializeOperationLog()` is called FIRST (result discarded) so the
         // high-water mark is recorded and `commitSaved()` after a 200 drops the batch — prevents
-        // unbounded op accumulation on the model path. A dirty save already recorded the mark via the
-        // `opLogSnapshot` read above; only the clean case needs the extra call.
+        // unbounded op accumulation on the model path. A dirty imported save always recorded the mark
+        // via the `opLogSnapshot` read above; the extra call is belt-and-braces for any path that
+        // reaches here without one.
         const importedModelHandle = editorRef.current as ComposeEditorHandle & ComposeEditorImportedModelHandle;
-        let importedBuilt: { model: ComposeContentModel; warnings: Array<{ code: string; count: number }> } | null =
-          null;
+        let importedBuilt: {
+          model: ComposeContentModel;
+          warnings: Array<{ code: string; count: number }>;
+          snapshot?: unknown;
+        } | null = null;
         if (
+          editorIsDirty &&
           state.docxBytes &&
           state.loadedContentModel &&
           typeof importedModelHandle.buildImportedContentModel === 'function'
@@ -1731,12 +1749,19 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // task 012 (r6): the MODEL path sent NO operationLog (so the pre-existing `if (operationLog)`
         // commit cannot double-fire on it) but DID record the op-log high-water mark via the
         // serializeOperationLog call in the probe above — commit it now so the superseded batch drops
-        // (prevents unbounded op accumulation across model-path saves), and recapture the editor's
-        // baseline snapshot so subsequent edits diff against the just-saved state. Exactly ONE
-        // commitSaved fires per successful save on every path.
+        // (prevents unbounded op accumulation across model-path saves). Baseline hand-off (sibling
+        // F4, mid-flight edit race): PREFER `adoptBaselineSnapshot(built.snapshot)` — the BUILD-TIME
+        // `{paraId → rejectText}` map the POSTED model was derived from — over a live-doc
+        // `recaptureBaselineSnapshot()`, which would silently absorb (mask) any edits typed during
+        // the in-flight save. The live recapture remains only as the older-editor-build fallback.
+        // Exactly ONE commitSaved fires per successful save on every path.
         if (usedModelPath) {
-          (editorRef.current as (ComposeEditorHandle & ComposeEditorImportedModelHandle) | null)
-            ?.recaptureBaselineSnapshot?.();
+          const postSaveHandle = editorRef.current as (ComposeEditorHandle & ComposeEditorImportedModelHandle) | null;
+          if (postSaveHandle && typeof postSaveHandle.adoptBaselineSnapshot === 'function' && importedBuilt) {
+            postSaveHandle.adoptBaselineSnapshot(importedBuilt.snapshot);
+          } else {
+            postSaveHandle?.recaptureBaselineSnapshot?.();
+          }
           editorRef.current?.commitSaved?.();
         } else if (operationLog) {
           editorRef.current?.commitSaved?.();
