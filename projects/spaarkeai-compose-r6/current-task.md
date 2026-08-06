@@ -1,6 +1,6 @@
 # Current Task — Spaarke Compose R6
 
-> **Last Updated**: 2026-08-06 (by context-handoff, post-024 close-out)
+> **Last Updated**: 2026-08-06 (by context-handoff, post-010-cutover close-out — clean boundary)
 > **Recovery**: Read "Quick Recovery" first; full state below.
 
 ## Quick Recovery (READ THIS FIRST)
