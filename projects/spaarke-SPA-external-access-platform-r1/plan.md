@@ -1,7 +1,7 @@
 # Project Plan: Spaarke External Access Platform — Custom SPA + Entra External ID (R1)
 
-> **Last Updated**: 2026-07-19
-> **Status**: Ready for Tasks
+> **Last Updated**: 2026-08-06
+> **Status**: Complete (all 25 tasks ✅; shipped + owner-verified)
 > **Spec**: [spec.md](spec.md) · **Design**: [design.md](design.md)
 
 ---

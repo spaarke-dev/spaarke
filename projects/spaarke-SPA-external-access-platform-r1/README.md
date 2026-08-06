@@ -34,15 +34,15 @@ Swap the front door only: host the existing SPA on Azure Static Web Apps (real C
 
 ## Graduation Criteria
 
-- [ ] SPA loads and functions from the SWA origin with clean-URL deep links (direct + through-login).
-- [ ] A core user invites an outside-counsel Contact; the attorney signs in via CIAM and sees the assigned Project + documents (end-to-end).
-- [ ] Onboarding is idempotent — re-invite creates no second CIAM account.
-- [ ] An authorized Contact downloads a document; an **unauthorized** Contact gets 403 with **no bytes** (positive + negative tests).
-- [ ] No workforce B2B guest is created for any external user.
-- [ ] BFF publish size ≤60 MB; no new HIGH CVE; BFF build + tests pass.
-- [ ] Power Pages site + web-resource script decommissioned after parity; docs rewritten.
-- [ ] ADR-028 Amendment A1 applied (done).
+- [x] SPA loads and functions from the SWA origin with clean-URL deep links (direct + through-login). — task 040 (deep-link `/project/:id` → 200; login-return verified).
+- [x] A core user invites an outside-counsel Contact; the attorney signs in via CIAM and sees the assigned Project + documents (end-to-end). — task 040 (owner live-verified: sign-in + correct scoping + new-grant propagation).
+- [x] Onboarding is idempotent — re-invite creates no second CIAM account. — task 025/030 (`AlreadyProvisioned` gate + contract test).
+- [x] An authorized Contact downloads a document; an **unauthorized** Contact gets 403 with **no bytes** (positive + negative tests). — task 030 `ExternalAccessContractTests` centerpiece (`GetSpePointersAsync`/`DownloadFileAsync` `Times.Never` on 403).
+- [x] No workforce B2B guest is created for any external user. — broker-only (ADR-028 A1); task 026 removed synthetic SPE membership; task 040 confirmed.
+- [x] BFF publish size ≤60 MB; no new HIGH CVE; BFF build + tests pass. — task 031 (deploy); current shipped baseline 46.90 MB compressed (< 60); full BFF suite green.
+- [x] Power Pages site + web-resource script decommissioned after parity; docs rewritten. — task 041 (owner retired the site 2026-08-06; repo script removed) + task 042 (docs rewritten to CIAM/SWA).
+- [x] ADR-028 Amendment A1 applied. — `.claude/adr/ADR-028-spaarke-auth-architecture.md` § "Amendment A1 (2026-07-19)".
 
 ## Status
 
-**Phase**: Planning → ready for task execution. **Spec**: [spec.md](spec.md) (owner-reviewed, BFF-audit-reconciled). **ADR-028 Amendment A1**: applied. **Phase-0 spike**: GREEN.
+**COMPLETE** (2026-08-06). All 25 tasks ✅; all graduation criteria met. Shipped: external Secure Project Workspace migrated from Power Pages + Entra B2B guests to Azure Static Web Apps + Entra External ID (CIAM), broker-only (ADR-028 Amendment A1). Live + owner-verified. Successor: [`spaarke-SPA-external-access-platform-r2`](../spaarke-SPA-external-access-platform-r2/) (module-host platform + Legal Front Door). **Spec**: [spec.md](spec.md). **ADR-028 Amendment A1**: applied. **Phase-0 spike**: GREEN.

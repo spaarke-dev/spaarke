@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-20 (context-handoff before /compact — 24/25 tasks done; ALL agent work committed + pushed + MERGED TO MASTER @ a9f6ca180; only owner Power-Pages-site teardown [041] + 090 wrap-up remain. TWO POST-COMPACT FOLLOW-ONS requested — see plan below.)
+> **Last Updated**: 2026-08-06 (task 090 — PROJECT COMPLETE. All 25 tasks ✅; owner retired the Power Pages site (041); wrap-up done.)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,16 +10,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | External Access Platform R1 — **24 of 25 tasks ✅**. Phase 0/1/2 + 040 parity + 042 docs done; 041 repo-half done. BFF live @ spaarke-bff-dev (CIAM wired), SPA live @ green-dune SWA; owner-verified sign-in + scoping + new-grant propagation. |
-| **Step** | All agent work committed + pushed + **merged to origin/master @ a9f6ca180** (branch 0 behind/0 ahead). Working tree clean. |
-| **Status** | 24 ✅ (001-004, 010-014, 020-031, 040, 042); 041 🔄 (repo-half done, owner site-teardown pending); 090 ⏳ (blocked on 041). |
-| **Next Action** | **Post-compact, the user asked for 3 things (do in order):** **(A) ADMIN-GUIDE NEW-USER-SETUP CLARITY** — make `docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md` crystal-clear on how to onboard a new external user, EXPLICITLY stating the current API-only reality (no MDA/ribbon UI yet — DI-029-01). The shipped flow: a core user calls `POST /api/v1/external-access/invite-and-grant` {email, ProjectId, AccessLevel(100000000/1/2), firstName, lastName} → BFF creates/resolves Contact, idempotently provisions a CIAM local account (Graph POST /users in spaarkeextid), binds oid→`Contact.sprk_externalobjectid`, creates `sprk_externalrecordaccess` grant, sends onboarding email → user opens the SWA portal (green-dune-0c4f1221e.7.azurestaticapps.net), sets password via **SSPR Email OTP** ("Forgot password"; isSignUpAllowed=false), signs in, sees granted projects/docs. Add a copy-paste curl/Postman example + the SSPR step. **(B) SCOPE `external-access-platform-r2`** — run `/design-to-spec` → `/project-pipeline`; enhancement backlog in the section below. **(C) FINISH R1**: once OWNER retires the `sprk-external-workspace` Power Pages site (Power Platform admin — agent can't; it's a Power Pages SITE, not a Dataverse web resource — confirmed found:0 web resources), flip 041→✅ and run **090 wrap-up** (`/test-diet` + close-out). |
-
-### Files Modified This Session
-- **All committed + pushed + on master** (`a9f6ca180`). Nothing uncommitted. Key commits: 011/012 (BrowserRouter+deep-link), 013 CORS, 020-031 (CIAM auth chain + tests + BFF deploy), CIAM App Service config, deploy-external-spa.yml CIAM env fix, 040/041-repo/042 docs.
+| **Task** | **none — PROJECT COMPLETE** (External Access Platform R1). |
+| **Step** | All 25 tasks ✅. R1 code shipped to master mid-project; docs/status on branch `work/spaarke-SPA-external-access-platform-r1` (836 behind master — the admin-guide Section 5.0 improvement + close-out are the only branch-only content). |
+| **Status** | **COMPLETE** (2026-08-06). SWA + CIAM broker-only external portal live + owner-verified; Power Pages retired; docs rewritten; ADR-028 A1 applied. |
+| **Next Action** | Project done. Optional: PR the branch-only doc (admin-guide Section 5.0) to master. Active successor work is **`spaarke-SPA-external-access-platform-r2`** (its own worktree/session). |
 
 ### Critical Context (for continuation)
-External Secure Project Workspace migrated Power Pages+B2B → **Azure Static Web Apps + Entra External ID (CIAM), broker-only** (ADR-028 Amendment A1). Live + owner-verified. Only the owner's Power-Pages-site teardown + 090 wrap-up remain to close R1.
+R1 shipped: external Secure Project Workspace migrated Power Pages + Entra B2B → **Azure Static Web Apps + Entra External ID (CIAM), broker-only** (ADR-028 Amendment A1). Successor = R2 (module-host platform + Legal Front Door), scoped + spec'd + in its own worktree.
 
 ---
 
