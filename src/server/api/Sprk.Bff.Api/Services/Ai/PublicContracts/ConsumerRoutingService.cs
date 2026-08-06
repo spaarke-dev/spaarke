@@ -97,6 +97,8 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
         "sprk_capturemode",
         "sprk_oneventbindings",
         "sprk_surfaces",
+        // FR-B2 (spaarkeai-assistant-enhancements-r2): context-type relevance tags (CSV, mirrors sprk_surfaces).
+        "sprk_contexttypetags",
         "sprk_modeltieroverride",
         // FR-H1 grounding predicate (task 003/044): host-context precondition read by the PreFilter.
         "sprk_requiresnoattachedrecord",
@@ -875,6 +877,9 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
             OnEventBindings = ParseJsonList<OnEventBinding>(
                 entity.GetAttributeValue<string>("sprk_oneventbindings")),
             Surfaces = ParseSurfaces(entity.GetAttributeValue<string>("sprk_surfaces")),
+            // FR-B2: context-type tags share the sprk_surfaces CSV shape; ParseSurfaces is a
+            // generic comma-token splitter (null/empty → empty list = relevant to any context).
+            ContextTypeTags = ParseSurfaces(entity.GetAttributeValue<string>("sprk_contexttypetags")),
             ModelTierOverride = MapNullableChoice<AiModelTier>(
                 entity.GetAttributeValue<OptionSetValue>("sprk_modeltieroverride")),
             // FR-H1 grounding predicate (task 044): BIT column; null/unset → false (offered regardless).

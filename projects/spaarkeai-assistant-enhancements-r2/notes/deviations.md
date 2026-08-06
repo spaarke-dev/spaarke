@@ -17,7 +17,8 @@
 **Decision (§6.5 Path A — project-scoped exception)**: implement **Option C** — a dedicated first-class column. FR-B2's "no deploy" rested on the wrong premise that a field existed; the functional/technical need (discoverable, type-safe, first-class context-type tag aligned to the task-020 closed set) wins. This is what §11 anticipated.
 **Re-scope of task 021** (was STANDARD/data-only): now **FULL rigor**, tags += `bff-api, dataverse`. Work items:
 1. New Dataverse column on `sprk_playbookconsumer` (e.g. `sprk_contexttypetags`, multi-value/CSV of the closed set) via `dataverse-create-schema`.
-2. `Binding.cs` reads it (new `ContextTypeTags` field) + `ConsumerRoutingService` maps it (~line 857 attribute read) + filter logic.
+2. `Binding.cs` reads it (new `ContextTypeTags` field) + `ConsumerRoutingService` maps it in `MapBinding` (reusing `ParseSurfaces`, the generic CSV splitter) + adds `sprk_contexttypetags` to the `Columns` array. **No filter/selection logic in 021.**
 3. Seed tag values on the relevant Bindings + author the Reanalyze Binding (FR-D11 data).
 4. BFF redeploy (publish-size check).
-Downstream: task 022's proactive turn filters candidate Bindings by the active tab's `contextType` against this field.
+
+**021/022 boundary (refined 2026-08-05, resume)**: 021 is the **carrier + data** only (column, `Binding.ContextTypeTags`, seed, Reanalyze row). The active-tab candidate **filter** — chips scoped to the focused tab's `contextType` against `ContextTypeTags` — lives in the client proactive turn (`useConsumerChips`/ConversationPane) and is **task 022** (opus/xhigh). This keeps 021's acceptance criteria a closed set and respects §11 (021 builds no selection surface it doesn't itself consume). Column type = **String/CSV** mirroring `sprk_surfaces` (not a multi-select choice — avoids an option-value→token mapping layer).

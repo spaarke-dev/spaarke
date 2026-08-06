@@ -10,10 +10,19 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Next = **021** (FR-B2 context-type tags) — **RE-SCOPED to Option C** (new column + BFF), owner-approved |
-| **Step** | Not started |
-| **Status** | not-started (7 tasks done + deployed; awaiting 021 build) |
-| **Next Action** | Re-scope 021 POML to Option C, then build it. See "Task 021 re-scope" below + `notes/deviations.md` §"Task 021 Option C". |
+| **Task** | Next = **022** (FR-B3/B5) — proactive suggestion turn cached per tabId, ≤3 chips filtered by active-tab contextType. **021 COMPLETE + deployed.** |
+| **Step** | 021 not-started → **done**. 8 tasks now complete (001/002/010/011/012/013/020/**021**). |
+| **Status** | not-started (next = 022) |
+| **Next Action** | Begin task 022 (opus/xhigh, ConvPane spine). It CONSUMES `Binding.ContextTypeTags` (021's carrier) — filters candidate Bindings by the active tab's `contextType`, renders ≤3 chips via the **reactive** `useConsumerChips` surface. Reanalyze binding `9c29b488-4291-f111-b8db-7ced8ddc4a05` feeds FR-D11/task 038. |
+
+### Seeded BindingIds (task 021)
+- **Reanalyze** (created): `9c29b488-4291-f111-b8db-7ced8ddc4a05` → `document` (chat-summarize/reanalyze, reuses summarize Action `eeb05bfd-1260-f111-ab0b-70a8a59455f4`).
+- **document**: `651194cd…`(Chat Summarize) · `ed92d769…`(Agreement Classify) · `121194cd…`(AI Summary).
+- **compose-doc**: `30374f2f`·`32374f2f`·`b1c4d38a`·`05a7132f`·`65549e51`·`b11aaf8b`·`904f2d53`·`986799ad`·`0aa7132f`.
+- Untagged (empty = any context, intentional): create-*, compose-draft-document, chat-classify, daily-briefing, matter-summary leg. Analyst-extendable, no deploy.
+
+### Task 021 mechanism (decided)
+Column = String CSV `sprk_contexttypetags` (MaxLength 200) mirroring `sprk_surfaces` exactly. BFF: add to `Columns` array (ConsumerRoutingService.cs:80-103), add `Binding.ContextTypeTags` (IReadOnlyList&lt;string&gt;), map via `ParseSurfaces` (generic CSV splitter — reuse, no dup parser). Filter = task 022, NOT here. §6.5 Path A (owner-approved). No master overlap on the two BFF files (verified).
 
 ### Files Modified This Session (all COMMITTED + PUSHED)
 Branch `work/spaarkeai-assistant-enhancements-r2` @ `9aacda4bf` (pushed). Commits this session:
