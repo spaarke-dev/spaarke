@@ -2335,13 +2335,19 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
     /// <summary>
     /// True when <paramref name="ex"/> (or any inner exception) is the Dataverse alternate-key duplicate
-    /// fault raised by the task-020 UNIQUE key on <c>sprk_internetmessageid</c>. Walks the exception chain
-    /// because <c>ServiceClient.CreateAsync</c> may surface the fault directly OR wrapped
+    /// fault raised by a UNIQUE key (e.g. the task-020 key on <c>sprk_internetmessageid</c>). Walks the
+    /// exception chain because <c>ServiceClient.CreateAsync</c> may surface the fault directly OR wrapped
     /// (<c>DataverseOperationException</c> / a re-thrown <c>InvalidOperationException</c>). Matches the typed
     /// <c>OrganizationServiceFault.ErrorCode</c> <c>0x80060892</c> first (deterministic), with a message
     /// fallback mirroring the existing duplicate-association idiom in <see cref="AssociateAsync"/>.
+    /// <para>
+    /// Pure classification (Exception → bool) — the correctness core of the race-proof create (FR-C1 /
+    /// NFR-02). Exposed <c>public static</c> so it is (a) unit-testable through the public surface without a
+    /// live ServiceClient (ADR-038: test pure logic, not the un-fakeable SDK boundary) and (b) reusable by
+    /// the upload→communication dedup path (task 043), which must classify the SAME duplicate-key fault.
+    /// </para>
     /// </summary>
-    private static bool IsAlternateKeyDuplicate(Exception ex)
+    public static bool IsAlternateKeyDuplicate(Exception ex)
     {
         for (Exception? e = ex; e is not null; e = e.InnerException)
         {

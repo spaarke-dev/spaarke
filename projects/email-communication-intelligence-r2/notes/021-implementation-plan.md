@@ -37,7 +37,48 @@
   (typed ErrorCode 0x80060892 first, message fallback) + `using System.ServiceModel;` + NotImplemented WebApi
   stub. Null/blank internetMessageId → unguarded create (nulls excluded from the key). BFF builds 0 errors.
   The reconcile-query method (`GetCommunicationByInternetMessageIdAsync`) ALREADY EXISTED — no new query needed.
-- **REMAINING (next increment):** steps 3-7 below — wire the capture path, SB idempotency, tests, verify, 9.5.
+- **Step 3 DONE (capture-path wiring, 2026-08-06):** `IncomingCommunicationProcessor` —
+  (a) `CreateCommunicationRecordAsync` now returns `(Guid Id, bool WasDuplicate)` and routes its create through
+  `_communicationService.CreateCommunicationRaceProofAsync(communication, message.InternetMessageId, ct)` (was
+  `_genericEntityService.CreateAsync`; both live in `DataverseServiceClientImpl` over the same `ServiceClient`, so
+  no create behavior lost); (b) new **Step 3.5** internet-message-id fast-path (post-fetch, the earliest point the
+  canonical id is known) short-circuits cross-mailbox duplicates before a doomed create, via new non-fatal helper
+  `ExistsByInternetMessageIdAsync` (reuses existing `GetCommunicationByInternetMessageIdAsync`); (c) on
+  `WasDuplicate` the caller logs "reconciled to canonical row" and **returns** — ceding attachments/association/
+  thread/participant/enrichment side effects to the race winner (mirrors the Step-1 dedup early-return).
+- **Step 4 — SB idempotency: DOCUMENTED DEVIATION (no code change).** Plan step 4 as written ("re-key SB
+  idempotency on internet-message-id") rests on a **false premise**: the Graph webhook notification
+  (`CommunicationEndpoints.HandleIncomingWebhookAsync` ~L1099-1117) carries only `{subscriptionId, resource,
+  graphMessageId, changeType}`. The canonical `internetMessageId` is only known **after** the Graph
+  `GET /messages/{id}` fetch inside `ProcessAsync` (Step 3 `$select`). Re-keying at enqueue would force a Graph
+  fetch per notification — defeating the fast-202 webhook design and doubling Graph calls. The existing key
+  `Communication:{graphMessageId}:Process` is **correct for its actual job**: dedup of notification *redelivery*
+  (Service Bus at-least-once + Graph duplicate notifications), which by definition share a graph id. Cross-mailbox
+  / canonical dedup is a *different* concern, now correctly enforced one layer down at Dataverse (Step 3.5
+  fast-path + the alternate-key race-proof create) — the layer where the canonical id first exists. Directional
+  step mode → did the right thing, documented here + in the PR. **No SB code changed.**
+- **Step 5 — tests (2026-08-06):** ADR-038 hard constraints reshaped this. `ServiceClient` is sealed + built from
+  a live connection string (un-fakeable — the `MockServiceClientFactory` note says so); ban **B2** kills
+  `Mock<IServiceClient>`, **B8** kills private-method/`InternalsVisibleTo` tests, **B7/B15** kill a 20-mock
+  `ProcessAsync` test (and there's a pre-existing SKIP'd `InboundPipelineTests` confirming the un-fakeable-Graph
+  wall). A true N-mailbox→1-row seam test needs a **live tenant with the 020 key** (gated — can't run here). So
+  coverage went to the **correctness core distilled to pure logic**: made `IsAlternateKeyDuplicate` **public
+  static** (visibility only; also reused by task 043 upload-dedup — §11 extension, not a new type) and added
+  `tests/unit/.../AlternateKeyDuplicateClassifierTests.cs` (8 tests: typed 0x80060892 → true; wrong code → false;
+  wrapped-in-chain → true; message-fallback Theory → true; over-match guard + unrelated → false). Tested through
+  the **public surface** (the ✅ side of B8, not banned reflection). 8/8 green; full Communication unit suite
+  762/762 green (5 pre-existing skips). **Coverage boundary (honest):** the live concurrent-race + N-mailbox
+  seam test is deferred to a real-tenant integration run — the pinned parts are the fault classifier (unit) + the
+  wiring (build + reconcile logic).
+- **Step 6 — verify (2026-08-06):** BFF build 0 err; CVE `--vulnerable` clean; publish **48.28 MB compressed incl
+  PDBs** (≤60 MB ceiling; flat vs ~49.6 baseline — no packages added). Step 9.5 code-review + adr-check: **0
+  violations, 0 warnings, 1 suggestion** (reuse-over-new-Exists-method — accepted per §11).
+
+### Placement Justification (§10 — for the PR)
+Extends `Services/Communication` (`IncomingCommunicationProcessor`) + `Spaarke.Dataverse`
+(`DataverseServiceClientImpl` visibility) **in place**. No new service, endpoint, DI registration, package, or
+`*Module.cs`/conditional-DI change. AI untouched. The one visibility change (`IsAlternateKeyDuplicate` →
+public static) is a reusable pure classifier, not a new abstraction (ADR-010 clean).
 
 ## Implementation steps (execute in fresh session)
 

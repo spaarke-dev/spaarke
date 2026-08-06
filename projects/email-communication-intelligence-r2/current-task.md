@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 021 — race-proof internet-message-id dedup. **Investigation DONE; turnkey plan written** (notes/021-implementation-plan.md). Code deferred to fresh session (opus·xhigh, 1-2 day, contended path — needs full context budget). |
-| **Step** | Escalation gate RESOLVED (GREEN). Seam foundation DONE + building. Capture-path wiring + tests pending. |
-| **Status** | Branch synced to master (merged 30 commits clean, 9 ahead). **021 step 1 done**: `CreateCommunicationRaceProofAsync` in ICommunicationDataverseService + DataverseServiceClientImpl (catch FaultException<OrganizationServiceFault> ErrorCode 0x80060892 → reconcile via existing GetCommunicationByInternetMessageIdAsync) + IsAlternateKeyDuplicate walker + WebApi stub. BFF builds 0 err. |
-| **Next Action** | 021 next increment (fresh session, notes/021-implementation-plan.md steps 3-7): wire IncomingCommunicationProcessor.CreateCommunicationRecordAsync (L~598) through CreateCommunicationRaceProofAsync + internetmessageid fast-path; re-key SB idempotency on internet-message-id; seam+unit tests; verify+9.5. Scope guard: upload→communication dedup = task 043. |
+| **Task** | 021 — race-proof internet-message-id dedup. **✅ COMPLETE (2026-08-06).** FR-C1/NFR-02 capture-path dedup shipped. |
+| **Step** | DONE. Capture-path wired + fast-path + race-proof create seam + classifier test. Step 9.5 clean (0 violations). |
+| **Status** | 021 ✅: `IncomingCommunicationProcessor` routes create through `CreateCommunicationRaceProofAsync` + Step-3.5 internet-message-id fast-path + wasDuplicate short-circuit; `IsAlternateKeyDuplicate` → public static + 8 classifier tests (762/762 comm suite green). Build 0 err · CVE clean · publish 48.28 MB. **2 documented deviations**: (a) SB idempotency NOT re-keyed — canonical id unavailable pre-fetch, correctly kept graph-id + pushed canonical dedup to Dataverse layer; (b) live N-mailbox seam test deferred to real-tenant run (ServiceClient/Graph un-fakeable per ADR-038 B2/B7/B8). See notes/021-implementation-plan.md. |
+| **Next Action** | Commit 021. Then next pending: **016 AffinityRung** (schema created; opus-tier code) OR **024 SPE detector** (deps 023 ✅) OR **010 HMAC signer** (KV `footer-hmac-key` ready) → 012/013. Scope guard: upload→communication dedup = task 043. Optional: `/merge-to-master` (branch ahead of master). |
 
 ### Completed this session (all committed)
 - **Task 003 ✅** — `notes/fixtures/r1-golden-emails.md`.
