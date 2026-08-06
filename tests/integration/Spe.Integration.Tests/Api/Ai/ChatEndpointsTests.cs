@@ -49,6 +49,17 @@ public class ChatEndpointsTests : IClassFixture<ChatEndpointsTestFixture>
     private const string TestTenantId = "chat-test-tenant-abc";
     private const string TestSessionId = "test-session-123";
     private const string TestDocumentId = "doc-test-001";
+
+    // FR-D3 (spaarkeai-assistant-enhancements-r2 task 031): a session that genuinely exists
+    // (fixture's mock resolves it) but carries zero messages — distinct from a session id the
+    // fixture never seeded, which resolves to null and must 404.
+    private const string TestEmptySessionId = "test-session-empty-001";
+
+    // A session id the fixture's mock has never seeded — GetSessionAsync resolves to null at
+    // every tier (Redis miss, no Cosmos persistence registered in this fixture, Dataverse mock
+    // returns null for any id other than TestSessionId/TestEmptySessionId).
+    private const string TestMissingSessionId = "test-session-never-existed-999";
+
     private static readonly Guid TestPlaybookId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
     public ChatEndpointsTests(ChatEndpointsTestFixture fixture)
@@ -208,6 +219,61 @@ public class ChatEndpointsTests : IClassFixture<ChatEndpointsTestFixture>
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
+    /// <summary>
+    /// FR-D3 (spaarkeai-assistant-enhancements-r2 task 031) regression: before this fix,
+    /// <c>GetHistoryAsync</c> returned 200 with an empty message array for a session that never
+    /// existed, silently masking the missing session instead of triggering the client's
+    /// stale-session recovery. The endpoint now checks <c>ChatSessionManager.GetSessionAsync</c>
+    /// (the same Redis→Cosmos→Dataverse existence check DELETE/PATCH-context/GET-tabs already
+    /// use) BEFORE delegating to <c>ChatHistoryManager.GetHistoryAsync</c>, and returns 404
+    /// (RFC 7807 ProblemDetails) when the session is genuinely absent.
+    /// </summary>
+    [Fact]
+    [Trait("status", "repaired")]
+    public async Task GetHistory_Returns404_WhenSessionDoesNotExist()
+    {
+        // Arrange
+        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+
+        // Act — TestMissingSessionId was never seeded by SetupDataverseRepositoryMock, so it
+        // resolves to null at every tier (Redis miss, no Cosmos persistence in this fixture,
+        // Dataverse mock returns null for any id other than TestSessionId/TestEmptySessionId).
+        var response = await client.GetAsync($"/api/ai/chat/sessions/{TestMissingSessionId}/history");
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "FR-D3: a genuinely-missing session must 404 so the client's stale-session recovery fires");
+        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json",
+            "ADR-019: 404s use RFC 7807 ProblemDetails, matching the sibling GetTabsAsync 404 shape");
+    }
+
+    /// <summary>
+    /// FR-D3 regression guard: an existing session that simply has no messages yet is NOT the
+    /// same as a missing session. <c>ChatSessionManager.GetSessionAsync</c> returns a non-null
+    /// <see cref="ChatSession"/> (with an empty <c>Messages</c> list) for a session that exists
+    /// at the Dataverse tier, so this must stay 200 — only a null session resolution is 404.
+    /// </summary>
+    [Fact]
+    [Trait("status", "repaired")]
+    public async Task GetHistory_Returns200WithEmptyMessages_WhenSessionExistsWithNoMessages()
+    {
+        // Arrange
+        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+
+        // Act
+        var response = await client.GetAsync($"/api/ai/chat/sessions/{TestEmptySessionId}/history");
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "an existing session with zero messages must NOT be 404'd — only a genuinely-missing " +
+            "session (null from GetSessionAsync) is 404");
+
+        var content = await response.Content.ReadFromJsonAsync<ChatHistoryResponse>(_jsonOptions);
+        content.Should().NotBeNull();
+        content!.SessionId.Should().Be(TestEmptySessionId);
+        content.Messages.Should().BeEmpty();
+    }
+
     // -------------------------------------------------------------------------
     // PATCH /api/ai/chat/sessions/{id}/context — context switch
     // -------------------------------------------------------------------------
@@ -305,6 +371,11 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
     public const string CreatedSessionId = "created-session-001";
     private const string TestSessionId = "test-session-123";
     private const string TestDocumentId = "doc-test-001";
+
+    // FR-D3 (task 031): a session the Dataverse mock resolves to a real (non-null) session with
+    // zero messages — must stay distinguishable from TestMissingSessionId's null resolution.
+    private const string TestEmptySessionId = "test-session-empty-001";
+
     private static readonly Guid TestPlaybookId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
     // IChatDataverseRepository is an interface — fully mockable.
@@ -428,6 +499,14 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
             // only register when Analysis:Enabled=true && DocumentIntelligence:Enabled=true
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.SemanticSearch.ISemanticSearchService>(Moq.MockBehavior.Loose).Object);
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.RecordSearch.IRecordSearchService>(Moq.MockBehavior.Loose).Object);
+
+            // IEmailTemplateService — used by CommunicationTemplateEndpoints (always mapped, added by
+            // the 096a5f754 "feat(copilot)" merge) but only registered when Analysis:Enabled=true.
+            // Without this stub the unconditional endpoint's parameter binding fails at startup and
+            // takes down the ENTIRE endpoint route table (every test in this fixture 500s). Same
+            // stub-the-conditional-service pattern as the block above.
+            services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.Delivery.IEmailTemplateService>(Moq.MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.PublicContracts.IEmailDraftAi>(Moq.MockBehavior.Loose).Object);
 
             // ReferenceIndexingService (sealed concrete) — used by AdminKnowledgeEndpoints.
             // Register its missing dependency stubs so DI can construct it.
@@ -599,6 +678,24 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
                 It.Is<string>(s => s != TestSessionId),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((ChatSession?)null);
+
+        // GetSessionAsync — returns a REAL (non-null) session for TestEmptySessionId with an
+        // empty Messages list. FR-D3 (task 031): registered AFTER the catch-all above so Moq's
+        // most-recently-added-setup-wins matching resolves this id to the empty session rather
+        // than the catch-all's null — the regression guard for "existing but empty must stay 200".
+        MockDataverseRepository
+            .Setup(r => r.GetSessionAsync(
+                It.IsAny<string>(),
+                TestEmptySessionId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ChatSession(
+                SessionId: TestEmptySessionId,
+                TenantId: "chat-test-tenant-abc",
+                DocumentId: null,
+                PlaybookId: TestPlaybookId,
+                CreatedAt: now,
+                LastActivity: now,
+                Messages: Array.Empty<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>()));
 
         // ArchiveSessionAsync — no-op (called by DeleteSessionAsync)
         MockDataverseRepository

@@ -10,10 +10,15 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **025** (Deploy+verify B) — **✅\* COMPLETE** (2026-08-06; deployed + programmatically verified; **owner E2E of live-UI chips pending** — see `notes/b-deploy-verify.md`). **🎉 PHASE B DONE (020–025).** 12 tasks done. Next phase: **D** (030–039). |
-| **Step** | Phase B complete. Ready for Phase D. |
+| **Task** | **Wave D1 (030+031)** — **✅ COMPLETE + VERIFIED** (2026-08-06, committed; deploy deferred to 039). **14 tasks done.** Phase D in progress. |
+| **Step** | D1 done. Ready for wave D2 (032, 033). |
 | **Status** | completed |
-| **Next Action** | **Phase D** (History robustness & true resume — the largest workstream, 030–039). Per phasing E→A→B→**D**→C. Start with **wave D1** (030 awaited messages[0] Cosmos write + 031 404-on-missing history — 2 BFF tasks, parallelizable: persistence ∥ ChatEndpoints). 030 = sonnet/**xhigh**; 031 = sonnet/high. Both dep 001 (done). NOTE the BFF file-overlap serialization (TASK-INDEX): 031&032 share ChatEndpoints.cs; 030&033 share SessionPersistenceService.cs. **Owner may prefer to E2E-verify Phase B (+ FR-A) first** before starting D — good checkpoint. |
+| **Next Action** | **Phase D wave D2**: **032** (stored writable title + `PATCH …/{id}` rename + cheap title-gen, FR-D4 — sonnet/high; ChatEndpoints, AFTER 031 ✓) + **033** (retention TTL spike-then-implement, FR-D10 — **opus/xhigh, DATA-LOSS blast radius**; SessionPersistenceService, AFTER 030 ✓). File-overlap OK now (031/030 done). 033 is spike-first — **surface the TTL approach to owner before implementing the fallback** (owner already directed: prefer per-doc Cosmos TTL extension on filing; fallback = remove container TTL + expiresAt + scheduled cleanup). Then D3 (035 rich-restore overwrite-hazard ∥ 037 HistoryOverlay), D4 (036), D5 (038), D6 (034), D7 (039 deploy). |
+
+### Wave D1 — DONE (030+031, 2026-08-06). Deploy deferred to 039.
+- **030 (FR-D2)**: `awaitCosmosWrite` optional flag threaded ISessionPersistenceService.PersistSessionAsync → SessionPersistenceService → ChatSessionManager.UpdateSessionCacheAsync → ChatHistoryManager.AddMessageAsync (isFirstMessage = pre-append count==0). messages[0] AWAITED (survives Redis eviction); later turns unchanged fire-and-forget (no latency regression). ADR-040 (no new store). Tests: `tests/integration/regression/Ai/FirstTurnCosmosWriteSurvivesEvictionTests.cs` (3) + ChatHistoryManagerTests (+2).
+- **031 (FR-D3)**: `GetHistoryAsync` 404s on genuinely-missing session via `ChatSessionManager.GetSessionAsync` (3-tier; null=missing, empty-session=200), mirrors GetTabsAsync/SwitchContext/Delete. Tests in `tests/integration/Spe.Integration.Tests/Api/Ai/ChatEndpointsTests.cs` (+2).
+- **Orchestrator fixes (consolidated build)**: (a) 6 Moq expression-tree sites needed explicit `It.IsAny<bool>()` + callback `bool __` param (the subagent missed these — CS0854); (b) **pre-existing fixture rot** from copilot merge `096a5f754` (unregistered `IEmailTemplateService` + `IEmailDraftAi`) broke the ENTIRE ChatEndpointsTests class — added 2 stubs, restoring all 13 tests. Verified: BFF build clean; 030 22 tests; 031 + full ChatEndpointsTests 13 tests; publish 46.89 MB (no packages).
 
 ### Phase B — COMPLETE (020–025, 2026-08-06)
 All deployed to spaarkedev1 (BFF `spaarke-bff-dev` + code page `sprk_spaarkeai`). Proactive grounded suggestion turn live: contextType pre-filter → SUGGEST-FOLLOWUPS Action (proposer, not dispatcher) → ≤3 content-specific chips once per tab; manual refresh; dev trace. Owner E2E checklist in `notes/b-deploy-verify.md` (document/summary tabs exercise full content-specificity today; **email tabs gated on Workstream C** 040–043).

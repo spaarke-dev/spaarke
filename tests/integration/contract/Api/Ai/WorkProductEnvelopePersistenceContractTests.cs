@@ -186,7 +186,7 @@ public class WorkProductEnvelopePersistenceContractTests
             _events = events;
         }
 
-        internal override Task UpdateSessionCacheAsync(ChatSession session, CancellationToken ct = default)
+        internal override Task UpdateSessionCacheAsync(ChatSession session, CancellationToken ct = default, bool awaitCosmosWrite = false)
         {
             _events.Add("store");
             return Task.CompletedTask;

@@ -17,9 +17,16 @@ namespace Sprk.Bff.Api.Services.Ai.Sessions;
 ///   1. Read the current session document from Redis (or an empty shell if new).
 ///   2. Append the message, update LastActivity.
 ///   3. Write updated document to Redis (non-blocking on failure).
-///   4. Upsert into Cosmos DB (fire-and-forget background task; non-blocking on failure).
+///   4. Upsert into Cosmos DB (fire-and-forget background task; non-blocking on failure) — EXCEPT
+///      <see cref="PersistSessionAsync"/> with <c>awaitCosmosWrite: true</c> (FR-D2, task 030),
+///      which CONFIRMS the Cosmos write before returning. Reserved for a session's first message
+///      (<c>messages[0]</c>) so the transcript survives a Redis eviction; every other write stays
+///      fire-and-forget (NFR-03 — no latency regression on turns 2+).
 ///
-/// Failure policy: either store failing is caught, logged at Warning, and swallowed.
+/// Failure policy: either store failing is caught, logged at Warning, and swallowed — EXCEPT the
+/// confirmed-write branch above, where a Cosmos failure still does not throw (logged at Warning)
+/// but the caller now observes the completed (failed-and-swallowed) attempt before proceeding,
+/// rather than a detached background task.
 /// The SSE streaming pipeline is never blocked by a persistence failure.
 ///
 /// Tenant isolation: all keys and Cosmos partition values are scoped by tenantId (ADR-015, NFR-09).
@@ -208,15 +215,29 @@ public class SessionPersistenceService : ISessionPersistenceService
     }
 
     /// <inheritdoc/>
-    public async Task PersistSessionAsync(StoredSession session, CancellationToken ct = default)
+    public async Task PersistSessionAsync(StoredSession session, CancellationToken ct = default, bool awaitCosmosWrite = false)
     {
         // Write to Redis (hot tier) — non-blocking on failure
         await WriteToRedisAsync(session.TenantId, session.SessionId, session, ct);
 
-        // Upsert to Cosmos DB (warm tier) — fire-and-forget, non-blocking on failure.
-        // We do NOT pass the request CancellationToken because the HTTP request may complete
-        // (or be cancelled) before the Cosmos write finishes (same pattern as PersistMessageAsync).
-        _ = UpsertToCosmosAsync(session, CancellationToken.None);
+        // Upsert to Cosmos DB (warm tier).
+        //
+        // FR-D2 (task 030): the caller (ChatSessionManager, for messages[0] ONLY) may request a
+        // CONFIRMED write via awaitCosmosWrite — this method then does not return until the Cosmos
+        // upsert completes, so the transcript + title seed survive a Redis eviction that happens
+        // moments after the HTTP response finishes. Every other call keeps the original D-06
+        // fire-and-forget contract (awaitCosmosWrite defaults to false) — turns 2+ are NOT slowed
+        // down (NFR-03). Either branch still passes CancellationToken.None (not `ct`) to the Cosmos
+        // call itself — a client mid-request disconnect must not abort a write whose whole purpose
+        // is to outlive the request; only the AWAIT boundary changes between the two branches.
+        if (awaitCosmosWrite)
+        {
+            await UpsertToCosmosAsync(session, CancellationToken.None);
+        }
+        else
+        {
+            _ = UpsertToCosmosAsync(session, CancellationToken.None);
+        }
     }
 
     // =========================================================================

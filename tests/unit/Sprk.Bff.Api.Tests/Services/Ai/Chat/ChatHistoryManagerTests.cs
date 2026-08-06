@@ -22,6 +22,10 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 ///   per-output summaries with preserved <c>{bindingId}@t{n}</c> keys, on both the
 ///   summarisation and archive paths; sessions without outputs keep the pre-ledger
 ///   digest shape unchanged.
+/// - Confirmed-vs-fire-and-forget Cosmos write selection (FR-D2, task 030): messages[0]
+///   requests the confirmed write; every later turn keeps the fire-and-forget contract.
+///   The deeper end-to-end proof (genuine await + eviction survival) lives in
+///   <c>tests/integration/regression/Ai/FirstTurnCosmosWriteSurvivesEvictionTests.cs</c>.
 /// </summary>
 public class ChatHistoryManagerTests
 {
@@ -44,6 +48,14 @@ public class ChatHistoryManagerTests
         private ChatSession? _storedSession;
         public ChatSession? LastCachedSession { get; private set; }
 
+        /// <summary>
+        /// FR-D2 (task 030): records the <c>awaitCosmosWrite</c> flag the caller passed on the
+        /// most recent <see cref="UpdateSessionCacheAsync"/> invocation, so tests can assert
+        /// <see cref="ChatHistoryManager.AddMessageAsync"/> requests a confirmed write for
+        /// messages[0] and a fire-and-forget write for every later turn.
+        /// </summary>
+        public bool LastAwaitCosmosWrite { get; private set; }
+
         public FakeChatSessionManager(
             ITenantCache cache,
             IChatDataverseRepository repo,
@@ -58,9 +70,13 @@ public class ChatHistoryManagerTests
             string tenantId, string sessionId, CancellationToken ct = default)
             => Task.FromResult(_storedSession);
 
-        internal override Task UpdateSessionCacheAsync(ChatSession session, CancellationToken ct = default)
+        internal override Task UpdateSessionCacheAsync(
+            ChatSession session,
+            CancellationToken ct = default,
+            bool awaitCosmosWrite = false)
         {
             LastCachedSession = session;
+            LastAwaitCosmosWrite = awaitCosmosWrite;
             return Task.CompletedTask;
         }
     }
@@ -158,6 +174,43 @@ public class ChatHistoryManagerTests
         // Assert — cache was updated with the new message via UpdateSessionCacheAsync
         _fakeSessionManager.LastCachedSession.Should().NotBeNull();
         _fakeSessionManager.LastCachedSession!.Messages.Should().HaveCount(1);
+    }
+
+    // =========================================================================
+    // Confirmed vs fire-and-forget Cosmos write (FR-D2, task 030)
+    // =========================================================================
+
+    [Fact]
+    public async Task AddMessageAsync_FirstMessageOfSession_RequestsConfirmedCosmosWrite()
+    {
+        // Arrange — a brand-new session (no messages yet); this message becomes messages[0].
+        var session = CreateTestSession(messageCount: 0);
+        var message = CreateTestMessage(session.SessionId, 0);
+        SetupRepoDefaults();
+
+        // Act
+        await _sut.AddMessageAsync(session, message);
+
+        // Assert — messages[0] must request the CONFIRMED (awaited) Cosmos write so the transcript
+        // survives a Redis eviction (spec FR-D2 acceptance; see also the end-to-end regression test
+        // at tests/integration/regression/Ai/FirstTurnCosmosWriteSurvivesEvictionTests.cs).
+        _fakeSessionManager.LastAwaitCosmosWrite.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task AddMessageAsync_LaterMessageOfSession_KeepsFireAndForgetCosmosWrite()
+    {
+        // Arrange — session already has 3 messages; the new message is a later turn.
+        var session = CreateTestSession(messageCount: 3);
+        var message = CreateTestMessage(session.SessionId, 3);
+        SetupRepoDefaults();
+
+        // Act
+        await _sut.AddMessageAsync(session, message);
+
+        // Assert — turns after messages[0] must NOT request the confirmed write (NFR-03 — no
+        // latency regression on turns 2+; keeps the original D-06 fire-and-forget contract).
+        _fakeSessionManager.LastAwaitCosmosWrite.Should().BeFalse();
     }
 
     // =========================================================================

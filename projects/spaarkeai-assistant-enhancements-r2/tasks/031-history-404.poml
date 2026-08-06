@@ -4,7 +4,7 @@
     <title>Return 404 for a genuinely-missing session on GET history/session-load (FR-D3)</title>
     <phase>4 D — History &amp; true resume</phase>
     <gate>blocked until 001</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF endpoint contract change</rigor-reason>
     <model-tier>sonnet</model-tier>

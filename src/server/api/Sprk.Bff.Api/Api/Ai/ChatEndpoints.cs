@@ -1168,10 +1168,22 @@ public static class ChatEndpoints
     /// <summary>
     /// Get chat history for a session.
     /// GET /api/ai/chat/sessions/{sessionId}/history
+    ///
+    /// FR-D3: returns 404 for a genuinely-missing session so the client's stale-session
+    /// recovery fires, instead of a silent blank 200. <see cref="ChatHistoryManager.GetHistoryAsync"/>
+    /// itself collapses "missing" and "exists-but-empty" to the same empty array (it exists to serve
+    /// the hot message-read path, not existence checks), so the existence check is done here via
+    /// <see cref="ChatSessionManager.GetSessionAsync"/> — the same session-load path (Redis hot →
+    /// Cosmos warm → Dataverse cold, ADR-040) that <c>DeleteSessionAsync</c>/<c>SwitchContextAsync</c>/
+    /// <c>GetComposeOutputsAsync</c> already use for their 404 checks. It returns <c>null</c> ONLY when
+    /// the session is absent from all three tiers — an existing session with zero messages still
+    /// returns a non-null <see cref="ChatSession"/> (empty <c>Messages</c> list), so it is not
+    /// ambiguous with "missing" and correctly stays 200.
     /// </summary>
     private static async Task<IResult> GetHistoryAsync(
         string sessionId,
         ChatHistoryManager historyManager,
+        ChatSessionManager sessionManager,
         HttpContext httpContext,
         ILogger<ChatHistoryManager> logger,
         CancellationToken cancellationToken)
@@ -1187,6 +1199,17 @@ public static class ChatEndpoints
 
         logger.LogDebug(
             "GetHistory: session={SessionId}, tenant={TenantId}", sessionId, tenantId);
+
+        // Existence check (FR-D3) — mirrors the 404-on-missing pattern used by
+        // DeleteSessionAsync/SwitchContextAsync/GetComposeOutputsAsync.
+        var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
+        if (session is null)
+        {
+            return Results.Problem(
+                statusCode: 404,
+                title: "Not Found",
+                detail: $"Session '{sessionId}' not found.");
+        }
 
         var messages = await historyManager.GetHistoryAsync(tenantId, sessionId, ct: cancellationToken);
 

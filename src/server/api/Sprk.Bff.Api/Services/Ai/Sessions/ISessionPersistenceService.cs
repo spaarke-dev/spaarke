@@ -77,7 +77,15 @@ public interface ISessionPersistenceService
     /// </summary>
     /// <param name="session">The session document to upsert.</param>
     /// <param name="ct">Cancellation token.</param>
-    Task PersistSessionAsync(StoredSession session, CancellationToken ct = default);
+    /// <param name="awaitCosmosWrite">
+    /// FR-D2 (task 030): when <c>true</c>, the Cosmos upsert is CONFIRMED — this method does not
+    /// return until the write completes — so the caller's "before request completes" durability
+    /// contract holds even under a Redis eviction moments later. Reserved for the FIRST message of
+    /// a session (<c>messages[0]</c>), which also seeds the History title (FR-D4). Defaults to
+    /// <c>false</c>, which preserves the original D-06 fire-and-forget contract for every other
+    /// call site — remaining turns are NOT slowed down by this change (NFR-03).
+    /// </param>
+    Task PersistSessionAsync(StoredSession session, CancellationToken ct = default, bool awaitCosmosWrite = false);
 
     /// <summary>
     /// Persists workspace tabs[] + activeTabId for a session (NFR-09 write-through).

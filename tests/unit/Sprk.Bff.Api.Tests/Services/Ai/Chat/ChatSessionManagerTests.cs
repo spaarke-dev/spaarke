@@ -645,7 +645,7 @@ public class ChatSessionManagerTests
 
         // Cosmos persistence throws (e.g., transient network error)
         _persistenceMock
-            .Setup(p => p.PersistSessionAsync(It.IsAny<StoredSession>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.PersistSessionAsync(It.IsAny<StoredSession>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()))
             .ThrowsAsync(new InvalidOperationException("Cosmos DB unavailable"));
 
         // Act — must not throw despite Cosmos failure

@@ -4,7 +4,7 @@
     <title>Await/confirm the Cosmos transcript write for messages[0] (FR-D2)</title>
     <phase>4 D — History &amp; true resume</phase>
     <gate>blocked until 001</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF reliability change in the persistence write path</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -13,6 +13,12 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 ///   - Archive is triggered when approaching the 50-message limit (NFR-12).
 ///   - History retrieval returns the most recent N messages from Redis (hot path).
 ///
+/// Cosmos durability (FR-D2 / ADR-040, task 030): the Redis-refresh step also write-throughs to
+/// Cosmos DB via <see cref="ChatSessionManager.UpdateSessionCacheAsync"/>. For messages[0] — the
+/// first message of a brand-new session, which also seeds the History title (FR-D4) — that Cosmos
+/// write is CONFIRMED (awaited) so the transcript survives a Redis eviction; every later turn keeps
+/// the original fire-and-forget write-through (D-06, NFR-03 — no latency regression on turns 2+).
+///
 /// Summarisation (NFR / spec):
 ///   - Trigger: <c>session.Messages.Count &gt;= <see cref="SummarisationThreshold"/></c>
 ///   - Action: Condenses older messages into a single summary text stored in
@@ -125,8 +131,17 @@ public sealed class ChatHistoryManager
             LastActivity = DateTimeOffset.UtcNow
         };
 
-        // 3. Refresh the Redis hot cache with the updated session
-        await _sessionManager.UpdateSessionCacheAsync(updatedSession, ct);
+        // 3. Refresh the Redis hot cache with the updated session.
+        //
+        // FR-D2 (task 030): session.Messages.Count is the PRE-append count — the index `message`
+        // will occupy once appended. Count == 0 means this call is minting messages[0] (the very
+        // first message of a brand-new session), which also seeds the History title (FR-D4). That
+        // ONE write is CONFIRMED (awaitCosmosWrite: true) so the transcript survives a Redis
+        // eviction even if it happens moments after this request completes. Every later turn
+        // (Count > 0) keeps the default fire-and-forget write-through (D-06) — no latency
+        // regression for turns 2+ (NFR-03).
+        var isFirstMessage = session.Messages.Count == 0;
+        await _sessionManager.UpdateSessionCacheAsync(updatedSession, ct, awaitCosmosWrite: isFirstMessage);
 
         // 4. Update session activity in Dataverse (fire-and-forget acceptable for counters)
         _ = _dataverseRepository.UpdateSessionActivityAsync(

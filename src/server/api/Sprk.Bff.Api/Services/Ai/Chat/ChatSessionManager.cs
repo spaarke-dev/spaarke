@@ -295,14 +295,35 @@ public class ChatSessionManager
     /// </summary>
     /// <param name="session">The updated session to cache.</param>
     /// <param name="ct">Cancellation token.</param>
-    internal virtual async Task UpdateSessionCacheAsync(ChatSession session, CancellationToken ct = default)
+    /// <param name="awaitCosmosWrite">
+    /// FR-D2 (task 030): when <c>true</c>, the Cosmos write-through is CONFIRMED — this method does
+    /// not return until the Cosmos upsert completes — instead of the default fire-and-forget (D-06).
+    /// <see cref="ChatHistoryManager.AddMessageAsync"/> sets this for the FIRST message of a session
+    /// (<c>messages[0]</c>) only, so the transcript + title seed (FR-D4) survive a Redis eviction.
+    /// Every other caller (and every later turn) keeps the default <c>false</c> — no latency
+    /// regression on turns 2+ (NFR-03).
+    /// </param>
+    internal virtual async Task UpdateSessionCacheAsync(
+        ChatSession session,
+        CancellationToken ct = default,
+        bool awaitCosmosWrite = false)
     {
         // 1. Refresh Redis hot cache
         await CacheSessionAsync(session, ct);
 
-        // 2. Write-through to Cosmos DB (warm path, D-06) — fire-and-forget.
-        // Cosmos failure must not block the message add path or affect the streaming response.
-        FireAndForgetCosmosPersist(session);
+        // 2. Write-through to Cosmos DB (warm path, D-06).
+        if (awaitCosmosWrite)
+        {
+            // FR-D2: confirmed write for messages[0] — awaited so the caller (and, transitively,
+            // the HTTP request handler) does not complete until the durable warm-tier copy exists.
+            await AwaitedCosmosPersistAsync(session);
+        }
+        else
+        {
+            // Fire-and-forget (D-06 default). Cosmos failure must not block the message add path
+            // or affect the streaming response.
+            FireAndForgetCosmosPersist(session);
+        }
     }
 
     /// <summary>
@@ -584,6 +605,31 @@ public class ChatSessionManager
         // Cosmos writes never block the Redis/response path. CancellationToken.None ensures
         // the write survives HTTP request cancellation.
         _ = _persistence.PersistSessionAsync(stored, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Confirmed (awaited) Cosmos DB upsert for <paramref name="session"/> — the FR-D2 (task 030)
+    /// counterpart to <see cref="FireAndForgetCosmosPersist"/>. Reserved for the FIRST message of a
+    /// session (<c>messages[0]</c>) so the transcript + title seed (FR-D4) are durable in Cosmos
+    /// before the caller (ultimately the SendMessage request handler) returns, closing the gap where
+    /// a Redis eviction between response-completion and the fire-and-forget write finishing would
+    /// otherwise strand a brand-new session with a blank transcript on reopen.
+    ///
+    /// Still routes the underlying Cosmos call through <see cref="CancellationToken.None"/> —
+    /// mirroring <see cref="FireAndForgetCosmosPersist"/>: a client mid-request disconnect must not
+    /// abort a write whose entire purpose is to outlive the request. Only the AWAIT boundary differs
+    /// between the two methods; the write itself is identical (same mapper, same non-throwing
+    /// failure policy inside <see cref="SessionPersistenceService"/>).
+    /// </summary>
+    private async Task AwaitedCosmosPersistAsync(ChatSession session)
+    {
+        if (_persistence is null)
+        {
+            return;
+        }
+
+        var stored = MapChatSessionToStoredSession(session);
+        await _persistence.PersistSessionAsync(stored, CancellationToken.None, awaitCosmosWrite: true);
     }
 
     /// <summary>
