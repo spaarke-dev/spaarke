@@ -1,0 +1,19 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for nda-standard-summary (ai-advanced-capabilities-nda-r1 task 021). Normalized OpenAI-function-parameters subset (validated by CatalogInputSchemaContractTests + jps-validate; server twin OpenAiFunctionSchemaValidator). MIRROR-FIRST: modeled directly on list-tasks.input.schema.json's pattern — this Action never reviews an uploaded document, so there is no document/session-file operand. The documentText field is declared DELIBERATELY as the dispatch operand: a prompted Action with no session file must present a STRUCTURED operand or the dispatch takes the file-operand path and hard-fails 'No session files available' (SessionDispatchOrchestrator.ResolveFileOperandAsync). documentText makes ContextBinder.HasStructuredOperand true so the no-file hard-stop is relaxed. Its CONTENT is unused for computing the summary — the Spaarke NDA standard (KNW-011) is supplied separately by the retrieval/grounding layer, same as nda-review's standard-side grounding. Property-level \"required\": true is FORBIDDEN (use the object-level required array). actionCode carries NO version suffix (owner hygiene).",
+  "$comment-grounding": "NFR-06 tenant pin: the standard is retrieved from spaarke-rag-references (KNW-011) seeded tenantId='system'; ReferenceRetrievalService currently filters on the execution tenant with no 'system' fallback, so live grounding depends on the same path-B fix escalated in projects/ai-advanced-capabilities-nda-r1/notes/tenant-pin-analysis.md (shared dependency with nda-review). This Action is authored correctly regardless; live grounding is gated on that fix.",
+  "actionCode": "nda-standard-summary",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["documentText"],
+    "properties": {
+      "documentText": {
+        "type": "string",
+        "description": "The user's request, in their own words (e.g. 'explain our NDA standard', 'what are our default NDA positions and why'). This is the action operand so the capability dispatches WITHOUT requiring an uploaded document or open session file; its text is NOT used to compute the summary — the Spaarke NDA standard (KNW-011) is supplied separately by the retrieval/grounding layer at dispatch time.",
+        "maxLength": 2000,
+        "elicitation_prompt": "What would you like explained about Spaarke's NDA standard?",
+        "ledger_resolution": "user.requestText — the plain-language request that triggered this capability. The firm NDA standard (KNW-011) is supplied by the retrieval layer at dispatch time (not a maker-provided field)."
+      }
+    }
+  }
+}

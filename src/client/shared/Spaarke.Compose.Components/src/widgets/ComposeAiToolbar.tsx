@@ -114,12 +114,14 @@ import { type Editor } from '@tiptap/react';
 import {
   Toolbar,
   ToolbarButton,
+  Button,
   Tooltip,
   Menu,
   MenuTrigger,
   MenuPopover,
   MenuList,
   MenuItem,
+  Text,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
@@ -127,10 +129,10 @@ import {
   Info24Regular,
   ArrowSwapRegular,
   DocumentEdit24Regular,
+  TextGrammarArrowLeft24Regular,
+  Wand24Regular,
   MoreVertical20Regular,
-  Mail24Regular,
-  Open24Regular,
-  Send24Regular,
+  Dismiss16Regular,
 } from '@fluentui/react-icons';
 import { useAuth } from '@spaarke/auth';
 import {
@@ -142,6 +144,8 @@ import {
 import type { DispatchPaneEvent, WorkspacePaneEvent } from '@spaarke/ai-widgets/events';
 import type { ComposeDocumentRef } from '../types/compose-contracts';
 import type { TipTapNode } from '../utils/docxBridge';
+import type { AiGenerateBookmarkController } from './hooks/useAiGenerateBookmark';
+import type { AiApplyReviewReason, AiApplyValidationController } from './hooks/useAiApplyValidation';
 
 /**
  * spaarkeai-compose-r2 — clean-body extraction for the Email stub (FIX #10b).
@@ -237,6 +241,25 @@ const TOOLBAR_SELECTION_TEXT_CAP = 16000;
 // ---------------------------------------------------------------------------
 
 /**
+ * The UI surfaces on which a tool can appear (Contextual AI Tool Library —
+ * see `projects/ai-advanced-capabilities-nda-r1/notes/contextual-ai-tool-library-design.md`).
+ * A tool's `surfaces` is the FIRST of the two library dimensions (the second is
+ * `workTypes`). `selection` = the BubbleMenu; `review-note` = a Review Note's ⋮ menu;
+ * `whole-document` / `assistant-chip` are declared for future surfaces.
+ */
+export type ToolSurface = 'selection' | 'review-note' | 'whole-document' | 'assistant-chip';
+
+/**
+ * Optional runtime context a tool's `appliesTo` predicate may inspect. Kept minimal
+ * for now (no predicate ships yet); a future tool can gate on the selection text
+ * or the active document.
+ */
+export interface ToolContext {
+  readonly selectionText?: string;
+  readonly activeWorkType?: string;
+}
+
+/**
  * One inline AI toolbar action. `bindingId: ''` is the Phase-4 stub sentinel
  * (see file header "PHASE-4 STUB BOUNDARY") — a stubbed action renders
  * disabled rather than silently failing on click.
@@ -250,7 +273,7 @@ export interface ComposeAiToolbarAction {
   readonly tooltip: string;
   /** `sprk_playbookconsumer` Binding row GUID. `''` = not yet wired (Phase 4 gate). */
   readonly bindingId: string;
-  /** `'primary'` renders as an always-visible button; `'overflow'` lands in "More actions…". */
+  /** `'primary'` renders as an always-visible button; `'overflow'` lands in "More actions…". Selection-surface ORDERING hint only. */
   readonly placement: 'primary' | 'overflow';
   /**
    * DEF-09: `true` for a compose-DISPOSITION EDIT action whose result materializes
@@ -263,6 +286,29 @@ export interface ComposeAiToolbarAction {
    * which keep chat-session dispatch + Assistant-rendered prose.
    */
   readonly materializesInEditor?: boolean;
+
+  // --- Contextual AI Tool Library — surfacing dimensions ---
+  /**
+   * WHICH UI surfaces render this tool. Defaults to `['selection']` when omitted
+   * (= today's behavior: BubbleMenu only). A single definition may list several
+   * surfaces (e.g. Draft alternative on `['selection','review-note']`). An empty
+   * array RETIRES the tool from every surface without deleting its definition — used
+   * to remove non-functional tools (round-8 #6) so they can be re-tagged later.
+   */
+  readonly surfaces?: readonly ToolSurface[];
+  /**
+   * WHICH WORK TYPES surface this tool — the product surface the user chose by intent
+   * (`'agreement-analysis'`, `'legal-research'`, …), NOT the knowledge sub-domain (NDA
+   * vs MSA is a grounding difference within a work type, not a tool-scoping axis).
+   * `['*']` (default) = a shared edit primitive shown in every work type (e.g. Draft
+   * alternative / Make concise); `['agreement-analysis']` = shown only in that surface.
+   * The active work type narrows the surface's tool set to `workTypes ∋ '*' || activeWorkType`.
+   */
+  readonly workTypes?: readonly string[];
+  /** Optional runtime predicate — return `false` to hide the tool for the given context. */
+  readonly appliesTo?: (ctx: ToolContext) => boolean;
+  /** Free-text prompt seed for instruction-style tools (e.g. "Describe a change…"). */
+  readonly inputPrompt?: string;
 }
 
 /**
@@ -308,6 +354,10 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     tooltip: EXPLAIN_TOOLTIP,
     bindingId: '',
     placement: 'primary',
+    // Round-8 #6 (UAT): RETIRED from the selection surface — the explain output was
+    // not useful in practice. Definition kept so a future context can re-tag it
+    // (`surfaces: ['selection']`) without re-authoring. `workTypes: ['*']` when re-enabled.
+    surfaces: [],
   },
   {
     id: 'compose-compare-to-playbook',
@@ -315,6 +365,10 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     tooltip: COMPARE_TOOLTIP,
     bindingId: '',
     placement: 'primary',
+    // Round-8 #6 (UAT): RETIRED from the selection surface — redundant with the NDA
+    // Review Notes (which already carry per-clause playbook comparison). Re-tag per
+    // work type if a non-advisory Compose context wants inline clause comparison.
+    surfaces: [],
   },
   {
     id: 'compose-draft-alternative',
@@ -325,16 +379,50 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     // DEF-09: the ONLY compose-disposition EDIT action — its alternative renders as an
     // inline redline in the document, so route to the DOCUMENT session + confirm-only.
     materializesInEditor: true,
+    // Contextual AI Tool Library: the reusable edit primitive — shown on BOTH the
+    // BubbleMenu and each Review Note's ⋮ menu, from this ONE definition (round-8 #4).
+    // `workTypes` defaults to ['*'] (a shared primitive, available in every work type).
+    surfaces: ['selection', 'review-note'],
   },
   {
-    // gap 2.3 — the defined-terms scan (FR-11). Overflow-menu trigger per the
-    // authored Binding row ("overflow-menu trigger"); results surface read-only
-    // in the Context pane.
+    // Contextual AI Tool Library phase 3 (round-8 #4) — one-click "make more concise".
+    // Same structured-edit → redline path as draft-alternative; different prompt intent.
+    // Catalog: infra/dataverse/actions/compose-make-concise.action.json (+ binding row).
+    id: 'compose-make-concise',
+    label: 'Make more concise',
+    tooltip:
+      'Rewrite this clause to be more concise, preserving its exact legal meaning. Produces a pending track-change you can accept or reject.',
+    bindingId: '',
+    placement: 'primary',
+    materializesInEditor: true,
+    surfaces: ['selection', 'review-note'],
+  },
+  {
+    // Contextual AI Tool Library phase 3 (round-8 #4) — free-text "describe a change".
+    // The ONLY current tool with an `inputPrompt`: the host collects the user's
+    // instruction before dispatch and passes it as the `instruction` slot.
+    // Catalog: infra/dataverse/actions/compose-rewrite-instruction.action.json (+ binding row).
+    id: 'compose-rewrite-instruction',
+    label: 'Describe a change',
+    tooltip:
+      'Describe a change in your own words (e.g. "make this mutual", "add a 30-day cure period"). Produces a pending track-change you can accept or reject.',
+    bindingId: '',
+    placement: 'primary',
+    materializesInEditor: true,
+    surfaces: ['selection', 'review-note'],
+    inputPrompt: 'Describe the change you’d like to make to this clause.',
+  },
+  {
+    // gap 2.3 — the defined-terms scan (FR-11).
     id: 'compose-defined-terms',
     label: 'Defined terms',
     tooltip: DEFINED_TERMS_TOOLTIP,
     bindingId: '',
     placement: 'overflow',
+    // Round-8 #6 (UAT): RETIRED from the selection surface — it did not work usefully
+    // from the clause toolbar. Belongs to a future `whole-document` surface; re-tag
+    // `surfaces: ['whole-document']` when that surface ships.
+    surfaces: [],
   },
 ];
 
@@ -387,6 +475,35 @@ export function getComposeAiToolbarActions(): readonly ComposeAiToolbarAction[] 
   return [...DEFAULT_ACTIONS.filter(a => !overriddenIds.has(a.id)), ...registeredActions];
 }
 
+/**
+ * Contextual AI Tool Library selector. Returns the tools that render on a given
+ * `surface` for the `activeWorkType`, applying both library dimensions plus the
+ * optional `appliesTo` predicate:
+ *
+ *   surfaces ∋ surface   AND   (workTypes ∋ '*' OR workTypes ∋ activeWorkType)   AND   appliesTo(ctx) !== false
+ *
+ * Defaults preserve today's behavior: a tool with no `surfaces` is treated as
+ * `['selection']`; a tool with no `workTypes` is treated as `['*']` (a shared primitive).
+ * This is how the BubbleMenu (`'selection'`) and each Review Note's ⋮ menu
+ * (`'review-note'`) draw from ONE registry — a single definition surfaces in the
+ * contexts it declares. `activeWorkType` is the product surface the user chose
+ * (`'agreement-analysis'` / `'legal-research'`), NOT the knowledge sub-domain.
+ */
+export function getToolsForSurface(
+  surface: ToolSurface,
+  activeWorkType: string,
+  ctx?: ToolContext
+): readonly ComposeAiToolbarAction[] {
+  return getComposeAiToolbarActions().filter(a => {
+    const surfaces = a.surfaces ?? ['selection'];
+    if (!surfaces.includes(surface)) return false;
+    const workTypes = a.workTypes ?? ['*'];
+    if (!workTypes.includes('*') && !workTypes.includes(activeWorkType)) return false;
+    if (a.appliesTo && a.appliesTo(ctx ?? { activeWorkType }) === false) return false;
+    return true;
+  });
+}
+
 /** Test-only — clears registrations between test files/cases. */
 export function __resetComposeAiToolbarActionsForTests(): void {
   registeredActions = [];
@@ -414,6 +531,23 @@ export interface ComposeAiToolbarProps {
    */
   actions?: ReadonlyArray<ComposeAiToolbarAction>;
   /**
+   * Contextual AI Tool Library — the ACTIVE work type (the product surface the user
+   * chose), used to narrow the selection surface's tools (`getToolsForSurface('selection', …)`).
+   * Defaults to `'*'`: only shared `workTypes: ['*']` primitives show. A host running a
+   * specific work type (e.g. Agreement Analysis) passes its id (`'agreement-analysis'`)
+   * so work-type-scoped tools also appear. Knowledge sub-domain (NDA vs MSA) does NOT
+   * belong here — it only affects grounding. Ignored when `actions` is supplied.
+   */
+  activeWorkType?: string;
+  /**
+   * Contextual AI Tool Library (phase 3) — free-text tool prompt. When an action declares
+   * an `inputPrompt` (e.g. "Describe a change…"), the toolbar calls this to collect the
+   * user's free-text `instruction` BEFORE dispatch; the host renders the input UI and
+   * resolves the entered text (or `null` if cancelled). Absent ⇒ an `inputPrompt` tool
+   * cannot dispatch (no-op) — the host that wants free-text tools MUST provide this.
+   */
+  onRequestInstruction?: (action: ComposeAiToolbarAction) => Promise<string | null>;
+  /**
    * FR-18 host serialization seam (see `ComposeActionEnqueue`). When provided,
    * every action dispatch routes through the host's serial queue instead of the
    * toolbar's own bound `dispatchConsumer`. Optional — omit for a standalone
@@ -438,6 +572,49 @@ export interface ComposeAiToolbarProps {
    * original "renders nothing on collapsed selection" behavior).
    */
   forceVisible?: boolean;
+  /**
+   * FR-07 (task 040) drift-proof AI anchoring — the generate-window bookmark controller
+   * (`useAiGenerateBookmark`). OPT-IN + additive: when provided, clicking a
+   * `materializesInEditor` (Generate) action drops a request-scoped bookmark at the current
+   * selection, rebases it through concurrent user edits, and adds the resolved `targetParaId`
+   * to the dispatch slots as model context; on the dispatch result it calls `resolveOnReturn`
+   * so the returned JSON operations land at the REBASED selection (the apply/validate is
+   * task 041, driven by the controller's surface callbacks). When ABSENT (the default, and
+   * every existing mount/test), dispatch behavior is UNCHANGED — no bookmark, no extra slot.
+   * The dispatch itself is unchanged (envelope-only, `Services/Ai/PublicContracts` via
+   * `dispatchConsumer`; no new endpoint — ADR-039).
+   */
+  aiGenerateBookmark?: AiGenerateBookmarkController;
+  /**
+   * FR-07 (task 041) apply-side gate — the validate-before-apply + fuzzy-as-comment last-resort
+   * controller (`useAiApplyValidation`). OPT-IN + additive, mirroring `aiGenerateBookmark`: when
+   * BOTH `aiGenerateBookmark` and `aiApplyValidation` are supplied, a successful (`status:
+   * 'operations'`) `resolveOnReturn` result is handed to `aiApplyValidation.validateAndApply` —
+   * every returned operation's anchor is validated against the live document; a valid one applies
+   * cleanly, an unvalidatable one surfaces as a review item in this toolbar's review banner
+   * (rendered below the toolbar, dark-mode-correct — ADR-021). NEVER silently placed, NEVER
+   * silently dropped (FR-07 / NFR-02 / I-7). When ABSENT, behavior is UNCHANGED from task 040 —
+   * `resolveOnReturn`'s result is resolved but nothing further happens here.
+   */
+  aiApplyValidation?: AiApplyValidationController;
+}
+
+/** Short, human-readable label for a surfaced review item's reason (the toolbar's review banner). */
+function reviewReasonLabel(reason: AiApplyReviewReason): string {
+  switch (reason) {
+    case 'unknown-paraId':
+      return 'the target paragraph could no longer be found';
+    case 'unknown-target-paraId':
+      return 'the merge target paragraph could no longer be found';
+    case 'out-of-range':
+      return 'the target position moved out of range';
+    case 'atom-interior':
+      return 'the target overlaps non-editable content';
+    case 'not-applied':
+      return 'the suggestion could not be applied automatically';
+    default:
+      return 'needs review';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -470,6 +647,28 @@ const useStyles = makeStyles({
     paddingInline: tokens.spacingHorizontalS,
     paddingBlock: tokens.spacingVerticalXS,
   },
+  // FR-07 (task 041) — the review banner surfacing unvalidatable AI operations. The SAME warning
+  // semantic tokens ComposeEditor.tsx's redline/reanchor "needs attention" surfaces already use
+  // (colorStatusWarning*) — dark-mode-correct, no hex literals (ADR-021).
+  reviewBanner: {
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: tokens.spacingVerticalXS,
+    marginTop: tokens.spacingVerticalXS,
+    padding: tokens.spacingHorizontalS,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorStatusWarningBackground1,
+    border: `1px solid ${tokens.colorStatusWarningBorder1}`,
+  },
+  reviewItem: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: tokens.spacingHorizontalS,
+  },
+  reviewItemText: {
+    color: tokens.colorStatusWarningForeground1,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -484,9 +683,13 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
     bffBaseUrl,
     dispatch,
     actions,
+    activeWorkType = '*',
+    onRequestInstruction,
     enqueueComposeAction,
     dispatchConsumerOverride,
     forceVisible,
+    aiGenerateBookmark,
+    aiApplyValidation,
   } = props;
   const styles = useStyles();
 
@@ -533,7 +736,7 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
   );
 
   const handleActionClick = React.useCallback(
-    (action: ComposeAiToolbarAction): void => {
+    async (action: ComposeAiToolbarAction): Promise<void> => {
       if (!editor) return;
       if (!action.bindingId) {
         // Phase-4 catalog gate — see file header "PHASE-4 STUB BOUNDARY".
@@ -548,6 +751,29 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
       const selectionText =
         rawText.length > TOOLBAR_SELECTION_TEXT_CAP ? rawText.slice(0, TOOLBAR_SELECTION_TEXT_CAP) : rawText;
 
+      // Contextual AI Tool Library (phase 3): a free-text tool (`inputPrompt`, e.g. "Describe a
+      // change…") collects the user's instruction via the host dialog BEFORE dispatch. Selection
+      // is already captured above (from/to/selectionText), so it survives the modal. Cancel/empty
+      // ⇒ abort. The `instruction` becomes a dispatch slot the Action's inputSchema declares.
+      let instruction: string | undefined;
+      if (action.inputPrompt) {
+        const entered = onRequestInstruction ? await onRequestInstruction(action) : null;
+        if (!entered || !entered.trim()) return;
+        instruction = entered.trim();
+      }
+
+      // FR-07 (task 040) — GENERATE-WINDOW BOOKMARK (opt-in via `aiGenerateBookmark`; drops only
+      // for a `materializesInEditor` Generate action). Drop a request-scoped bookmark at the
+      // current selection, rebased through concurrent edits, and send the resolved target paraId
+      // as model context. `resolveOnReturn` (below) resolves it to the CURRENT position so the
+      // returned ops land at the rebased selection (apply/validate = task 041, via the controller's
+      // surface callbacks). Absent controller ⇒ nothing added (unchanged dispatch shape).
+      const useBookmark = !!aiGenerateBookmark && action.materializesInEditor === true;
+      const bookmarkRequestId = useBookmark ? `${action.id}#bm${(clickSeqRef.current += 1)}` : undefined;
+      const bookmarkContext = useBookmark
+        ? aiGenerateBookmark!.beginGenerate({ requestId: bookmarkRequestId })
+        : undefined;
+
       // Slots mirror the SHIPPED compose-selection scope's authored field
       // list (task 024) — not invented (see Spike 0 §3a: the server owns the
       // typed parse against the Action's sprk_inputschema; this is the
@@ -560,6 +786,12 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
           documentSpeId: documentRef?.speDriveItemId,
           documentRecordId: documentRef?.sprkDocumentId,
           sessionId,
+          // FR-07: the durable target paraId as model context (only when a Generate bookmark was
+          // dropped AND the caret sat in a paraId-bearing block). The model returns JSON operations
+          // referencing this paraId, not free text to search (I-7).
+          ...(useBookmark && bookmarkContext?.paraId ? { targetParaId: bookmarkContext.paraId } : {}),
+          // Contextual AI Tool Library (phase 3): the free-text instruction for an `inputPrompt` tool.
+          ...(instruction ? { instruction } : {}),
         },
       };
 
@@ -567,6 +799,25 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
       // wired, the Assistant pane's existing dispatch-failure line (mirrors
       // useConsumerChips.tsx) is the user-visible surface.
       const swallow = (): void => undefined;
+
+      // FR-07: on the dispatch RESULT, resolve the bookmark to its current (rebased) position and
+      // hand the returned JSON operations to the apply path (task 041, via the controller's surface
+      // callbacks — free text is refused, a deleted-content bookmark is surfaced for review). Only
+      // when a bookmark was dropped; a rejected dispatch clears it so no stale bookmark leaks.
+      // Task 041: when an `aiApplyValidation` controller is ALSO supplied, a successful
+      // ('operations') resolution is handed to `validateAndApply` — every returned op's anchor is
+      // validated against the live doc before it applies; an unvalidatable op surfaces via the
+      // review banner below, never silently placed. Absent controller ⇒ behavior UNCHANGED (040).
+      const resolveReturn = (result: DispatchConsumerResult): void => {
+        if (!useBookmark || !bookmarkRequestId) return;
+        const outcome = aiGenerateBookmark!.resolveOnReturn(bookmarkRequestId, result?.result);
+        if (outcome?.status === 'operations' && aiApplyValidation) {
+          void aiApplyValidation.validateAndApply(outcome);
+        }
+      };
+      const onDispatchError = (): void => {
+        if (useBookmark && bookmarkRequestId) aiGenerateBookmark!.clearBookmark(bookmarkRequestId);
+      };
 
       // FR-18: route through the host serial queue when threaded (serializes
       // rapid Compare→Draft clicks); else fall back to the toolbar's own bound
@@ -583,54 +834,56 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
           bindingId: action.bindingId,
           args,
           ...(action.materializesInEditor ? { documentSessionId: sessionId } : {}),
-        }).catch(swallow);
+        })
+          .then(resolveReturn)
+          .catch(() => {
+            onDispatchError();
+            swallow();
+          });
       } else {
-        void dispatchConsumer(action.bindingId, args).catch(swallow);
+        void dispatchConsumer(action.bindingId, args)
+          .then(resolveReturn)
+          .catch(() => {
+            onDispatchError();
+            swallow();
+          });
       }
     },
-    [editor, dispatchConsumer, enqueueComposeAction, documentRef, sessionId]
+    [
+      editor,
+      dispatchConsumer,
+      enqueueComposeAction,
+      documentRef,
+      sessionId,
+      aiGenerateBookmark,
+      aiApplyValidation,
+      onRequestInstruction,
+    ]
   );
 
-  // FIX #10b (UAT) — "Email" affordance. Compose is the default drafting
-  // surface; an explicit email path is a STUB for now. Both menu items open a
-  // new STUB email widget tab by dispatching a `workspace` `widget_load` on the
-  // EXISTING PaneEventBus (ADR-030; NO new bus, NO dispatch endpoint). The
-  // contract MATCHES the chat "email" chip another agent emits:
-  //   workspace / widget_load, widgetType 'email', displayName 'Email',
-  //   widgetData { layoutName: 'Email', mode: 'open' | 'send', ... }.
-  // WorkspacePane resolves the EmailStubWidget for `widgetType === 'email'`.
-  //   - Open in Email → mode 'open', carries the drafted body text.
-  //   - Send in Email → mode 'send', carries the current file as an attachment.
-  const handleEmailAction = React.useCallback(
-    (mode: 'open' | 'send'): void => {
-      if (!editor) return;
-      // Clean the drafted body so pending redlines email as their ACCEPTED text, not the garbled
-      // struck-original + proposed-insertion concatenation `textBetween` produces.
-      const draftedText = extractCleanDraftText(editor.getJSON() as TipTapNode);
-      const attachmentFileName = documentRef?.fileName ?? 'Untitled.docx';
-      dispatch('workspace', {
-        type: 'widget_load',
-        widgetType: 'email',
-        displayName: 'Email',
-        widgetData: {
-          layoutName: 'Email',
-          mode,
-          ...(mode === 'open' ? { bodyText: draftedText } : {}),
-          ...(mode === 'send' ? { attachmentFileName } : {}),
-        },
-      });
-    },
-    [editor, documentRef, dispatch]
-  );
+  // Round-8 #6 (UAT): the "Email" split-menu was REMOVED from the selection toolbar —
+  // it launched an email hand-off from the clause BubbleMenu, which the review UX did not
+  // want. (The "Email — coming soon" stub it used to launch was deleted once the full email
+  // widget shipped — email-communication-solution-r5.) `extractCleanDraftText` stays exported
+  // for any future email path.
 
   if (!editor) return null;
 
   const { from, to } = editor.state.selection;
-  // NEGATIVE case — collapsed/empty selection shows no toolbar, UNLESS the
-  // host force-opened it (task 111 right-click / point-insertion trigger).
-  if (from === to && !forceVisible) return null;
+  // NEGATIVE case — collapsed/empty selection hides the ACTION toolbar, UNLESS the host
+  // force-opened it (task 111 right-click / point-insertion trigger). Task 041: the review banner
+  // (surfaced unvalidatable AI operations) is independent of selection state — a surfaced item
+  // must stay visible even after the selection that triggered it changes, so it is NOT gated here.
+  const showActionToolbar = !(from === to && !forceVisible);
+  const reviewItems = aiApplyValidation?.reviewQueue ?? [];
+  if (!showActionToolbar && reviewItems.length === 0) return null;
 
-  const allActions = actions ?? getComposeAiToolbarActions();
+  // Contextual AI Tool Library: the BubbleMenu IS the `selection` surface, so draw from
+  // `getToolsForSurface('selection', …)` — this is what drops the tools retired via
+  // `surfaces: []` (round-8 #6: Explain / Compare / Defined-terms) and narrows to the
+  // active work type. `placement` remains the intra-surface primary-vs-overflow ORDERING.
+  // Tests may still inject a fixed `actions` list.
+  const allActions = actions ?? getToolsForSurface('selection', activeWorkType);
   const primaryActions = allActions.filter(a => a.placement === 'primary');
   const overflowActions = allActions.filter(a => a.placement === 'overflow');
 
@@ -643,91 +896,90 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
   // `columnGap` token — no large gap, all actions still reachable, all
   // aria-labels preserved. Grouping is carried by distinct glyphs + tooltips.
   return (
-    <Toolbar size="small" className={styles.toolbar} aria-label="AI actions" data-testid="compose-ai-toolbar">
-      {/* FIX #9 — ICON-ONLY primary buttons (the tool WORDS were removed); the
+    <>
+      {showActionToolbar ? (
+        <Toolbar size="small" className={styles.toolbar} aria-label="AI actions" data-testid="compose-ai-toolbar">
+          {/* FIX #9 — ICON-ONLY primary buttons (the tool WORDS were removed); the
           hover Tooltip names each tool. Names come from `action.label`. */}
-      {primaryActions.map(action => (
-        <Tooltip key={action.id} content={action.label} relationship="description" withArrow>
-          <ToolbarButton
-            appearance="subtle"
-            icon={actionIcon(action.id)}
-            disabled={!action.bindingId}
-            aria-label={action.label}
-            data-testid={`compose-ai-toolbar-${action.id}`}
-            onClick={() => handleActionClick(action)}
-          />
-        </Tooltip>
-      ))}
+          {primaryActions.map(action => (
+            <Tooltip key={action.id} content={action.label} relationship="description" withArrow>
+              <ToolbarButton
+                appearance="subtle"
+                icon={actionIcon(action.id)}
+                disabled={!action.bindingId}
+                aria-label={action.label}
+                data-testid={`compose-ai-toolbar-${action.id}`}
+                onClick={() => void handleActionClick(action)}
+              />
+            </Tooltip>
+          ))}
 
-      {/* FIX #10b — Email split-menu (STUB target). Consistent with the primary
-          labelled buttons; both items dispatch a workspace/widget_load that opens
-          the EmailStubWidget tab (see handleEmailAction). */}
-      <Menu positioning="below-end">
-        <MenuTrigger disableButtonEnhancement>
-          <Tooltip content="Email" relationship="description" withArrow>
-            <ToolbarButton
-              appearance="subtle"
-              icon={<Mail24Regular />}
-              aria-label="Email"
-              data-testid="compose-ai-toolbar-email"
-            />
-          </Tooltip>
-        </MenuTrigger>
-        <MenuPopover>
-          <MenuList>
-            <MenuItem
-              icon={<Open24Regular />}
-              data-testid="compose-ai-toolbar-email-open"
-              onClick={() => handleEmailAction('open')}
-            >
-              Open in Email
-            </MenuItem>
-            <MenuItem
-              icon={<Send24Regular />}
-              data-testid="compose-ai-toolbar-email-send"
-              onClick={() => handleEmailAction('send')}
-            >
-              Send in Email
-            </MenuItem>
-          </MenuList>
-        </MenuPopover>
-      </Menu>
+          {/* Round-8 #6 (UAT): the Email split-menu was removed from this toolbar. */}
+          <Menu positioning="below-end">
+            <MenuTrigger disableButtonEnhancement>
+              <Tooltip content="More actions" relationship="description" withArrow>
+                <ToolbarButton
+                  appearance="subtle"
+                  // FIX #9 — VERTICAL three-dots overflow affordance.
+                  icon={<MoreVertical20Regular />}
+                  aria-label="More actions"
+                  data-testid="compose-ai-toolbar-more"
+                />
+              </Tooltip>
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                {overflowActions.length === 0 ? (
+                  <MenuItem disabled data-testid="compose-ai-toolbar-more-empty">
+                    No additional actions yet
+                  </MenuItem>
+                ) : (
+                  overflowActions.map(action => (
+                    <MenuItem
+                      key={action.id}
+                      disabled={!action.bindingId}
+                      title={action.tooltip}
+                      data-testid={`compose-ai-toolbar-overflow-${action.id}`}
+                      onClick={() => void handleActionClick(action)}
+                    >
+                      {action.label}
+                    </MenuItem>
+                  ))
+                )}
+              </MenuList>
+            </MenuPopover>
+          </Menu>
+        </Toolbar>
+      ) : null}
 
-      <Menu positioning="below-end">
-        <MenuTrigger disableButtonEnhancement>
-          <Tooltip content="More actions" relationship="description" withArrow>
-            <ToolbarButton
-              appearance="subtle"
-              // FIX #9 — VERTICAL three-dots overflow affordance.
-              icon={<MoreVertical20Regular />}
-              aria-label="More actions"
-              data-testid="compose-ai-toolbar-more"
-            />
-          </Tooltip>
-        </MenuTrigger>
-        <MenuPopover>
-          <MenuList>
-            {overflowActions.length === 0 ? (
-              <MenuItem disabled data-testid="compose-ai-toolbar-more-empty">
-                No additional actions yet
-              </MenuItem>
-            ) : (
-              overflowActions.map(action => (
-                <MenuItem
-                  key={action.id}
-                  disabled={!action.bindingId}
-                  title={action.tooltip}
-                  data-testid={`compose-ai-toolbar-overflow-${action.id}`}
-                  onClick={() => handleActionClick(action)}
-                >
-                  {action.label}
-                </MenuItem>
-              ))
-            )}
-          </MenuList>
-        </MenuPopover>
-      </Menu>
-    </Toolbar>
+      {/* FR-07 (task 041) — review banner: unvalidatable AI operations, surfaced never silently
+        placed/dropped (FR-07 / NFR-02 / I-7). Dark-mode-correct semantic tokens only (ADR-021). */}
+      {reviewItems.length > 0 ? (
+        <div className={styles.reviewBanner} role="status" data-testid="compose-ai-review-banner">
+          {reviewItems.map(item => (
+            <div key={item.id} className={styles.reviewItem} data-testid={`compose-ai-review-item-${item.id}`}>
+              <Text size={200} className={styles.reviewItemText}>
+                An AI suggestion needs review — {reviewReasonLabel(item.reason)}
+                {item.fuzzy?.matchedParagraphPreview
+                  ? ` (possible match: "${item.fuzzy.matchedParagraphPreview}")`
+                  : ''}
+                .
+              </Text>
+              <Tooltip content="Dismiss" relationship="description" withArrow>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<Dismiss16Regular />}
+                  aria-label="Dismiss review item"
+                  data-testid={`compose-ai-review-dismiss-${item.id}`}
+                  onClick={() => aiApplyValidation?.dismissReview(item.id)}
+                />
+              </Tooltip>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -742,6 +994,10 @@ function actionIcon(actionId: string): React.JSX.Element {
       return <ArrowSwapRegular />;
     case 'compose-draft-alternative':
       return <DocumentEdit24Regular />;
+    case 'compose-make-concise':
+      return <TextGrammarArrowLeft24Regular />;
+    case 'compose-rewrite-instruction':
+      return <Wand24Regular />;
     default:
       return <DocumentEdit24Regular />;
   }

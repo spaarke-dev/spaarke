@@ -1,0 +1,185 @@
+<task id="021" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Opaque-atom node in the TipTap/ProseMirror schema (FR-02, client half)</title>
+    <phase>2 Frontend capture</phase>
+    <gate>passed</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New client node type in the editor schema (`.ts`/`.tsx`, tags include frontend); a mis-modeled atom drops fields/SDTs on save. FULL per root §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped single node-type addition against a documented projection contract; default sonnet tier is sufficient.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>012</deps>
+    <tags>frontend,fluent-ui,docx</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started>2026-07-22</started>
+    <completed>2026-07-22</completed>
+  </metadata>
+
+  <prompt>
+    Add a NEW non-editable ProseMirror/TipTap node type that renders the server's opaque atom blocks
+    (SDT/content controls, fields, complex/floating objects — the projection side is task 012) as visible,
+    non-inline-editable placeholders. Each atom node MUST carry its `w14:paraId` and preserve document order
+    relative to the surrounding editable paragraphs (design §5, "Ingest (backend)" → opaque atom blocks;
+    §5.0 opaque atoms). The node is an `atom: true`, non-editable leaf: the user can select/move-past it but
+    cannot type into it (the step interceptor, task 020, refuses edits routed into it). New node file under
+    `src/client/shared/Spaarke.Compose.Components/src/widgets/`; wire it into the ComposeEditor schema.
+    MIT ProseMirror base only — NO `@tiptap-pro/*`, no AGPL (NFR-03). Display-only placeholder: the atom's
+    OOXML is never opened, so it survives save byte-for-byte on the server side (FR-02 acceptance).
+  </prompt>
+
+  <role>
+    Senior React/TypeScript editor engineer fluent in the ProseMirror/TipTap node schema (atom nodes,
+    `NodeView`, node attributes, non-editable leaves). Understands FR-02 (opaque atoms are shown, never
+    opened) and invariant I-1/I-4 (the OOXML is authoritative; untouched subtrees stay byte-identical).
+  </role>
+
+  <goal>
+    A registered TipTap/ProseMirror node type such that a document containing fields/SDT/complex objects
+    renders those constructs as placeholder atom nodes: visible, non-editable, each carrying its `paraId`,
+    in correct document order among the editable paragraphs. Typing inside an atom is a no-op. The node
+    round-trips the projection's atom descriptor (task 012) faithfully so document order + patchability
+    survive; the server never opens the atom's bytes.
+  </goal>
+
+  <context>
+    <background>
+      Design §5 "Ingest (backend)" specifies non-renderable constructs become opaque atom blocks — visible,
+      non-inline-editable, carrying their paraId so document order + patchability survive. §5.0 names opaque
+      atoms as one of the three hard bridge pieces. The projection (server) half is task 012 (FR-02) — it
+      emits the atom descriptors this node renders; this task is the client half. The interceptor (task 020)
+      refuses edits routed into an atom, so together they make atoms non-editable and order-preserving. This
+      is genuinely NEW surface (no existing overlap per spec §New Components).
+    </background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.Compose.Components/src/widgets/opaqueAtomNode.ts — NEW TipTap/ProseMirror atom node type (non-editable leaf carrying `paraId`, rendered as a placeholder NodeView)</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — register the atom node in the editor schema/extension list</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ — task 012 opaque-atom projection descriptors (the shape this node renders); align the atom descriptor contract</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/widgets/paraIdExtension.ts — the `w14:paraId` attr convention to mirror on the atom node</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §5 (Ingest → opaque atom blocks), §5.0 (opaque atoms)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-02, NFR-03</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="012" status="pending">Opaque atoms — server projection (FR-02). Emits the atom descriptors (paraId + kind + order) this node type renders. The descriptor contract MUST be agreed before the client node is finalized.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-02">Non-renderable constructs (SDT/content controls, fields, complex/floating objects) MUST render as non-editable placeholder atom nodes carrying their paraId, preserving document order. Atoms are NEVER opened; they survive save byte-for-byte. Scope: this node type + its registration.</constraint>
+    <constraint source="project / I-1, I-4">The atom's OOXML is authoritative and untouched — the client node is display-only; it MUST NOT author or mutate the atom's bytes. Scope: the NodeView (render-only, no editable content hole).</constraint>
+    <constraint source="spec / NFR-03">MIT ProseMirror base + `@tiptap/extension-*` only. MUST NOT add `@tiptap-pro/*`, AGPL, or commercial packages; no EigenPal runtime dependency. Scope: this task's imports/package.json.</constraint>
+    <constraint source="ADR-028">This task adds no fetch (render-only). If any is added it MUST use `@spaarke/auth`; flagged so no ad-hoc token handling is introduced. Scope: the node/NodeView.</constraint>
+    <constraint source="ADR-038 / NFR-06">Behavior covered by colocated Vitest (full suite in task 024). NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests. Scope: tests under `src/`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ProseMirror atom nodes + NodeView; non-editable leaves; node attributes; TipTap schema registration; projection atom descriptors; client licensing discipline</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r4/design.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="paraId node attr convention" location="src/client/shared/Spaarke.Compose.Components/src/widgets/paraIdExtension.ts">
+        How `w14:paraId` is carried as a hidden node attr — mirror the attr shape on the atom node so its paraId is addressable by the patch model.
+      </pattern>
+      <pattern name="Non-editable atom leaf" location="notes/bridge-prior-art.md §3">
+        Opaque/non-renderable OOXML constructs render as placeholders holding their paraId so order + patchability survive; the editor never opens them (FR-02).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>None — verified by grep against `Spaarke.Compose.Components/src/widgets/`: no node type renders SDT/fields/complex objects. Today such constructs either break the mammoth/projection mount or are dropped (spec §New Components lists the opaque-atom node as the one genuinely-new client surface).</existing>
+    <extension>No existing node type can be extended: `paraIdExtension` only tags `paragraph`/`heading` editable nodes; there is no non-editable-leaf node to build on. An atom node is a distinct ProseMirror node kind (`atom: true`), not a variant of an editable node.</extension>
+    <cost-of-doing-nothing>Without it, documents containing fields/content controls either error on load or silently drop those constructs on save — the FR-02 acceptance "corpus docs containing fields/SDTs load without editor error; the constructs survive save byte-for-byte" fails.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (root §8). Load the knowledge files + the task-012 atom descriptor contract. Confirm task 012 is complete (the descriptor shape is agreed). Note this is a display-only client node — no fetch, no save wiring.</step>
+    <step order="1" name="Define the atom node">Implement `opaqueAtomNode.ts`: a TipTap/ProseMirror node with `atom: true`, non-editable, `selectable` but not typeable; attrs include `paraId` (mirroring `paraIdExtension`) + the atom `kind`. `parseHTML`/`renderHTML` (or `addAttributes`) round-trip the task-012 descriptor.</step>
+    <step order="2" name="Placeholder NodeView">Render a visible, non-editable placeholder NodeView (Fluent v9, theme-token styled) that labels the atom kind and holds no editable content hole. Document order relative to surrounding paragraphs is preserved by node position.</step>
+    <step order="3" name="Register in editor">Register the node in `ComposeEditor.tsx`'s schema/extension list so projected atoms mount as this node. Confirm the task-020 interceptor refuses edits routed into it (coordinate the guard). Checkpoint (context-handoff) per root §5.</step>
+    <step order="4" name="Local tests + build">Add colocated Vitest tests: atom renders non-editable, carries its paraId, preserves order; typing is a no-op. Run `npm run build:prod` (NOT `npm run build`) for the shared lib; confirm no `@tiptap-pro/*` in the tree.</step>
+    <step order="5" name="Close-out">Update `tasks/TASK-INDEX.md`: set this task's status to ✅. Document any deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <ui-tests>
+    <ui-test name="Fields/SDT render as placeholders in order">
+      <steps>Load a projected doc that contains a field and an SDT between two editable paragraphs.</steps>
+      <expected>Each construct renders as a visible placeholder atom labeled with its kind, in the correct position between the paragraphs; no editor error on load.</expected>
+    </ui-test>
+    <ui-test name="Typing inside an atom is a no-op">
+      <steps>Select an atom placeholder and attempt to type / paste into it.</steps>
+      <expected>No text is inserted; the atom content is unchanged (non-editable leaf); the caret does not enter the atom.</expected>
+    </ui-test>
+    <ui-test name="Atom carries its paraId">
+      <steps>Inspect the mounted atom node's attributes after load.</steps>
+      <expected>The node's `paraId` attr equals the descriptor's paraId, making it addressable by the patch model.</expected>
+    </ui-test>
+    <ui-test name="Dark-mode render (ADR-021)">
+      <steps>Render the editor with atom placeholders under the Fluent v9 dark theme provider.</steps>
+      <expected>Placeholder chrome (border, label, icon) uses theme tokens and is legible in dark mode; no hard-coded light colors.</expected>
+    </ui-test>
+  </ui-tests>
+
+  <escalation>
+    <trigger>If the task-012 atom descriptor cannot express a construct the client must render in order (e.g. a nested/floating object with no stable paraId), STOP and surface it (root §6 / §6.5) rather than inventing a client-side identity — the atom's addressability depends on the server descriptor.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/opaqueAtomNode.ts (new non-editable atom node type)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (atom node registered)</output>
+    <output type="test">Colocated Vitest tests for atom render/non-editable/order/paraId (extended in task 024)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A doc with fields/SDT renders those constructs as placeholder atom nodes, in correct document order, without editor error.</criterion>
+    <criterion testable="true">Each atom node is non-editable and carries its `paraId` attribute.</criterion>
+    <criterion testable="true">Attempting to type inside an atom is a no-op — content unchanged (negative case).</criterion>
+    <criterion testable="true">No `@tiptap-pro/*` / AGPL / EigenPal runtime dependency is introduced; `npm run build:prod` for the shared lib is green (NFR-03).</criterion>
+    <criterion testable="true">The dark-mode render (ADR-021) is legible with theme tokens.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Client half of FR-02; the server projection half is task 012 (agree the atom descriptor contract with it).
+    Render-only — no fetch, no save wiring. Client task (no BFF surface) — no publish-size / CVE gate. The
+    interceptor (task 020) enforces non-editability at the step level; this task enforces it at the schema
+    level (`atom: true`).
+
+    COMPLETED 2026-07-22. New file `src/client/shared/Spaarke.Compose.Components/src/widgets/opaqueAtomNode.ts`
+    defines TWO node types mirroring task 012's two server-emitted atom shapes: `ComposeBlockAtomNode`
+    (`group: 'block'`, parses the server's compose-atom div with data-atom-kind/data-atomid) and
+    `ComposeInlineAtomNode` (`group: 'inline'`, parses the server's compose-atom span with data-atom-kind, inherits
+    its containing paragraph's `data-paraid` via `closest()`). Both are `atom: true` leaves with no `content`
+    expression (structural non-editability — no interior cursor position). Registered additively in
+    `ComposeEditor.tsx` as `COMPOSE_R4_OPAQUE_ATOMS`; new `.compose-atom*` CSS classes added to `useStyles()`
+    (semantic tokens only, ADR-021). 17 new colocated Jest tests in `opaqueAtomNode.test.ts` (package uses
+    Jest, not Vitest — deviation noted). Full details, the paraId/atomId identity-model deviation (block
+    atoms use `atomId` not `paraId` — a documented, non-blocking resolution of a POML-vs-task-012-contract
+    naming mismatch), and quality-gate results: `notes/task-021-opaque-atom-node-decisions.md`.
+
+    Deviations from literal POML text (both documented, neither blocking): (1) "Vitest" → Jest (matches
+    package.json + all existing colocated tests); (2) "Placeholder NodeView" → `renderHTML` + token-CSS
+    (matches every existing Compose schema extension's pattern; no ReactNodeViewRenderer precedent exists
+    in this codebase). Step 9.7 (browser dark-mode check) not run — no `--chrome` session; covered instead
+    by a unit-level "no inline style/hex" assertion (ADR-021) and deferred to task 024 / a future --chrome
+    session per the Step 9.7 skip rule.
+
+    Verification: `npm install --legacy-peer-deps` (no changes); `npx jest opaqueAtomNode` 17/17 pass;
+    `npx jest` full suite 200 passed / 25 suites pre-existing-fail on missing `@spaarke/*` sibling `dist/`
+    builds (confirmed unrelated — none import this task's files); `npx tsc --noEmit` same pre-existing
+    `@spaarke/*` resolution errors only, zero errors in this task's files; `grep tiptap-pro package.json`
+    — none (NFR-03 confirmed). Quality gates: code-review 0 Critical / 0 Warning / 1 Suggestion (applied);
+    adr-check 0 Critical / 0 Warning (ADR-021 compliant; ADR-028/013/007/010 not applicable to this
+    render-only client node).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

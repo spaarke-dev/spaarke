@@ -931,6 +931,45 @@ public sealed class StubMembershipResolverService : IMembershipResolverService
 
         return Task.FromResult(response);
     }
+
+    public Task<Sprk.Bff.Api.Services.Ai.Membership.Models.MembershipResponse> ResolveByContactAsync(
+        Guid contactId,
+        string entityType,
+        MembershipResolveOptions? options,
+        CancellationToken ct)
+    {
+        // teams-app-r1 task 021 — contact-anchored entry point. Not exercised by
+        // the Phase 2 AC-1P2.6 endpoint-contract test; project the junction by
+        // contactId so the stub honors the interface with a shape-consistent
+        // response (allowlist filtering is covered by MembershipResolverService
+        // unit tests, not this stub).
+        var matchingIds = _state.Junction
+            .Where(j => j.EntityLogicalName == entityType && j.PersonId == contactId)
+            .Select(j => j.EntityRecordId)
+            .Distinct()
+            .OrderBy(g => g)
+            .ToList();
+
+        var byRole = _state.Junction
+            .Where(j => j.EntityLogicalName == entityType && j.PersonId == contactId)
+            .GroupBy(j => j.Role)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<Guid>)g.Select(j => j.EntityRecordId).Distinct().ToList());
+
+        var response = new Sprk.Bff.Api.Services.Ai.Membership.Models.MembershipResponse(
+            EntityType: entityType,
+            PersonIdentity: new Sprk.Bff.Api.Services.Ai.Membership.Models.PersonIdentity(
+                SystemUserId: Guid.Empty, ContactId: contactId),
+            Ids: matchingIds,
+            ByRole: byRole,
+            Count: matchingIds.Count,
+            CacheExpiresAt: DateTimeOffset.UtcNow.AddMinutes(5),
+            ContinuationToken: null,
+            RelatedByRole: null);
+
+        return Task.FromResult(response);
+    }
 }
 
 /// <summary>

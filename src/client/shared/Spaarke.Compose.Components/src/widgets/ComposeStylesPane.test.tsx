@@ -257,6 +257,17 @@ describe('ComposeStylesPane panel', () => {
     editor.destroy();
   });
 
+  it('item 5a: shows an always-visible purpose hint when styles are present (the thin one-button case)', () => {
+    const editor = makeEditor('<p>Body only — the common single-"Body Text" case.</p>');
+    renderPane(editor);
+    // Even with just "Body Text", the pane explains what clicking a style does.
+    expect(screen.getByTestId('compose-styles-pane-apply-Normal')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-styles-pane-hint')).toHaveTextContent(
+      'Click a style to apply it to the paragraph your cursor is in.'
+    );
+    editor.destroy();
+  });
+
   it('clicking an existing style applies it to the current selection', async () => {
     const user = userEvent.setup();
     const editor = makeEditor('<h1>Title</h1><p>Body copy.</p>');

@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Two-tier session model — loose vs Analysis-owned + explicit promotion</title>
+    <phase>2 Session</phase>
+    <gate>passed</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Spans BFF session model + SpaarkeAi `ConversationPane`; changes session-lifecycle semantics (auto-create vs explicit promotion); tags bff/frontend/session.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded model change over existing `ChatSessionManager` + `ConversationPane` with a clear rule (no auto-Analysis on casual chat); no architectural authoring.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares session code with 020/021/022 and `ConversationPane` with redesign-r1 decomposition; serial within Phase 2; `/conflict-check` before the BFF PR.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff, frontend, session</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Implement the two-tier session model: loose sessions persist server-side and appear in history but are NOT
+    `sprk_analysis` records; a casual chat NEVER auto-creates an Analysis. Add an explicit promotion path that binds a
+    loose session to a new/named Analysis (reusing the task-020 FK bind + task-021 create seam). Distinguish the two
+    tiers in `ChatSessionManager` and surface promotion in `ConversationPane`.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in BFF session persistence (`ChatSessionManager`) and the SpaarkeAi
+    three-pane `ConversationPane`. Follow ADRs strictly; Fluent v9 for any UI (ADR-021).
+  </role>
+
+  <goal>
+    A loose session persists (Redis→Cosmos, appears in history) without creating a `sprk_analysis`; an explicit
+    "promote" action binds an existing loose session to a new/named Analysis via the task-020 FK; build + tests green;
+    publish-size ≤60 MB + no new HIGH CVE reported.
+  </goal>
+
+  <context>
+    <background>
+      Today every session flows through `ChatEndpoints` (Redis 24h → Cosmos → `sprk_aichatsummary` anchor). Task 020
+      adds the `sprk_aichatsummary → sprk_analysis` FK. The two-tier rule (spec FR-07): an ad-hoc/casual chat is a
+      loose session (persisted, in history, NO Analysis FK); only an explicit user action promotes it into an
+      Analysis. Promotion reuses the create-Analysis + FK-bind seams (tasks 021/020), NOT a new store. This avoids
+      polluting `sprk_analysis` with disposable chats.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs (loose vs Analysis-owned tier)</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/.../ConversationPane (promotion affordance)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs (task-020 FK bind — reused by promotion)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (loose-vs-owned tests)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">Session→Analysis FK bind path (promotion reuses it to bind a loose session to a new Analysis).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: session creation. A casual/ad-hoc chat MUST NOT auto-create a `sprk_analysis`; loose sessions carry no analysis FK but still persist + appear in history.</constraint>
+    <constraint source="project">SCOPE: promotion. Explicit promotion binds a loose session to a new/named Analysis by reusing the task-020 FK bind + create seam; MUST NOT introduce a second session store or write `sprk_analysischatmessage`.</constraint>
+    <constraint source="ADR-040">SCOPE: both tiers. Cosmos remains the transcript store-of-record for loose and owned sessions alike (Path A); Dataverse anchor only appears on promotion.</constraint>
+    <constraint source="ADR-013">SCOPE: any AI capability the promotion path needs. Reach via `PublicContracts/`; MUST NOT fork `Services/Ai/` or inject AI-internal types.</constraint>
+    <constraint source="ADR-021">SCOPE: `ConversationPane` promotion affordance. Fluent UI v9 components + theme tokens; MUST render correctly in dark mode.</constraint>
+    <constraint source="ADR-029">SCOPE: this BFF-touching task. State Placement Justification, report `dotnet publish` size + diff vs ~49.63 MB baseline (≤60 MB), confirm no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Two-tier session model + promotion</topic>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/public-contracts-facade.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+    <patterns>
+      <pattern name="FK bind reuse" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs">
+        Promotion reuses the task-020 `sprk_analysis` FK write on the existing loose session's `sprk_aichatsummary` record — no new record type.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor + reason; load knowledge; confirm task 020 FK path present.</step>
+    <step order="1">In `ChatSessionManager`, model the loose (no analysis FK) vs Analysis-owned tier; ensure a new casual chat is loose by default and writes NO `sprk_analysis`.</step>
+    <step order="2">Implement explicit promotion: bind an existing loose session to a new/named Analysis (create Analysis via the task-021 seam + write the FK via task-020 path).</step>
+    <step order="3">Surface the promotion affordance in `ConversationPane` (Fluent v9); loose sessions still list in history.</step>
+    <step order="4">Add tests: casual chat → loose session, no Analysis; promotion → loose session gains the analysis FK; history lists both tiers.</step>
+    <step order="5">`/conflict-check` vs redesign-r1 (`ConversationPane`) + redesign-r2 (`Services/Ai/`); `dotnet build` + `dotnet test`; `dotnet publish` size + CVE report.</step>
+    <step order="6">Update TASK-INDEX.md: set 023 status to ✅.</step>
+    <step order="7">Document any deviation in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If distinguishing loose vs Analysis-owned requires a schema change (new column/flag) beyond the owner-created FK, STOP and escalate — schema is an owner-gated prerequisite (CLAUDE.md §6).</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Casual chat creates no Analysis">
+      <steps><step>Open SpaarkeAi, start an ad-hoc chat, send a message.</step><step>Check the Analysis hub grid.</step></steps>
+      <expected>The chat appears in session history but NO new `sprk_analysis` record exists.</expected>
+    </test>
+    <test name="Explicit promotion binds a loose session">
+      <steps><step>From a loose session, invoke "promote", supply a name.</step><step>Reopen the Analysis hub grid.</step></steps>
+      <expected>A new named `sprk_analysis` exists bound to that session's FK; promotion affordance renders correctly in dark mode (ADR-021).</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build/test BFF; `dotnet publish -c Release`; `dotnet list package --vulnerable`.</tool>
+    <tool name="npm">Build SpaarkeAi client.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</output>
+    <output type="code">src/solutions/SpaarkeAi/src/ (ConversationPane promotion affordance)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (loose-vs-owned tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a casual/ad-hoc chat, when messages are sent, then a loose session persists (Redis→Cosmos, in history) and NO `sprk_analysis` is created.</criterion>
+    <criterion testable="true">Given a loose session, when the user explicitly promotes it with a name, then a new named `sprk_analysis` is created and the loose session is bound via the `sprk_analysis` FK.</criterion>
+    <criterion testable="true">Negative: no code path auto-creates an Analysis from a casual chat, and none writes `sprk_analysischatmessage`.</criterion>
+    <criterion testable="true">Both loose and Analysis-owned sessions appear in session history.</criterion>
+    <criterion testable="true">The `ConversationPane` promotion affordance renders correctly in light + dark mode (ADR-021).</criterion>
+    <criterion testable="true">BFF publish-size ≤60 MB compressed (diff reported); no new HIGH CVE; all unit tests pass; build green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-07 / PLAN §2.4. Promotion is the loose→owned bridge; reuse tasks 020/021 seams — no new store. `/conflict-check` before the BFF PR.
+
+    COMPLETED 2026-07-29. Full details: projects/ai-advanced-capabilities-analysis-hub-r1/notes/task-023-two-tier-session-model.md
+
+    Summary: added `IChatDataverseRepository.BindSessionToAnalysisAsync` (FK bind on an EXISTING
+    sprk_aichatsummary row) + `ChatSessionManager.PromoteSessionToAnalysisAsync` (re-fetch → bind →
+    update HostContext in place, no new session minted) + `POST /api/ai/analysis/promote`
+    (AnalysisEndpoints.cs — lighter sibling of /fork: bind-only, no mint, no archive; compensates by
+    deleting the Analysis if the bind fails or the session vanished). Client: HistoryOverlay.tsx
+    (HistoryMenu) gained a self-contained "Promote to Analysis…" affordance (icon button + Fluent v9
+    Dialog) — zero ConversationPane.tsx changes, per the merge-order note.
+
+    Course-correction during implementation: the first draft swallowed a BindSessionToAnalysisAsync
+    failure (mirroring CreateSessionAsync's tolerant posture); the compensation contract test caught
+    this (expected 500, got 201) and the fix now propagates the bind failure so the endpoint
+    compensates — see notes file "Design note" section.
+
+    Tests: 12 new/updated (2 ChatDataverseRepositoryTests, 3 ChatSessionManagerTests, 7
+    AnalysisPromoteEndpointContractTests incl. the negative acceptance criterion), all green.
+    dotnet build: 0 errors. Full unit suite: 9027 passed / 8 pre-existing-and-unrelated failures
+    (verified via git stash -u against the pre-task baseline). npm run typecheck: 0 new surface
+    errors. Publish size 47.52 MB (+0.01 MB vs baseline). No new CVE (zero package changes).
+    /conflict-check: no open PR overlap on any touched file.
+
+    Scope decision: History-list visual tier distinction (loose vs Analysis-owned row styling) was
+    deferred — it depends on a pre-existing, unrelated gap (StoredSession.EntityRefs is never
+    written by any code path today) and was not named in this task's acceptance criteria. The
+    "Promote" affordance is offered on every row; the server's one-time-bind guard (400 on an
+    already-Analysis-owned session) is the actual enforcement point.
+
+    Open follow-up (not blocking): dark-mode rendering of the new Dialog was not visually verified
+    via ui-test/browser in this pass (structurally theme-token-driven, so expected to be correct;
+    flagged as a Warning in the Step 9.5 ADR check, not a violation).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL: code-review + adr-check).</protocol>
+  </execution>
+</task>

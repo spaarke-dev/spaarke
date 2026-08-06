@@ -217,6 +217,7 @@ import {
   type ITodoRegardingTargetCatalogEntry,
   type PolymorphicPickerProps,
   type RecordTypeCatalogEntry,
+  OOB_MODAL_SIZES,
 } from '@spaarke/ui-components';
 
 /**
@@ -244,7 +245,7 @@ import {
 // in index.ts and the manifest attributes on every release (SRFR-033).
 // ---------------------------------------------------------------------------
 
-const BUILD_DATE = '2026-07-08';
+const BUILD_DATE = '2026-08-03';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -1345,12 +1346,14 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
         // `TypeError: Cannot read properties of undefined (reading '_clientApiExecutor')`
         // when unbound. Method-call form preserves `this`.
         try {
+          // `record` OOB size (85%×85%) — record-modal-selection.md invariant
+          // (spec FR-11/FR-18, task 090); was an ad-hoc 80%×80% literal.
           const result = xrm.Navigation.navigateTo(
             { pageType: 'entityrecord', entityName, entityId },
             {
               target: 2,
-              width: { value: 80, unit: '%' },
-              height: { value: 80, unit: '%' },
+              width: OOB_MODAL_SIZES.record.width,
+              height: OOB_MODAL_SIZES.record.height,
             }
           );
           if (result && typeof (result as Promise<unknown>).catch === 'function') {

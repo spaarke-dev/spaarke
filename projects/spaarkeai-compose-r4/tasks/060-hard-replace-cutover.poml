@@ -1,0 +1,190 @@
+<task id="060" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Hard-replace cutover completion — remove residual mammoth, confirm one engine (FR-12)</title>
+    <phase>6 Hardening + cutover</phase>
+    <gate>startable</gate>
+    <status>done-with-exception</status>
+    <resolution date="2026-07-23" source="owner §6.5 Path-A">
+      CORE hard-replace COMPLETE: write path fully on ComposeShadowPatchEngine (+ renderer for born-in-editor,
+      cited I-5 exception); both legacy WRITERS (DocxAnnotationWriter, ComposeParagraphRedlineSynthesizer) +
+      collectEditedParagraphs + LocateTarget confirmed ZERO live-code refs (comments acceptable). mammoth
+      removal DEFERRED as a §6.5 Path-A exception: three transient docx mounts (Browse local file — client-only
+      per ADR-040; Assistant-upload; Open-in-Compose) have no server projection and legitimately need the client
+      mammoth mapper; routing them through the projection builder is net-new functional work → R5 G6. mammoth is
+      a READ/display mapper, not a write-path author — retaining it does not violate I-5/I-7. Causes no errors
+      (038 guardrails treat browsed docx as loaded). FR-12 "mammoth gone" amended to "removed from stored-Load
+      path; retained as transient/Browse mapper." Evidence + honesty note (transient-flow save fidelity):
+      notes/060-BLOCKED-projection-less-transient-mounts.md.
+    </resolution>
+    <adjustment date="2026-07-23" source="owner C-revised + task 038">
+      C-REVISED (owner 2026-07-23): the two byte-authors are kept separate for R4. `ComposeShadowPatchEngine`
+      is the sole EDIT-path byte-author; `ComposeDocumentRenderer` is RETAINED as the born-in-editor
+      clean-authoring path (cited I-5 exception — zero text-search, I-7 fully honored). Therefore "exactly ONE
+      engine / one byte-author" in this task means one EDIT-path byte-author + the retained renderer. DO NOT
+      delete `ComposeDocumentRenderer`, `SynthesizeDocument`, or `buildContentModel`. Scope of this task is the
+      residual `mammoth` fallback removal + the legacy grep-audit ONLY. Grep for `DocxAnnotationWriter` /
+      `ComposeParagraphRedlineSynthesizer` / `LocateTarget` must show zero LIVE-CODE references; retrospective
+      `//`-comment / doc-string mentions left by task 036 are acceptable (036 already proved zero live refs).
+      Deps updated: 032,034,006,036,038.
+    </adjustment>
+    <rigor>FULL</rigor>
+    <rigor-reason>Irreversible final removal of all legacy client + server write paths; modifies .ts/.tsx and touches the BFF Compose surface; gated on the Phase 0 gate (006); high blast radius — the canonical FULL trigger set (deletion + bff-api + frontend tags).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Final irreversible removal of all legacy paths, high blast radius — a mistake here silently re-introduces a lossy fallback mount or leaves a dead text-search path alive. Requires opus-grade judgment to confirm ZERO residual references across two languages before deletion.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Removes residual shared client + server paths (`docxBridge.ts`, `ComposeEditor.tsx`, `Services/Compose/`) that every other Compose task also touches; must run sequentially against a quiesced tree.</parallel-reason>
+    <deps>032,034,006</deps>
+    <tags>bff-api,frontend,docx,deletion</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Complete the hard-replace cutover (FR-12). This is the FINAL, IRREVERSIBLE removal of every legacy
+    write path. Do it in this exact order because the deletions are gated and the gate is load-bearing:
+    (1) CONFIRM the Phase 0 gate (task 006) is GREEN and task 032 (retire both legacy writers) is DONE —
+    if either is not, STOP and remain blocked (NFR-08: no old-path deletion before the proof gate passes).
+    (2) CONFIRM there is NO projection-less mount left anywhere (the projection builder must be the only
+    mapper). If ANY projection-less mount still exists, mammoth removal is BLOCKED — surface per root §6;
+    do NOT delete mammoth to "clean up" while a mount still needs it.
+    (3) Remove the residual `mammoth` fallback: delete `docxToTipTapHtml` from `docxBridge.ts` and the
+    mammoth fallback branch in `ComposeEditor.tsx`; remove the `mammoth` dependency.
+    (4) Grep-audit the whole repo to prove ZERO remaining references to `mammoth`, `collectEditedParagraphs`,
+    `DocxAnnotationWriter`, `ComposeParagraphRedlineSynthesizer`, and `LocateTarget` — no text-search,
+    paragraph-diff, or legacy-writer call site survives.
+    (5) Confirm exactly ONE engine remains: the `ComposeShadowPatchEngine` (Patch Engine). Build `build:prod`
+    for the shared lib and build the BFF — both green. This is a DELETION task — no new surface, no
+    `&lt;justification&gt;`. Run `/conflict-check` before the PR (Compose overlaps sibling projects).
+  </prompt>
+
+  <role>
+    Senior full-stack engineer (.NET 8 `Services/Compose/` + React/TypeScript `Spaarke.Compose.Components`)
+    performing the terminal cutover of a mission-critical rip-and-replace. Understands the hard-replace
+    contract (NFR-08: the Phase 0 proof gate is a HARD prerequisite to old-path deletion) and the seven
+    invariants (esp. I-5 one byte-author, I-7 no text-search in the write path).
+  </role>
+
+  <goal>
+    The hard-replace is complete: residual `mammoth` fallback mounts are gone (`docxToTipTapHtml` in
+    `docxBridge.ts` and the `ComposeEditor.tsx` fallback branch removed; `mammoth` dependency dropped);
+    a repo-wide grep shows ZERO references to `mammoth`, `collectEditedParagraphs`, `DocxAnnotationWriter`,
+    `ComposeParagraphRedlineSynthesizer`, or `LocateTarget`; no projection-less mount remains; exactly ONE
+    engine — the `ComposeShadowPatchEngine` — writes the package; `build:prod` (shared lib) and the BFF
+    build are both green. Loading a document no longer has any mammoth fallback branch to hit.
+  </goal>
+
+  <context>
+    <background>
+      Design §6 (Phase 6 — Hardening + cutover: "delete dead code; remove `mammoth`") and §2 (RIP OUT list).
+      Spec FR-12 ("the old paths are removed only after the Phase 0 gate passes ... Residual `mammoth` is
+      removed once no projection-less mount remains") and NFR-08 (hard-replace safety — the Phase 0 proof
+      gate is a HARD prerequisite to old-path removal). Task 032 already retired the two legacy writers
+      (`DocxAnnotationWriter`, `ComposeParagraphRedlineSynthesizer`); this task removes the LAST residual —
+      the mammoth fallback on the client — and proves the whole legacy surface is gone. `as-built-inventory.md`
+      RIP list names the exact residual sites: `docxBridge.ts` (`docxToTipTapHtml`) + the `ComposeEditor.tsx`
+      fallback branch. Task 006 (Phase 0 gate) is the HARD prerequisite; without it green this task remains
+      blocked.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts — remove `docxToTipTapHtml` (the residual mammoth mapper); remove the `mammoth` import/dependency</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — remove the mammoth fallback branch (the projection builder is the only mapper)</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ — task 032 must have already deleted `DocxAnnotationWriter.cs` + `ComposeParagraphRedlineSynthesizer.cs`; this task grep-confirms zero residual references</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs — the ONE engine that must remain (task 030)</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r4/notes/as-built-inventory.md — the authoritative RIP list (exact residual sites + line numbers)</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §6 (Phase 6), §2 (RIP OUT)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-12, NFR-08, Success Criterion 7</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="006" status="blocked">Phase 0 GATE — HARD prerequisite (NFR-08). No old-path deletion may proceed until 006 is green. If not green, remain blocked and escalate.</dependency>
+      <dependency task="032" status="blocked">Retire both legacy writers — must be DONE; this task removes the LAST residual (mammoth) and grep-confirms the writers are gone.</dependency>
+      <dependency task="034" status="blocked">Patch-engine seam slices + corpus proof — the post-cutover byte-diff evidence base that 061 re-runs.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-12">Scope: residual-mammoth removal ONLY after the Phase 0 gate (006) is green AND no projection-less mount remains. MUST NOT delete mammoth while any projection-less mount still needs it — that is a BLOCKED condition, escalate.</constraint>
+    <constraint source="spec / NFR-08">The Phase 0 proof gate is a HARD prerequisite to old-path removal. MUST verify 006 green before any deletion in this task. Silent bypass is a root §6 escalation.</constraint>
+    <constraint source="project / I-5,I-7">After cutover exactly ONE byte-author remains (the `ComposeShadowPatchEngine`); zero text-search anchoring survives in the write path. Grep MUST show no `LocateTarget` / text-search call site.</constraint>
+    <constraint source="project / §10 BFF hygiene">State the Placement Justification in the PR (deletion consolidates onto `Services/Compose/`; no new surface). Report BFF publish size absolute + delta vs ~49.63 MB baseline (incl. PDBs), ≤60 MB — a deletion should not increase it. Verify no new HIGH CVE.</constraint>
+    <constraint source="ADR-038 / NFR-06">Do NOT delete or weaken the corpus/seam evidence; the post-cutover corpus proof (task 034/061) must still pass. No `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests introduced.</constraint>
+    <constraint source="project / conflict-check">Run `/conflict-check` before the PR — `Services/Compose/` + `Spaarke.Compose.Components/` overlap `spaarkeai-compose-r1/r2/r3` and `spaarke-ai-architecture-redesign-r2`.</constraint>
+    <constraint source="NFR-03">MIT/permissive only. Removing `mammoth` (a dependency) reduces surface; MUST NOT add any replacement runtime package.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Hard-replace cutover completion; residual-dependency removal; grep-audit of retired legacy surfaces; BFF publish-size + CVE hygiene on a deletion</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r4/notes/as-built-inventory.md</file>
+    </files>
+    <patterns>
+      <pattern name="RIP-list grep-audit" location="projects/spaarkeai-compose-r4/notes/as-built-inventory.md">
+        The RIP list enumerates every legacy site (mammoth `docxToTipTapHtml`, `collectEditedParagraphs`,
+        `DocxAnnotationWriter`/`LocateTarget`, `ComposeParagraphRedlineSynthesizer`). Use it as the closed
+        grep checklist — zero hits across the repo is the acceptance bar.
+      </pattern>
+      <pattern name="One-engine invariant (I-5)" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs">
+        After cutover the Patch Engine is the sole byte-author. Confirm no other class writes the package.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration + gate check">Output the FULL rigor-level declaration (rigor FULL, reason: irreversible deletion + bff-api/frontend/deletion tags). Load knowledge files + `bff-extensions.md`. VERIFY task 006 (Phase 0 gate) is GREEN and task 032 is DONE — if either is not, STOP, remain blocked, escalate per root §6/§6.5. State the Placement Justification for the PR.</step>
+    <step order="1" name="Confirm no projection-less mount remains">Audit every Compose editor mount (`ComposeEditor.tsx` and any other mount site) to confirm the projection builder is the only mapper and NO mount depends on the mammoth fallback. If ANY projection-less mount still exists, mammoth removal is BLOCKED — surface per root §6 and stop.</step>
+    <step order="2" name="Remove residual mammoth">Delete `docxToTipTapHtml` from `docxBridge.ts` and the mammoth fallback branch from `ComposeEditor.tsx`; remove the `mammoth` dependency from the shared-lib package manifest.</step>
+    <step order="3" name="Grep-audit — prove the legacy surface is gone">Run repo-wide grep for `mammoth`, `collectEditedParagraphs`, `DocxAnnotationWriter`, `ComposeParagraphRedlineSynthesizer`, and `LocateTarget`. Every one MUST return ZERO references. If any survives, resolve it (it belongs to the RIP list) before proceeding.</step>
+    <step order="4" name="Confirm one engine + build">Confirm exactly ONE byte-author remains — `ComposeShadowPatchEngine`. Build the shared lib with `npm run build:prod` (NOT `npm run build`) and build the BFF (`dotnet build src/server/api/Sprk.Bff.Api/`). Both green.</step>
+    <step order="5" name="Publish-size + CVE report">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size absolute + delta vs ~49.63 MB baseline (incl. PDBs), ≤60 MB. Run `dotnet list package --vulnerable --include-transitive` — no new HIGH CVE.</step>
+    <step order="6" name="conflict-check + finalize">Run `/conflict-check` before the PR. Update `projects/spaarkeai-compose-r4/tasks/TASK-INDEX.md`: set this task's status to ✅. Document any deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts (docxToTipTapHtml + mammoth removed)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (mammoth fallback branch removed)</output>
+    <output type="report">Grep-audit result (zero references to mammoth / collectEditedParagraphs / DocxAnnotationWriter / ComposeParagraphRedlineSynthesizer / LocateTarget)</output>
+    <output type="report">Publish-size absolute + delta vs ~49.63 MB baseline (≤60 MB); CVE scan; Placement Justification for the PR</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Doc renders via projection (no mammoth fallback)">
+      <steps>
+        <step>Load a corpus doc.</step>
+        <step>Verify it renders through the projection path with no console error and no mammoth fallback branch hit.</step>
+      </steps>
+      <expected>The doc renders via projection with no console error and no mammoth fallback.</expected>
+    </test>
+    <test name="Dark mode compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode.</step>
+        <step>Verify the Compose surface adapts.</step>
+      </steps>
+      <expected>All colors use semantic tokens per ADR-021.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Task 006 (Phase 0 gate) is confirmed GREEN and task 032 confirmed DONE before any deletion occurs; if not, the task remains blocked (no deletion happens).</criterion>
+    <criterion testable="true">Repo-wide grep shows ZERO references to `mammoth`, `collectEditedParagraphs`, `DocxAnnotationWriter`, `ComposeParagraphRedlineSynthesizer`, and `LocateTarget`.</criterion>
+    <criterion testable="true">No projection-less mount remains — the projection builder is the only mapper; loading a document has no mammoth fallback branch to hit.</criterion>
+    <criterion testable="true">Exactly ONE byte-author (the `ComposeShadowPatchEngine`) remains; `npm run build:prod` (shared lib) and the BFF build are both green.</criterion>
+    <criterion testable="true">Negative: if any projection-less mount still exists, mammoth removal is NOT performed — the task escalates as BLOCKED per root §6.</criterion>
+    <criterion testable="true">Publish size reported absolute + delta vs ~49.63 MB baseline, ≤60 MB; no new HIGH CVE; `/conflict-check` run before the PR.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If ANY projection-less mount still exists, mammoth removal is BLOCKED — do NOT delete mammoth; surface the conflict per root §6. Likewise if task 006 (Phase 0 gate) is not GREEN or task 032 is not DONE, remain blocked and escalate rather than proceeding with an ungated deletion (NFR-08).</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

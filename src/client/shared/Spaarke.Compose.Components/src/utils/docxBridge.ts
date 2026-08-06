@@ -1,18 +1,21 @@
 /**
- * docxBridge — DOCX ↔ TipTap conversion helpers (R1 LOCKED behaviour).
+ * docxBridge — DOCX ↔ TipTap conversion helpers.
  *
  * Project:     spaarkeai-compose-r1, task 045 (Phase 4 W4).
  * Locked spec: `projects/spaarkeai-compose-r1/notes/spikes/spike-1-tiptap-docx-roundtrip.md`
  *
- * Direction split:
- *  - IMPORT (DOCX → HTML → TipTap):  mammoth ^1.8.0 (BSD-2-Clause)
- *  - EXPORT (TipTap JSON → DOCX):    docx     ^9.0.3 (MIT)
+ * Task 013 (spaarkeai-compose-fidelity-r4.5, F-2 "one reader"): the client-side IMPORT path
+ * (`docxToTipTapHtml`, DOCX → HTML → TipTap via mammoth ^1.8.0 BSD-2-Clause) has been DELETED —
+ * every Compose entry path (Load, Upload, Browse, open-in-Compose) now hydrates a server-side
+ * `ComposeDocxProjection` (`ComposeDocxProjectionBuilder`, `Sprk.Bff.Api`) instead. This module is
+ * now EXPORT-side only: TipTap JSON → structured content model (`buildContentModel`), consumed by
+ * the server-side `.docx` renderer. It also still owns the load-time paraId carry helpers
+ * (`stampParaIds`, `captureParaIdSnapshot`, `buildBaselineParaIdMap`), which are reader-agnostic —
+ * they stamp/snapshot ids on whatever HTML the editor just mounted (formerly mammoth's HTML, now
+ * the server projection's HTML) and are unchanged by the mammoth removal.
  *
- * Both libraries are **lazy-loaded** via dynamic `import()` so the editor's
- * cold-load cost stays small (per CHAT-ATTACHMENT-POLICY.md lazy-load
- * precedent in `useChatFileAttachment.ts`). Mammoth + docx together add
- * ~150-200 KB minified-gzipped; they are only fetched when the user actually
- * loads or saves a DOCX.
+ * `mammoth` remains a REPO dependency (SprkChat + Notepad, in `@spaarke/ui-components`, still use
+ * it) — only the Compose call site was removed; the package itself is not uninstalled.
  *
  * Round-trip fidelity is governed by the **LOCKED Spike #1 OOB subset**
  * (§3.2 of the spike artifact). Features classified "Preserved" survive;
@@ -22,27 +25,22 @@
  * documented escape hatch.
  *
  * Privacy (ADR-015 Tier 3): document text payloads pass through these
- * helpers in-memory only. NO logging of document content. The
- * `MammothConversionResult` exposes mammoth's per-conversion `messages`
- * array (warnings about unsupported styles, numbering refs lost, etc.) —
- * these are SAFE to log (configuration metadata, not user content). The
- * `html`/`docxBytes` payloads are NOT safe to log.
+ * helpers in-memory only. NO logging of document content.
  *
- * This module is import-side and export-side ONLY. It does NOT speak to
+ * This module is export-side ONLY. It does NOT speak to
  * the BFF, does NOT speak to SPE, does NOT speak to Microsoft Graph.
  * Document bytes arrive from the host (via `ComposeEditor` props) and
  * return to the host. SPE plumbing lives in `ComposeDocumentService` /
  * Compose BFF endpoints.
  *
  * @see projects/spaarkeai-compose-r1/notes/spikes/spike-1-tiptap-docx-roundtrip.md §3 (extension inventory) + §4 (library choice) + §4.5 (client-side conversion strategy)
- * @see projects/spaarkeai-compose-r1/notes/spikes/spike-1-prototype/src/Editor.tsx (mammoth wiring reference)
  * @see projects/spaarkeai-compose-r1/notes/spikes/spike-1-prototype/src/exportDocx.ts (docx wiring reference)
+ * @see projects/spaarkeai-compose-fidelity-r4.5/design.md §4 WS-1 (server projection / F-2 one reader)
  */
 
 import type { Editor } from '@tiptap/core';
 import type {
   ParaIdMapEntry,
-  ComposeEditedParagraph,
   ComposeBaselineParaId,
   ComposeContentModel,
   ComposeContentBlock,
@@ -54,87 +52,12 @@ import type {
 } from '../types/compose-contracts';
 
 // ---------------------------------------------------------------------------
-// Result types
-// ---------------------------------------------------------------------------
-
-/**
- * Result of a DOCX → HTML conversion via mammoth.
- *
- * `html` is the TipTap-compatible HTML markup (set via `editor.commands.setContent`).
- * `messages` is mammoth's per-conversion warning array — surfaces unsupported
- * style references, unmapped numbering, dropped features. R1 captures these
- * but does NOT yet present them to the user (deferred to R2 per spike §5.4).
- */
-export interface MammothConversionResult {
-  /** TipTap-compatible HTML markup. Tier 3 (carries user document content). */
-  html: string;
-  /**
-   * Per-conversion warnings (e.g. "unrecognized style: Heading 9",
-   * "unsupported numbering: 1.1.1"). Each entry is `{ type, message }`.
-   * Tier 1 safe (configuration metadata; no document content).
-   */
-  messages: Array<{ type: string; message: string }>;
-}
-
-// ---------------------------------------------------------------------------
-// Import path: DOCX bytes → TipTap HTML (via mammoth)
-// ---------------------------------------------------------------------------
-
-/**
- * Convert DOCX bytes to TipTap-compatible HTML.
- *
- * Lazy-loads mammoth on first call. Subsequent calls reuse the loaded module.
- *
- * Behaviour notes:
- *  - Mammoth maps `<w:b>`, `<w:i>`, `<w:u>`, `<w:strike>` → HTML inline marks
- *  - Headings 1-6 → `<h1>`-`<h6>`
- *  - BulletList / OrderedList → `<ul>` / `<ol>` (single-level OOB-preserved;
- *    multi-level OOB-degraded per spike §3.2 row 8)
- *  - Tables → `<table><thead><tr><th>` / `<tbody><tr><td>`
- *  - Images → inline base64 data URIs (Image extension `allowBase64: true`)
- *  - Field codes (DATE, AUTHOR, REF) → resolved to current value or dropped
- *  - Headers/footers, page breaks, comments → dropped silently (Open-in-Word
- *    is the FR-12 escape hatch)
- *
- * @param docxBytes  Raw DOCX bytes (typically from SPE drive-item content)
- * @returns          HTML markup + conversion warnings
- * @throws           Error wrapping any mammoth failure (caller decides UX)
- */
-export async function docxToTipTapHtml(docxBytes: ArrayBuffer): Promise<MammothConversionResult> {
-  // Lazy-load mammoth (BSD-2-Clause). First call pays the bundle cost.
-  // Subsequent calls reuse the module from the module-graph cache.
-  //
-  // mammoth's @types/mammoth declares the module exports as a namespace with
-  // `convertToHtml`, `extractRawText`, etc. as top-level functions; bundlers
-  // sometimes wrap this in a `.default` interop shim. Handle both shapes via
-  // `unknown`-cast probing — cleaner than fighting the type system on a
-  // dynamic-import boundary that runs once.
-  const mammothModule = await import('mammoth');
-  const mammothCandidate = mammothModule as unknown as {
-    default?: { convertToHtml: typeof mammothModule.convertToHtml };
-    convertToHtml?: typeof mammothModule.convertToHtml;
-  };
-  const convertToHtml = mammothCandidate.default?.convertToHtml ?? mammothCandidate.convertToHtml;
-  if (!convertToHtml) {
-    throw new Error('docxBridge: mammoth.convertToHtml export not found');
-  }
-
-  const result = await convertToHtml({ arrayBuffer: docxBytes });
-
-  return {
-    html: result.value,
-    // mammoth Result.messages is `Array<{ type: 'warning' | 'error'; message: string }>`
-    messages: result.messages.map(m => ({ type: m.type, message: m.message })),
-  };
-}
-
-// ---------------------------------------------------------------------------
 // R3 FR-08/FR-09/FR-10 — `w14:paraId` identity carry (design §5)
 // ---------------------------------------------------------------------------
 //
-// mammoth flattens `.docx` to HTML and DISCARDS `w14:paraId` (docxToTipTapHtml
-// above), so the paragraph ids arrive from the SERVER pre-parse map (task 010),
-// not from the imported HTML. `stampParaIds` owns the client-side carry: an
+// Task 013: the client-side docx→HTML reader (formerly mammoth's `docxToTipTapHtml`, deleted per
+// F-2 "one reader") is gone — the paragraph ids now ALWAYS arrive via the server pre-parse map
+// (task 010), never from a client-side HTML conversion. `stampParaIds` owns the client-side carry: an
 // EXPLICIT transaction stamping the server ids onto the paragraph nodes
 // immediately after `setContent` (FR-09: load-time ids are server-owned, never
 // left to the minting extension's auto-assign). The OOXML-shaped id generator for
@@ -257,8 +180,11 @@ function forEachBlock(node: TipTapNode, fn: (block: TipTapNode) => void): void {
 
 /**
  * Capture the LOAD-TIME `{ paraId → reject-state text }` snapshot for the editor, in document order.
- * Call immediately after {@link stampParaIds} on a load (or after a born-in-editor seed's setContent):
- * {@link collectEditedParagraphs} diffs the current doc against this to find the dirty paragraphs.
+ * Call immediately after {@link stampParaIds} on a load (or after a born-in-editor seed's setContent).
+ * R4 (task 023): the load-time snapshot now feeds {@link buildBaselineParaIdMap} for the C2 minted-id
+ * stamp; the settled-text DIFF itself is superseded by the step interceptor's operation log
+ * (`stepOperationInterceptor.ts`) — the retired paragraph-diff export (`collectEditedParagraphs`) that
+ * used to diff against this snapshot was removed in task 023 (FR-06 client-half cleanup).
  */
 export function captureParaIdSnapshot(editor: Editor): Map<string, string> {
   const snapshot = new Map<string, string>();
@@ -267,33 +193,6 @@ export function captureParaIdSnapshot(editor: Editor): Map<string, string> {
     if (paraId) snapshot.set(paraId, rejectStateText(block));
   });
   return snapshot;
-}
-
-/**
- * The paragraphs the user CHANGED since load (FR-01), each keyed by its `w14:paraId` with its new
- * reject-state settled text. Diffs the current doc against the load-time {@link captureParaIdSnapshot}
- * snapshot. Emits ONLY paragraphs that EXISTED at load (present in the snapshot) whose settled text
- * changed — the server synthesizer edits matched paragraphs in place and fails fast on a paraId the
- * retained original lacks, so a brand-new paraId (a split/insert) is intentionally NOT emitted here
- * (structural insert/split/delete is out of the E1 delta scope — a future synthesizer extension).
- * Unchanged paragraphs are omitted (sending them would needlessly rewrite their run structure).
- */
-export function collectEditedParagraphs(
-  editor: Editor,
-  snapshot: ReadonlyMap<string, string>
-): ComposeEditedParagraph[] {
-  const edited: ComposeEditedParagraph[] = [];
-  forEachBlock(editor.getJSON() as TipTapNode, block => {
-    const paraId = block.attrs?.paraId as string | undefined;
-    if (!paraId) return;
-    const original = snapshot.get(paraId);
-    if (original === undefined) return; // new paraId (split/insert) — out of E1 delta scope
-    const current = rejectStateText(block);
-    if (current !== original) {
-      edited.push({ paraId, text: current });
-    }
-  });
-  return edited;
 }
 
 /**

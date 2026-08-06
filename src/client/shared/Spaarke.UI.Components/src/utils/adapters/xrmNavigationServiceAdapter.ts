@@ -40,6 +40,7 @@ import type {
 } from '../../types/serviceInterfaces';
 import { getXrm } from '../xrmContext';
 import { cleanGuid } from '../../services/PolymorphicResolverService';
+import { OOB_MODAL_SIZES } from './oobModalSizes';
 
 /**
  * Normalises a dimension value to the Xrm.Navigation format.
@@ -107,6 +108,26 @@ export function createXrmNavigationService(): INavigationService {
     async openRecord(entityName: string, entityId: string): Promise<void> {
       const navigation = getNavigation();
       await navigation.openForm({ entityName, entityId });
+    },
+
+    // Modal-decision standard Layout 1: open the record as a centred dialog
+    // (`target: 2`) at the fixed `record` OOB size (85% × 85%, sourced from
+    // oobModalSizes.ts — spec FR-11), so the host surface (e.g. the SpaarkeAi
+    // Assistant pane) is NOT navigated away. See
+    // docs/standards/MODAL-DECISION-CRITERIA.md.
+    async openRecordModal(entityName: string, entityId: string): Promise<void> {
+      const navigation = getNavigation();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nav = navigation as any;
+      await nav.navigateTo(
+        { pageType: 'entityrecord', entityName, entityId },
+        {
+          target: 2,
+          position: 1,
+          width: OOB_MODAL_SIZES.record.width,
+          height: OOB_MODAL_SIZES.record.height,
+        }
+      );
     },
 
     async openDialog(webresourceName: string, data?: string, options?: DialogOptions): Promise<DialogResult> {

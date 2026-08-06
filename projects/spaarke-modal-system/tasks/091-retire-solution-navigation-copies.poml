@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="091" project="spaarke-modal-system">
+  <metadata>
+    <title>P7 — Retire solution-local navigation.ts copies (LegalWorkspace ≡ SmartTodo) — FR-18</title>
+    <phase>7 OOB consolidation</phase>
+    <gate>blocked until 090</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Modify-then-delete of duplicated helper files with a clear consuming pattern (the shared hub from task 090); bounded blast radius (two solutions), no new architecture.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical dedup + caller repoint against an already-built hub; fully specified once 090 lands.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P7</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>090</deps>
+    <tags>react, typescript, frontend</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>`src/solutions/LegalWorkspace/src/utils/navigation.ts` and `src/solutions/SmartTodo/src/utils/navigation.ts` are byte-identical (both open at 80%×80% via `navigateTo` `target:2`). Retire BOTH by routing their callers through the shared `xrmNavigationServiceAdapter` at the OOB size scale (task 090 constants), then DELETE the two duplicate files. The 80%→85%(record)/70-80%(create-form) size collapse is acceptable pending the one-time P7 visual review (FR-18).</prompt>
+  <role>SPAARKE platform developer. Expert in TypeScript module retirement, Dataverse `navigateTo`, and cross-solution refactors. Follow ADRs strictly.</role>
+  <goal>Both `navigation.ts` copies are deleted; every caller in LegalWorkspace and SmartTodo routes through the shared `xrmNavigationServiceAdapter` at the OOB size scale from task 090; both solutions build green under `@types/react` 18 and React 19 with no dangling imports.</goal>
+
+  <context>
+    <background>Discovery (project CLAUDE.md, 2026-08-01) confirmed `src/solutions/LegalWorkspace/src/utils/navigation.ts` and `src/solutions/SmartTodo/src/utils/navigation.ts` are byte-identical (both 4225 bytes) and both open at 80%×80% via `navigateTo target:2`. Spec FR-18 mandates retiring solution-local `navigation.ts` copies and routing all `navigateTo` through the two sanctioned hubs. Task 090 built the OOB size constants + hub consumption; this task repoints the callers of the two duplicate files to the shared adapter and deletes the duplicates. The size collapse from 80% to the named `record`/`create-form` sizes is a known, accepted change pending the one-time P7 visual review (spec "remaining assumption").</background>
+    <relevant-files>
+      <file role="delete">src/solutions/LegalWorkspace/src/utils/navigation.ts</file>
+      <file role="delete">src/solutions/SmartTodo/src/utils/navigation.ts</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/utils/adapters/xrmNavigationServiceAdapter.ts</file>
+      <file role="modify">callers of both `navigation.ts` copies in `src/solutions/LegalWorkspace/**` and `src/solutions/SmartTodo/**`</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="090" status="pending">OOB size constants + the two hubs consuming them; the size scale the callers repoint onto.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Callers route through the single shared `@spaarke/ui-components` `xrmNavigationServiceAdapter`; MUST NOT reintroduce a solution-local navigation helper (CLAUDE.md §11 — one source of truth).</constraint>
+    <constraint source="project">The 80%→85%(record)/70-80%(create-form) collapse is acceptable pending the one-time P7 visual review; MUST NOT silently preserve a bespoke 80% by pinning a per-caller size — surface any genuine 80% need for the review instead.</constraint>
+    <constraint source="project">Keep OOB `navigateTo` for full main-form editing; only the launch size/route changes (NFR-05, client-only). MUST compile clean under `@types/react` 18 and React 19 (NFR-04).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Retiring duplicated solution-local navigation helpers onto the shared OOB hub</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="record-modal-selection" location=".claude/patterns/ui/record-modal-selection.md">OOB `navigateTo` record open at the 85%×85% invariant.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load both `navigation.ts` copies + the shared `xrmNavigationServiceAdapter`. Declare RIGOR: STANDARD.</step>
+    <step order="1">Grep both solutions for imports/callers of the local `navigation.ts` (LegalWorkspace + SmartTodo); enumerate every call site.</step>
+    <step order="2">Repoint each caller to the shared `xrmNavigationServiceAdapter` using the OOB named size (record/create-form) from task 090; map the former 80%×80% opens onto the appropriate named size.</step>
+    <step order="3">Delete both `src/solutions/LegalWorkspace/src/utils/navigation.ts` and `src/solutions/SmartTodo/src/utils/navigation.ts`; grep to confirm zero remaining imports of either file.</step>
+    <step order="4">Build both solutions and confirm green; confirm dual-React clean (`@types/react` 18 and React 19).</step>
+    <step order="5">Note in `projects/spaarke-modal-system/notes/` any caller flagged as genuinely needing 80% for the one-time P7 visual review.</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: set 091 status to ✅.</step>
+    <step order="7">Document any deviation in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a specific caller genuinely needs the former 80% size (not the named `record`/`create-form` scale), note it for the one-time P7 visual review per CLAUDE.md §6 rather than forcing it to 85% silently or re-pinning a bespoke 80%.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Callers open at the standard OOB size (manual)">
+      <steps>
+        <step>Trigger a former `navigation.ts` open path in LegalWorkspace and in SmartTodo.</step>
+        <step>Measure the opened modal against its viewport.</step>
+      </steps>
+      <expected>Each opens at the named OOB size (record 85%×85% or create-form 70%×80%) via the shared hub; no site opens the old 80%×80% ad-hoc size.</expected>
+    </test>
+    <test name="Dark-mode note">
+      <steps>
+        <step>Observe the opened OOB modal under a dark host theme.</step>
+      </steps>
+      <expected>Dark-mode chrome is N/A here — the OOB `navigateTo` dialog chrome is host-owned, not a Spaarke component; only the launch size/route changed.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test LegalWorkspace and SmartTodo solutions</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/** callers repointed to the shared hub</output>
+    <output type="code">src/solutions/SmartTodo/** callers repointed to the shared hub</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both `src/solutions/LegalWorkspace/src/utils/navigation.ts` and `src/solutions/SmartTodo/src/utils/navigation.ts` are deleted; a grep finds no remaining imports of either file.</criterion>
+    <criterion testable="true">Every former caller routes through the shared `xrmNavigationServiceAdapter` at an OOB named size from task 090.</criterion>
+    <criterion testable="true">Both solutions build green under `@types/react` 18 and React 19 with no dangling imports.</criterion>
+    <criterion testable="true">Any caller genuinely needing the old 80% size is recorded for the P7 visual review rather than silently forced to 85%.</criterion>
+  </acceptance-criteria>
+
+  <notes>Modify-then-delete — no `&lt;justification&gt;` (retires duplicated existing files onto the shared hub; net component count decreases per NFR-06). Depends on 090 (constants + hubs). Runs in parallel group P7 with 092. The 80%→85/70-80 collapse is a spec-acknowledged accepted change pending the one-time P7 visual review. COMPLETED 2026-08-02 (parallel sub-agent, FULL): BOTH files DELETED, zero remaining imports (grep-proven). Real scope = 26 call sites across 17 LW files (090's `.navigateTo(`-grep missed the `navigateToEntity`/openForm shape's 13 extra callers); SmartTodo copy was DEAD CODE (zero callers). Mapping: 5 record-dialog opens → hub openRecordModal (85²); 14 openForm full-page opens → hub openRecord (no size — openForm has none); 4 entitylist → record-size navigateTo (nearest fit, flagged); 3 orphaned openView postMessages preserved verbatim (no receiver exists — flagged). Caught own optional-chaining bug via tsc-baseline diff (LW back to exactly 238). Flags for visual review: FilePreviewDialog lost openInNewWindow (adapter lacks the option); orphaned postMessage receivers; entitylist size mapping. SmartTodo build+tests green. Detail: notes/task-091-completion.md.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,138 @@
+{
+  "$comment": "email-communication-intelligence-r1 task 030 (FR-09) — PROPOSE-FIELD-UPDATES Action SEED (systemPrompt home). ACTION-ONLY per ADR-039: a code-directed capability is an Action row + Binding row (task 030), reached via Services/Ai/PublicContracts/ (ADR-013, the ICommunicationProposeAi facade) — it MUST NOT land on the frozen node-graph playbook engine, PlaybookOrchestrationService, UpdateRecordNodeExecutor, or IInvokePlaybookAi (deleted). This is Job B's OWN targeted field-value extraction: given the operator-owned allow-list fields (sprk_emailupdatefield, enabled rows only) + their extraction guidance + the email/attachment text (+ the already-produced triage output as grounding), it extracts candidate NEW values for those specific fields, each with a VERBATIM citation. It is NOT a redundant classification pass (the classification/triage signal is reused as grounding context, never re-derived). UNLIKE the classic-JPS triage-email.action.json (which needed the JPS $choices dynamic-lookup mechanism), this Action follows the flat-systemPrompt + outputSchema shape of nda-review.action.json — the allow-listed target fields are DYNAMIC (supplied per-run in the ## Input operand by the facade), so a static $choices/enum output would be wrong here. Deploy via Dataverse MCP create_record from this mirror; the systemPrompt is the literal value for sprk_analysisaction.sprk_systemprompt and outputSchema is sprk_analysisaction.sprk_outputschemajson. Owner hygiene: actionCode carries NO version suffix (propose-field-updates, matching nda-review/compose-*/triage-email convention).",
+  "$comment-justification": "§11 Component Justification (root CLAUDE.md §11 / project CLAUDE.md). (1) Existing overlap: none — AiClassificationRung produces a metadata-only classification signal and triage-email produces {category, summary, obligations[], priority, reviewOutcome}, but NEITHER extracts a candidate NEW VALUE for a specific allow-listed record field (old->new), and the Field Mapping Framework is creation-time value copy (different intent). Grep-confirmed no existing Action produces an allow-list-gated, cited field-update proposal shape. (2) Extension instead: this Action reuses the classification/triage signal as grounding (no second classification pass — see $comment-no-second-pass) and adds ONLY targeted extraction of candidate field values from the email/attachment text; new catalog data (ADR-039), not a new engine. (3) Cost-of-doing-nothing: without it, Job B (FR-09) either proposes arbitrary column writes (unsafe) or has nothing for r5 to render + task 031 to apply — the record-currency pillar (G-5 / Success Criterion 6) does not ship.",
+  "$comment-no-second-pass": "FR-05/FR-09 'no second full LLM pass' constraint — this Action is a SINGLE targeted field-value extraction call, not a re-classification. The already-produced triage/classification output is supplied as the OPTIONAL `triage` grounding input (input.triage below) to sharpen extraction; the systemPrompt directs the model to EXTRACT candidate values for the supplied allow-listed fields from the message/attachment text, never to re-classify the email. The facade (CommunicationProposeAi) has NO dependency on ICommunicationClassificationAi/IOpenAiClient — it is structurally incapable of a second classification.",
+  "$comment-trust-invariants": "NFR-06 / ADR-015 trust invariants encoded in the systemPrompt AND enforced downstream in code (Services/Communication, task 030): (a) every proposal carries a plain-language `reason` + a `citation` with a VERBATIM `quotedText`; (b) the BFF VERIFIES the quotedText actually exists in the source communication/attachment before STORING the proposal (a proposal whose cited text cannot be located is DROPPED, not stored — the model is instructed to copy verbatim, but code is the enforcement); (c) the allow-list (sprk_emailupdatefield enabled rows) is the SOLE gate — a field with no enabled row is NEVER proposed, and code re-checks each candidate's field against the enabled set even though the fields are supplied to the model; (d) privilege is flagged, never decided (ADR-015) — nothing is auto-applied (every proposal is stored PENDING and human-confirmed at task 031).",
+  "actionCode": "propose-field-updates",
+  "name": "Propose Field Updates",
+  "description": "Job B (FR-09) targeted field-value extraction: given the operator-owned allow-list fields (sprk_emailupdatefield enabled rows) for the record an email is associated to, plus each field's extraction guidance and the email subject/body/attachment text (grounded in the already-produced triage output), proposes candidate NEW values for those specific fields. Each proposal carries the field logical name, the proposed new value, a VERBATIM citation (source + locator + quoted span), a plain-language reason, and a confidence. Read-only extraction: proposes only — the values are stored PENDING (sprk_emailreviewlog Proposed rows) and applied later under human confirmation (task 031); this Action never writes the target record. Not a classification pass (the classification/triage signal is reused as grounding, never re-derived).",
+  "actionType": 0,
+  "$comment-actionType": "ExecutorType.AiAnalysis = 0 — handled by the existing prompt-driven executor (ActionRunner + PromptSchemaRenderer); a 'prompted' Action per ADR-039. No new executor. Documentary field, mirroring the sibling Action files' convention.",
+  "modelTier": "Fast",
+  "$comment-modelTier": "Maps to sprk_analysisaction.sprk_modeltier = 100000000 (AiModelTier.Fast — 'Cheap/fast models... classification, validation, entity resolution', per Services/Ai/PublicContracts/Binding.cs). Correct tier: targeted extraction/entity-resolution over a bounded set of named fields with verbatim citation, not open-ended deep reasoning.",
+  "temperature": 0.1,
+  "$comment-temperature": "Very low temperature — a field-update proposal must be faithful to the source text (extraction with verbatim citation), never creative. Lower than triage-email (0.2) because the citation MUST be copied verbatim from the source for the NFR-06 verify-cited-text gate to pass.",
+
+  "systemPrompt": "ROLE: You are the Spaarke email record-currency assistant. An inbound email has been associated to a specific Spaarke record (a matter, project, invoice, work assignment, budget, service request, or report card). Your job is to keep that record CURRENT from the email by proposing updates to a FIXED, operator-approved set of fields — and ONLY those fields.\n\nWHAT YOU ARE GIVEN (in the ## Input section): (1) `record` — the target record's entity logical name (context only). (2) `fields` — the ALLOW-LISTED fields you may propose an update to; each has `targetField` (the exact field logical name you MUST use in your output), `fieldType` (Text | Lookup | OptionSet | Number | DateTime | Boolean | Memo | Currency), and optional `extractionGuidance` (how to find/shape the value). (3) `triage` — the already-produced triage output for this email (category, summary, obligations, priority) as GROUNDING context only. (4) `message` — the email `subject`, plain-text `body`, and (when present) extracted `attachmentText`.\n\nYOUR TASK: For each allow-listed field, determine whether the email/attachment text STATES a concrete new value for it. When it does, emit ONE proposal for that field. When it does not, emit NO proposal for that field. Return an EMPTY `proposals` array when the email supports no field updates. Do NOT re-classify the email; the `triage` input is already the classification result — use it only as grounding to sharpen extraction.\n\nHARD RULES (a violation makes the proposal invalid and it will be dropped downstream):\n  1. ALLOW-LIST IS THE ONLY GATE. `field` in every proposal MUST be EXACTLY one of the `targetField` logical names supplied in `fields`. NEVER propose a field that is not in that list, and never invent a field name.\n  2. GROUND EVERY PROPOSAL IN THE SOURCE. Propose a value ONLY when the email `subject`/`body`/`attachmentText` actually states it. Do NOT infer a value from the record type, the triage category, or general knowledge. If the source does not state a value for a field, omit it.\n  3. CITE VERBATIM. Every proposal MUST carry a `citation` whose `quotedText` is an EXACT, VERBATIM excerpt copied character-for-character from the source (`subject`, `body`, or `attachmentText`) — never paraphrased, never reconstructed. Set `citation.source` to `subject`, `body`, or `attachment` accordingly, and `citation.locator` to a short human-readable pointer (e.g. `body: paragraph 2`, or the attachment file/page when known, e.g. `OA_908068.pdf p.1`). A downstream check re-locates your quotedText in the source and DROPS any proposal whose quotedText cannot be found — so copy it exactly.\n  4. SHAPE THE VALUE TO THE FIELD TYPE. `newValue` is plain text, but shape it per `fieldType`: a Number/Currency as a bare number (no currency symbols/thousands separators), a DateTime as an explicit date (prefer ISO-8601 yyyy-MM-dd, or yyyy-MM-ddTHH:mm when a time is stated), a Boolean as `true`/`false`, an OptionSet/Lookup as the human-readable label named in the source (downstream code resolves the label to the Dataverse value). Follow `extractionGuidance` when supplied.\n  5. REASON + CONFIDENCE. Every proposal carries a concise plain-language `reason` (what changed and why, for a human reviewer) and a `confidence` in [0,1] reflecting how unambiguously the source states the value.\n  6. PROPOSE, NEVER DECIDE. You are proposing pending updates a human will confirm — never assert that anything is applied. Privilege, deadlines, and any sensitive fact are surfaced as proposals for review, never auto-decided.\n\nOUTPUT: Emit a JSON object matching the output schema EXACTLY — `{ proposals: [ { field, newValue, citation: { source, locator, quotedText }, reason, confidence } ] }`. additionalProperties is false; do not add fields. An email that supports no allow-listed field update yields an EMPTY `proposals` array — never a fabricated proposal to appear thorough.",
+
+  "input": {
+    "record": {
+      "required": true,
+      "placeholder": "{{record}}",
+      "description": "The target record context: { entityLogicalName }. The record the email is associated to (from the identifier rung, task 020). Context only — do not propose the record's identity; propose values for the allow-listed fields below."
+    },
+    "fields": {
+      "required": true,
+      "placeholder": "{{fields}}",
+      "description": "The ALLOW-LISTED fields (sprk_emailupdatefield enabled rows for this record's entity). Array of { targetField, fieldType, extractionGuidance }. You may propose an update ONLY to a field whose targetField appears here."
+    },
+    "triage": {
+      "required": false,
+      "placeholder": "{{triage}}",
+      "description": "The already-produced triage output for this email (category, summary, obligations, priority) — GROUNDING context only, reused to sharpen extraction. Do NOT re-classify from it."
+    },
+    "message": {
+      "required": true,
+      "maxLength": 30000,
+      "placeholder": "{{message.subject}} {{message.bodyText}} {{message.attachmentText}}",
+      "description": "The email subject + plain-text body + (when present) extracted attachment text, bounded. The ONLY source you may cite from — every quotedText MUST be a verbatim excerpt of this text."
+    }
+  },
+
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["proposals"],
+    "$comment-required": "Object-level required array only (proposals is always present, possibly empty). CLOSED CONTRACT: exactly { proposals[ { field, newValue, citation{source, locator, quotedText}, reason, confidence } ] } — tasks 030 (store)/031 (apply)/032 (feed) + r5 consume exactly these fields; do NOT add fields. citation.source is a closed set (subject|body|attachment) expressed via the OpenAI-subset `enum` keyword.",
+    "properties": {
+      "proposals": {
+        "type": "array",
+        "description": "Zero or more proposed field updates for the allow-listed fields, each grounded in and cited to the email/attachment text. Empty array when the email supports no allow-listed field update — never a fabricated proposal.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["field", "newValue", "citation", "reason", "confidence"],
+          "properties": {
+            "field": {
+              "type": "string",
+              "description": "The target field logical name. MUST be EXACTLY one of the `targetField` values supplied in the `fields` input (the allow-list is the sole gate)."
+            },
+            "newValue": {
+              "type": "string",
+              "description": "The proposed NEW value as plain text, shaped to the field's fieldType (bare Number/Currency; ISO-8601 DateTime; true/false Boolean; human-readable label for OptionSet/Lookup)."
+            },
+            "citation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source", "locator", "quotedText"],
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "enum": ["subject", "body", "attachment"],
+                  "description": "Which part of the email the value was extracted from."
+                },
+                "locator": {
+                  "type": "string",
+                  "description": "A short human-readable pointer to where the quoted span sits (e.g. 'body: paragraph 2', 'subject', 'OA_908068.pdf p.1')."
+                },
+                "quotedText": {
+                  "type": "string",
+                  "description": "A VERBATIM excerpt copied character-for-character from the cited source — the exact span stating the value. A downstream check re-locates this in the source and DROPS the proposal if it cannot be found."
+                }
+              }
+            },
+            "reason": {
+              "type": "string",
+              "description": "A concise plain-language explanation of what the proposed update changes and why, for a human reviewer."
+            },
+            "confidence": {
+              "type": "number",
+              "description": "Confidence in [0,1] that the source unambiguously states this new value."
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "examples": [
+    {
+      "input": {
+        "record": { "entityLogicalName": "sprk_matter" },
+        "fields": [
+          { "targetField": "sprk_closingdate", "fieldType": "DateTime", "extractionGuidance": "The scheduled closing/completion date for the matter, if the email states a new one." }
+        ],
+        "triage": { "category": "Scheduling", "priority": "High" },
+        "message": {
+          "subject": "Closing moved - Smith v. Acme",
+          "bodyText": "Counsel, please note the closing has been moved to August 15, 2026. Update your calendars accordingly.",
+          "attachmentText": ""
+        }
+      },
+      "output": {
+        "proposals": [
+          {
+            "field": "sprk_closingdate",
+            "newValue": "2026-08-15",
+            "citation": {
+              "source": "body",
+              "locator": "body: sentence 1",
+              "quotedText": "the closing has been moved to August 15, 2026"
+            },
+            "reason": "The email states the matter's closing date changed to August 15, 2026.",
+            "confidence": 0.9
+          }
+        ]
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "email-communication-intelligence-r1",
+    "authorLevel": 0,
+    "createdAt": "2026-07-29T00:00:00Z",
+    "description": "Job B (FR-09) targeted field-value extraction — proposes allow-listed field updates (old->new) with a verbatim citation + confidence, stored PENDING (never applied). Not a classification pass.",
+    "tags": ["email-propose", "job-b", "record-currency", "catalog-action", "prompted", "allow-list-gated", "cited"]
+  }
+}

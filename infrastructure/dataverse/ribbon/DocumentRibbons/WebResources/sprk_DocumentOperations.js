@@ -1,11 +1,20 @@
 /**
  * Spaarke Document Operations
- * Version: 1.27.0
+ * Version: 1.28.0
  * Description: Document checkout/checkin operations via BFF API with MSAL authentication
  *
  * ADR-006 Exception: Approved for ribbon button invocation
  *
  * Dependencies: MSAL.js (loaded from CDN)
+ *
+ * Changes in 1.28.0:
+ * - FR-18 (spaarke-modal-system): Removed showChoiceDialog's hand-rolled
+ *   window.top.document DOM overlay (createElement/position:fixed). Reworked
+ *   showDocumentLockedDialog() to chain two Xrm.Navigation.openConfirmDialog
+ *   calls (View Only / Download Copy / Cancel) instead — a SUPPORTED client
+ *   API. Same 'view'|'download'|null return contract; openInWeb/openInDesktop
+ *   callers unchanged. Mailto contact link degrades to plain text (no HTML in
+ *   openConfirmDialog).
  *
  * Changes in 1.27.0:
  * - Replaced hardcoded BFF app ID, MSAL client ID, tenant ID, redirect URI,
@@ -72,7 +81,7 @@ Spaarke.Document.Config = {
     },
 
     // Version
-    version: "1.27.0",
+    version: "1.28.0",
 
     // Document Status Codes (statuscode field values)
     statusCode: {
@@ -109,14 +118,21 @@ Spaarke.Document._getEnvironmentVariable = function(schemaName) {
     return Xrm.WebApi.retrieveMultipleRecords(
         "environmentvariabledefinition",
         "?$filter=schemaname eq '" + schemaName + "'" +
-        "&$select=environmentvariabledefinitionid" +
+        "&$select=environmentvariabledefinitionid,defaultvalue" +
         "&$expand=environmentvariabledefinition_environmentvariablevalue($select=value)"
     ).then(function(result) {
         if (result.entities && result.entities.length > 0) {
             var definition = result.entities[0];
+            // Override value (if set) takes precedence over defaultvalue. Match the
+            // resolution pattern used by @spaarke/auth's resolveRuntimeConfig.ts and
+            // by sprk_emailactions.js — falling back to defaultvalue is REQUIRED
+            // because in dev/demo envs, sprk_TenantId only has a defaultvalue set.
             var values = definition.environmentvariabledefinition_environmentvariablevalue;
             if (values && values.length > 0 && values[0].value) {
                 return values[0].value;
+            }
+            if (definition.defaultvalue) {
+                return definition.defaultvalue;
             }
         }
         return null;
@@ -158,8 +174,11 @@ Spaarke.Document._resolveEnvironmentConfig = function() {
         var cache = Spaarke.Document._envVarCache;
 
         if (cache.bffApiBaseUrl) {
-            Spaarke.Document.Config.bffApiUrl = cache.bffApiBaseUrl.replace(/\/+$/, "");
-            console.log("[Spaarke.Document] BFF URL from env var:", Spaarke.Document.Config.bffApiUrl);
+            // Normalize: strip trailing slashes AND trailing /api to get HOST ONLY.
+            // All fetch URLs must add /api/ themselves (buildBffApiUrl pattern).
+            // This prevents the recurring /api/api/ double-prefix bug.
+            Spaarke.Document.Config.bffApiUrl = cache.bffApiBaseUrl.replace(/\/+$/, "").replace(/\/api$/i, "");
+            console.log("[Spaarke.Document] BFF URL from env var (normalized):", Spaarke.Document.Config.bffApiUrl);
         } else {
             console.error("[Spaarke.Document] MISSING: sprk_BffApiBaseUrl environment variable not found in Dataverse. Ensure it is defined in Dataverse Environment Variables.");
         }
@@ -516,200 +535,56 @@ Spaarke.Document.Utils = {
 };
 
 // =============================================================================
-// CHOICE DIALOG (ADR-023 Pattern)
+// DOCUMENT LOCKED DIALOG (ADR-023 UX via supported Xrm.Navigation — FR-18)
 // =============================================================================
 
 /**
- * Choice Dialog - Follows ADR-023 pattern for rich option buttons
- * Creates a Fluent-styled modal with vertically stacked option buttons
+ * Show document locked dialog with two choices: View Only or Download Copy
+ * (plus implicit Cancel). Reproduces the ADR-023 choice-dialog UX (view /
+ * download / cancel) using two chained Xrm.Navigation.openConfirmDialog calls
+ * — a SUPPORTED client API — instead of the prior hand-rolled
+ * window.top.document DOM overlay (removed 2026-08, spaarke-modal-system
+ * FR-18; ADR-006 web-resource exception stays JS-on-supported-API, not PCF).
  *
- * @param {object} config - Dialog configuration
- * @param {string} config.title - Dialog title
- * @param {string|HTMLElement} config.message - Message content (can include HTML for contact links)
- * @param {Array<object>} config.options - Array of options { id, icon, title, description }
- * @param {string} [config.cancelText="Cancel"] - Cancel button text
- * @returns {Promise<string|null>} Selected option ID or null if cancelled
- */
-Spaarke.Document.showChoiceDialog = function(config) {
-    return new Promise(function(resolve) {
-        // CRITICAL: Use top window's document to escape iframe context
-        // Dataverse runs web resources in iframes, so document.body would be wrong
-        var targetDoc = window.top ? window.top.document : document;
-
-        // Create overlay
-        var overlay = targetDoc.createElement('div');
-        overlay.className = 'sprk-choice-dialog-overlay';
-        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);' +
-            'display:flex;align-items:center;justify-content:center;z-index:10000;font-family:"Segoe UI",sans-serif;';
-
-        // Create dialog surface
-        var dialog = targetDoc.createElement('div');
-        dialog.className = 'sprk-choice-dialog';
-        dialog.style.cssText = 'background:#fff;border-radius:8px;box-shadow:0 25px 65px rgba(0,0,0,0.35);' +
-            'max-width:480px;width:90%;max-height:90vh;overflow:auto;';
-
-        // Dialog header
-        var header = targetDoc.createElement('div');
-        header.style.cssText = 'padding:20px 24px 0;display:flex;justify-content:space-between;align-items:center;';
-
-        var title = targetDoc.createElement('h2');
-        title.style.cssText = 'margin:0;font-size:20px;font-weight:600;color:#242424;';
-        title.textContent = config.title;
-
-        var closeBtn = targetDoc.createElement('button');
-        closeBtn.style.cssText = 'background:none;border:none;font-size:20px;cursor:pointer;color:#616161;padding:4px;';
-        closeBtn.innerHTML = '&times;';
-        closeBtn.onclick = function() { cleanup(null); };
-
-        header.appendChild(title);
-        header.appendChild(closeBtn);
-
-        // Dialog content
-        var content = targetDoc.createElement('div');
-        content.style.cssText = 'padding:16px 24px;';
-
-        // Message
-        var messageDiv = targetDoc.createElement('div');
-        messageDiv.style.cssText = 'color:#424242;font-size:14px;line-height:1.5;margin-bottom:16px;';
-        if (typeof config.message === 'string') {
-            messageDiv.innerHTML = config.message;
-        } else {
-            messageDiv.appendChild(config.message);
-        }
-        content.appendChild(messageDiv);
-
-        // Options container
-        var optionsDiv = targetDoc.createElement('div');
-        optionsDiv.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
-
-        // Create option buttons (ADR-023 style: outline buttons with icon + title + description)
-        config.options.forEach(function(option) {
-            var btn = targetDoc.createElement('button');
-            btn.style.cssText = 'display:flex;align-items:center;gap:12px;width:100%;padding:12px 16px;' +
-                'background:#fff;border:1px solid #d1d1d1;border-radius:4px;cursor:pointer;text-align:left;' +
-                'transition:all 0.1s ease;min-height:64px;';
-            btn.onmouseover = function() { this.style.borderColor = '#0078d4'; this.style.background = '#f5f5f5'; };
-            btn.onmouseout = function() { this.style.borderColor = '#d1d1d1'; this.style.background = '#fff'; };
-            btn.onclick = function() { cleanup(option.id); };
-
-            // Icon
-            var iconSpan = targetDoc.createElement('span');
-            iconSpan.style.cssText = 'font-size:24px;color:#0078d4;flex-shrink:0;width:24px;text-align:center;';
-            iconSpan.innerHTML = option.icon;
-            btn.appendChild(iconSpan);
-
-            // Text container
-            var textDiv = targetDoc.createElement('div');
-            textDiv.style.cssText = 'display:flex;flex-direction:column;gap:2px;overflow:hidden;';
-
-            var titleSpan = targetDoc.createElement('span');
-            titleSpan.style.cssText = 'font-weight:600;color:#242424;font-size:14px;';
-            titleSpan.textContent = option.title;
-            textDiv.appendChild(titleSpan);
-
-            var descSpan = targetDoc.createElement('span');
-            descSpan.style.cssText = 'color:#616161;font-size:12px;line-height:1.4;';
-            descSpan.textContent = option.description;
-            textDiv.appendChild(descSpan);
-
-            btn.appendChild(textDiv);
-            optionsDiv.appendChild(btn);
-        });
-
-        content.appendChild(optionsDiv);
-
-        // Dialog footer with Cancel button
-        var footer = targetDoc.createElement('div');
-        footer.style.cssText = 'padding:16px 24px 20px;display:flex;justify-content:flex-end;border-top:1px solid #e0e0e0;margin-top:8px;';
-
-        var cancelBtn = targetDoc.createElement('button');
-        cancelBtn.style.cssText = 'padding:8px 20px;background:#fff;border:1px solid #d1d1d1;border-radius:4px;' +
-            'cursor:pointer;font-size:14px;color:#242424;';
-        cancelBtn.textContent = config.cancelText || 'Cancel';
-        cancelBtn.onmouseover = function() { this.style.background = '#f5f5f5'; };
-        cancelBtn.onmouseout = function() { this.style.background = '#fff'; };
-        cancelBtn.onclick = function() { cleanup(null); };
-        footer.appendChild(cancelBtn);
-
-        // Assemble dialog
-        dialog.appendChild(header);
-        dialog.appendChild(content);
-        dialog.appendChild(footer);
-        overlay.appendChild(dialog);
-
-        // Cleanup function
-        function cleanup(result) {
-            targetDoc.body.removeChild(overlay);
-            targetDoc.removeEventListener('keydown', escHandler);
-            resolve(result);
-        }
-
-        // ESC key handler
-        function escHandler(e) {
-            if (e.key === 'Escape') {
-                cleanup(null);
-            }
-        }
-        targetDoc.addEventListener('keydown', escHandler);
-
-        // Add to DOM
-        targetDoc.body.appendChild(overlay);
-
-        // Focus first option button for accessibility
-        var firstBtn = optionsDiv.querySelector('button');
-        if (firstBtn) {
-            firstBtn.focus();
-        }
-    });
-};
-
-/**
- * Show document locked dialog with three options: View Only, Download, Cancel
- * Plus contact link for the person who has it checked out
- * Follows ADR-023 Choice Dialog pattern
+ * Sequence: "View Only?" (confirm -> 'view', decline -> ask next) then, only
+ * if declined, "Download Copy instead?" (confirm -> 'download', decline ->
+ * null). This preserves the exact three outcomes openInWeb/openInDesktop
+ * branch on. The old overlay's one-click mailto contact link cannot be
+ * reproduced here — openConfirmDialog's text is plain text, not HTML — so the
+ * contact email (when known) is surfaced as a plain-text line instead.
  *
  * @param {object} checkoutInfo - Info about who has the document checked out
  * @param {string} checkoutInfo.name - Name of person who checked out
  * @param {string} [checkoutInfo.email] - Email of person who checked out
  * @param {string} documentName - Name of the document
- * @returns {Promise<string|null>} 'view' | 'download' | null
+ * @returns {Promise<string|null>} 'view' | 'download' | null if cancelled
  */
-Spaarke.Document.showDocumentLockedDialog = function(checkoutInfo, documentName) {
-    // Build message with optional contact link
-    var messageHtml = '<strong>"' + documentName + '"</strong> is currently checked out by <strong>' +
-        checkoutInfo.name + '</strong>.';
+Spaarke.Document.showDocumentLockedDialog = async function(checkoutInfo, documentName) {
+    var contactLine = checkoutInfo.email
+        ? ("\n\nContact " + checkoutInfo.name + " at " + checkoutInfo.email + " to request access.")
+        : "";
 
-    if (checkoutInfo.email) {
-        var subject = encodeURIComponent('Request: Document Access - ' + documentName);
-        var body = encodeURIComponent('Hi ' + checkoutInfo.name + ',\n\nI need to access the document "' +
-            documentName + '" which is currently checked out to you.\n\nCould you please let me know when you\'ll be done, or check it back in if you\'re finished?\n\nThank you!');
-        var mailtoUrl = 'mailto:' + checkoutInfo.email + '?subject=' + subject + '&body=' + body;
+    var viewResult = await Xrm.Navigation.openConfirmDialog({
+        title: "Document Locked",
+        text: "\"" + documentName + "\" is currently checked out by " + checkoutInfo.name + "." + contactLine +
+              "\n\nOpen it for viewing only? Any changes you make will not be saved.",
+        confirmButtonLabel: "View Only",
+        cancelButtonLabel: "More Options"
+    });
 
-        messageHtml += '<br><br><a href="' + mailtoUrl + '" style="color:#0078d4;text-decoration:none;">' +
-            '📧 Contact ' + checkoutInfo.name + '</a>';
+    if (viewResult.confirmed) {
+        return 'view';
     }
 
-    var options = [
-        {
-            id: 'view',
-            icon: '👁️',
-            title: 'View Only',
-            description: 'Open the document to view. Any changes you make will not be saved.'
-        },
-        {
-            id: 'download',
-            icon: '📥',
-            title: 'Download Copy',
-            description: 'Download a local copy to edit offline. Changes won\'t sync back automatically.'
-        }
-    ];
-
-    return Spaarke.Document.showChoiceDialog({
-        title: 'Document Locked',
-        message: messageHtml,
-        options: options,
-        cancelText: 'Cancel'
+    var downloadResult = await Xrm.Navigation.openConfirmDialog({
+        title: "Document Locked",
+        text: "Download a local copy of \"" + documentName + "\" to edit offline instead?\n\n" +
+              "Changes won't sync back automatically.",
+        confirmButtonLabel: "Download Copy",
+        cancelButtonLabel: "Cancel"
     });
+
+    return downloadResult.confirmed ? 'download' : null;
 };
 
 // =============================================================================
@@ -2142,18 +2017,23 @@ Spaarke.Document.sendToIndex = async function(primaryControl, selectedItemIds) {
         var isGridContext = false;
 
         // Determine context: form or grid/subgrid
+        // Normalize every GUID to lowercase + strip braces. Xrm APIs return GUIDs in
+        // {UPPERCASE} form; Azure AI Search Edm.String filters are case-sensitive, and
+        // lookups elsewhere (Find Similar, related-doc joins) use lowercase. Normalizing
+        // here gives one consistent shape for the BFF and the index. BFF also normalizes
+        // defensively, but cleaner contract to do it at the source.
         if (selectedItemIds && selectedItemIds.length > 0) {
             // Grid or subgrid context
             documentIds = selectedItemIds.map(function(id) {
-                return id.replace(/[{}]/g, "");
+                return id.replace(/[{}]/g, "").toLowerCase();
             });
             isGridContext = true;
             console.log("[Spaarke.Document] SendToIndex - grid context with", documentIds.length, "documents");
         } else if (primaryControl && primaryControl.data && primaryControl.data.entity) {
             // Form context
             var docInfo = Spaarke.Document.Utils.getDocumentInfo(primaryControl);
-            documentIds = [docInfo.id];
-            console.log("[Spaarke.Document] SendToIndex - form context for document:", docInfo.id);
+            documentIds = [(docInfo.id || "").replace(/[{}]/g, "").toLowerCase()];
+            console.log("[Spaarke.Document] SendToIndex - form context for document:", documentIds[0]);
         } else if (primaryControl && primaryControl.getGrid) {
             // SelectedControl from grid/subgrid
             var selectedRows = primaryControl.getGrid().getSelectedRows();
@@ -2161,7 +2041,7 @@ Spaarke.Document.sendToIndex = async function(primaryControl, selectedItemIds) {
                 selectedRows.forEach(function(row) {
                     var rowData = row.getData();
                     if (rowData && rowData.entity) {
-                        var id = rowData.entity.getId().replace(/[{}]/g, "");
+                        var id = rowData.entity.getId().replace(/[{}]/g, "").toLowerCase();
                         documentIds.push(id);
                     }
                 });
@@ -2252,13 +2132,23 @@ Spaarke.Document.sendToIndex = async function(primaryControl, selectedItemIds) {
                     : data.totalRequested + " documents successfully sent to search index.";
             } else if (data.successCount === 0) {
                 resultMsg = "Failed to index documents. Please try again.";
-                if (data.results && data.results.length > 0 && data.results[0].error) {
-                    resultMsg += "\n\nError: " + data.results[0].error;
+                // Response field is `errorMessage` (per RagEndpoints.cs SendToIndexDocumentResult),
+                // not `error`. The old `data.results[0].error` was always undefined so the user
+                // never saw the actual cause. Fixed 2026-05-19.
+                if (data.results && data.results.length > 0 && data.results[0].errorMessage) {
+                    resultMsg += "\n\nError: " + data.results[0].errorMessage;
                 }
             } else {
                 resultMsg = data.successCount + " of " + data.totalRequested + " documents indexed successfully.";
                 if (data.failedCount > 0) {
                     resultMsg += "\n" + data.failedCount + " document(s) failed.";
+                    if (data.results) {
+                        for (var i = 0; i < data.results.length; i++) {
+                            if (!data.results[i].success && data.results[i].errorMessage) {
+                                resultMsg += "\n  - " + data.results[i].errorMessage;
+                            }
+                        }
+                    }
                 }
             }
 
@@ -2382,7 +2272,7 @@ console.log("[Spaarke.Document] Operations module loaded v" + Spaarke.Document.C
 
 // v1.22.0 Changes:
 // - ADR-023: Enhanced document locked dialog with View Only / Download / Cancel options
-// - Added showChoiceDialog() - reusable ADR-023 compliant choice dialog
+// - Added showChoiceDialog() - reusable ADR-023 compliant choice dialog (removed in 1.28.0, see above)
 // - Added showDocumentLockedDialog() - specialized dialog for locked documents
 // - Added email contact link when document is locked by another user
 // - Fetches checkout user email from BFF API for contact link

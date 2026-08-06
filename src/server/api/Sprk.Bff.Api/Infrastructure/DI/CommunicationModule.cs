@@ -30,6 +30,11 @@ public static class CommunicationModule
         // consumed via IOptionsMonitor so a flag/threshold flip takes effect WITHOUT redeploy.
         services.Configure<AutoFileOptions>(configuration.GetSection(AutoFileOptions.SectionName));
 
+        // Tracking-footer config (ADR-018 / FR-A1). Bound from "Communication:TrackingFooter"; operator
+        // flips enable / edits the disclosure template with NO redeploy. Carries only the Key Vault secret
+        // NAME of the HMAC key, never the key (ADR-028 / NFR-07).
+        services.Configure<TrackingFooterOptions>(configuration.GetSection(TrackingFooterOptions.SectionName));
+
         // Semantic-match (rung 4 / FR-14) options. Bound from "Communication:SemanticMatch"; the Enabled
         // flag is an operational kill-switch for the semantic rung (no redeploy).
         services.Configure<SemanticMatchOptions>(configuration.GetSection(SemanticMatchOptions.SectionName));
@@ -57,8 +62,16 @@ public static class CommunicationModule
         services.AddSingleton<CommunicationAccountService>();
         services.AddSingleton<ApprovedSenderValidator>();
         services.AddSingleton<CommunicationService>();
+        // ADR-010 testing-seam over CommunicationService.ReconstructEnvelopeAsync for the Job B apply path (task 031
+        // citation re-verify). Pass-through to the singleton CommunicationService → singleton.
+        services.AddSingleton<ICommunicationEnvelopeReader>(sp => sp.GetRequiredService<CommunicationService>());
         services.AddSingleton<EmlGenerationService>();
         services.AddSingleton<GraphMessageToEmlConverter>();
+        // HTML-preserving REVERSE of GraphMessageToEmlConverter (email-communication-solution-r5 task 010 /
+        // FR-07 / NFR-03). Pure transformation (no I/O) → singleton, mirroring the converter above; its
+        // HtmlSanitizer is configured once in the ctor and only Sanitize() is called after (thread-safe).
+        // Consumed by the GET /api/documents/{id}/eml-render endpoint (FileAccessEndpoints).
+        services.AddSingleton<EmlToHtmlRenderer>();
         services.AddSingleton<MailboxVerificationService>();
 
         // Channel seams (ADR-045 rule 4 / NFR-04). Email is the ONLY R4 implementation of each seam.
@@ -152,6 +165,13 @@ public static class CommunicationModule
         // and the engine evaluates them by ascending Order — so registration order is cosmetic.
         services.AddSingleton<GraphMessageNormalizer>();
         services.AddSingleton<IAssociationRung, ExplicitReferenceRung>();      // rung 0 — explicit reference
+        // rung 0 — identifier reverse-lookup (FR-01). SAME Kind/Order as ExplicitReferenceRung: a well-formed
+        // explicit identifier IS a rung-0 explicit reference. Extends matter-only identifier matching to all 7
+        // core types by VALUE-based reverse lookup against Dataverse, catalog-driven off sprk_recordtype_ref
+        // (no numbering scheme in code; onboarding a tenant needs only catalog config). Bare-numeric tokens
+        // emit sub-threshold (never auto-file alone); multi-entity tokens are capped (never a guessed auto-file).
+        // Registered unconditionally (mirrors the other deterministic rungs; ADR-010).
+        services.AddSingleton<IAssociationRung, IdentifierReverseLookupRung>(); // rung 0 — identifier reverse-lookup
         services.AddSingleton<IAssociationRung, ThreadContinuityRung>();       // rung 1 — thread continuity
         services.AddSingleton<IAssociationRung, ParticipantCorrelationRung>(); // rung 2 — participant correlation
         // rung 3 — structural detectors (NFR-04: adding a detector is a new IStructuralDetector
@@ -174,6 +194,13 @@ public static class CommunicationModule
         // is NOT auto-file-eligible, so it never auto-files. Registered unconditionally; self-gated by
         // Communication:ContactNameMatch:Enabled.
         services.AddSingleton<IAssociationRung, ContactNameMatchRung>();       // rung 3.6 — contact-name match
+        // rung 3.7 — attachment→document association (email-communication-intelligence-r1 061 UAT / F1). Matches
+        // an incoming attachment to an existing sprk_document (by sprk_filename today; by the AI-populated
+        // sprk_globalsearchextender content field as that project lands) and surfaces the document's OWN
+        // matter/project/invoice links as candidates. SUGGEST-ONLY: RungKind.DocumentAssociation is not in the
+        // mapper's auto-file-eligible/deterministic-write sets, so it can only add review candidates, never
+        // auto-file. Takes the singleton IGenericEntityService (no captive dependency). Registered unconditionally (ADR-010).
+        services.AddSingleton<IAssociationRung, AttachmentDocumentAssociationRung>(); // rung 3.7 — attachment→document
         // rung 4 — semantic record match (FR-14). AI-tier: the engine evaluates it only when the
         // deterministic pass did not auto-file, and the mapper caps it to Suggested (never auto-files).
         // Consumes the IRecordMatchingAi facade (ADR-013) from a per-evaluation scope (facade is scoped,
@@ -188,6 +215,8 @@ public static class CommunicationModule
         // Confidence→status ladder + auto-file gate (FR-11 / ADR-018). Both unconditional (ADR-010):
         // the gate is pure config resolution and the mapper is pure decision logic; no feature gate.
         services.AddSingleton<AutoFileGate>();
+        // Tracking-footer resolver (FR-A1 / ADR-018) — unconditional (ADR-010); pure config resolution.
+        services.AddSingleton<TrackingFooterGate>();
         services.AddSingleton<AssociationStatusMapper>();
         services.AddSingleton<IncomingAssociationResolver>();
         services.AddSingleton<IncomingCommunicationProcessor>();
@@ -198,6 +227,46 @@ public static class CommunicationModule
         // no feature gate — no Null-Object peer required). Singleton mirrors IncomingCommunicationProcessor,
         // which already injects the scoped IPostUploadIndexingEnqueuer via the same pattern.
         services.AddSingleton<ICommunicationEnrichmentService, CommunicationEnrichmentService>();
+
+        // communication_assessed producer seam (spaarke-notification-spine-r1 task 040 / FR-11). Enrichment
+        // step 5 (RunAssessmentEmissionAsync) publishes the assessed signal through
+        // ICommunicationAssessedProducer instead of only logging. Registered UNCONDITIONALLY (ADR-032) with
+        // the interim log-only safe default (LoggingCommunicationAssessedProducer) — no outbox write, no
+        // IEventRulesService.FireAsync (both out of scope for FR-11). Task 041 replaces this registration with
+        // the real comms-policy-gate consumer behind the SAME seam; task 042 (downstream of that gate) writes
+        // the kind=communication-assessed outbox row. Placement Justification (root §10/§11): the seam lives in
+        // Services/Communication/ beside its sole emit point (the enrichment step), consumes nothing AI-internal
+        // (ADR-013 clean), and is a genuine seam (≥2 implementations: this default + task 041's policy consumer).
+        // NOTE (task 041): the log-only default below is REPLACED by RuleGatedAssessedConsumer (next block);
+        // LoggingCommunicationAssessedProducer stays defined as the ADR-032 safe default / test double.
+
+        // Comms policy gate (spaarke-notification-spine-r1 task 041 / FR-12). Owner chose a dedicated
+        // sprk_communicationrule Dataverse table (Path B — notes/041-rule-store-decision.md).
+        // CommunicationRuleGate reads that table and evaluates tenant/matter match + a confidence threshold
+        // (per-rule sprk_confidencethreshold, falling back to CommsPolicyOptions.DefaultConfidenceThreshold),
+        // flags privilege (ADR-015 — flagged, NEVER decided), and returns authorize/deny. RuleGatedAssessedConsumer
+        // is the REAL consumer behind task 040's ICommunicationAssessedProducer seam — it REPLACES the interim
+        // LoggingCommunicationAssessedProducer; the enrichment step-5 emit point is unchanged. No outbox write, no
+        // IEventRulesService.FireAsync (RI action execution is task 042, downstream of authorize). Concrete
+        // singletons (ADR-010); all deps (IGenericEntityService, IOptions) are singletons.
+        services.Configure<CommsPolicyOptions>(configuration.GetSection(CommsPolicyOptions.SectionName));
+        services.AddSingleton<CommunicationRuleGate>();
+
+        // Comms-RI action orchestrator (spaarke-notification-spine-r1 task 042 / FR-13). Executes the RI action
+        // path when CommunicationRuleGate AUTHORIZES: converges the Layer-A action seam (task 031 IActionSeam,
+        // ADR-013 — creates a follow-up task, never a direct write), the Layer-B outbox (task 012, kind=
+        // communication-assessed row BEFORE the ping), the Layer-C SignalR ping (task 020, best-effort), and the
+        // ONE platform appnotification writer (NotificationService.CreateNotificationAsync — the Daily-Briefing
+        // mirror). RuleGatedAssessedConsumer (registered next) delegates to it ONLY inside its authorize branch, so
+        // a deny produces no side effect. Placement Justification (root §10/§11): sits in Services/Communication/
+        // beside the gate + arrived producer, depends "up" into the Notifications spine + the ADR-013 IActionSeam
+        // facade (never AI-internal types); ZERO new access logic, ZERO new Dataverse write path (the seam +
+        // NotificationService are the only writers). Concrete singleton (ADR-010) — all deps are singletons:
+        // IActionSeam + NotificationService (AnalysisServicesModule), OutboxService + SignalRDeliveryService
+        // (NotificationsModule), IGenericEntityService. MUST be registered BEFORE RuleGatedAssessedConsumer, which
+        // now takes it as a ctor dependency.
+        services.AddSingleton<CommunicationRiActionService>();
+        services.AddSingleton<ICommunicationAssessedProducer, RuleGatedAssessedConsumer>();
 
         // Direction-symmetric thread resolver (messaging-communication-app-r1 task 040 / FR-06). The thread
         // analog of the enrichment orchestrator above: find-or-create a sprk_communicationthread and stamp
@@ -277,6 +346,58 @@ public static class CommunicationModule
         services.TryAddScoped<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver,
                               Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolver>();
         services.AddScoped<CommunicationThreadReadService>();
+
+        // FR-17 ranked-exceptions queue-feed (email-communication-intelligence-r1 task 032). SAME impersonated
+        // read + shared ICommunicationAccessFilter as CommunicationThreadReadService above (no new access
+        // mechanism) — composed with task 030's sprk_emailreviewlog Proposed-row store via the existing
+        // IGenericEntityService seam. SCOPED for the same reason as CommunicationThreadReadService (consumes the
+        // Scoped ICallerSystemUserResolver). Registered UNCONDITIONALLY (ADR-010/ADR-032 — the endpoint maps
+        // unconditionally); read-only, r1 supplies the feed only (C-3), r5 builds no surface here.
+        services.AddScoped<CommunicationQueueFeedService>();
+
+        // Job B APPLY (email-communication-intelligence-r1 task 031 / FR-10). Applies a CONFIRMED pending proposal
+        // (task 030's open sprk_emailreviewlog Proposed row) to the associated record via the blessed
+        // IActionSeam.UpdateRecordAsync UNDER THE CONFIRMING USER'S MSCRMCallerID impersonation (owner Option 2,
+        // 2026-07-29 — native modifiedby = the human; go-live prereq: BFF app user holds prvActOnBehalfOfAnotherUser),
+        // re-validating the sprk_emailupdatefield allow-list + citation at apply time, and writing the append-only
+        // Applied audit row. SCOPED (consumes the Scoped ICallerSystemUserResolver, same as the queue feed).
+        // Registered UNCONDITIONALLY (ADR-010/ADR-032 — the apply endpoint maps unconditionally).
+        services.AddScoped<ICommunicationProposalApplyService, CommunicationProposalApplyService>();
+
+        // Layer-C fan-out targeting (spaarke-notification-spine-r1 task 023 / FR-08 / NFR-07). Given a persisted
+        // sprk_communication + its thread, returns the systemuserids eligible to receive a Layer-C ping (task 024's
+        // producer loops them into SignalRDeliveryService.PingUserAsync). Placement Justification (root §10 / §11):
+        // its dependencies are ALL Communication-flavored (ICommunicationAccessFilter + IThreadPrivateGrantProvider +
+        // the sprk_communicationparticipant junction via IGenericEntityService), so ADR-010's feature-module home is
+        // HERE, not NotificationsModule (which owns the SignalR delivery leg + identity resolver). ZERO new access
+        // logic: it COMPOSES the two existing access primitives + the junction read-only (design §5 — leverage,
+        // don't rebuild). Singleton — all deps are singletons; mirrors the participant indexer/thread resolver.
+        //
+        // IThreadPrivateGrantProvider deny-all null-object (ADR-032): the task-042 read-path rework REMOVED the
+        // deny-all registration (the impersonation-based read filter no longer depends on it — see the task-042
+        // comment above), so the seam is currently UNREGISTERED. The fan-out service DOES consume it (private-thread
+        // gate), and it is reached from the unconditionally-mapped negotiate/producer path, so the null-object MUST
+        // be registered unconditionally for the consumer to resolve (ADR-032 asymmetric-registration rule; CLAUDE.md
+        // §10 bullet 6). TryAdd so the FUTURE Dataverse-backed provider (task-043 private-direct work) wins if it
+        // registers first — this only supplies the fail-closed default (private-thread fan-out is EMPTY until then).
+        services.TryAddSingleton<IThreadPrivateGrantProvider, DenyAllThreadPrivateGrantProvider>();
+        services.AddSingleton<CommunicationFanOutTargetingService>();
+
+        // The single, spine-owned communication-arrived producer (spaarke-notification-spine-r1 task 024 /
+        // FR-09 / NFR-05). Emits the Layer-C refresh signal at PERSISTENCE for every sprk_communication write —
+        // inbound capture (email + messaging) + outbound send (email + messaging), identically — so messaging-r3
+        // task 045 consumes ONE spine event instead of wiring its own producer (Owner Clarification). Injected as
+        // an OPTIONAL trailing ctor param into the three persist orchestrators (IncomingCommunicationProcessor,
+        // MessagingIngestor, CommunicationService), each of which calls it AFTER its participant-index step (the
+        // point at which the fan-out junction, thread lookup, and regarding are populated — NOT the raw CreateAsync;
+        // see the producer's remarks + notes/024). Placement Justification (root §10 / §11): sits in
+        // Services/Communication/ beside its fan-out dependency (task 023) and depends "up" into the Notifications
+        // spine infra (OutboxService + SignalRDeliveryService) — the correct direction; ZERO new access logic, ZERO
+        // AI dependency (ADR-013 clean). Registered UNCONDITIONALLY (ADR-010 / ADR-032 — non-fatal producer consumed
+        // best-effort by all three call sites; no feature gate). Singleton — all deps (IGenericEntityService,
+        // CommunicationFanOutTargetingService, OutboxService, SignalRDeliveryService) are singletons, matching the
+        // three singleton orchestrators it is injected into (no captive-scope anti-pattern).
+        services.AddSingleton<CommunicationArrivedProducer>();
 
         // Job handler: processes incoming email notifications from Graph webhooks (Task 072)
         // Extracts message details from Graph, creates sprk_communication record, handles attachments.

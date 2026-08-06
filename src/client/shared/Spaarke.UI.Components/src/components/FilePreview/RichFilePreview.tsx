@@ -24,6 +24,22 @@
  * outer container's width/height (the modal dialog clamps to 1280px × 85vh;
  * non-modal hosts pick their own dimensions).
  *
+ * spaarke-modal-system task 060 (P4 re-base): `RichFilePreviewDialog` now
+ * mounts this renderer INSIDE the `PreviewModal`/`BrowseModal` presets
+ * instead of a hand-rolled `Dialog` + `RecordNavigationModalShell`. Those
+ * presets own ALL chrome (title, nav "N of M", `ModalWindowControls`,
+ * maximize/restore, footer) via `SprkModal`'s header/footer, so:
+ *  - the former `onClose`/`isMaximized`/`onToggleMaximize` props (added by
+ *    P1 task 030 as an INTERIM measure before the presets existed) are
+ *    REMOVED — they had exactly one caller (`RichFilePreviewDialog`'s
+ *    non-nav path) and are now fully superseded by the preset's own
+ *    `ModalWindowControls` instance.
+ *  - a new optional `showMetadataPane` prop (default `true`, unchanged for
+ *    every existing non-modal consumer) lets the modal wrapper suppress
+ *    this renderer's OWN Tags+Details pane, since the presets render their
+ *    OWN `metadata` column (`PreviewGridBody`) alongside the renderer's
+ *    stage content — avoiding a duplicate/nested 320px side panel.
+ *
  * @see ADR-012 - Shared component library boundary
  * @see ADR-021 - Fluent UI v9 (semantic tokens, dark-mode parity)
  * @see ADR-022 - React 19 (no React 18-only APIs)
@@ -38,6 +54,7 @@ import {
   Text,
   Tag,
   makeStyles,
+  mergeClasses,
   shorthands,
   tokens,
 } from '@fluentui/react-components';
@@ -133,6 +150,27 @@ export interface IRichFilePreviewProps {
    * actions, or a tailored array to override per-mount.
    */
   disabledActions?: DocumentRowAction[];
+  /**
+   * Whether the renderer draws its own title text. Defaults to `true`. Set to
+   * `false` when a wrapper already supplies the document title (e.g.
+   * `RichFilePreviewDialog`, where the `PreviewModal`/`BrowseModal` preset's
+   * `SprkModal` header owns the title chrome) — this avoids a duplicate
+   * ("double header") title. The title-bar row (3-dot `DocumentRowMenu` +
+   * any actions) still renders.
+   */
+  showTitle?: boolean;
+  /**
+   * Whether the renderer draws its own 2-column body (stage | Tags+Details
+   * metadata pane). Defaults to `true` (unchanged for every non-modal
+   * consumer). Set to `false` when a wrapper already renders its OWN meta
+   * column alongside this renderer's stage content (e.g.
+   * `RichFilePreviewDialog`, which mounts this renderer inside the
+   * `PreviewModal`/`BrowseModal` preset's `PreviewGridBody` — that preset
+   * supplies the 320px `metadata` column, so this renderer must render ONLY
+   * its stage (iframe/loading/error), full width, to avoid a nested
+   * duplicate side panel).
+   */
+  showMetadataPane?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +223,10 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     flexShrink: 0,
+    // Keep the actions cluster right-aligned even when the title text is
+    // hidden (`showTitle={false}`), since the title normally consumes the
+    // leading flex space.
+    marginInlineStart: 'auto',
   },
   // Prev/Next nav cluster relocated from footer (DialogActions) to
   // the title bar's right side, just before the 3-dot DocumentRowMenu.
@@ -217,9 +259,28 @@ const useStyles = makeStyles({
     width: '100%',
     ...shorthands.overflow('hidden'),
   },
+  // Stage-only body (task 060) — used when `showMetadataPane={false}` (the
+  // modal wrapper supplies its OWN meta column via the preset's
+  // `PreviewGridBody`, so this renderer occupies the full width with no
+  // internal grid split, avoiding a nested duplicate 320px panel).
+  bodyStageOnly: {
+    ...shorthands.padding('0px'),
+    flex: 1,
+    minHeight: 0,
+    display: 'flex',
+    width: '100%',
+    ...shorthands.overflow('hidden'),
+  },
   // Iframe container — fills the left column.
   // `minWidth: 0` is the Grid-collapse fix.
   // Visible vertical scrollbar HIDDEN (iframe content renders its own).
+  // Stage-only mode mounts the cell in the `bodyStageOnly` FLEX row (not the
+  // grid), where a flex item with only absolutely-positioned content (the
+  // iframe) collapses to 0 width — `flex: 1` makes it fill the row (UAT
+  // 2026-08-02: blank preview stage in PreviewModal/BrowseModal).
+  thumbnailCellStageOnly: {
+    flex: 1,
+  },
   thumbnailCell: {
     position: 'relative' as const,
     minWidth: 0,
@@ -312,7 +373,7 @@ const useStyles = makeStyles({
 // Helpers
 // ---------------------------------------------------------------------------
 
-function formatDate(iso: string | null | undefined): string {
+export function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—';
   try {
     const d = new Date(iso);
@@ -327,7 +388,7 @@ function formatDate(iso: string | null | undefined): string {
   }
 }
 
-function formatFileSize(bytes: number | null | undefined): string {
+export function formatFileSize(bytes: number | null | undefined): string {
   if (bytes === null || bytes === undefined || isNaN(bytes) || bytes < 0) return '—';
   if (bytes === 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -341,7 +402,7 @@ function formatFileSize(bytes: number | null | undefined): string {
   return `${formatted} ${units[unitIdx]}`;
 }
 
-function nonEmpty(value: string | null | undefined): string {
+export function nonEmpty(value: string | null | undefined): string {
   return value && value.trim().length > 0 ? value : '—';
 }
 
@@ -393,6 +454,8 @@ export const RichFilePreview: React.FC<IRichFilePreviewProps> = ({
   currentIndex,
   onNavigate,
   disabledActions: disabledActionsOverride,
+  showTitle = true,
+  showMetadataPane = true,
 }) => {
   const styles = useStyles();
 
@@ -675,11 +738,15 @@ export const RichFilePreview: React.FC<IRichFilePreviewProps> = ({
 
   return (
     <div className={styles.root}>
-      {/* Title bar — document name + optional Prev/Next + 3-dot DocumentRowMenu. */}
+      {/* Title bar — document name + optional Prev/Next + 3-dot DocumentRowMenu.
+          `showTitle` is false when a wrapper (e.g. the nav-mode dialog shell)
+          already renders the title, preventing a duplicate "double header". */}
       <div className={styles.titleBar}>
-        <Text as="h2" className={styles.titleText} size={400}>
-          {documentName || 'Document Preview'}
-        </Text>
+        {showTitle && (
+          <Text as="h2" className={styles.titleText} size={400}>
+            {documentName || 'Document Preview'}
+          </Text>
+        )}
         <div
           className={styles.titleActions}
           aria-label={isInWorkspace ? 'Document actions (in workspace)' : 'Document actions'}
@@ -718,26 +785,35 @@ export const RichFilePreview: React.FC<IRichFilePreviewProps> = ({
         </div>
       </div>
 
-      {/* 2-column body — iframe (left) | metadata pane (right). */}
-      <div className={styles.body} role="group" aria-label="Document preview body">
-        <div className={styles.thumbnailCell}>{renderPreviewArea()}</div>
-        <div className={styles.metadataPane}>
-          {/* Section 1: Tags */}
-          <section className={styles.section} aria-labelledby="rfp-tags-heading">
-            <Text id="rfp-tags-heading" className={styles.sectionHeader} size={300}>
-              Tags
-            </Text>
-            {renderTagSection()}
-          </section>
-
-          {/* Section 2: Details */}
-          <section className={styles.section} aria-labelledby="rfp-details-heading">
-            <Text id="rfp-details-heading" className={styles.sectionHeader} size={300}>
-              Details
-            </Text>
-            {renderDetailsSection()}
-          </section>
+      {/* Body — iframe stage (+ Tags/Details metadata pane, unless the
+          wrapper's preset already supplies its own meta column). */}
+      <div
+        className={showMetadataPane ? styles.body : styles.bodyStageOnly}
+        role="group"
+        aria-label="Document preview body"
+      >
+        <div className={mergeClasses(styles.thumbnailCell, !showMetadataPane && styles.thumbnailCellStageOnly)}>
+          {renderPreviewArea()}
         </div>
+        {showMetadataPane && (
+          <div className={styles.metadataPane}>
+            {/* Section 1: Tags */}
+            <section className={styles.section} aria-labelledby="rfp-tags-heading">
+              <Text id="rfp-tags-heading" className={styles.sectionHeader} size={300}>
+                Tags
+              </Text>
+              {renderTagSection()}
+            </section>
+
+            {/* Section 2: Details */}
+            <section className={styles.section} aria-labelledby="rfp-details-heading">
+              <Text id="rfp-details-heading" className={styles.sectionHeader} size={300}>
+                Details
+              </Text>
+              {renderDetailsSection()}
+            </section>
+          </div>
+        )}
       </div>
     </div>
   );

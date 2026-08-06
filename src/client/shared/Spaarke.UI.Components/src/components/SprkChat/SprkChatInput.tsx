@@ -49,6 +49,28 @@ const useStyles = makeStyles({
   textarea: {
     flexGrow: 1,
   },
+  // UAT 2026-07-21: a light-gray toolbar tray at the bottom of the composer.
+  // Left holds the host's leading slot (the Attach paperclip); right holds the
+  // character count + Send. Semantic tokens only (ADR-021) so it inverts in dark.
+  tray: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    ...shorthands.gap(tokens.spacingHorizontalS),
+    ...shorthands.padding(tokens.spacingVerticalXXS, tokens.spacingHorizontalS),
+    ...shorthands.borderRadius(tokens.borderRadiusMedium),
+    backgroundColor: tokens.colorNeutralBackground3,
+  },
+  trayLeft: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    ...shorthands.gap(tokens.spacingHorizontalXS),
+  },
+  trayRight: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    ...shorthands.gap(tokens.spacingHorizontalS),
+  },
   footer: {
     display: 'flex',
     justifyContent: 'space-between',
@@ -97,6 +119,7 @@ export const SprkChatInput = React.forwardRef<ISprkChatInputHandle, ISprkChatInp
       minRows,
       dynamicSlashCommands,
       hideSlashButton = false,
+      toolbarLeadingSlot,
     },
     ref
   ) => {
@@ -147,6 +170,25 @@ export const SprkChatInput = React.forwardRef<ISprkChatInputHandle, ISprkChatInp
       }
     }, [value, disabled, isOverLimit, onSend]);
 
+    // UAT 2026-07-21: insert a newline at the caret. Used by Ctrl/Cmd+Enter,
+    // which browsers do NOT natively turn into a newline in a textarea, so we
+    // splice it into the controlled value and restore the caret.
+    const insertNewlineAtCaret = React.useCallback(() => {
+      const el = inputRef.current;
+      const start = el?.selectionStart ?? value.length;
+      const end = el?.selectionEnd ?? value.length;
+      const next = value.slice(0, start) + '\n' + value.slice(end);
+      setValue(next);
+      hookHandleInputChange(next);
+      requestAnimationFrame(() => {
+        if (inputRef.current) {
+          const caret = start + 1;
+          inputRef.current.selectionStart = caret;
+          inputRef.current.selectionEnd = caret;
+        }
+      });
+    }, [value, hookHandleInputChange]);
+
     const handleKeyDown = React.useCallback(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Escape') {
@@ -159,12 +201,27 @@ export const SprkChatInput = React.forwardRef<ISprkChatInputHandle, ISprkChatInp
           return;
         }
 
-        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        if (e.key === 'Enter') {
+          // UAT 2026-07-21: Enter SENDS; Ctrl/Cmd+Enter and Shift+Enter insert a
+          // newline (was the reverse). When the slash-command menu is open,
+          // Enter selects the highlighted command instead — let that through.
+          if (menuVisible) {
+            return;
+          }
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            insertNewlineAtCaret();
+            return;
+          }
+          if (e.shiftKey) {
+            // Shift+Enter → default textarea newline (no preventDefault).
+            return;
+          }
           e.preventDefault();
           handleSend();
         }
       },
-      [handleSend, menuVisible, dismissMenu]
+      [handleSend, menuVisible, dismissMenu, insertNewlineAtCaret]
     );
 
     const handleChange = React.useCallback(
@@ -275,7 +332,17 @@ export const SprkChatInput = React.forwardRef<ISprkChatInputHandle, ISprkChatInp
               // (primary slot — confirmed by TextareaSlots.textarea JSDoc)
               ref={inputRef}
             />
+          </div>
+        </div>
 
+        {/* UAT 2026-07-21: bottom toolbar tray (light gray). Paperclip (host
+            leading slot) sits left; character count + Send sit right. */}
+        <div className={styles.tray} role="toolbar" aria-label="Composer actions">
+          <span className={styles.trayLeft}>{toolbarLeadingSlot}</span>
+          <div className={styles.trayRight}>
+            <Text className={isOverLimit ? styles.charCountWarning : styles.charCount}>
+              {charCount}/{maxCharCount}
+            </Text>
             <Button
               appearance="primary"
               icon={<SendRegular />}
@@ -288,10 +355,7 @@ export const SprkChatInput = React.forwardRef<ISprkChatInputHandle, ISprkChatInp
         </div>
 
         <div className={styles.footer}>
-          <Text className={styles.hint}>Ctrl+Enter to send · / for commands</Text>
-          <Text className={isOverLimit ? styles.charCountWarning : styles.charCount}>
-            {charCount}/{maxCharCount}
-          </Text>
+          <Text className={styles.hint}>Enter to send · Ctrl+Enter for new line · / for commands</Text>
         </div>
       </div>
     );

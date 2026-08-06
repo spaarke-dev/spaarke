@@ -34,7 +34,18 @@
       // `@spaarke/ui-components`'s raw source (and its PCF-framework-dependent
       // surface) into the program — `skipLibCheck` covers the rest.
       "@spaarke/ui-components": ["../Spaarke.UI.Components/dist/index.d.ts"],
-      "@spaarke/ui-components/*": ["../Spaarke.UI.Components/dist/*"]
+      "@spaarke/ui-components/*": ["../Spaarke.UI.Components/dist/*"],
+      // Added task 031 (FR-14a): the widget now imports the free-function
+      // `authenticatedFetch` directly (ADR-028). Same pre-built-declaration
+      // pattern as `@spaarke/ui-components` above — no `node_modules` install
+      // required for type-checking.
+      "@spaarke/auth": ["../Spaarke.Auth/dist/index.d.ts"],
+      "@spaarke/auth/*": ["../Spaarke.Auth/dist/*"],
+      // Added task 045 (FR-22): the widget consumes the notification-spine client. Mapped to a LOCAL
+      // minimal type shim (not the sibling lib's dist, which isn't pre-built, and not an ambient
+      // `declare module`, which would collide in a host compile) — the two Vite hosts resolve the REAL
+      // `@spaarke/notifications` against their own node_modules at build/runtime.
+      "@spaarke/notifications": ["./src/types/spaarke-notifications.d.ts"]
     }
   },
   "include": ["src"],

@@ -115,6 +115,26 @@ describe('buildLaunchUrl — Compose params (task 046)', () => {
     expect(url).toContain('speFileName=Acme+MSA.docx');
   });
 
+  /** task 041 (FR-13): activeWorkType is additive — encoded alongside the existing params. */
+  test('emits activeWorkType when supplied (task 041, FR-13)', () => {
+    const url = buildLaunchUrl({
+      composeMode: 'editor',
+      speDriveItemId: '01ABCDEF0123456789',
+      activeWorkType: 'agreement-analysis',
+    } satisfies SpaarkeAiComposeLaunchParams);
+
+    expect(url).toContain('activeWorkType=agreement-analysis');
+  });
+
+  test('omits activeWorkType when not supplied (no regression on pre-existing launches)', () => {
+    const url = buildLaunchUrl({
+      composeMode: 'editor',
+      speDriveItemId: '01ABCDEF0123456789',
+    } satisfies SpaarkeAiComposeLaunchParams);
+
+    expect(url).not.toContain('activeWorkType');
+  });
+
   test('allows Compose params alongside the existing entityLogicalName / entityId envelope (FR-19 ribbon path)', () => {
     const url = buildLaunchUrl({
       entityLogicalName: 'sprk_document',
@@ -130,6 +150,102 @@ describe('buildLaunchUrl — Compose params (task 046)', () => {
     expect(url).toContain('composeMode=editor');
     expect(url).toContain('sprkDocumentId=aaaa-bbbb-cccc');
     expect(url).toContain('speDriveItemId=01ABCDEF');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildLaunchUrl — Analysis entry-matrix params (ai-advanced-capabilities-
+// analysis-hub-r1 task 052, spec §13.3 / FR-16)
+// ---------------------------------------------------------------------------
+
+describe('buildLaunchUrl — Analysis params (task 052)', () => {
+  test('omits analysis params when none are supplied (back-compat with non-Analysis launches)', () => {
+    const url = buildLaunchUrl({
+      entityLogicalName: 'sprk_matter',
+      entityId: '{abc-123}',
+    });
+
+    expect(url).toContain('entityLogicalName=sprk_matter');
+    expect(url).toContain('entityId=abc-123');
+    expect(url).not.toContain('analysisId');
+    expect(url).not.toContain('worktype');
+    expect(url).not.toContain('regarding');
+  });
+
+  test('emits worktype + regarding alongside entity context (entry case 2b: new-in-record)', () => {
+    const url = buildLaunchUrl({
+      entityLogicalName: 'sprk_matter',
+      entityId: 'matter-guid-1',
+      worktype: '100000000',
+      regarding: 'matter-guid-1',
+    });
+
+    expect(url).toContain('entityLogicalName=sprk_matter');
+    expect(url).toContain('entityId=matter-guid-1');
+    expect(url).toContain('worktype=100000000');
+    expect(url).toContain('regarding=matter-guid-1');
+    expect(url).not.toContain('analysisId');
+  });
+
+  test('emits analysisId (entry case 2d: open existing) with braces stripped', () => {
+    const url = buildLaunchUrl({
+      analysisId: '{D1A2B3C4-AAAA-BBBB-CCCC-DDDDEEEEFFFF}',
+    });
+
+    expect(url).toContain('analysisId=D1A2B3C4-AAAA-BBBB-CCCC-DDDDEEEEFFFF');
+    expect(url).not.toContain('worktype');
+    expect(url).not.toContain('regarding');
+  });
+
+  test('regarding braces are stripped like entityId', () => {
+    const url = buildLaunchUrl({
+      regarding: '{abc-123}',
+    });
+
+    expect(url).toContain('regarding=abc-123');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildLaunchUrl — subDomain deep-link param (ai-advanced-capabilities-
+// agreements-r1 task 022, spec FR-09 — hub A3 deferred deep-threading leg)
+// ---------------------------------------------------------------------------
+
+describe('buildLaunchUrl — subDomain deep-link param (task 022)', () => {
+  test('omits subDomain when not supplied (back-compat with every existing launch)', () => {
+    const url = buildLaunchUrl({
+      analysisId: 'analysis-guid-1',
+    });
+
+    expect(url).not.toContain('subDomain');
+  });
+
+  test('emits subDomain alongside analysisId (cold-load open-existing door)', () => {
+    const url = buildLaunchUrl({
+      analysisId: 'analysis-guid-1',
+      subDomain: 'nda',
+    });
+
+    expect(url).toContain('analysisId=analysis-guid-1');
+    expect(url).toContain('subDomain=nda');
+  });
+
+  test('emits subDomain alongside worktype (cold-load new-analysis-hub hint door)', () => {
+    const url = buildLaunchUrl({
+      worktype: '100000000',
+      subDomain: 'employment',
+    });
+
+    expect(url).toContain('worktype=100000000');
+    expect(url).toContain('subDomain=employment');
+  });
+
+  test('subDomain is a plain slug — no brace-stripping applied (not a GUID)', () => {
+    const url = buildLaunchUrl({
+      subDomain: 'asset-purchase',
+    });
+
+    expect(url).toContain('subDomain=asset-purchase');
   });
 });
 
@@ -174,6 +290,66 @@ describe('openSpaarkeAi — back-compat (entity form launch unchanged)', () => {
     openSpaarkeAi({}, 1);
     const [, navOptions] = nav.navigateTo.mock.calls[0];
     expect(navOptions).toMatchObject({ target: 1 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// openSpaarkeAi — Analysis entry-matrix params (task 052)
+// ---------------------------------------------------------------------------
+
+describe('openSpaarkeAi — Analysis params (task 052 §ui-tests)', () => {
+  let nav: MockNavigation;
+
+  beforeEach(() => {
+    nav = installXrmMock();
+  });
+  afterEach(() => {
+    uninstallXrmMock();
+  });
+
+  /** POML ui-test #1: ribbon new-in-record opens modal with regarding. */
+  test('new-in-record: worktype + regarding=parent reach the URL data blob at target=2', () => {
+    openSpaarkeAi({
+      entityLogicalName: 'sprk_matter',
+      entityId: 'matter-guid-1',
+      worktype: '100000000',
+      regarding: 'matter-guid-1',
+    });
+
+    expect(nav.navigateTo).toHaveBeenCalledTimes(1);
+    const [pageInput, navOptions] = nav.navigateTo.mock.calls[0];
+    const data = (pageInput as { data: string }).data;
+    const params = new URLSearchParams(data);
+
+    expect(params.get('entityLogicalName')).toBe('sprk_matter');
+    expect(params.get('entityId')).toBe('matter-guid-1');
+    expect(params.get('worktype')).toBe('100000000');
+    expect(params.get('regarding')).toBe('matter-guid-1');
+    expect(params.get('analysisId')).toBeNull();
+    expect(navOptions).toMatchObject({ target: 2 });
+  });
+
+  /** POML ui-test #2: open existing passes analysisId. */
+  test('open existing: analysisId reaches the URL data blob at target=2', () => {
+    openSpaarkeAi({ analysisId: 'analysis-guid-1' });
+
+    const [pageInput, navOptions] = nav.navigateTo.mock.calls[0];
+    const params = new URLSearchParams((pageInput as { data: string }).data);
+
+    expect(params.get('analysisId')).toBe('analysis-guid-1');
+    expect(params.get('worktype')).toBeNull();
+    expect(navOptions).toMatchObject({ target: 2 });
+  });
+
+  /** task 022 (spec FR-09) ui-test: "Deep-link door" — subDomain=nda reaches the URL data blob. */
+  test('Deep-link door (task 022): subDomain=nda reaches the URL data blob alongside analysisId', () => {
+    openSpaarkeAi({ analysisId: 'analysis-guid-1', subDomain: 'nda' });
+
+    const [pageInput] = nav.navigateTo.mock.calls[0];
+    const params = new URLSearchParams((pageInput as { data: string }).data);
+
+    expect(params.get('analysisId')).toBe('analysis-guid-1');
+    expect(params.get('subDomain')).toBe('nda');
   });
 });
 
@@ -268,6 +444,40 @@ describe('openSpaarkeAiCompose — Path A entry (task 046 §ui-tests)', () => {
    * speDriveItemId; ComposeWorkspace then renders its empty-state picker
    * per FR-19 + design.md §14 row 5.
    */
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1 task 041 (FR-13): activeWorkType (e.g. an
+   * Agreement Review launch) reaches the URL data blob so main.tsx → App → ThreePaneShell →
+   * ComposeLaunchContext → ComposeWorkspace → ComposeEditor can scope the AI toolbar via the
+   * already-shipped getToolsForSurface(surface, activeWorkType).
+   */
+  test('Agreement Review scopes palette: activeWorkType="agreement-analysis" reaches the URL data blob', () => {
+    openSpaarkeAiCompose({
+      sprkDocumentId: 'doc-guid-2',
+      speDriveItemId: '01DRIVEITEM2',
+      activeWorkType: 'agreement-analysis',
+    });
+
+    const [pageInput] = nav.navigateTo.mock.calls[0];
+    const params = new URLSearchParams((pageInput as { data: string }).data);
+    expect(params.get('activeWorkType')).toBe('agreement-analysis');
+    expect(params.get('composeMode')).toBe('editor');
+  });
+
+  /**
+   * Default is unscoped (no regression): omitting activeWorkType keeps the URL free of the
+   * param — main.tsx falls through to `undefined`, and ComposeEditor's own `'*'` default applies.
+   */
+  test("Default is unscoped: omitting activeWorkType omits the param (ComposeEditor's own '*' default applies)", () => {
+    openSpaarkeAiCompose({
+      sprkDocumentId: 'doc-guid-3',
+      speDriveItemId: '01DRIVEITEM3',
+    });
+
+    const [pageInput] = nav.navigateTo.mock.calls[0];
+    const params = new URLSearchParams((pageInput as { data: string }).data);
+    expect(params.get('activeWorkType')).toBeNull();
+  });
+
   test('Empty-state launch: composeMode=editor only, no document context', () => {
     openSpaarkeAiCompose({});
 

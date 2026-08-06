@@ -65,6 +65,24 @@ export interface ComposeLaunchContextValue {
    * section factory lives in LegalWorkspace and cannot import from `src/solutions/SpaarkeAi/*`.
    */
   onCreateOnSaveComplete?: (newSprkDocumentId: string) => void | Promise<void>;
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1 task 041 (FR-13): the ACTIVE work type the host
+   * launched with (e.g. `'agreement-analysis'` for an Agreement Review). Forwarded to
+   * `<ComposeWorkspace activeWorkType>` → `<ComposeEditor activeWorkType>` →
+   * `getToolsForSurface(surface, activeWorkType)`, scoping the inline AI toolbar to work-type-
+   * scoped tools alongside the shared `['*']` primitives. Absent/undefined on every launch that
+   * predates this field or has no work-type context — `ComposeEditor`'s own `'*'` default applies
+   * (unscoped, no regression).
+   */
+  activeWorkType?: string;
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1 (agreements-r1 contract A3): the level-2
+   * agreement sub-domain (`sprk_agreementtype.sprk_key`, e.g. `'nda'`) the host launched
+   * with. Carried alongside `activeWorkType` so the review machine (agreements-r1) opens
+   * ORIENTED — binds the type's knowledge pack + scopes tools — instead of re-inferring.
+   * Absent on non-agreement launches; a null/undefined subDomain routes to the general pack.
+   */
+  subDomain?: string;
 }
 
 export const ComposeLaunchContext = React.createContext<ComposeLaunchContextValue | null>(null);

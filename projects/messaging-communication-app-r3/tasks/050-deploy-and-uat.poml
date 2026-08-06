@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Deploy full solution + UAT across success criteria + roll out to 11 regarding-family entities</title>
+    <phase>6 Deploy + wrap-up</phase>
+    <gate>after:045</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deploy + verification gate; orchestrates deploy skills + UAT. No new application code authored here (deploy/verify, not implement).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Executes prescribed deploy skills + a UAT checklist; no architectural authoring.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploy gate — must run after all Phase 5 surfaces land; serializes the environment.</parallel-reason>
+    <deps>034, 041, 042, 043, 044, 045</deps>
+    <tags>deploy</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+  <prompt>Deploy the full R3 solution (backend + Phase 5 must-haves) to the target env, run UAT across all spec success criteria, and roll out across the 11 regarding-family entities with Matter as the pilot first. Verify the release gates: BFF publish ≤60 MB compressed, 0 new HIGH CVE, ADR-038 tests green.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly.</role>
+  <goal>A deployed, UAT-verified R3 across all three surfaces and the Email &amp; Messages tab, live on the Matter pilot first then rolled out to all 11 regarding-family entities, with the release NFR gates (publish size, CVE, tests) all green.</goal>
+  <context>
+    <background>Phase 6 deploys everything built in Phases 1–5: the BFF backend increment, the shared conversation widget, the right-pane PCF, the standalone code page + sprk_communicationspage, the Email &amp; Messages DataGrid tab, and the Phase 5 must-haves (attachments, privilege/privacy, notification awareness, search config, pin). Rollout is Matter-pilot-first across all 11 regarding-family entities. Success criteria are the 13 items in spec §Success Criteria.</background>
+    <relevant-files>
+      <file>projects/messaging-communication-app-r3/spec.md (§Success Criteria — 13 items)</file>
+      <file>src/server/api/Sprk.Bff.Api/**</file>
+      <file>src/client/pcf/** (right-pane conversation PCF)</file>
+      <file>src/solutions/** (standalone code page + sprk_communicationspage)</file>
+    </relevant-files>
+    <dependencies>Tasks 034 (surfaces), 041 (pin UI), 042 (attachments), 043 (privilege/privacy), 044 (search config), 045 (notification awareness — if not degraded). Confirm R2 tasks 002/003 applied in the target env.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="NFR-02">BFF publish ≤60 MB compressed — measure + report (baseline ~46 MB).</constraint>
+    <constraint source="NFR-07">0 new HIGH-severity CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="NFR-08">ADR-038 tests green (seam tests for the read endpoint + component tests).</constraint>
+    <constraint source="spec-rollout">All 11 regarding-family entities; Matter is the pilot — verify the pilot before broad rollout.</constraint>
+    <constraint source="PCF-build">PCF deploy uses npm run build:prod (NOT npm run build).</constraint>
+    <constraint source="ADR-tensions">Cite the two Path-C ADR tensions (ADR-006 web-resource grid, ADR-026 Path-A PCF) in the deploy PR.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="deploy-order" location="bff-deploy / dataverse-deploy / pcf-deploy / code-page-deploy skills">Deploy backend, then schema/web-resource, then PCF, then code page; verify each before rollout.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Confirm prerequisites in the target env: R2 tasks 002 + 003 applied; task 040 pin field present; task 044 search config live. Run /conflict-check for Services/Communication before the BFF deploy.</step>
+    <step order="2">Deploy the BFF via bff-deploy. Run dotnet publish -c Release, measure compressed size (report absolute + diff vs ~46 MB), verify ≤60 MB and 0 new HIGH CVE. Confirm ADR-038 seam + component tests green.</step>
+    <step order="3">Deploy schema/web-resource + sprk_communicationspage via dataverse-deploy.</step>
+    <step order="4">Deploy the right-pane conversation PCF via pcf-deploy (npm run build:prod).</step>
+    <step order="5">Deploy the standalone conversation code page via code-page-deploy.</step>
+    <step order="6">Pilot on Matter: run UAT across all 13 spec §Success Criteria (right-pane PCF → record-filtered modal; workspace + standalone render incl. record-less thread; bubbles mine/others; email auto-associate ThreadId; list-all-threads access parity; rename edit-preserve; quick-view+pin; attachments open/download; privilege/privacy + no over-disclosure; notification badge/toast; global search security-trimmed; thread pin; NFR gates).</step>
+    <step order="7">After Matter pilot passes, roll out the form onLoad grid + surfaces to the remaining 10 regarding-family entities.</step>
+    <step order="8">Record UAT results (pass/fail per criterion) + publish-size + CVE + test status in projects/messaging-communication-app-r3/notes/. Update TASK-INDEX.md 050 to complete; document deviations in notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If publish exceeds 60 MB, a new HIGH CVE appears, ADR-038 tests fail, or a Success Criterion fails on the Matter pilot, STOP the broad rollout and escalate rather than deploying to all 11 entities.</trigger>
+  </escalation>
+  <tools>Read, Bash, PowerShell, Skill(bff-deploy), Skill(dataverse-deploy), Skill(pcf-deploy), Skill(code-page-deploy), Skill(conflict-check), Skill(ui-test), Skill(task-execute)</tools>
+  <outputs>
+    <output type="deploy">R3 solution deployed to target env (backend + Phase 5 + surfaces)</output>
+    <output type="note">projects/messaging-communication-app-r3/notes/ — UAT results + publish size + CVE + test status</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Backend + surfaces + Phase 5 must-haves are deployed to the target env; the Matter pilot passes all applicable spec §Success Criteria.</criterion>
+    <criterion testable="true">All 11 regarding-family entities have the surfaces rolled out after the Matter pilot passes.</criterion>
+    <criterion testable="true">BFF publish ≤60 MB compressed (absolute + diff reported); 0 new HIGH CVE; ADR-038 seam + component tests green.</criterion>
+    <criterion testable="true">Privilege/privacy negative case verified in UAT — no over-disclosure; global search results security-trimmed.</criterion>
+    <criterion testable="true">If FR-22 notification awareness was degraded (spine unavailable), the degrade is recorded and UAT reflects polling-only awareness — release not blocked.</criterion>
+    <criterion testable="true">UAT results recorded per criterion in notes/; deploy PR cites the two Path-C ADR tensions.</criterion>
+  </acceptance-criteria>
+  <notes>BFF-touching deploy: verify publish ≤60 MB compressed + 0 new HIGH CVE; cite Placement Justification + the two ADR tensions (ADR-006, ADR-026) in the deploy PR. Reference spec §Success Criteria + NFR-02/07/08. If task 045 degraded to polling-only, deploy proceeds — FR-22 is the only spine-gated item.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge first; follow task-execute.</protocol></execution>
+</task>

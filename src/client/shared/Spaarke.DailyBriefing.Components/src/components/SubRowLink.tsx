@@ -34,6 +34,7 @@
 
 import * as React from 'react';
 import { makeStyles, tokens, Link, Text } from '@fluentui/react-components';
+import { OOB_MODAL_SIZES } from '@spaarke/ui-components';
 import type { NotificationItem } from '../types/notifications';
 
 // ---------------------------------------------------------------------------
@@ -105,6 +106,8 @@ export const SubRowLink: React.FC<SubRowLinkProps> = ({ item }) => {
 
     if (!xrm?.Navigation?.navigateTo) return;
 
+    // `record` OOB size (85%×85%) — record-modal-selection.md invariant
+    // (spec FR-11/FR-18, task 090); was an ad-hoc 80%×80% literal.
     xrm.Navigation.navigateTo(
       {
         pageType: 'entityrecord',
@@ -113,8 +116,8 @@ export const SubRowLink: React.FC<SubRowLinkProps> = ({ item }) => {
       },
       {
         target: 2,
-        width: { value: 80, unit: '%' },
-        height: { value: 80, unit: '%' },
+        width: OOB_MODAL_SIZES.record.width,
+        height: OOB_MODAL_SIZES.record.height,
       }
     ).catch(() => {
       /* user closed dialog or navigation cancelled -- non-fatal */

@@ -135,8 +135,9 @@ function noopDispatch(): DispatchPaneEvent {
   return jest.fn() as unknown as DispatchPaneEvent;
 }
 
-// A representative FULL action set (primary + overflow + email split menu are all always rendered)
-// so the one-row assertion covers the busiest realistic layout, not just the stubbed default.
+// A representative FULL action set (primary + overflow) injected via the `actions` override so the
+// one-row assertion covers the busiest realistic layout, not just the stubbed default. (The injected
+// list bypasses the Contextual AI Tool Library surface filter — tests control the exact set.)
 const FULL_TEST_ACTIONS: ComposeAiToolbarAction[] = [
   { id: 'compose-explain-clause', label: 'Explain', tooltip: 'Explain.', bindingId: 'b1', placement: 'primary' },
   {
@@ -181,7 +182,7 @@ describe('FR-20 (DEF-17) — the selection AI bubble menu renders on a single ro
     expect(style.whiteSpace).toBe('nowrap');
   });
 
-  it('every action (primary + email + overflow trigger) renders inside the SAME single toolbar row', () => {
+  it('every action (primary + overflow trigger) renders inside the SAME single toolbar row', () => {
     renderAiToolbar();
     const toolbar = screen.getByTestId('compose-ai-toolbar');
 
@@ -190,7 +191,6 @@ describe('FR-20 (DEF-17) — the selection AI bubble menu renders on a single ro
     expect(toolbar).toContainElement(screen.getByTestId('compose-ai-toolbar-compose-explain-clause'));
     expect(toolbar).toContainElement(screen.getByTestId('compose-ai-toolbar-compose-compare-to-playbook'));
     expect(toolbar).toContainElement(screen.getByTestId('compose-ai-toolbar-compose-draft-alternative'));
-    expect(toolbar).toContainElement(screen.getByTestId('compose-ai-toolbar-email'));
     expect(toolbar).toContainElement(screen.getByTestId('compose-ai-toolbar-more'));
     expect(screen.getAllByRole('toolbar')).toHaveLength(1);
   });
@@ -258,7 +258,7 @@ describe('FR-21 (DEF-15) — dismissing the simplification banner persists for t
     renderBannerStack({ importWarnings: DIFFERENT_WARNINGS });
 
     expect(screen.getByTestId('compose-workspace-import-warning-banner')).toBeInTheDocument();
-    expect(screen.getByText('Document opened with 1 simplification(s)')).toBeInTheDocument();
+    expect(screen.getByText('Some formatting was simplified')).toBeInTheDocument();
   });
 
   it('sessionStorage carries a dismissal sentinel keyed to the warnings content after ×', async () => {

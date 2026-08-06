@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>sprk_agreementtype registry — code mirror, remaining seeds, behavior values</title>
+    <phase>0 Foundation</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New file creation (type + seed mirror) + Dataverse data ops; no product logic changes. TS type extension is additive/mechanical.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified data/mirror work; the schema facts are already verified (HUB-R1-REVIEW §2-A2 with GUIDs).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, schema-mirror, data</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Give the env-only sprk_agreementtype table a code mirror and complete its data: today the table exists in
+    spaarkedev1 with 3 seed rows and ZERO repo references. Author the TS type + infra seed JSON, load the remaining
+    7 identity rows, fill behavior-column values for nda + general, and verify the sprk_key alternate-key constraint.
+  </prompt>
+  <role>SPAARKE platform developer. Dataverse schema/data + TypeScript type authoring. Follow ADRs strictly.</role>
+  <goal>
+    sprk_agreementtype is fully mirrored in code (TS type + seed JSON with recorded GUIDs), all 10 identity rows exist
+    (sprk_isselectable=Yes), behavior columns are populated for nda + general, and sprk_key uniqueness is enforced.
+  </goal>
+
+  <context>
+    <background>
+      Hub-r1 created the table env-only (via MCP; no code/infra mirror — verified in HUB-R1-REVIEW §2-A2). The hub's A1
+      picker (commit 1e1a6579b) already reads rows with `sprk_isselectable eq true`; hub added partial fields to
+      sprkAnalysis.ts. Existing rows (spaarkedev1): general 433e1688-908c-f111-8077-7ced8ddc4cc6 (isfallback=Yes),
+      nda d557c894-…, employment 92b3c59a-… — all isselectable=Yes (owner fix 2026-07-31, verified). Behavior columns
+      (sprk_knowledgepackref, sprk_classificationcue, sprk_confidencethreshold) exist but are null — agreements-r1 owns
+      the VALUES (hub reverse doc Part D). Remaining seed rows per Part D: lease, asset-purchase, services, licensing,
+      vendor, partnership, loan. NAMING: the sprk_analysis lookup attribute logical name is sprk_agreementtype
+      (OData _sprk_agreementtype_value); sprk_agreementtypeid is the reference table's PK. An undocumented
+      sprk_description column also exists.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/types/sprkAnalysis.ts</file>
+      <file role="new">infra/dataverse/sprk_agreementtype-rows.json</file>
+      <file role="canonical-reference">scripts/seed-data/Deploy-TypeLookups.ps1</file>
+      <file role="canonical-reference">infra/dataverse/sprk_playbookconsumer-rows.json</file>
+    </relevant-files>
+    <dependencies>none (Wave 0)</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-044">All GUIDs written to the seed mirror or passed over OData use bare-lowercase canonical form via the shared cleanGuid helpers — scope: every GUID in the new seed JSON + any @odata.bind built here.</constraint>
+    <constraint source="ADR-027">Dataverse data changes deploy via the established seed-script pattern (mirror-first JSON + idempotent script), not ad-hoc console edits — scope: the 7 new rows + behavior-value updates.</constraint>
+    <constraint source="project">Behavior values only — NO schema changes (columns exist). If the sprk_key alternate key turns out to be MISSING, adding it IS schema work: do it via dataverse-create-schema patterns and record it in the seed JSON header.</constraint>
+    <constraint source="project">Do not duplicate the registry: this table is the ONE source of truth (design Lens 3d). No parallel TS constant list of agreement types beyond the generated mirror.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse schema/data + registry mirror</topic>
+    <files>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>projects/ai-advanced-capabilities-agreements-r1/notes/HUB-R1-REVIEW-2026-07-30.md</file>
+    </files>
+    <patterns>
+      <pattern name="type-lookup seed" location="scripts/seed-data/Deploy-TypeLookups.ps1">Closest existing seed pattern — extend/copy for sprk_agreementtype rows.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; load knowledge files; read HUB-R1-REVIEW §2-A2 + hub reverse doc Part D.</step>
+    <step order="1">Describe sprk_agreementtype + the sprk_analysis lookup via Dataverse MCP; verify the sprk_key alternate key exists. Q4 STATUS (hub answer doc): OWNER ACTION in flight — hub asked the owner to confirm/add it; check the hub answer doc for confirmation FIRST; if still missing and unconfirmed, coordinate with the owner so it is added ONCE (we may add it with owner ok) — never add blind.</step>
+    <step order="2">Author infra/dataverse/sprk_agreementtype-rows.json — all 10 rows (existing 3 with live GUIDs; 7 new), identity + behavior columns, header documenting the lookup logical-name fact.</step>
+    <step order="3">Load the 7 new identity rows (sprk_isselectable=Yes, sortorder per Part D) via the seed pattern; update behavior values on nda (knowledgepackref=KNW-011 NDA pack ref; classificationcue; confidencethreshold null=global) + general (broad fallback pack ref).</step>
+    <step order="4">Extend the sprkAnalysis.ts mirror (hub already added partial fields in 1e1a6579b — extend, don't restate) with the SprkAgreementType row type + key constants.</step>
+    <step order="5">Verify via read_query: 10 rows, all selectable, exactly one isfallback=Yes.</step>
+    <step order="6">Update TASK-INDEX.md: 001 ✅. Note GUIDs of new rows in the seed JSON.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the sprk_key alternate key is missing, unconfirmed by the owner (hub Q4 owner-action), and blocking — STOP and escalate rather than adding unilaterally; routing code keys on sprk_key uniqueness.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>sprk_agreementtype table exists env-only; repo-wide grep finds the string ONLY in coordination docs (HUB-R1-REVIEW §2-A2). Partial TS fields added by hub 1e1a6579b.</existing>
+    <extension>Yes — extends the existing sprkAnalysis.ts types file and the existing seed-data script pattern; the seed JSON is the standard mirror artifact every Dataverse data surface carries.</extension>
+    <cost-of-doing-nothing>Every consumer hand-writes schema facts from the live env; the doc'd wrong lookup name (sprk_agreementtypeid) propagates into code; classifier routing has only 3 of 10 types and null behavior columns — routing/grounding cannot work.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dataverse-mcp">describe/read_query/create_record/update_record</tool><tool name="terminal">seed script</tool></tools>
+
+  <outputs>
+    <output type="config">infra/dataverse/sprk_agreementtype-rows.json</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/types/sprkAnalysis.ts (extended)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">read_query returns 10 rows; all sprk_isselectable=Yes; exactly one sprk_isfallback=Yes (general).</criterion>
+    <criterion testable="true">nda + general rows carry non-null sprk_knowledgepackref + sprk_classificationcue; confidencethreshold null (global baseline applies).</criterion>
+    <criterion testable="true">The seed JSON round-trips: every row in the file matches the env (GUIDs recorded); the file documents the lookup logical name sprk_agreementtype.</criterion>
+    <criterion testable="true">sprk_key uniqueness is enforced (alt key verified or created); attempting a duplicate key row fails.</criterion>
+    <criterion testable="true">Negative: no schema columns were added/modified on sprk_agreementtype (except the alt key if missing); tsc build green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-06 substrate. Hub Q3 CONFIRMED (we load the 7 seeds); Q4 = owner action in flight (we verify + coordinate-once). The 7 new-row GUIDs must be appended to the seed JSON after creation.
+
+  COMPLETION SUMMARY (2026-07-31, FULL rigor — overridden up from authored STANDARD because this task modifies a .ts
+  file): all 10 sprk_agreementtype rows now exist in spaarkedev1 (7 new: lease caa461f3-fb8c-f111-8076-3833c5deff74,
+  asset-purchase cca461f3-fb8c-f111-8076-3833c5deff74, services dea461f3-fb8c-f111-8076-3833c5deff74, licensing
+  e6a461f3-fb8c-f111-8076-3833c5deff74, vendor f0a461f3-fb8c-f111-8076-3833c5deff74, partnership
+  f9a461f3-fb8c-f111-8076-3833c5deff74, loan fba461f3-fb8c-f111-8076-3833c5deff74), all sprk_isselectable=Yes,
+  exactly one sprk_isfallback=Yes (general). nda + general behavior columns filled (sprk_knowledgepackref=KNW-011 /
+  KNW-012-forward-ref, sprk_classificationcue authored, sprk_confidencethreshold left null = global baseline).
+  sprk_key alt-key EMPIRICALLY VERIFIED (duplicate-create attempt rejected with "Entity Key Key violated" — no test
+  row created, nothing to clean up); escalation trigger did not fire. Authored infra/dataverse/sprk_agreementtype-rows.json
+  (all 10 rows + naming-footgun/alt-key/sortorder/KNW-convention/load-procedure header notes) and extended
+  src/client/shared/Spaarke.UI.Components/src/types/sprkAnalysis.ts (ISprkAgreementTypeRecord, SprkAgreementTypeKey
+  union, SPRK_AGREEMENT_TYPE_KEYS, SPRK_AGREEMENT_TYPE_FALLBACK_KEY, SPRK_AGREEMENT_TYPE_SELECT — additive only, did
+  NOT restate hub's 1e1a6579b fields). IMPORTANT DISCOVERY for the main session: this worktree's sprkAnalysis.ts
+  still carries the WRONG OData field name (_sprk_agreementtypeid_value, should be _sprk_agreementtype_value) on the
+  pre-existing ISprkAnalysisRecord/SPRK_ANALYSIS_SELECT — the fix (commit 7e022e7dd) exists on the
+  work/ai-advanced-capabilities-analysis-hub-r1 branch but is NOT YET an ancestor of this branch's HEAD or of
+  origin/master; deliberately not duplicated here (out of this task's "extend, don't restate" scope) to avoid merge
+  drift — will self-correct on the next master merge. tsc build is clean for all lines this task touched (2
+  pre-existing, unrelated errors remain: missing type declarations for @spaarke/sdap-client / @spaarke/auth, sibling
+  packages never built in this fresh worktree checkout). Full detail + quality-gate self-review in
+  projects/ai-advanced-capabilities-agreements-r1/notes/001-execution-notes.md. All 5 acceptance criteria PASS.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

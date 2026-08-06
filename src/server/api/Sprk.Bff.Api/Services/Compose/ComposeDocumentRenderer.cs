@@ -116,6 +116,10 @@ public sealed partial class ComposeDocumentRenderer
             var plan = new NumberingPlan();
             RenderBlocks(body, model.Blocks, plan);
 
+            // G5 (FR-05, task 033): swap each BuildRun href-sentinel for a real EXTERNAL hyperlink
+            // relationship on the main part (the part is in scope here; BuildRun was not). Before save.
+            ResolveHyperlinkRelationships(body, mainPart);
+
             // Word requires a trailing sectPr for a valid single-section document.
             body.AppendChild(new SectionProperties(
                 new PageSize { Width = 12240, Height = 15840 },
@@ -133,6 +137,136 @@ public sealed partial class ComposeDocumentRenderer
         }
 
         return stream.ToArray();
+    }
+
+    /// <summary>
+    /// Task 041 (ai-advanced-capabilities-nda-r1, Phase 4): appends <paramref name="blocks"/> as a NEW,
+    /// page-broken, NON-TRACKED section at the END of an EXISTING <c>.docx</c> package — <c>byte[]</c>-in /
+    /// <c>byte[]</c>-out, purely additive. Used to materialize the NDA-REVIEW Summary Page (TL;DR +
+    /// flagged-section overview + recommendations, built by <see cref="ComposeSummaryPageGenerator"/> from
+    /// the ONE ledgered result — no second LLM call) without touching a single existing paragraph.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Not a ComposeShadowPatchEngine operation (deliberate, ADR-049)</b>: the Summary Page is
+    /// SERVER-AUTHORED, FINAL content — not a proposed edit for the user to accept/reject. Routing it
+    /// through the operation log would emit tracked <c>w:ins</c> revisions (a pending suggestion), the wrong
+    /// semantic here. This method instead appends PLAIN (untracked) paragraphs directly to the body,
+    /// mirroring how <see cref="SynthesizeDocument"/> authors a whole document from a
+    /// <see cref="ComposeContentModel"/> — the SAME authoring engine (<see cref="RenderBlocks"/>), applied
+    /// additively to an existing package instead of a blank one.
+    /// </para>
+    /// <para>
+    /// <b>Page break, not a new OOXML section</b>: a manual page break (<c>w:br w:type="page"</c>) precedes
+    /// the appended content. This is deliberately NOT a new <c>w:sectPr</c> section break — a true section
+    /// break would fork page setup (headers/footers/margins) for the appendix, unnecessary here and a risk
+    /// of clashing with the source document's own section scheme. <see cref="ComposeSummaryPageGenerator"/>
+    /// contractually emits only <see cref="ComposeBlockKind.Paragraph"/> blocks with plain (unstyled,
+    /// unnumbered) runs, so this method never needs to merge into — or collide with — the target's
+    /// <c>StyleDefinitionsPart</c> / <c>NumberingDefinitionsPart</c>.
+    /// </para>
+    /// <para>
+    /// <b>Trailing section properties preserved</b>: OOXML requires the FINAL section's <c>w:sectPr</c> to be
+    /// the LAST direct child of <c>w:body</c> (true of every valid single- or multi-section document). This
+    /// method detaches it, appends the page break + blocks, then re-attaches it — so the appended content
+    /// lands INSIDE the same final section (same page setup) rather than after/outside it.
+    /// </para>
+    /// <para>
+    /// <b>Idempotent paraId assignment</b>: <see cref="AssignParaIds"/> mints a fresh <c>w14:paraId</c> for
+    /// every new paragraph (E2 substrate); every existing id is left untouched.
+    /// </para>
+    /// </remarks>
+    /// <param name="docxBytes">The existing <c>.docx</c> package bytes (retained-original, patched, or
+    /// just-synthesized). A valid WordprocessingML OPC package.</param>
+    /// <param name="blocks">The content to append, in document order. SHOULD be
+    /// <see cref="ComposeBlockKind.Paragraph"/> blocks only (style/numbering-independent, per
+    /// <see cref="ComposeSummaryPageGenerator"/>'s contract). Heading/ListItem/Table blocks are supported
+    /// defensively — this method adds the required Style/Numbering part ONLY when the target package does
+    /// not already carry one — but are not exercised by the Summary Page generator. An empty
+    /// <paramref name="blocks"/> is a no-op passthrough (mirrors <see cref="ComposeShadowPatchEngine.Apply"/>'s
+    /// empty-log contract).</param>
+    /// <exception cref="ArgumentException"><paramref name="docxBytes"/> is null/empty.</exception>
+    /// <exception cref="ComposePatchException">The supplied bytes are not a readable <c>.docx</c> package, or
+    /// the package has no main document part / body.</exception>
+    public byte[] AppendSection(byte[] docxBytes, IReadOnlyList<ComposeBlock> blocks)
+    {
+        if (docxBytes is null || docxBytes.Length == 0)
+        {
+            throw new ArgumentException("docxBytes is required and must be non-empty.", nameof(docxBytes));
+        }
+
+        ArgumentNullException.ThrowIfNull(blocks);
+
+        if (blocks.Count == 0)
+        {
+            return docxBytes;
+        }
+
+        using var buffer = new MemoryStream();
+        buffer.Write(docxBytes, 0, docxBytes.Length);
+        buffer.Position = 0;
+
+        WordprocessingDocument doc;
+        try
+        {
+            doc = WordprocessingDocument.Open(buffer, isEditable: true);
+        }
+        catch (Exception ex) when (ex is OpenXmlPackageException or FileFormatException or InvalidDataException or ArgumentOutOfRangeException)
+        {
+            throw new ComposePatchException(
+                ComposePatchErrorKind.MalformedDocument,
+                "The supplied bytes are not a readable .docx (WordprocessingML) package.",
+                ex);
+        }
+
+        using (doc)
+        {
+            var mainPart = doc.MainDocumentPart
+                ?? throw new ComposePatchException(ComposePatchErrorKind.MalformedDocument, "The .docx has no main document part.");
+            var body = mainPart.Document?.Body
+                ?? throw new ComposePatchException(ComposePatchErrorKind.MalformedDocument, "The .docx main document part has no body.");
+
+            // The final section's sectPr is always the LAST direct child of body — detach it so the new
+            // content lands INSIDE the same final section, then re-attach it as the new last child.
+            var trailingSectPr = body.Elements<SectionProperties>().LastOrDefault();
+            trailingSectPr?.Remove();
+
+            // Manual page break — a dedicated paragraph containing only a <w:br w:type="page"/> run.
+            // Deliberately NOT a new w:sectPr (see remarks).
+            body.AppendChild(new Paragraph(new Run(new Break { Type = BreakValues.Page })));
+
+            var plan = new NumberingPlan();
+            RenderBlocks(body, blocks, plan);
+
+            // G5 (FR-05, task 033): resolve any href-sentinels in the appended section too (parity with
+            // SynthesizeDocument; the Summary Page generator emits none today, so this is a no-op there).
+            ResolveHyperlinkRelationships(body, mainPart);
+
+            // Defensive: only exercised if a future caller passes Heading/ListItem/Table blocks (the Summary
+            // Page generator does not). Adds the required part ONLY when the target doesn't already carry
+            // one — never a second StyleDefinitionsPart/NumberingDefinitionsPart (Word would not merge two).
+            if (mainPart.StyleDefinitionsPart is null && blocks.Any(b => b.Kind == ComposeBlockKind.Heading))
+            {
+                AddStyleDefinitions(mainPart);
+            }
+
+            if (mainPart.NumberingDefinitionsPart is null && (plan.OrderedInstanceIds.Count > 0 || plan.BulletInstanceId is not null))
+            {
+                AddNumberingDefinitions(mainPart, plan);
+            }
+
+            if (trailingSectPr is not null)
+            {
+                body.AppendChild(trailingSectPr);
+            }
+
+            // E2 substrate: mint a fresh w14:paraId for every appended paragraph; every existing id untouched.
+            AssignParaIds(body);
+
+            mainPart.Document!.Save();
+        }
+
+        return buffer.ToArray();
     }
 
     // ────────────────────────────────────────────────────────────────────────────────────────────
@@ -237,7 +371,13 @@ public sealed partial class ComposeDocumentRenderer
         return paragraph;
     }
 
-    private static Run BuildRun(ComposeInlineRun run)
+    // G5 (FR-05, task 033): sentinel prefix stashing a run's href on the temporary Hyperlink.Id during the
+    // static body build (which has no MainDocumentPart in hand). ResolveHyperlinkRelationships replaces
+    // each sentinel with a real EXTERNAL relationship id BEFORE the document is saved — the sentinel never
+    // persists. A prefix that can never collide with a real OOXML relationship id (rId…).
+    private const string HyperlinkPendingIdPrefix = "COMPOSE_PENDING_HREF:";
+
+    private static OpenXmlElement BuildRun(ComposeInlineRun run)
     {
         var element = new Run();
         if (run.Bold || run.Italic || run.Underline)
@@ -250,7 +390,58 @@ public sealed partial class ComposeDocumentRenderer
         }
 
         element.AppendChild(new Text(SanitizeText(run.Text)) { Space = SpaceProcessingModeValues.Preserve });
+
+        // G5: a run carrying an href renders as a clean w:hyperlink wrapping the run. The real external
+        // relationship id can only be minted once the MainDocumentPart is in scope, so stash the href on a
+        // sentinel Hyperlink.Id here; ResolveHyperlinkRelationships (called by both byte-authors after the
+        // body is built) swaps it for the true rId. Zero text-search — the wrap is by the model's own run.
+        if (!string.IsNullOrWhiteSpace(run.Href))
+        {
+            return new Hyperlink(element) { Id = HyperlinkPendingIdPrefix + run.Href!.Trim() };
+        }
+
         return element;
+    }
+
+    /// <summary>
+    /// G5 (FR-05, task 033): resolve every sentinel <see cref="HyperlinkPendingIdPrefix"/> id emitted by
+    /// <see cref="BuildRun"/> into a real EXTERNAL hyperlink relationship on <paramref name="mainPart"/>
+    /// (<c>TargetMode="External"</c>). Called by both authors (<see cref="SynthesizeDocument"/> +
+    /// <see cref="AppendSection"/>) after the body is built and BEFORE save, so no sentinel ever persists.
+    /// A malformed href that cannot form a Uri is unwrapped to its inner run (never a broken relationship,
+    /// never a silent drop of the run's text — the text survives, only the link is dropped).
+    /// </summary>
+    private static void ResolveHyperlinkRelationships(Body body, MainDocumentPart mainPart)
+    {
+        foreach (var hyperlink in body.Descendants<Hyperlink>().ToList())
+        {
+            var id = hyperlink.Id?.Value;
+            if (id is null || !id.StartsWith(HyperlinkPendingIdPrefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var href = id.Substring(HyperlinkPendingIdPrefix.Length);
+            if (Uri.TryCreate(href, UriKind.Absolute, out var uri))
+            {
+                hyperlink.Id = mainPart.AddHyperlinkRelationship(uri, isExternal: true).Id;
+            }
+            else
+            {
+                // Unrepresentable target (not an absolute Uri): keep the run's TEXT (no silent loss) by
+                // replacing the hyperlink wrapper with its inline children, and drop only the link.
+                var parent = hyperlink.Parent;
+                if (parent is not null)
+                {
+                    foreach (var child in hyperlink.ChildElements.ToList())
+                    {
+                        child.Remove();
+                        parent.InsertBefore(child, hyperlink);
+                    }
+                    hyperlink.Remove();
+                }
+            }
+        }
     }
 
     // ── tables ───────────────────────────────────────────────────────────────────────────────────

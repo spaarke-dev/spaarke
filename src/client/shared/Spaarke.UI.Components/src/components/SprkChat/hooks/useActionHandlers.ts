@@ -455,7 +455,9 @@ async function resolveGate(
 
 /**
  * Resolves a confirmed action after the user clicks Confirm in the
- * ActionConfirmationDialog — the presentation leg of the ONE Confirmation Gate.
+ * ConfirmModal-based action confirmation (spaarke-modal-system task 042 — the
+ * retired hand-rolled ActionConfirmationDialog overlay used to render this) —
+ * the presentation leg of the ONE Confirmation Gate.
  *
  * D12 / FR-P2-02 → FR-P2-03 (spaarke-ai-architecture-redesign-r1 tasks 031/032):
  * the deleted R2-052 per-action confirm endpoint is replaced by the unified-gate
@@ -476,7 +478,8 @@ export async function dispatchConfirmedAction(
 
 /**
  * Rejects a pending action after the user clicks Cancel in the
- * ActionConfirmationDialog — writes the `rejected` Gate resolution marker
+ * ConfirmModal-based action confirmation (spaarke-modal-system task 042) —
+ * writes the `rejected` Gate resolution marker
  * server-side (ADR-040 append-only correlation) instead of silently dropping
  * the suspension client-side.
  */

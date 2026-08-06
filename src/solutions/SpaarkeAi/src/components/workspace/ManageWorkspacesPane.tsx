@@ -157,6 +157,7 @@ import {
   DrawerHeader,
   DrawerHeaderTitle,
   DrawerBody,
+  DrawerFooter,
 } from "@fluentui/react-components";
 import {
   DismissRegular,
@@ -168,8 +169,11 @@ import {
   StarRegular,
   ArrowUpRegular,
   ArrowDownRegular,
+  AddRegular,
 } from "@fluentui/react-icons";
 import { useAiSession, useDispatchPaneEvent } from "@spaarke/ai-widgets";
+import { OOB_MODAL_SIZES } from "@spaarke/ui-components";
+import type { WorkspaceTab } from "./WorkspaceTabManager";
 import {
   isPinned,
   pinWorkspace,
@@ -197,6 +201,11 @@ import { SPAARKEAI_TEMPLATE_FILTER } from "../../constants/workspaceTemplateFilt
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
+  // UAT 2026-07-21: standard Power Apps side-pane width (400px). Overriding
+  // `width` on the surface wins over the Fluent size-derived default width.
+  drawer: {
+    width: "400px",
+  },
   drawerBody: {
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalM,
@@ -286,11 +295,6 @@ const useStyles = makeStyles({
     whiteSpace: "nowrap",
     cursor: "pointer",
   },
-  systemHint: {
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
-    fontStyle: "italic",
-  },
   // R4 task 053 (B-4 / FR-07): "Modified ..." metadata line beneath the
   // workspace name. Same visual hierarchy as the systemHint above so the row
   // density stays consistent.
@@ -330,18 +334,26 @@ const useStyles = makeStyles({
   defaultBadge: {
     flexShrink: 0,
   },
+  // UAT 2026-07-21 (round 3): use Fluent's DrawerFooter so the footer aligns to
+  // the drawer surface (a raw <div> child was inset by the surface, which both
+  // pushed the buttons off the right edge and shortened the divider line). We
+  // lay it out as a full-width flex row: Cancel left, New+Save right. The
+  // border-top on DrawerFooter spans the full pane width.
   footer: {
     display: "flex",
-    justifyContent: "flex-end",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: tokens.spacingHorizontalS,
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalM,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
     borderTopStyle: "solid",
     borderTopWidth: "1px",
     borderTopColor: tokens.colorNeutralStroke2,
-    flexShrink: 0,
+  },
+  // Right-aligned button cluster (+ New, Save). Cancel sits at the left edge
+  // via the footer's space-between; this group holds the two right buttons.
+  footerRight: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalS,
   },
   dangerButton: {
     backgroundColor: tokens.colorStatusDangerBackground3,
@@ -467,8 +479,8 @@ async function launchEditWizard(
       },
       {
         target: 2,
-        width: { value: 60, unit: "%" },
-        height: { value: 70, unit: "%" },
+        width: OOB_MODAL_SIZES.wizard.width,
+        height: OOB_MODAL_SIZES.wizard.height,
         title: mode === "saveAs" ? "Save As New Workspace" : "Edit Workspace",
       },
     );
@@ -482,6 +494,88 @@ async function launchEditWizard(
 }
 
 // ---------------------------------------------------------------------------
+// Create-wizard launch + result bridge — moved here from WorkspacePaneMenu
+// (UAT 2026-07-20). The "+ New" button in this pane's footer launches the
+// WorkspaceLayoutWizard in create mode; on save the wizard writes its result
+// to sessionStorage (popup window boundary — `window.__dialogResult` can't
+// cross it) which we read + consume to auto-open the new workspace as a tab.
+// ---------------------------------------------------------------------------
+
+const WIZARD_RESULT_STORAGE_KEY = "spaarke:workspace-wizard:last-result";
+const WIZARD_RESULT_MAX_AGE_MS = 60_000;
+
+interface WizardDialogResult {
+  confirmed: boolean;
+  layoutId?: string;
+  at?: number;
+}
+
+function readWizardDialogResult(): WizardDialogResult | null {
+  try {
+    const raw = window.sessionStorage?.getItem(WIZARD_RESULT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as WizardDialogResult;
+    if (
+      typeof parsed.at === "number" &&
+      Date.now() - parsed.at > WIZARD_RESULT_MAX_AGE_MS
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function consumeWizardDialogResult(): void {
+  try {
+    window.sessionStorage?.removeItem(WIZARD_RESULT_STORAGE_KEY);
+  } catch {
+    /* storage may be disabled */
+  }
+}
+
+async function launchCreateWizard(bffBaseUrl: string): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm() as any;
+  if (!xrm?.Navigation?.navigateTo) {
+    console.warn(
+      "[ManageWorkspacesPane] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Create launch is a no-op.",
+    );
+    return;
+  }
+
+  const parts: string[] = [
+    "mode=create",
+    `bffBaseUrl=${encodeURIComponent(bffBaseUrl ?? "")}`,
+    `templateFilter=${encodeURIComponent(SPAARKEAI_TEMPLATE_FILTER.join(","))}`,
+  ];
+  const data = parts.join("&");
+
+  try {
+    await xrm.Navigation.navigateTo(
+      {
+        pageType: "webresource",
+        webresourceName: "sprk_workspacelayoutwizard",
+        data,
+      },
+      {
+        target: 2,
+        width: OOB_MODAL_SIZES.wizard.width,
+        height: OOB_MODAL_SIZES.wizard.height,
+        title: "Create New Workspace",
+      },
+    );
+  } catch (err: unknown) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const code = (err as any)?.errorCode;
+    if (code !== 2) {
+      console.warn("[ManageWorkspacesPane] Create wizard launch error:", err);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -490,6 +584,14 @@ export interface ManageWorkspacesPaneProps {
   open: boolean;
   /** Called when the drawer should close (X click, Escape, scrim click, Cancel, Save). */
   onOpenChange: (open: boolean) => void;
+  /**
+   * Currently-open workspace tabs. Used by the Save handler to open any pinned
+   * workspace that isn't already an open tab (reactive tab refresh — UAT
+   * 2026-07-20). Reuses the exact `widget_load` dispatch the workspace dropdown
+   * used, so pin/unpin/edit changes made in this pane surface as tabs on Save
+   * without a page refresh.
+   */
+  tabs?: readonly WorkspaceTab[];
 }
 
 // ---------------------------------------------------------------------------
@@ -499,6 +601,7 @@ export interface ManageWorkspacesPaneProps {
 export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
   open,
   onOpenChange,
+  tabs = [],
 }) => {
   const styles = useStyles();
   const { authenticatedFetch, bffBaseUrl, isAuthenticated } = useAiSession();
@@ -751,9 +854,40 @@ export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
   );
 
   // -------------------------------------------------------------------------
-  // Footer handlers — Cancel + Save both close the drawer. Operations are
-  // committed instantly; the buttons are operator-visible exits. If we
-  // later add a transactional mode, Cancel reverts and Save commits.
+  // "+ New" — launch the create wizard, then (on a confirmed save) refetch the
+  // list and auto-open the new workspace as a tab. Moved here from the old
+  // WorkspacePaneMenu dropdown (UAT 2026-07-20).
+  // -------------------------------------------------------------------------
+
+  const handleNew = React.useCallback(async (): Promise<void> => {
+    await launchCreateWizard(bffBaseUrl);
+    refetch();
+    const dialogResult = readWizardDialogResult();
+    if (dialogResult?.confirmed && dialogResult.layoutId) {
+      dispatch("workspace", {
+        type: "widget_load",
+        widgetType: "workspace",
+        widgetData: { layoutId: dialogResult.layoutId, layoutName: "Workspace" },
+        displayName: "Workspace",
+      });
+      consumeWizardDialogResult();
+      onOpenChange(false);
+    }
+  }, [bffBaseUrl, refetch, dispatch, onOpenChange]);
+
+  // -------------------------------------------------------------------------
+  // Footer handlers — Cancel + Save both close the drawer. All row operations
+  // (pin / unpin / set-default / move / rename / delete) are committed
+  // instantly, so neither button applies or reverts anything.
+  //
+  // Save additionally RECONCILES the open tab set (UAT 2026-07-20): any pinned
+  // workspace that isn't already open is dispatched as a `widget_load` — the
+  // SAME path the old workspace dropdown used on pin — so pin changes made
+  // here surface as tabs without a page refresh. We do NOT auto-close tabs for
+  // unpinned workspaces (that would discard the user's open work; the dropdown
+  // never did either); an unpinned workspace simply won't be re-opened next
+  // cold load. Renames/edits already refetch the list; an open tab keeps its
+  // title until reopened.
   // -------------------------------------------------------------------------
 
   const handleCancel = React.useCallback((): void => {
@@ -761,8 +895,25 @@ export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
   }, [onOpenChange]);
 
   const handleSave = React.useCallback((): void => {
+    for (const p of getPinnedWorkspaces()) {
+      const alreadyOpen = tabs.some(
+        (t) =>
+          t.widgetType === "workspace" &&
+          (t.widgetData as { layoutId?: string } | null)?.layoutId ===
+            p.layoutId,
+      );
+      if (alreadyOpen) continue;
+      const layout = layouts.find((l) => l.id === p.layoutId);
+      const layoutName = layout?.name ?? p.layoutName;
+      dispatch("workspace", {
+        type: "widget_load",
+        widgetType: "workspace",
+        widgetData: { layoutId: p.layoutId, layoutName },
+        displayName: layoutName,
+      });
+    }
     onOpenChange(false);
-  }, [onOpenChange]);
+  }, [tabs, layouts, dispatch, onOpenChange]);
 
   // -------------------------------------------------------------------------
   // Ordered display list — task 104
@@ -897,12 +1048,26 @@ export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
                   Default
                 </Badge>
               )}
+              {/* UAT 2026-07-20: the per-row "System layout — Save As to edit"
+                * italic line was replaced with a compact inline badge to cut
+                * row noise. The Save-As-to-edit hint moves to the badge tooltip. */}
+              {layout.isSystem && (
+                <Tooltip
+                  content="System layout — use Edit then Save As to make an editable copy."
+                  relationship="label"
+                >
+                  <Badge
+                    appearance="outline"
+                    color="informative"
+                    size="small"
+                    className={styles.defaultBadge}
+                    data-testid={`manage-system-badge-${layout.id}`}
+                  >
+                    System
+                  </Badge>
+                </Tooltip>
+              )}
             </div>
-          )}
-          {layout.isSystem && (
-            <Text className={styles.systemHint}>
-              System layout — Save As to edit
-            </Text>
           )}
           {/* R4 task 053 (B-4 / FR-07): "Modified ..." metadata line.
             * Hidden for system layouts (their modifiedOn is the Unix-epoch
@@ -1059,6 +1224,7 @@ export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
         open={open}
         position="end"
         size="medium"
+        className={styles.drawer}
         onOpenChange={(_, data) => onOpenChange(data.open)}
         data-testid="manage-workspaces-drawer"
       >
@@ -1091,8 +1257,7 @@ export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
             </div>
           ) : layouts.length === 0 ? (
             <Text className={styles.emptyHint}>
-              No workspaces yet. Use "+ New Workspace" in the Workspaces menu
-              to create one.
+              No workspaces yet. Use "+ New" below to create one.
             </Text>
           ) : (
             <div data-testid="manage-workspaces-list">
@@ -1143,12 +1308,14 @@ export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
           )}
         </DrawerBody>
 
-        {/* Footer — Cancel + Save (instant model; both close the drawer).
-         * If we later add a transactional mode, Cancel reverts and Save
-         * commits. See file header for the rationale. */}
-        <div className={styles.footer}>
+        {/* Footer (UAT 2026-07-21) — Fluent DrawerFooter so it aligns to the
+         * drawer surface: Cancel left-aligned; "+ New" (gray / secondary) +
+         * Save (primary) right-aligned; the top divider spans the full pane
+         * width. "+ New" launches the create wizard; Save reconciles the open
+         * tabs against the pinned list; Cancel and Save both close the drawer. */}
+        <DrawerFooter className={styles.footer}>
           <Tooltip
-            content="Close without applying further changes."
+            content="Close without opening pinned workspaces."
             relationship="description"
           >
             <Button
@@ -1159,19 +1326,31 @@ export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
               Cancel
             </Button>
           </Tooltip>
-          <Tooltip
-            content="Close the manage panel."
-            relationship="description"
-          >
-            <Button
-              appearance="primary"
-              onClick={handleSave}
-              data-testid="manage-workspaces-save"
+          <div className={styles.footerRight}>
+            <Tooltip content="Create a new workspace." relationship="description">
+              <Button
+                appearance="secondary"
+                icon={<AddRegular />}
+                onClick={() => void handleNew()}
+                data-testid="manage-workspaces-new"
+              >
+                New
+              </Button>
+            </Tooltip>
+            <Tooltip
+              content="Apply changes and open pinned workspaces."
+              relationship="description"
             >
-              Save
-            </Button>
-          </Tooltip>
-        </div>
+              <Button
+                appearance="primary"
+                onClick={handleSave}
+                data-testid="manage-workspaces-save"
+              >
+                Save
+              </Button>
+            </Tooltip>
+          </div>
+        </DrawerFooter>
       </OverlayDrawer>
 
       {/* Inline delete-confirmation dialog (preserved from task 093). */}

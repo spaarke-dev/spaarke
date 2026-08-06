@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Identity;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Communication;
@@ -59,6 +60,7 @@ public class CommunicationFilteredQueryTests
             _query.Object,
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
             _resolver.Object,
+            Mock.Of<ISystemUserIdentityResolver>(), // #675: default IsExternalAsync ⇒ false (internal caller) — preserves pre-fix behavior
             Mock.Of<ILogger<CommunicationThreadReadService>>());
     }
 
@@ -110,6 +112,35 @@ public class CommunicationFilteredQueryTests
         _messageQuery.Should().Contain("sprk_sentat ge 2026-07-01");
         _messageQuery.Should().Contain("sprk_sentat le 2026-07-31");
         _messageQuery.Should().Contain(" and ", "multiple facets are AND-composed");
+    }
+
+    [Fact]
+    public async Task QueryCommunicationsAsync_ProjectsEnrichedSenderIdentity_UniformWithOtherReadPaths()
+    {
+        // FR-18 uniform contract: the filtered query projects and flows Direction/SentBy/SentByName just like the
+        // single-thread and by-regarding reads (all three share QueryVisibleMessagesAsync / BuildDto).
+        var messageId = Guid.NewGuid();
+        var sender = Guid.NewGuid();
+        var sut = Sut(); // registers the default setups first...
+        // ...then override the message row to carry the enriched sender identity (later setup wins in Moq).
+        _query.Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => _messageQuery = odata)
+              .ReturnsAsync(new[] { MessageRow(messageId, ThreadId, type: TypeMessage,
+                  direction: 100000000, sentBy: sender, sentByName: "Bob") });
+
+        var result = await sut.QueryCommunicationsAsync(
+            ThreadId.ToString(), null, null, null, null, null, Caller(), CancellationToken.None);
+
+        // The $select carries sprk_direction + the _sprk_sentby_value lookup (whose FormattedValue annotation
+        // supplies SentByName); sprk_sentbyname is deliberately NOT selected — broken in the env
+        // (IsValidODataAttribute=false) → messaging-r3 2026-07-22.
+        _messageQuery.Should().Contain("sprk_direction").And.Contain("_sprk_sentby_value");
+        _messageQuery.Should().NotContain("sprk_sentbyname",
+            "the broken denormalized column must not be selected (it 400s the whole read)");
+        var msg = result.Messages.Single();
+        msg.Direction.Should().Be(100000000);
+        msg.SentBy.Should().Be(sender);
+        msg.SentByName.Should().Be("Bob");
     }
 
     // ─────────────────────────── no-leak: access filter applied on the filtered path ───────────────────────────
@@ -299,7 +330,10 @@ public class CommunicationFilteredQueryTests
 
     private static Dictionary<string, JsonElement> MessageRow(
         Guid id, Guid threadId, string? body = null, int? type = null,
-        bool internalOnly = false, int privilege = PrivilegeNone) => new()
+        bool internalOnly = false, int privilege = PrivilegeNone,
+        int? direction = null, Guid? sentBy = null, string? sentByName = null)
+    {
+        var row = new Dictionary<string, JsonElement>
         {
             ["sprk_communicationid"] = El(id.ToString()),
             ["_sprk_communicationthread_value"] = El(threadId.ToString()),
@@ -309,6 +343,13 @@ public class CommunicationFilteredQueryTests
             ["sprk_body"] = El(body ?? ""),
             ["sprk_communicationtype"] = El(type ?? TypeMessage),
         };
+        if (direction is not null) row["sprk_direction"] = El(direction.Value);
+        if (sentBy is not null) row["_sprk_sentby_value"] = El(sentBy.Value.ToString());
+        // Sender name rides the _sprk_sentby_value FormattedValue annotation (not the broken
+        // sprk_sentbyname column) — the service reads SentByName from THIS key (messaging-r3 2026-07-22).
+        if (sentByName is not null) row["_sprk_sentby_value@OData.Community.Display.V1.FormattedValue"] = El(sentByName);
+        return row;
+    }
 
     private static Dictionary<string, JsonElement> ParticipantRow(Guid communicationId) => new()
     {

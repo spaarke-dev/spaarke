@@ -53,13 +53,37 @@ import {
   formatEventOutputMarkdown,
   isCorrespondenceDraft,
   buildCorrespondenceComposeHtml,
+  isComposeDraftDocument,
+  buildDraftDocumentComposeSeed,
 } from "./DocumentUploadedEventStream";
 import { makeLocalAssistantMessage } from "./summarizeRouting";
+import { isNdaReviewResult } from "./useNdaReviewAdvisoryCommentsBridge";
 import {
   isLocalChip,
   buildPostDraftLocalChips,
   buildAskAboutFilesChip,
 } from "./localActionChips";
+
+/**
+ * UAT round-4 (item #9): the QUICK-review-completion trigger reads `fileId`/`subDomain` back off
+ * the SAME dispatch `slots` task 070's quick-scan caveat already reads `reviewDepth` from — never
+ * a re-classification, never a re-fetch. `slots.fileIds` is typed `unknown` (a generic
+ * `Record<string, unknown>` — the wire shape every review dispatch populates with `[fileId]`, see
+ * `dispatchReview`/`dispatchDirectReview` in useAgreementReviewGate.ts); this extracts the first
+ * entry defensively (never throws on a malformed/legacy payload).
+ */
+function extractFirstFileIdSlot(slots: Record<string, unknown> | undefined): string | undefined {
+  const raw = slots?.fileIds;
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const first = raw[0];
+  return typeof first === "string" && first.length > 0 ? first : undefined;
+}
+
+/** Same defensive-extraction shape as {@link extractFirstFileIdSlot}, for a single string slot. */
+function extractStringSlot(slots: Record<string, unknown> | undefined, key: string): string | undefined {
+  const value = slots?.[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
 
 export interface ConsumerChipsDeps {
   bffBaseUrl: string;
@@ -113,6 +137,30 @@ export interface ConsumerChipsDeps {
    * preference source exists yet; see that module's header).
    */
   chipDisplayPreference?: ChipDisplayPreference | null;
+  /**
+   * D-043-01 (option c): notified with the Binding id each time a real chip dispatches, so the host
+   * can record LEARNED usage that feeds `chipDisplayPreference` back on the next render. Local `local:*`
+   * action chips never reach here (they route through `onLocalChipAction`). Omitted → no usage tracking.
+   */
+  onChipDispatched?: (bindingId: string) => void;
+
+  /**
+   * nda-r1 follow-up: notified with the TERMINAL `dispatched.result` of each Binding dispatch on the
+   * chip/card path (the "Review an NDA" card dispatches through here, NOT through dispatchComposeAction).
+   * The host wires this to the NDA-REVIEW advisory-comments bridge (`emitFromResult`), which is a safe
+   * structural no-op for every non-NDA result shape — so the flagged clauses materialize as Compose
+   * document comments instead of only rendering as raw JSON in the transcript. Omitted → no projection.
+   */
+  onDispatchResult?: (result: unknown) => void;
+
+  /**
+   * UAT round-4 (item #9): notified when an NDA-REVIEW dispatch completes at QUICK depth — the
+   * "Rerun a full analysis" card trigger seam (`useRerunFullAnalysisCard.ts`). Carries the SAME
+   * `fileId`/`subDomain` this dispatch's own `slots` already carried (no re-classification, no
+   * re-upload). NEVER fires for a `thorough` (or absent) `reviewDepth` — no card for an
+   * already-thorough review. Omitted → no card offered.
+   */
+  onQuickReviewComplete?: (info: { fileId: string; subDomain?: string }) => void;
 }
 
 export interface ConsumerChipsController {
@@ -135,8 +183,29 @@ export interface ConsumerChipsController {
    * next-step chips (`INextStepChip.targetBindingId`) wired by ConversationPane's
    * `onNextStep` (F-4, e2e-completion-audit 2026-07-10). Not a new dispatch
    * path — it is the existing one, hoisted so the host reuses it.
+   *
+   * task 021 (FR-08 "both" composite dispatch): returns the settled Promise so a
+   * caller that must run MULTIPLE dispatches SEQUENTIALLY (ADR-016 — one pack's
+   * review at a time, never concurrent) can `await` completion before firing the
+   * next one. Every EXISTING caller (chip clicks, effects) calls this as a bare
+   * statement and ignores the return value — this widening is purely additive.
+   * `opts.resultLabel`, when supplied, is threaded into the NDA-REVIEW-shaped
+   * completion message (see `runBindingDispatch`) so a per-pack outcome can be
+   * labelled ("...under the **Employment** lens...") instead of the generic
+   * "the NDA" phrasing; omitted preserves the exact original message.
+   *
+   * agreements-r1 task 031 (DEF-09 routing): `opts.sessionIdOverride`, when supplied,
+   * is threaded verbatim to `dispatchConsumer`'s own `sessionIdOverride` (the SAME
+   * additive per-dispatch session-target the Compose EDIT toolbar path already uses —
+   * `ConversationPane.dispatchComposeAction`) so THIS dispatch's `compose`-disposition
+   * SessionOutput writes into a caller-chosen session (e.g. the agreement-review's
+   * DOCUMENT session) instead of the bound chat session. Omitted preserves the exact
+   * original (chat-session) behavior for every pre-031 caller.
    */
-  dispatchBinding: (bindingId: string, args?: { slots?: Record<string, unknown> }) => void;
+  dispatchBinding: (
+    bindingId: string,
+    args?: { slots?: Record<string, unknown>; resultLabel?: string; sessionIdOverride?: string }
+  ) => Promise<void>;
   /** Chips are session-scoped — clear on session change. */
   resetForSession: () => void;
 }
@@ -154,8 +223,11 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
     getActiveSourceFile,
     onLocalChipAction,
     getAppendedLocalChips,
+    onDispatchResult,
     onCorrespondenceDraft,
     chipDisplayPreference,
+    onChipDispatched,
+    onQuickReviewComplete,
   } = deps;
 
   const [consumerChips, setConsumerChips] = React.useState<ReadonlyArray<ConsumerChip>>([]);
@@ -187,23 +259,50 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
   const runBindingDispatch = React.useCallback(
     (
       bindingId: string,
-      opts?: { slots?: Record<string, unknown>; requiresAttachments?: boolean }
-    ): void => {
+      opts?: {
+        slots?: Record<string, unknown>;
+        requiresAttachments?: boolean;
+        /**
+         * task 021 (FR-08 "both" composite dispatch): an optional per-pack label
+         * ("Employment", "NDA") threaded into the NDA-REVIEW-shaped completion message
+         * below, so a sequential multi-pack run reads as distinct per-pack outcomes
+         * instead of N identical "the NDA" lines. Omitted preserves the exact original
+         * message (every pre-021 caller).
+         */
+        resultLabel?: string;
+        /**
+         * task 031 (DEF-09 routing): per-dispatch session-id override, threaded verbatim
+         * to `dispatchConsumer`'s own `sessionIdOverride`. Omitted preserves the exact
+         * original chat-session-bound behavior (every pre-031 caller).
+         */
+        sessionIdOverride?: string;
+      }
+    ): Promise<void> => {
       // Single dispatch decision per turn: consume the chip set on click.
       setConsumerChips([]);
       // R4-10 (UAT 2026-07-19): surface a "Working…" spinner while the capability runs (the
       // summarize chip in particular had no visible progress). Cleared in .finally().
       setDispatching(true);
 
+      // D-043-01: record this Binding as LEARNED usage (feeds the chip-display reorder next render).
+      onChipDispatched?.(bindingId);
+
       // ADR-015: structural signal only — never the label/binding values.
       console.log("[ConversationPane] consumer chip dispatched");
 
-      void dispatchConsumer(bindingId, {
+      return dispatchConsumer(bindingId, {
         slots: opts?.slots,
         requiresAttachments: opts?.requiresAttachments,
         attachmentCount: sessionAttachmentCount,
+        // task 031 (DEF-09 routing): threads a caller-chosen session (e.g. the agreement-review's
+        // DOCUMENT session) instead of the bound chat session. Undefined for every existing caller.
+        sessionIdOverride: opts?.sessionIdOverride,
       })
         .then((dispatched) => {
+          // nda-r1 follow-up: hand the terminal result to the host's advisory-comments bridge so the
+          // "Review an NDA" card path (which dispatches through here, not dispatchComposeAction) also
+          // materializes flagged clauses as Compose document comments. Safe no-op for non-NDA shapes.
+          onDispatchResult?.(dispatched.result);
           // UAT 2026-07-19: a surface-launch capability (create-matter / create-project) hands its
           // drafted output to the WIZARD — rendering that draft in the transcript dumped raw JSON
           // ("{matter_name:…, resolvedLookups:…}") into the chat. Suppress the transcript render for
@@ -215,6 +314,17 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
           // `compose.draft.html` seed (no shared-lib change — the editor already seeds from draft HTML).
           // The transcript gets a short confirmation instead of the raw draft.
           const isCorrespondence = !isSurfaceLaunch && isCorrespondenceDraft(dispatched.result);
+          // R7-4 (UAT 2026-07-21): a `compose-draft-document` result (substantial output — a brief /
+          // memo / analysis) carries editor-ready `body_html`. Route it INTO a Compose tab (verbatim
+          // seed) and show only a short confirmation in the transcript — never dump the full document
+          // into chat. Same `compose.draft.html` seed the correspondence route uses (no shared-lib change).
+          const isDraftDocument =
+            !isSurfaceLaunch && !isCorrespondence && isComposeDraftDocument(dispatched.result);
+          // R7-7 (UAT 2026-07-21): an NDA-REVIEW result is a large `{overallRisk, flaggedSections[]}`
+          // JSON that the bridge materializes as in-document Review Notes + the Review Summary. Dumping
+          // that raw JSON into the transcript is noise — suppress it and post a short completion line.
+          const isNdaReview =
+            !isSurfaceLaunch && !isCorrespondence && !isDraftDocument && isNdaReviewResult(dispatched.result);
           if (isCorrespondence) {
             // R5-9: hand the raw draft to the host so a subsequent "Send as email" chip can seed
             // the Email Compose modal (subject / body / suggested recipients).
@@ -231,6 +341,61 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
                 "I've opened a draft response in the Compose tab — review and edit it there."
               )
             );
+          } else if (isDraftDocument) {
+            const { html, title } = buildDraftDocumentComposeSeed(
+              dispatched.result as Record<string, unknown>
+            );
+            dispatch("workspace", {
+              type: "widget_load",
+              widgetType: "compose",
+              widgetData: { compose: { draft: { html, fileName: title } } },
+              displayName: "Compose",
+            } as unknown as WorkspacePaneEvent);
+            enqueueAssistantMessage(
+              makeLocalAssistantMessage(
+                `"${title}" has been prepared in the Compose tab — review and edit it there.`
+              )
+            );
+          } else if (isNdaReview) {
+            // R7-7: never render the raw analysis JSON — the findings live in the Compose Review
+            // Notes + Review Summary. Just confirm completion in the transcript.
+            // task 021 (FR-08 "both" composite dispatch): `opts.resultLabel`, when supplied, names
+            // the pack this run was measured against so a sequential multi-pack "both" run reads as
+            // distinct per-pack outcomes; omitted preserves the exact original generic wording.
+            // task 070 (UAT2 review-depth selector): a Quick-depth run carries a visible caveat —
+            // "Quick scan — not a full advisory review." — read back from the SAME dispatch args
+            // this closure already threads (`opts.slots`), the least-invasive seam: `reviewDepth`
+            // never round-trips server-side (the terminal AnalysisChunk only carries the LLM's
+            // output, never the original request args — SessionDispatchOrchestrator reads
+            // `reviewDepth` only to resolve the model tier, see ResolveReviewDepthModelTierOverride),
+            // so the client — the only place that still knows which depth it picked — renders the
+            // caveat itself. Compose.Components (AgreementReviewSummaryPanel / ComposeEditor) is
+            // off-limits this wave (071's territory) and, per audit, no longer renders a live
+            // risk/disclaimer banner there anyway (overallRisk is `@deprecated`/ignored) — this
+            // conversation-side confirmation message is the correct, reachable seam. Absent for
+            // every Thorough run (the default) — zero visible change to the pre-070 wording.
+            const quickScanCaveat =
+              opts?.slots?.reviewDepth === "quick" ? "**Quick scan — not a full advisory review.** " : "";
+            enqueueAssistantMessage(
+              makeLocalAssistantMessage(
+                opts?.resultLabel
+                  ? `${quickScanCaveat}I've finished reviewing under the **${opts.resultLabel}** lens. Open the **Review Summary** and the in-document **Review Notes** in the Compose tab to see the flagged clauses and assessments.`
+                  : `${quickScanCaveat}I've finished reviewing the NDA. Open the **Review Summary** and the in-document **Review Notes** in the Compose tab to see the flagged clauses and assessments.`
+              )
+            );
+            // UAT round-4 (item #9): a QUICK run just completed — offer the "Rerun a full
+            // analysis" CARD (useRerunFullAnalysisCard.ts), reusing the SAME fileId/subDomain
+            // this dispatch's own slots already carried (no re-classification, no re-upload).
+            // Thorough runs (the default) and any non-"quick" value never reach here.
+            if (opts?.slots?.reviewDepth === "quick") {
+              const fileId = extractFirstFileIdSlot(opts.slots);
+              if (fileId) {
+                onQuickReviewComplete?.({
+                  fileId,
+                  subDomain: extractStringSlot(opts.slots, "subDomain"),
+                });
+              }
+            }
           } else if (!isSurfaceLaunch && dispatched.result !== undefined && dispatched.result !== null) {
             enqueueAssistantMessage(
               makeLocalAssistantMessage(formatEventOutputMarkdown(dispatched.result))
@@ -246,10 +411,19 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
             // R4-6: after "Draft a response" opens a Compose tab, offer Send-as-email +
             // Save-to-document (client bridges) before the server "Create a matter" chip.
             nextChips = [...buildPostDraftLocalChips(), ...serverChips];
+          } else if (isDraftDocument) {
+            // R7-4: after a drafted document opens in Compose, offer the same post-draft companions
+            // (Send as email / Save to document) so the user is never left without a next step.
+            nextChips = [...buildPostDraftLocalChips(), ...serverChips];
           } else if (dispatched.consumerType === "chat-summarize") {
             // R4-11: after a summary, offer "Ask about these files" alongside the server
             // Create-a-matter / Draft-a-response chips (replaces the old "Summarize again").
-            nextChips = [...serverChips, buildAskAboutFilesChip()];
+            // R6-1: also offer "Revise document" when a file is indexed (getAppendedLocalChips).
+            nextChips = [
+              ...serverChips,
+              buildAskAboutFilesChip(),
+              ...(getAppendedLocalChips?.() ?? []),
+            ];
           }
           if (nextChips.length > 0) {
             setConsumerChips(nextChips);
@@ -306,6 +480,10 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
       getActiveSourceFile,
       getSessionId,
       onCorrespondenceDraft,
+      getAppendedLocalChips,
+      onChipDispatched,
+      onDispatchResult,
+      onQuickReviewComplete,
     ]
   );
 
@@ -337,9 +515,15 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
    * same core. Next-step chips carry no attachment precondition.
    */
   const dispatchBinding = React.useCallback(
-    (bindingId: string, args?: { slots?: Record<string, unknown> }): void => {
-      runBindingDispatch(bindingId, { slots: args?.slots });
-    },
+    (
+      bindingId: string,
+      args?: { slots?: Record<string, unknown>; resultLabel?: string; sessionIdOverride?: string }
+    ): Promise<void> =>
+      runBindingDispatch(bindingId, {
+        slots: args?.slots,
+        resultLabel: args?.resultLabel,
+        sessionIdOverride: args?.sessionIdOverride,
+      }),
     [runBindingDispatch]
   );
 

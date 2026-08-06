@@ -62,7 +62,67 @@ public interface IThreadResolver
     /// <c>sprk_communicationthread</c> (see <see cref="ThreadResolver"/> XML doc for the full recommendation).
     /// </remarks>
     Task ReDeriveThreadNameAsync(Guid threadId, CancellationToken ct = default);
+
+    /// <summary>
+    /// FR-17 rename (task 004): sets <c>sprk_name</c> AND flips the naming-edited marker
+    /// (<c>sprk_nameisautoderived</c> → Edited/<c>false</c>) in ONE write, so a later
+    /// <see cref="ReDeriveThreadNameAsync"/> short-circuits at the marker gate and never overwrites the
+    /// user-chosen name (edit-preserve). Returns the persisted (trimmed + truncated) name. This BFF write is the
+    /// ONLY marker-flip path — the rename routes through the BFF, NEVER a Dataverse plugin (hard MUST NOT).
+    /// Unlike <see cref="ReDeriveThreadNameAsync"/> this is a user action and is NOT best-effort: a write failure
+    /// propagates to the caller (the rename endpoint) rather than being swallowed. A blank name is rejected.
+    /// </summary>
+    Task<string> RenameThreadAsync(Guid threadId, string name, CancellationToken ct = default);
+
+    /// <summary>
+    /// FR-24 pin/unpin (task 041): sets <c>sprk_ispinned</c> in a single write. Mirrors
+    /// <see cref="RenameThreadAsync"/>'s shape — a user action, NOT best-effort (a write failure propagates to the
+    /// caller, i.e. the pin endpoint, rather than being swallowed like <see cref="ReDeriveThreadNameAsync"/>). This
+    /// BFF write is the ONLY pin-state write path — no Dataverse plugin. Returns the persisted value (echoed by the
+    /// endpoint).
+    /// </summary>
+    Task<bool> SetPinnedAsync(Guid threadId, bool pinned, CancellationToken ct = default);
+
+    /// <summary>
+    /// Creates a NEW named, record-anchored thread (R3 UAT 2026-07-23 item 9) OWNED by
+    /// <paramref name="ownerSystemUserId"/> and anchored to <paramref name="regarding"/> (the denormalized
+    /// <c>sprk_regardingrecord*</c> pointer — REUSE of the ADR-024 regarding family, not a second mechanism;
+    /// <c>sprk_threadtype</c> = Record-Anchored). When <paramref name="name"/> is blank the name derives from
+    /// the record name (marker Auto → re-derives on a later regarding change); a provided name is stamped
+    /// Edited (<c>sprk_nameisautoderived=false</c>) so the auto re-derive never overwrites it. Owner = caller
+    /// so the new (empty) thread is immediately visible in the caller's all-mode thread list. User action —
+    /// NOT best-effort: a write failure propagates to the endpoint. Returns the new thread id.
+    /// </summary>
+    Task<Guid> CreateRecordThreadAsync(
+        Guid ownerSystemUserId, string? name, RecordThreadAnchor regarding, CancellationToken ct = default);
+
+    /// <summary>
+    /// Round-7 item 7 soft-delete: DEACTIVATES a thread (<c>sprk_communicationthread</c>) by setting its
+    /// <c>statecode</c>=Inactive (<c>statuscode</c>=Inactive) rather than physically deleting it — reversible +
+    /// preserves audit/archive history (operator decision, round 7). The deactivated thread drops out of the
+    /// impersonated list/read on the next load. User action, NOT best-effort (mirrors <see cref="SetPinnedAsync"/>):
+    /// a write failure propagates to the endpoint. This BFF write is the only thread-deactivate path — no Dataverse
+    /// plugin. The endpoint authorizes the caller against the thread (impersonated visibility) BEFORE calling this.
+    /// </summary>
+    Task DeactivateThreadAsync(Guid threadId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Round-7 item 8 soft-delete: DEACTIVATES a single message (<c>sprk_communication</c>) by setting its
+    /// <c>statecode</c>=Inactive (<c>statuscode</c>=Inactive) rather than physically deleting it — reversible +
+    /// preserves the communication record (operator decision, round 7). The deactivated message drops out of the
+    /// impersonated thread read on the next poll. User action, NOT best-effort. This lives on the thread-resolver
+    /// as the single communication-write seam (alongside rename/pin/create). The endpoint authorizes the caller
+    /// against the message (impersonated visibility) BEFORE calling this. Email-type deletion is NOT routed here —
+    /// the client only offers this for message-type rows (email deletion is owned by the email surface).
+    /// </summary>
+    Task DeactivateMessageAsync(Guid communicationId, CancellationToken ct = default);
 }
+
+/// <summary>
+/// The ADR-024 regarding record a new record-anchored thread is created against (item 9). Mirrors the
+/// denormalized <c>sprk_regardingrecord*</c> pointer the resolver already stamps at thread create.
+/// </summary>
+public sealed record RecordThreadAnchor(string EntityType, string RecordId, string? RecordName);
 
 /// <summary>
 /// Channel-neutral input to <see cref="IThreadResolver.ResolveAndAssignThreadAsync"/>. The resolver

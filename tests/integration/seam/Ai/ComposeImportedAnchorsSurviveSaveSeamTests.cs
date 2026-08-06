@@ -5,12 +5,12 @@
 // (task 050/051's DocxAnnotationReader projection) live INSIDE the loaded `.docx` as native
 // `w:ins`/`w:del`/`w:comment` OOXML. On an E1 dirty save (task 022), the persisted baseline is the
 // RETAINED ORIGINAL bytes (the client's `content` — the same bytes Load returned, which still carry
-// the imported marks) plus a paraId-keyed delta for ONLY the edited paragraph(s)
-// (`ComposeParagraphRedlineSynthesizer`, Option C). Untouched paragraphs — including ones carrying
-// imported marks — pass through the synthesizer BYTE-IDENTICAL (task 024 proved this for the
-// fidelity core generally; this test proves it specifically for imported marks). Because task 022's
-// synthesizer opens the SAME OPC package in place (`WordprocessingDocument.Open(buffer,
-// isEditable: true)`) and only rewrites the matched paragraphs' XML, the separate
+// the imported marks) plus a task-003 operation log applied for ONLY the edited paragraph(s) via the
+// `ComposeShadowPatchEngine` (task 030/032). Untouched paragraphs — including ones carrying
+// imported marks — are left BYTE-IDENTICAL (task 024 proved this for the
+// fidelity core generally; this test proves it specifically for imported marks). Because the engine
+// opens the SAME OPC package in place (`WordprocessingDocument.Open(buffer,
+// isEditable: true)`) and only mutates the anchored paragraphs' XML, the separate
 // `WordprocessingCommentsPart` (comments.xml) that a `w:comment` element's `CommentRangeStart`/
 // `CommentRangeEnd`/`CommentReference` markers point into is never touched either — so an imported
 // COMMENT survives even though its comment body lives in a different OPC part than the paragraph
@@ -46,8 +46,9 @@
 // DI-registration test; NO ctor-null test. Mocks live ONLY at the ISpeFileOperations /
 // IGenericEntityService / IPostUploadIndexingEnqueuer module boundaries (the SAME fixture as task
 // 024) — the HTTP boundary, the real ComposeEndpoints route mapping, and the real
-// ComposeService/ComposeParagraphRedlineSynthesizer/DocxAnnotationReader/DocxAnnotationWriter/
-// ParaIdPreParser are all production types.
+// ComposeService/ComposeShadowPatchEngine/DocxAnnotationReader/
+// ParaIdPreParser are all production types. (DocxAnnotationWriter fully retired by task 036;
+// tracked-change fixtures are now synthesized by the test-only TrackedChangeDocxBuilder.)
 
 using System.Net;
 using System.Net.Http.Json;
@@ -183,21 +184,32 @@ public sealed class ComposeImportedAnchorsSurviveSaveSeamTests : IClassFixture<C
                 It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
 
-        const string amendedPara2Text = "This clause shall survive independent review by counsel and outside experts.";
-
         var saveResponse = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
         {
             sessionId,
             tenantId = tenant,
             driveId,
-            // The real wire contract task 027's client sends for a loaded-doc dirty save: the
+            // The real wire contract task 032's client sends for a loaded-doc dirty save: the
             // same-session fast-path retained-original `content` (STILL carrying the imported marks —
-            // this is the client's pristine mount payload, never a reconstruction) + the paraId-keyed
-            // `editedParagraphs` delta for the ONE paragraph the user actually changed.
+            // this is the client's pristine mount payload, never a reconstruction) + the task-003
+            // `operationLog` the ComposeShadowPatchEngine applies onto it. Here: a single insertText on
+            // the ONE paragraph (para2) the user actually changed — the engine lands a native w:ins at
+            // that paraId + run-local offset, leaving every other paragraph (incl. the imported-mark
+            // ones) byte-identical.
             content = original,
-            editedParagraphs = new[]
+            operationLog = new
             {
-                new { paraId = para2Id, newText = amendedPara2Text },
+                schemaVersion = "compose-ops-v2",
+                operations = new object[]
+                {
+                    new
+                    {
+                        type = "insertText",
+                        paraId = para2Id,
+                        at = new { runIndex = 0, offset = 0 },
+                        text = " and outside experts",
+                    },
+                },
             },
         });
 
@@ -242,7 +254,7 @@ public sealed class ComposeImportedAnchorsSurviveSaveSeamTests : IClassFixture<C
             originalComments.Should().NotBeNull();
             persistedComments.Should().NotBeNull("the comments.xml part must survive a dirty save that never touches the commented paragraph");
             ReadPartBytes(persistedComments!).Should().Equal(ReadPartBytes(originalComments!),
-                "comments.xml is never opened by the redline synthesizer (it only opens MainDocumentPart.Document) — byte-identical");
+                "comments.xml is never opened by the patch engine on a save with no anchored comments (it only opens MainDocumentPart.Document) — byte-identical");
         }
 
         // ── Phase 3: RELOAD (through the real GET route again) — the through-the-wire round trip
@@ -320,22 +332,187 @@ public sealed class ComposeImportedAnchorsSurviveSaveSeamTests : IClassFixture<C
             "the dirty edit to paragraph 2 is present in the reopened document");
     }
 
+    // Task 040 (ai-advanced-capabilities-nda-r1, comment-export wiring fix) — the sibling of the
+    // FR-26 imported-anchor-survival test above, but for a comment ADDED DURING THIS SESSION via the
+    // Save request's `comments` field (ComposeAnchoredComment: paraId + run-local range), not one
+    // pre-existing in the original document. Proves the FULL round trip the client-side fix
+    // (ComposeWorkspace.tsx's `getAnchoredComments()` wiring / ComposeCommentThread.types.ts's
+    // `composeSessionCommentThreadsToAnchoredComments`) depends on: Save with `comments` -> the engine
+    // bakes a native w:comment at the resolved paraId (ComposeShadowPatchEngine.ApplyComment) ->
+    // Reload recovers it via DocxAnnotationReader, projected onto
+    // LoadComposeDocumentResponse.ImportedComments (task 052's wire projection) exactly like a
+    // human-authored Word comment would be. Reuses this file's fixture/helper conventions verbatim
+    // (CLAUDE.md §11 — extend, don't duplicate): same ComposeFidelitySeamFixture, same
+    // Load->Save->Reload wiring shape, same `CreateDocx` builder (a plain doc this time — no
+    // TrackedChangeDocxBuilder annotation, since the comment under test is FRESHLY authored by the
+    // save, not imported).
+    [Fact]
+    public async Task Save_NewAnchoredComment_ThenReload_RoundTripsViaDocxAnnotationReader()
+    {
+        _fixture.ResetBoundaries();
+
+        const string para0Text = "The receiving party shall keep this confidential.";
+        const string para1Text = "The lazy dog sleeps soundly today.";
+        const string para2Text = "This clause shall survive independent review by counsel.";
+        var original = CreateDocx(para0Text, para1Text, para2Text);
+
+        const string speId = "spe-item-040-new-comment";
+        const string driveId = "drive-040-new-comment";
+        const string tenant = ComposeFidelitySeamFixture.TestTenantId;
+
+        // ── Phase 1: LOAD (through the real GET route) — a plain document with NO pre-existing marks. ──
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileHandleDto(
+                Id: speId, Name: "plain.docx", ParentId: null, Size: original.Length,
+                CreatedDateTime: DateTimeOffset.UtcNow, LastModifiedDateTime: DateTimeOffset.UtcNow,
+                ETag: "\"v1-etag\"", IsFolder: false, WebUrl: null, DriveId: driveId));
+        _fixture.SpeMock
+            .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(original));
+        _fixture.SpeMock
+            .Setup(s => s.GetCurrentVersionIdAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("v-load-1");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var firstLoadResponse = await client.GetAsync(
+            $"/api/compose/documents/{speId}?driveId={driveId}&tenantId={tenant}");
+        firstLoadResponse.StatusCode.Should().Be(HttpStatusCode.OK,
+            "the real Load route resolves the plain fixture bytes through the SPE facade boundary");
+
+        var firstLoad = await firstLoadResponse.Content.ReadFromJsonAsync<LoadComposeDocumentResponse>();
+        firstLoad.Should().NotBeNull();
+        firstLoad!.ImportedComments.Should().BeEmpty("the plain fixture carries no pre-existing comments");
+
+        var para1Id = firstLoad.ParaIdMap.Single(e => e.Index == 1).ParaId;
+        var sessionId = firstLoad.SessionId;
+        sessionId.Should().NotBeNullOrWhiteSpace();
+
+        // ── Phase 2: SAVE with a NEW `comments` entry anchored to paragraph 1 — the exact wire shape
+        //    task 040's client wiring sends (ComposeAnchoredComment: paraId + run-local range), no
+        //    operationLog (a clean, comment-only save; EDGE-1 — comments apply before any op). ────────
+        _fixture.ResetBoundaries();
+
+        var existingDocumentId = Guid.NewGuid();
+        byte[]? persisted = null;
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+            {
+                using var ms = new MemoryStream();
+                stream.CopyTo(ms);
+                persisted = ms.ToArray();
+            })
+            .ReturnsAsync(new FileHandleDto(
+                Id: speId, Name: "plain.docx", ParentId: null, Size: original.Length,
+                CreatedDateTime: DateTimeOffset.UtcNow, LastModifiedDateTime: DateTimeOffset.UtcNow,
+                ETag: "\"v2-etag\"", IsFolder: false, WebUrl: null, DriveId: driveId));
+
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveByAlternateKeyAsync(
+                It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_document", existingDocumentId));
+
+        _fixture.IndexingMock
+            .Setup(i => i.EnqueueIfApplicableAsync(
+                It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+
+        const string commentBody = "Flag: this retention term deviates from the standard 3-year cap.";
+        var saveResponse = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            comments = new object[]
+            {
+                new
+                {
+                    paraId = para1Id,
+                    range = new { start = new { runIndex = 0, offset = 0 }, end = new { runIndex = 0, offset = 8 } },
+                    commentText = commentBody,
+                    author = "AI Advisory Review",
+                    date = When,
+                },
+            },
+        });
+
+        var saveBody = await saveResponse.Content.ReadAsStringAsync();
+        saveResponse.StatusCode.Should().Be(HttpStatusCode.OK, saveBody);
+        persisted.Should().NotBeNull("the SPE facade boundary captured the bytes ComposeService actually persisted");
+
+        // ── Byte-level: the native w:comment landed at paragraph 1, exactly the resolved paraId. ──────
+        using (var patchedDoc = WordprocessingDocument.Open(new MemoryStream(persisted!, writable: false), isEditable: false))
+        {
+            var editedPara = patchedDoc.MainDocumentPart!.Document!.Body!.Descendants<Paragraph>()
+                .Single(p => string.Equals(p.ParagraphId?.Value, para1Id, StringComparison.OrdinalIgnoreCase));
+            editedPara.Descendants<CommentRangeStart>().Should().NotBeEmpty(
+                "paragraph 1 must carry the comment range start after the save");
+            var commentsPart = patchedDoc.MainDocumentPart!.WordprocessingCommentsPart;
+            commentsPart.Should().NotBeNull("a native w:comment part must exist after the comment save");
+            commentsPart!.Comments!.Descendants<Comment>()
+                .SelectMany(c => c.Descendants<DocumentFormat.OpenXml.Wordprocessing.Text>())
+                .Select(t => t.Text)
+                .Should().Contain(t => t.Contains("retention term deviates", StringComparison.Ordinal),
+                    "the comment body must be emitted natively");
+        }
+
+        // ── Phase 3: RELOAD — the freshly-saved comment must round-trip back in via
+        //    DocxAnnotationReader, projected the SAME way an imported (pre-existing) comment is
+        //    (task 040 acceptance criterion: "reopening the exported DOCX round-trips the comments
+        //    back in via DocxAnnotationReader"). ──────────────────────────────────────────────────────
+        _fixture.ResetBoundaries();
+
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileHandleDto(
+                Id: speId, Name: "plain.docx", ParentId: null, Size: persisted!.Length,
+                CreatedDateTime: DateTimeOffset.UtcNow, LastModifiedDateTime: DateTimeOffset.UtcNow,
+                ETag: "\"v2-etag\"", IsFolder: false, WebUrl: null, DriveId: driveId));
+        _fixture.SpeMock
+            .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(persisted!));
+        _fixture.SpeMock
+            .Setup(s => s.GetCurrentVersionIdAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("v-load-2");
+
+        var secondLoadResponse = await client.GetAsync(
+            $"/api/compose/documents/{speId}?driveId={driveId}&tenantId={tenant}&sessionId={sessionId}");
+        secondLoadResponse.StatusCode.Should().Be(HttpStatusCode.OK,
+            "the real Load route re-reads the JUST-PERSISTED bytes (the round trip under test)");
+
+        var secondLoad = await secondLoadResponse.Content.ReadFromJsonAsync<LoadComposeDocumentResponse>();
+        secondLoad.Should().NotBeNull();
+
+        secondLoad!.ImportedComments.Should().ContainSingle(
+            "the comment added via this session's Save `comments` field must round-trip back in on reload, exactly like a human-authored Word comment");
+        var reloadedComment = secondLoad.ImportedComments[0];
+        reloadedComment.ParaId.Should().Be(para1Id,
+            "the comment re-anchors to the SAME w14:paraId it was saved onto");
+        reloadedComment.CommentText.Should().Be(commentBody, "the comment body text is untouched by the round trip");
+        reloadedComment.Author.Should().Be("AI Advisory Review");
+    }
+
     // ── fixture construction + OOXML helpers ────────────────────────────────────────────────────
 
     /// <summary>The fixture's REAL, physically-authored <c>w14:paraId</c> values (deterministic — NOT
     /// server-minted). A minted id (produced by <see cref="ParaIdPreParser"/> for a source paragraph
     /// that has none) lives ONLY in the reported <c>ParaIdMap</c>, never physically in the bytes
     /// (design note on <see cref="ParaIdPreParser"/>: "the map, not the bytes, carries minted ids") —
-    /// so a save's <c>editedParagraphs</c> key MUST resolve against a paraId the retained-original
+    /// so a save's operation-log <c>paraId</c> anchor MUST resolve against a paraId the retained-original
     /// bytes ACTUALLY carry, exactly like a genuinely Word-authored document (the 024 fidelity seam's
     /// real CSA fixture). Explicit ids here mirror that Word-authored shape deterministically.</summary>
     private static readonly string[] FixtureParaIds = { "00000001", "00000002", "00000003" };
 
     /// <summary>Builds a small, deterministic 3-paragraph <c>.docx</c> — EVERY paragraph carrying a
     /// real physical <c>w14:paraId</c> (<see cref="FixtureParaIds"/>), exactly as a genuinely
-    /// Word-authored document does — and redlines/comments it via <see cref="DocxAnnotationWriter"/>
-    /// (the SAME writer that produces the exact Word-for-Web <c>w:ins</c>/<c>w:del</c>/<c>w:comment</c>
-    /// markup the read side + tasks 050/051's own fixtures use): an insertion on paragraph 0, a
+    /// Word-authored document does — and redlines/comments it via <see cref="TrackedChangeDocxBuilder"/>
+    /// (the SAME test-only fixture builder that produces the exact Word-for-Web <c>w:ins</c>/<c>w:del</c>/<c>w:comment</c>
+    /// markup the read side + tasks 050/051's own fixtures use; DocxAnnotationWriter fully retired by task 036): an insertion on paragraph 0, a
     /// deletion + comment on paragraph 1, paragraph 2 left untouched as the eventual dirty-edit
     /// target.</summary>
     private static byte[] BuildRedlinedAndCommentedFixture(string para0, string para1, string para2)
@@ -343,11 +520,11 @@ public sealed class ComposeImportedAnchorsSurviveSaveSeamTests : IClassFixture<C
         var source = CreateDocx(para0, para1, para2);
         var annotations = new[]
         {
-            new DocxAnnotation { Kind = TrackChangeKind.Insertion, TargetText = "fox", NewText = " (Vulpes vulpes)", Author = "Jordan Ellis", Date = When },
-            new DocxAnnotation { Kind = TrackChangeKind.Deletion, TargetText = "lazy ", Author = "Jordan Ellis", Date = When },
-            new DocxAnnotation { Kind = TrackChangeKind.Comment, TargetText = "lazy dog", CommentText = "Cut this sentence.", Author = "Sam Rivera", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Insertion, TargetText = "fox", NewText = " (Vulpes vulpes)", Author = "Jordan Ellis", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Deletion, TargetText = "lazy ", Author = "Jordan Ellis", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Comment, TargetText = "lazy dog", CommentText = "Cut this sentence.", Author = "Sam Rivera", Date = When },
         };
-        return new DocxAnnotationWriter().Annotate(source, annotations);
+        return new TrackedChangeDocxBuilder().Annotate(source, annotations);
     }
 
     private static byte[] CreateDocx(params string[] paragraphs)

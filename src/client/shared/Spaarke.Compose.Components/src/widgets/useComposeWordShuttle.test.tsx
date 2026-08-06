@@ -1,13 +1,10 @@
 /**
  * useComposeWordShuttle.test.tsx — coverage for the Word round-trip shuttle client wiring
- * (task 103, Cluster 3). Verifies the mappers + the three fetch hooks POST the right routes/bodies,
- * and that the "Push to Word" toolbar action (gap 3.1) is rendered + wired.
+ * (task 103, Cluster 3). Verifies the mappers + the pull / check-changes fetch hooks POST the right
+ * routes/bodies.
  */
 
-import * as React from 'react';
-import { render, screen, renderHook, act } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { FluentProvider, webLightTheme } from '@fluentui/react-components';
+import { renderHook, act } from '@testing-library/react';
 
 // @spaarke/auth is the fetch boundary — mock useAuth (the hooks call it unconditionally). The
 // hooks also accept a fetchOverride escape hatch, used below to assert wire shapes.
@@ -22,24 +19,15 @@ jest.mock('@spaarke/auth', () => ({
   }),
 }));
 
-// ComposeToolbar depends on useDocumentActions (Open-in-Word) — mock to no-op handlers.
-jest.mock('@spaarke/document-operations', () => ({
-  useDocumentActions: () => ({
-    openInWeb: jest.fn(),
-    openInDesktop: jest.fn(),
-    isActing: false,
-  }),
-}));
-
 import {
-  useComposePushAnnotations,
   useComposePullAnnotations,
   useComposeCheckChanges,
   anchoredAnnotationsToDocxAnnotations,
   anchoredAnnotationsToPriorAnchors,
+  redlineMarksToDocxAnnotations,
+  selectSaveRedlineAnnotations,
   DocxTrackChangeKind,
 } from './useComposeWordShuttle';
-import { ComposeToolbar } from './ComposeToolbar';
 import type { AnchoredAnnotation } from '../types/compose-contracts';
 
 function anchor(overrides: Partial<AnchoredAnnotation> & Pick<AnchoredAnnotation, 'id' | 'type'>): AnchoredAnnotation {
@@ -125,41 +113,6 @@ describe('anchoredAnnotationsToPriorAnchors (gap 3.5 mapping)', () => {
   });
 });
 
-describe('useComposePushAnnotations (gap 3.1)', () => {
-  it('POSTs push-annotations with driveId/tenantId/ifMatch/annotations', async () => {
-    const fetchMock = okJson({});
-    const { result } = renderHook(() =>
-      useComposePushAnnotations({ bffBaseUrl: 'https://bff', fetchOverride: fetchMock })
-    );
-
-    await act(async () => {
-      await result.current.push({
-        documentSpeId: 'spe-1',
-        driveId: 'b!drive-1',
-        tenantId: 't1',
-        ifMatch: '"etag-1"',
-        annotations: [
-          {
-            kind: DocxTrackChangeKind.Comment,
-            targetText: 'x',
-            commentText: 'y',
-            author: 'A',
-            date: '2026-07-10T00:00:00Z',
-          },
-        ],
-      });
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://bff/api/compose/document/spe-1/push-annotations',
-      expect.objectContaining({ method: 'POST' })
-    );
-    const body = JSON.parse((fetchMock as jest.Mock).mock.calls[0][1].body);
-    expect(body).toMatchObject({ driveId: 'b!drive-1', tenantId: 't1', ifMatch: '"etag-1"' });
-    expect(body.annotations).toHaveLength(1);
-  });
-});
-
 describe('useComposeCheckChanges (poll half of gap 3.5)', () => {
   it('POSTs check-changes with the containerId and returns the changed flag', async () => {
     const fetchMock = okJson({
@@ -209,35 +162,98 @@ describe('useComposePullAnnotations (gap 3.4)', () => {
   });
 });
 
-describe('ComposeToolbar — Push to Word action (gap 3.1)', () => {
-  const renderTb = (ui: React.ReactElement) => render(<FluentProvider theme={webLightTheme}>{ui}</FluentProvider>);
+// ---------------------------------------------------------------------------
+// redlineMarksToDocxAnnotations — per-block split (Fix #1, UAT 2026-07-20)
+// A redline whose marked text spans >1 editor paragraph must emit ONE annotation per <w:p>, because the
+// server locates each target within a single paragraph — a concatenated cross-paragraph target never
+// matches (→ 422 "a tracked change could not be located").
+// ---------------------------------------------------------------------------
+describe('redlineMarksToDocxAnnotations — per-block split (Fix #1)', () => {
+  const del = (text: string, ledgerRef = 'b1@t1') => ({
+    type: 'text',
+    text,
+    marks: [{ type: 'deletion', attrs: { ledgerRef } }],
+  });
+  const ins = (text: string, ledgerRef = 'b1@t1') => ({
+    type: 'text',
+    text,
+    marks: [{ type: 'insertion', attrs: { ledgerRef } }],
+  });
+  const para = (...content: unknown[]) => ({ type: 'paragraph', content });
+  const doc = (...content: unknown[]) => ({ type: 'doc', content });
 
-  it('renders the Push to Word button and fires the handler when enabled', async () => {
-    const onPush = jest.fn();
-    renderTb(
-      <ComposeToolbar documentId="spe-1" bffBaseUrl="https://bff" onPushToWordRequested={onPush} canPushToWord />
-    );
+  it('splits a deletion that spans two paragraphs into one annotation per paragraph', () => {
+    const json = doc(para(del('End of paragraph one.')), para(del('Start of paragraph two.')));
 
-    const button = screen.getByTestId('compose-toolbar-push-to-word');
-    expect(button).toBeEnabled();
-    await userEvent.click(button);
-    expect(onPush).toHaveBeenCalledTimes(1);
+    const out = redlineMarksToDocxAnnotations(json, 'Spaarke AI', '2026-07-20T00:00:00Z');
+
+    const deletions = out.filter(a => a.kind === DocxTrackChangeKind.Deletion);
+    expect(deletions.map(d => d.targetText)).toEqual(['End of paragraph one.', 'Start of paragraph two.']);
+    // Critically, NO annotation concatenates the two paragraphs' text.
+    expect(out.some(a => a.targetText === 'End of paragraph one.Start of paragraph two.')).toBe(false);
   });
 
-  it('disables the button when there is nothing to push', () => {
-    renderTb(
-      <ComposeToolbar
-        documentId="spe-1"
-        bffBaseUrl="https://bff"
-        onPushToWordRequested={jest.fn()}
-        canPushToWord={false}
-      />
-    );
-    expect(screen.getByTestId('compose-toolbar-push-to-word')).toBeDisabled();
+  it('leaves a single-paragraph replace redline unchanged (insertion first, then deletion)', () => {
+    const json = doc(para(ins('the new clause'), del('the old clause')));
+
+    const out = redlineMarksToDocxAnnotations(json, 'Spaarke AI', '2026-07-20T00:00:00Z');
+
+    expect(out).toEqual([
+      {
+        kind: DocxTrackChangeKind.Insertion,
+        targetText: 'the old clause',
+        newText: 'the new clause',
+        author: 'Spaarke AI',
+        date: '2026-07-20T00:00:00Z',
+      },
+      {
+        kind: DocxTrackChangeKind.Deletion,
+        targetText: 'the old clause',
+        author: 'Spaarke AI',
+        date: '2026-07-20T00:00:00Z',
+      },
+    ]);
   });
 
-  it('does not render the button when no push handler is provided', () => {
-    renderTb(<ComposeToolbar documentId="spe-1" bffBaseUrl="https://bff" />);
-    expect(screen.queryByTestId('compose-toolbar-push-to-word')).toBeNull();
+  it('skips imported: revisions (they ride the retained-original baseline)', () => {
+    const json = doc(para(del('was-imported', 'imported:rev-1')));
+
+    const out = redlineMarksToDocxAnnotations(json, 'Spaarke AI', '2026-07-20T00:00:00Z');
+
+    expect(out).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// selectSaveRedlineAnnotations — Item 3 (UAT round-4): no 422 on a zero-edit save
+// ---------------------------------------------------------------------------
+describe('selectSaveRedlineAnnotations (item 3 — zero-edit save must not persist unverified suggestions)', () => {
+  const REDLINES = [
+    { kind: DocxTrackChangeKind.Deletion, targetText: 'old', author: 'AI', date: '2026-07-21T00:00:00Z' },
+  ];
+
+  it('returns [] for a CLEAN save even when the doc carries passively-materialized AI redline marks', () => {
+    const getRedlineAnnotations = jest.fn(() => REDLINES);
+    const out = selectSaveRedlineAnnotations({ editorIsDirty: false, hasRedlines: true, getRedlineAnnotations });
+    expect(out).toEqual([]);
+    // The gate short-circuits BEFORE reading annotations — nothing to locate server-side, so no 422.
+    expect(getRedlineAnnotations).not.toHaveBeenCalled();
+  });
+
+  it('persists redline annotations once the user has ENGAGED the document (dirty + has redlines)', () => {
+    const out = selectSaveRedlineAnnotations({
+      editorIsDirty: true,
+      hasRedlines: true,
+      getRedlineAnnotations: () => REDLINES,
+    });
+    expect(out).toEqual(REDLINES);
+  });
+
+  it('returns [] when there are no redlines, regardless of dirty state', () => {
+    const getRedlineAnnotations = jest.fn(() => REDLINES);
+    expect(selectSaveRedlineAnnotations({ editorIsDirty: true, hasRedlines: false, getRedlineAnnotations })).toEqual(
+      []
+    );
+    expect(getRedlineAnnotations).not.toHaveBeenCalled();
   });
 });

@@ -40,7 +40,7 @@ import { useEvents, sortEvents } from "../../hooks/useEvents";
 import { useActivityFeedFilters } from "../../hooks/useActivityFeedFilters";
 import { EventFilterCategory } from "../../types/enums";
 import { IEvent } from "../../types/entities";
-import { openRecordDialog } from "../../utils/navigation";
+import { createXrmNavigationService } from "@spaarke/ui-components";
 import type { IWebApi } from "../../types/xrm";
 
 // ---------------------------------------------------------------------------
@@ -346,7 +346,9 @@ export const ActivityFeed: React.FC<IActivityFeedProps> = ({
   }, []);
 
   const handleEdit = React.useCallback((eventId: string) => {
-    openRecordDialog("sprk_event", eventId);
+    createXrmNavigationService().openRecordModal?.("sprk_event", eventId).catch((err) => {
+      console.error("[ActivityFeed] openRecordModal failed:", err);
+    });
   }, []);
 
   return (

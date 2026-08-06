@@ -1,7 +1,7 @@
 # Current Task State — spaarkeai-assistant-enhancements-r1
 
-> **Last Updated**: 2026-07-20 (by context-handoff)
-> **Recovery**: Read "Quick Recovery" first. This is a **UAT-driven remediation** stream (not formal POML task execution) — the Assistant repositioning features are shipped; we're iterating on UAT feedback (R3 → R4).
+> **Last Updated**: 2026-07-23 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first. UAT remediation through **R7** + close-out shipped. **2026-07-23 close-out batch: 050 ✅ / 051 ✅ / 054 ✅** — R1 eval family authored + joined to the `Category=GoldenUtteranceEval` merge gate (92/92 green), deploy formalized (no re-deploy per owner), pre-090 doc review done. **ONLY 090 (wrap-up + /test-diet) remains.**
 
 ---
 
@@ -9,11 +9,35 @@
 
 | Field | Value |
 |-------|-------|
-| **Mode** | UAT remediation (R4 round-2 close-out shipped; awaiting owner's next UAT pass) |
-| **Status** | in-progress — clean handoff point |
-| **Git** | branch + `origin/branch` at **`3a74acc40`**, merged to **origin/master** (`9fda08501..3a74acc40`). Working tree clean at commit. (Main repo `C:/code_files/spaarke` local master lags — blocked by ANOTHER worktree's uncommitted work; origin/master is correct.) |
-| **Deployed** | dev: `sprk_spaarkeai` code page (R5 client batch, 2026-07-20). BFF **unchanged** across R4 round-2 + R5. |
-| **Next Action** | **Shared-lib/code-page chunk** (multi-deploy): **R5-4** SprkChat composer layout · **R5-7** Create Event file leg (add `initialFileRefs` to `CreateEventWizard` + wire main.tsx — envelope already carries files) · **R5-8** Assign Work / Summarize / Find Similar file legs (registry + new session-bytes ingestion seams). Also awaiting owner repro: **R4-7 / R4-9**. Rule: `/worktree-sync` before any BFF deploy (none needed so far). |
+| **Git** | branch + `origin/branch` + **origin/master** + main-repo local master ALL at **`71800366d`**. Working tree clean. |
+| **Deployed (dev) 2026-07-22** | **BFF `spaarke-bff-dev` DEPLOYED from this wt** (hash-verified + healthz 200): notification idempotency fix (from master) + NEW `POST /api/notifications/{id}/dismiss` (ownership-checked) + tightened missing-context chip keywords. **`sprk_spaarkeai` code page** redeployed (banner + dismiss card UX + `[action:]` label-strip + all merged client work). Grid config `ac05e4f1` (My Tasks membership) live. |
+| **Proactive suggestions (notification spine / R1.5) — LIVE ON DEV** | `Notifications__Suggestions__Enabled=true` set on dev BFF (engine ON; idempotency fix live so no dupes). SignalR NOT provisioned → client on **poll fallback**. Producer = `DailyBriefingSuggestionProducer` (fires on Daily-Briefing render, grounded+gated). Client: `useSuggestionCards`+`SuggestionCard` render at top of Assistant → **collapsed "You have N new notifications" banner** (no hover) → cards drop down → click opens record modal, **dismiss 'x'** (server-persisted via new endpoint) + dismiss-on-action. 20 stale pre-fix outbox dupes **bulk-dismissed** (clean slate). SuggestionCard tests 10/10. |
+| **Create-task chip fixes (this session)** | Two bugs fixed + deployed: (1) **label leak** — `SprkChatSuggestions.tsx` now strips the `[action:<id>] ` routing prefix for DISPLAY (raw still routes); (2) **mis-fire** — tightened `EmitMissingContextChipsIfNeededAsync` keywords (`ChatEndpoints.cs`) so bare "please provide/share/send" no longer fires document chips on a task reply. |
+| **"Add a task" routing (DIAGNOSED, no change)** | NOT broken: live catalog has `create-matter`/`create-task`/`create-todo` ALL `disposition=Surface Launch`, enabled, `captureMode=Loop Elicitation`. The chat Q&A is Loop Elicitation collecting missing required args before launching the pre-seeded surface; the confusing doc chips were the (now-fixed) mis-fire. **OPEN owner decision:** keep chat-elicit-first (LoopElicitation) vs launch-form-immediately (`captureMode=Modal`, 100000001) — a live catalog-data flip on the 3 bindings; VERIFY Modal semantics + required-args first. Re-test "add a task" with the chip fix live before deciding. |
+| **Membership-filter feature (shipped earlier 2026-07-22)** | ✅ Reusable `behavior.membershipFilter` DataGrid feature + applied to 050 (`ac05e4f1` → savedquery `12a510e4` + `membershipFilter:true`). Graduated into `SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md` §6.6. Awaiting owner UAT of "what are my tasks?" (membership-scoped). |
+| **Registry surface routing (shipped)** | `surfaceLaunchRegistry` drives `handleSurfaceLaunch` by `kind` (workspace-tab/wizard/oob-form); hardcoded `list-tasks` branch retired. Doc: `ASSISTANT-SURFACE-LAUNCH-MECHANISM.md` (§1.1 reactive-vs-proactive). |
+| **Docs added this session** | `docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md` (+CLAUDE.md §17 pointer +CHANGELOG) · `docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md` (bubble/chip/card/tab criteria). r2 `surfaceTarget` project idea INVESTIGATED + ABANDONED (over-abstraction / data-defined routing) — folder deleted. |
+| **PROJECT STATUS** | ✅ **COMPLETE (2026-07-23)** — all 25 tasks done. **050/051/052/053/054/090 all ✅**. Eval gate 92/92; /test-diet clean (`notes/test-diet-report.md`); deferrals filed ([#684](https://github.com/spaarke-dev/spaarke/issues/684); R1.5 delivered via notification-spine); README+plan Complete (7/7 graduation criteria); `notes/lessons-learned.md` written. |
+| **Next Action** | **None — project complete.** Open (non-gating): owner UAT of the final shipped batch (suggestions/dismiss/"add a task"/membership); portfolio Project #649 status flip manual (`/devops-project-sync` needs the claude.ai connector, unavailable this session); SignalR provisioning for live push (poll fallback works). | |
+| **Open follow-ups** | (a) "add a task" captureMode Modal-vs-Loop decision (owner). (b) `compose-draft-document` may have latent no-file issue (documentText fix pattern). (c) leave suggestions engine ON per owner (idempotency live). (d) SignalR not provisioned on dev (poll fallback only) — provision for live push if desired. |
+
+### Only open items (both need an owner repro; NO code written yet)
+- **R4-7** — new session showed header *"Actions available for '…'"* (text from the file in Compose) but **no actions listed** beneath — confusing empty state.
+- **R4-9** — Context / **Execution-Trace pane** loads inconsistently; it logs the session's grounded tool calls from the ledger (so it reads empty when a turn made no tool call — see R5-6 answer). Owner to re-capture repro.
+
+### Deploy recipes (fast reference)
+- Client code page: `cd src/solutions/SpaarkeAi && rm -rf dist node_modules/.vite && npm run build` → PATCH `sprk_spaarkeai` web resource content + `PublishXml` (targeted, mirrors `Deploy-SpaarkeAi.ps1`). Catalog chips = live Web-API PATCH on `sprk_playbookconsumers.sprk_chiptransitions` (no deploy).
+- Wizard code pages need `npm install --legacy-peer-deps` first (no node_modules); deploy = PATCH the `sprk_*wizard` web resource content + publish.
+- **PCF** (e.g. CommunicationActions): bump 5 version locations, `npm install` + `npm run build:prod` (prebuild:prod auto-refreshes shared-lib `dist/`), copy `out/controls/<name>/{bundle.js,ControlManifest.xml,styles.css}` → `Solution/Controls/…`, `pack.ps1`, then `pac solution import --path bin/…zip --publish-changes` (disable `Directory.Packages.props` during import). pac is authed to SPAARKE DEV 1.
+
+### R6 shipped 2026-07-21 (incl. standard email modal via PCF)
+R6-1 Revise-document chip · R6-2 one chip row (revise-context vs consumer cards) · R6-3 redline whitespace-tolerant fallback (master's "Fix #4"; my dup dropped at merge) · R6-4 email dialog 760px · R6-5 recipient lookup wired on BOTH modals + shared `ILookupItem.email` fix (CommunicationActions PCF v1.1.4) · R6-6 rewrite→redline routing. Commits d3428b930 (batch) / f69a2ad46 (PCF+docs). Backlog: [`notes/uat-feedback-2026-07-21-R6.md`](notes/uat-feedback-2026-07-21-R6.md).
+
+### R6 shipped 2026-07-21 (client + shared-lib email/compose)
+R6-1 Revise-document chip · R6-2 one chip row · R6-3 (already fixed on master via "Fix #4") · R6-4 email dialog 760px · R6-5 recipient lookup + shared ILookupItem.email fix · R6-6 rewrite→redline routing. Merged `d3428b930`. Backlog: [`notes/uat-feedback-2026-07-21-R6.md`](notes/uat-feedback-2026-07-21-R6.md).
+
+### R5 round-2 shipped 2026-07-20 (shared-lib + wizard code-pages)
+R5-7 (Create Event) · R5-8 (Assign Work / Summarize / Find Similar) file legs · R5-4 (composer pills row). New shared `useHandoffFileLeg` hook (Matter/Event/Assign-Work/Summarize); Find Similar code-page-local single-doc variant. Registry → 7 entries. Commits e20d1cc7a / e498fc724 / 0a7d838bd / 7b9d249cf.
 
 ### R5 round-1 shipped 2026-07-20 (client-only, `sprk_spaarkeai`)
 R5-1 Revise-as-card · R5-2 spacing · R5-3 remove ? icon · R5-5 history restore+styling · R5-9 Email Compose modal. New seams: `localActionChips.reviseInCompose`, `useConsumerChips.getAppendedLocalChips`/`onCorrespondenceDraft`, `QuickStartModal.onSendEmail`, `ConversationPane` mounts `SendEmailDialog`. 127 tests pass. Full backlog: [`notes/uat-feedback-2026-07-20-R5.md`](notes/uat-feedback-2026-07-20-R5.md).

@@ -4,7 +4,7 @@
  * Forward carries the body with "Fwd:", Draft keeps the record's recipients.
  */
 
-import { deriveComposerFields, splitRecipients } from '../CommunicationActions/composerPrefill';
+import { deriveComposerFields, splitRecipients } from '@spaarke/communication-components/logic/actions';
 
 const record = {
   from: 'sender@contoso.com',
@@ -12,19 +12,27 @@ const record = {
   cc: '',
   subject: 'Quarterly review',
   body: '<p>Original body</p>',
+  sent: 'Jul 24, 2026 9:00 AM',
 };
 
 describe('deriveComposerFields', () => {
-  it('reply → addresses the sender and prefixes "Re:"', () => {
+  it('reply → addresses the sender, prefixes "Re:", and quotes the original below (owner UAT 2026-07-24)', () => {
     const f = deriveComposerFields('reply', record);
     expect(f.initialTo).toEqual(['sender@contoso.com']);
     expect(f.initialSubject).toBe('Re: Quarterly review');
+    // Original message loaded like a normal thread: header + quoted original, below a reply gap.
+    expect(f.initialBody).toContain('<p>Original body</p>');
+    expect(f.initialBody).toContain('From:');
+    expect(f.initialBody).toContain('<blockquote>');
+    expect(f.initialBody?.startsWith('<p></p><p></p>')).toBe(true);
   });
 
-  it('forward → prefixes "Fwd:" and carries the original body, no recipients', () => {
+  it('forward → prefixes "Fwd:", quotes the original body with a header, no recipients', () => {
     const f = deriveComposerFields('forward', record);
     expect(f.initialSubject).toBe('Fwd: Quarterly review');
-    expect(f.initialBody).toBe('<p>Original body</p>');
+    expect(f.initialBody).toContain('<p>Original body</p>');
+    expect(f.initialBody).toContain('From:');
+    expect(f.initialBody).toContain('Subject:');
     expect(f.initialTo).toBeUndefined();
   });
 

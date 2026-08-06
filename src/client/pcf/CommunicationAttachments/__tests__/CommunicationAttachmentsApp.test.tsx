@@ -2,7 +2,7 @@
  * Wiring tests for CommunicationAttachmentsApp:
  *   - auth gate resolves, attachments load (inline images filtered out),
  *   - clicking a file row opens the shared RichFilePreviewDialog (mocked),
- *   - clicking an .eml row routes to open/download (open-links fetch), NOT the modal.
+ *   - clicking an .eml row opens the SAME in-modal preview (UAT R4 B12-4).
  */
 
 import * as React from 'react';
@@ -10,7 +10,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { CommunicationAttachmentsApp } from '../CommunicationAttachments/CommunicationAttachmentsApp';
 import { authenticatedFetch } from '@spaarke/auth';
-import { AttachmentType } from '../CommunicationAttachments/types';
+import { AttachmentType } from '@spaarke/communication-components/logic/attachments';
 
 const DOC = '_sprk_document_value';
 
@@ -82,53 +82,73 @@ describe('CommunicationAttachmentsApp', () => {
     expect(screen.getByTestId('preview-doc-name').textContent).toBe('Report.pdf');
   });
 
-  it('routes an .eml attachment to open/download (open-links fetch), not the inline modal', async () => {
+  it('opens the same in-modal preview for an .eml attachment (UAT R4 B12-4 — no external-open route)', async () => {
     renderApp(makeContext(rows));
     fireEvent.click(await screen.findByText('Thread.eml'));
 
-    await waitFor(() => {
-      const called = (authenticatedFetch as jest.Mock).mock.calls.some((c: unknown[]) =>
-        String(c[0]).includes('/api/documents/doc-3/open-links')
-      );
-      expect(called).toBe(true);
-    });
-    // No inline preview modal for an email message.
-    expect(screen.queryByTestId('rich-file-preview-dialog')).not.toBeInTheDocument();
+    // .eml now opens the shared RichFilePreviewDialog for its document, exactly
+    // like any other attachment — no forced open-links/external-open branch.
+    const dialog = await screen.findByTestId('rich-file-preview-dialog');
+    expect(dialog).toBeInTheDocument();
+    expect(dialog.getAttribute('data-document-id')).toBe('doc-3');
+    // Clicking the row did NOT eagerly fetch open-links (that only happens from
+    // inside the modal's open affordance, not on row activation).
+    const openLinksFetched = (authenticatedFetch as jest.Mock).mock.calls.some((c: unknown[]) =>
+      String(c[0]).includes('/api/documents/doc-3/open-links')
+    );
+    expect(openLinksFetched).toBe(false);
   });
 
-  it('wires prev/next nav across the previewable attachments and re-targets the document on navigate', async () => {
-    // Two previewable file rows + one inline image (filtered upstream) + one
-    // .eml (routes to download, excluded from the modal nav sequence).
-    const navRows = [
-      { sprk_communicationattachmentid: 'a', sprk_name: 'A.pdf', sprk_attachmenttype: AttachmentType.File, [DOC]: 'doc-a' },
-      { sprk_communicationattachmentid: 'b', sprk_name: 'B.docx', sprk_attachmenttype: AttachmentType.File, [DOC]: 'doc-b' },
-      { sprk_communicationattachmentid: 'i', sprk_name: 'Pic.png', sprk_attachmenttype: AttachmentType.InlineImage, [DOC]: 'doc-i' },
-      { sprk_communicationattachmentid: 'e', sprk_name: 'Msg.eml', sprk_attachmenttype: AttachmentType.File, [DOC]: 'doc-e' },
+  it('mounts the preview dialog WITH prev/next nav across ALL document-bearing attachments incl. .eml (A11-1 + B12-4)', async () => {
+    // A11-1 is fixed in the shared lib (dialog passes showTitle={false} in shell
+    // mode → single title), so we KEEP the nav trio and browse the previewable
+    // set. Per B12-4 the `.eml` row now participates in the nav sequence too;
+    // only inline images / rows without a documentId are excluded.
+    const files = [
+      {
+        sprk_communicationattachmentid: '1',
+        sprk_name: 'Report.pdf',
+        sprk_attachmenttype: AttachmentType.File,
+        [DOC]: 'doc-1',
+      },
+      {
+        sprk_communicationattachmentid: '2',
+        sprk_name: 'Memo.pdf',
+        sprk_attachmenttype: AttachmentType.File,
+        [DOC]: 'doc-4',
+      },
+      {
+        sprk_communicationattachmentid: '3',
+        sprk_name: 'Thread.eml',
+        sprk_attachmenttype: AttachmentType.File,
+        [DOC]: 'doc-3',
+      },
     ];
-    renderApp(makeContext(navRows));
-
-    // Open the first previewable attachment.
-    fireEvent.click(await screen.findByText('A.pdf'));
+    renderApp(makeContext(files));
+    fireEvent.click(await screen.findByText('Report.pdf'));
     const dialog = await screen.findByTestId('rich-file-preview-dialog');
-    // Nav set = 2 previewable docs (inline image + .eml excluded); opened at index 0.
-    expect(dialog.getAttribute('data-nav-total')).toBe('2');
+    expect(dialog.getAttribute('data-document-id')).toBe('doc-1');
+    // Nav trio passed: total = 3 previewable attachments (the .eml is INCLUDED), index 0.
+    expect(dialog.getAttribute('data-nav-total')).toBe('3');
     expect(dialog.getAttribute('data-nav-index')).toBe('0');
-    expect(dialog.getAttribute('data-document-id')).toBe('doc-a');
-
-    // Next → moves to doc-b and re-targets the dialog (drives preview-url re-resolution).
+    // Next → moves to the second previewable attachment.
     fireEvent.click(screen.getByTestId('preview-next'));
-    await waitFor(() => {
-      expect(screen.getByTestId('rich-file-preview-dialog').getAttribute('data-document-id')).toBe('doc-b');
-    });
-    expect(screen.getByTestId('preview-doc-name').textContent).toBe('B.docx');
-    expect(screen.getByTestId('rich-file-preview-dialog').getAttribute('data-nav-index')).toBe('1');
+    await waitFor(() =>
+      expect(screen.getByTestId('rich-file-preview-dialog').getAttribute('data-document-id')).toBe('doc-4')
+    );
+  });
 
-    // Prev → back to doc-a.
-    fireEvent.click(screen.getByTestId('preview-prev'));
-    await waitFor(() => {
-      expect(screen.getByTestId('rich-file-preview-dialog').getAttribute('data-document-id')).toBe('doc-a');
-    });
-    expect(screen.getByTestId('rich-file-preview-dialog').getAttribute('data-nav-index')).toBe('0');
+  it('renders the default section title "ATTACHMENTS" when no sectionTitle property is set', async () => {
+    renderApp(makeContext(rows));
+    expect(await screen.findByText('ATTACHMENTS')).toBeInTheDocument();
+  });
+
+  it('renders the configured sectionTitle property value (uppercased via CSS, raw text preserved)', async () => {
+    const ctx = makeContext(rows);
+    ctx.parameters.sectionTitle = { raw: 'Files' };
+    renderApp(ctx);
+    // textTransform:uppercase is a display transform — the DOM text stays 'Files'.
+    expect(await screen.findByText('Files')).toBeInTheDocument();
   });
 
   it('shows an empty state when the communication has no file attachments', async () => {

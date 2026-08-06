@@ -10,7 +10,14 @@ namespace Sprk.Bff.Api.Services.Communication.Engine;
 /// result to a <c>sprk_associationstatus</c> plus an auto-file decision:
 ///
 /// <list type="bullet">
-///   <item>DETERMINISTIC (rungs 0–3) reinforced ≥ threshold, kill-switch on → <b>Resolved + auto-file</b>.</item>
+///   <item>
+///   C-1 narrowing (ADR-045 path-A exception, kill-switch-governed per ADR-018): rung 0 (ExplicitReference)
+///   + rung 1 (ThreadContinuity) reinforced ≥ threshold, kill-switch on → <b>Resolved + auto-file</b>.
+///   Rung 2 (ParticipantCorrelation) + rung 3 (StructuralDetector) still MATCH and contribute to full
+///   confidence, but do NOT clear the auto-file bar by default → <b>Suggested</b>, unless the tenant
+///   has <see cref="Configuration.AutoFileOptions.Rung2And3AutoFileEnabled"/> toggled on (legacy pre-C-1
+///   behavior).
+///   </item>
 ///   <item>Reinforced in [0.50, threshold), OR any AI rung (4–5) involved, OR kill-switch off → <b>Suggested</b>.</item>
 ///   <item>Reinforced &lt; 0.50, or no writable match → <b>Pending Review</b>.</item>
 ///   <item>Two+ distinct targets on the SAME field each ≥ threshold → <b>Ambiguous</b> (never guess).</item>
@@ -44,22 +51,28 @@ public sealed class AssociationStatusMapper
     /// <summary>A field-winner below this confidence is not asserted as a regarding write.</summary>
     private const double WriteFloor = 0.50;
 
-    /// <summary>
-    /// Identity / participant "fallback" regarding fields. A match here means only that the sender/recipient
-    /// is a known contact / organization / account — it is NOT what the email is about, so on its own it must
-    /// NOT auto-file the communication to Resolved (owner: "a contact match isn't really a match — it's a
-    /// fallback"). Auto-file requires a SUBSTANTIVE target (matter / project / invoice / service request /
-    /// event / work assignment). Fallback matches are still WRITTEN (a correct association) and can be the
-    /// review surface's primary — they just don't clear the auto-file bar by themselves.
-    /// </summary>
-    private static readonly HashSet<string> FallbackFields = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "sprk_regardingperson",       // Contact
-        "sprk_regardingorganization", // Organization
-        "sprk_regardingaccount",      // Account
-    };
+    /// <summary>Empty core set fallback when settings carry none (treated as "nothing auto-associates").</summary>
+    private static readonly IReadOnlySet<string> EmptyCore = new HashSet<string>();
 
-    private static bool IsSubstantiveField(string field) => !FallbackFields.Contains(field);
+    /// <summary>
+    /// Whether a resolved regarding target may be AUTO-ASSOCIATED — written to its <c>sprk_regarding*</c>
+    /// lookup at capture — which is true ONLY when the target's ENTITY is in the tenant's core-writable set
+    /// (<see cref="Configuration.AutoFileOptions.CoreWritableEntities"/>: matter + project + service request
+    /// by default). A non-core target (contact / organization / account / invoice / work-assignment / event
+    /// / budget / report-card / analysis) is surfaced as a <c>Suggested</c> review candidate but NEVER
+    /// written automatically (owner rule, 061 UAT round-3, 2026-07-31: "only auto-associate to our core
+    /// records; contacts/orgs/invoices/etc. can be suggestions the user associates, never auto-associated").
+    /// <para>
+    /// This is BOTH the auto-file-STATUS gate (only a core target can push a communication to
+    /// <c>Resolved</c>, via <c>topDetCore</c>) AND the WRITE gate (<see cref="AddWrites"/> persists core
+    /// fields only; non-core stays candidate-only). The set is resolved per-decision from the ADR-018 gate,
+    /// so an operator retunes "core" without a redeploy. Superseded the earlier "fallback identity field"
+    /// concept (which still WROTE contacts/orgs) — the owner tightened the rule from "don't auto-file on a
+    /// contact" to "don't auto-associate a contact at all."
+    /// </para>
+    /// </summary>
+    private static bool IsCoreWritable(EntityReference target, IReadOnlySet<string> coreEntities) =>
+        coreEntities.Contains(target.LogicalName);
 
     public AssociationStatusMapper(AutoFileGate gate, ILogger<AssociationStatusMapper> logger)
     {
@@ -104,7 +117,7 @@ public sealed class AssociationStatusMapper
             .Where(m => m.Target is not null && m.RegardingFieldName is not null)
             .ToList();
 
-        var fieldWinners = BuildFieldWinners(writable);
+        var fieldWinners = BuildFieldWinners(writable, settings.Rung2And3AutoFileEnabled);
 
         // Conflict is "2+ distinct targets on the same field each ≥ the (tenant-resolved) threshold";
         // evaluate it now that the threshold is known.
@@ -115,10 +128,13 @@ public sealed class AssociationStatusMapper
         var anyConflict = fieldWinners.Any(f => f.Conflict);
         var topFull = fieldWinners.Count > 0 ? fieldWinners.Max(f => f.FullConfidence) : 0.0;
         var topDet = fieldWinners.Count > 0 ? fieldWinners.Max(f => f.DeterministicConfidence) : 0.0;
-        // Auto-file eligibility keys off the top SUBSTANTIVE deterministic winner — a fallback
-        // identity match (contact/org/account) alone never clears the bar.
-        var topDetSubstantive = fieldWinners
-            .Where(f => IsSubstantiveField(f.Field))
+        // Auto-file eligibility keys off the top CORE-record deterministic winner — only a matter /
+        // project / service request (the tenant's core-writable set) can push a communication to Resolved.
+        // A non-core target (contact / organization / account / invoice / …) never clears the auto-file
+        // bar and is never written automatically (owner rule, 061 UAT round-3).
+        var coreEntities = settings.CoreWritableEntities ?? EmptyCore;
+        var topDetCore = fieldWinners
+            .Where(f => IsCoreWritable(f.Winner.Target, coreEntities))
             .Select(f => f.DeterministicConfidence)
             .DefaultIfEmpty(0.0)
             .Max();
@@ -145,31 +161,32 @@ public sealed class AssociationStatusMapper
             // auto-dedup'd) must NOT suppress a clean, unambiguous association on ANOTHER field (e.g. the one
             // exact-name matter). AddWrites skips the conflicting field(s) and writes the rest so the review UI
             // surfaces both the filed clean match AND the ambiguous choices (from provenance).
-            AddWrites(writes, fieldWinners, useDeterministic: false);
+            AddWrites(writes, fieldWinners, coreEntities, useDeterministic: false);
         }
         else if (topFull < SuggestFloor)
         {
             status = AssociationStatusCodes.PendingReview;
             reason = $"Top reinforced confidence {topFull:F2} < suggest floor {SuggestFloor:F2}.";
         }
-        else if (topDetSubstantive >= settings.Threshold && settings.Enabled)
+        else if (topDetCore >= settings.Threshold && settings.Enabled)
         {
             status = AssociationStatusCodes.Resolved;
             autoFiled = true;
-            reason = $"Substantive deterministic reinforced confidence {topDetSubstantive:F2} ≥ threshold {settings.Threshold:F2}; auto-file enabled ⇒ Resolved.";
-            // Auto-file asserts only deterministic winners (AI-derived fields are never auto-filed).
-            AddWrites(writes, fieldWinners, useDeterministic: true);
+            reason = $"Core-record deterministic reinforced confidence {topDetCore:F2} ≥ threshold {settings.Threshold:F2}; auto-file enabled ⇒ Resolved.";
+            // Auto-file asserts only deterministic winners on CORE fields (AI-derived and non-core targets
+            // are never auto-filed).
+            AddWrites(writes, fieldWinners, coreEntities, useDeterministic: true);
         }
         else
         {
             status = AssociationStatusCodes.Suggested;
-            // A high-confidence FALLBACK match (contact/org) that doesn't auto-file lands here: the fallback
-            // is written but the email still needs a substantive association reviewed.
-            reason = topDet >= settings.Threshold && topDetSubstantive < settings.Threshold
-                ? $"Only a fallback identity match (contact/organization) reached the threshold ({topDet:F2}); no substantive target auto-filed ⇒ Suggested (review for the matter/project/invoice)."
+            // A high-confidence NON-CORE match (contact/org/invoice/…) that can't auto-file lands here: it is
+            // NOT written — it is surfaced as a review candidate the user confirms (owner rule, round-3).
+            reason = topDet >= settings.Threshold && topDetCore < settings.Threshold
+                ? $"Only a non-core match (contact/organization/invoice/…) reached the threshold ({topDet:F2}); no core record (matter/project/service request) auto-filed ⇒ Suggested (confirm to associate)."
                 : BuildSuggestedReason(topDet, topFull, aiInvolvedTop, settings);
-            // Suggestions may include AI-derived fields.
-            AddWrites(writes, fieldWinners, useDeterministic: false);
+            // Suggestions may include AI-derived fields; only CORE fields are written (AddWrites gate).
+            AddWrites(writes, fieldWinners, coreEntities, useDeterministic: false);
         }
 
         var candidates = BuildCandidateTraces(fieldWinners, writes);
@@ -210,7 +227,7 @@ public sealed class AssociationStatusMapper
 
     // ── Aggregation ──────────────────────────────────────────────────────────────
 
-    private static List<FieldWinner> BuildFieldWinners(IReadOnlyList<RungMatch> writable)
+    private static List<FieldWinner> BuildFieldWinners(IReadOnlyList<RungMatch> writable, bool includeRung23)
     {
         var winners = new List<FieldWinner>();
 
@@ -230,7 +247,15 @@ public sealed class AssociationStatusMapper
                     .ToList();
 
                 var fullConf = NoisyOr(perKindMax.Select(m => m.Confidence));
-                var detConf = NoisyOr(perKindMax.Where(m => IsAutoFileEligible(m.Rung)).Select(m => m.Confidence));
+                // Auto-file STATUS confidence: C-1-narrowed set (rung 0+1, or 0–3 when the kill-switch
+                // toggles rung 2/3 back on). Drives topDetSubstantive → the Resolved/auto-file decision.
+                var detConf = NoisyOr(perKindMax.Where(m => IsAutoFileEligible(m.Rung, includeRung23)).Select(m => m.Confidence));
+                // Deterministic WRITE confidence: the PRE-C-1 deterministic set (all rungs 0–3, never AI,
+                // never RecordNameMatch/ContactNameMatch). Independent of the auto-file narrowing so that when
+                // an email DOES auto-file, ALL its deterministic (rung 0–3) associations are still written to
+                // Dataverse exactly as the shipped design specifies ("fallback matches are still WRITTEN...
+                // they just don't clear the auto-file bar"). Consumed only by the Resolved-branch write gate.
+                var writeConf = NoisyOr(perKindMax.Where(m => IsDeterministicWriteEligible(m.Rung)).Select(m => m.Confidence));
                 // "AI involved" is TRUE only when a genuine AI rung contributed. RecordNameMatch is a
                 // deterministic exact-match rung that is (intentionally) not auto-file-eligible — it must NOT
                 // be mislabeled as AI in the provenance/reason.
@@ -240,6 +265,7 @@ public sealed class AssociationStatusMapper
                     Target: contributors[0].Target!,
                     FullConfidence: fullConf,
                     DeterministicConfidence: detConf,
+                    WriteConfidence: writeConf,
                     AiInvolved: aiInvolved,
                     Contributors: perKindMax));
             }
@@ -257,13 +283,32 @@ public sealed class AssociationStatusMapper
     private static void AddWrites(
         Dictionary<string, EntityReference> writes,
         List<FieldWinner> fieldWinners,
+        IReadOnlySet<string> coreEntities,
         bool useDeterministic)
     {
         foreach (var fw in fieldWinners)
         {
             if (fw.Conflict) continue; // never assert a conflicting field
             var winner = fw.Winner;
-            var conf = useDeterministic ? winner.DeterministicConfidence : winner.FullConfidence;
+            // Surface-only rungs (DocumentAssociation / F1) contribute review CANDIDATES but are NEVER written
+            // as a filed association (061 UAT round-2): a document's record is INDIRECT, twice-removed evidence,
+            // so it must be confirmed by the reviewer (r5 "Suggested · confirm to link"), not auto-linked and
+            // shown as "Filed automatically". A field whose winning target has ONLY surface-only contributors is
+            // surfaced as a candidate (BuildCandidateTraces) but skipped here; if a real rung also matched the
+            // same target, it writes normally (the surface-only rung merely reinforced).
+            if (winner.Contributors.All(c => IsSurfaceOnly(c.Rung)))
+                continue;
+            // Non-core target (contact / organization / account / invoice / work-assignment / …): surface as a
+            // review candidate (BuildCandidateTraces) but NEVER write it automatically — only CORE records
+            // (matter / project / service request, per the tenant's core-writable set) are auto-associated
+            // (owner rule, 061 UAT round-3). The user confirms a non-core suggestion through r5's review
+            // surface — a separate, user-initiated write path — so nothing is lost; it just isn't auto-filed.
+            if (!IsCoreWritable(winner.Target, coreEntities))
+                continue;
+            // Resolved branch (useDeterministic) writes the PRE-C-1 deterministic set (rung 0–3 via
+            // WriteConfidence) so no fallback/structural association is dropped when an email auto-files;
+            // Suggested branch writes on FullConfidence (may include AI-derived fields).
+            var conf = useDeterministic ? winner.WriteConfidence : winner.FullConfidence;
             if (conf >= WriteFloor)
             {
                 writes[fw.Field] = winner.Target;
@@ -359,12 +404,33 @@ public sealed class AssociationStatusMapper
 
     /// <summary>
     /// Rungs whose confidence is AUTO-FILE-ELIGIBLE (a match here can push a substantive target to Resolved).
-    /// The 4 hard-deterministic rungs. Deliberately EXCLUDES <see cref="RungKind.RecordNameMatch"/>: per owner
-    /// spec (2026-07-17) a name match is surfaced for review (the user picks the primary among matches), never
-    /// auto-filed — so it contributes to full confidence + is written as a Suggested candidate, but does not
-    /// clear the auto-file bar on its own.
+    /// C-1 narrowing (ADR-045 path-A exception, email-communication-intelligence-r1): by default (
+    /// <paramref name="includeRung23"/> = <c>false</c>) only rung 0 (<see cref="RungKind.ExplicitReference"/>)
+    /// and rung 1 (<see cref="RungKind.ThreadContinuity"/>) are eligible — misfiling is the #1 trust-killer,
+    /// so participant/sender-only (rung 2) and structural (rung 3) matches still contribute to full
+    /// confidence and are written as Suggested candidates, but do not clear the auto-file bar alone.
+    /// <paramref name="includeRung23"/> = <c>true</c> restores the legacy pre-C-1 behavior (rungs 0–3 all
+    /// eligible) — kill-switch-governed per ADR-018 via <see cref="Configuration.AutoFileOptions.Rung2And3AutoFileEnabled"/>,
+    /// togglable without a redeploy. Deliberately EXCLUDES <see cref="RungKind.RecordNameMatch"/> regardless
+    /// of the flag: per owner spec (2026-07-17) a name match is surfaced for review (the user picks the
+    /// primary among matches), never auto-filed.
     /// </summary>
-    private static bool IsAutoFileEligible(RungKind kind) =>
+    private static bool IsAutoFileEligible(RungKind kind, bool includeRung23) =>
+        kind is RungKind.ExplicitReference or RungKind.ThreadContinuity
+             || (includeRung23 && kind is RungKind.ParticipantCorrelation or RungKind.StructuralDetector);
+
+    /// <summary>
+    /// Rungs whose confidence is DETERMINISTIC-WRITE-ELIGIBLE — the PRE-C-1 deterministic set (all four
+    /// hard-deterministic rungs 0–3). This is the WRITE set for the Resolved branch and is INDEPENDENT of
+    /// the C-1 auto-file narrowing (<see cref="IsAutoFileEligible"/>): the narrowing changes only WHICH rungs
+    /// can push a communication to auto-file STATUS, not which deterministic associations are persisted once
+    /// it does. When an email auto-files, all rung 0–3 associations (incl. participant/structural fallbacks)
+    /// are still written — the shipped design keeps fallback matches WRITTEN even though they don't clear the
+    /// auto-file bar; r5's review surface displays these denormalized associations. Excludes
+    /// <see cref="RungKind.RecordNameMatch"/> / <see cref="RungKind.ContactNameMatch"/> and AI rungs exactly
+    /// as the deterministic write set always has.
+    /// </summary>
+    private static bool IsDeterministicWriteEligible(RungKind kind) =>
         kind is RungKind.ExplicitReference or RungKind.ThreadContinuity
              or RungKind.ParticipantCorrelation or RungKind.StructuralDetector;
 
@@ -372,12 +438,23 @@ public sealed class AssociationStatusMapper
     private static bool IsAi(RungKind kind) =>
         kind is RungKind.SemanticMatch or RungKind.AiClassification;
 
+    /// <summary>
+    /// Surface-only rungs whose matches are review CANDIDATES but are NEVER written as a filed association nor
+    /// auto-filed — INDIRECT evidence the reviewer confirms (061 UAT round-2). Currently the F1
+    /// attachment→document rung (<see cref="RungKind.DocumentAssociation"/>): a document's own record links are
+    /// twice-removed from the email, so they are suggested ("confirm to link"), not auto-linked. Distinct from
+    /// <see cref="RungKind.RecordNameMatch"/> (a DIRECT name/number appearance in the email text, still written).
+    /// </summary>
+    private static bool IsSurfaceOnly(RungKind kind) =>
+        kind is RungKind.DocumentAssociation;
+
     // ── Internal working types ───────────────────────────────────────────────────
 
     private sealed record TargetAgg(
         EntityReference Target,
         double FullConfidence,
         double DeterministicConfidence,
+        double WriteConfidence,
         bool AiInvolved,
         IReadOnlyList<RungMatch> Contributors);
 

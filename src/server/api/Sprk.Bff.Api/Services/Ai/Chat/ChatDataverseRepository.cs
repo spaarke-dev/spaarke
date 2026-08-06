@@ -1,4 +1,5 @@
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai.Chat;
 
@@ -19,6 +20,20 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
     // Dataverse entity names (from dataverse-chat-schema.md)
     private const string SummaryEntityName = "sprk_aichatsummary";
     private const string MessageEntityName = "sprk_aichatmessage";
+
+    // sprk_aichatsummary.sprk_analysis lookup FK target entity (owner-created; verified
+    // present by ai-advanced-capabilities-analysis-hub-r1 task 010 — Dataverse MCP `describe`
+    // confirms: sprk_analysis LOOKUP (GUID) (Related table: sprk_analysis)). Bound at
+    // CreateSessionAsync for Analysis-owned sessions (task 020, spec FR-05).
+    private const string AnalysisFkAttribute = "sprk_analysis";
+    private const string AnalysisEntityName = "sprk_analysis";
+
+    // HostContext.EntityType value that identifies an Analysis-owned chat session (existing
+    // convention — set at session-create time for sessions bound to an sprk_analysis record;
+    // see AnalysisEndpoints.cs ForkAnalysis/PromoteSession, task 020/021/023). The sibling
+    // per-turn sprk_chathistory write in ChatEndpoints.cs that used to reference this same
+    // convention was removed by task 064 (provably dead once its sole reader was dropped).
+    private const string AnalysisHostContextEntityType = "sprk_analysisoutput";
 
     private readonly IGenericEntityService _genericEntityService;
     private readonly ILogger<ChatDataverseRepository> _logger;
@@ -44,11 +59,61 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
             ["sprk_isarchived"] = false
         };
 
+        // Analysis-owned session binding (task 020, spec FR-05): when the session's
+        // HostContext identifies an analysis-scoped session (the existing
+        // "sprk_analysisoutput" + analysis GUID convention), set the sprk_analysis lookup FK
+        // alongside sprk_sessionid so "one Analysis → many sessions" is queryable
+        // (GetSessionsByAnalysisAsync below). Loose (non-Analysis) sessions write no FK —
+        // the record persists with only sprk_sessionid, matching pre-existing behavior.
+        Guid? analysisId = null;
+        if (session.HostContext?.EntityType == AnalysisHostContextEntityType &&
+            Guid.TryParse(session.HostContext.EntityId, out var parsedAnalysisId))
+        {
+            analysisId = parsedAnalysisId;
+            entity[AnalysisFkAttribute] = new EntityReference(AnalysisEntityName, parsedAnalysisId);
+        }
+
         var id = await _genericEntityService.CreateAsync(entity, ct);
 
         _logger.LogInformation(
-            "Created sprk_aichatsummary {RecordId} for session {SessionId} (tenant={TenantId})",
-            id, session.SessionId, session.TenantId);
+            "Created sprk_aichatsummary {RecordId} for session {SessionId} (tenant={TenantId}, analysis={AnalysisId})",
+            id, session.SessionId, session.TenantId, analysisId);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<AnalysisSessionSummary>> GetSessionsByAnalysisAsync(
+        string tenantId,
+        Guid analysisId,
+        CancellationToken ct = default)
+    {
+        var query = new QueryExpression(SummaryEntityName)
+        {
+            ColumnSet = new ColumnSet("sprk_sessionid", "sprk_messagecount", "sprk_isarchived", "createdon"),
+            NoLock = true,
+        };
+        query.Criteria.AddCondition(AnalysisFkAttribute, ConditionOperator.Equal, analysisId);
+        // Tenant-scoped (ADR-014/ADR-028): mirrors every sibling read on this interface — a
+        // cross-tenant analysisId guess must not leak another tenant's sessions.
+        query.Criteria.AddCondition("sprk_tenantid", ConditionOperator.Equal, tenantId);
+
+        var results = await _genericEntityService.RetrieveMultipleAsync(query, ct);
+
+        var summaries = results.Entities
+            .Select(e => new AnalysisSessionSummary(
+                SessionId: e.GetAttributeValue<string>("sprk_sessionid") ?? string.Empty,
+                MessageCount: e.GetAttributeValue<int?>("sprk_messagecount") ?? 0,
+                IsArchived: e.GetAttributeValue<bool?>("sprk_isarchived") ?? false,
+                CreatedOn: e.Contains("createdon")
+                    ? new DateTimeOffset(e.GetAttributeValue<DateTime>("createdon"), TimeSpan.Zero)
+                    : null))
+            .Where(s => !string.IsNullOrEmpty(s.SessionId))
+            .ToList();
+
+        _logger.LogInformation(
+            "Retrieved {Count} session(s) bound to analysis {AnalysisId} for tenant {TenantId} (sprk_analysis FK, grouped by sprk_sessionid)",
+            summaries.Count, analysisId, tenantId);
+
+        return summaries;
     }
 
     /// <inheritdoc />
@@ -111,12 +176,127 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
             "Archiving session {SessionId} in Dataverse (tenant={TenantId})",
             sessionId, tenantId);
 
-        // Mark the session summary record as archived
-        // Note: We need the Dataverse record GUID to update. In Phase D, this would be cached.
-        // For now, we log and proceed — the session will simply expire from Redis.
-        // The AddMessageAsync path already has the GUID; ArchiveSession would need a lookup.
-        // This is a known limitation addressed in AIPL-054 (ChatEndpoints) via summary GUID caching.
-        await Task.CompletedTask;
+        // AIPL-054 durable-archive (ai-advanced-capabilities-analysis-hub-r1 task 022, spec FR-06):
+        // this method previously logged only — it lacked the sprk_aichatsummary record GUID needed
+        // to flip sprk_isarchived (the "missing cached summary GUID" gap that deferred a durable
+        // archive to task 022). Rather than a broad summary-GUID caching refactor across
+        // ChatSessionManager, we close the gap in-place: sprk_sessionid is already a queryable key
+        // on the summary row (CreateSessionAsync writes it), so ONE tenant-scoped query resolves the
+        // GUID and a sparse UpdateAsync durably flips the flag.
+        //
+        // Tenant-scoped (ADR-014/ADR-028): mirrors every sibling read on this interface — a
+        // cross-tenant sessionId guess must not flip another tenant's archive flag.
+        //
+        // ADR-040 Path A: this is a MARKER update only. The Cosmos transcript is the store-of-record
+        // and is NEVER deleted here — the archived prior session stays retrievable / switchable-back
+        // (no transcript data loss). No second transcript store is created.
+        var query = new QueryExpression(SummaryEntityName)
+        {
+            ColumnSet = new ColumnSet("sprk_isarchived"),
+            TopCount = 1,
+            NoLock = true,
+        };
+        query.Criteria.AddCondition("sprk_sessionid", ConditionOperator.Equal, sessionId);
+        query.Criteria.AddCondition("sprk_tenantid", ConditionOperator.Equal, tenantId);
+
+        var results = await _genericEntityService.RetrieveMultipleAsync(query, ct);
+        var record = results.Entities.FirstOrDefault();
+
+        if (record is null)
+        {
+            // No sprk_aichatsummary anchor row (e.g. a session whose cold-tier create was skipped
+            // or failed — CreateSessionAsync tolerates a Dataverse write failure and continues on
+            // Redis only). There is no row to flip; the Cosmos transcript remains the store-of-record
+            // (ADR-040 Path A) and is still retrievable. Non-fatal — matches the tolerant create path.
+            _logger.LogWarning(
+                "ArchiveSessionAsync: no sprk_aichatsummary row for session {SessionId} (tenant={TenantId}) — " +
+                "sprk_isarchived not flipped. Cosmos transcript stays the store-of-record; no data lost.",
+                sessionId, tenantId);
+            return;
+        }
+
+        // Durable flip: sprk_isarchived = true (sparse update — only the changed field).
+        await _genericEntityService.UpdateAsync(
+            SummaryEntityName,
+            record.Id,
+            new Dictionary<string, object> { ["sprk_isarchived"] = true },
+            ct);
+
+        _logger.LogInformation(
+            "Archived session {SessionId}: sprk_isarchived flipped true on sprk_aichatsummary {RecordId} " +
+            "(tenant={TenantId}). Cosmos transcript preserved (ADR-040 Path A — retrievable/switchable-back).",
+            sessionId, record.Id, tenantId);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> BindSessionToAnalysisAsync(
+        string tenantId,
+        string sessionId,
+        Guid analysisId,
+        CancellationToken ct = default)
+    {
+        // Explicit promotion (task 023, spec FR-07): binds an EXISTING sprk_aichatsummary row to a
+        // NEW sprk_analysis — a bind on the CURRENT row, never a new row. Distinct from
+        // CreateSessionAsync's create-time FK write (which fires only for a session minted with an
+        // Analysis-owned HostContext) — this is the after-the-fact path for a loose session that was
+        // NOT Analysis-owned at create time. Same tenant-scoped query-then-update shape as
+        // ArchiveSessionAsync (ADR-014/ADR-028: a cross-tenant sessionId guess must not bind another
+        // tenant's row).
+        _logger.LogInformation(
+            "Binding session {SessionId} to analysis {AnalysisId} (tenant={TenantId}) — explicit promotion (task 023)",
+            sessionId, analysisId, tenantId);
+
+        var query = new QueryExpression(SummaryEntityName)
+        {
+            ColumnSet = new ColumnSet(AnalysisFkAttribute),
+            TopCount = 1,
+            NoLock = true,
+        };
+        query.Criteria.AddCondition("sprk_sessionid", ConditionOperator.Equal, sessionId);
+        query.Criteria.AddCondition("sprk_tenantid", ConditionOperator.Equal, tenantId);
+
+        var results = await _genericEntityService.RetrieveMultipleAsync(query, ct);
+        var record = results.Entities.FirstOrDefault();
+
+        if (record is null)
+        {
+            // No sprk_aichatsummary anchor row (e.g. a session whose cold-tier create was skipped or
+            // failed — CreateSessionAsync tolerates a Dataverse write failure and continues on Redis
+            // only). UNLIKE the tolerant archive path, PROMOTE cannot no-op here: the durable
+            // sprk_analysis FK is promotion's ENTIRE deliverable — it is what makes the Analysis
+            // queryable via GetSessionsByAnalysisAsync / visible in the hub grid. A silent no-op left
+            // promote returning 201 with an orphaned Analysis (agreements-r1 Q2 / silent-FK gap,
+            // 2026-07-31). So we CREATE the anchor row now WITH the FK (minimal columns — message
+            // count / playbook backfill on the next cold write; the FK is the point). A real Dataverse
+            // write failure throws and propagates to the caller's compensation (Analysis delete).
+            var created = new Entity(SummaryEntityName)
+            {
+                ["sprk_sessionid"] = sessionId,
+                ["sprk_tenantid"] = tenantId,
+                ["sprk_messagecount"] = 0,
+                ["sprk_isarchived"] = false,
+                [AnalysisFkAttribute] = new EntityReference(AnalysisEntityName, analysisId),
+            };
+            var createdId = await _genericEntityService.CreateAsync(created, ct);
+
+            _logger.LogInformation(
+                "BindSessionToAnalysisAsync: no existing sprk_aichatsummary for session {SessionId} (tenant={TenantId}) — " +
+                "created anchor row {RecordId} WITH the sprk_analysis {AnalysisId} FK (promote durable-bind).",
+                sessionId, tenantId, createdId, analysisId);
+            return true;
+        }
+
+        await _genericEntityService.UpdateAsync(
+            SummaryEntityName,
+            record.Id,
+            new Dictionary<string, object> { [AnalysisFkAttribute] = new EntityReference(AnalysisEntityName, analysisId) },
+            ct);
+
+        _logger.LogInformation(
+            "Bound session {SessionId} to analysis {AnalysisId}: sprk_analysis FK set on sprk_aichatsummary {RecordId} (tenant={TenantId})",
+            sessionId, analysisId, record.Id, tenantId);
+
+        return true;
     }
 
     /// <inheritdoc />

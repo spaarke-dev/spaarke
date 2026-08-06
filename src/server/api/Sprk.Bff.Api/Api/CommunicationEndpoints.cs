@@ -87,6 +87,19 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
+        // POST /api/communications/threads — create a NEW named, record-anchored thread (R3 UAT 2026-07-23
+        // item 9). Distinct from POST /threads/direct (participant-based 1:1): this anchors to an ADR-024
+        // regarding record (no participant), owner = the server-resolved caller (so the empty thread is
+        // visible in the caller's all-mode list). Distinct route: POST verb + literal /threads segment, no
+        // route param — no collision with GET /threads (list), POST /threads/direct, or /threads/{id}/*.
+        group.MapPost("/threads", CreateRecordThreadAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("CreateRecordThread")
+            .WithDescription("Create a new named, record-anchored thread (item 9): owner = server-resolved caller, denormalized ADR-024 regarding pointer, Record-Anchored type. 403 on unresolved caller; 400 on missing regarding.")
+            .Produces<CreateRecordThreadResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
         // GET /threads/{threadId}/messages — the polling timeline's thread-read (task 050 / FR-11). Returns the
         // caller's READABLE sprk_communication rows in the thread, impersonated (Dataverse row-level security) +
         // the shared internal-only/privilege filter (task 042). Optional ?since=<iso> for incremental polls;
@@ -109,6 +122,76 @@ public static class CommunicationEndpoints
             .WithDescription("Count a thread's unread (readable) messages since the caller's last-seen marker (?since=<iso8601>).")
             .Produces<UnreadCountResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
+        // GET /api/communications/threads — list ALL threads the caller may see, INCLUDING record-less (Direct)
+        // threads, for the R3 workspace left pane + standalone code page (task 003 / FR-16, Surface 2). Impersonated
+        // (MSCRMCallerID — Dataverse row-level security is the ONLY visibility gate); NOT scoped to any regarding
+        // lookup (so Direct/record-less threads are included) and NO membership-union (retired 2026-07-16). Optional
+        // ?search=<name> (contains on sprk_name, injection-escaped), ?top=<n> page size, ?pageToken=<opaque cursor>
+        // for stable, non-overlapping keyset paging over createdon desc. A bare GET /threads is DISTINCT from
+        // GET /threads/{threadId}/messages, GET /threads/{threadId}/unread-count, and POST /threads/direct — no route
+        // collision (literal segment, no route param, GET verb). Fail-closed 403 on an unresolved caller.
+        group.MapGet("/threads", ListThreadsAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("ListThreads")
+            .WithDescription("List all threads the caller may see (incl. record-less Direct threads); impersonated + access-filtered by Dataverse row-level security; no membership-union. Optional ?search=, ?top=, ?pageToken=.")
+            .Produces<ThreadListResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
+        // POST /api/communications/threads/{threadId}/rename — set a user-chosen thread name (task 004 / FR-17).
+        // The caller is resolved server-side (never client-supplied); the write authorizes the caller AGAINST the
+        // thread by an IMPERSONATED visibility check (a caller MUST NOT rename a thread they cannot see → 403,
+        // ADR-028 / NFR-01), a blank name is a 400. The write sets sprk_name AND flips sprk_nameisautoderived to
+        // Edited in ONE update so the auto re-derive never overwrites the user's name (edit-preserve). This BFF
+        // write is the ONLY marker-flip path — NO Dataverse plugin (hard MUST NOT). Distinct route: POST verb +
+        // literal /rename segment, no collision with GET /threads/{threadId}/messages|unread-count or POST
+        // /threads/direct.
+        group.MapPost("/threads/{threadId:guid}/rename", RenameThreadAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("RenameThread")
+            .WithDescription("Rename a communication thread (FR-17): sets sprk_name + flips sprk_nameisautoderived to Edited so the auto re-derive never overwrites it. Caller resolved server-side; 403 if the caller cannot see the thread; 400 on a blank name. No Dataverse plugin — this BFF write is the only marker-flip path.")
+            .Produces<RenameThreadResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
+        // PATCH /api/communications/threads/{threadId}/pin — pin/unpin a thread (task 041 / FR-24). Pin only — no
+        // archive/mute/tag equivalent. Same authorization shape as rename: the caller is resolved server-side and
+        // authorized AGAINST the thread by an impersonated visibility check (403 if the caller cannot see it —
+        // ADR-028 / NFR-01). Sets sprk_ispinned (task 040 schema) in one write via IThreadResolver.SetPinnedAsync.
+        // Distinct route: PATCH verb + literal /pin segment, no collision with the rename POST or any GET route.
+        group.MapPatch("/threads/{threadId:guid}/pin", SetThreadPinnedAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("SetThreadPinned")
+            .WithDescription("Pin/unpin a communication thread (FR-24): sets sprk_ispinned. Caller resolved server-side; 403 if the caller cannot see the thread. No Dataverse plugin — this BFF write is the only pin-state write path.")
+            .Produces<SetThreadPinnedResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
+        // DELETE /api/communications/threads/{threadId} — soft-delete (deactivate) a thread (round 7 item 7).
+        // Same authorization shape as rename/pin: the caller is resolved server-side and authorized AGAINST the
+        // thread by an impersonated visibility check (403 if the caller cannot see it — ADR-028 / NFR-01), then
+        // statecode/statuscode are set to Inactive via IThreadResolver.DeactivateThreadAsync (reversible; no
+        // physical delete, no Dataverse plugin). Distinct route: DELETE verb + literal /threads segment, no
+        // collision with the DELETE /{id} message-deactivate below.
+        group.MapDelete("/threads/{threadId:guid}", DeactivateThreadAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("DeactivateThread")
+            .WithDescription("Soft-delete (deactivate) a communication thread (round 7 item 7): sets statecode/statuscode to Inactive. Caller resolved server-side; 403 if the caller cannot see the thread. Reversible — no physical delete, no Dataverse plugin.")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
+        // DELETE /api/communications/{id} — soft-delete (deactivate) a single message (round 7 item 8). Caller
+        // resolved + authorized AGAINST the message by an impersonated visibility check (403 if the caller cannot
+        // see it), then statecode/statuscode set to Inactive via IThreadResolver.DeactivateMessageAsync. DELETE
+        // verb + bare /{id} (no suffix) is distinct from POST /{id}/archive and the DELETE /threads/{threadId}
+        // above (literal /threads segment).
+        group.MapDelete("/{id:guid}", DeactivateCommunicationAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("DeactivateCommunication")
+            .WithDescription("Soft-delete (deactivate) a single message (round 7 item 8): sets statecode/statuscode to Inactive. Caller resolved server-side; 403 if the caller cannot see the message. Reversible — no physical delete.")
+            .Produces(StatusCodes.Status204NoContent)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
         // GET /api/communications/by-regarding/{entityType}/{id} — ALL of a regarding record's threads + their
@@ -154,6 +237,40 @@ public static class CommunicationEndpoints
             .Produces<SuggestAssociationsResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
+        // GET /api/communications/queue-feed?regarding=&top= — the FR-17 ranked-exceptions queue-feed (task 032).
+        // Surface-agnostic: r1 supplies the feed ONLY, r5 builds the Exceptions Queue surface on top of it (C-3).
+        // Composes unresolved/Suggested/Ambiguous association exceptions + OPEN pending Job B proposals (task 030)
+        // into ONE dual-use QueueFeedItem shape both r5 surfaces (Code Page + SpaarkeAi widget) render without a
+        // fork (D-10), ranked by the EXISTING sprk_triagepriority + sprk_riconfidence (tasks 022-025) — no second
+        // scoring scheme (D-08). Optional ?regarding={entityType}:{guid} narrows to one record's communications
+        // (any ADR-024 regarding family); omitted, the scope is every communication the caller may see. Same
+        // access posture as every other communication read (impersonated + the shared CommunicationAccessFilter) —
+        // a communication (or proposal on it) the caller may not see is absent, never redacted. READ-ONLY.
+        group.MapGet("/queue-feed", GetQueueFeedAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("GetCommunicationQueueFeed")
+            .WithDescription("FR-17 ranked-exceptions queue-feed: unresolved/Suggested/Ambiguous associations + open pending Job B proposals, ranked by the existing triage priority + RI-confidence. Optional ?regarding={entityType}:{guid} scope; ?top= page size. Surface-agnostic (r5 builds the Exceptions Queue surface); read-only.")
+            .Produces<QueueFeedResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
+        // POST /api/communications/proposals/{reviewLogId}/apply — Job B APPLY (task 031 / FR-10). r5 renders the
+        // confirm card (from the queue-feed above) and POSTs the proposal's ReviewLogId here on Approve (C-2). The
+        // apply runs the record PATCH UNDER THE CONFIRMING USER'S impersonation (owner Option 2 — never app-only,
+        // caller resolved server-side from HttpContext.User, fail-closed 403), re-validates the sprk_emailupdatefield
+        // allow-list + citation AT APPLY time (never trust client gating), applies via the blessed
+        // IActionSeam.UpdateRecordAsync, and writes the append-only Applied sprk_emailreviewlog audit row. r1 builds
+        // no UI. Registered unconditionally (ADR-010/ADR-032).
+        group.MapPost("/proposals/{reviewLogId:guid}/apply", ApplyProposalAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("ApplyCommunicationProposal")
+            .WithDescription("Job B apply (FR-10): apply a confirmed pending field-update proposal to the associated record under the confirming user's MSCRMCallerID impersonation, then write the append-only Applied audit row. Caller resolved server-side (403 fail-closed); non-allow-listed field (403), unverifiable citation (422), or already-resolved proposal (409) are refused.")
+            .Produces<ApplyProposalResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
+            .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
 
         group.MapPost("/accounts/{id:guid}/verify", VerifyCommunicationAccountAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
@@ -251,6 +368,50 @@ public static class CommunicationEndpoints
             CallerSystemUserId = callerId,
             OtherParticipantSystemUserId = request.OtherParticipantSystemUserId,
         });
+    }
+
+    /// <summary>
+    /// Creates a NEW named, record-anchored thread (R3 UAT 2026-07-23 item 9). Resolves the caller
+    /// server-side (never client-supplied — the caller becomes the owner so the new thread is visible in
+    /// their all-mode list) and delegates the create to <see cref="IThreadResolver.CreateRecordThreadAsync"/>.
+    /// Unlike POST /threads/direct this is NOT participant-based — it anchors to an ADR-024 regarding record.
+    /// </summary>
+    private static async Task<IResult> CreateRecordThreadAsync(
+        CreateRecordThreadRequest request,
+        IThreadResolver threadResolver,
+        ICallerSystemUserResolver callerResolver,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var resolution = await callerResolver.ResolveAsync(context.User, ct);
+        if (!resolution.IsResolved || !Guid.TryParse(resolution.SystemUserId, out var callerId) || callerId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "SENDER_NOT_RESOLVED",
+                title: "Sender Not Resolved",
+                detail: "The caller could not be resolved to a Dataverse systemuser; cannot create a thread.",
+                statusCode: 403);
+        }
+
+        if (string.IsNullOrWhiteSpace(request.RegardingEntityType) || request.RegardingRecordId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "VALIDATION_ERROR",
+                title: "Validation Error",
+                detail: "regardingEntityType and a non-empty regardingRecordId are required.",
+                statusCode: 400);
+        }
+
+        var threadId = await threadResolver.CreateRecordThreadAsync(
+            callerId,
+            request.Name,
+            new RecordThreadAnchor(
+                request.RegardingEntityType,
+                request.RegardingRecordId.ToString(),
+                request.RegardingRecordName),
+            ct);
+
+        return TypedResults.Ok(new CreateRecordThreadResponse { ThreadId = threadId });
     }
 
     /// <summary>
@@ -505,6 +666,150 @@ public static class CommunicationEndpoints
     }
 
     /// <summary>
+    /// List-all-threads for the R3 workspace left pane + standalone code page (task 003 / FR-16). Resolves the caller
+    /// server-side (never client-supplied) and delegates to the impersonated, access-parity list read. Optional
+    /// <c>?search=</c> (name contains), <c>?top=</c> (page size), <c>?pageToken=</c> (opaque keyset cursor). A malformed
+    /// <c>pageToken</c> is a 400 ProblemDetails (ADR-019); an unresolved caller is a 403 (fail closed).
+    /// </summary>
+    private static async Task<IResult> ListThreadsAsync(
+        CommunicationThreadReadService readService,
+        HttpContext context,
+        [FromQuery] string? search,
+        [FromQuery] int? top,
+        [FromQuery] string? pageToken,
+        CancellationToken ct)
+    {
+        var result = await readService.ListThreadsAsync(context.User, search, top, pageToken, ct);
+        return TypedResults.Ok(result);
+    }
+
+    /// <summary>
+    /// Rename a communication thread (task 004 / FR-17). Validates a non-blank name (400), authorizes the
+    /// server-resolved caller AGAINST the thread via an impersonated visibility check (403 if the caller cannot
+    /// see the thread — never rename an inaccessible thread), then sets <c>sprk_name</c> + flips
+    /// <c>sprk_nameisautoderived</c> to Edited in ONE write via <see cref="IThreadResolver.RenameThreadAsync"/>
+    /// (edit-preserve). Returns the persisted name. NO Dataverse plugin — this BFF write is the only marker-flip
+    /// path.
+    /// </summary>
+    private static async Task<IResult> RenameThreadAsync(
+        Guid threadId,
+        RenameThreadRequest request,
+        CommunicationThreadReadService readService,
+        IThreadResolver threadResolver,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var name = request?.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new SdapProblemException(
+                code: "VALIDATION_ERROR",
+                title: "Validation Error",
+                detail: "A non-blank thread name is required.",
+                statusCode: 400);
+        }
+
+        // Authorize the caller against the thread (impersonated visibility). ResolveCallerOrThrowAsync inside
+        // throws a 403 for an unresolved caller (fail closed); zero visible rows → the caller cannot see it → 403.
+        var canSee = await readService.CanCallerSeeThreadAsync(threadId, context.User, ct);
+        if (!canSee)
+        {
+            throw new SdapProblemException(
+                code: "THREAD_RENAME_FORBIDDEN",
+                title: "Forbidden",
+                detail: "The thread does not exist or is not visible to the caller.",
+                statusCode: 403);
+        }
+
+        var persisted = await threadResolver.RenameThreadAsync(threadId, name, ct);
+        return TypedResults.Ok(new RenameThreadResponse { ThreadId = threadId, Name = persisted });
+    }
+
+    /// <summary>
+    /// Pin/unpin a communication thread (task 041 / FR-24). Authorizes the server-resolved caller AGAINST the
+    /// thread via the SAME impersonated visibility check as rename (403 if the caller cannot see the thread — never
+    /// pin/unpin an inaccessible thread), then sets <c>sprk_ispinned</c> via
+    /// <see cref="IThreadResolver.SetPinnedAsync"/>. Returns the persisted pinned state. NO Dataverse plugin — this
+    /// BFF write is the only pin-state write path.
+    /// </summary>
+    private static async Task<IResult> SetThreadPinnedAsync(
+        Guid threadId,
+        SetThreadPinnedRequest request,
+        CommunicationThreadReadService readService,
+        IThreadResolver threadResolver,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        // Authorize the caller against the thread (impersonated visibility). ResolveCallerOrThrowAsync inside
+        // throws a 403 for an unresolved caller (fail closed); zero visible rows → the caller cannot see it → 403.
+        var canSee = await readService.CanCallerSeeThreadAsync(threadId, context.User, ct);
+        if (!canSee)
+        {
+            throw new SdapProblemException(
+                code: "THREAD_PIN_FORBIDDEN",
+                title: "Forbidden",
+                detail: "The thread does not exist or is not visible to the caller.",
+                statusCode: 403);
+        }
+
+        var persisted = await threadResolver.SetPinnedAsync(threadId, request.Pinned, ct);
+        return TypedResults.Ok(new SetThreadPinnedResponse { ThreadId = threadId, IsPinned = persisted });
+    }
+
+    /// <summary>
+    /// Soft-delete (deactivate) a thread (round 7 item 7). Authorizes the caller against the thread via the SAME
+    /// impersonated visibility check as pin/rename (403 if the caller cannot see it — never deactivate an
+    /// inaccessible thread), then sets statecode/statuscode to Inactive via
+    /// <see cref="IThreadResolver.DeactivateThreadAsync"/>. Reversible — no physical delete, no Dataverse plugin.
+    /// </summary>
+    private static async Task<IResult> DeactivateThreadAsync(
+        Guid threadId,
+        CommunicationThreadReadService readService,
+        IThreadResolver threadResolver,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var canSee = await readService.CanCallerSeeThreadAsync(threadId, context.User, ct);
+        if (!canSee)
+        {
+            throw new SdapProblemException(
+                code: "THREAD_DELETE_FORBIDDEN",
+                title: "Forbidden",
+                detail: "The thread does not exist or is not visible to the caller.",
+                statusCode: 403);
+        }
+
+        await threadResolver.DeactivateThreadAsync(threadId, ct);
+        return TypedResults.NoContent();
+    }
+
+    /// <summary>
+    /// Soft-delete (deactivate) a single message (round 7 item 8). Authorizes the caller against the message via an
+    /// impersonated visibility check (403 if the caller cannot see it — NFR-01), then sets statecode/statuscode to
+    /// Inactive via <see cref="IThreadResolver.DeactivateMessageAsync"/>. Reversible — no physical delete.
+    /// </summary>
+    private static async Task<IResult> DeactivateCommunicationAsync(
+        Guid id,
+        CommunicationThreadReadService readService,
+        IThreadResolver threadResolver,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var canSee = await readService.CanCallerSeeMessageAsync(id, context.User, ct);
+        if (!canSee)
+        {
+            throw new SdapProblemException(
+                code: "MESSAGE_DELETE_FORBIDDEN",
+                title: "Forbidden",
+                detail: "The message does not exist or is not visible to the caller.",
+                statusCode: 403);
+        }
+
+        await threadResolver.DeactivateMessageAsync(id, ct);
+        return TypedResults.NoContent();
+    }
+
+    /// <summary>
     /// By-regarding read for the regarding-mode Timeline (R2 task 010 / FR-01). Resolves the caller server-side
     /// (never client-supplied) and delegates to the impersonated, access-filtered by-regarding read. An unsupported
     /// <paramref name="entityType"/> is a 400 ProblemDetails (ADR-019).
@@ -558,6 +863,36 @@ public static class CommunicationEndpoints
         var (message, context) = await communicationService.ReconstructEnvelopeAsync(id, ct);
         var decision = await associationResolver.EvaluateAsync(message, context, ct);
         return TypedResults.Ok(SuggestAssociationsResponse.FromDecision(id, decision));
+    }
+
+    /// <summary>
+    /// FR-17 ranked-exceptions queue-feed (task 032) — delegates entirely to
+    /// <see cref="CommunicationQueueFeedService.GetQueueFeedAsync"/> (caller resolved server-side inside the
+    /// service, same access posture as every other communication read). READ-ONLY; r1 supplies the feed only,
+    /// r5 renders it (C-3) — this handler builds no UI.
+    /// </summary>
+    private static async Task<IResult> GetQueueFeedAsync(
+        CommunicationQueueFeedService feedService,
+        HttpContext context,
+        [FromQuery] string? regarding,
+        [FromQuery] int? top,
+        CancellationToken ct)
+    {
+        var result = await feedService.GetQueueFeedAsync(regarding, top, context.User, ct);
+        return TypedResults.Ok(result);
+    }
+
+    // Job B apply (task 031 / FR-10). The caller is resolved server-side inside the service (fail-closed 403); the
+    // record PATCH runs under that caller's MSCRMCallerID impersonation; failures surface as RFC 7807 ProblemDetails
+    // via SdapProblemException (403/404/409/422/500).
+    private static async Task<IResult> ApplyProposalAsync(
+        Guid reviewLogId,
+        ICommunicationProposalApplyService applyService,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var result = await applyService.ApplyAsync(reviewLogId, context.User, ct);
+        return TypedResults.Ok(result);
     }
 
     private static async Task<IResult> VerifyCommunicationAccountAsync(

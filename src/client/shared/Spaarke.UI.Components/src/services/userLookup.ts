@@ -71,7 +71,9 @@ export async function searchUsersAsLookup(dataService: IDataService, query: stri
   const safe = escapeODataLiteral(query.trim());
   const options =
     `?$select=systemuserid,fullname,internalemailaddress` +
-    `&$filter=contains(fullname,'${safe}') and isdisabled eq false` +
+    // Match on name OR email (users often type the address). Parens are required
+    // so the `and isdisabled` binds outside the name/email OR, not just the email.
+    `&$filter=(contains(fullname,'${safe}') or contains(internalemailaddress,'${safe}')) and isdisabled eq false` +
     `&$orderby=fullname asc` +
     `&$top=${MAX_RESULTS_PER_TABLE}`;
 
@@ -79,6 +81,9 @@ export async function searchUsersAsLookup(dataService: IDataService, query: stri
   return result.entities.map(e => ({
     id: e['systemuserid'] as string,
     name: formatName(e['fullname'] as string, e['internalemailaddress'] as string | undefined),
+    // First-class email (task 123): recipient pickers resolve to THIS, not to
+    // the email re-parsed out of `name`. Undefined when the record has none.
+    email: (e['internalemailaddress'] as string | undefined) || undefined,
     entityType: 'systemuser' as const,
   }));
 }
@@ -101,7 +106,9 @@ export async function searchContactsAsLookup(dataService: IDataService, query: s
   const safe = escapeODataLiteral(query.trim());
   const options =
     `?$select=contactid,fullname,emailaddress1` +
-    `&$filter=contains(fullname,'${safe}') and statecode eq 0` +
+    // Match on name OR email (users often type the address). Parens are required
+    // so the `and statecode` binds outside the name/email OR, not just the email.
+    `&$filter=(contains(fullname,'${safe}') or contains(emailaddress1,'${safe}')) and statecode eq 0` +
     `&$orderby=fullname asc` +
     `&$top=${MAX_RESULTS_PER_TABLE}`;
 
@@ -109,6 +116,9 @@ export async function searchContactsAsLookup(dataService: IDataService, query: s
   return result.entities.map(e => ({
     id: e['contactid'] as string,
     name: formatName(e['fullname'] as string, e['emailaddress1'] as string | undefined),
+    // First-class email (task 123): recipient pickers resolve to THIS, not to
+    // the email re-parsed out of `name`. Undefined when the record has none.
+    email: (e['emailaddress1'] as string | undefined) || undefined,
     entityType: 'contact' as const,
   }));
 }

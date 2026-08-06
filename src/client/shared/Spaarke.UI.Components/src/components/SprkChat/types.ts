@@ -1447,6 +1447,13 @@ export interface ISprkChatInputProps {
    * `triggerSlashMode()` via the imperative handle.
    */
   hideSlashButton?: boolean;
+  /**
+   * UAT 2026-07-21: content rendered at the LEFT of the composer's bottom
+   * toolbar tray. SprkChat passes its Attach (paperclip) button here so the
+   * paperclip sits in the tray (left) opposite the Send button (right).
+   * When omitted, the tray-left is empty and Send stays right-aligned.
+   */
+  toolbarLeadingSlot?: import('react').ReactNode;
 }
 
 /**
@@ -1787,8 +1794,10 @@ export type IDocumentStreamSseEvent =
 
 /**
  * Pending action awaiting user confirmation (HITL — requiresConfirmation=true).
- * Shown in the ActionConfirmationDialog. On Confirm, the action is dispatched
- * to the BFF; on Cancel, the pending action is cleared without side effects.
+ * Shown via the ConfirmModal preset (spaarke-modal-system task 042 — the retired
+ * hand-rolled ActionConfirmationDialog overlay used to render this). On Confirm,
+ * the action is dispatched to the BFF; on Cancel, the pending action is cleared
+ * without side effects.
  *
  * @see spec-FR-07 — HITL confirmation dialog
  * @see ADR-021 — Fluent v9 Dialog component

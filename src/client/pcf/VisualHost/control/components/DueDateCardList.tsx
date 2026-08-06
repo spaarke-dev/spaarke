@@ -13,6 +13,7 @@ import * as React from 'react';
 import { useState, useEffect, useCallback } from 'react';
 import { DueDateCardList } from '../../../../shared/Spaarke.Visuals/src/components/DueDateCardList';
 import type { IEventDueDateCardProps } from '../../../../shared/Spaarke.Visuals/src/components/EventDueDateCard';
+import { OOB_MODAL_SIZES } from '../../../../shared/Spaarke.UI.Components/src/utils/adapters/oobModalSizes';
 import type { IChartDefinition } from '../types';
 import type { IConfigWebApi } from '../services/ConfigurationLoader';
 import { resolveQuery, injectContextFilter, type ISubstitutionParams } from '../services/ViewDataService';
@@ -205,14 +206,15 @@ export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
         const xrm = (window as any).Xrm;
 
         if (xrm?.Navigation?.navigateTo) {
-          // Open event record form as a modal dialog
+          // Open event record form as a modal dialog at the `record` OOB size
+          // (85%×85% — record-modal-selection.md invariant; was 80%×80%).
           await xrm.Navigation.navigateTo(
             { pageType: 'entityrecord', entityName, entityId: eventId },
             {
               target: 2,
               position: 1,
-              width: { value: 80, unit: '%' },
-              height: { value: 80, unit: '%' },
+              width: OOB_MODAL_SIZES.record.width,
+              height: OOB_MODAL_SIZES.record.height,
             }
           );
         } else if (onClickAction) {

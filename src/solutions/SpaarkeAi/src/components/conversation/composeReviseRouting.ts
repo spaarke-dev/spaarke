@@ -192,12 +192,16 @@ export interface ReviseThisDocumentDetection {
 
 // A revise/review verb. Deliberately excludes past tense ("reviewed", "revised") via word
 // boundaries so "I reviewed the doc yesterday" does NOT trigger — only present-tense requests.
+// R6-6 (UAT 2026-07-21): a full-document "rewrite/redraft" is a revise request too — added
+// rewrite|re-write|redraft|re-draft|rework alongside the existing revise verbs.
 const REVISE_VERB_RE =
-  /\b(revise|review|redline|red-line|mark[\s-]?up|edit|improve|revising|reviewing|editing|clean[\s-]?up|tighten)\b/i;
+  /\b(revise|review|redline|red-line|mark[\s-]?up|edit|improve|revising|reviewing|editing|clean[\s-]?up|tighten|rewrite|re-write|redraft|re-draft|rework)\b/i;
 
 // A reference to the document under discussion (this/the/my/our + a document noun).
+// R6-6: added response|letter|email|correspondence|message — the drafted correspondence in Compose
+// is commonly referred to as "the response"/"the letter", not "the document".
 const DOC_REFERENCE_RE =
-  /\b(this|the|my|our)\s+(document|doc|file|contract|agreement|draft|nda|brief|memo|clause|clauses|policy|text)\b/i;
+  /\b(this|the|my|our)\s+(document|doc|file|contract|agreement|draft|nda|brief|memo|clause|clauses|policy|text|response|letter|email|correspondence|message)\b/i;
 
 /**
  * Extract a named revision intent from the original message, or undefined. Order matters — the most
@@ -226,6 +230,19 @@ function extractNamedReviseIntent(text: string): RevisionIntent | undefined {
  * revise your estimate" has no document reference). The CALLER additionally gates on an active
  * chat-uploaded source document.
  */
+// R6-6 (UAT 2026-07-21): detect a request to rewrite a SPECIFIC SECTION (not the whole doc). Used
+// only when a document is already open in Compose and nothing is highlighted — the caller then tells
+// the user to select the section and use "Draft alternative" instead of redlining the whole document.
+const SECTION_REWRITE_RE =
+  /\b(rewrite|re-write|revise|redraft|reword|edit|improve|change|update|fix|tighten)\b[\s\S]{0,40}?\b(section|paragraph|clause|sentence|bullet|heading|line|part|point)\b/i;
+
+/** True when the message asks to rewrite/edit a specific SECTION (paragraph/clause/…). Pure/total. */
+export function detectSectionRewriteIntent(messageText: string): boolean {
+  const t = messageText.trim();
+  if (t.length === 0 || t.startsWith('/')) return false;
+  return SECTION_REWRITE_RE.test(t);
+}
+
 export function detectReviseThisDocumentIntent(messageText: string): ReviseThisDocumentDetection {
   const trimmed = messageText.trim();
   if (trimmed.length === 0 || trimmed.startsWith('/')) {

@@ -38,13 +38,30 @@
  * Marks are applied with `addToHistory: false` — a load-time render of pre-existing revisions is not a
  * user edit and must not be undoable (the caller resets the dirty flag right after; see ComposeEditor).
  *
+ * UNRESOLVABLE REVISIONS (spaarkeai-compose-r4 task 053, FR-10 / invariant I-7): a revision that cannot
+ * be anchored — no exact `paraId` match AND the fuzzy `anchorText`/`paragraphHint` fallback also misses
+ * (e.g. Word regenerated the paraId on an external save AND the paragraph text also changed enough that
+ * the word-overlap heuristic can't recover it) — MUST surface for human review, NEVER be silently
+ * dropped, and NEVER be placed via a text search (I-7 bans text-search anchoring outright). This module
+ * stays PURE about that: {@link applyImportedRevisions} now also returns the unresolved revisions
+ * themselves ({@link ApplyImportedRevisionsResult.unresolvedItems}, not just a count) so the caller can
+ * decide how to surface them. The actual in-editor surfacing is {@link renderUnresolvedRevisionPlaceholders}
+ * — REUSES the task-021 opaque-atom node (`composeInlineAtom`, `./opaqueAtomNode.ts`) rather than a
+ * parallel placeholder mechanism, appending one atom per unresolved revision at the END of the document
+ * (never inline at a guessed position — that would be exactly the text-search placement I-7 forbids).
+ * Appending happens in a SEPARATE pass, after every revision in the batch has already been resolved-or-not
+ * — inserting inline during the main loop would grow `collectBlocks()`'s result set and risk a LATER
+ * revision's fuzzy fallback matching text inside an EARLIER placeholder instead of the real document.
+ *
  * Privacy (ADR-015 Tier 3): `revision.text` / `revision.anchorText` are document content — carried
  * in-memory to the render only, NEVER logged.
  *
  * @see ./marks/InsertionMark.ts · ./marks/DeletionMark.ts (the rendering primitives, author/date-extended)
  * @see ./hooks/usePendingRedline.ts (accept/reject scans marks by ledgerRef — imported marks ride it)
  * @see ../utils/docxBridge.ts (stampParaIds — the paraIds this module anchors against)
+ * @see ./opaqueAtomNode.ts (`ComposeInlineAtomNode` — reused, not reimplemented, for the review placeholder)
  * @see projects/spaarkeai-compose-r3/design.md §7 (import round-trip)
+ * @see projects/spaarkeai-compose-r4/spec.md FR-10, invariant I-7 (unresolvable anchors surface, never drop)
  */
 import type { Editor } from '@tiptap/core';
 import type { ImportedRevision } from '../types/compose-contracts';
@@ -69,6 +86,12 @@ export interface ApplyImportedRevisionsResult {
   applied: number;
   /** Revisions that could not be anchored (no paraId match + no fuzzy match) or whose text was empty. */
   unresolved: number;
+  /**
+   * The unresolved revisions themselves, in the SAME order they were evaluated (task 053, FR-10 / I-7).
+   * `.length` always equals `unresolved`. Pass to {@link renderUnresolvedRevisionPlaceholders} to surface
+   * them for review — never drop them on the strength of this list alone.
+   */
+  unresolvedItems: ImportedRevision[];
 }
 
 /**
@@ -152,9 +175,27 @@ export function resolveBlock(blocks: readonly BlockInfo[], target: AnchorHint): 
 
   // Fuzzy fallback (cross-Word-session): the document-order hint, verified loosely against anchorText.
   const anchor = target.anchorText ?? '';
+  const anchorEmpty = !normalize(anchor);
   if (target.paragraphHint >= 0 && target.paragraphHint < blocks.length) {
     const atHint = blocks[target.paragraphHint];
-    if (!normalize(anchor) || fuzzyMatches(atHint.text, anchor)) {
+    if (anchorEmpty) {
+      // R5 task 012 (G12) — imported-deletion end-of-paragraph re-anchor fix. A deletion that spans a
+      // PARAGRAPH BOUNDARY (the user deleted a whole paragraph's content up to / across the para mark)
+      // carries EMPTY anchorText: every run of that paragraph is inside <w:del>, so the reader's settled
+      // (non-tracked) anchor text is "". With no text to verify against, this branch used to trust the
+      // doc-order hint UNCONDITIONALLY — but on a cross-Word-session reload the fully-deleted paragraph is
+      // GONE from the mammoth-flattened editor (its paraId regenerated + unmatched above), so the hint
+      // index now lands on a DIFFERENT, already-identified paragraph, and applyDeletion would append the
+      // struck text at the END of that unrelated paragraph (silent mis-anchor). Only trust the empty-anchor
+      // hint when it does NOT collide with a distinct identified paragraph: a hint block with no paraId (a
+      // genuine empty slot) or a same-round-trip target with no id to disambiguate is still honest; a hint
+      // block carrying its OWN different present paraId is refused (return null → surfaced as a review
+      // placeholder, never guessed onto the wrong paragraph — invariant I-7 "never text-search / never guess").
+      const hintIsDistinctIdentifiedParagraph = !!target.paraId && !!atHint.paraId && atHint.paraId !== target.paraId;
+      if (!hintIsDistinctIdentifiedParagraph) {
+        return atHint;
+      }
+    } else if (fuzzyMatches(atHint.text, anchor)) {
       return atHint;
     }
   }
@@ -251,11 +292,11 @@ export function applyImportedRevisions(
   revisions: readonly ImportedRevision[] | undefined
 ): ApplyImportedRevisionsResult {
   if (!editor || !revisions || revisions.length === 0) {
-    return { applied: 0, unresolved: 0 };
+    return { applied: 0, unresolved: 0, unresolvedItems: [] };
   }
 
   let applied = 0;
-  let unresolved = 0;
+  const unresolvedItems: ImportedRevision[] = [];
 
   revisions.forEach((revision, index) => {
     // Re-collect blocks each iteration: a prior deletion re-insert shifts later block positions, so
@@ -263,7 +304,7 @@ export function applyImportedRevisions(
     const blocks = collectBlocks(editor);
     const block = resolveBlock(blocks, revision);
     if (!block) {
-      unresolved++;
+      unresolvedItems.push(revision);
       return;
     }
 
@@ -276,11 +317,62 @@ export function applyImportedRevisions(
     if (ok) {
       applied++;
     } else {
-      unresolved++;
+      unresolvedItems.push(revision);
     }
   });
 
-  return { applied, unresolved };
+  return { applied, unresolved: unresolvedItems.length, unresolvedItems };
 }
 
 export default applyImportedRevisions;
+
+/** A short, safe preview of document content for the review placeholder's label (never a raw dump). */
+function preview(text: string, max = 80): string {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return '(no text)';
+  return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
+}
+
+/** Human-readable label for one unresolved revision's review placeholder (Tier 3 content, render-only). */
+function unresolvedRevisionLabel(revision: ImportedRevision): string {
+  const kindLabel = revision.kind === 'deletion' ? 'deletion' : 'insertion';
+  const who = revision.author && revision.author.length > 0 ? revision.author : 'Unknown author';
+  const body = preview(revision.text.length > 0 ? revision.text : revision.anchorText);
+  return `Imported ${kindLabel} could not be placed automatically — ${who}: "${body}"`;
+}
+
+/**
+ * Surface every unresolved imported revision as a review placeholder, appended in document order at the
+ * VERY END of the document (task 053, FR-10 / invariant I-7 — never text-searched into a guessed
+ * position, never silently dropped). REUSES the task-021 opaque-atom node (`composeInlineAtom`,
+ * `./opaqueAtomNode.ts`) — each placeholder is a fresh paragraph wrapping one inline atom
+ * (`kind: 'unknown'`, `displayText` carrying the author/kind/text preview), so it renders + themes
+ * (ADR-021 dark mode) exactly like a real server-projected opaque atom, with zero new schema surface.
+ *
+ * Call ONCE per mount, AFTER {@link applyImportedRevisions} has finished its full pass (so an earlier
+ * placeholder never pollutes a later revision's fuzzy-anchor search — see file header) and BEFORE the
+ * caller captures its load-time paraId snapshot / resets the op-log, mirroring the mount contract
+ * `applyImportedRevisions`/`applyImportedCommentAnchors` already follow. Applied with `addToHistory:
+ * false` — this is a load-time surfacing render, not a user edit. No-op for an empty list.
+ */
+export function renderUnresolvedRevisionPlaceholders(
+  editor: Editor | null,
+  unresolvedItems: readonly ImportedRevision[] | undefined
+): void {
+  if (!editor || !unresolvedItems || unresolvedItems.length === 0) return;
+  const atomType = editor.state.schema.nodes.composeInlineAtom;
+  const paragraphType = editor.state.schema.nodes.paragraph;
+  // Defensive, mirrors applyInsertion/applyDeletion's markType guard above: an editor schema missing
+  // either node (an unexpected/stripped-down configuration) has nothing safe to reuse — skip rather
+  // than throw building `.create(...)` on an undefined node type.
+  if (!atomType || !paragraphType) return;
+
+  let tr = editor.state.tr;
+  unresolvedItems.forEach(revision => {
+    const atom = atomType.create({ kind: 'unknown', displayText: unresolvedRevisionLabel(revision) });
+    const wrapper = paragraphType.create(null, atom);
+    tr = tr.insert(tr.doc.content.size, wrapper);
+  });
+  tr.setMeta('addToHistory', false);
+  editor.view.dispatch(tr);
+}

@@ -43,6 +43,10 @@ function item(
   return { id, source: kind, fileName: `${id}.pdf`, sizeBytes, documentId: `doc-${id}`, ...extra };
 }
 
+// AttachmentList is now display-only + collapsible (owner UAT 2026-07-24): the add/link
+// controls moved to the RichTextEditor toolbar (tested via EmailComposer). `mode`/`sources`
+// are accepted here for call-site compatibility but no longer affect the component. Render
+// with `defaultExpanded` so the item rows + caps are visible without a click.
 function renderList(opts: {
   mode?: EmailComposerMode;
   items: IAttachmentItem[];
@@ -51,23 +55,19 @@ function renderList(opts: {
   onToggleSelected?: (id: string) => void;
   onToggleLink?: (id: string) => void;
 }) {
-  const onAdd = jest.fn();
   const onRemove = opts.onRemove ?? jest.fn();
   const onToggleSelected = opts.onToggleSelected ?? jest.fn();
   const onToggleLink = opts.onToggleLink ?? jest.fn();
-  const sources = opts.sources ?? [{ kind: 'related' }];
   const result = renderWithProviders(
     <AttachmentList
-      mode={opts.mode ?? 'compose'}
-      sources={sources}
       items={opts.items}
-      onAdd={onAdd}
       onRemove={onRemove}
       onToggleSelected={onToggleSelected}
       onToggleLink={onToggleLink}
+      defaultExpanded
     />
   );
-  return { ...result, onAdd, onRemove, onToggleSelected, onToggleLink };
+  return { ...result, onRemove, onToggleSelected, onToggleLink };
 }
 
 describe('AttachmentList — hard caps', () => {
@@ -100,15 +100,20 @@ describe('AttachmentList — soft 25 MB warning', () => {
 });
 
 describe('AttachmentList — source sections + badges', () => {
-  it('renders a badge for each attachment source kind', () => {
+  it('renders all items in one section with no per-source pills/labels (owner UAT round 3 #2)', () => {
     renderList({
       sources: [{ kind: 'local' }, { kind: 'spe' }, { kind: 'related' }, { kind: 'wizard' }],
       items: [item('l', 'local', 16), item('s', 'spe', 16), item('r', 'related', 16), item('w', 'wizard', 16)],
     });
-    // Each label appears at least once (section title and/or per-item badge).
-    for (const label of ['From this device', 'From SharePoint', 'Related documents', 'Uploaded in this wizard']) {
-      expect(screen.getAllByText(label).length).toBeGreaterThan(0);
+    // Every item renders by filename, regardless of source.
+    for (const name of ['l.pdf', 's.pdf', 'r.pdf', 'w.pdf']) {
+      expect(screen.getByTitle(name)).toBeInTheDocument();
     }
+    // The source pills/labels are gone — one "Attachments" section header instead.
+    for (const label of ['From this device', 'From SharePoint', 'Related documents', 'Uploaded in this wizard']) {
+      expect(screen.queryByText(label)).toBeNull();
+    }
+    expect(screen.getByText(/^Attachments/)).toBeInTheDocument();
   });
 });
 
@@ -162,9 +167,11 @@ describe('AttachmentList — reply/forward include toggles (task 104)', () => {
     expect(screen.queryByRole('checkbox', { name: /Insert a link/ })).toBeNull();
   });
 
-  it('does not render include toggles in compose mode', () => {
+  it('renders the Attach toggle for related documents in compose mode (owner UAT 2026-07-22)', () => {
+    // Related documents expose Attach/Link in ANY mode incl. compose (mockup: "New Email"
+    // shows Related documents with Attach/Link). Non-Document-backed local picks still do not.
     renderList({ mode: 'compose', items: [item('c1', 'related', 16)] });
-    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.getByRole('checkbox', { name: /attach/i })).toBeInTheDocument();
   });
 
   it('does not render include toggles for items lacking a documentId (local picks)', () => {

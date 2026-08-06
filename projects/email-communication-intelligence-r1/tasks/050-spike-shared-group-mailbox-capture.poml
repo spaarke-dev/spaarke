@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>SPIKE: shared vs M365-group mailbox Graph subscription + Exchange `ApplicationAccessPolicy` model; size the `GraphSubscriptionManager` + permission-grant delta (FR-15 sizing) — WRITTEN FINDING ONLY</title>
+    <phase>P5 — FR-15 capture (parallel, spike-first)</phase>
+    <gate>none</gate>
+    <status>not-started</status>
+    <tags>investigation, spike</tags>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Investigation/spike — the deliverable is a WRITTEN FINDING (notes/) that sizes the shared-vs-group mailbox subscription/permission model + the `GraphSubscriptionManager` delta; it changes no product code, so FULL implementation gates do not apply. It carries an escalation trigger: if the shared-vs-group subscription/permission model requires a design decision beyond sizing, the spike STOPS and surfaces it. 051 is gated on this finding.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Sizing an unfamiliar Microsoft-platform boundary (Graph change-notifications over shared vs M365-group mailboxes + Exchange `ApplicationAccessPolicy` scoping) where getting the permission/subscription model right determines whether 051 is safe to build; reasoning + platform-knowledge synthesis, not code.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only investigation on the independent FR-15 capture track — fully parallel to P1–P4; writes only a finding under notes/; no shared code touched.</parallel-reason>
+    <dependencies></dependencies>
+  </metadata>
+
+  <prompt>
+    Run the **FR-15 capture spike**. Produce a **written finding** (a notes/ document) that sizes how to extend capture (Graph change-notification subscriptions + Exchange `ApplicationAccessPolicy`) to cover **shared mailboxes** and **M365 group mailboxes**, and specifies the concrete **`GraphSubscriptionManager` delta** + the **permission-grant delta** needed. **This spike writes NO product code** — its output is the finding that gates 051.
+
+    Investigate + document:
+    1. **Subscription model** — how a Graph change-notification subscription differs (if at all) for a shared mailbox vs an M365 group mailbox vs a user mailbox: resource path, supported change types, subscription lifetime/renewal, and any per-mailbox-type limitations.
+    2. **Permission model** — the app-only permission surface for reading shared + group mailbox messages, and how **Exchange `ApplicationAccessPolicy`** scopes app-only access to specific mailboxes (the least-privilege posture; how a policy is created + which app + which mailbox group).
+    3. **`GraphSubscriptionManager` delta** — the concrete, minimal change to the existing `Services/Communication/GraphSubscriptionManager.cs` to add shared/group coverage (what enumerates the mailboxes, what creates/renews the subscriptions, what changes in the notification handling).
+    4. **Sizing + risks** — effort, sequencing, and the risk items 051 must handle (e.g. renewal cadence, group-vs-shared divergence, tenant permission-grant prerequisites the operator must perform).
+
+    Consult the researcher subagent / `knowledge/` for current Microsoft-platform behavior (Graph + Exchange are rapidly-evolving; verify against current docs, not stale memory). If, during investigation, the shared-vs-group subscription/permission model requires a **design decision beyond sizing** (e.g. the two mailbox types need fundamentally different capture paths, or the least-privilege posture forces an architectural choice), **STOP and surface it** — do not pre-decide it inside the spike.
+  </prompt>
+
+  <role>
+    Spaarke platform investigator for the communication capture layer. Fluent in the existing `GraphSubscriptionManager` capture path, Microsoft Graph change-notification subscriptions, Exchange Online `ApplicationAccessPolicy` least-privilege scoping, and ADR-028 app-only background auth. Uses the researcher subagent + `knowledge/` for current Microsoft-platform behavior. Produces a written finding; changes no product code.
+  </role>
+
+  <goal>
+    A written finding at `projects/email-communication-intelligence-r1/notes/` that: (a) states the subscription model for shared vs M365-group vs user mailboxes; (b) states the app-only permission model + the Exchange `ApplicationAccessPolicy` least-privilege posture; (c) specifies the concrete minimal `GraphSubscriptionManager` delta + the permission-grant delta; (d) sizes the 051 implementation with sequencing + risks + operator prerequisites. If a design decision beyond sizing surfaces, the finding documents it as an escalation (not a silent decision). 051 is gated on this finding.
+  </goal>
+
+  <context>
+    <background>
+      FR-15 extends capture to shared + M365-group mailboxes (D-07). r1 OWNS this — r4 capture is archived with no active owner. The spec mandates spike-first: task 050 confirms the subscription/permission model + the `GraphSubscriptionManager` / permission-grant delta before 051 implements. This track is fully parallel to the intelligence spine (Phases 1–4) — independent.
+
+      The existing capture path is `Services/Communication/GraphSubscriptionManager.cs` (user-mailbox subscriptions today). The unknowns the spike resolves: does a shared/group mailbox subscription use the same resource path + change types? What app-only permissions + `ApplicationAccessPolicy` scoping are needed (least privilege)? What is the minimal delta to add the coverage? Graph + Exchange behavior is rapidly-evolving — verify against current docs via the researcher / `knowledge/`.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/GraphSubscriptionManager.cs (REFERENCE — the existing capture path; the spike specifies the delta, does not edit it)</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md (app-only background auth — the permission posture the spike sizes against)</file>
+      <file>projects/email-communication-intelligence-r1/notes/ (OUTPUT — the written finding lands here)</file>
+      <file>knowledge/ (consult FIRST for current Microsoft-platform behavior; researcher subagent memoizes findings)</file>
+    </relevant-files>
+    <dependencies>None — fully parallel/independent capture track.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-15">Scope: spike-first — confirm the subscription/permission model for shared vs group mailboxes + the `GraphSubscriptionManager` / permission-grant delta; implementation (051) is GATED on this finding. This task produces a WRITTEN FINDING and changes NO product code.</constraint>
+    <constraint source="ADR-028">Scope: size the shared/group capture against app-only background auth (least privilege); the Exchange `ApplicationAccessPolicy` posture MUST scope app-only access to the intended mailboxes, not tenant-wide.</constraint>
+    <constraint source="root §15 (researcher)">Scope: Graph + Exchange are rapidly-evolving — consult `knowledge/` FIRST, then current Microsoft Learn / official repos via the researcher subagent; do NOT rely on stale memory for the subscription/permission model.</constraint>
+    <constraint source="project">Scope: no product code change; the deliverable is a notes/ finding. Do NOT begin 051's implementation inside this spike.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/GraphSubscriptionManager.cs</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>knowledge/</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </files>
+    <patterns>
+      <pattern name="Consult knowledge/ first, then researcher" location="knowledge/">
+        Check curated knowledge for Graph change-notifications + Exchange `ApplicationAccessPolicy` behavior; fall back to the researcher subagent (Microsoft Learn / official repos) for anything current/uncertain; memoize findings.
+      </pattern>
+      <pattern name="Size the delta, do not build it" location="src/server/api/Sprk.Bff.Api/Services/Communication/GraphSubscriptionManager.cs">
+        Read the existing manager; specify the minimal concrete change for shared/group coverage in the finding — do not edit the file in this task.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `GraphSubscriptionManager.cs` (the current user-mailbox subscription path) + ADR-028 (app-only posture) + the FR-15 spec acceptance criteria.</step>
+    <step order="2">Consult `knowledge/` for Graph change-notification + Exchange `ApplicationAccessPolicy` behavior; use the researcher subagent for any current/uncertain platform behavior (subscription resource paths, change types, renewal, per-mailbox-type limits).</step>
+    <step order="3">Document the SUBSCRIPTION model: shared vs M365-group vs user mailbox differences (resource path, change types, lifetime/renewal, limitations).</step>
+    <step order="4">Document the PERMISSION model: app-only permissions for shared + group mailbox reads + the Exchange `ApplicationAccessPolicy` least-privilege scoping (who grants, which app, which mailboxes) — the operator prerequisites.</step>
+    <step order="5">Specify the concrete minimal `GraphSubscriptionManager` DELTA (enumerate mailboxes, create/renew subscriptions, notification-handling changes) + the permission-grant delta.</step>
+    <step order="6">Size 051: effort, sequencing, risks (renewal cadence, group-vs-shared divergence, tenant grant prerequisites), and the closed set of behaviors 051 must implement. If a design decision beyond sizing surfaced, document it as an escalation item (do not pre-decide).</step>
+    <step order="7">Write the finding to `projects/email-communication-intelligence-r1/notes/` (e.g. `notes/050-fr15-mailbox-capture-spike.md`); update `tasks/TASK-INDEX.md` (050 ✅) + `current-task.md`; note whether the escalation trigger fired.</step>
+  </steps>
+
+  <escalation>
+    <trigger>REQUIRED: if the shared-vs-group mailbox subscription or permission model requires a DECISION BEYOND SIZING — e.g. shared and group mailboxes need fundamentally different capture paths, the least-privilege `ApplicationAccessPolicy` posture forces an architectural choice, or a tenant permission-grant prerequisite changes the ownership/scope of the work — STOP and surface it per root §6 / §6.5. This is a legitimate spike stop; do NOT silently pre-decide the model inside the spike, and do NOT begin 051's implementation to "prove" a decision.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="read">Inspect `GraphSubscriptionManager.cs`, ADR-028, knowledge/, spec FR-15</tool>
+    <tool name="researcher">Deep-dive current Graph change-notification + Exchange ApplicationAccessPolicy behavior (Microsoft Learn / official repos)</tool>
+    <tool name="write">Author the written finding under notes/</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-communication-intelligence-r1/notes/050-fr15-mailbox-capture-spike.md (NEW — subscription model + permission model + `GraphSubscriptionManager` delta + permission-grant delta + 051 sizing + risks + any escalation item)</output>
+    <output type="docs">projects/email-communication-intelligence-r1/tasks/TASK-INDEX.md + current-task.md (UPDATED — 050 ✅; escalation-fired flag noted)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A written finding exists under notes/ stating the Graph subscription model for shared vs M365-group vs user mailboxes (resource path, change types, lifetime/renewal, limitations).</criterion>
+    <criterion testable="true">The finding states the app-only permission model + the Exchange `ApplicationAccessPolicy` least-privilege scoping + the operator permission-grant prerequisites.</criterion>
+    <criterion testable="true">The finding specifies a concrete, minimal `GraphSubscriptionManager` delta + the permission-grant delta needed for shared/group coverage.</criterion>
+    <criterion testable="true">The finding sizes 051 (effort, sequencing, risks, the closed set of behaviors 051 must implement) so 051 can be gated on it.</criterion>
+    <criterion testable="true">NEGATIVE (no code): the spike changes no product code — its only output is the notes/ finding (+ index update).</criterion>
+    <criterion testable="true">If a design decision beyond sizing surfaced, it is documented as an escalation item (surfaced per root §6/§6.5), not silently pre-decided.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Escalation trigger is REQUIRED here — a shared-vs-group model decision beyond sizing is a legitimate stop. 051 is GATED on this finding. Fully parallel to the intelligence spine (independent capture track). Consult `knowledge/` + the researcher subagent for current Microsoft-platform behavior — do NOT rely on stale memory. No product code in this task.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Apply STANDARD rigor (investigation — no implementation gates). Use the researcher subagent + `knowledge/` for current platform behavior. Honor the REQUIRED escalation trigger. Produce the notes/ finding only. Model tier `opus` @ effort `high`.</protocol>
+  </execution>
+</task>

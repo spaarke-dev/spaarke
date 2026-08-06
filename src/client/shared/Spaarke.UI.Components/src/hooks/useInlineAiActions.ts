@@ -132,7 +132,10 @@ export function useInlineAiActions(options: UseInlineAiActionsOptions): UseInlin
       const event: InlineActionBroadcastEvent = {
         type: 'inline_action',
         actionId: action.id,
-        actionType: action.actionType,
+        // `actionType` is optional on InlineAiAction (hosts like the email composer that run
+        // the action in-place omit it). This BroadcastChannel path is Analysis-Workspace-only,
+        // where DEFAULT_INLINE_ACTIONS always set it; default to 'chat' for the type's sake.
+        actionType: action.actionType ?? 'chat',
         label: action.label,
         selectedText,
       };

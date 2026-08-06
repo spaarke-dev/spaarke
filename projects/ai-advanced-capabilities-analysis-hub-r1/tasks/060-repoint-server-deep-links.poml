@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Repoint 4 server-side C# deep-links → openSpaarkeAi shape</title>
+    <phase>6 Retirement</phase>
+    <gate>blocked — 052 (openSpaarkeAi param extension must exist)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies compiled C# in Sprk.Bff.Api (bff tag); the current deep-links would 404 post-retirement, so correctness is load-bearing; test update required (HandoffUrlBuilderTests).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded repoint of a known URL shape across 4 call-sites with a reference target (openSpaarkeAi); no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Ordered retirement head (§13.5): this repoint MUST land before any delete task (063) so no deep-link dangles; sequenced after 052.</parallel-reason>
+    <deps>052</deps>
+    <tags>bff, retirement</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Repoint the four server-side C# deep-links that currently target the retiring sprk_analysisworkspace code page so
+    they instead build the openSpaarkeAi `sprk_spaarkeai` deep-link shape (the target extended in task 052). These are
+    compiled URLs that would 404 the moment the web resource is deleted (063); repointing first is the ordered §13.5
+    invariant. Update HandoffUrlBuilderTests to assert the new shape.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the BFF agent/analysis handoff surface and the openSpaarkeAi deep-link
+    contract. Follow ADRs strictly; do NOT fork Services/Ai (redesign-r2 sole owner) — this task only touches URL-builder
+    and notification actionUrl code.
+  </role>
+
+  <goal>
+    HandoffUrlBuilder.BuildAnalysisWorkspaceUrl and its three callers plus the AnalysisEndpoints notification actionUrl
+    all emit the openSpaarkeAi `sprk_spaarkeai` deep-link; HandoffUrlBuilderTests assert the new shape; a Grep for
+    `sprk_analysisworkspace` across C# returns zero; BFF build is green.
+  </goal>
+
+  <context>
+    <background>
+      Per spec §13.5 / FR-18, the sprk_analysisworkspace code page is being retired. Four compiled C# deep-links point at
+      it and would 404 after deletion: HandoffUrlBuilder.BuildAnalysisWorkspaceUrl (the builder) and its three callers
+      (PlaybookStatusEndpoints, PlaybookInvocationService, AgentErrorHandler), plus the notification actionUrl in
+      AnalysisEndpoints (webresourceName=sprk_analysisworkspace). Task 052 already extended openSpaarkeAi to carry
+      analysisId/worktype/regarding on the `sprk_spaarkeai` surface — that is the repoint target. This is the first of the
+      ordered retirement tasks: repoint before delete.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Agent/HandoffUrlBuilder.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Agent/PlaybookStatusEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Agent/PlaybookInvocationService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Agent/AgentErrorHandler.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Api/Agent/HandoffUrlBuilderTests.cs</file>
+      <file role="canonical-reference">src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="052" status="pending">Extends openSpaarkeAi with analysisId/worktype/regarding on the sprk_spaarkeai surface — the repoint target shape.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: only HandoffUrlBuilder + its 3 callers + AnalysisEndpoints.cs:783 notification actionUrl are repointed. Do NOT touch Services/Ai orchestration internals (redesign-r2 sole owner) beyond swapping the URL string these builders emit.</constraint>
+    <constraint source="ADR-039">SCOPE: the repointed deep-link resolves to the sprk_spaarkeai surface via the openSpaarkeAi shape (record-driven opens stay in code); do NOT route through surfaceLaunchRegistry.</constraint>
+    <constraint source="ADR-029">SCOPE: this is a BFF-touching task — run the publish-size check and report absolute size + diff vs the ~49.63 MB baseline in task notes / PR (CLAUDE.md §10 bullet 4). A string-only repoint is expected to be size-neutral.</constraint>
+    <constraint source="project">SCOPE: ordered §13.5 — this repoint MUST be complete before task 063 deletes the web resource; do NOT delete anything in this task.</constraint>
+    <constraint source="ADR-013">SCOPE: if a caller needs AI capability it goes through Services/Ai/PublicContracts/; do NOT inject AI-internal types into the agent/notification code being edited.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+    </files>
+    <patterns>
+      <pattern name="openSpaarkeAi deep-link shape" location="src/solutions/SpaarkeAi/src/utils/launch-resolver.ts">
+        Read the openSpaarkeAi/openSpaarkeAiCompose resolver (~lines 198,268) to mirror the exact sprk_spaarkeai query-param shape the server URL must produce (analysisId/worktype/regarding).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor + reason; confirm task 052's openSpaarkeAi extension is merged so the target shape exists.</step>
+    <step order="1">Read launch-resolver.ts openSpaarkeAi/openSpaarkeAiCompose to capture the exact sprk_spaarkeai deep-link shape (surface + query params analysisId/worktype/regarding).</step>
+    <step order="2">Rewrite HandoffUrlBuilder.BuildAnalysisWorkspaceUrl (lines ~20-39) to emit the sprk_spaarkeai openSpaarkeAi shape instead of sprk_AnalysisWorkspaceLauncher; keep the method's inputs/signature stable unless the new shape requires added params.</step>
+    <step order="3">Update the 3 callers to pass whatever the new shape needs: PlaybookStatusEndpoints.cs (~119-122), PlaybookInvocationService.cs (~268-274), AgentErrorHandler.cs (~102-110).</step>
+    <step order="4">Repoint the notification actionUrl in AnalysisEndpoints.cs (~782-784): change webresourceName=sprk_analysisworkspace to the sprk_spaarkeai openSpaarkeAi shape.</step>
+    <step order="5">Update HandoffUrlBuilderTests.cs to assert the new sprk_spaarkeai shape and remove any assertion on the old sprk_analysisworkspace URL.</step>
+    <step order="6">Build the BFF (dotnet build) and run the affected tests; Grep the C# tree for `sprk_analysisworkspace` / `sprk_AnalysisWorkspaceLauncher` and confirm zero remaining references from this task's scope.</step>
+    <step order="7">Run the publish-size check; record absolute size + diff in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+    <step order="8">Update TASK-INDEX.md: set task 060 status to ✅.</step>
+    <step order="9">Document any deviation in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the openSpaarkeAi shape from task 052 cannot represent a deep-link a caller needs (e.g. a notification actionUrl requires a param the client resolver does not parse), STOP and escalate per CLAUDE.md §6 rather than inventing a new URL contract.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build the BFF and run HandoffUrlBuilderTests.</tool>
+    <tool name="terminal">Run the publish-size measurement and Grep verification.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Agent/HandoffUrlBuilder.cs (+ 3 callers + AnalysisEndpoints.cs notification actionUrl)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/Agent/HandoffUrlBuilderTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the retirement is complete, when any of the 4 deep-links is built, then it resolves to the sprk_spaarkeai SpaarkeAi surface via the openSpaarkeAi shape (not a sprk_analysisworkspace / sprk_AnalysisWorkspaceLauncher URL).</criterion>
+    <criterion testable="true">HandoffUrlBuilderTests assert the new sprk_spaarkeai shape and pass; the BFF build is green.</criterion>
+    <criterion testable="true">Grep-clean: `sprk_analysisworkspace` and `sprk_AnalysisWorkspaceLauncher` return zero matches across the C# tree (excluding files deleted by later tasks).</criterion>
+    <criterion testable="true">Negative: no caller silently drops the analysisId/regarding context — a deep-link built for an existing analysis carries analysisId in the sprk_spaarkeai shape.</criterion>
+    <criterion testable="true">Publish-size reported (absolute + diff vs ~49.63 MB baseline); no new HIGH-severity CVE; size delta within NFR-01 thresholds.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec §13.5 / FR-18. Ordered head of the retirement chain: repoint before delete. Do NOT delete the web resource here
+    (that is task 063). The sprk_spaarkeai target shape is defined by task 052's openSpaarkeAi extension.
+
+    COMPLETED 2026-07-29.
+
+    Dependency 052 confirmed completed before starting (verified via 052's own POML status).
+
+    **HandoffUrlBuilder.BuildAnalysisWorkspaceUrl** (name + 3-arg signature kept stable, per POML's "your call,
+    document it"): now targets `sprk_spaarkeai` instead of `sprk_AnalysisWorkspaceLauncher`. `analysisId` is always
+    emitted (never dropped). `sourceFileId`, when non-`Guid.Empty`, threads as `entityLogicalName=sprk_document` +
+    `entityId` — reusing the openSpaarkeAi "entity form" context channel already defined in
+    `SpaarkeAiLaunchParams` rather than inventing a bespoke `sourceFileId` param the client has no reader for.
+    `playbookId` is accepted for source compatibility (3 existing callers pass it) but is DELIBERATELY DROPPED from
+    the emitted URL — `SpaarkeAiLaunchParams` has no playbookId field and `main.tsx` has no reader for it; the
+    playbook that produced an analysis is already resolvable server-side from the analysis record itself once
+    `analysisId` resolves the bound session. This did not rise to the POML's escalation trigger (no caller lost
+    the ability to open the correct surface) — documented as a design decision in the method's XML doc, not
+    escalated.
+
+    **3 callers** (`PlaybookStatusEndpoints.cs`, `PlaybookInvocationService.BuildAnalysisDeepLink`,
+    `AgentErrorHandler.HandlePlaybookTimeout`) required NO call-site changes — the shared method signature absorbed
+    the repoint. Doc-comments + one user-facing Adaptive Card message ("Analysis Workspace" → "Spaarke AI" / "the
+    SpaarkeAi Analysis surface") were updated for accuracy.
+
+    **AnalysisEndpoints.cs notification actionUrl** (~line 823, `SendAnalysisCompleteNotificationAsync`): new
+    private `BuildSpaarkeAiActionUrl` helper (mirrors `HandoffUrlBuilder.BuildWebResourceUrl`'s encoding but stays
+    relative — no Dataverse base URL — matching this file's + `WorkAssignmentEndpoints.cs`'s existing relative
+    actionUrl convention). Prefers `request.AnalysisId` (guarded against both `null` and `Guid.Empty`, mirroring
+    the established `BuildDocumentUploadWizardUrl(Guid?)` degrade-to-unscoped convention in the same builder class)
+    when the execute request is bound to an existing `sprk_analysis` record; falls back to
+    `entityLogicalName=sprk_document` + `entityId=documentId` when no analysis record is bound yet (the legacy
+    in-memory `/execute` path), so the notification stays actionable either way.
+
+    **Grep-clean**: `sprk_analysisworkspace` / `sprk_AnalysisWorkspace` / `sprk_AnalysisWorkspaceLauncher` — zero
+    matches across the full `.cs` tree (src + tests), including doc-comments (explanatory prose rewritten to avoid
+    the literal legacy identifiers rather than excepted).
+
+    **Tests**: `HandoffUrlBuilderTests.cs` — updated the 3 `BuildAnalysisWorkspaceUrl` tests for the new shape
+    (webresourceName, entityLogicalName/entityId instead of sourceFileId, playbookId dropped) and added 2 new
+    tests (`WithEmptySourceFileId_OmitsEntityContext`, `AlwaysCarriesAnalysisId` — the POML's negative acceptance
+    criterion). Full `HandoffUrlBuilderTests` suite: 31/31 green (was 29 pre-change).
+
+    **Gates**: code-review found one real Warning — `request.AnalysisId` in `AnalysisEndpoints.cs` was not guarded
+    against `Guid.Empty` before this fix, which could have fabricated an invalid `analysisId` link; fixed to match
+    the sibling `BuildDocumentUploadWizardUrl(Guid?)` convention. adr-check — ADR-013 (no AI-internal types
+    injected, grep-verified clean) and ADR-039 (no `surfaceLaunchRegistry` reference, deep-links remain deterministic
+    CODE-path URL construction, no new intent-detection/routing-config surface) both PASS, 0 violations.
+    `/conflict-check` — only open PR touching this branch is #694 (this same branch); no other active PR or
+    worktree touches any of the 6 changed files; none of the changes touch `Services/Ai/**`
+    (redesign-r2 sole-ownership boundary respected — all edits are `Api/Agent/**` + `Api/Ai/AnalysisEndpoints.cs`).
+
+    **Publish-size** (ADR-029 / CLAUDE.md §10 bullet 4): 46.16 MB compressed (48,402,081 bytes) — matches the
+    ~46.16 MB baseline exactly, size-neutral as expected for a string-only repoint (no new packages, no new files).
+    **CVE**: `dotnet list package --vulnerable --include-transitive` shows one pre-existing HIGH
+    (`System.Security.Cryptography.Xml` transitive, GHSA-g8r8-53c2-pm3f et al.) — NOT introduced by this task (zero
+    `.csproj` changes).
+
+    **Build**: `dotnet build src/server/api/Sprk.Bff.Api/` green (0 errors; pre-existing warning count unchanged).
+
+    No deviation from the POML's prescriptive step sequence. Escalation trigger did not fire.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL: code-review + adr-check). /conflict-check before the BFF PR.</protocol>
+  </execution>
+</task>

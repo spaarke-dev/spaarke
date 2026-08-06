@@ -95,4 +95,53 @@ public interface IChatDataverseRepository
         string sessionId,
         string summary,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns every chat session bound to a given <c>sprk_analysis</c> record via the
+    /// <c>sprk_aichatsummary.sprk_analysis</c> lookup FK — "one Analysis → many sessions"
+    /// (ai-advanced-capabilities-analysis-hub-r1 task 020, spec FR-05).
+    ///
+    /// Each returned <see cref="AnalysisSessionSummary"/> already represents exactly one
+    /// session (grouped by <c>sprk_sessionid</c>) — <see cref="CreateSessionAsync"/> writes
+    /// one <c>sprk_aichatsummary</c> row per session, so no further server-side grouping is
+    /// required.
+    /// </summary>
+    /// <param name="tenantId">
+    /// Tenant ID for isolation (ADR-014/ADR-028) — matches the tenant-scoping convention every
+    /// sibling read method on this interface follows. Filtered alongside the analysis FK so a
+    /// cross-tenant analysisId guess cannot leak another tenant's sessions.
+    /// </param>
+    /// <param name="analysisId">The <c>sprk_analysis</c> record ID to filter by.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyList<AnalysisSessionSummary>> GetSessionsByAnalysisAsync(
+        string tenantId,
+        Guid analysisId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Binds an EXISTING <c>sprk_aichatsummary</c> session record to an <c>sprk_analysis</c> record
+    /// via the task-020 <c>sprk_analysis</c> lookup FK — the explicit-promotion write seam
+    /// (ai-advanced-capabilities-analysis-hub-r1 task 023, spec FR-07). Unlike
+    /// <see cref="CreateSessionAsync"/>'s create-time FK write, this UPDATES an already-persisted
+    /// row in place: no new <c>sprk_aichatsummary</c> row, no new session minted. Mirrors the
+    /// query-then-update pattern <see cref="ArchiveSessionAsync"/> uses to resolve the record GUID
+    /// from the queryable <c>sprk_sessionid</c> + <c>sprk_tenantid</c> key.
+    /// </summary>
+    /// <param name="tenantId">
+    /// Tenant ID for isolation (ADR-014/ADR-028) — mirrors every sibling write on this interface.
+    /// </param>
+    /// <param name="sessionId">The session's <c>sprk_sessionid</c> to bind.</param>
+    /// <param name="analysisId">The <c>sprk_analysis</c> record ID to bind the session to.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// <c>true</c> when a matching <c>sprk_aichatsummary</c> row was found and its FK updated;
+    /// <c>false</c> when no anchor row exists for the session (non-fatal — mirrors
+    /// <see cref="ArchiveSessionAsync"/>'s tolerant behavior for a session whose cold-tier create
+    /// was skipped or failed; the caller's Redis/Cosmos HostContext update still proceeds).
+    /// </returns>
+    Task<bool> BindSessionToAnalysisAsync(
+        string tenantId,
+        string sessionId,
+        Guid analysisId,
+        CancellationToken ct = default);
 }

@@ -274,9 +274,12 @@ public sealed class RecordNameMatchRung : IAssociationRung
                 : $"name in {v.Location}";
 
             // Parseable provenance for the CommunicationConnections review UI (match reason + record number).
+            // Escape the user-controlled name/number values so an embedded double-quote can't corrupt the
+            // quote-delimited mini-format the review UI parses (see RungProvenanceFormat).
             var provenance =
                 $"record-name-match:{result.RecordType}:where={v.Location}:matched={v.Kind}:" +
-                $"name=\"{result.RecordName}\":number=\"{recordNumber}\":reason=\"{reason}\"";
+                $"name=\"{RungProvenanceFormat.EscapeValue(result.RecordName)}\":" +
+                $"number=\"{RungProvenanceFormat.EscapeValue(recordNumber)}\":reason=\"{reason}\"";
 
             var match = new RungMatch
             {
@@ -322,7 +325,19 @@ public sealed class RecordNameMatchRung : IAssociationRung
                         : c.AttachmentCollapsed.Contains(collapsed, StringComparison.Ordinal) ? "attachment"
                         : null;
                 if (loc is not null)
-                    return new VerifiedMatch(opts.NumberConfidence, loc, "number", refNum);
+                {
+                    // E1 (FR-12 UAT): location-tier the number confidence (subject > body > attachment), exactly
+                    // as name matches already are — so a reference cited in the SUBJECT (the record the email is
+                    // really about) outranks the same-strength number merely mentioned in an older thread body.
+                    // FR-12 still independently gates auto-file; this only changes RANKING among candidates.
+                    var numberConfidence = loc switch
+                    {
+                        "subject" => opts.NumberConfidence,
+                        "body" => opts.BodyNumberConfidence,
+                        _ => opts.AttachmentNumberConfidence,
+                    };
+                    return new VerifiedMatch(numberConfidence, loc, "number", refNum);
+                }
             }
         }
 

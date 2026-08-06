@@ -4,8 +4,10 @@
  * FIX #5 (spaarkeai-compose-r2 UAT): the toolbar was consolidated from TWO wrapping
  * rows of individual icon buttons into ONE row grouped behind labelled Fluent v9
  * `Menu` dropdowns. The dropdown TRIGGER buttons carry WORD labels (Body / Paragraph
- * / Font / Word); the tools INSIDE each dropdown are ICON-only buttons with a hover
- * Tooltip naming each command. `Save` + `Undo`/`Redo` are icon-only buttons pushed
+ * / Font / Word); the tools INSIDE the Paragraph/Font/Table dropdowns are ICON-only
+ * buttons with a hover Tooltip naming each command, while the Word dropdown (task 039
+ * P3) is a VERTICAL list of icon+label rows (Open web / Open desktop). The Track
+ * Changes toggle is icon-only (task 039 P1). `Save` + `Undo`/`Redo` are icon-only buttons pushed
  * to the RIGHT edge (a `flex:1` spacer). This is a REORGANIZATION only — every
  * command previously reachable stays wired with its disabled/active state intact.
  *
@@ -16,14 +18,45 @@
  *   - Table     — insert table (2x2 + header row), add/delete row, add/delete column,
  *                 delete table (task 041, FR-18). Row/column/delete-table commands are
  *                 disabled outside a table (`editor.can().<cmd>()` dry-run).
- *   - Word      — Open in Word Web, Open in Word Desktop, Push to Word. These were
+ *   - Word      — Open in Word Web, Open in Word Desktop. These were
  *                 previously top-level actions on the separate `ComposeToolbar`
  *                 command bar (rendered by ComposeWorkspace). The host now binds the
- *                 handlers (`onOpenInWord` / `onOpenInWordDesktop` / `onPushToWord`)
+ *                 handlers (`onOpenInWord` / `onOpenInWordDesktop`)
  *                 and threads them here via ComposeEditor. The dropdown is omitted
- *                 when the host wires no Word handlers.
- *   - Save      — icon button (right-aligned); rendered only when `onSave` is wired.
+ *                 when the host wires no Word handlers. UAT round-1 #6 (2026-08-03):
+ *                 relocated OUT of this format-menus row to the action side (right,
+ *                 near Save) as an icon-only dropdown (`DocumentWordRegular`). UAT
+ *                 round-4 #11 (2026-08-04): the popover's former Save-duplicate entries
+ *                 were REMOVED — it now contains ONLY "Open in Word (web)" / "Open in
+ *                 Word (desktop)".
+ *   - Save      — icon-only button (right-aligned); rendered only when `onSave` is
+ *                 wired. UAT round-1 #5 (2026-08-03): the visible "Save Version" text
+ *                 was dropped (restoring the icon-only intent this header already
+ *                 documented) — the accessible name lives on `aria-label` + a Tooltip.
  *   - Undo/Redo — icon buttons (right-aligned).
+ *
+ * UAT round-1 #3 (2026-08-03): "Create Summary Memo" (see the FR-14 group below) is now an
+ * icon-only dropdown trigger (`DocumentBulletList24Regular`, same glyph as before) repositioned
+ * to the FAR LEFT of the toolbar — the very first control, ahead of Body/Paragraph/Font/Table.
+ * The dropdown's two menu items (Generate memo / Email memo) are unchanged.
+ *
+ * UAT round-4 #11/#12 (2026-08-04) — SUPERSEDES the round-1 #3 far-left Memo placement above and
+ * the round-1 #6 Word-menu Save duplicate:
+ *   #11 (menu allocation) — the Word dropdown's "Save Version" / "Save New Document" duplicate
+ *     buttons (the round-1 "UX-1 parity affordance") are REMOVED. The owner rejected the overlap:
+ *     Word menu now contains ONLY "Open in Word (web)" / "Open in Word (desktop)"; Save stays the
+ *     ONE split-button (Save Version primary / Save New Document caret). Zero functional overlap
+ *     between the two menus.
+ *   #12 (regroup + spacing) — the format-menu group (Body/Paragraph/Font/Table) is unchanged at
+ *     the left. The Create Summary Memo trigger moves OFF the far-left position (superseding round-1
+ *     #3) into the regrouped action-icon area on the right, which now reads, left→right, as FOUR
+ *     `ToolbarDivider`-separated groups: [Review Summary toggle · Create Summary Memo] |
+ *     [Word · Save] | [Review Notes toggle · Track Changes toggle] | [Undo · Redo · Info]. The
+ *     three controls the owner's round-4 order did not mention — Open Document, Reload from
+ *     source, Refresh Profile — are NOT deleted; they sit immediately after the format-menu group
+ *     and before the (now right-aligned) action groups, keeping their pre-round-4 relative order.
+ *     This placement is a judgment call (flagged for the owner to adjust) — see the inline comment
+ *     at that render site.
  *
  * The inline character-format controls (Bold / Italic / Underline / Strikethrough /
  * Link) were RELOCATED here from the TipTap selection BubbleMenu at task 111 (the
@@ -54,7 +87,9 @@ import { type Editor } from '@tiptap/react';
 import {
   Toolbar,
   ToolbarButton,
+  ToolbarDivider,
   Button,
+  SplitButton,
   Tooltip,
   makeStyles,
   tokens,
@@ -63,7 +98,15 @@ import {
   MenuPopover,
   MenuList,
   MenuItem,
+  Popover,
+  PopoverTrigger,
+  PopoverSurface,
+  Text,
+  Spinner,
+  type MenuButtonProps,
 } from '@fluentui/react-components';
+// G7 (task 022): the Save split-button choice ('version' | 'new').
+import type { ComposeSaveMode } from '../types/compose-contracts';
 import {
   TextBold24Regular,
   TextItalic24Regular,
@@ -79,10 +122,12 @@ import {
   TextAlignRight24Regular,
   ArrowUndo24Regular,
   ArrowRedo24Regular,
+  Info24Regular,
+  CommentMultiple24Regular,
   ChevronDown16Regular,
+  DocumentEdit24Regular,
   OpenRegular,
   DesktopRegular,
-  ArrowUploadRegular,
   SaveRegular,
   TableAdd24Regular,
   TableInsertRow24Regular,
@@ -90,6 +135,14 @@ import {
   TableDeleteRow24Regular,
   TableDeleteColumn24Regular,
   TableDismiss24Regular,
+  ClipboardTaskListLtr24Regular,
+  DocumentSync24Regular,
+  ArrowClockwise24Regular,
+  DocumentText24Regular,
+  DocumentBulletList24Regular,
+  ArrowDownload24Regular,
+  Mail24Regular,
+  DocumentWordRegular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -135,6 +188,26 @@ const useStyles = makeStyles({
   spacer: {
     flexGrow: 1,
   },
+  // UAT round-6 #4 — the not-legal-advice disclaimer popover (opened from the toolbar info button).
+  disclaimerPopover: {
+    maxWidth: '320px',
+    color: tokens.colorNeutralForeground2,
+  },
+  // task 039 P3: the Word dropdown is now a VERTICAL, labelled list (was a horizontal icon-only
+  // palette) — each action reads as a full-width menu row with an icon + text label. Semantic tokens only.
+  wordMenuColumn: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    minWidth: '176px',
+    paddingInline: tokens.spacingHorizontalXS,
+    paddingBlock: tokens.spacingVerticalXS,
+    rowGap: tokens.spacingVerticalXXS,
+  },
+  // Left-align the icon + label inside each vertical Word action (Fluent Button centers by default).
+  wordMenuItem: {
+    justifyContent: 'flex-start',
+  },
 });
 
 export interface ComposeFormatToolbarProps {
@@ -147,22 +220,99 @@ export interface ComposeFormatToolbarProps {
   onOpenInWord?: () => void;
   /** Open the current document in the Word desktop app. */
   onOpenInWordDesktop?: () => void;
-  /** Render accepted annotations into the .docx as native Word track-changes + comments. */
-  onPushToWord?: () => void;
   /** Disables the two Open-in-Word items (no persisted document, or an action is in flight). */
   wordActionsDisabled?: boolean;
-  /** True when there is something to push (persisted doc + ≥1 accepted annotation). */
-  canPushToWord?: boolean;
-  /** True while a push-to-Word is in flight. */
-  isPushingToWord?: boolean;
 
-  // ---- Save (FIX #5) — icon button, right-aligned; rendered only when `onSave` set ----
-  /** Save handler (create-on-save first Save, or update). */
-  onSave?: () => void;
+  // ---- Track Changes (item 4, UAT round-4) — labelled toggle, rendered only when handler set ----
+  /** True when the live Track Changes decoration overlay is on (user edits render as redlines). */
+  trackChangesEnabled?: boolean;
+  /** Toggle the live Track Changes overlay. Rendered only when supplied. */
+  onToggleTrackChanges?: () => void;
+
+  // ---- Deferred edit-path gate (task 038, supersedes task 037 — R4 zero-error guardrails) ----
+  /**
+   * True when the editor is over a LOADED/imported baseline (an uploaded `.docx`, a stored
+   * document, or an opened template — anything with a retained original). False/undefined for a
+   * from-scratch BORN-IN-EDITOR draft (blank page / AI-draft) that has NO retained original.
+   *
+   * Task 038 (R4 zero-error release gate) uses this to gate the controls whose edit-path support is
+   * DEFERRED to R5 (projects/spaarkeai-compose-r5), so R4 ships with no user-triggerable errors and no
+   * silent data loss:
+   *  - When `true` (LOADED doc): the alignment buttons, the heading dropdown, the bullet/ordered list
+   *    buttons, AND "Insert table" are DISABLED — the tracked-edit engine either 422s (alignment) or
+   *    silently drops (heading/list/table) these constructs. Each shows an "Available in a future
+   *    release" tooltip.
+   *  - When falsy (BORN-IN-EDITOR draft): those controls are ENABLED — the ComposeDocumentRenderer
+   *    authors headings/lists/tables/alignment cleanly for a from-scratch document.
+   *
+   * NOTE the table polarity is INVERTED vs task 037 (which disabled born-in-editor tables): the renderer
+   * authors born-in-editor tables cleanly, but the engine has no table op and would silently drop a
+   * loaded-doc table — so table-insert is enabled born-in-editor and disabled loaded. Hyperlinks are
+   * disabled in BOTH modes independently of this flag (not representable in R4 — R5 G5).
+   *
+   * Defaults to falsy (undefined ⇒ born-in-editor treatment ⇒ these controls enabled), so a standalone/
+   * library mount that never threads the flag keeps full authoring.
+   */
+  hasLoadedBaseline?: boolean;
+
+  // ---- Save (FIX #5 / G7 task 022) — split-button, right-aligned; rendered only when `onSave` set ----
+  /** Save handler. G7 (task 022): receives the split-button choice — `'version'` (default, replace/dedup)
+   *  or `'new'` (fork a new document). */
+  onSave?: (mode?: ComposeSaveMode) => void;
   /** True when Save should be enabled (unsaved edit OR unpersisted transient draft). */
   canSave?: boolean;
   /** True while a save is in flight. */
   isSaving?: boolean;
+  /** G10 (FR-09, task 040): manual "Refresh Profile" handler. Renders the button when set (the host
+   *  wires it only for a promoted doc — one with a sprk_document record to re-profile). */
+  onRefreshProfile?: () => void;
+  /** UAT #5 (task 053): "Reload from source" handler. Renders the button when set (the host wires it only
+   *  for a doc with an SPE source). Pulls the latest SPE bytes on demand — e.g. after an external Word-web
+   *  edit the change-check missed. Distinct from Refresh Profile (which re-profiles, not reloads bytes). */
+  onReloadFromSource?: () => void;
+  /** "Open Document" handler. Renders the button when set (the host wires it only for a doc with a preview
+   *  source — a promoted sprk_document). Opens the source Dataverse Document in the shared preview modal.
+   *  Undefined → the button hides (mirrors the onRefreshProfile gating pattern). */
+  onOpenDocument?: () => void;
+  /** UAT #9 (task 054): true while a manual profile re-run is in flight — shows a spinner on the
+   *  Refresh-Profile button so the (otherwise silent 202) click gives visible feedback. */
+  isRefreshingProfile?: boolean;
+
+  // ---- Review (ai-advanced-capabilities-nda-r1 UAT round-2 items #1/#2) — icon-only dropdown,
+  //      right-aligned, rendered ONLY when an NDA advisory review is present. Two independent
+  //      toggles: "Review Summary" (the docked TL;DR panel) and "Review Notes" (the right-gutter
+  //      advisory comment cards). Both surfaces already exist; this is a single toolbar control that
+  //      shows/hides each without dismissing the review data. ----
+  /** True when an NDA advisory review has run (summary findings or in-document advisory comments exist). */
+  hasReview?: boolean;
+  /** Whether the review-summary docked panel is currently shown. */
+  reviewSummaryOpen?: boolean;
+  /** Toggle the review-summary panel. */
+  onToggleReviewSummary?: () => void;
+  /** Whether the right-gutter advisory comment cards ("Review Notes") are currently shown. */
+  reviewNotesOpen?: boolean;
+  /** Toggle the right-gutter advisory comments. */
+  onToggleReviewNotes?: () => void;
+  /**
+   * UAT round-6 #4 — the not-legal-advice warning text. When provided (an NDA advisory review is
+   * present), an info (ⓘ) button appears at the far right of the toolbar; clicking it shows this text in
+   * a popover. Replaces the standing disclaimer banner that used to sit inside the Review Summary.
+   */
+  reviewDisclaimer?: string;
+
+  // ---- Create Summary Memo (FR-14, ai-advanced-capabilities-agreements-r1 task 051) — a dropdown with
+  //      two actions, rendered ONLY when a review is present (same `hasReview` gate as the Review
+  //      Summary/Notes toggles above) AND at least one handler is threaded. Both actions READ the
+  //      PERSISTED review-memo record server-side (render-from-persisted, project-binding constraint) —
+  //      a record that hasn't been generated yet surfaces the host's "generate the review/memo first"
+  //      negative state, never a silent empty export. Pure forwarder (mirrors onSave/onOpenDocument): the
+  //      host (ComposeWorkspace) owns the fetch/download/EmailComposer-open logic. ----
+  /** Generate + download the memo as a .docx. Rendered only when set. */
+  onGenerateMemo?: () => void;
+  /** Read the persisted memo and open the EmailComposer prefilled with its body + subject. Rendered only when set. */
+  onEmailMemo?: () => void;
+  /** True while a memo generate/email fetch is in flight — disables both actions and shows a spinner on the trigger. */
+  isMemoActionInFlight?: boolean;
 }
 
 /**
@@ -231,11 +381,19 @@ function PaletteIconButton(props: {
   disabled?: boolean;
   onClick: () => void;
   testId: string;
+  /**
+   * task 038 (spaarkeai-compose-r4 zero-error guardrails): when the control is disabled because its
+   * underlying feature is DEFERRED (not merely read-only), the hover tooltip explains why instead of
+   * naming the unavailable command. The accessible NAME (`aria-label`) stays the command so assistive
+   * tech still announces what the control is; only the descriptive Tooltip changes.
+   */
+  deferredReason?: string;
 }): React.JSX.Element {
+  // The Button carries the accessible NAME via `aria-label`; the Tooltip is therefore a
+  // `description` (not a second `label`) so the two do not both claim the accessible name.
+  const tooltipContent = props.disabled && props.deferredReason ? props.deferredReason : props.label;
   return (
-    // The Button carries the accessible NAME via `aria-label`; the Tooltip is therefore a
-    // `description` (not a second `label`) so the two do not both claim the accessible name.
-    <Tooltip content={props.label} relationship="description" withArrow>
+    <Tooltip content={tooltipContent} relationship="description" withArrow>
       <Button
         appearance={props.active ? 'primary' : 'subtle'}
         size="small"
@@ -257,13 +415,26 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     disabled,
     onOpenInWord,
     onOpenInWordDesktop,
-    onPushToWord,
     wordActionsDisabled,
-    canPushToWord,
-    isPushingToWord,
+    hasLoadedBaseline,
     onSave,
     canSave,
     isSaving,
+    onRefreshProfile,
+    onReloadFromSource,
+    onOpenDocument,
+    isRefreshingProfile,
+    trackChangesEnabled,
+    onToggleTrackChanges,
+    hasReview,
+    reviewSummaryOpen,
+    onToggleReviewSummary,
+    reviewNotesOpen,
+    onToggleReviewNotes,
+    reviewDisclaimer,
+    onGenerateMemo,
+    onEmailMemo,
+    isMemoActionInFlight,
   } = props;
 
   // Re-render on selection/transaction to keep the "active" highlight in sync.
@@ -354,10 +525,48 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
   const canDeleteColumn = canRunTableCommand(editor, 'deleteColumn');
   const canDeleteTable = canRunTableCommand(editor, 'deleteTable');
 
-  const showWordMenu = Boolean(onOpenInWord || onOpenInWordDesktop || onPushToWord);
+  const showWordMenu = Boolean(onOpenInWord || onOpenInWordDesktop);
   const openInWordDisabled = controlDisabled || wordActionsDisabled === true;
-  const pushDisabled = controlDisabled || canPushToWord !== true || isPushingToWord === true;
   const saveDisabled = controlDisabled || canSave !== true || isSaving === true;
+
+  // ---- task 038 guardrails, progressively lifted by R5 (spaarkeai-compose-r5 G3/G4) ----------------
+  // The tracked-edit path (loaded/imported docs) originally had NO representation for alignment/heading/
+  // list/table, so those controls were DISABLED on a LOADED doc and kept only for a BORN-IN-EDITOR draft
+  // (the ComposeDocumentRenderer authors them cleanly). R5 lifts the guards one construct at a time as the
+  // ComposeShadowPatchEngine gains each applier:
+  //   - R5 task 010 (G3 alignment): alignment RE-ENABLED on loaded docs (tracked w:pPrChange).
+  //   - R5 task 011 (G3 heading/list): heading + bullet/ordered list RE-ENABLED on loaded docs (tracked
+  //     w:pPrChange for Style/ListOrdered/ListLevel; list numbering reuses R4.5's numbering engine).
+  //   - R5 task 014 (G4 table op): STRUCTURAL EDITS of an existing table — add/delete row, add/delete column,
+  //     delete table, and cell-content edits — now RE-ENABLED + round-tripping on loaded docs (the client
+  //     captures them as the closed-catalog `table` op; the engine emits full tracked table structure —
+  //     w:trPr/w:ins+del, w:tcPr/w:cellIns+cellDel, w:tblGridChange, w:tblPrChange). These edit buttons are
+  //     already gated only by the read-only `controlDisabled` + `editor.can()` (in-a-table) checks — no
+  //     isLoadedBaseline gate — so on a loaded doc they were reachable-but-silently-dropped before task 014;
+  //     they now round-trip.
+  //   - Insert-table (a BRAND-NEW table) stays loaded-gated: whole-table CREATE is a whole-block author, NOT a
+  //     structural edit of an existing table, and is deliberately OUTSIDE the task-004 closed table-op catalog
+  //     (which covers InsertRow/DeleteRow/InsertColumn/DeleteColumn/SetCellContent/SetTableProps). Enabling it
+  //     on a loaded doc would reintroduce the exact silent-loss NFR-08 forbids, so it remains disabled (honest
+  //     "future release" tooltip). Born-in-editor tables stay enabled — the renderer authors them cleanly.
+  //   - Hyperlinks remain unrepresentable in BOTH modes until R5 G5 (no mark op, no content-model href).
+  const isLoadedBaseline = hasLoadedBaseline === true;
+  /** Hover tooltip on a control disabled because its feature is deferred to a future release. */
+  const FUTURE_RELEASE_TOOLTIP = 'Available in a future release';
+  const deferredIfLoaded = isLoadedBaseline ? FUTURE_RELEASE_TOOLTIP : undefined;
+  // Heading + bullet/ordered list — RE-ENABLED on loaded docs (R5 task 011); read-only gate still applies.
+  const headingListEditDisabled = controlDisabled;
+  // Alignment — re-enabled on loaded docs (R5 task 010); read-only gate still applies.
+  const alignmentEditDisabled = controlDisabled;
+  // Insert-table (whole-table CREATE) — still loaded-gated (out of the R5 task-014 closed table-op catalog:
+  // that op covers structural EDITS of an existing table, not authoring a new one). Enabled born-in-editor
+  // (renderer), disabled loaded. Row/column/delete-table EDIT commands are NOT gated here — they round-trip
+  // via the table op (G4).
+  const tableInsertDisabled = controlDisabled || isLoadedBaseline;
+  // G5 (FR-05, task 033): hyperlinks are now representable on BOTH paths — authored (clean w:hyperlink via
+  // ComposeDocumentRenderer) and edit (the `Link` mark op → ComposeShadowPatchEngine tracked w:hyperlink).
+  // The SDL-4/5 R4 guard is removed; the control follows the same read-only gate as Bold/Italic.
+  const hyperlinkDisabled = controlDisabled;
 
   return (
     <Toolbar
@@ -367,12 +576,14 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
       data-testid="compose-format-toolbar"
     >
       {/* ---- Body (block/heading style) ---- */}
+      {/* R5 task 011 (G3 heading/list): the heading menu is RE-ENABLED on loaded docs — the engine now applies
+          a setBlockAttr Style op as a tracked w:pPrChange. Gated only by the read-only `controlDisabled`. */}
       <Menu positioning="below-start">
         <MenuTrigger disableButtonEnhancement>
           <Button
             appearance="subtle"
             size="small"
-            disabled={controlDisabled}
+            disabled={headingListEditDisabled}
             className={styles.menuButton}
             icon={<ChevronDown16Regular />}
             iconPosition="after"
@@ -402,7 +613,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextBulletListLtr24Regular />}
               label="Bullet list"
               active={editor.isActive('bulletList')}
-              disabled={controlDisabled}
+              disabled={headingListEditDisabled}
               onClick={() => editor.chain().focus().toggleBulletList().run()}
               testId="compose-format-bullet-list"
             />
@@ -410,7 +621,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextNumberListLtr24Regular />}
               label="Numbered list"
               active={editor.isActive('orderedList')}
-              disabled={controlDisabled}
+              disabled={headingListEditDisabled}
               onClick={() => editor.chain().focus().toggleOrderedList().run()}
               testId="compose-format-ordered-list"
             />
@@ -426,7 +637,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextAlignLeft24Regular />}
               label="Align left"
               active={editor.isActive({ textAlign: 'left' })}
-              disabled={controlDisabled}
+              disabled={alignmentEditDisabled}
               onClick={() => editor.chain().focus().setTextAlign('left').run()}
               testId="compose-format-align-left"
             />
@@ -434,7 +645,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextAlignCenter24Regular />}
               label="Align center"
               active={editor.isActive({ textAlign: 'center' })}
-              disabled={controlDisabled}
+              disabled={alignmentEditDisabled}
               onClick={() => editor.chain().focus().setTextAlign('center').run()}
               testId="compose-format-align-center"
             />
@@ -442,7 +653,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextAlignRight24Regular />}
               label="Align right"
               active={editor.isActive({ textAlign: 'right' })}
-              disabled={controlDisabled}
+              disabled={alignmentEditDisabled}
               onClick={() => editor.chain().focus().setTextAlign('right').run()}
               testId="compose-format-align-right"
             />
@@ -493,7 +704,9 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={editor.isActive('link') ? <LinkDismiss24Regular /> : <Link24Regular />}
               label={editor.isActive('link') ? 'Remove link' : 'Add link'}
               active={editor.isActive('link')}
-              disabled={controlDisabled}
+              // G5 (FR-05, task 033): hyperlinks now round-trip on both paths — the control follows the
+              // read-only gate only (hyperlinkDisabled === controlDisabled), no longer deferred.
+              disabled={hyperlinkDisabled}
               onClick={toggleLink}
               testId="compose-format-link"
             />
@@ -511,7 +724,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
             <PaletteIconButton
               icon={<TableAdd24Regular />}
               label="Insert table"
-              disabled={controlDisabled}
+              disabled={tableInsertDisabled}
+              deferredReason={deferredIfLoaded}
               onClick={insertTable}
               testId="compose-format-table-insert"
             />
@@ -554,77 +768,271 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         </MenuPopover>
       </Menu>
 
-      {/* ---- Word (Open in Web / Desktop / Push to Word) ---- */}
-      {showWordMenu ? (
+      {/* ---- UAT round-4 #12 (2026-08-04): Open Document / Reload from source / Refresh Profile
+             are NOT named in the owner's regrouped left→right order below (Review Summary·Memo |
+             Word·Save | Review Notes·Track Changes | Undo·Redo·Info). PLACEMENT DECISION — FLAGGED
+             for the owner to adjust: kept immediately after the format-menu group (Body/Paragraph/
+             Font/Table) and before the (now right-aligned) regrouped action-icon area, preserving
+             their pre-round-4 relative order. Nothing was deleted. ---- */}
+      {onOpenDocument ? (
+        <Tooltip content="Open document" relationship="label" withArrow>
+          <ToolbarButton
+            appearance="subtle"
+            icon={<DocumentText24Regular />}
+            aria-label="Open document"
+            disabled={controlDisabled}
+            onClick={onOpenDocument}
+            data-testid="compose-format-open-document"
+          />
+        </Tooltip>
+      ) : null}
+
+      {onReloadFromSource ? (
+        <Tooltip content="Reload from source" relationship="label" withArrow>
+          <ToolbarButton
+            appearance="subtle"
+            icon={<ArrowClockwise24Regular />}
+            aria-label="Reload from source"
+            disabled={controlDisabled}
+            onClick={onReloadFromSource}
+            data-testid="compose-format-reload-from-source"
+          />
+        </Tooltip>
+      ) : null}
+
+      {onRefreshProfile ? (
+        <Tooltip
+          content={isRefreshingProfile ? 'Refreshing document profile…' : 'Refresh document profile'}
+          relationship="label"
+          withArrow
+        >
+          <ToolbarButton
+            appearance="subtle"
+            icon={isRefreshingProfile ? <Spinner size="tiny" /> : <DocumentSync24Regular />}
+            aria-label={isRefreshingProfile ? 'Refreshing document profile' : 'Refresh document profile'}
+            disabled={controlDisabled || isRefreshingProfile}
+            onClick={onRefreshProfile}
+            data-testid="compose-format-refresh-profile"
+          />
+        </Tooltip>
+      ) : null}
+
+      {/* Spacer — pushes the regrouped action-icon area (below) to the right edge. */}
+      <div className={styles.spacer} />
+
+      {/* ==== Group 1 (UAT round-4 #12): Show/Hide Review Summary · Create Summary Memo ==== */}
+      {hasReview && onToggleReviewSummary ? (
+        <Tooltip
+          content={reviewSummaryOpen ? 'Hide Review Summary' : 'Show Review Summary'}
+          relationship="label"
+          withArrow
+        >
+          <ToolbarButton
+            appearance={reviewSummaryOpen ? 'primary' : 'subtle'}
+            icon={<ClipboardTaskListLtr24Regular />}
+            aria-label="Toggle Review Summary"
+            aria-pressed={Boolean(reviewSummaryOpen)}
+            disabled={controlDisabled}
+            onClick={onToggleReviewSummary}
+            data-testid="compose-format-review-summary-toggle"
+          />
+        </Tooltip>
+      ) : null}
+
+      {/* ---- Create Summary Memo (FR-14, task 051) — MOVED (UAT round-4 #12, supersedes the round-1
+             #3 far-left placement) into Group 1 alongside Review Summary. Rendered ONLY when a review
+             is present AND at least one handler is threaded; the trigger shows a spinner + disables
+             both items while a memo fetch is in flight — never a silent empty export. The accessible
+             NAME lives on `aria-label` (icon-only); a Tooltip carries the full label on hover
+             (ADR-021/a11y — icon-only needs both). ---- */}
+      {hasReview && (onGenerateMemo || onEmailMemo) ? (
         <Menu positioning="below-start">
           <MenuTrigger disableButtonEnhancement>
-            <DropdownButton label="Word" disabled={controlDisabled} testId="compose-format-word-menu" />
+            {(triggerProps: MenuButtonProps) => (
+              <Tooltip content="Create Summary Memo" relationship="label" withArrow>
+                <Button
+                  {...triggerProps}
+                  appearance="subtle"
+                  size="small"
+                  icon={isMemoActionInFlight ? <Spinner size="tiny" /> : <DocumentBulletList24Regular />}
+                  aria-label="Create Summary Memo"
+                  disabled={controlDisabled || isMemoActionInFlight}
+                  data-testid="compose-format-memo-menu"
+                />
+              </Tooltip>
+            )}
           </MenuTrigger>
           <MenuPopover>
-            <div className={styles.dropdownPalette} role="group" aria-label="Word document actions">
-              {/* UX-1 (UAT 2026-07-19): a deliberate DUPLICATE of the right-aligned Save
-                  icon — users instinctively look in the Word menu to save. Same handler
-                  (`onSave`) + same enable predicate (`saveDisabled`); rendered only when
-                  the host wires Save. */}
-              {onSave ? (
-                <PaletteIconButton
-                  icon={<SaveRegular />}
-                  label={isSaving ? 'Saving…' : 'Save'}
-                  disabled={saveDisabled}
-                  onClick={onSave}
-                  testId="compose-format-word-save"
+            <MenuList>
+              <MenuItem
+                icon={<ArrowDownload24Regular />}
+                disabled={!onGenerateMemo || controlDisabled || isMemoActionInFlight}
+                onClick={() => onGenerateMemo?.()}
+                data-testid="compose-format-memo-generate"
+              >
+                Generate memo (.docx)
+              </MenuItem>
+              <MenuItem
+                icon={<Mail24Regular />}
+                disabled={!onEmailMemo || controlDisabled || isMemoActionInFlight}
+                onClick={() => onEmailMemo?.()}
+                data-testid="compose-format-memo-email"
+              >
+                Email memo
+              </MenuItem>
+            </MenuList>
+          </MenuPopover>
+        </Menu>
+      ) : null}
+
+      <ToolbarDivider data-testid="compose-format-divider-1" />
+
+      {/* ==== Group 2 (UAT round-4 #11/#12): Word · Save ====
+             MENU ALLOCATION FIX (#11): the Word dropdown's former "Save Version"/"Save New Document"
+             duplicate (the round-1 "UX-1 parity affordance") is REMOVED — the owner explicitly
+             rejected that overlap. Word now contains ONLY the two Open-in-Word handoff actions; Save
+             is the ONE split-button (Save Version primary / Save New Document caret). Zero functional
+             overlap between the two menus. ---- */}
+      {showWordMenu ? (
+        <Menu positioning="below-end">
+          <MenuTrigger disableButtonEnhancement>
+            {(triggerProps: MenuButtonProps) => (
+              <Tooltip content="Word" relationship="label" withArrow>
+                <Button
+                  {...triggerProps}
+                  appearance="subtle"
+                  size="small"
+                  icon={<DocumentWordRegular />}
+                  aria-label="Word"
+                  disabled={controlDisabled}
+                  data-testid="compose-format-word-menu"
                 />
-              ) : null}
+              </Tooltip>
+            )}
+          </MenuTrigger>
+          <MenuPopover>
+            <div className={styles.wordMenuColumn} role="group" aria-label="Word document actions">
               {onOpenInWord ? (
-                <PaletteIconButton
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  className={styles.wordMenuItem}
                   icon={<OpenRegular />}
-                  label="Open in Word for Web"
+                  aria-label="Open in Word for the Web"
                   disabled={openInWordDisabled}
                   onClick={onOpenInWord}
-                  testId="compose-format-open-word-web"
-                />
+                  data-testid="compose-format-open-word-web"
+                >
+                  Open in Word (web)
+                </Button>
               ) : null}
               {onOpenInWordDesktop ? (
-                <PaletteIconButton
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  className={styles.wordMenuItem}
                   icon={<DesktopRegular />}
-                  label="Open in Word Desktop"
+                  aria-label="Open in the Word desktop app"
                   disabled={openInWordDisabled}
                   onClick={onOpenInWordDesktop}
-                  testId="compose-format-open-word-desktop"
-                />
-              ) : null}
-              {onPushToWord ? (
-                <PaletteIconButton
-                  icon={<ArrowUploadRegular />}
-                  label={isPushingToWord ? 'Pushing to Word…' : 'Push to Word'}
-                  disabled={pushDisabled}
-                  onClick={onPushToWord}
-                  testId="compose-format-push-to-word"
-                />
+                  data-testid="compose-format-open-word-desktop"
+                >
+                  Open in Word (desktop)
+                </Button>
               ) : null}
             </div>
           </MenuPopover>
         </Menu>
       ) : null}
 
-      {/* Spacer — pushes Save + Undo/Redo to the right edge. */}
-      <div className={styles.spacer} />
-
-      {/* ---- Save (icon-only, right-aligned) ---- */}
+      {/* ---- Save split-button (G7 task 022) — the ONE save entry point (#11: no longer duplicated
+             inside the Word menu). UAT round-1 #5 (2026-08-03): ICON-ONLY — the visible "Save
+             Version" text was dropped. Primary action = "Save Version" (replace in place /
+             transient-key dedup); the caret menu carries "Save New Document" (a deliberate fork).
+             Fluent v9 SplitButton, theme tokens only (ADR-021 dark-mode). Mirrors the blessed
+             ComposerActionBar Send split-button pattern. The accessible NAME survives via the
+             primaryActionButton's `aria-label`; a Tooltip carries the full label on hover (icon-only
+             buttons need both — ADR-021/a11y). ---- */}
       {onSave ? (
-        <Tooltip content={isSaving ? 'Saving…' : 'Save changes'} relationship="label" withArrow>
+        <Menu positioning="below-end">
+          <MenuTrigger disableButtonEnhancement>
+            {(triggerProps: MenuButtonProps) => (
+              <Tooltip content={isSaving ? 'Saving…' : 'Save Version'} relationship="label" withArrow>
+                <SplitButton
+                  appearance="subtle"
+                  data-testid="compose-format-save"
+                  menuButton={{ ...triggerProps, 'aria-label': 'Save options' }}
+                  primaryActionButton={{
+                    onClick: () => onSave('version'),
+                    disabled: saveDisabled,
+                    icon: <SaveRegular />,
+                    'aria-label': isSaving ? 'Saving' : 'Save version',
+                  }}
+                />
+              </Tooltip>
+            )}
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              <MenuItem
+                icon={<SaveRegular />}
+                disabled={saveDisabled}
+                onClick={() => onSave('new')}
+                data-testid="compose-format-save-new"
+              >
+                Save New Document
+              </MenuItem>
+            </MenuList>
+          </MenuPopover>
+        </Menu>
+      ) : null}
+
+      <ToolbarDivider data-testid="compose-format-divider-2" />
+
+      {/* ==== Group 3 (UAT round-4 #12): Show/Hide Review Notes · Track Changes ==== */}
+      {hasReview && onToggleReviewNotes ? (
+        <Tooltip content={reviewNotesOpen ? 'Hide Review Notes' : 'Show Review Notes'} relationship="label" withArrow>
           <ToolbarButton
-            appearance="subtle"
-            icon={<SaveRegular />}
-            aria-label={isSaving ? 'Saving' : 'Save changes'}
-            disabled={saveDisabled}
-            onClick={onSave}
-            data-testid="compose-format-save"
+            appearance={reviewNotesOpen ? 'primary' : 'subtle'}
+            icon={<CommentMultiple24Regular />}
+            aria-label="Toggle Review Notes"
+            aria-pressed={Boolean(reviewNotesOpen)}
+            disabled={controlDisabled}
+            onClick={onToggleReviewNotes}
+            data-testid="compose-format-review-notes-toggle"
           />
         </Tooltip>
       ) : null}
 
-      {/* ---- Undo / Redo (icon-only, right-aligned) ---- */}
+      {/* ---- Track Changes toggle (item 4, UAT round-4) — task 039 P1: ICON-ONLY. The visible
+             "Track changes" text label was dropped for an icon-only toggle; the accessible NAME
+             (aria-label) + pressed state (aria-pressed) + the descriptive Tooltip are all retained
+             (ADR-021 — the primary/subtle appearance carries the on/off state, dark-mode-correct). ---- */}
+      {onToggleTrackChanges ? (
+        <Tooltip
+          content={
+            trackChangesEnabled
+              ? 'Track changes is on — your edits show as redlines and save as tracked changes'
+              : 'Track changes is off — turn on to see your edits as redlines'
+          }
+          relationship="label"
+          withArrow
+        >
+          <ToolbarButton
+            appearance={trackChangesEnabled ? 'primary' : 'subtle'}
+            icon={<DocumentEdit24Regular />}
+            aria-pressed={trackChangesEnabled === true}
+            aria-label="Toggle track changes"
+            disabled={controlDisabled}
+            onClick={onToggleTrackChanges}
+            data-testid="compose-format-track-changes"
+          />
+        </Tooltip>
+      ) : null}
+
+      <ToolbarDivider data-testid="compose-format-divider-3" />
+
+      {/* ==== Group 4 (UAT round-4 #12): Undo · Redo · Info ==== */}
       <ToolbarButton
         appearance="subtle"
         icon={<ArrowUndo24Regular />}
@@ -642,6 +1050,26 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         onClick={() => editor.chain().focus().redo().run()}
         data-testid="compose-format-redo"
       />
+
+      {/* UAT round-6 #4 — the not-legal-advice warning, moved OUT of the Review Summary body to a far-
+          right info (ⓘ) button. Shown only when an NDA advisory review is present (reviewDisclaimer set). */}
+      {hasReview && reviewDisclaimer ? (
+        <Popover withArrow positioning="below-end" size="small">
+          <PopoverTrigger disableButtonEnhancement>
+            <ToolbarButton
+              appearance="subtle"
+              icon={<Info24Regular />}
+              aria-label="About this review"
+              data-testid="compose-format-review-info"
+            />
+          </PopoverTrigger>
+          <PopoverSurface data-testid="compose-format-review-info-popover">
+            <Text size={200} className={styles.disclaimerPopover}>
+              {reviewDisclaimer}
+            </Text>
+          </PopoverSurface>
+        </Popover>
+      ) : null}
     </Toolbar>
   );
 }

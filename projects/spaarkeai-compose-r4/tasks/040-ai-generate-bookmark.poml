@@ -1,0 +1,216 @@
+<task id="040" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Drift-proof AI anchoring — generate-window bookmark + resolve-on-return (FR-07, capture)</title>
+    <phase>4 AI anchoring</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend + AI implementation modifying .ts/.tsx on the generate/apply path; subtle AI-correctness surface under concurrent edits; tags include frontend + ai + docx.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Drift-proofing under concurrent edits is the subtle AI-correctness surface — position rebasing via ProseMirror Mapping tied to a request id is easy to get subtly wrong; high blast radius on the AI generate path.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies the client AI toolbar surface + the generate path shared with 041; step→operation interceptor (020) and the generate window overlap the same editor state.</parallel-reason>
+    <deps>020,006</deps>
+    <tags>frontend,ai,docx</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-07 capture-side: make AI generation drift-proof. On Generate, drop a ProseMirror
+    `Decoration` / `Selection.getBookmark()` at the user's current selection and tie it to the request id;
+    as the user keeps typing during the generate window, rebase that bookmark through the concurrent edits
+    using the op-log `Mapping` (task 022 / 020's rebased log). Pass the target `paraId` (the bookmark's
+    resolved paragraph) to the model AS CONTEXT — the model returns JSON operations referencing paraId,
+    NOT free text to text-search. On return, resolve the bookmark to its CURRENT position (post-concurrent-edit)
+    so the returned operations land at the rebased selection, not the stale original offset.
+
+    This is envelope-only. The engine is FROZEN (ADR-039): do NOT add a new AI dispatch endpoint and do NOT
+    change any AI catalog row. AI dispatch goes through the existing `Services/Ai/PublicContracts/` facade
+    (ADR-013) — do NOT fork `Services/Ai/` and do NOT inject `IOpenAiClient`/executor/routing types anywhere.
+    Reuse the EXISTING AI toolbar surface `widgets/ComposeAiToolbar.tsx` — do not build a new toolbar. Client
+    fetches use `@spaarke/auth` (`useAuth`/`authenticatedFetch`) — no hand-rolled token handling (ADR-028).
+    This is the R4 generate-window state-drift fix (design §5 AI paragraph, feature F5).
+  </prompt>
+
+  <role>
+    Senior React/TypeScript engineer fluent in TipTap 3 / ProseMirror (Decorations, `Selection.getBookmark`,
+    Step/StepMap/`Mapping` position rebasing) and the Spaarke AI facade contract. Understands that the
+    editor is a lossy view + controller (I-6): the AI must be handed a stable `paraId` anchor and return
+    ID-anchored operations, never free text the client would have to search for (violates I-7).
+  </role>
+
+  <goal>
+    An AI generate flow where: a bookmark/Decoration is dropped at the selection on Generate and tied to the
+    request id; the bookmark rebases through concurrent user edits via the op-log `Mapping`; the target
+    `paraId` is sent as model context; the model returns JSON operations referencing paraId; and on return
+    the bookmark resolves to its current position so operations land at the rebased selection. If the model
+    returns free text instead of operations, the flow refuses and surfaces rather than text-searching.
+    Wired into the existing `ComposeAiToolbar.tsx`; AI dispatch via the PublicContracts facade only.
+  </goal>
+
+  <context>
+    <background>
+      Design §5 (AI paragraph): "on Generate, drop a `Decoration`/`Selection.getBookmark()` at the selection,
+      tie it to the request id, pass the target `paraId` as context. The model returns JSON operations
+      referencing paraId (not free text to search). On return, rebase the bookmark to its current position,
+      validate every returned paraId/offset against the live doc, then apply." Design §4 feature F5: the
+      generate-window state-drift fix (NEW in R4). This task is the CAPTURE half (bookmark + resolve-on-return
+      + paraId-as-context + refuse-free-text); the APPLY half (validate every returned anchor before apply;
+      fuzzy-as-comment last resort) is task 041. Depends on 020's ProseMirror step→operation interceptor and
+      its rebased op-log `Mapping` for the concurrent-edit rebasing. Gated on the Phase 0 gate (006).
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx — the EXISTING AI toolbar surface; wire Generate to drop the bookmark/Decoration, tie it to the request id, and resolve-on-return</file>
+      <file role="new">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useAiGenerateBookmark.ts — NEW hook: create a Decoration/`Selection.getBookmark` at the selection tied to the request id; rebase through concurrent edits via the op-log Mapping; resolve to current position on return; expose the resolved paraId for model context</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/widgets/paraIdExtension.ts — TipTap schema carries `data-paraid`; resolve the bookmark's paragraph to its paraId via this</file>
+      <file role="dependency-output">src/client/shared/Spaarke.Compose.Components/src/ — task 020 ProseMirror step→operation interceptor + task 022 rebased op-log `Mapping` (the position-rebasing primitive this reuses)</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ — the AI facade seam the generate call dispatches through (envelope-only; no new endpoint, no fork)</file>
+      <file role="export">src/client/shared/Spaarke.Compose.Components/src/index.ts — export the hook if part of the public surface</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §5 (AI paragraph), §4 F5 (generate-window drift fix)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-07, Success Criterion 3</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">ProseMirror step→operation interceptor + rebased op-log `Mapping` — the position-rebasing primitive the bookmark reuses to survive concurrent edits.</dependency>
+      <dependency task="006" status="pending">Phase 0 GATE — go/no-go for cutover; the operation schema (003) the model returns against is ratified here.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-07">On Generate a ProseMirror Decoration/bookmark is dropped at the selection, rebased through concurrent edits, and tied to the request id; the target paraId is sent to the model as context; the model returns JSON operations referencing paraId; on return the bookmark resolves to its current position. MUST NOT hand the model free text to text-search (invariant I-7).</constraint>
+    <constraint source="ADR-039 / project">Engine FROZEN — MUST NOT add a new AI dispatch endpoint and MUST NOT change any AI catalog row. The AI redline path stays envelope-only.</constraint>
+    <constraint source="ADR-013 / NFR-05">AI dispatch goes through `Services/Ai/PublicContracts/` only — MUST NOT fork `Services/Ai/`; MUST NOT inject `IOpenAiClient`/executor/routing types into `Services/Compose/` or the client.</constraint>
+    <constraint source="ADR-028 / project">Client generate/apply fetches use `@spaarke/auth` (`useAuth`/`authenticatedFetch`) — no hand-rolled token handling, no custom token props on the editor.</constraint>
+    <constraint source="ADR-021 / project">All new/modified UI is Fluent UI v9 and MUST render correctly in dark mode (theme tokens; no hard-coded colors).</constraint>
+    <constraint source="NFR-03 / project">Op capture + bookmark use RAW ProseMirror step/decoration/Mapping APIs on the MIT base — NO `@tiptap-pro/*`, no AGPL, no runtime dependency on EigenPal. Prefer zero new dependency.</constraint>
+    <constraint source="ADR-038 / NFR-06">Client component/unit tests exercise real editor state; NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests. (The automated concurrent-edit ProseMirror proof is task 042.)</constraint>
+    <constraint source="CLAUDE.md §11">New surface (the generate-window bookmark hook) — provide the `&lt;justification&gt;` (Existing / Extension / Cost-of-doing-nothing).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ProseMirror Decoration/bookmark + Mapping position rebasing; TipTap paraId resolution; AI facade envelope contract; Fluent v9 dark mode; BFF hygiene</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="paraId resolution from a position" location="src/client/shared/Spaarke.Compose.Components/src/widgets/paraIdExtension.ts">
+        The schema carries `data-paraid` as a hidden node attr — resolve the bookmark's resolved position to its paragraph node and read its paraId to hand the model as context.
+      </pattern>
+      <pattern name="Rebased op-log Mapping" location="src/client/shared/Spaarke.Compose.Components/src/">
+        Task 020/022 maintain an ordered, rebased operation log via ProseMirror `Mapping` — reuse the same Mapping to rebase the generate-window bookmark as the user keeps typing.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor (frontend + ai + docx; xhigh; opus). Load the knowledge files + design §5 + §4 F5. Read `ComposeAiToolbar.tsx`, `paraIdExtension.ts`, and task 020/022 op-log Mapping to understand how positions are rebased. State the Placement Justification (AI dispatch stays behind PublicContracts; no new endpoint; envelope-only).</step>
+    <step order="1" name="Bookmark on Generate">In `useAiGenerateBookmark.ts`, on Generate drop a `Decoration`/`Selection.getBookmark()` at the current selection and tie it to the request id. Resolve the bookmark's paragraph to its paraId (via `paraIdExtension`) to hand the model as context.</step>
+    <step order="2" name="Rebase through concurrent edits">Subscribe to editor transactions during the generate window; rebase the bookmark through concurrent user edits using the op-log `Mapping` (task 020/022) so it tracks the moving selection.</step>
+    <step order="3" name="Dispatch with paraId context">Wire the Generate call through the existing AI facade (`Services/Ai/PublicContracts/`, via `@spaarke/auth`) passing the target paraId as context. Do NOT add a new endpoint. Instruct/parse so the model returns JSON operations referencing paraId.</step>
+    <step order="4" name="Resolve-on-return + refuse free text">On return, resolve the bookmark to its CURRENT position and hand the returned JSON operations to the apply path (task 041) anchored at the rebased selection. If the model returns free text instead of operations, REFUSE and surface for review — do NOT text-search a placement (I-7). Fire the escalation trigger.</step>
+    <step order="5" name="Wire into toolbar + tests">Wire the hook into `ComposeAiToolbar.tsx`; export from `index.ts` if public. Author component/unit tests (real editor state) for bookmark-drop, rebase-through-edit, and refuse-free-text, plus an ADR-021 dark-mode render check.</step>
+    <step order="6" name="Verify + index">`npm run build:prod` the shared lib; run the new tests. Update TASK-INDEX.md: set this task's status to ✅. Document any deviation in projects/spaarkeai-compose-r4/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>No existing generate-window bookmark. `ComposeAiToolbar.tsx` dispatches AI but has no concurrent-edit position tracking; task 020/022 maintain a rebased op-log `Mapping` for user edits but not a request-scoped selection bookmark.</existing>
+    <extension>Cannot fold into the op-log interceptor (that captures user edits into operations, a distinct concern) nor into the toolbar (a dispatch surface). The generate-window bookmark is a cohesive request-scoped anchor with its own resolve-on-return lifecycle — a dedicated hook that REUSES the existing Mapping rather than a new position system.</extension>
+    <cost-of-doing-nothing>Without it, AI generation with concurrent user edits mis-places or fails — the returned operations land at the stale original offset, not where the moving selection ended up (the R4 generate-window drift defect). Concrete failing contract: FR-07 / Success Criterion 3 "generation with concurrent edits lands at the rebased selection" cannot be met.</cost-of-doing-nothing>
+  </justification>
+
+  <escalation>
+    <trigger>The model returns FREE TEXT instead of JSON operations referencing paraId — do NOT text-search a placement (violates I-7). REFUSE, surface for review, and escalate per root §6 rather than improvising a text-anchor. Also escalate if honoring "operations referencing paraId" would require a new AI dispatch endpoint or an AI catalog change (ADR-039 conflict — surface as §6.5 Path A/B/C, do not silently add an endpoint).</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useAiGenerateBookmark.ts</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx (bookmark drop + resolve-on-return wired)</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useAiGenerateBookmark.test.ts</output>
+    <output type="report">Placement Justification (AI via PublicContracts, no new endpoint, envelope-only) for the PR</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">On Generate, a Decoration/`Selection.getBookmark()` is dropped at the current selection and tied to the request id; the bookmark's paragraph paraId is resolved and sent to the model as context.</criterion>
+    <criterion testable="true">Generation with CONCURRENT user edits lands at the REBASED selection — the bookmark rebases through the concurrent edits via the op-log `Mapping` and resolves to its current position on return, not the stale original offset.</criterion>
+    <criterion testable="true">The returned payload is JSON operations referencing paraId (handed to the apply path 041); no free text is text-searched for placement.</criterion>
+    <criterion testable="true">NEGATIVE: if the model returns free text instead of operations, the flow REFUSES and surfaces for review (fires the escalation trigger) — it does not silently place.</criterion>
+    <criterion testable="true">AI dispatch routes through `Services/Ai/PublicContracts/` only — no new AI dispatch endpoint, no AI catalog change (ADR-039), no fork of `Services/Ai/`, no `IOpenAiClient`/executor/routing injection (ADR-013).</criterion>
+    <criterion testable="true">Client fetches use `@spaarke/auth`; no `@tiptap-pro/*` / AGPL / EigenPal runtime dependency added (NFR-03); ideally zero new dependency.</criterion>
+    <criterion testable="true">The toolbar/generate UI renders correctly in Fluent v9 dark mode (ADR-021); component tests pass; shared-lib `npm run build:prod` is green.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <ui-test name="Bookmark drops at selection on Generate">
+      <steps>Select a phrase in a paragraph, click Generate on the AI toolbar.</steps>
+      <expected>A Decoration/bookmark is placed at the selection tied to the request id; the paragraph's paraId is captured for model context.</expected>
+    </ui-test>
+    <ui-test name="Generation with concurrent edits lands at rebased selection">
+      <steps>Select a phrase, click Generate, then keep typing elsewhere (and within the same paragraph) while the request is in flight; let the AI return operations.</steps>
+      <expected>The returned operations land at the REBASED selection (bookmark resolved to its current position), not the stale original offset.</expected>
+    </ui-test>
+    <ui-test name="Free-text return is refused">
+      <steps>Simulate the model returning free text instead of paraId-anchored operations.</steps>
+      <expected>The flow refuses and surfaces for review; no text-search placement occurs.</expected>
+    </ui-test>
+    <ui-test name="Dark-mode render (ADR-021)">
+      <steps>Render the AI toolbar + generate affordance under the Fluent v9 dark theme provider.</steps>
+      <expected>Toolbar and any generate-state UI use theme tokens and are legible in dark mode; no hard-coded light colors.</expected>
+    </ui-test>
+  </ui-tests>
+
+  <notes>
+    Capture half of FR-07; the apply/validate half (validate every returned anchor before apply; fuzzy-as-comment
+    last resort) is task 041. Success Criterion 3 (AI drift-proof) is proven by the automated concurrent-edit
+    ProseMirror test in task 042. Run `/conflict-check` before any BFF-touching PR (`Services/Compose/` +
+    `Services/Ai/` overlap sibling projects).
+
+    ── COMPLETION (2026-07-22) ──
+    Implemented CAPTURE-half only; NO server/BFF files touched (envelope-only, ADR-039 honored — no new AI
+    dispatch endpoint, no AI-catalog row; dispatch stays on the shipped `Services/Ai/PublicContracts` route via
+    the existing `dispatchConsumer`). NO escalation needed — drift-proof anchoring did NOT require a new AI
+    dispatch surface.
+
+    Files:
+      - NEW  src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useAiGenerateBookmark.ts
+             (request-scoped generate-window bookmark: native ProseMirror `SelectionBookmark` + tracked points,
+              rebased through concurrent edits via the SAME `tr.mapping.mapResult(pos,assoc)` primitive task
+              020/022's RebasedOperationLog uses; resolves the target paraId via `resolveRunAnchor` for model
+              context; `resolveOnReturn` validates the payload is JSON operations referencing paraId — REFUSES
+              free text (I-7), SURFACES a deleted-content bookmark for review (041 seam), never silent placement).
+      - NEW  .../src/widgets/hooks/useAiGenerateBookmark.test.tsx  (19 tests green — extract classifier, bookmark
+             drop + paraId context, REBASE-through-concurrent-edit drift proof, JSON-ops-referencing-paraId,
+             free-text refusal, deleted-content review seam, unknown-request; + toolbar wiring & ADR-021 dark-mode
+             render of the generate affordance).
+      - EDIT .../src/widgets/ComposeAiToolbar.tsx  (ADDITIVE opt-in `aiGenerateBookmark` prop: on a
+             `materializesInEditor` Generate click it drops the bookmark, adds `targetParaId` to the dispatch
+             slots as model context, and calls `resolveOnReturn` on the dispatch result. Absent controller ⇒
+             dispatch shape UNCHANGED — proven by an additive-safety test.)
+      - EDIT .../src/index.ts  (additive exports of the hook + its public types).
+
+    Justification (CLAUDE.md §11): the bookmark hook is a cohesive request-scoped anchor with its own
+    resolve-on-return lifecycle; it REUSES the existing ProseMirror Mapping (does not add a new position system)
+    and cannot fold into the op-log interceptor (user-edit capture) or the toolbar (a dispatch surface). Cost of
+    doing nothing = FR-07 / Success Criterion 3 unmet (returned ops land at the stale original offset).
+
+    Verify: client `npm run typecheck` — R4 files clean (only pre-existing `@spaarke/*` sibling-dist module
+    errors remain, environmental). `npx jest useAiGenerateBookmark` → 19/19 pass; `stepOperationInterceptor`
+    green; `usePendingRedline` runnable tests 31/31 (its ComposeEditor-render sub-block is blocked by the SAME
+    pre-existing `@spaarke/ui-components` dist→`@fluentui/react-icons` env issue, unrelated to this change).
+    Step 9.5 gates: adr-check → 0 violations (ADR-013/028/039/021, NFR-03, ADR-038 all compliant);
+    code-review → PASS, 0 critical/warning, 2 cosmetic suggestions.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

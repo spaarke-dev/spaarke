@@ -12,6 +12,8 @@
  * @see .claude/patterns/ui/record-modal-selection.md
  */
 
+import { OOB_MODAL_SIZES } from '../utils/adapters/oobModalSizes';
+
 /**
  * Layout 1 modal (R2 canonical standard) — 85% x 85%.
  *
@@ -21,12 +23,17 @@
  *
  * Shape matches Xrm.Navigation.navigateTo `navigationOptions`:
  *   target=2 (modal), position=1 (center), width/height as percentages.
+ *
+ * width/height sourced from oobModalSizes.ts's `record` size (spec
+ * FR-11/FR-18, task 090) — this constant previously duplicated the 85%×85%
+ * literal independently; it now defers to the single OOB size-constants
+ * module so the two can never drift.
  */
 export const LAYOUT_1_MODAL = {
   target: 2 as const,
   position: 1 as const,
-  width: { value: 85, unit: '%' as const },
-  height: { value: 85, unit: '%' as const },
+  width: OOB_MODAL_SIZES.record.width,
+  height: OOB_MODAL_SIZES.record.height,
 };
 
 /**

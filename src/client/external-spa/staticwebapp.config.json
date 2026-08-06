@@ -9,7 +9,7 @@
   },
   "globalHeaders": {
     "Referrer-Policy": "no-referrer-or-same-origin",
-    "Content-Security-Policy": "frame-ancestors 'self'",
+    "Content-Security-Policy": "frame-ancestors 'self' https://teams.microsoft.com https://*.cloud.microsoft",
     "X-Content-Type-Options": "nosniff"
   }
 }

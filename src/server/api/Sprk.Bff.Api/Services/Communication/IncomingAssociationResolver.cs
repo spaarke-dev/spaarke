@@ -294,7 +294,13 @@ public sealed class IncomingAssociationResolver
 
         // Populate polymorphic resolver fields whenever we asserted a regarding lookup (a Suggested
         // record surfaces the proposed target too, so the review UI needs the denormalized fields).
-        if (decision.RegardingWrites.Count > 0)
+        // P2b (061 UAT round-2, 2026-07-30): but NOT on Ambiguous. Ambiguous means the engine explicitly
+        // refused to pick among conflicting matters (they are not written); crowning whatever leftover
+        // non-conflicting record IS written (an incidental invoice, a fallback) as the denormalized "primary
+        // Regarding" headline is exactly the misfile the UAT flagged ("why is the logic favoring invoices?").
+        // The typed regarding lookups are still written for the review surface; the headline stays empty until
+        // the reviewer picks the primary.
+        if (decision.RegardingWrites.Count > 0 && decision.Status != AssociationStatusCodes.Ambiguous)
         {
             await PopulateResolverFieldsAsync(fields, ct);
         }
@@ -350,22 +356,44 @@ public sealed class IncomingAssociationResolver
     /// entity-specific regarding field that was set.
     ///
     /// Fields set:
-    ///   - sprk_regardingrecordtype  (Lookup → sprk_recordtype_ref)
-    ///   - sprk_regardingrecordid    (Text — parent GUID)
-    ///   - sprk_regardingrecordname  (Text — parent display name)
-    ///   - sprk_regardingrecordurl   (URL — clickable link to parent record)
+    ///   - sprk_regardingrecordtype   (Lookup → sprk_recordtype_ref)
+    ///   - sprk_regardingrecordid     (Text — parent GUID)
+    ///   - sprk_regardingrecordname   (Text — parent display name)
+    ///   - sprk_regardingrecordnumber (Text — parent reference number, when the entity has one)
+    ///   - sprk_regardingrecordurl    (URL — clickable link to parent record)
     /// </summary>
+    /// <summary>
+    /// Identity "fallback" regarding fields (contact / organization / account) — matching a sender/recipient
+    /// is NOT what an email is <i>about</i>. Mirrors <see cref="Engine.AssociationStatusMapper"/>'s
+    /// <c>FallbackFields</c>. A fallback must never become the denormalized <b>primary</b> Regarding (P2, FR-12
+    /// UAT): before P1/P2, when the substantive matters went Ambiguous (not written), the primary-pick fell
+    /// through priority order to a written fallback (contact) — or a spurious sub-threshold invoice — and put a
+    /// misleading headline "Regarding" on the record.
+    /// </summary>
+    private static readonly HashSet<string> FallbackRegardingFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_regardingperson",       // contact
+        "sprk_regardingorganization", // organization
+        "sprk_regardingaccount",      // account
+    };
+
     private async Task PopulateResolverFieldsAsync(
         Dictionary<string, object> fields,
         CancellationToken ct)
     {
         // Find the primary regarding entity (highest priority field that was set). Priority order is the
         // single source of truth in RegardingFieldMap.All (ADR-024) — the rungs write the same fields.
+        // P2 (FR-12 UAT): consider SUBSTANTIVE fields only — a fallback identity match (contact/org/account)
+        // must never be the headline Regarding. When the substantive matters conflict (Ambiguous → not
+        // written), leaving the denormalized fields unset is the correct outcome: the record shows no headline
+        // Regarding and the review surface resolves the candidates from provenance.
         EntityReference? primaryRef = null;
         string? primaryEntityLogicalName = null;
 
         foreach (var (entityLogicalName, fieldName) in RegardingFieldMap.All)
         {
+            if (FallbackRegardingFields.Contains(fieldName))
+                continue;
             if (fields.TryGetValue(fieldName, out var value) && value is EntityReference entityRef)
             {
                 primaryRef = entityRef;
@@ -383,28 +411,46 @@ public sealed class IncomingAssociationResolver
             var cleanId = primaryRef.Id.ToString("D").ToLowerInvariant();
             fields["sprk_regardingrecordid"] = cleanId;
 
-            // Set sprk_regardingrecordname (display name from the EntityReference or retrieve)
-            var recordName = primaryRef.Name;
-            if (string.IsNullOrEmpty(recordName))
+            // Set sprk_regardingrecordname (the record's actual NAME) + sprk_regardingrecordnumber (its
+            // reference NUMBER). Retrieve BOTH directly from the primary record rather than trusting
+            // EntityReference.Name: a number-match rung (e.g. RecordNameMatchRung) attaches the record
+            // NUMBER as the reference Name, which previously landed in sprk_regardingrecordname with the
+            // number field left null — inbound emails then showed "Regarding Name: LITG-119896" with no
+            // number (UAT R5 / task 132). Mirror the outbound denormalization exactly: name = name,
+            // number = number.
+            var nameField = GetPrimaryNameField(primaryEntityLogicalName);
+            var numberField = GetReferenceNumberField(primaryEntityLogicalName);
+            string? retrievedName = null;
+            string? retrievedNumber = null;
+            if (nameField is not null || numberField is not null)
             {
-                // EntityReference.Name may not always be populated; try to retrieve it
                 try
                 {
-                    var nameField = GetPrimaryNameField(primaryEntityLogicalName);
+                    var columns = new List<string>(2);
+                    if (nameField is not null) columns.Add(nameField);
+                    if (numberField is not null) columns.Add(numberField);
+                    var record = await _genericEntityService.RetrieveAsync(
+                        primaryEntityLogicalName, primaryRef.Id, columns.ToArray(), ct);
                     if (nameField is not null)
-                    {
-                        var record = await _genericEntityService.RetrieveAsync(
-                            primaryEntityLogicalName, primaryRef.Id, [nameField], ct);
-                        recordName = record.GetAttributeValue<string>(nameField) ?? "";
-                    }
+                        retrievedName = record.GetAttributeValue<string>(nameField);
+                    if (numberField is not null)
+                        retrievedNumber = record.GetAttributeValue<string>(numberField);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogDebug(ex, "Could not retrieve name for {Entity} {Id}",
+                    _logger.LogDebug(ex, "Could not retrieve name/number for {Entity} {Id}",
                         primaryEntityLogicalName, primaryRef.Id);
                 }
             }
+
+            // Name: the record's actual primary name wins; fall back to the reference Name only when the
+            // retrieve yielded nothing (never leave the field holding the record NUMBER).
+            var recordName = !string.IsNullOrWhiteSpace(retrievedName) ? retrievedName : primaryRef.Name;
             fields["sprk_regardingrecordname"] = recordName ?? "";
+
+            // Number: the record's reference number, when the entity has one and it is populated.
+            if (!string.IsNullOrWhiteSpace(retrievedNumber))
+                fields["sprk_regardingrecordnumber"] = retrievedNumber;
 
             // Set sprk_regardingrecordurl
             fields["sprk_regardingrecordurl"] = BuildRecordUrl(primaryEntityLogicalName, cleanId);
@@ -483,6 +529,19 @@ public sealed class IncomingAssociationResolver
         "sprk_organization" => "sprk_name",
         "contact" => "fullname",
         "account" => "name",
+        _ => null,
+    };
+
+    /// <summary>
+    /// Map entity logical name to its reference-number attribute (the human-facing record number that
+    /// belongs in <c>sprk_regardingrecordnumber</c>). Null for entity types with no reference-number
+    /// convention (contact / account / organization / …), in which case the number field is left unset.
+    /// </summary>
+    private static string? GetReferenceNumberField(string entityLogicalName) => entityLogicalName switch
+    {
+        "sprk_matter" => "sprk_matternumber",
+        "sprk_project" => "sprk_projectnumber",
+        "sprk_invoice" => "sprk_invoicenumber",
         _ => null,
     };
 }

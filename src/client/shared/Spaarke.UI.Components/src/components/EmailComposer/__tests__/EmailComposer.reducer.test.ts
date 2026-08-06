@@ -119,12 +119,14 @@ describe('initialState — per-mode seeding', () => {
     expect(state.attachments).toHaveLength(1);
   });
 
-  it('reply seeds To from the original sender, blanks body, prefixes Re:', () => {
+  it('reply seeds To from the original sender, quotes the thread, prefixes Re:', () => {
     const state = initialState(baseProps({ mode: 'reply', sourceRecord }));
     expect(state.to.map(r => r.email)).toEqual(['sender@example.com']);
     expect(state.cc).toEqual([]);
     expect(state.subject).toBe('Re: Quarterly review');
-    expect(state.body).toBe('');
+    // Reply now quotes the previous thread (owner UAT R5 item 1) and stores it on quotedThread.
+    expect(state.body).toContain('wrote:');
+    expect(state.quotedThread).toBeTruthy();
     expect(state.readOnly).toBe(false);
     expect(state.associations).toHaveLength(1);
   });
@@ -209,6 +211,108 @@ describe('emailComposerReducer', () => {
     expect(off.attachments[0].linkSelected).toBe(false);
   });
 
+  it('RESOLVE_ATTACHMENT_DOCUMENT patches documentId + driveItemId + linkUrl (item 9b)', () => {
+    const withAtt: EmailComposerState = { ...start(), attachments: [att('l1', { source: 'local' })] };
+    const resolved = emailComposerReducer(withAtt, {
+      type: 'RESOLVE_ATTACHMENT_DOCUMENT',
+      id: 'l1',
+      documentId: 'doc-guid',
+      driveItemId: 'drive-item',
+      linkUrl: 'https://spe/doc',
+    });
+    expect(resolved.attachments[0].documentId).toBe('doc-guid');
+    expect(resolved.attachments[0].driveItemId).toBe('drive-item');
+    // linkUrl lights up the per-row Link toggle for an uploaded local file.
+    expect(resolved.attachments[0].linkUrl).toBe('https://spe/doc');
+  });
+
+  it('RESOLVE_ATTACHMENT_DOCUMENT without linkUrl preserves any existing linkUrl (no clobber)', () => {
+    const withAtt: EmailComposerState = {
+      ...start(),
+      attachments: [att('l1', { source: 'local', linkUrl: 'https://spe/existing' })],
+    };
+    const resolved = emailComposerReducer(withAtt, {
+      type: 'RESOLVE_ATTACHMENT_DOCUMENT',
+      id: 'l1',
+      documentId: 'doc-guid',
+    });
+    expect(resolved.attachments[0].linkUrl).toBe('https://spe/existing');
+  });
+
+  it('ADD_ASSOCIATION appends (dedup) and REMOVE_ASSOCIATION drops by entityType+entityId (item 10)', () => {
+    const a1 = { entityType: 'sprk_matter', entityId: 'm-1', entityName: 'Smith v. Jones' };
+    const added = emailComposerReducer(start(), { type: 'ADD_ASSOCIATION', association: a1 });
+    expect(added.associations).toHaveLength(1);
+    expect(added.isDirty).toBe(true);
+
+    // Re-adding the same record is a no-op (dedup on entityType+entityId).
+    const dup = emailComposerReducer(added, { type: 'ADD_ASSOCIATION', association: { ...a1, entityId: 'M-1' } });
+    expect(dup.associations).toHaveLength(1);
+
+    const removed = emailComposerReducer(added, {
+      type: 'REMOVE_ASSOCIATION',
+      entityType: 'sprk_matter',
+      entityId: 'M-1', // case-insensitive match
+    });
+    expect(removed.associations).toEqual([]);
+    expect(removed.isDirty).toBe(true);
+  });
+
+  describe('SET_PRIMARY_ASSOCIATION (item 8 — single-primary "Related to")', () => {
+    const withAssociations = (associations: EmailComposerState['associations']): EmailComposerState => ({
+      ...start(),
+      associations,
+    });
+
+    it('promotes the picked record to index 0, REPLACING the old primary, and marks dirty', () => {
+      const oldPrimary = { entityType: 'sprk_matter', entityId: 'm-1', entityName: 'Old Primary' };
+      const picked = { entityType: 'sprk_matter', entityId: 'm-2', entityName: 'New Primary' };
+      const next = emailComposerReducer(withAssociations([oldPrimary]), {
+        type: 'SET_PRIMARY_ASSOCIATION',
+        association: picked,
+      });
+      // Picked is index 0 (primary); the old index-0 primary is dropped (single-primary model).
+      expect(next.associations).toEqual([picked]);
+      expect(next.associations[0].entityId).toBe('m-2');
+      expect(next.isDirty).toBe(true);
+    });
+
+    it('preserves SECONDARY associations (index 1+) while replacing only the primary', () => {
+      const oldPrimary = { entityType: 'sprk_matter', entityId: 'm-1', entityName: 'Old Primary' };
+      const secondaryA = { entityType: 'sprk_document', entityId: 'd-1', entityName: 'Doc A' };
+      const secondaryB = { entityType: 'contact', entityId: 'c-1', entityName: 'Contact B' };
+      const picked = { entityType: 'sprk_matter', entityId: 'm-9', entityName: 'New Primary' };
+      const next = emailComposerReducer(withAssociations([oldPrimary, secondaryA, secondaryB]), {
+        type: 'SET_PRIMARY_ASSOCIATION',
+        association: picked,
+      });
+      expect(next.associations).toEqual([picked, secondaryA, secondaryB]);
+    });
+
+    it('DEDUPS the picked record out of the preserved secondaries (case-insensitive, braces stripped)', () => {
+      const oldPrimary = { entityType: 'sprk_matter', entityId: 'm-1', entityName: 'Old Primary' };
+      // Same record as `picked` but as a secondary, with different case + braces — must be deduped.
+      const dupSecondary = { entityType: 'SPRK_MATTER', entityId: '{M-9}', entityName: 'Dup' };
+      const keepSecondary = { entityType: 'sprk_document', entityId: 'd-1', entityName: 'Doc A' };
+      const picked = { entityType: 'sprk_matter', entityId: 'm-9', entityName: 'New Primary' };
+      const next = emailComposerReducer(withAssociations([oldPrimary, dupSecondary, keepSecondary]), {
+        type: 'SET_PRIMARY_ASSOCIATION',
+        association: picked,
+      });
+      expect(next.associations).toEqual([picked, keepSecondary]);
+    });
+
+    it('works from the empty state (no existing primary to replace)', () => {
+      const picked = { entityType: 'sprk_matter', entityId: 'm-1', entityName: 'First Primary' };
+      const next = emailComposerReducer(withAssociations([]), {
+        type: 'SET_PRIMARY_ASSOCIATION',
+        association: picked,
+      });
+      expect(next.associations).toEqual([picked]);
+      expect(next.isDirty).toBe(true);
+    });
+  });
+
   describe('SET_MODE transition matrix', () => {
     const viewState = (): EmailComposerState => initialState(baseProps({ mode: 'view', sourceRecord }));
 
@@ -291,7 +395,10 @@ describe('emailComposerReducer', () => {
 // ---------------------------------------------------------------------------
 
 describe('task 104 — attachment inclusion on reply/forward', () => {
-  const stateWith = (attachments: IAttachmentItem[], overrides: Partial<EmailComposerState> = {}): EmailComposerState => ({
+  const stateWith = (
+    attachments: IAttachmentItem[],
+    overrides: Partial<EmailComposerState> = {}
+  ): EmailComposerState => ({
     ...initialState(baseProps({ mode: 'compose' })),
     attachments,
     ...overrides,
@@ -316,9 +423,7 @@ describe('task 104 — attachment inclusion on reply/forward', () => {
     });
 
     it('honors an explicit selected override from the host', () => {
-      const state = initialState(
-        baseProps({ mode: 'reply', initialAttachments: [{ ...carried[0], selected: true }] })
-      );
+      const state = initialState(baseProps({ mode: 'reply', initialAttachments: [{ ...carried[0], selected: true }] }));
       expect(state.attachments[0].selected).toBe(true);
     });
   });
@@ -374,10 +479,21 @@ describe('task 104 — attachment inclusion on reply/forward', () => {
 
     it('appends chosen document links to the HTML body (link path)', () => {
       const req = mapStateToSendRequest(
-        stateWith([att('a1', { fileName: 'contract.pdf', documentId: 'doc-1', selected: false, linkSelected: true, linkUrl: 'https://x/doc-1' })], {
-          body: '<p>See below.</p>',
-          bodyFormat: 'HTML',
-        })
+        stateWith(
+          [
+            att('a1', {
+              fileName: 'contract.pdf',
+              documentId: 'doc-1',
+              selected: false,
+              linkSelected: true,
+              linkUrl: 'https://x/doc-1',
+            }),
+          ],
+          {
+            body: '<p>See below.</p>',
+            bodyFormat: 'HTML',
+          }
+        )
       );
       expect(req.body).toContain('<p>See below.</p>');
       expect(req.body).toContain('href="https://x/doc-1"');

@@ -13,16 +13,21 @@
  * supplied, so standalone/test usage of `MessageRow` is unaffected.
  *
  * HTML bodies come from persisted email content (external senders included)
- * and are UNTRUSTED — sanitized via DOMPurify before `dangerouslySetInnerHTML`
- * (same library `renderMarkdown.ts` uses elsewhere in this package). Plain-text
- * bodies render as React text content (auto-escaped, no sanitization needed).
+ * and are UNTRUSTED — sanitized via the shared hardened `sanitizeEmailHtml`
+ * util (allow-list DOMPurify: no script/iframe/object, no `on*` handlers,
+ * schemes restricted to http/https/mailto, anchors forced to
+ * `rel="noopener noreferrer" target="_blank"`; task 001 / FR-16 / NFR-03)
+ * before `dangerouslySetInnerHTML`. Plain-text bodies render as React text
+ * content (auto-escaped, no sanitization needed).
  */
 import * as React from 'react';
-import { Badge, Button, Text, Tooltip, makeStyles, tokens } from '@fluentui/react-components';
-import { ChatRegular, DocumentRegular, MailRegular } from '@fluentui/react-icons';
-import DOMPurify from 'dompurify';
+import { Button, Text, Tooltip, makeStyles, tokens } from '@fluentui/react-components';
+import { ChatRegular, MailRegular } from '@fluentui/react-icons';
+import { sanitizeEmailHtml } from '../../../utils/sanitizeEmailHtml';
 import { ChannelBadge } from './ChannelBadge';
-import type { TimelineMessage } from '../CommunicationTimeline.types';
+import { PrivacyMarkers } from './PrivacyMarkers';
+import { MessageAttachments } from './MessageAttachments';
+import type { TimelineAttachment, TimelineMessage } from '../CommunicationTimeline.types';
 
 export interface IMessageRowProps {
   message: TimelineMessage;
@@ -32,6 +37,13 @@ export interface IMessageRowProps {
   onQuoteIntoMessage?: (message: TimelineMessage) => void;
   /** "Quote into email" action (task 063) — omit to hide the affordance. */
   onQuoteIntoEmail?: (message: TimelineMessage) => void;
+  /**
+   * Open/preview/download an attachment via the existing SPE document-viewer
+   * path (task 042 / FR-20). Threaded from `CommunicationTimeline`; the host
+   * mounts `<RichFilePreviewDialog />`. Omit it and attachments render as
+   * passive chips.
+   */
+  onOpenAttachment?: (attachment: TimelineAttachment, message: TimelineMessage) => void;
 }
 
 const MAX_INDENT_DEPTH = 6;
@@ -87,13 +99,19 @@ const useStyles = makeStyles({
   },
 });
 
-export const MessageRow: React.FC<IMessageRowProps> = ({ message, depth, onQuoteIntoMessage, onQuoteIntoEmail }) => {
+export const MessageRow: React.FC<IMessageRowProps> = ({
+  message,
+  depth,
+  onQuoteIntoMessage,
+  onQuoteIntoEmail,
+  onOpenAttachment,
+}) => {
   const styles = useStyles();
   const cappedDepth = Math.min(Math.max(depth, 0), MAX_INDENT_DEPTH);
 
   const sanitizedHtml = React.useMemo(() => {
     if (message.bodyFormat !== 'html' || !message.body) return '';
-    return DOMPurify.sanitize(message.body, { USE_PROFILES: { html: true } });
+    return sanitizeEmailHtml(message.body);
   }, [message.bodyFormat, message.body]);
 
   const timestampLabel = message.sentOn ? new Date(message.sentOn).toLocaleString() : '';
@@ -107,6 +125,11 @@ export const MessageRow: React.FC<IMessageRowProps> = ({ message, depth, onQuote
     >
       <div className={styles.headerRow}>
         <ChannelBadge channelType={message.channelType} />
+        <PrivacyMarkers
+          privilege={message.privilege}
+          isInternalOnly={message.isInternalOnly}
+          isPrivate={message.isPrivate}
+        />
         <Text className={styles.sender}>{message.sender ?? 'Unknown sender'}</Text>
         {timestampLabel && (
           <Text size={200} className={styles.timestamp}>
@@ -150,13 +173,12 @@ export const MessageRow: React.FC<IMessageRowProps> = ({ message, depth, onQuote
       ) : null}
 
       {message.attachments.length > 0 && (
-        <div className={styles.attachmentsRow}>
-          {message.attachments.map(a => (
-            <Badge key={a.id} appearance="outline" icon={<DocumentRegular />} size="small">
-              {a.fileName ?? 'Attachment'}
-            </Badge>
-          ))}
-        </div>
+        <MessageAttachments
+          className={styles.attachmentsRow}
+          attachments={message.attachments}
+          message={message}
+          onOpenAttachment={onOpenAttachment}
+        />
       )}
     </div>
   );

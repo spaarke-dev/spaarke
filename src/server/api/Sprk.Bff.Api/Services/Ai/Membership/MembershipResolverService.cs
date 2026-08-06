@@ -88,6 +88,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
     private readonly IDataverseService _dataverse;
     private readonly ITenantCache _cache;
     private readonly IHttpContextAccessor? _httpContextAccessor;
+    private readonly MembershipOptions _options;
     private readonly ILogger<MembershipResolverService> _logger;
 
     public MembershipResolverService(
@@ -112,9 +113,10 @@ public sealed class MembershipResolverService : IMembershipResolverService
         _cache = cache;
         _httpContextAccessor = httpContextAccessor;
         _logger = logger;
-        _ = options.Value; // Reserved for future tuning (Phase 1D depth, paging
-                           // strategy, etc.). Resolving here surfaces binding
-                           // errors at construction rather than first call.
+        _options = options.Value; // Consumed by ResolveByContactAsync's
+                                  // access-conferring role allowlist (NFR-05).
+                                  // Resolving here surfaces binding errors at
+                                  // construction rather than first call.
     }
 
     /// <summary>
@@ -341,6 +343,218 @@ public sealed class MembershipResolverService : IMembershipResolverService
             relatedByRole?.Count ?? 0);
 
         return response;
+    }
+
+    /// <inheritdoc/>
+    public async Task<MembershipResponse> ResolveByContactAsync(
+        Guid contactId,
+        string entityType,
+        MembershipResolveOptions? options,
+        CancellationToken ct)
+    {
+        if (contactId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "contactId must not be Guid.Empty.",
+                nameof(contactId));
+        }
+        if (string.IsNullOrWhiteSpace(entityType))
+        {
+            throw new ArgumentException(
+                "entityType must not be null, empty, or whitespace.",
+                nameof(entityType));
+        }
+
+        ct.ThrowIfCancellationRequested();
+
+        var normalizedEntity = entityType.Trim().ToLowerInvariant();
+        var effectiveOptions = options ?? new MembershipResolveOptions();
+
+        // ── Contact-only principal (ADR-034 Path C — no systemuser) ─────────
+        // A PersonIdentity carrying ONLY the contactId. SystemUserId is
+        // Guid.Empty so BuildFetchXml's SystemUser branch (and every other
+        // non-Contact branch — Team/BusinessUnit/Account/Organization) emits
+        // zero conditions (AppendCondition guards Guid.Empty; the identity's
+        // team/org collections are empty). Only the Contact branch can bind —
+        // and we further constrain the descriptors to the access-conferring
+        // allowlist below, so this path can NEVER resolve via a non-contact or
+        // adverse lookup. We deliberately bypass IIdentityNormalizationService
+        // (which is hard-keyed to a systemuserid) — that is exactly the gap
+        // this entry point closes.
+        var identity = new PersonIdentity(SystemUserId: Guid.Empty, ContactId: contactId);
+
+        // ── Cache lookup (contact-namespaced id, disjoint from systemuser path) ─
+        var tenantId = GetTenantId();
+        var cacheId = BuildContactCacheId(contactId, normalizedEntity, effectiveOptions);
+        var cached = await TryGetFromCacheAsync(tenantId, cacheId, ct).ConfigureAwait(false);
+        if (cached is not null)
+        {
+            _logger.LogDebug(
+                "MembershipResolverService (contact) cache HIT for contactId={ContactId} entity={EntityType}",
+                contactId, normalizedEntity);
+            return cached;
+        }
+
+        var sw = Stopwatch.StartNew();
+        _logger.LogDebug(
+            "MembershipResolverService (contact) cache MISS for contactId={ContactId} entity={EntityType} — resolving",
+            contactId, normalizedEntity);
+
+        // ── a) Discovery → access-conferring allowlist → options filter ─────
+        // The allowlist filter runs FIRST (security-load-bearing, NFR-05): it
+        // reduces the discovered set to ONLY the convention-matching, non-excluded
+        // contact roles before any options narrowing. Reuses the SAME metadata
+        // discovery mechanism as the systemuser path — no second discovery engine.
+        var discovery = await _discovery.DiscoverAsync(normalizedEntity, ct).ConfigureAwait(false);
+        var allowlisted = FilterToAccessConferringContactRoles(discovery.DiscoveredFields);
+        var descriptors = FilterDescriptors(allowlisted, effectiveOptions);
+
+        // No access-conferring contact roles → empty response (NOT an error).
+        if (descriptors.Count == 0)
+        {
+            _logger.LogDebug(
+                "MembershipResolverService (contact): no access-conferring contact roles for " +
+                "entity={EntityType} (discovered={DiscoveredCount}, allowlisted={AllowlistedCount}) — " +
+                "returning empty response",
+                normalizedEntity, discovery.DiscoveredFields.Count, allowlisted.Count);
+
+            var emptyResponse = BuildEmptyResponse(normalizedEntity, identity, descriptors);
+            await TrySetCacheAsync(tenantId, cacheId, emptyResponse, ct).ConfigureAwait(false);
+            return emptyResponse;
+        }
+
+        // ── b) Build FetchXml via the EXISTING engine (reuse, not fork) ─────
+        var effectiveLimit = ClampLimit(effectiveOptions.Limit);
+        var fetchSkip = DecodeContinuationSkip(effectiveOptions.ContinuationToken);
+        var (fetchXml, fetchSummary) = BuildFetchXml(
+            normalizedEntity,
+            descriptors,
+            identity,
+            effectiveLimit,
+            fetchSkip,
+            systemUserId: Guid.Empty);
+
+        if (fetchSummary.ConditionCount == 0)
+        {
+            // Should not happen (every allowlisted descriptor is Contact-typed and
+            // ContactId is non-empty), but preserve the systemuser path's fail-soft
+            // contract rather than issuing a match-nothing query.
+            _logger.LogDebug(
+                "MembershipResolverService (contact): zero conditions built for entity={EntityType} — returning empty",
+                normalizedEntity);
+
+            var emptyResponse = BuildEmptyResponse(normalizedEntity, identity, descriptors);
+            await TrySetCacheAsync(tenantId, cacheId, emptyResponse, ct).ConfigureAwait(false);
+            return emptyResponse;
+        }
+
+        // ── c) Execute + materialize (shared helpers) ───────────────────────
+        var fetch = new FetchExpression(fetchXml);
+        var entityCollection = await _dataverse
+            .RetrieveMultipleAsync(fetch, ct)
+            .ConfigureAwait(false);
+
+        var (ids, byRole, hasMore) = MaterializeResults(
+            entityCollection,
+            descriptors,
+            effectiveLimit);
+
+        string? nextToken = null;
+        if (hasMore)
+        {
+            nextToken = EncodeContinuationSkip(fetchSkip + effectiveLimit);
+        }
+
+        // ── d) Build + cache response. RelatedByRole stays null — the
+        // contact-anchored path does not do transitive expansion (task 022
+        // composes membership sources; this entry point's shape is stable).
+        var response = new MembershipResponse(
+            EntityType: normalizedEntity,
+            PersonIdentity: identity,
+            Ids: ids,
+            ByRole: byRole,
+            Count: ids.Count,
+            CacheExpiresAt: DateTimeOffset.UtcNow.Add(CacheTtl),
+            ContinuationToken: nextToken,
+            RelatedByRole: null);
+
+        await TrySetCacheAsync(tenantId, cacheId, response, ct).ConfigureAwait(false);
+
+        sw.Stop();
+        _logger.LogInformation(
+            "MembershipResolverService (contact) resolved contactId={ContactId} entity={EntityType} " +
+            "in {ElapsedMs}ms (allowlistedRoles={DescriptorCount}, conditions={ConditionCount}, rows={RowCount})",
+            contactId, normalizedEntity, sw.ElapsedMilliseconds,
+            descriptors.Count, fetchSummary.ConditionCount, ids.Count);
+
+        return response;
+    }
+
+    // ── Access-conferring role allowlist (NFR-05 — security-load-bearing) ───
+    /// <summary>
+    /// Reduces discovered descriptors to ONLY the access-conferring contact
+    /// roles for the contact-anchored entry point. A descriptor qualifies when
+    /// ALL hold:
+    ///   (1) its <see cref="MembershipDescriptor.IdentityType"/> is
+    ///       <c>Contact</c> — org/systemuser/team/BU/account lookups (and
+    ///       polymorphic <c>sprk_regardingrecord*</c> fields resolved to a
+    ///       non-contact target) never confer contact-anchored access;
+    ///   (2) its logical field name starts with the configured convention
+    ///       prefix (default <c>sprk_assigned</c>, case-insensitive) — adverse
+    ///       contact lookups such as an opposing-counsel field fail here;
+    ///   (3) it is NOT on the config/data-driven exclusion list.
+    /// The allowlist is therefore derived from live metadata discovery + a
+    /// naming convention + a config exclusion list — never a hardcoded field
+    /// allowlist — so a newly-added <c>sprk_assigned*</c> contact lookup
+    /// auto-qualifies with no code change (NFR-05).
+    /// </summary>
+    private IReadOnlyList<MembershipDescriptor> FilterToAccessConferringContactRoles(
+        IReadOnlyList<MembershipDescriptor> discovered)
+    {
+        if (discovered.Count == 0)
+        {
+            return Array.Empty<MembershipDescriptor>();
+        }
+
+        var config = _options.AccessConferringRoles ?? new AccessConferringRoleOptions();
+        var prefix = string.IsNullOrWhiteSpace(config.ConventionPrefix)
+            ? AccessConferringRoleOptions.DefaultConventionPrefix
+            : config.ConventionPrefix.Trim();
+
+        var exclusions = new HashSet<string>(
+            (config.ExcludedFields ?? new List<string>())
+                .Where(f => !string.IsNullOrWhiteSpace(f))
+                .Select(f => f.Trim()),
+            StringComparer.OrdinalIgnoreCase);
+
+        var result = new List<MembershipDescriptor>(discovered.Count);
+        foreach (var d in discovered)
+        {
+            if (string.IsNullOrWhiteSpace(d.Field))
+            {
+                continue;
+            }
+            var field = d.Field.Trim();
+
+            // (1) Contact-typed person lookup only.
+            if (!string.Equals(d.IdentityType, "Contact", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            // (2) Access-conferring naming convention.
+            if (!field.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            // (3) Config/data-driven exclusion list.
+            if (exclusions.Contains(field))
+            {
+                continue;
+            }
+
+            result.Add(d);
+        }
+        return result;
     }
 
     // ── Descriptor filtering ───────────────────────────────────────────────
@@ -1023,10 +1237,26 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// returned string carries the user + entity + options-hash composition.
     /// </summary>
     private static string BuildCacheId(Guid systemUserId, string entityType, MembershipResolveOptions options)
+        => $"{systemUserId:D}:{entityType}:{HashOptions(options)}";
+
+    /// <summary>
+    /// Builds the resource-id segment for the contact-anchored entry point.
+    /// Namespaced with a <c>contact:</c> prefix so contact-keyed entries never
+    /// collide with the systemuser-keyed cache (a bare <c>{systemUserId:D}:</c>
+    /// prefix). Shares the same options-hash composition as
+    /// <see cref="BuildCacheId"/>.
+    /// </summary>
+    private static string BuildContactCacheId(Guid contactId, string entityType, MembershipResolveOptions options)
+        => $"contact:{contactId:D}:{entityType}:{HashOptions(options)}";
+
+    /// <summary>
+    /// Options hash — deterministic across equivalent option values regardless of
+    /// ordering. Includes Roles, IdentityTypes, IncludeRelated, Limit, and the
+    /// ContinuationToken (so paging requests cache per-page). First 8 bytes →
+    /// 16 hex chars; collision risk negligible at this scope.
+    /// </summary>
+    private static string HashOptions(MembershipResolveOptions options)
     {
-        // Options hash — deterministic across equivalent option values regardless of
-        // ordering. Includes Roles, IdentityTypes, IncludeRelated, Limit, and the
-        // ContinuationToken (so paging requests cache per-page).
         var sb = new StringBuilder(64);
         sb.Append("r:").Append(HashSorted(options.Roles)).Append('|');
         sb.Append("i:").Append(HashSorted(options.IdentityTypes)).Append('|');
@@ -1036,10 +1266,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
 
         var hashInput = sb.ToString();
         var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(hashInput));
-        // First 8 bytes → 16 hex chars. Collision risk negligible at this scope.
-        var optionsHash = Convert.ToHexString(hashBytes, 0, 8).ToLowerInvariant();
-
-        return $"{systemUserId:D}:{entityType}:{optionsHash}";
+        return Convert.ToHexString(hashBytes, 0, 8).ToLowerInvariant();
     }
 
     private static string HashSorted(IReadOnlyList<string>? values)

@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Deploy client / code-page + ribbon + form customizations</title>
+    <phase>7 Deploy</phase>
+    <gate>063 and 070 complete</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Multi-surface client deployment against known deploy scripts/skills; prescriptive/ordered; no design authoring, but touches SpaarkeAi + Dataverse ribbon/forms so it is sequenced carefully.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Executes dependency-ordered build + web-resource/ribbon/form deploys via known scripts; mechanical, no architectural judgment.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Ordered W7 step; runs after the retirement delete (063) and the BFF deploy (070), before the e2e tests (072).</parallel-reason>
+    <deps>063,070</deps>
+    <tags>deploy, code-page, ribbon</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build and deploy the client surfaces: the SpaarkeAi three-pane + Analysis hub widget + per-type wizard web
+    resources, and the Dataverse ribbon launcher + Analysis subgrid/tab form customizations on the sprk_matter /
+    sprk_project forms. Build in dependency order via Build-AllClientComponents.ps1, then deploy. Confirm the
+    retired AnalysisWorkspace web resources are gone (post-063) and nothing dangles.
+  </prompt>
+
+  <role>
+    SPAARKE release engineer. Expert in Build-AllClientComponents.ps1, code-page-deploy / dataverse-deploy /
+    ribbon-edit skills, and the Deploy-*CodePage / Export-EntityRibbon scripts. Follow PCF-DEPLOYMENT-GUIDE +
+    ENVIRONMENT-DEPLOYMENT-GUIDE.
+  </role>
+
+  <goal>
+    The SpaarkeAi client (hub widget + wizard) is built and deployed as web resources; the sprk_matter/sprk_project
+    ribbon launcher + Analysis subgrid/tab are deployed and visible on the forms; and no retired AnalysisWorkspace
+    web-resource or deep-link reference remains after 063.
+  </goal>
+
+  <context>
+    <background>
+      Phase 3–5 built the hub widget, per-type wizard, entry routing, ribbon launcher (openSpaarkeAi extension), and
+      the Analysis subgrid/tab on Matter/Project forms. Phase 6 (task 063) deleted the sprk_analysisworkspace web
+      resources, the AnalysisWorkspace/ source tree, Deploy-AnalysisWorkspace.ps1, and reconciled the 4-name casing.
+      This task deploys the surviving/new client surfaces. Build-AllClientComponents.ps1 builds shared libs +
+      solutions in dependency order (npm install --legacy-peer-deps; build:prod for PCF).
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">scripts/Build-AllClientComponents.ps1</file>
+      <file role="canonical-reference">scripts/Deploy-WizardCodePages.ps1</file>
+      <file role="canonical-reference">scripts/Deploy-ReportingCodePage.ps1</file>
+      <file role="canonical-reference">scripts/Export-EntityRibbon.ps1</file>
+      <file role="canonical-reference">scripts/Deploy-DataverseSolutions.ps1</file>
+      <file role="modify">src/solutions/SpaarkeAi/</file>
+      <file role="new">projects/ai-advanced-capabilities-analysis-hub-r1/notes/deploy-client-record.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="063" status="pending">Retired web resources + AnalysisWorkspace/ tree + deploy script deleted; 4-name casing reconciled — retirement must be done before this deploy so nothing dangles.</dependency>
+      <dependency task="070" status="pending">BFF deployed + healthy — the client surfaces call the deployed BFF.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md-12">SCOPE: client build. Use `npm install --legacy-peer-deps --no-audit --no-fund` (NOT `npm ci`) and `build:prod` for PCF; Build-AllClientComponents.ps1 handles this — do not add raw `npm ci`.</constraint>
+    <constraint source="NFR-07">SCOPE: this deploy + post-063 state. Retirement leaves nothing dangling — no orphaned sprk_analysisworkspace web-resource references, no 404 deep-links, casing reconciled. Verify by grep for `analysisworkspace` before declaring clean.</constraint>
+    <constraint source="NFR-02">SCOPE: the code-page modal host (2b/2d). The deployed embedded modal host honors LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md (config init, theme ownership, sessionStorage sentinels, webApi shim, mount, lifecycle).</constraint>
+    <constraint source="ADR-039">SCOPE: deployed ribbon launcher. Record-driven opens route through `openSpaarkeAi`, NOT `surfaceLaunchRegistry`; the deployed ribbon script must call openSpaarkeAi.</constraint>
+    <constraint source="CLAUDE.md-9">SCOPE: deploy config. No secrets committed; production secrets in Key Vault.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>client-deployment</topic>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+    </files>
+    <patterns>
+      <pattern name="Build-AllClientComponents.ps1" location="scripts/Build-AllClientComponents.ps1">
+        Dependency-ordered client build (shared libs → solutions). Run this before any web-resource deploy.
+      </pattern>
+      <pattern name="Export-EntityRibbon.ps1" location="scripts/Export-EntityRibbon.ps1">
+        Ribbon export/import for the sprk_matter/sprk_project launcher button; pair with ribbon-edit skill.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare STANDARD rigor; load PCF-DEPLOYMENT-GUIDE + LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT; confirm 063 (retirement) and 070 (BFF) are ✅.</step>
+    <step order="1">Build all client components in dependency order via Build-AllClientComponents.ps1 (build:prod); fix any build breaks before deploying.</step>
+    <step order="2">Deploy the SpaarkeAi surface + Analysis hub widget + per-type wizard web resources (code-page-deploy / Deploy-*CodePage scripts).</step>
+    <step order="3">Deploy the sprk_matter / sprk_project ribbon launcher (openSpaarkeAi) via ribbon-edit / Export-EntityRibbon.ps1, and the Analysis subgrid/tab form customizations (dataverse-deploy / Deploy-DataverseSolutions.ps1).</step>
+    <step order="4">Grep the deployed environment + repo for `analysisworkspace` (all 4 casings); confirm no dangling web-resource references or 404 deep-links remain post-063.</step>
+    <step order="5">Load a Matter and a Project form; confirm the ribbon launcher button + Analysis subgrid/tab render.</step>
+    <step order="6">Update TASK-INDEX.md: set 071 status to ✅; record the deploy in notes/deploy-client-record.md.</step>
+    <step order="7">Document any deviation in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the grep finds a surviving `sprk_analysisworkspace` web-resource reference or a 404 deep-link after 063, STOP — the retirement is incomplete; escalate/fix before declaring the deploy clean rather than shipping a dangling reference.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build the client (build:prod for PCF; --legacy-peer-deps).</tool>
+    <tool name="terminal">Run Build-AllClientComponents.ps1 + the code-page/ribbon/solution deploy scripts.</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-advanced-capabilities-analysis-hub-r1/notes/deploy-client-record.md (build + web-resource + ribbon + form deploy record; dangling-ref grep result)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Build-AllClientComponents.ps1 builds all shared libs + SpaarkeAi solutions clean (build:prod); web resources deploy without error.</criterion>
+    <criterion testable="true">A Matter form and a Project form show the Analysis ribbon launcher button + the Analysis subgrid/tab.</criterion>
+    <criterion testable="true">Grep for `analysisworkspace` (all 4 casings) finds no dangling web-resource reference or 404 deep-link post-063 (NFR-07).</criterion>
+    <criterion testable="true">The deployed ribbon launcher opens the SpaarkeAi surface via `openSpaarkeAi`, not `surfaceLaunchRegistry` (ADR-039).</criterion>
+    <criterion testable="true">Negative: if any client component fails to build, the deploy does NOT proceed with a stale/partial artifact.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Second ordered W7 step (after 070, before 072). The subgrid/tab + ribbon launcher are net-new form customizations
+    (FR-15/FR-16); the retirement grep-clean is the visible half of NFR-07 / Success Criterion #7.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute; prescriptive steps; verify retirement grep-clean before declaring done.</protocol>
+  </execution>
+</task>

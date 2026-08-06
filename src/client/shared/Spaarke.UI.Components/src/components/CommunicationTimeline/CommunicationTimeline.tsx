@@ -173,6 +173,7 @@ const ThreadModeCommunicationTimeline: React.FC<CommunicationTimelineThreadModeP
     archiveToSpe,
     onSendComplete,
     onError,
+    onOpenAttachment,
     className,
   } = props;
 
@@ -216,8 +217,13 @@ const ThreadModeCommunicationTimeline: React.FC<CommunicationTimelineThreadModeP
   // `dispatch` from `useReducer` is referentially stable across renders (React
   // contract, same as `useState`'s setter), so these callbacks can safely
   // omit it from their dependency arrays without a ref indirection.
-  const handleMessages = React.useCallback((incoming: TimelineMessage[]) => {
-    const action: CommunicationTimelineAction = { type: 'MERGE_POLL', messages: incoming };
+  const handleMessages = React.useCallback((incoming: TimelineMessage[], isInitialLoad: boolean) => {
+    // Initial load (mount OR threadId change) REPLACES; delta ticks MERGE. Prevents
+    // a thread switch from unioning the new thread's messages into the prior thread's
+    // (RB R3 UAT 2026-07-28). Mirrors ConversationView.handleMessages.
+    const action: CommunicationTimelineAction = isInitialLoad
+      ? { type: 'SET_THREAD', messages: incoming }
+      : { type: 'MERGE_POLL', messages: incoming };
     dispatch(action);
   }, []);
 
@@ -377,6 +383,7 @@ const ThreadModeCommunicationTimeline: React.FC<CommunicationTimelineThreadModeP
             depth={entry.depth}
             onQuoteIntoMessage={handleQuoteIntoMessage}
             onQuoteIntoEmail={onQuoteIntoEmail ? handleQuoteIntoEmail : undefined}
+            onOpenAttachment={onOpenAttachment}
           />
         ))}
         {timeline.length === 0 && state.status === 'ready' && (

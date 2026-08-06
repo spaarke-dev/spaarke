@@ -26,7 +26,7 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// so this orchestrator is free of provider (Microsoft.Graph) types — a future channel is added by
 /// registering a new sender/archiver, with no change here (NFR-04).
 /// </summary>
-public sealed class CommunicationService
+public sealed class CommunicationService : ICommunicationEnvelopeReader
 {
     private readonly CommunicationChannelDispatcher _channelDispatcher;
     private readonly ApprovedSenderValidator _senderValidator;
@@ -41,6 +41,7 @@ public sealed class CommunicationService
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly IDirectThreadAccessService? _directThreadAccess;
     private readonly CommunicationParticipantIndexer? _participantIndexer;
+    private readonly CommunicationArrivedProducer? _arrivedProducer;
     private readonly CommunicationOptions _options;
     private readonly ILogger<CommunicationService> _logger;
 
@@ -84,7 +85,8 @@ public sealed class CommunicationService
         IThreadResolver? threadResolver = null,
         IServiceScopeFactory? scopeFactory = null,
         IDirectThreadAccessService? directThreadAccess = null,
-        CommunicationParticipantIndexer? participantIndexer = null)
+        CommunicationParticipantIndexer? participantIndexer = null,
+        CommunicationArrivedProducer? arrivedProducer = null)
     {
         _channelDispatcher = channelDispatcher;
         _senderValidator = senderValidator;
@@ -99,6 +101,7 @@ public sealed class CommunicationService
         _scopeFactory = scopeFactory;
         _directThreadAccess = directThreadAccess;
         _participantIndexer = participantIndexer;
+        _arrivedProducer = arrivedProducer;
         _options = options.Value;
         _logger = logger;
     }
@@ -432,16 +435,30 @@ public sealed class CommunicationService
         };
 
     /// <summary>
-    /// Resolves (find-or-create) the outbound message's thread and stamps <c>sprk_communicationthread</c>
-    /// (task 040 / FR-06) — best-effort, non-fatal (NFR-02). For EMAIL, a reply (<c>InReplyToMessageId</c>
-    /// set) joins its parent's thread and a fresh email creates one; the thread anchors to the record's
-    /// regarding (mapped at create time, ADR-024 reuse). For MESSAGE (chat), the authoritative ACS
-    /// <c>ChatThreadId</c> is carried by the inbound echo path (task 031/051), not surfaced here in R1, so
-    /// the resolver skips — no duplicate thread. MUST NOT fail the send.
+    /// Resolves the outbound EMAIL's thread and stamps <c>sprk_communicationthread</c>
+    /// (task 040 / FR-06) — best-effort, non-fatal (NFR-02).
+    /// <b>(1) Explicit target (FR-19)</b> — when <see cref="SendCommunicationRequest.ThreadId"/> is supplied
+    /// (the "respond into the current thread" case), the lookup is stamped DIRECTLY to that thread via the SAME
+    /// <see cref="AssignExplicitThreadAsync"/> helper the Message path uses (<c>ResolveOutboundMessageThreadAsync</c>),
+    /// bypassing the find-or-create resolver below entirely — no new send path or assignment mechanism (ADR-045).
+    /// <b>(2) Find-or-create</b> — otherwise (no <c>ThreadId</c>), behavior is UNCHANGED: a reply
+    /// (<c>InReplyToMessageId</c> set) joins its parent's thread and a fresh email creates one; the thread anchors
+    /// to the record's regarding (mapped at create time, ADR-024 reuse). Both paths MUST NOT fail the send.
     /// </summary>
     private async Task ResolveOutboundThreadAsync(
         Guid communicationId, SendCommunicationRequest request, string correlationId, CancellationToken ct)
     {
+        // (1) FR-19 explicit target: mirror the Message path — stamp the supplied thread directly and skip
+        // find-or-create. AssignExplicitThreadAsync is self-contained best-effort / non-fatal (NFR-02): a stamp
+        // failure never fails the already-sent + persisted email. Checked BEFORE the resolver-null guard so an
+        // explicit ThreadId is honored even when no find-or-create resolver is wired (parity with the Message path).
+        if (request.ThreadId.HasValue)
+        {
+            await AssignExplicitThreadAsync(communicationId, request.ThreadId.Value, correlationId, ct);
+            return;
+        }
+
+        // (2) Find-or-create (unchanged pre-FR-19 behavior).
         if (_threadResolver is null)
             return;
 
@@ -606,6 +623,12 @@ public sealed class CommunicationService
                 await WriteParticipantIndexAsync(
                     communicationId.Value, senderEmail, senderParticipant,
                     request.To, request.Cc, request.Bcc, ct);
+
+                // communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal, emitted
+                // AFTER thread resolution + participant index so the fan-out junction + thread lookup are populated
+                // (the same spine-owned producer + emit point the inbound + email send paths use — channel-identical).
+                if (_arrivedProducer is not null)
+                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, ct);
             }
 
             // The response carries only the tracking record id + status — NO ACS token or admin capability
@@ -749,6 +772,11 @@ public sealed class CommunicationService
         // previously wired for the Message channel.
         if (!string.IsNullOrWhiteSpace(request.InReplyToMessageId))
             communication["sprk_inreplyto"] = request.InReplyToMessageId;
+
+        // Reply regarding inheritance (UAT R4 D12-1 / task 124) — a Message reply/forward inherits the
+        // parent message's regarding the same way email does; copy before explicit associations.
+        if (request.InheritRegardingFromCommunicationId is { } srcCommId)
+            await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
 
         // Map primary association (regarding lookup + denormalized fields) — same ADR-024 mechanism as email.
         MapAssociationFields(communication, request.Associations, _logger);
@@ -1229,6 +1257,12 @@ public sealed class CommunicationService
                 await WriteParticipantIndexAsync(
                     communicationId.Value, senderResult.Email, null,
                     request.To, request.Cc, request.Bcc, cancellationToken);
+
+                // communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal, emitted
+                // AFTER thread resolution + participant index (fan-out junction + thread lookup populated). Same
+                // spine-owned producer + emit point as the other four persist paths (channel-identical).
+                if (_arrivedProducer is not null)
+                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, cancellationToken);
             }
 
             return new SendCommunicationResponse
@@ -1534,6 +1568,12 @@ public sealed class CommunicationService
                 await WriteParticipantIndexAsync(
                     communicationId.Value, userEmail, null,
                     request.To, request.Cc, request.Bcc, ct);
+
+                // communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal, emitted
+                // AFTER thread resolution + participant index (fan-out junction + thread lookup populated). Same
+                // spine-owned producer + emit point as the other four persist paths (channel-identical).
+                if (_arrivedProducer is not null)
+                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, ct);
             }
 
             return new SendCommunicationResponse
@@ -1640,6 +1680,11 @@ public sealed class CommunicationService
             communication["sprk_attachmentcount"] = request.AttachmentDocumentIds.Length;
         }
 
+        // Reply/Reply All/Forward regarding inheritance (UAT R4 D12-1 / task 124) — see the shared-mailbox
+        // create path; copies the parent's regarding onto this new draft before explicit associations.
+        if (request.InheritRegardingFromCommunicationId is { } srcCommId)
+            await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
+
         // Map primary association (regarding lookup + denormalized fields)
         MapAssociationFields(communication, request.Associations, _logger);
 
@@ -1739,6 +1784,12 @@ public sealed class CommunicationService
             communication["sprk_attachmentcount"] = request.AttachmentDocumentIds.Length;
         }
 
+        // Reply/Reply All/Forward regarding inheritance (UAT R4 D12-1 / task 124) — copy the parent's
+        // regarding onto this new draft BEFORE mapping any explicit association, so an explicitly-supplied
+        // association still wins on its field (CopyRegardingFromSourceAsync skips already-set fields).
+        if (request.InheritRegardingFromCommunicationId is { } srcCommId)
+            await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
+
         // Map primary association (regarding lookup + denormalized fields)
         MapAssociationFields(communication, request.Associations, _logger);
 
@@ -1763,6 +1814,7 @@ public sealed class CommunicationService
         ["sprk_project"] = ("sprk_regardingproject", "sprk_projects"),
         ["sprk_analysis"] = ("sprk_regardinganalysis", "sprk_analysises"),
         ["sprk_budget"] = ("sprk_regardingbudget", "sprk_budgets"),
+        ["sprk_reportcard"] = ("sprk_regardingreportcard", "sprk_reportcards"),
         ["sprk_invoice"] = ("sprk_regardinginvoice", "sprk_invoices"),
         ["sprk_workassignment"] = ("sprk_regardingworkassignment", "sprk_workassignments"),
         ["sprk_servicerequest"] = ("sprk_regardingservicerequest", "sprk_servicerequests"),
@@ -1806,6 +1858,77 @@ public sealed class CommunicationService
 
         if (primary.EntityUrl is not null)
             communication["sprk_regardingrecordurl"] = TruncateTo(primary.EntityUrl, 200);
+    }
+
+    /// <summary>
+    /// Reply / Reply All / Forward regarding INHERITANCE (UAT R4 D12-1 / task 124). Copies the
+    /// parent (source) communication's regarding association onto a NEW draft <paramref name="communication"/>:
+    /// reads ALL populated <c>sprk_regarding*</c> typed lookups (<see cref="Engine.RegardingFieldMap.AllRegardingFields"/>)
+    /// plus the denormalized regarding pointer (id/type/name/url) + association count from the source, and writes
+    /// each populated value onto the new record. This is a DIRECT COPY — it never invokes the Association Engine
+    /// and never re-derives (per the task-124 constraint + owner intent). Additive: only populated source fields
+    /// are set; a sibling regarding field is never cleared (mirrors task-042 write semantics). Best-effort /
+    /// non-fatal — an inheritance-read failure MUST NOT fail the send (NFR-02).
+    /// </summary>
+    private async Task CopyRegardingFromSourceAsync(
+        DataverseEntity communication, Guid sourceCommunicationId, string correlationId, CancellationToken ct)
+    {
+        try
+        {
+            var columns = new List<string>
+            {
+                "sprk_regardingrecordid", "sprk_regardingrecordtype", "sprk_regardingrecordname",
+                "sprk_regardingrecordurl", "sprk_associationcount",
+            };
+            columns.AddRange(Engine.RegardingFieldMap.AllRegardingFields);
+
+            var source = await _genericEntityService.RetrieveAsync(
+                "sprk_communication", sourceCommunicationId, columns.ToArray(), ct);
+
+            var copied = 0;
+            foreach (var (entityLogicalName, field) in Engine.RegardingFieldMap.All)
+            {
+                // Only copy a populated typed lookup; never overwrite a value already set on the new
+                // record by an explicit association (MapAssociationFields runs AFTER this — explicit wins).
+                if (!communication.Attributes.ContainsKey(field)
+                    && source.GetAttributeValue<EntityReference>(field) is { } er)
+                {
+                    communication[field] = new EntityReference(
+                        string.IsNullOrWhiteSpace(er.LogicalName) ? entityLogicalName : er.LogicalName, er.Id);
+                    copied++;
+                }
+            }
+
+            // Denormalized regarding pointer — copy only populated values (additive).
+            CopyStringIfPresent(source, communication, "sprk_regardingrecordid");
+            CopyStringIfPresent(source, communication, "sprk_regardingrecordtype");
+            CopyStringIfPresent(source, communication, "sprk_regardingrecordname");
+            CopyStringIfPresent(source, communication, "sprk_regardingrecordurl");
+
+            var count = source.GetAttributeValue<int?>("sprk_associationcount");
+            if (count is > 0 && !communication.Attributes.ContainsKey("sprk_associationcount"))
+                communication["sprk_associationcount"] = count.Value;
+
+            _logger.LogInformation(
+                "Inherited {Count} regarding lookup(s) from source communication {SourceId} onto new draft | CorrelationId: {CorrelationId}",
+                copied, sourceCommunicationId, correlationId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Regarding inheritance from source communication {SourceId} failed (non-fatal) | CorrelationId: {CorrelationId}",
+                sourceCommunicationId, correlationId);
+        }
+    }
+
+    /// <summary>Copies a non-empty string attribute from <paramref name="source"/> to <paramref name="target"/>
+    /// only when the target does not already carry it (additive; explicit values win).</summary>
+    private static void CopyStringIfPresent(DataverseEntity source, DataverseEntity target, string field)
+    {
+        if (target.Attributes.ContainsKey(field)) return;
+        var val = source.GetAttributeValue<string>(field);
+        if (!string.IsNullOrWhiteSpace(val)) target[field] = val;
     }
 
     /// <summary>

@@ -57,6 +57,54 @@ public class DocumentIntelligenceOptions
     public string? ImageSummarizeModel { get; set; }
 
     /// <summary>
+    /// Model deployment name for Fast-tier Actions
+    /// (<c>AiModelTier.Fast</c> — <c>sprk_analysisaction.sprk_modeltier</c>). Cheap/fast models:
+    /// classification, validation, entity resolution.
+    /// </summary>
+    /// <remarks>
+    /// Added by <c>ai-advanced-capabilities-nda-r1</c> task 010 (model-tier last-mile). Defaults to the
+    /// same deployment as <see cref="SummarizeModel"/> (<c>gpt-4o-mini</c>) — the only chat deployment
+    /// confirmed provisioned in most environments as of the 2026-03-04 model inventory
+    /// (<c>projects/ai-spaarke-platform-enhancments-r3/notes/azure-openai-model-inventory.md</c>).
+    /// Consumed by <see cref="Sprk.Bff.Api.Services.Ai.LinearConsumers.ModelTierDeploymentResolver"/>.
+    /// </remarks>
+    public string FastModel { get; set; } = "gpt-4o-mini";
+
+    /// <summary>
+    /// Model deployment name for Standard-tier Actions
+    /// (<c>AiModelTier.Standard</c> — the platform default tier when an Action's <c>sprk_modeltier</c>
+    /// is unset). Intended for capable/quality models (e.g. <c>gpt-4o</c>) per the
+    /// <c>AiModelTier</c> vocabulary.
+    /// </summary>
+    /// <remarks>
+    /// Added by <c>ai-advanced-capabilities-nda-r1</c> task 010. DEFAULTS to <c>gpt-4o-mini</c>
+    /// (same as <see cref="SummarizeModel"/>) so environments that do not explicitly configure
+    /// <c>DocumentIntelligence:StandardModel</c> see NO behavior/cost change from the pre-task-010
+    /// <c>model:null</c> fallback in <c>ActionRunner</c>. Ops opt into a distinct Standard deployment
+    /// (e.g. <c>gpt-4o</c>) once provisioned — see the 2026-03-04 model inventory note above; as of
+    /// that inventory <c>gpt-4o</c> was referenced in code but NOT deployed.
+    /// Consumed by <see cref="Sprk.Bff.Api.Services.Ai.LinearConsumers.ModelTierDeploymentResolver"/>.
+    /// </remarks>
+    public string StandardModel { get; set; } = "gpt-4o-mini";
+
+    /// <summary>
+    /// Model deployment name for Reasoning-tier Actions
+    /// (<c>AiModelTier.Reasoning</c> — o-series models for complex multi-step planning / advisory
+    /// analysis, e.g. NDA-REVIEW). Null until an o-series deployment is provisioned.
+    /// </summary>
+    /// <remarks>
+    /// Added by <c>ai-advanced-capabilities-nda-r1</c> task 010. Bound from the <c>#{AI_REASONING_MODEL}#</c>
+    /// template token (task 013 — see <c>appsettings.tokens.md</c> and
+    /// <c>projects/ai-advanced-capabilities-nda-r1/notes/task-013-reasoning-provisioning.md</c> for the
+    /// provisioning runbook + recommended model, currently <c>gpt-5</c>). Until an actual reasoning-class
+    /// Azure OpenAI deployment is provisioned and the token/App Setting is set,
+    /// <see cref="Sprk.Bff.Api.Services.Ai.LinearConsumers.ModelTierDeploymentResolver"/> falls back to
+    /// <see cref="StandardModel"/> when this is null/empty/whitespace, so a Reasoning-tagged Action still
+    /// executes (no hard failure) rather than 404ing against an undeployed model.
+    /// </remarks>
+    public string? ReasoningModel { get; set; }
+
+    /// <summary>
     /// Model deployment name for generating text embeddings.
     /// Used for RAG vector search.
     /// Options: "text-embedding-3-large" (3072 dims, recommended), "text-embedding-3-small" (1536 dims, legacy)
@@ -112,6 +160,18 @@ public class DocumentIntelligenceOptions
     /// </summary>
     [Range(5, 300, ErrorMessage = "DocumentIntelligence:DocIntelTimeoutSeconds must be between 5 and 300")]
     public int DocIntelTimeoutSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// Per-attempt network timeout (seconds) for Azure OpenAI chat-completion calls
+    /// (<c>AzureOpenAIClientOptions.NetworkTimeout</c>). The SDK default is 100s, which the slow
+    /// Reasoning tier (gpt-5-reasoning) blows through on a larger document — the call is cancelled,
+    /// retried 3×, and finally surfaces as "couldn't run that action" (observed 2026-07-27 on the
+    /// HELIO NDA review). Reasoning completions routinely need 2-4 minutes; default 300s gives them
+    /// room while still bounding a genuinely hung request. Fast/Standard tiers complete well within
+    /// this, so a single global value is safe.
+    /// </summary>
+    [Range(30, 600, ErrorMessage = "DocumentIntelligence:OpenAiNetworkTimeoutSeconds must be between 30 and 600")]
+    public int OpenAiNetworkTimeoutSeconds { get; set; } = 300;
 
     /// <summary>
     /// Number of consecutive Document Intelligence failures before the circuit breaker opens.

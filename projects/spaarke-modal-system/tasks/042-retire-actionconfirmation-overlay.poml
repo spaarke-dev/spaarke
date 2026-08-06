@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-modal-system">
+  <metadata>
+    <title>P2 — Retire ActionConfirmationDialog hand-rolled overlay → ConfirmModal — FR-13</title>
+    <phase>2 Confirms &amp; choices</phase>
+    <gate>blocked until 005</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deletes a hand-rolled `position:absolute` overlay and re-routes SprkChat confirm consumers onto `ConfirmModal`; accessibility (focus trap, ESC) now comes from Fluent `Dialog`, so behavior/a11y parity must be verified, not assumed.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Overlay replacement is fully specified by the `ConfirmModal` reference impl and the existing overlay's confirm/cancel contract; no architectural ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>005</deps>
+    <tags>react, fluent-ui, frontend</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>`components/SprkChat/ActionConfirmationDialog.tsx` is a HAND-ROLLED `position:absolute` div overlay (despite an in-file comment claiming it uses a Fluent Dialog). Replace it with the `ConfirmModal` preset (built in task 005), DELETE the hand-rolled overlay, and update the SprkChat consumers to call `ConfirmModal` — preserving the existing confirm/cancel behavior and messaging (FR-13). Then VERIFY by grep that no `position:fixed`/`position:absolute` + `role="dialog"` hand-roll remains anywhere in `components/SprkChat/`.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 dialogs, accessibility (focus trap / ESC / aria-modal), and overlay anti-patterns. Follow ADRs strictly.</role>
+  <goal>The hand-rolled `ActionConfirmationDialog` overlay is removed; SprkChat action-confirmation flows use `ConfirmModal` with equivalent confirm/cancel behavior + messaging; a11y (focus trap, ESC, aria-modal) is provided by Fluent `Dialog`; a grep of `components/SprkChat/` finds no `position:fixed`/`position:absolute` + `role="dialog"` overlay; the shared lib and SprkChat consumers build green under `@types/react` 18 and React 19.</goal>
+
+  <context>
+    <background>Design §3.3 / §1 identify `ActionConfirmationDialog` as one of three hand-rolled overlays that bypass Fluent — a `position:absolute` div reinventing surface + backdrop + dismissal (the comment claiming "Fluent Dialog" is inaccurate). Spec success-criterion 5 requires these overlays retired and verified by grep. Task 005 delivers `ConfirmModal`; this task re-routes SprkChat onto it and deletes the overlay. Because the overlay hand-rolled its own dismissal, a11y (focus trap, ESC, aria-modal) now comes for free from Fluent `Dialog` via `ConfirmModal` — verify parity rather than assume it.</background>
+    <relevant-files>
+      <file role="delete">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/ActionConfirmationDialog.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/ (consumers of ActionConfirmationDialog)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/ConfirmModal.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="005" status="pending">The `ConfirmModal` preset that replaces the hand-rolled overlay.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST NOT hand-roll overlays — retire the `position:absolute` div entirely; a11y (focus trap / ESC / aria-modal) MUST come from the Fluent `Dialog` inside `ConfirmModal`, not from bespoke listeners.</constraint>
+    <constraint source="ADR-012">Use the shared `ConfirmModal` from `@spaarke/ui-components`; do NOT fork it or re-create confirm chrome in SprkChat.</constraint>
+    <constraint source="ADR-021">Semantic tokens only — remove any hex, `'1px'` literals, or inline color styles that lived in the overlay; introduce none (NFR-03).</constraint>
+    <constraint source="project">Preserve the existing SprkChat action-confirmation behavior and messaging (title/body copy, confirm + cancel semantics, which action is destructive). Keep the barrel/public export contract intact for any external consumer of the confirm.</constraint>
+    <constraint source="project">Touched files MUST compile clean under `@types/react` 18 (PCF) and React 19 (Code Pages) — NFR-04.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Retiring hand-rolled overlays → Fluent v9 ConfirmModal + a11y</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Shared-lib preset composition + a11y-by-default via Fluent Dialog.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-13 + success-criterion 5 + design §3.3 + the `ConfirmModal` preset from task 005. Read `ActionConfirmationDialog.tsx` to capture its exact confirm/cancel behavior + messaging. Declare RIGOR: FULL.</step>
+    <step order="1">Enumerate SprkChat consumers of `ActionConfirmationDialog` (grep its imports/usages) and record each call contract.</step>
+    <step order="2">Re-route each consumer to render `ConfirmModal` with the same title/body messaging and confirm/cancel semantics (destructive variant where the action was destructive).</step>
+    <step order="3">Delete `ActionConfirmationDialog.tsx` and remove its barrel/export references; keep any still-needed public confirm entry point stable for external callers.</step>
+    <step order="4">Grep `components/SprkChat/` for `position:fixed` / `position:absolute` combined with `role="dialog"` (and `createElement`/`createPortal` overlay hand-rolls); confirm none remain.</step>
+    <step order="5">Build the shared lib + the SprkChat consumers (PCF + Code Page); prove dual-React cleanliness; fix any type/import breaks.</step>
+    <step order="6">Run the ui-tests below (confirm behavior + focus trap + dark-mode parity).</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set 042 status to ✅.</step>
+    <step order="8">Document the consumer re-route decisions and the grep result in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a SprkChat consumer relied on the overlay's non-portal, in-tree mount for a specific reason (e.g. positioning relative to a chat message, in-flow layout, or scroll containment), STOP and surface that dependency per CLAUDE.md §6 rather than assuming the portaled `ConfirmModal` is a drop-in — the reason must be understood before deleting the overlay.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Confirm dialog behaves after retirement">
+      <steps>
+        <step>Trigger a SprkChat action confirmation and confirm, then trigger again and cancel.</step>
+        <step>Verify the confirm/cancel outcomes and messaging match the pre-retirement overlay.</step>
+      </steps>
+      <expected>Confirm + cancel behave identically; messaging unchanged; the surface is now a Fluent `Dialog` via `ConfirmModal`.</expected>
+    </test>
+    <test name="Focus trap + ESC via Fluent Dialog">
+      <steps>
+        <step>Open the confirm and Tab through it; press ESC.</step>
+        <step>Verify focus is trapped within the dialog and ESC behaves per the dialog's dismiss semantics (blocking confirms do not ESC-dismiss).</step>
+      </steps>
+      <expected>Focus trap + aria-modal present from Fluent Dialog; ESC behavior correct; no bespoke listener needed.</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Render the confirm under the dark Fluent theme.</step>
+        <step>Verify surface/backdrop/buttons read correctly via semantic tokens in both light and dark.</step>
+      </steps>
+      <expected>Correct light/dark contrast via semantic tokens; no hex/inline color remains from the deleted overlay.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test shared lib and SprkChat consumers (build:prod for PCF)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/ (consumers re-routed to ConfirmModal; ActionConfirmationDialog.tsx deleted + de-exported)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a SprkChat action confirmation, when triggered, then it renders via `ConfirmModal` (Fluent `Dialog`), not a hand-rolled overlay, with unchanged confirm/cancel behavior + messaging.</criterion>
+    <criterion testable="true">`ActionConfirmationDialog.tsx` is deleted and removed from the barrel/exports; no dangling import remains.</criterion>
+    <criterion testable="true">Negative: a grep of `components/SprkChat/` for `position:fixed`/`position:absolute` + `role="dialog"` (and `createElement`/`createPortal` overlay hand-rolls) returns no results.</criterion>
+    <criterion testable="true">The confirm has a working focus trap + aria-modal + correct ESC behavior sourced from Fluent `Dialog`; no bespoke dismissal listener remains; no hex/`'1px'`/inline color remains from the overlay.</criterion>
+    <criterion testable="true">Shared-lib build and SprkChat consumers build green under `@types/react` 18 and React 19.</criterion>
+  </acceptance-criteria>
+
+  <notes>One of the three hand-rolled overlays the project retires (spec success-criterion 5; the other two — `ConversationModal` P5, `sprk_DocumentOperations.js` P7 — are out of this task's scope). The in-file comment claiming "Fluent Dialog" is inaccurate — verify against the actual `position:absolute` markup. COMPLETED 2026-08-02 (parallel sub-agent + main-session consolidation): overlay DELETED; sole consumer (SprkChat HITL flow) re-routed onto ConfirmModal; anchor investigation cleared the escalation (accidental overflow-clip, no deliberate in-tree dependency); dismiss="alert" matches the overlay's actual behavior (no backdrop-cancel ever wired). Grep proof: zero overlay patterns remain in SprkChat/. Consolidation restored busy/spinner parity via ConfirmModal `busy` (call-site guards kept as defense-in-depth). New 5-test integration suite hardened for full-suite determinism post-review. Detail: notes/task-042-completion.md.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

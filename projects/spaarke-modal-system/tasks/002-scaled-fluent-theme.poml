@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-modal-system">
+  <metadata>
+    <title>Scaled Fluent theme builder (scaleTheme) — FR-06</title>
+    <phase>0 Build</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New scaled-theme surface (the `--sprk-ui-scale` mechanism) that the base shell + P0.5 app-shell control both depend on; ported pure function with unit tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard shared-lib pure-function work, fully specified by an existing prototype file (`theme.ts`).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>react, typescript, fluent-ui, frontend</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Port the scaled-theme arm of the `--sprk-ui-scale` mechanism from the prototype into `@spaarke/ui-components` as `SprkModal/scaledTheme.ts`: `scaleTheme(base, scale)` clones a Fluent `Theme` and multiplies every token whose key starts with `fontSize`/`lineHeight`/`spacing`/`strokeWidth`/`borderRadius` AND whose value ends in `"px"` by `scale` (rounded to 2 decimal places), leaving colors and all non-px tokens untouched; `scale === 1` short-circuits and returns the base identity. Also port `baseTheme(dark)`. This is the mechanism that lets Fluent's OWN internals grow at 2K/4K (FR-06); a root-font/rem trick cannot, because Fluent v9 tokens are fixed px.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 theming, TypeScript, and scale-aware token math. Follow ADRs strictly.</role>
+  <goal>`src/client/shared/Spaarke.UI.Components/src/components/SprkModal/scaledTheme.ts` exists exporting `scaleTheme(base: Theme, scale: number): Theme` and `baseTheme(dark: boolean): Theme`; a unit test verifies the exact multiply-and-round behavior per prototype `theme.ts`; shared-lib build green.</goal>
+
+  <context>
+    <background>Design §6.9 + spec FR-06 lock the scale mechanism to a **scaled Fluent theme, NOT CSS `zoom`** (zoom under-scales a portaled `position:fixed` dialog at 4K — owner-verified 2026-07-31). The scaled theme changes the actual token values the dialog reads, so it is portal-independent and correct. The prototype `theme.ts` is the reference implementation. This module has no dependency on the base shell, so it is authored first (parallel with 001/003). The base shell (004) consumes it; the P0.5 app-shell control feeds it a scale value.</background>
+    <relevant-files>
+      <file role="canonical-reference">c:/code_files/spaarke-prototype/projects/2026-07-sprk-modal-system/src/theme.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/scaledTheme.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/__tests__/scaledTheme.test.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Lives in `@spaarke/ui-components` under `components/SprkModal/`; not duplicated per solution or per code page.</constraint>
+    <constraint source="ADR-021">Semantic-token only: `scaleTheme` operates on Fluent `Theme` token values; it introduces no hex, no `'1px'` literal, and no inline color style. Colors MUST be left untouched (only the px-valued size/spacing/stroke/radius/font families are multiplied).</constraint>
+    <constraint source="ADR-028">Pure function over a `Theme` passed in as an argument — MUST NOT snapshot or hardcode host theme/auth state. The caller (host app-shell) owns which base theme + scale to pass.</constraint>
+    <constraint source="project">Realize `--sprk-ui-scale` via this SCALED THEME — MUST NOT use CSS `zoom` (design §6.9). `scale === 1` MUST short-circuit and return the base object identity.</constraint>
+    <constraint source="project">Type-only + pure-function module — no JSX. MUST compile under `@types/react` 18 (PCF) and React 19 (Code Pages) (NFR-04).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Fluent v9 scaled-theme token multiplication</topic>
+    <files>
+      <file>projects/spaarke-modal-system/spec.md</file>
+      <file>projects/spaarke-modal-system/CLAUDE.md</file>
+      <file>projects/spaarke-modal-system/design.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-theming" location=".claude/patterns/ui/fluent-v9-theming.md">Host-provided theme + semantic tokens; how a scaled theme is passed to a FluentProvider.</pattern>
+      <pattern name="fluent-v9-react-version-boundaries" location=".claude/patterns/ui/fluent-v9-react-version-boundaries.md">Dual-React (18/19) safety.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec §6.9, design §6.9, and the prototype `theme.ts`. Declare RIGOR: FULL.</step>
+    <step order="1">In `components/SprkModal/`, author `scaledTheme.ts`: the `SCALED_TOKEN_PREFIXES` list (`fontSize`, `lineHeight`, `spacing`, `strokeWidth`, `borderRadius`) and `scaleTheme(base, scale)` porting the prototype logic exactly (iterate token entries, multiply px-valued matches by `scale`, round to 2dp via `Math.round(n*scale*100)/100`, skip non-string / non-px / non-prefix / NaN values; `scale === 1` returns `base`).</step>
+    <step order="2">Add `baseTheme(dark: boolean): Theme` returning `webDarkTheme`/`webLightTheme`.</step>
+    <step order="3">Write `__tests__/scaledTheme.test.ts`: assert `scaleTheme(webLightTheme, 1.5)` multiplies `spacingHorizontalM`, `fontSizeBase300`, and `strokeWidthThin` by 1.5 (rounded 2dp); assert a color token (e.g. `colorNeutralForeground1`) is byte-identical (untouched); assert `scaleTheme(webLightTheme, 1)` returns the base identity.</step>
+    <step order="4">Run the shared-lib build + tests; confirm green and dual-React-clean (no React import needed in this module).</step>
+    <step order="5">Update `tasks/TASK-INDEX.md`: set 002 status to ✅.</step>
+    <step order="6">Document any deviation from the prototype `theme.ts` (e.g. an added prefix or rounding change) in `projects/spaarke-modal-system/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the installed `@fluentui/react-components` `Theme` shape differs from the prototype's (e.g. a size-driving token family the prefix list misses, or a px token that must NOT scale), STOP and surface it per CLAUDE.md §6 rather than silently widening/narrowing the prefix list — the scaled families are load-bearing for FR-06.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No scaled-theme builder exists in `@spaarke/ui-components` today. Grep: theme resolution is `resolveCodePageTheme()` per code page (base light/dark only, no scale); there is no px-token multiplier anywhere.</existing>
+    <extension>No — `resolveCodePageTheme` picks a base theme; it does not scale tokens. `scaleTheme` is a distinct pure transform that composes with it (the host passes `scaleTheme(resolveCodePageTheme(), scale)`), not a duplicate of it.</extension>
+    <cost-of-doing-nothing>Without a scaled theme, FR-06 acceptance fails: at `--sprk-ui-scale` 1.15/1.25/1.5 Fluent's own buttons/inputs/spacing stay fixed-px while only custom layout grows, so the modal scales inconsistently (and CSS `zoom`, the rejected alternative, under-scales the portaled dialog at 4K).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Scaled theme grows Fluent internals (conceptual)">
+      <steps>
+        <step>In a harness, wrap a Fluent `Button` + `Input` in a `FluentProvider theme={scaleTheme(webLightTheme, 1.5)}`.</step>
+        <step>Compare against the same controls under the un-scaled base theme.</step>
+      </steps>
+      <expected>Button padding, input height, and text render ~1.5× larger; colors are identical between the two.</expected>
+    </test>
+    <test name="Dark-mode parity (ADR-021)">
+      <steps>
+        <step>Render the harness under `scaleTheme(baseTheme(true), 1.25)` (dark).</step>
+      </steps>
+      <expected>Dark palette is preserved (colors untouched); only sizes scale; no hardcoded light-mode color leaks.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test shared lib</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/scaledTheme.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/__tests__/scaledTheme.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `webLightTheme` and scale 1.5, when `scaleTheme` runs, then `spacingHorizontalM`, `fontSizeBase300`, and `strokeWidthThin` are each multiplied by 1.5 (rounded to 2 decimal places) and re-emitted as `"…px"` strings.</criterion>
+    <criterion testable="true">Given any scale, color tokens (e.g. `colorNeutralForeground1`, `colorBrandBackground`) are returned unchanged.</criterion>
+    <criterion testable="true">Given scale exactly 1, `scaleTheme` returns the base object identity (short-circuit, no clone).</criterion>
+    <criterion testable="true">`baseTheme(true)` returns `webDarkTheme`, `baseTheme(false)` returns `webLightTheme`; unit tests pass; shared-lib build green.</criterion>
+    <criterion testable="true">Module imports no React/JSX and compiles under `@types/react` 18 and React 19.</criterion>
+  </acceptance-criteria>
+
+  <notes>Prototype `SCALED_TOKEN_PREFIXES = ["fontSize","lineHeight","spacing","strokeWidth","borderRadius"]`; rounding is `Math.round(n * scale * 100) / 100`. The prototype's CSS-`zoom` arm lives in its `App.tsx` and is explicitly NOT ported (rejected mechanism). This module is consumed by task 004 (base shell) and the P0.5 app-shell scale control.
+
+**COMPLETED 2026-08-01.** Ported `scaledTheme.ts` verbatim from prototype `theme.ts` (`scaleTheme` + `baseTheme`, 5-prefix list, 2dp rounding, `scale===1` base identity short-circuit). 7 Jest assertions green (px tokens multiply; colors byte-identical; identity short-circuit; dark parity; no base mutation; `baseTheme` mapping); shared-lib `tsc` build green; eslint clean. No React import. No deviation from the prototype. No escalation (installed `@fluentui/react-components ^9.73.2` `Theme` shape matches the prefix families).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files first. Follow task-execute.</protocol>
+  </execution>
+</task>

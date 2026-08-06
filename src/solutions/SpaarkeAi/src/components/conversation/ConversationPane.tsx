@@ -25,11 +25,16 @@ import {
   MessageBarActions,
 } from "@fluentui/react-components";
 import { ChatRegular, ChatAddRegular, DismissRegular } from "@fluentui/react-icons";
-import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, launchSurface, launchSummarizeFilesWizard, SendEmailDialog } from "@spaarke/ui-components";
+import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, createXrmDataService, searchUsersAndContacts, launchSurface, resolveSurfaceLaunch, launchSummarizeFilesWizard, SendEmailDialog } from "@spaarke/ui-components";
 import { WelcomeStartCards } from "./WelcomeStartCards";
 import { QuickStartModal } from "./QuickStartModal";
-import { useAiSession, useDispatchPaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
+import { MemoryDialog } from "./MemoryDialog";
+import { useAiSession, useDispatchPaneEvent, usePaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
+// task 033 (FR-17 wizard→review auto-run bridge): the typed compose-seed shape the wizard hand-off
+// listener narrows `widget_load{widgetType:'compose'}` payloads to (composeSessionId / analysisId /
+// subDomain / autoRunReview — declared additively on the SAME seed every compose door already uses).
+import type { ComposeWidgetSeed } from "../workspace/composeWidgetData";
 import type {
   IChatMessage,
   DispatchWorkspaceEvent,
@@ -53,9 +58,22 @@ import { CommandHelpPanel } from "./CommandHelpPanel";
 import { useInjectionQueue } from "./useInjectionQueue";
 import { useEventBatch } from "./useEventBatch";
 import { useAttachments } from "./useAttachments";
+import { FileAttachSessionPrompt } from "./FileAttachSessionPrompt";
 import { useConsumerChips } from "./useConsumerChips";
+// spaarke-notification-spine-r1 task 051 (FR-16): the proactive-suggestion renderer branch —
+// a SIBLING of the Click-path chips, subscribing to the Layer-C spine's `kind=suggestion`
+// pushes via the ONE host-wide `@spaarke/notifications` client (task 021).
+import { useSuggestionCards, type PendingSuggestionItem } from "./useSuggestionCards";
+// UAT round-4 (item #9): "Rerun a full analysis" card — offered after a QUICK-depth agreement
+// review completes. A SIBLING of useSuggestionCards (reuses its SuggestionCard visual directly)
+// but client-local/session-turn-scoped — no outbox row, no BFF re-ground.
+import { useRerunFullAnalysisCard } from "./useRerunFullAnalysisCard";
+import { getNotificationsClient } from "../../services/notificationsBootstrap";
 import { useContextEventBridge } from "./useContextEventBridge";
 import { useDocQaCitationBridge } from "./useDocQaCitationBridge";
+import { useNdaReviewAdvisoryCommentsBridge, isNdaReviewResult } from "./useNdaReviewAdvisoryCommentsBridge";
+import { useNdaReviewRunProgress } from "./useNdaReviewRunProgress";
+import { NdaReviewProgressModal } from "./NdaReviewProgressModal";
 import { usePlaybookSelection } from "./usePlaybookSelection";
 import { usePlaybookOptions } from "./usePlaybookOptions";
 import { useCommandRouting } from "./useCommandRouting";
@@ -77,19 +95,36 @@ import { resolveCurrentComposeLedgerRef, buildComposeApplyEvent } from "./compos
 // FR-17 undo/replace (task 034) — the durable ledger-supersession hook + its Assistant affordance.
 import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession";
 import type { ComposeAssistantToWorkspaceFlow } from "@spaarke/compose-components/types/compose-contracts";
-import { formatEventOutputMarkdown, toDisplayList } from "./DocumentUploadedEventStream";
-import { formatComposeActionResultMarkdown } from "./composeResultFormat";
-import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage, makeFileStatusMessage } from "./summarizeRouting";
+import { formatEventOutputMarkdown, toDisplayList, type EventClassificationData } from "./DocumentUploadedEventStream";
+import { formatComposeActionResultMarkdown, extractComposeEditExplanation } from "./composeResultFormat";
+import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage, buildComposeAttachedToAssistantMessage, makeFileStatusMessage } from "./summarizeRouting";
 import { routeReviseIntent } from "./composeReviseRouting";
-import { LOCAL_CHIP, buildReviseInComposeChip } from "./localActionChips";
+import { detectDraftDocumentIntent } from "./composeDraftRouting";
+import { LOCAL_CHIP, buildReviseInComposeChip, buildNdaReviewChip, getDocumentReviewCapability } from "./localActionChips";
+import { buildChipPreference, recordChipUsage } from "./chipPreference";
 import {
   detectReviseThisDocumentIntent,
+  detectSectionRewriteIntent,
   REVISE_MOUNT_ASK_MESSAGE,
   type RevisionIntent,
   type ComposeDocAction,
 } from "./composeReviseRouting";
 import { ComposeDocActionChips } from "./ReviseIntentChips";
 import { useCapabilityDiscovery } from "./useCapabilityDiscovery";
+// task 021 (FR-07/08/09 interactive orientation + confirmation gate): the review-intent text
+// detector (checked BEFORE detectReviseThisDocumentIntent — see the decorate hook below) and the
+// stateful gate controller. Deep-import useComposeLaunch from the shared context module (NOT the
+// `@spaarke/compose-components` barrel) — mirrors this file's existing composeActionBridge
+// deep-import rationale (avoids transitively pulling the TipTap editor widgets into the Assistant
+// pane bundle); composeLaunchContext.ts is a READ-ONLY canonical reference this task consumes,
+// never modifies (Spaarke.Compose.Components is off-limits this wave — task 012 owns it).
+import { detectAgreementReviewIntent, normalizeReviewDepth, type ReviewDepth } from "./agreementReviewRouting";
+import { useAgreementReviewGate } from "./useAgreementReviewGate";
+// task 031 (DEF-09 routing): the pure waiter/timeout seam that resolves the reviewed file's
+// REAL document session (backfilled by registerComposeActiveDocument), so the review dispatch's
+// `sessionIdOverride` can target the SAME session ComposeWorkspace reads compose-outputs from.
+import { createDocumentSessionWaiter } from "./documentSessionWaiter";
+import { useComposeLaunch } from "@spaarke/compose-components/context/composeLaunchContext";
 import {
   AuthLoadingState,
   PlaybookHeaderStrip,
@@ -98,6 +133,8 @@ import {
   RefinementChipBar,
   FilesAttachedIndicator,
   UploadProgressIndicator,
+  AssistantModelTierPicker,
+  AssistantModelTier,
   useConversationPaneLayoutStyles,
 } from "./ConversationPaneChrome";
 
@@ -108,6 +145,7 @@ export {
   FILE_CONFIRMATION_MAX_NAMES,
   routeSummarizeIntent,
   buildFileConfirmationMessage,
+  buildComposeAttachedToAssistantMessage,
   buildMultiFileSummarizeInterjection,
   makeLocalAssistantMessage,
   makeComposeEditControlsMessage,
@@ -160,6 +198,90 @@ export const COMPOSE_EDIT_CONFIRMATION =
 export const COMPOSE_WHOLE_DOCUMENT_EDIT_CONFIRMATION =
   'I revised the document — review the tracked changes in the document, then accept, reject, or try another.';
 
+/**
+ * agreements-r1 task 042 (FR-12) — best-effort extraction of a resolvable clause-LOCATION string for
+ * a compose EDIT confirmation, if the dispatch's request or result happens to carry one.
+ *
+ * **Wiring status (2026-07-31)**: neither shipped caller of `enqueueComposeAction`
+ * (`ComposeAiToolbar.tsx`'s inline-toolbar dispatch, `ComposeEditor.tsx`'s `dispatchNoteToolRequest` —
+ * both in the read-only-for-this-task `@spaarke/compose-components` package) currently populates a
+ * location field on `args.slots`, and none of the compose-draft-alternative / compose-revise-document
+ * result schemas (`infra/dataverse/outputschemas/compose-*.schema.json`) carry one either.
+ * `deriveClauseLocationLabel` (`clauseLocation.ts`) is computed today ONLY for the gutter's own note
+ * card (`ComposeCommentGutter.tsx`) — it is never threaded into the AI-action dispatch that reaches
+ * this pane. Closing that gap is a `ComposeEditor.tsx` change (one field added to
+ * `dispatchNoteToolRequest`'s `slots`) outside this task's file boundary (task 042 owns
+ * `ConversationPane.tsx` only — see `notes/042-execution-notes.md`).
+ *
+ * This extraction is written FORWARD-COMPATIBLE / defensive rather than hard-coded to "always empty":
+ * it checks the established `locationLabel` field name (mirrors `ComposeEditor.tsx`'s own
+ * `locationLabel: deriveClauseLocationLabel(...)` convention) plus the `sectionRef`/`location` names
+ * already used elsewhere in this file's result-shape handling (`useNdaReviewAdvisoryCommentsBridge.ts`),
+ * on BOTH the outbound request's forwarded slots and the dispatched result payload. The moment a future
+ * change populates any of these, {@link withComposeEditLocationHeader} activates the bold header with
+ * ZERO further change here. Until then this consistently returns `null`.
+ */
+function extractComposeEditLocationLabel(request: ComposeActionRequest, result: unknown): string | null {
+  const asTrimmedString = (value: unknown): string | null =>
+    typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+
+  const slots = asRecord(request.args?.slots);
+  const fromRequest =
+    asTrimmedString(slots?.locationLabel) ?? asTrimmedString(slots?.sectionRef) ?? asTrimmedString(slots?.location);
+  if (fromRequest) return fromRequest;
+
+  const record = asRecord(result);
+  return (
+    asTrimmedString(record?.locationLabel) ?? asTrimmedString(record?.sectionRef) ?? asTrimmedString(record?.location)
+  );
+}
+
+/**
+ * agreements-r1 task 042 (FR-12) — prepend a BOLD clause-location header to a compose EDIT
+ * confirmation, with clear whitespace separating it from the summary/explanation body below. Renders
+ * the header as a markdown `###` heading — the exact same `.sprk-markdown h3` rule (`SPRK_MARKDOWN_CSS`,
+ * `@spaarke/ui-components/services/renderMarkdown`) every other Assistant message already renders
+ * through: `font-weight: var(--fontWeightBold)`, `margin-top: var(--spacingVerticalL)`,
+ * `margin-bottom: var(--spacingVerticalS)` — Fluent v9 SEMANTIC TOKENS, dark-mode-safe by construction
+ * (ADR-021), with NO new styling surface added by this task (`ConversationPane.tsx` never renders its
+ * own JSX for message content — `content` is a markdown string SprkChat renders).
+ *
+ * When `locationLabel` is unresolved (today's universal case — see
+ * {@link extractComposeEditLocationLabel}) the header is OMITTED rather than replaced with a filler
+ * string: (1) it keeps the confirmation BYTE-IDENTICAL to pre-042 behavior in that case, which is the
+ * exact scenario `ConversationPane.compose-edit-controls.test.tsx` locks with an exact `.toBe` match
+ * (ADR-041 "existing tests pass untouched"); (2) a repeated, non-distinguishing filler label on every
+ * entry of a batch ("Clause update", "Clause update", …) would not actually help a reviewer tell
+ * entries apart — the "graceful… no undefined" requirement is satisfied by cleanly omitting the header,
+ * never by fabricating one.
+ */
+function withComposeEditLocationHeader(confirmationText: string, locationLabel: string | null): string {
+  return locationLabel ? `### ${locationLabel}\n\n${confirmationText}` : confirmationText;
+}
+
+/**
+ * agreements-r1 task 033 (FR-17) — the DISTINCT bridge-failure surface (ADR-019): the wizard armed
+ * an auto-run review, but the document never finished registering as a session file (the DEF-10
+ * register's upload failed or never landed) within the watchdog window. The Analysis itself is
+ * already durable and consistent (created + bound by the wizard BEFORE the hand-off) — only the
+ * auto-run leg degraded, and the recovery is the user's normal conversational trigger. Deliberately
+ * different copy from the wizard's own session-mint failure warning (bind failure) and from the
+ * dispatch path's own error surface (dispatch failure) — three legs, three distinct surfaces.
+ */
+export const WIZARD_AUTO_RUN_BRIDGE_FAILURE_MESSAGE =
+  'I couldn\'t start the agreement review automatically — the document didn\'t finish preparing. ' +
+  'Your analysis was created and saved; open the document tab and ask me to "review this document" to run the review.';
+
+/**
+ * task 033: how long the auto-run watchdog waits for the DEF-10 register to land the session file
+ * before surfacing {@link WIZARD_AUTO_RUN_BRIDGE_FAILURE_MESSAGE} and standing down. Generous vs.
+ * the normal path (doc load + upload is seconds; the server manifest probe alone is ~5s) so a slow
+ * network never false-alarms, while a genuinely failed bridge still surfaces within the session.
+ */
+export const WIZARD_AUTO_RUN_WATCHDOG_MS = 30_000;
+
 export function ConversationPane(): React.JSX.Element {
   const styles = useConversationPaneLayoutStyles();
 
@@ -182,6 +304,12 @@ export function ConversationPane(): React.JSX.Element {
   const restoreCtx = useRestoreContext();
   const paneCollapse = usePaneCollapseContext();
   const dispatch = useDispatchPaneEvent();
+  // task 021 (FR-09 "skip when subDomain already present — explicit path owns it, 023"): a non-null
+  // `subDomain` here means the app was launched already-oriented (composeMode='editor' ribbon launch,
+  // or a server-seeded `workspace_open_tab` — main.tsx's SpaarkeAiWorkspaceRenderer). The interactive
+  // gate (below) skips classification entirely when this is set — read-only consumption of the
+  // shared launch context (composeLaunchContext.ts), never written here.
+  const explicitComposeLaunch = useComposeLaunch();
 
   // Wave 3 Part 1 (UAT-R3 Test #1) — the client-side "active source document" pointer. When a chat
   // upload / browse-direct-upload / opened host document has been registered as the session's active
@@ -194,6 +322,17 @@ export function ConversationPane(): React.JSX.Element {
     documentSessionId?: string;
     fileName?: string;
   } | null>(null);
+
+  // task 031 (DEF-09 routing) — the pure waiter/timeout seam (documentSessionWaiter.ts) that resolves
+  // a REVIEWED file's REAL document session, keyed by that file's session-file id (never a different
+  // file's stale value), backfilled by `registerComposeActiveDocument` below (the SAME reactive
+  // conduit the "revise this document" flow's `activeComposeDocSessionId` already uses). One instance
+  // per pane mount; reset on a fresh chat session (`handleSessionCreated`).
+  const documentSessionWaiterRef = React.useRef(createDocumentSessionWaiter());
+  const awaitDocumentSessionIdFor = React.useCallback(
+    (fileId: string): Promise<string | null> => documentSessionWaiterRef.current.awaitDocumentSessionId(fileId),
+    []
+  );
 
   // #2 double-classify fix (UAT 2026-07-18) — CROSS-PATH dedup registry keyed by filename. A chat file
   // upload promotes via useAttachments' auto-promote (`POST /documents` → classify #1). FIX #7 then
@@ -247,13 +386,23 @@ export function ConversationPane(): React.JSX.Element {
   // seed shape is consumed verbatim by ComposeDirectWidget.buildLaunchFromSeed). WorkspacePane reuses
   // the single Compose tab per distinct file. Returns true when a mount was dispatched.
   const mountFileInCompose = React.useCallback(
-    (sessionFileId: string, fileName?: string): boolean => {
+    (sessionFileId: string, fileName?: string, activeWorkType?: string): boolean => {
       const sessionId = chatSessionIdRef.current;
       if (!sessionFileId || !sessionId) return false;
       dispatch("workspace", {
         type: "widget_load",
         widgetType: "compose",
-        widgetData: { compose: { upload: { sessionId, sessionFileId, fileName } } },
+        widgetData: {
+          compose: {
+            upload: { sessionId, sessionFileId, fileName },
+            // task 021 (FR-07 orientation writes): threaded through the SAME
+            // `ComposeWidgetSeed.activeWorkType` field task 041 (hub) already wired end-to-end
+            // (`buildLaunchFromSeed` -> `<ComposeWorkspace activeWorkType>` -> `getToolsForSurface`).
+            // Omitted (every pre-021 caller) preserves the exact prior wire shape — ComposeEditor's
+            // own `'*'` unscoped default applies.
+            ...(activeWorkType ? { activeWorkType } : {}),
+          },
+        },
         displayName: "Compose",
       } as WorkspacePaneEvent);
       return true;
@@ -306,14 +455,47 @@ export function ConversationPane(): React.JSX.Element {
   // fetch kicks off the moment a revise is detected — well before the user reads the ask message and
   // clicks a chip, so the bindingId is resolved by dispatch time.
   const [reviseCapabilityNeeded, setReviseCapabilityNeeded] = React.useState<boolean>(false);
+  // R7-4 (UAT 2026-07-21): the SAME deferred capability-discovery seam also resolves the
+  // `compose-draft-document` bindingId for the substantial-output → Compose route. Enable the
+  // discovery fetch when EITHER a revise OR a draft-document intent is first detected (both stay
+  // inert on a mounted-but-idle pane).
+  const [draftCapabilityNeeded, setDraftCapabilityNeeded] = React.useState<boolean>(false);
+  // task 022 (NDA review card): the SAME deferred capability-discovery seam resolves the
+  // classified document type's review-capability bindingId — enabled the moment classification
+  // flags a reviewable upload (below), well before the user reads the card and clicks it. Zero
+  // hardcoded GUID, zero new BFF read (reuses GET /api/ai/capabilities — the same closed-catalog
+  // projection revise/draft use).
+  const [ndaReviewCapabilityNeeded, setNdaReviewCapabilityNeeded] = React.useState<boolean>(false);
+  // task 064 (ai-advanced-capabilities-analysis-hub-r1, spec §13.5 / FR-22): the consumerType to
+  // resolve a bindingId for, set by `handleNdaClassified` from the matched
+  // `DocumentReviewCapability` (registry lookup by classified docType — generalizes the prior
+  // hardcoded "nda-review" consumerType so a different work-type's clause-review capability can
+  // be wired in later via a one-line registry addition, not a code fork). Declared here (before
+  // the `ndaReviewBindingId` memo below) so the memo can depend on it.
+  const [ndaReviewConsumerType, setNdaReviewConsumerType] = React.useState<string>("nda-review");
+  // task 021 — the SAME deferred capability-discovery seam resolves the `agreement-classify`
+  // bindingId, enabled the moment the review-intent text detector first fires (see the decorate
+  // hook below) — well before classification actually needs to dispatch.
+  const [agreementReviewGateNeeded, setAgreementReviewGateNeeded] = React.useState<boolean>(false);
   const { capabilities: launchableCapabilities } = useCapabilityDiscovery({
     bffBaseUrl,
     authenticatedFetch,
-    enabled: reviseCapabilityNeeded,
+    enabled:
+      reviseCapabilityNeeded || draftCapabilityNeeded || ndaReviewCapabilityNeeded || agreementReviewGateNeeded,
   });
   const reviseBindingId = React.useMemo<string | null>(
     () =>
       launchableCapabilities.find((c) => c.consumerType === "compose-revise-document")?.bindingId ??
+      null,
+    [launchableCapabilities]
+  );
+  // R7-4: the `compose-draft-document` Binding id from the SAME closed capability catalog (ADR-039:
+  // bindingId only from discovery, never invented). The action is on the `assistant` surface, so it
+  // is returned on the default discovery. Null until the fetch resolves / when the catalog is
+  // unreachable (the decorate branch buffers the request until it resolves).
+  const draftBindingId = React.useMemo<string | null>(
+    () =>
+      launchableCapabilities.find((c) => c.consumerType === "compose-draft-document")?.bindingId ??
       null,
     [launchableCapabilities]
   );
@@ -324,6 +506,28 @@ export function ConversationPane(): React.JSX.Element {
   const summarizeBindingId = React.useMemo<string | null>(
     () =>
       launchableCapabilities.find((c) => c.consumerType === "compose-summarize")?.bindingId ?? null,
+    [launchableCapabilities]
+  );
+
+  // task 022 — the classified document type's review-capability Binding id, resolved from the
+  // SAME closed capability catalog (ADR-039: bindingId only from discovery, never
+  // invented/hardcoded — portable across environments exactly like
+  // reviseBindingId/draftBindingId/summarizeBindingId above). task 064: consumerType is now
+  // `ndaReviewConsumerType` (set from the matched `DocumentReviewCapability` by classified
+  // docType) rather than a hardcoded "nda-review" literal — defaults to "nda-review" so behavior
+  // for the NDA docType is unchanged.
+  const ndaReviewBindingId = React.useMemo<string | null>(
+    () => launchableCapabilities.find((c) => c.consumerType === ndaReviewConsumerType)?.bindingId ?? null,
+    [launchableCapabilities, ndaReviewConsumerType]
+  );
+
+  // task 021 (FR-07/08/09 interactive orientation + confirmation gate) — the `agreement-classify`
+  // Binding id, resolved from the SAME closed capability catalog (ADR-039: bindingId only from
+  // discovery, never invented/hardcoded — portable across environments exactly like the bindingIds
+  // above). Enables the SAME deferred capability-discovery fetch the moment review-intent is first
+  // detected (see `agreementReviewGateNeeded` below), so it is resolved by the time the gate needs it.
+  const classifyBindingId = React.useMemo<string | null>(
+    () => launchableCapabilities.find((c) => c.consumerType === "agreement-classify")?.bindingId ?? null,
     [launchableCapabilities]
   );
 
@@ -345,6 +549,13 @@ export function ConversationPane(): React.JSX.Element {
   );
   const reviseDispatchSeqRef = React.useRef(0);
 
+  // R7-4 — a substantial-output "draft a document" request detected BEFORE capability discovery has
+  // resolved the `compose-draft-document` bindingId. Buffered here + dispatched by the effect below
+  // the moment `draftBindingId` back-fills (mirrors the named-intent revise buffer above).
+  const [pendingDraftDocument, setPendingDraftDocument] = React.useState<{ request: string } | null>(
+    null
+  );
+
   // R2 (race-safe revise) — when a natural-language "revise this document" arrives BEFORE the
   // uploaded file's registration has back-filled `activeSourceDocRef.sessionFileId`, we BUFFER the
   // intent here (rather than falling through to a chat-session agent turn that narrates it as prose)
@@ -354,9 +565,90 @@ export function ConversationPane(): React.JSX.Element {
     namedIntent: RevisionIntent | null;
   } | null>(null);
   const [sourceDocReadyToken, setSourceDocReadyToken] = React.useState(0);
+  // task 021 — the SAME race-safe buffer, for a natural-language "review this document" (agreement
+  // review-intent) that arrives BEFORE the upload's registration has back-filled
+  // `activeSourceDocRef.sessionFileId`. Reuses the SAME `sourceDocReadyToken` bump (a generic
+  // "a source doc just became ready" signal, not revise-specific) — the effect below fires the
+  // gate once the file is available.
+  const [pendingAgreementReview, setPendingAgreementReview] = React.useState<boolean>(false);
+  // task 023 (FR-09 explicit door) — the SAME race-safe buffer, for a "review this document" that
+  // arrives when the session was launched ALREADY oriented (`explicitComposeLaunch?.subDomain`).
+  // Carries the bound subDomainKey (captured at detection time, not re-read later) so the buffered
+  // effect below calls `agreementReviewGate.runExplicit` directly — no classification gate, ever.
+  // task 070 (UAT2 review-depth selector): `reviewDepth` is OPTIONAL on this buffer — the TEXT-path
+  // trigger (handleDecorateOutboundBodyWithRevise) leaves it undefined (runExplicit then asks ONE
+  // depth-choice turn); the WIZARD hand-off listener below sets it from the finish-time seed (the
+  // wizard already resolved a depth, so no further ask — see runExplicit's two-mode contract).
+  const [pendingExplicitAgreementReview, setPendingExplicitAgreementReview] = React.useState<{
+    subDomainKey: string;
+    reviewDepth?: ReviewDepth;
+  } | null>(null);
+  // task 033 (FR-17 wizard→review auto-run bridge) — wizard hand-off state:
+  //  - `wizardAutoRunHandledRef`: once-per-Analysis dedupe for the workspace-channel hand-off
+  //    listener (a re-dispatched/duplicate `widget_load` for the SAME analysisId must not re-adopt
+  //    or re-arm; a SECOND wizard run in the same pane session — a NEW analysisId — legitimately
+  //    fires again). Deliberately NOT session-scoped-reset: the bind/arm for an Analysis happens
+  //    exactly once per pane mount regardless of intervening session switches.
+  //  - `wizardAutoRunWatchdog`: armed alongside the explicit-door buffer when the WIZARD (not text)
+  //    armed it — drives the bounded bridge-failure surface (the buffered effect never fires when
+  //    the DEF-10 register's upload fails, and the TEXT door's indefinite-buffer semantics are
+  //    correct for a human mid-conversation but wrong for a machine-armed run the user never sees).
+  const wizardAutoRunHandledRef = React.useRef<Set<string>>(new Set());
+  const [wizardAutoRunWatchdog, setWizardAutoRunWatchdog] = React.useState<{
+    analysisId: string;
+  } | null>(null);
+  // UAT round-6 (item #15b) — once-per-mount guard for cold-load Compose-tab session RE-ADOPTION.
+  // When WorkspacePane restores a persisted home-surface Compose tab (item #13), it dispatches
+  // `widget_load{compose}` threading the tab's `composeSessionId` (but NO `analysisId` — the direct-
+  // Compose door is unbound). This pane adopts that session so the Assistant transcript CONTINUES on
+  // return instead of cold-starting "back at the Review an NDA step". Adopted at most once per mount.
+  const restoreSessionAdoptedRef = React.useRef<boolean>(false);
 
   // ── Behaviour hooks (see module map in the header) ────────────────────────
   const injection = useInjectionQueue();
+
+  // task 022 (NDA review card): the classified upload waiting on the "Review an NDA" card,
+  // if any. Set by handleNdaClassified (below) purely from the ONE existing classifier's
+  // (chat-classify / CLS-CHAT@v1) already-produced `docType` output — never a second
+  // classification mechanism (ADR-039). Cleared on click-dispatch, dismiss, or a fresh
+  // session (handleSessionCreated) — never left stale across sessions.
+  //
+  // task 064 (ai-advanced-capabilities-analysis-hub-r1, spec §13.5 / FR-22): widened with
+  // `cardLabel` so the Suggested-Next-Steps card text is driven by the matched
+  // `DocumentReviewCapability` (localActionChips.ts) rather than a hardcoded "Review an NDA"
+  // string — generalizes the docType gate to work-type without changing NDA's behavior.
+  const [ndaReviewFile, setNdaReviewFile] = React.useState<{
+    fileId: string;
+    fileName: string;
+    cardLabel: string;
+  } | null>(null);
+  // ai-advanced-capabilities-nda-r1 follow-up (UAT 2026-07-26): render-free mirror of ndaReviewFile so
+  // the stable-`[]`-deps `getAppendedLocalChips` callback (below) can read the current NDA state when
+  // `acceptChips` builds the Suggested-Next-Steps strip. Kept in sync at render (auto-tracks set AND
+  // every clear site) and set synchronously in handleNdaClassified so it is already populated if the
+  // classification and the chips frame land in the same tick (the pipeline order — promote → classify →
+  // chips — normally sets it a frame earlier, but this makes the append race-free either way).
+  const ndaReviewFileRef = React.useRef<{ fileId: string; fileName: string; cardLabel: string } | null>(null);
+  ndaReviewFileRef.current = ndaReviewFile;
+  const handleNdaClassified = React.useCallback((data: EventClassificationData): void => {
+    // task 064: the classified docType is resolved against the DOCUMENT_REVIEW_CAPABILITIES
+    // registry (localActionChips.ts) instead of a hardcoded `docType !== "nda"` comparison. The
+    // registry's only entry today is "nda" (unchanged behavior); a second work-type's
+    // clause-review capability is a one-line registry addition once its Action/Binding exists —
+    // no further code change here or in the discovery/dispatch below.
+    const capability = getDocumentReviewCapability(data.docType);
+    // Negative case (task 022 acceptance criterion 3): any docType with no registered review
+    // capability — including an absent/unclassified result — leaves ndaReviewFile untouched, so
+    // no card renders.
+    if (!capability || !data.fileId) return;
+    // Kick off the deferred capability-discovery fetch NOW (well before the user reads the
+    // card and clicks it) so ndaReviewBindingId is resolved by dispatch time.
+    setNdaReviewCapabilityNeeded(true);
+    setNdaReviewConsumerType(capability.consumerType);
+    const file = { fileId: data.fileId, fileName: data.fileName ?? "the document", cardLabel: capability.cardLabel };
+    ndaReviewFileRef.current = file; // same-tick guarantee for getAppendedLocalChips (see ref note above)
+    setNdaReviewFile(file);
+  }, []);
 
   // Stable-ref indirection keeps eventBatch → chips composition acyclic.
   const acceptChipsRef = React.useRef<(raw: unknown) => void>(() => undefined);
@@ -366,12 +658,28 @@ export function ConversationPane(): React.JSX.Element {
     getSessionId,
     enqueueAssistantMessage: injection.enqueue,
     onChips: React.useCallback((raw: unknown) => acceptChipsRef.current(raw), []),
+    onClassified: handleNdaClassified,
   });
+
+  // CHAT-4 (UAT 2026-07-19): track the live transcript length so the get-started cards render
+  // whenever the transcript is EMPTY — including a restored-but-empty session (where the old
+  // `chatSessionId === null` gate was false). Kept in sync via SprkChat's onMessagesChange.
+  //
+  // task 024 (spec FR-08): declared here (moved up from its original spot further below) so
+  // `hasPriorMessages` is available for the `useAttachments` call immediately below — a file
+  // attach mid-chat needs to know, AT ATTACH TIME, whether the chat already has messages.
+  const [chatMessageCount, setChatMessageCount] = React.useState(0);
+  // UAT round-6 (item #15b): a ref mirror so the bus-driven restore-adoption listener reads the CURRENT
+  // transcript length synchronously (its guard must never clobber a conversation the user is mid-way
+  // through). usePaneEvent always invokes the latest closure, so this stays fresh.
+  const chatMessageCountRef = React.useRef(chatMessageCount);
+  chatMessageCountRef.current = chatMessageCount;
 
   const attachments = useAttachments({
     bffBaseUrl,
     chatSessionId,
     hasActiveWorkspaceDocument: entityContext !== null,
+    hasPriorMessages: chatMessageCount > 0,
     authenticatedFetch,
     dispatch,
     inject: injection.inject,
@@ -389,6 +697,42 @@ export function ConversationPane(): React.JSX.Element {
   // files) route here. `handleDocAction` (the reused editor/email bridges) is declared further
   // below, so the chip strip reaches it through a ref rather than reordering hook declarations.
   const localChipActionRef = React.useRef<(actionId: string) => void>(() => undefined);
+  // nda-r1 follow-up: the NDA-REVIEW advisory-comments bridge (`emitFromResult`, defined further below
+  // with the other Compose bridges) is reached from the chips controller through this ref so the "Review
+  // an NDA" card path also materializes flagged clauses as Compose comments (not just raw JSON).
+  const ndaReviewEmitRef = React.useRef<(result: unknown) => void>(() => undefined);
+  // UAT round-4 (item #9): the "Rerun a full analysis" card's action needs
+  // `agreementReviewGate.rerunThorough`, but `agreementReviewGate` is constructed AFTER `chips`
+  // (it depends on `chips.dispatchBinding`) — reached through a ref, mirroring `ndaReviewEmitRef`
+  // immediately above. `useRerunFullAnalysisCard` itself is declared here (before `chips`) so its
+  // stable `showFor` callback can be threaded into `useConsumerChips`'s `onQuickReviewComplete` dep.
+  const rerunThoroughRef = React.useRef<(fileId: string, subDomainKey?: string) => Promise<void>>(
+    async () => undefined
+  );
+  const rerunFullAnalysisCard = useRerunFullAnalysisCard({
+    onRerun: React.useCallback((fileId: string, subDomainKey?: string) => {
+      void rerunThoroughRef.current(fileId, subDomainKey);
+    }, []),
+  });
+  // UAT round-5 #9 — center-screen progress modal for a running NDA review. Driven by the three real
+  // client transitions: dispatch-start (onChipDispatched, gated to the NDA binding), NDA-shaped terminal
+  // result (onDispatchResult), and dispatch-settle-without-result (a chips.dispatching effect → fail).
+  // Refs let the stable []-deps chip callbacks reach the current hook + binding id without re-subscribing.
+  const ndaRun = useNdaReviewRunProgress();
+  const ndaRunRef = React.useRef(ndaRun);
+  ndaRunRef.current = ndaRun;
+  const ndaReviewBindingIdRef = React.useRef<string | null>(null);
+  ndaReviewBindingIdRef.current = ndaReviewBindingId;
+  // UAT round-3 (item #8): broadcast the progress modal's visibility on the PaneEventBus so
+  // ReviewCompleteToast (shell/ReviewCompleteToast.tsx) can suppress a redundant completion toast
+  // while the modal itself is STILL showing the outcome (no double-notification per the decided
+  // matrix: dialog open+visible -> no toast; dismissed+on-tab -> no toast, existing active-tab
+  // suppression already covers it; dismissed+off-tab -> toast fires, the 071 notify-me case). The
+  // modal is now non-blocking (item #8), so "open+visible while on a DIFFERENT workspace tab" is a
+  // real reachable state that did not exist before this fix.
+  React.useEffect(() => {
+    dispatch("workspace", { type: "nda_review_progress_visibility", progressVisible: ndaRun.visible });
+  }, [ndaRun.visible, dispatch]);
   // R5-9 (UAT 2026-07-20): "Send as email" / Quick Start "Send Email" open the shared Email Compose
   // modal (SendEmailDialog / EmailComposer). `emailSeed` non-null = open; it carries the pre-fill
   // (subject / body / suggested recipients) captured from the last "Draft a response" result.
@@ -398,25 +742,85 @@ export function ConversationPane(): React.JSX.Element {
     initialSubject?: string;
     initialBody?: string;
   } | null>(null);
+  // R6-5 (UAT 2026-07-21): recipient (To/Cc/Bcc) directory lookup for the email modal. Reuses the
+  // same host-context Xrm.WebApi contacts/users search the standard CommunicationPage composer uses
+  // (searchUsersAndContacts → systemuser + contact; NO BFF/OBO per DATA-ACCESS-DECISION-CRITERIA).
+  const emailLookupDataService = React.useMemo(() => createXrmDataService(), []);
+  const handleSearchRecipients = React.useCallback(
+    (query: string) => searchUsersAndContacts(emailLookupDataService, query),
+    [emailLookupDataService]
+  );
   // P1-8 (UAT 2026-07-18): the chips' trailing "More…" affordance now opens Quick Start
   // (the playbook library is retired). Owned here so the `openLibraryModalRef` the chips
   // reach through (below) points at this modal instead of the library modal.
   const [quickStartOpen, setQuickStartOpen] = React.useState(false);
+  // ai-advanced-capabilities-analysis-hub-r1: which Quick Start tab opens. The
+  // Assistant menu / chips "More…" open 'create'; the Analysis grid `+ New`
+  // (via the `open_quick_start` intent below) opens 'analysis'.
+  const [quickStartTab, setQuickStartTab] = React.useState<"create" | "analysis">("create");
+  // UAT 2026-07-21 (#8): "What the Assistant remembers about you" review/delete dialog (host-owned so
+  // it has authenticatedFetch + bffBaseUrl), opened from the ⋮ Assistant Tools "Memory" entry.
+  const [memoryOpen, setMemoryOpen] = React.useState(false);
+  // D-043-01 (option c): drive the Suggested-Next-Steps DISPLAY reorder from the user's preference.
+  // The LEARNED signal (recent dispatch usage, localStorage) is the live source; a durable STATED
+  // override layers in via the `null` seam below once a structured `sprk_userprofile` order becomes
+  // client-projectable (buildChipPreference gives stated precedence when non-empty). `chipUsageTick`
+  // bumps after each dispatch so the preference re-reads usage and the next chip strip re-ranks.
+  const [chipUsageTick, setChipUsageTick] = React.useState(0);
+  const chipDisplayPreference = React.useMemo(
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- chipUsageTick is the intended recompute trigger
+    () => buildChipPreference(/* statedOrder seam */ null),
+    [chipUsageTick]
+  );
+  // UAT (2026-08-03): a file registered via the Compose→Assistant ingest path
+  // (`registerComposeActiveDocument`) is a real, actionable session file (its bytes are uploaded as a
+  // ChatSessionFile), but it lands ONLY in `activeSourceDocRef` (+ the `sourceDocReadyToken` bump) —
+  // NOT in the composer `attachmentChips` / `promotedChipIds` that `useAttachments.sessionAttachmentCount`
+  // counts. So the just-classified follow-on cards (Summarize this file / Draft a response / Review an NDA
+  // — all `requiresAttachments`) greyed out even though the Assistant clearly had the file. Fold the active
+  // source document into the attachment-gate count so those cards enable when a source doc is present.
+  // Keyed on `sourceDocReadyToken` (which bumps on every register) so the ref read stays REACTIVE — the
+  // memoized chip slot re-renders when a Compose-registered file becomes available.
+  const composeSourceDocCount = React.useMemo(
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sourceDocReadyToken is the reactive recompute trigger for the ref read
+    () => (activeSourceDocRef.current?.sessionFileId ? 1 : 0),
+    [sourceDocReadyToken]
+  );
   const chips = useConsumerChips({
     bffBaseUrl,
     getAccessToken,
     getSessionId,
     dispatch,
-    sessionAttachmentCount: attachments.sessionAttachmentCount,
+    // Gate on composer attachments UNION the Compose-registered active source doc (see composeSourceDocCount).
+    sessionAttachmentCount: Math.max(attachments.sessionAttachmentCount, composeSourceDocCount),
     enqueueAssistantMessage: injection.enqueue,
     inject: injection.inject,
     openLibraryModal: React.useCallback(() => openLibraryModalRef.current(), []),
     // UAT R4-6 / R4-11: local-action chips route through the ref to `handleLocalChipAction` (below).
     onLocalChipAction: React.useCallback((actionId: string) => localChipActionRef.current(actionId), []),
+    // nda-r1 follow-up: every Binding dispatch result on the chip/card path flows to the NDA-REVIEW
+    // advisory-comments bridge (via ref — defined below). Materializes flagged clauses as Compose
+    // comments for the "Review an NDA" card; safe no-op for every non-NDA result shape.
+    onDispatchResult: React.useCallback((result: unknown) => {
+      ndaReviewEmitRef.current(result);
+      // UAT round-5 #9 — an NDA-shaped terminal result completes the progress modal.
+      if (isNdaReviewResult(result)) ndaRunRef.current.complete();
+    }, []),
+    // UAT round-4 (item #9): a QUICK-depth review just completed — arm the "Rerun a full
+    // analysis" card (useRerunFullAnalysisCard.showFor is itself a stable, []-deps callback).
+    onQuickReviewComplete: rerunFullAnalysisCard.showFor,
     // R5-1: append "Revise in Compose" as an in-line card alongside the post-attach cards, once at
     // least one file is indexed. Reads the promoted-files ref so it reflects current state.
+    // nda-r1 follow-up (UAT 2026-07-26): also append "Review an NDA" (FIRST — the primary action for a
+    // just-classified NDA) when the classifier flagged the upload, replacing the old top-of-pane
+    // notification card. Both read refs so this stays a stable `[]`-deps callback.
     getAppendedLocalChips: React.useCallback(
-      () => (promotedFileIdsByNameRef.current.size > 0 ? [buildReviseInComposeChip()] : []),
+      () => [
+        // task 064: card label comes from the matched DocumentReviewCapability (defaults to
+        // "Review an NDA" for the NDA docType — unchanged behavior).
+        ...(ndaReviewFileRef.current ? [buildNdaReviewChip(ndaReviewFileRef.current.cardLabel)] : []),
+        ...(promotedFileIdsByNameRef.current.size > 0 ? [buildReviseInComposeChip()] : []),
+      ],
       []
     ),
     // R5-9: remember the last drafted correspondence so "Send as email" can seed the modal.
@@ -435,8 +839,152 @@ export function ConversationPane(): React.JSX.Element {
           : null,
       []
     ),
+    // D-043-01: the preference that reorders the suggested-next-step cards (learned usage today).
+    chipDisplayPreference,
+    // D-043-01: record each dispatched Binding as learned usage, then re-read the preference.
+    onChipDispatched: React.useCallback((bindingId: string) => {
+      recordChipUsage(bindingId);
+      setChipUsageTick((t) => t + 1);
+      // UAT round-5 #9 — when the NDA-review binding is the one dispatched (from the "Review an NDA"
+      // card OR its chip), open the center-screen progress modal.
+      if (ndaReviewBindingIdRef.current && bindingId === ndaReviewBindingIdRef.current) {
+        ndaRunRef.current.begin();
+        // UAT round-6 (item #15a) — THE dispatch-time chokepoint. Every review path (chip-quick,
+        // typed-gate, wizard-auto-run, rerun-thorough) funnels through this ONE `runBindingDispatch`
+        // callback, so stamping the cross-navigation resume flag HERE captures it for all of them —
+        // regardless of whether the user later dismisses the progress modal. WorkspacePane stamps the
+        // active home-surface Compose tab's persisted `run:{inFlight,dispatchedAt}` off this signal;
+        // completion clears it via `compose_advisory_comments`, failure via the `{false}` emit below.
+        dispatch("workspace", { type: "nda_review_dispatch_active", dispatchActive: true });
+      }
+    }, [dispatch]),
   });
   acceptChipsRef.current = chips.acceptChips;
+
+  // task 021 (FR-07/08/09 interactive orientation + confirmation gate) — the stateful gate
+  // controller. Declared AFTER `chips` (needs `chips.dispatchBinding`/`chips.acceptChips`) and
+  // AFTER `classifyBindingId`/`ndaReviewBindingId` (both resolved above via the SAME
+  // capability-discovery seam). `dataService` reuses the SAME Xrm.WebApi adapter instance the
+  // email-recipient lookup already created (§11 — one instance, two read-only consumers).
+  const agreementReviewGate = useAgreementReviewGate({
+    bffBaseUrl,
+    getAccessToken,
+    getSessionId,
+    dispatch,
+    dataService: emailLookupDataService,
+    classifyBindingId,
+    reviewBindingId: ndaReviewBindingId,
+    mountFileInCompose,
+    dispatchReviewBinding: chips.dispatchBinding,
+    acceptChips: chips.acceptChips,
+    enqueueAssistantMessage: injection.enqueue,
+    inject: injection.inject,
+    // task 031 (DEF-09 routing): resolves the reviewed file's REAL document session so the gate's
+    // dispatch(es) can target it via sessionIdOverride — see documentSessionWaiter.ts header.
+    awaitDocumentSessionId: awaitDocumentSessionIdFor,
+  });
+  // UAT round-4 (item #9): publish `rerunThorough` to the ref the "Rerun a full analysis" card
+  // reaches (declared above, before `chips`) — see that ref's doc comment.
+  rerunThoroughRef.current = agreementReviewGate.rerunThorough;
+
+  // task 023 (classifier-path lookup-write seam) — resolves the CLASSIFIER-determined subDomain for
+  // a session being promoted (`HistoryOverlay`'s "Promote to Analysis…"), so the promote flow can
+  // write the resolved `sprk_agreementtype` lookup onto the new Analysis (persistence-matches-
+  // routing; see `agreementTypeLookupWrite.ts`). Only the CURRENT session's classifier resolution is
+  // knowable client-side (`agreementReviewGate` is session-scoped, reset in `handleSessionCreated`)
+  // — promoting a DIFFERENT/older session from the History list deliberately returns `null` rather
+  // than guessing (never a fabricated lookup value). An EXPLICIT-door bind is NOT surfaced here — it
+  // already has a persisted lookup from its own door (wizard/deep-link/open-existing), so it needs
+  // no NEW write (see `getLastResolvedSubDomainKey`'s own doc comment).
+  const getLastResolvedSubDomainKey = agreementReviewGate.getLastResolvedSubDomainKey;
+  const resolveClassifiedSubDomainForSession = React.useCallback(
+    (sessionId: string): string | null => {
+      if (sessionId !== chatSessionIdRef.current) return null;
+      return getLastResolvedSubDomainKey();
+    },
+    [getLastResolvedSubDomainKey]
+  );
+
+  // UAT round-5 #9 — when a dispatch settles WITHOUT an NDA result having completed the run, mark it
+  // failed. `fail` no-ops unless the run is still `running` (a successful `complete` already won, since
+  // `onDispatchResult` runs before the dispatch's `.finally` clears `dispatching`). `ndaRun.fail` is a
+  // stable callback, so this effect only re-runs when `chips.dispatching` actually flips.
+  const ndaRunFail = ndaRun.fail;
+  React.useEffect(() => {
+    if (!chips.dispatching) ndaRunFail();
+  }, [chips.dispatching, ndaRunFail]);
+
+  // UAT round-6 (item #15a) — clear the cross-navigation resume flag on review FAILURE. `ndaRun.status`
+  // reaches 'error' ONLY when `fail()` fired while a review run was still 'running' (a genuine review
+  // failure — a successful `complete()` already transitioned to 'complete' and fail() no-ops). Emitting
+  // the `{dispatchActive:false}` clear exactly here means a failed run doesn't leave a stale in-flight
+  // flag that would resume a dead spinner+poll on a later return. The SUCCESS clear rides the separate
+  // `compose_advisory_comments` completion event (fires even for a zero-findings clean review), so this
+  // effect is failure-only.
+  React.useEffect(() => {
+    if (ndaRun.status === "error") {
+      dispatch("workspace", { type: "nda_review_dispatch_active", dispatchActive: false });
+    }
+  }, [ndaRun.status, dispatch]);
+
+  // ── spaarke-notification-spine-r1 task 051/052 (FR-16/FR-17): proactive-suggestion cards ──
+  // A `kind=suggestion` outbox row (task 050 producer) is delivered by the Layer-C
+  // spine via the task-021 `@spaarke/notifications` client, re-grounded through the
+  // BFF, and rendered as a compact card (SuggestionCard) — a SIBLING of the Click-path
+  // chips, independent of a dispatch turn. ACTING on it OPENS the regarding record in a
+  // MODAL (owner decision, task 052 / FR-17) — the modal-standard Layout 1
+  // (`Xrm.Navigation.navigateTo({ pageType: "entityrecord" }, { target: 2, 85% })`), so the
+  // Assistant is NOT navigated away. This is navigation, NOT a capability dispatch — it uses
+  // the existing `INavigationService` surface, so no second dispatch pipeline is introduced.
+  // ONE shared Xrm navigation service — also drives the saved-preview record open below.
+  const previewNavigationService = React.useMemo(() => createXrmNavigationService(), []);
+  const suggestions = useSuggestionCards({
+    subscribe: React.useCallback(
+      (kind, handler) => getNotificationsClient().registerHandler(kind, handler),
+      []
+    ),
+    // Re-fetch/re-ground: GET /api/notifications/pending (task 022) — oid-scoped +
+    // read-time expiry-filtered SERVER-side. Tolerant of the `{ items }` wrapper or a bare array.
+    fetchPending: React.useCallback(async (): Promise<ReadonlyArray<PendingSuggestionItem>> => {
+      const response = await authenticatedFetch(`${bffBaseUrl}/api/notifications/pending`, {
+        method: "GET",
+      });
+      const data: unknown = await response.json();
+      const items = Array.isArray(data)
+        ? data
+        : data && typeof data === "object" && Array.isArray((data as { items?: unknown }).items)
+          ? (data as { items: unknown[] }).items
+          : [];
+      return items as ReadonlyArray<PendingSuggestionItem>;
+    }, [authenticatedFetch, bffBaseUrl]),
+    // task 052 (FR-17): acting on a suggestion OPENS the regarding record in a modal
+    // (owner decision) — the shared INavigationService's Layout-1 `openRecordModal`
+    // (`navigateTo` entityrecord, `target: 2`, 85%). Navigation, not a capability dispatch,
+    // so no second dispatch pipeline. `openRecordModal` is optional on the interface; the
+    // Xrm adapter always provides it, and a re-fetch already confirmed the row is live.
+    onSuggestionAction: React.useCallback(
+      (envelope) =>
+        previewNavigationService.openRecordModal?.(
+          envelope.regardingRecordType,
+          envelope.regardingRecordId
+        ) ?? Promise.resolve(),
+      []
+    ),
+    // Dismiss 'x' (UAT 2026-07-22): POST /api/notifications/{id}/dismiss stamps sprk_dismissed
+    // server-side so the row leaves /pending (ownership enforced server-side). Also fired after a
+    // successful action so an acted-on suggestion does not reappear. Best-effort — a non-2xx is
+    // swallowed (the hook has already removed the card locally).
+    dismiss: React.useCallback(
+      async (outboxRowId: string): Promise<void> => {
+        await authenticatedFetch(
+          `${bffBaseUrl}/api/notifications/${encodeURIComponent(outboxRowId)}/dismiss`,
+          { method: "POST" }
+        );
+      },
+      [authenticatedFetch, bffBaseUrl]
+    ),
+    inject: injection.inject,
+  });
 
   // ── spaarkeai-assistant-enhancements-r1 P0(b): TEXT/agent-path surface launch ──
   // The BFF's BindingCapabilityTool emits a `surface_launch` SSE event when the
@@ -450,6 +998,27 @@ export function ConversationPane(): React.JSX.Element {
       if (!payload.consumerType) {
         return;
       }
+
+      // Registry-driven surface routing (no per-consumerType literals). The client
+      // launch registry (surfaceLaunchRegistry.ts) is the single source of truth for
+      // "which surface does this capability open"; we branch purely on the resolved
+      // entry's `kind`:
+      //  - workspace-tab / layout → open via the PaneEventBus `widget_load` channel
+      //    (Class-2a in-app tabs: grids/widgets, e.g. list-tasks → "My Tasks" grid).
+      //    Any future grid/widget surface is ONE registry entry — no code branch here.
+      //  - wizard / oob-form → fall through to the sessionStorage hand-off (launchSurface).
+      // The capability that opens a workspace tab drafts nothing — ignore any payload.
+      const surfaceEntry = resolveSurfaceLaunch(payload.consumerType);
+      if (surfaceEntry && (surfaceEntry.kind === "workspace-tab" || surfaceEntry.kind === "layout")) {
+        dispatch("workspace", {
+          type: "widget_load",
+          widgetType: surfaceEntry.surface,
+          widgetData: surfaceEntry.widgetData ?? {},
+          displayName: surfaceEntry.title,
+        } as WorkspacePaneEvent);
+        return;
+      }
+
       const draft =
         payload.payload && typeof payload.payload === "object" ? payload.payload : {};
       // Lift the server-enriched `resolvedLookups` out of draftValues so the
@@ -457,25 +1026,40 @@ export function ConversationPane(): React.JSX.Element {
       const { resolvedLookups: rawResolved, ...draftValues } = draft as Record<string, unknown> & {
         resolvedLookups?: Record<string, ResolvedLookup>;
       };
-      // W-2/W-5 file leg (UAT 2026-07-17): carry the session's active source file (the file the
-      // draft was grounded on) BY REFERENCE — sessionId + the session documentId are all the wizard
-      // needs to fetch the binary (GET .../documents/{id}/content) and attach it to the new record
-      // via its existing upload+link pipeline. Never inline binary (envelope invariant). Absent →
-      // no file carried (the wizard opens with an empty Add-file step, as today).
+      // W-2/W-5 file leg (UAT 2026-07-17): carry the session's file(s) BY REFERENCE — sessionId +
+      // the session documentId(s) are all the wizard needs to fetch the binary
+      // (GET .../documents/{id}/content) and attach it to the new record via its upload+link
+      // pipeline. Never inline binary (envelope invariant).
+      //
+      // R7-3 (UAT 2026-07-21): "create a matter from this file" opened the wizard with NO file
+      // loaded. Root cause: this path carried ONLY the single `activeSourceDocRef`, which is often
+      // still null right after an upload (it back-fills on the summarize/draft flow, not every
+      // upload). Prefer ALL promoted session files — the SAME source Quick Start uses
+      // (`promotedFileIdsByNameRef`) — falling back to the single active source doc. Keeps the
+      // server's drafted field values (this is still the server-driven surface_launch path).
       const sessionId = getSessionId();
-      const activeFile = activeSourceDocRef.current;
-      const fileIds = activeFile?.sessionFileId ? [activeFile.sessionFileId] : undefined;
+      const promoted = Array.from(promotedFileIdsByNameRef.current.entries());
+      let fileIds: string[] | undefined;
+      let sourceFiles: string[] | undefined;
+      if (promoted.length > 0) {
+        fileIds = promoted.map(([, id]) => id);
+        sourceFiles = promoted.map(([name]) => name);
+      } else {
+        const activeFile = activeSourceDocRef.current;
+        fileIds = activeFile?.sessionFileId ? [activeFile.sessionFileId] : undefined;
+        sourceFiles = activeFile?.fileName ? [activeFile.fileName] : undefined;
+      }
       void launchSurface({
         consumerType: payload.consumerType,
         draftValues,
         resolvedLookups: rawResolved ?? {},
         fileIds,
         source: sessionId ? { sessionId } : undefined,
-        provenance: activeFile?.fileName ? { sourceFiles: [activeFile.fileName] } : undefined,
+        provenance: sourceFiles && sourceFiles.length > 0 ? { sourceFiles } : undefined,
         bffBaseUrl,
       });
     },
-    [bffBaseUrl, getSessionId]
+    [bffBaseUrl, getSessionId, dispatch]
   );
 
   // UAT R4-12: the session's attached-file context for Quick Start wizards. Unlike the chip/text
@@ -631,8 +1215,20 @@ export function ConversationPane(): React.JSX.Element {
   const [savedPreview, setSavedPreview] = React.useState<{ documentId: string; fileName?: string } | null>(null);
   const [previewOpen, setPreviewOpen] = React.useState(false);
 
-  // FIX #7a — Xrm navigation service for the preview modal's "Open record" action (host-context; no BFF route).
-  const previewNavigationService = React.useMemo(() => createXrmNavigationService(), []);
+  // FIX #7a — the preview modal's "Open record" action reuses the ONE `previewNavigationService`
+  // hoisted above (also drives the task-052 suggestion-card modal open).
+
+  // ai-advanced-capabilities-nda-r1 task 031 — NDA-REVIEW advisory comments. A client-derived
+  // projection of the SAME ledgered NDA-REVIEW result (ADR-040; no second model call, no new
+  // server disposition). Detects the NDA-REVIEW output shape structurally (mirrors
+  // composeResultFormat.ts's mutually-exclusive-required-fields convention) and, on a match,
+  // emits `compose_advisory_comments` on the workspace channel so
+  // useComposeWorkspaceReceivers materializes a comment thread per flagged clause. See
+  // useNdaReviewAdvisoryCommentsBridge.ts for the full rationale.
+  const ndaReviewAdvisoryComments = useNdaReviewAdvisoryCommentsBridge({ dispatch, getSessionId });
+  // nda-r1 follow-up: publish emitFromResult to the ref the chips controller reaches (declared above the
+  // useConsumerChips call), so the "Review an NDA" card dispatch materializes flagged clauses as comments.
+  ndaReviewEmitRef.current = ndaReviewAdvisoryComments.emitFromResult;
 
   const dispatchComposeAction = React.useCallback(
     (request: ComposeActionRequest): Promise<DispatchConsumerResult> => {
@@ -657,6 +1253,11 @@ export function ConversationPane(): React.JSX.Element {
           const formatted =
             formatComposeActionResultMarkdown(dispatched.result) ?? formatEventOutputMarkdown(dispatched.result);
           injection.enqueue(makeLocalAssistantMessage(formatted));
+          // task 031 — a client-derived projection alongside the prose above (NDA-REVIEW's
+          // {overallRisk, flaggedSections[]} shape is not one of the 5 known Compose action
+          // shapes, so it renders via the formatEventOutputMarkdown fallback AND, here,
+          // separately materializes as document comments; no-op for any other action's result).
+          ndaReviewAdvisoryComments.emitFromResult(dispatched.result);
         }
         // Draft-alternative apply leg (Flow 5) — references the ledger entry, never the payload.
         // Capture the applied compose ledger key so the FR-17 undo/replace affordance targets THIS
@@ -671,17 +1272,28 @@ export function ConversationPane(): React.JSX.Element {
             // to a plain confirmation (no controls — there is no addressable edit to act on).
             // DEF-11: a whole-document revise uses the document-scoped confirmation copy; a
             // selection edit (DEF-09, unchanged) keeps the original wording. Same controls either way.
-            const confirmationText =
+            const baseConfirmation =
               request.revisionScope === "whole-document"
                 ? COMPOSE_WHOLE_DOCUMENT_EDIT_CONFIRMATION
                 : COMPOSE_EDIT_CONFIRMATION;
+            // UAT round-8 #7 — the reviewer asked for a Copilot-style explanation of WHAT/WHY changed
+            // (the summary-only confirmation gave no detail). Append the model's own rationale/summary
+            // from the edit result — the explanation ONLY, never the proposed text (that IS the redline).
+            const explanation = extractComposeEditExplanation(dispatched.result);
+            const confirmationText = explanation
+              ? `${baseConfirmation}\n\n**What I changed:** ${explanation}`
+              : baseConfirmation;
+            // task 042 (FR-12) — bold, separated clause-location header when resolvable (see
+            // extractComposeEditLocationLabel's doc comment for current wiring status + fallback).
+            const locationLabel = extractComposeEditLocationLabel(request, dispatched.result);
+            const finalConfirmationText = withComposeEditLocationHeader(confirmationText, locationLabel);
             injection.enqueue(
               ledgerRef
-                ? makeComposeEditControlsMessage(confirmationText, {
+                ? makeComposeEditControlsMessage(finalConfirmationText, {
                     ledgerRef,
                     bindingId: request.bindingId,
                   })
-                : makeLocalAssistantMessage(confirmationText)
+                : makeLocalAssistantMessage(finalConfirmationText)
             );
           }
           if (ledgerRef) {
@@ -693,8 +1305,11 @@ export function ConversationPane(): React.JSX.Element {
     },
     // Depend on the memoized `trackAppliedEdit` (stable), not the whole `supersession` object (new
     // identity each render) — keeps dispatchComposeAction stable so the bridge registration + serial
-    // queue don't re-register every render.
-    [actionQueue, injection, emitComposeApplyLeg, trackAppliedEdit]
+    // queue don't re-register every render. Same reasoning for
+    // `ndaReviewAdvisoryComments.emitFromResult` (itself stable — memoized on `[dispatch,
+    // getSessionId]`, both stable — see useNdaReviewAdvisoryCommentsBridge.ts) over the whole
+    // `ndaReviewAdvisoryComments` object, which is a fresh literal every render.
+    [actionQueue, injection, emitComposeApplyLeg, trackAppliedEdit, ndaReviewAdvisoryComments.emitFromResult]
   );
 
   // FR-17 affordance handlers (task 034). "Try another approach" passes the CURRENT
@@ -806,8 +1421,45 @@ export function ConversationPane(): React.JSX.Element {
   //                    message keeps the flow sensible even if the doc isn't saved yet (offer to open it).
   //  - "draft-email" → dispatch the Email workspace `widget_load` using the EXACT interop contract the
   //                    WorkspacePane owner's handler expects (the stub tab itself is created by that owner).
+  // task 022 — "Review an NDA" card click: (1) open the classified file in the Compose tab via
+  // the EXISTING `mountFileInCompose` helper (the SAME dynamic per-file widget_load seed
+  // "Revise document" already uses — the `nda-review` surfaceLaunchRegistry entry documents the
+  // same "compose" surface identity for a future TEXT-path surface_launch dispatch, but a
+  // static registry `widgetData` can't carry a per-click file id, so the CLICK path here reuses
+  // the existing dynamic helper directly rather than routing through resolveSurfaceLaunch);
+  // (2) dispatch NDA-REVIEW on that file through the SAME shared Click-path
+  // `chips.dispatchBinding` seam every other consumer chip uses (ADR-039 — one dispatch
+  // mechanism), scoping the run to just this file via `slots: { fileIds }` (the identical
+  // wire shape the server's own chip transitions already use — EventRulesService.cs).
+  const handleReviewNda = React.useCallback((): void => {
+    if (!ndaReviewFile) return;
+    const { fileId, fileName, cardLabel } = ndaReviewFile;
+    mountFileInCompose(fileId, fileName);
+    if (ndaReviewBindingId) {
+      // UAT round-3 (item #7): the direct chip/card click no longer dispatches immediately — it now
+      // presents the SAME one-turn Quick/Thorough depth ask task 070 built for the gate's other
+      // branches (reusing its `pendingDepthRef`/chip machinery, not a second mechanism). The chip
+      // click already committed the type (no `subDomain` slot either way — unchanged pre-070 wire
+      // shape), so the depth pick is the ONLY remaining question; `runDirectReview` handles the
+      // `awaitDocumentSessionIdFor`/`sessionIdOverride` threading (task 031 DEF-09) once answered.
+      agreementReviewGate.runDirectReview(fileId, fileName);
+    } else {
+      // Capability discovery hasn't resolved yet (or the catalog is unreachable) — the file still
+      // opens in Compose above; tell the user the review itself didn't start (never a silent drop).
+      // task 064: message derives from the matched capability's cardLabel instead of a hardcoded
+      // "NDA review" string, so it reads correctly for any registered document-review type.
+      injection.enqueue(
+        makeLocalAssistantMessage(`Sorry — "${cardLabel}" isn't available right now. Please try again.`)
+      );
+    }
+    setNdaReviewFile(null);
+  }, [ndaReviewFile, ndaReviewBindingId, mountFileInCompose, agreementReviewGate, injection]);
+
   const handleDocAction = React.useCallback(
     (action: ComposeDocAction): void => {
+      // R6-2: the user acted on a doc-action chip — clear the revise-context flag so the strip
+      // returns to the consumer cards (otherwise the doc-action row stays pinned all session).
+      setReviseChipsPending(false);
       switch (action) {
         case "summarize": {
           if (!summarizeBindingId) {
@@ -899,11 +1551,35 @@ export function ConversationPane(): React.JSX.Element {
           // R5-1: same on-demand open-in-Compose the files tray used to trigger.
           handleReviseInCompose();
           return;
+        case LOCAL_CHIP.ndaReview:
+          // nda-r1 follow-up (UAT 2026-07-26): the "Review an NDA" Suggested-Next-Steps card runs the
+          // SAME mount-in-Compose + dispatch-nda-review flow the old top-of-pane card used.
+          handleReviewNda();
+          return;
+        case LOCAL_CHIP.agreementReviewConfirmQuick:
+        case LOCAL_CHIP.agreementReviewConfirmThorough:
+        case LOCAL_CHIP.agreementReviewGeneral:
+        case LOCAL_CHIP.agreementReviewBoth:
+        case LOCAL_CHIP.agreementReviewDepthQuick:
+        case LOCAL_CHIP.agreementReviewDepthThorough:
+          // task 021 — the confirmation-gate chips (below-threshold confirm+depth / pick-another /
+          // non-agreement general-review escape hatch / composite "Both") all route back to the
+          // gate controller. task 070 — the standalone depth-choice chips (auto-proceed / explicit-
+          // door ask / composite post-pick) route the SAME way; the controller resolves the pending
+          // decision and dispatches the review.
+          agreementReviewGate.handleGateChipAction(actionId);
+          return;
         default:
+          // task 021 — the composite choice-of-lens chips carry a dynamic per-candidate id
+          // (`local:agreement-review-lens:{subDomainKey}`) that cannot be a fixed `case` label; the
+          // gate controller itself no-ops on any id it doesn't recognize (defensive, never throws).
+          if (actionId.startsWith("local:agreement-review-lens:")) {
+            agreementReviewGate.handleGateChipAction(actionId);
+          }
           return;
       }
     },
-    [handleDocAction, injection, handleReviseInCompose]
+    [handleDocAction, injection, handleReviseInCompose, handleReviewNda, agreementReviewGate]
   );
   localChipActionRef.current = handleLocalChipAction;
 
@@ -1133,6 +1809,13 @@ export function ConversationPane(): React.JSX.Element {
           // still can't double-emit.
           if (visible !== false && !composeIngestCeremonyFiredRef.current.has(sessionFileId)) {
             composeIngestCeremonyFiredRef.current.add(sessionFileId);
+            // UAT 2026-07-24: a file opened/uploaded in the Compose widget IS now a ChatSessionFile
+            // (this upload added it) — the Assistant can act on it — but the user only saw the two
+            // collapsed "File attached"/"File classified" entries and thought it was NOT attached in
+            // the Assistant. Lead with a PROSE affordance telling the user the file is now available
+            // here — the mirror of the Assistant→Compose "opened in Compose" message. Emitted FIRST so
+            // it sits above the two collapsed status entries (matches the reverse-direction ceremony).
+            injection.enqueue(makeLocalAssistantMessage(buildComposeAttachedToAssistantMessage(name)));
             const confirmation = buildFileConfirmationMessage([name]);
             if (confirmation !== null) {
               // P1-5: compact, collapsed-by-default file entry (was a full chat bubble).
@@ -1146,6 +1829,21 @@ export function ConversationPane(): React.JSX.Element {
         // Set BEFORE the active-document POST so a POST failure (chat-visibility loss) does NOT leave
         // this pointing at a STALE prior file — the bytes are already uploaded (sessionFileId is real).
         activeSourceDocRef.current = { sessionFileId, documentSessionId, fileName: name };
+        // task 031 (DEF-09 routing): back-fill the document-session waiter keyed by THIS file's
+        // session-file id — resolves any in-flight `awaitDocumentSessionIdFor(sessionFileId)` call
+        // (the agreement-review dispatch's routing wait) and remembers the value for a repeat review
+        // of an already-registered document. No-op when `documentSessionId` is undefined (a
+        // pointer-only registration with no session yet).
+        documentSessionWaiterRef.current.notify(sessionFileId, documentSessionId);
+        // task 033 (FR-17): bump the GENERIC source-doc readiness signal now that
+        // `activeSourceDocRef.sessionFileId` is real via THIS (Compose-register) path too — the
+        // race-safe buffered effects (notably the explicit-door auto-run, armed by the wizard
+        // hand-off BEFORE this register lands) re-run on it. Mirrors `handleSessionFileUploaded`'s
+        // bump exactly (the token is documented as "a generic 'a source doc just became ready'
+        // signal, not revise-specific"); pre-033 the chat-upload path was simply the only bump
+        // site because no machine-armed intent could precede a Compose-side registration. Effects
+        // whose own pending state is unset no-op on the re-run (each gates on its buffer).
+        setSourceDocReadyToken((t) => t + 1);
         // Wave 3 Part 2 (DEF-11 TEXT-path close): thread the tab's `documentSessionId` so the server
         // sets ChatSession.ActiveDocument.DocumentSessionId → BindingCapabilityTool routes a typed
         // revise/draft into THIS document session (redline in the open doc), not the chat session.
@@ -1217,7 +1915,10 @@ export function ConversationPane(): React.JSX.Element {
   // specific candidate-confidence flow (mirrors useCommandRouting's
   // `openLibraryModal([])` call for the same reason).
   // P1-8: the SNS/post-upload "More…" card opens Quick Start (was the retired playbook library).
-  openLibraryModalRef.current = () => setQuickStartOpen(true);
+  openLibraryModalRef.current = () => {
+    setQuickStartTab("create");
+    setQuickStartOpen(true);
+  };
   const commands = useCommandRouting({
     bffBaseUrl,
     authenticatedFetch,
@@ -1241,13 +1942,90 @@ export function ConversationPane(): React.JSX.Element {
   //   2b. Otherwise → show the mount-then-ask message + the four intent chips.
   // Gated on an active source document being present; every other message delegates verbatim to the
   // command-routing decorate (hard-slash / soft-slash / reference resolution — ADR-039 unchanged).
+  // ai-advanced-capabilities-nda-r1 task 011 (spec FR-04b): the Assistant's runtime model-tier
+  // picker selection. `null` (the default) means "unset" — decorateOutboundBody below omits the
+  // wire field entirely, so the dispatched Action's own sprk_modeltier governs exactly as before
+  // this control existed. A non-null selection is added to the outbound message body and rides
+  // sprk_modeltieroverride through the ONE tier→deployment resolver (ADR-016, task 010). Declared
+  // here (ABOVE handleDecorateOutboundBodyWithRevise) rather than beside the other simple UI state
+  // further down, because that callback's dependency array closes over it immediately below.
+  const [modelTierOverride, setModelTierOverride] = React.useState<AssistantModelTier | null>(null);
+
   const { handleDecorateOutboundBody } = commands;
   const handleDecorateOutboundBodyWithRevise = React.useCallback(
     async (body: Record<string, unknown>): Promise<Record<string, unknown> | null> => {
+      // ai-advanced-capabilities-nda-r1 task 011: only add the wire field when the user has picked a
+      // tier — omitted entirely on the (default) unset path, so the outbound body shape is byte-
+      // identical to pre-task-011 for every session that never touches the picker.
+      if (modelTierOverride !== null) {
+        body.modelTierOverride = modelTierOverride;
+      }
+
       const messageText = typeof body.message === "string" ? body.message : "";
-      const detection = detectReviseThisDocumentIntent(messageText);
       const hasActiveSourceDoc =
         activeSourceDocRef.current?.sessionFileId != null && chatSessionIdRef.current != null;
+
+      // task 021 (FR-07/08/09 interactive orientation + confirmation gate) — CHECKED FIRST, before
+      // the generic revise detector below: "review this document" (a review/assessment verb, no
+      // revise-specific verb/keyword) routes here instead of the whole-document revise flow
+      // (compose-revise-document) — design Lens 3d's canonical trigger phrase. task 023 (FR-09 the
+      // ONE routing decision point for both doors, per project instruction "not two"): when the
+      // session was launched ALREADY oriented (`explicitComposeLaunch?.subDomain` — the wizard /
+      // deep-link / open-existing envelope, task 022 delivers it on all three doors), the classifier
+      // NEVER gates the run — `runExplicit` binds the pack DETERMINISTICALLY (no confirm chips, no
+      // re-route); the classifier still runs, but only as a NON-BLOCKING, warn-only sanity check
+      // (ADR-041 — see agreementReviewGate.runExplicit / resolveAgreementReviewSanityMismatch). With
+      // no explicit subDomain, the classifier confirmation gate (`runGate`) runs as before. Negative
+      // criterion (project constraint, BOTH branches): a bare "review" with no document reference,
+      // or with NO active/uploading document, falls through unchanged to the normal agent turn —
+      // neither door ever fires on text alone.
+      if (detectAgreementReviewIntent(messageText)) {
+        const explicitSubDomain = explicitComposeLaunch?.subDomain;
+        if (hasActiveSourceDoc || attachments.uploadedFileCount > 0) {
+          // ALWAYS buffer through an effect (never dispatch inline here) — mirrors the
+          // revise/draft-document race-safe pattern: the review bindingId is resolved by a DEFERRED
+          // capability-discovery fetch enabled by `agreementReviewGateNeeded` just below, so it is
+          // virtually never ready on THIS same synchronous call (the very first trigger in a
+          // session). The buffered effect(s) below fire once BOTH the source file is registered AND
+          // the needed bindingId has resolved.
+          setAgreementReviewGateNeeded(true);
+          if (explicitSubDomain) {
+            setPendingExplicitAgreementReview({ subDomainKey: explicitSubDomain });
+          } else {
+            setPendingAgreementReview(true);
+          }
+          return null; // suppress the agent turn — the explicit bind or the classify->confirm->dispatch gate orchestrates
+        }
+        // No attached/target document — the negative criterion: fall through to the normal agent
+        // turn below (never fire either door on text alone).
+      }
+
+      const detection = detectReviseThisDocumentIntent(messageText);
+
+      // R6-6 (UAT 2026-07-21): the document is ALREADY open in Compose (a live document session).
+      // A revise/rewrite instruction should update the OPEN document, not answer in the chat pane.
+      if (activeComposeDocSessionId != null) {
+        // A specific-SECTION rewrite with nothing highlighted → the right tool is the in-document
+        // "Draft alternative" on the selected text, not a whole-document redline. Point the user there.
+        if (detectSectionRewriteIntent(messageText) && selection.selectionChip === null) {
+          injection.enqueue(
+            makeLocalAssistantMessage(
+              'To rewrite a specific section, highlight it in the document and choose "Draft alternative" from the selection toolbar. To rewrite the whole document, just say "rewrite the document".'
+            )
+          );
+          return null;
+        }
+        // A whole-document revise/rewrite → redline the open document (reuses the shipped edit path).
+        if (detection.isReviseThisDocument) {
+          dispatchReviseDocument(
+            detection.namedIntent ?? "custom",
+            detection.namedIntent ? undefined : messageText,
+            activeComposeDocSessionId
+          );
+          return null;
+        }
+      }
+
       if (detection.isReviseThisDocument) {
         if (hasActiveSourceDoc) {
           const mounted = mountActiveSourceDocInCompose();
@@ -1276,10 +2054,56 @@ export function ConversationPane(): React.JSX.Element {
           return null;
         }
       }
+
+      // R7-4 (UAT 2026-07-21): a substantial-output ask ("write a brief on X", "draft a memo",
+      // "analyze this agreement") should produce an editor-ready DOCUMENT in a Compose tab, NOT a
+      // long answer dumped into the chat. Route it to the shipped `compose-draft-document` capability
+      // (disposition = compose): the client dispatches it, `runBindingDispatch` opens a Compose tab
+      // from the result's `body_html` + posts a short confirmation + follow-on cards, and we SUPPRESS
+      // the raw agent turn. Deterministic (no reliance on the model picking the tool). The bindingId
+      // comes only from capability discovery (ADR-039); buffer until it resolves so the fetch latency
+      // never drops the request. Placed AFTER the revise branches so an open-document revise wins.
+      if (detectDraftDocumentIntent(messageText).isDraftDocument) {
+        setDraftCapabilityNeeded(true);
+        if (draftBindingId) {
+          chips.dispatchBinding(draftBindingId, { slots: { request: messageText } });
+        } else {
+          // Discovery not settled yet — acknowledge (never a silent dead-end) and buffer; the effect
+          // below dispatches the moment `draftBindingId` back-fills.
+          injection.enqueue(
+            makeLocalAssistantMessage("Preparing your document — I'll open it in the Compose tab.")
+          );
+          setPendingDraftDocument({ request: messageText });
+        }
+        return null;
+      }
+
       return handleDecorateOutboundBody(body);
     },
-    [handleDecorateOutboundBody, mountActiveSourceDocInCompose, injection, attachments.uploadedFileCount]
+    [
+      handleDecorateOutboundBody,
+      mountActiveSourceDocInCompose,
+      injection,
+      attachments.uploadedFileCount,
+      activeComposeDocSessionId,
+      dispatchReviseDocument,
+      selection.selectionChip,
+      draftBindingId,
+      chips,
+      modelTierOverride,
+      explicitComposeLaunch,
+    ]
   );
+
+  // R7-4 — fire a BUFFERED "draft a document" request the moment capability discovery resolves the
+  // `compose-draft-document` bindingId. Mirrors the named-intent revise effect: waits for BOTH a
+  // pending request AND the resolved bindingId, then dispatches once and clears the buffer.
+  React.useEffect(() => {
+    if (!pendingDraftDocument || !draftBindingId) return;
+    const { request } = pendingDraftDocument;
+    setPendingDraftDocument(null);
+    chips.dispatchBinding(draftBindingId, { slots: { request } });
+  }, [pendingDraftDocument, draftBindingId, chips]);
 
   // Wave 4 — fire a NAMED-intent revise the moment the auto-mount registers the document session.
   // `activeComposeDocSessionId` back-fills reactively from `registerComposeActiveDocument` (post-
@@ -1320,6 +2144,69 @@ export function ConversationPane(): React.JSX.Element {
     }
   }, [sourceDocReadyToken, pendingReviseThisDocument, mountActiveSourceDocInCompose, injection]);
 
+  // task 021 — the race-safe buffer for a natural-language "review this document" (agreement
+  // review-intent). Fires the classify+gate only once BOTH preconditions are met: (1) the source
+  // file is registered (`sourceDocReadyToken` — the same generic upload-readiness signal the
+  // revise buffer above consumes; already true immediately when `hasActiveSourceDoc` was true at
+  // detection time) AND (2) the deferred capability-discovery fetch has resolved
+  // `classifyBindingId` (mirrors the `pendingDraftDocument`/`draftBindingId` wait above) — every
+  // decorate-hook trigger buffers through here UNCONDITIONALLY (never dispatches inline) precisely
+  // because `classifyBindingId` is virtually never resolved on the same synchronous call that
+  // first flips `agreementReviewGateNeeded`.
+  const runAgreementReviewGate = agreementReviewGate.runGate;
+  React.useEffect(() => {
+    if (!pendingAgreementReview) return;
+    const active = activeSourceDocRef.current;
+    if (active?.sessionFileId == null || chatSessionIdRef.current == null) return;
+    if (!classifyBindingId) return;
+    setPendingAgreementReview(false);
+    void runAgreementReviewGate(active.sessionFileId, active.fileName);
+  }, [sourceDocReadyToken, pendingAgreementReview, runAgreementReviewGate, classifyBindingId]);
+
+  // task 023 (FR-09 explicit door) — the race-safe buffer for a "review this document" arriving on
+  // an ALREADY-oriented session. Gates on `ndaReviewBindingId` (the review dispatch target) rather
+  // than `classifyBindingId` — the explicit door dispatches deterministically and does not need the
+  // classifier ready to proceed (the sanity check inside `runExplicit` degrades gracefully via
+  // `runClassify`'s own null-safe contract if it resolves later or never). Both bindingIds come from
+  // the SAME shared capability-discovery fetch (`agreementReviewGateNeeded` enables it above), so in
+  // practice they resolve together.
+  const runExplicitAgreementReview = agreementReviewGate.runExplicit;
+  React.useEffect(() => {
+    if (!pendingExplicitAgreementReview) return;
+    const active = activeSourceDocRef.current;
+    if (active?.sessionFileId == null || chatSessionIdRef.current == null) return;
+    if (!ndaReviewBindingId) return;
+    const { subDomainKey, reviewDepth } = pendingExplicitAgreementReview;
+    setPendingExplicitAgreementReview(null);
+    void runExplicitAgreementReview(active.sessionFileId, active.fileName, subDomainKey, reviewDepth);
+  }, [sourceDocReadyToken, pendingExplicitAgreementReview, runExplicitAgreementReview, ndaReviewBindingId]);
+
+  // task 033 (FR-17) — the wizard auto-run BRIDGE-FAILURE watchdog (ADR-019 distinct surfacing).
+  // Armed by the wizard hand-off listener alongside the explicit-door buffer. Three outcomes:
+  //  - SUCCESS: the buffered effect above consumed `pendingExplicitAgreementReview` (dispatch
+  //    fired) → this effect re-runs, sees the buffer empty, and stands down silently.
+  //  - BRIDGE FAILURE: the DEF-10 register never landed a sessionFileId (upload failed / Compose
+  //    never mounted) → the buffer is still full when the timer fires → clear it + surface the
+  //    DISTINCT bridge-failure message. The Analysis stays consistent (created + bound before the
+  //    hand-off); recovery is the user's normal conversational "review this document".
+  //  - SESSION RESET: `handleSessionCreated` clears the buffer → same silent stand-down as success.
+  // The timer never resets on unrelated re-renders (deps are the two state objects, identity-stable
+  // until actually changed), and a text-armed buffer (no watchdog) keeps its shipped
+  // indefinite-buffer semantics untouched.
+  React.useEffect(() => {
+    if (!wizardAutoRunWatchdog) return undefined;
+    if (!pendingExplicitAgreementReview) {
+      setWizardAutoRunWatchdog(null);
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setPendingExplicitAgreementReview(null);
+      setWizardAutoRunWatchdog(null);
+      injection.enqueue(makeLocalAssistantMessage(WIZARD_AUTO_RUN_BRIDGE_FAILURE_MESSAGE));
+    }, WIZARD_AUTO_RUN_WATCHDOG_MS);
+    return () => clearTimeout(timer);
+  }, [wizardAutoRunWatchdog, pendingExplicitAgreementReview, injection]);
+
   // R4-4 (UAT 2026-07-19) — the FIX #7 AUTO-LOAD-on-attach effect was REMOVED. Owner reversed the
   // earlier decision: attaching files should NOT auto-open Compose (uploading 2 files spawned 2 Compose
   // tabs, which was jarring). Opening a file in Compose is now an ON-DEMAND action — the "Revise in
@@ -1344,6 +2231,8 @@ export function ConversationPane(): React.JSX.Element {
   const { resetForSession: resetAttachments } = attachments;
   const { resetForSession: resetChips } = chips;
   const { resetForSession: resetEventBatch } = eventBatch;
+  // UAT round-4 (item #9): the "Rerun a full analysis" card's own reset.
+  const { resetForSession: resetRerunFullAnalysisCard } = rerunFullAnalysisCard;
   const handleSessionCreated = React.useCallback(
     (session: IChatSession) => {
       if (!session?.sessionId) return;
@@ -1370,8 +2259,33 @@ export function ConversationPane(): React.JSX.Element {
       // R5-D (2026-07-07): the execution-trace replay buffer is session-scoped —
       // a fresh session must not replay the previous session's tool calls.
       clearExecutionTraceBuffer();
+      // task 022: a fresh session has no pending "Review an NDA" card.
+      setNdaReviewFile(null);
+      // task 064: reset the resolved consumerType to the default alongside the file — keeps the
+      // two pieces of state consistent even though only `ndaReviewFile` gates behavior.
+      setNdaReviewConsumerType("nda-review");
+      // task 021: a fresh session drops any pending confirmation-gate decision + per-file resolved
+      // cache (a new session has no already-oriented files) and any buffered race-safe gate intent.
+      agreementReviewGate.resetForSession();
+      setPendingAgreementReview(false);
+      // task 023: a fresh session also drops any buffered EXPLICIT-door review intent.
+      setPendingExplicitAgreementReview(null);
+      // task 031: a fresh session drops any known/pending document-session routing state — a prior
+      // session's file ids/session ids must never leak into a new session's resolution.
+      documentSessionWaiterRef.current.reset();
+      // UAT round-4 (item #9): a fresh session has no pending "Rerun a full analysis" card — it is
+      // session-turn-scoped plain state, never persisted, so a prior session's card must not survive.
+      resetRerunFullAnalysisCard();
     },
-    [setChatSessionId, clearRefinementPrompts, resetAttachments, resetChips, resetEventBatch]
+    [
+      setChatSessionId,
+      clearRefinementPrompts,
+      resetAttachments,
+      resetChips,
+      resetEventBatch,
+      agreementReviewGate,
+      resetRerunFullAnalysisCard,
+    ]
   );
 
   const handleHeaderCollapse = React.useCallback(() => {
@@ -1404,6 +2318,113 @@ export function ConversationPane(): React.JSX.Element {
     },
     [setChatSessionId, startNewSession]
   );
+
+  // ai-advanced-capabilities-analysis-hub-r1 task 031 (FR-11): a DIFFERENT pane (the
+  // AnalysisHubWidget grid's row-open handler) asks this pane to adopt an EXISTING session —
+  // e.g. reopening an Analysis from the hub grid. Reuses the IDENTICAL mechanism the History
+  // menu already uses (`handleSelectHistorySession`): adopt the id + remount SprkChat, whose
+  // own `resumeSession()`/`loadHistory()` mount-effect restores the transcript (TTL-safe —
+  // `ChatSessionManager.GetSessionAsync` already falls back Redis→Cosmos→Dataverse per the
+  // task-025 hardening). No new restore mechanism; additive `conversation.session_switch`
+  // discriminant (ADR-030).
+  usePaneEvent("conversation", (event) => {
+    if (event.type === "session_switch" && event.sessionId) {
+      handleSelectHistorySession(event.sessionId);
+    } else if (event.type === "open_quick_start") {
+      // ai-advanced-capabilities-analysis-hub-r1: the Analysis grid `+ New`
+      // asks us to open the ONE Quick Start modal on a given tab. Default to
+      // 'create' if unspecified.
+      setQuickStartTab(event.quickStartTab ?? "create");
+      setQuickStartOpen(true);
+    }
+  });
+
+  // task 033 (FR-17) — the wizard→review auto-run hand-off listener. The Create-Analysis wizard's
+  // finish hook dispatches the SAME `widget_load{widgetType:'compose'}` seed WorkspacePane consumes
+  // to open the document, now additionally carrying `{ composeSessionId, analysisId, subDomain,
+  // autoRunReview }` (ComposeWidgetSeed, agreement work-type only). This pane rides the SAME bus
+  // event (no new channel/event type — ADR-030) to do its two legs:
+  //  (1) ADOPT the wizard-minted ANALYSIS-OWNED session as the pane's active chat session — the
+  //      IDENTICAL adopt+remount mechanism the History menu / hub-grid `session_switch` use
+  //      (`handleSelectHistorySession`), plus the SAME synchronous ref update `ensureChatSession`
+  //      documents (so a same-tick / pre-re-render `getSessionId()` reader — notably the DEF-10
+  //      register's lazy-create guard — sees the adopted id and never mints a SECOND session).
+  //      ComposeWorkspace independently resumes this SAME session as its document session
+  //      (`initialSessionId` → BFF Load resume), so chat ≡ document session: the register's file
+  //      upload, the review's `sessionIdOverride` dispatch, and the compose-outputs read all
+  //      target ONE session (DEF-09 holds; no file-id impedance).
+  //  (2) ARM the shipped explicit review door (task 023's buffer — `runExplicit` on the picked
+  //      sub-domain's pack, deterministic, no classifier gate) + the bridge-failure watchdog. The
+  //      buffered effect fires when the DEF-10 register lands the sessionFileId (the register's
+  //      `sourceDocReadyToken` bump) AND capability discovery resolves the review bindingId.
+  // A seed WITHOUT the hand-off fields (every non-wizard compose open — upload door, Browse,
+  // "Open in Compose", revise mounts) returns immediately: zero behavior change.
+  usePaneEvent("workspace", (event) => {
+    const evt = event as WorkspacePaneEvent & {
+      widgetType?: string;
+      widgetData?: { compose?: ComposeWidgetSeed };
+    };
+    if (evt.type !== "widget_load" || evt.widgetType !== "compose") return;
+    const seed = evt.widgetData?.compose;
+    const composeSessionId = seed?.composeSessionId;
+    const analysisId = seed?.analysisId;
+
+    // UAT round-6 (item #15b) — RESTORE re-adoption branch. WorkspacePane's item-#13 cold-load restore
+    // reopens a persisted home-surface Compose tab with `composeSessionId` threaded but NO `analysisId`
+    // (the direct-Compose door is unbound — no wizard hand-off). On cold reload the Assistant pane's own
+    // session (persisted via AiSessionProvider's sessionStorage) can be lost across the code-page iframe
+    // teardown, so it cold-starts "back at the Review an NDA step". Re-adopt the restored tab's session
+    // — the SAME `handleSelectHistorySession` mechanism the wizard branch below and the History menu use
+    // — so the transcript CONTINUES on return.
+    //
+    // GUARD (never clobber an active conversation the user started after returning): adopt AT MOST once
+    // per mount, only when this pane is on a FRESH/DEFAULT session — i.e. it hasn't already adopted the
+    // restored session (`chatSessionIdRef !== composeSessionId`) AND the current transcript is empty
+    // (`chatMessageCountRef.current === 0`). The restore `widget_load` is dispatched macrotask-early on
+    // cold load (WorkspacePane defers it after `tabRestoreSettled`), before the user could realistically
+    // send a message; the empty-transcript check is the belt-and-braces "fresh session" gate. If the
+    // Assistant legitimately resumed the SAME review session already, the id-equality check makes this a
+    // no-op; if it resumed a DIFFERENT session that already has messages, the empty-transcript check
+    // blocks the clobber.
+    if (composeSessionId && !analysisId) {
+      if (restoreSessionAdoptedRef.current) return;
+      if (chatSessionIdRef.current === composeSessionId) return; // already on the restored session
+      if (chatMessageCountRef.current > 0) return; // an active conversation exists — never clobber
+      restoreSessionAdoptedRef.current = true;
+      // Synchronous ref update FIRST (ensureChatSession's documented pattern) so any same-tick
+      // getSessionId() reader sees the adopted session before the re-render lands.
+      chatSessionIdRef.current = composeSessionId;
+      handleSelectHistorySession(composeSessionId);
+      return;
+    }
+
+    if (!composeSessionId || !analysisId) return; // not a wizard hand-off seed
+    if (wizardAutoRunHandledRef.current.has(analysisId)) return; // once per Analysis
+    wizardAutoRunHandledRef.current.add(analysisId);
+
+    if (chatSessionIdRef.current !== composeSessionId) {
+      // Synchronous ref update FIRST (ensureChatSession's own documented pattern) so any
+      // same-tick getSessionId() reader sees the adopted session before the re-render lands.
+      chatSessionIdRef.current = composeSessionId;
+      handleSelectHistorySession(composeSessionId);
+    }
+
+    if (seed?.autoRunReview === true && seed.subDomain) {
+      // Enable the SAME deferred capability-discovery fetch the text door uses, so the review
+      // bindingId resolves by the time the buffered effect needs it (never dispatch inline here —
+      // the bindingId is virtually never resolved on this synchronous tick).
+      setAgreementReviewGateNeeded(true);
+      // task 070 (UAT2 review-depth selector): the wizard's "Analysis Details" step now carries an
+      // additive `reviewDepth` toggle (defaults to Thorough). Reading it here — normalized, never
+      // trusting the wire value blindly — means `runExplicit` dispatches IMMEDIATELY at the picked
+      // depth instead of inserting a post-open ask (see runExplicit's two-mode contract).
+      setPendingExplicitAgreementReview({
+        subDomainKey: seed.subDomain,
+        reviewDepth: normalizeReviewDepth(seed.reviewDepth),
+      });
+      setWizardAutoRunWatchdog({ analysisId });
+    }
+  });
 
   // ── OutcomeCard next-step chips (F-4, e2e-completion-audit 2026-07-10) ──────
   // A completed side-effect's OutcomeCard renders DECLARED next-step chips
@@ -1453,14 +2474,24 @@ export function ConversationPane(): React.JSX.Element {
   // then true after it resolves — a hook placed BELOW the guard would run in the second render but
   // not the first, changing the hook count and throwing "rendered more hooks than during the previous
   // render". Keep every hook call above the guard.
+  // R6-2 (UAT 2026-07-21): show ONE chip row at a time. Right after a "revise the document" mount,
+  // the compose-context doc-action chips (Summarize / Add-to-DMS / Draft-email) are the relevant
+  // next-steps, so they REPLACE the generic consumer cards instead of stacking a second row. Once
+  // the user acts (handleDocAction clears reviseChipsPending), the consumer cards resume.
   const transcriptFooter = React.useMemo(
     () => (
       <>
-        {reviseChipsPending ? <ComposeDocActionChips onAction={handleDocAction} /> : null}
-        {chips.consumerChipsSlot}
+        {/* UAT round-6 (item #14): the "Rerun a full analysis" card renders FIRST in the transcript
+            footer — i.e. INLINE in the transcript, directly beneath the last message, which right after
+            a Quick review is the "Quick scan — … I've finished reviewing…" completion message. It
+            scrolls WITH the conversation (it lives inside SprkChat's transcriptFooterSlot) instead of
+            floating pinned at the top of the pane (the owner's round-6 complaint). Renders nothing until
+            a quick run arms it; single-slot (never stacks). */}
+        {rerunFullAnalysisCard.cardSlot}
+        {reviseChipsPending ? <ComposeDocActionChips onAction={handleDocAction} /> : chips.consumerChipsSlot}
       </>
     ),
-    [reviseChipsPending, handleDocAction, chips.consumerChipsSlot]
+    [rerunFullAnalysisCard.cardSlot, reviseChipsPending, handleDocAction, chips.consumerChipsSlot]
   );
 
   // task 042 (FR-F3) — My Assistant questionnaire: open-state, cold-start gate, write/erase path.
@@ -1473,11 +2504,6 @@ export function ConversationPane(): React.JSX.Element {
   const [profileNudgeDismissed, setProfileNudgeDismissed] = React.useState(false);
   const showProfileNudge =
     myAssistant.available && myAssistant.needsProfile && !profileNudgeDismissed;
-
-  // CHAT-4 (UAT 2026-07-19): track the live transcript length so the get-started cards render
-  // whenever the transcript is EMPTY — including a restored-but-empty session (where the old
-  // `chatSessionId === null` gate was false). Kept in sync via SprkChat's onMessagesChange.
-  const [chatMessageCount, setChatMessageCount] = React.useState(0);
 
   // ── Auth loading guard (gate on isAuthenticated — never a token snapshot) ──
   // NOTE (Rules of Hooks): every React.use* call MUST appear ABOVE this early return — see the
@@ -1514,6 +2540,16 @@ export function ConversationPane(): React.JSX.Element {
 
   return (
     <div className={styles.root}>
+      {/* UAT round-5 #9 — center-screen live-progress popup while an NDA review runs (portals to
+          document.body, so its placement in the tree is immaterial). UAT round-3 item #8: now
+          non-blocking (modalType="non-modal") + dismissible via ndaRun.visible/dismiss — see
+          useNdaReviewRunProgress.ts. */}
+      <NdaReviewProgressModal
+        status={ndaRun.status}
+        visible={ndaRun.visible}
+        onClose={ndaRun.close}
+        onDismiss={ndaRun.dismiss}
+      />
       <PaneHeader
         title="Assistant"
         icon={<ChatRegular />}
@@ -1527,6 +2563,8 @@ export function ConversationPane(): React.JSX.Element {
               onSelectSession={handleSelectHistorySession}
               bffBaseUrl={bffBaseUrl}
               authenticatedFetch={authenticatedFetch}
+              resolveClassifiedSubDomain={resolveClassifiedSubDomainForSession}
+              dataService={emailLookupDataService}
             />
             {/* R4-5: New session — clears the persisted session id and remounts
                 SprkChat to mint a fresh session. PaneHeader's rightSlot already
@@ -1549,8 +2587,19 @@ export function ConversationPane(): React.JSX.Element {
                 rightSlot. task 042 (FR-F3): "My Assistant" opens the stated-profile
                 questionnaire. */}
             <AssistantToolMenu
+              // R7-1 (UAT 2026-07-21): route "Quick Start" to the ONE ConversationPane-owned modal
+              // (below) instead of AssistantToolMenu's own instance. That modal carries the session
+              // file context + email handler + the R7-2 next-step injection, and — because opening it
+              // never remounts SprkChat — the follow-up suggestion pills survive (the dual-modal path
+              // was the one that lost them). AssistantToolMenu delegates to this prop when supplied.
+              onQuickStart={() => {
+                setQuickStartTab("create");
+                setQuickStartOpen(true);
+              }}
               onMyAssistant={myAssistant.openDialog}
               highlightMyAssistant={myAssistant.needsProfile}
+              // #8 (UAT 2026-07-21): the "Memory" entry opens the remembers-about-you review dialog.
+              onMemory={() => setMemoryOpen(true)}
             />
           </>
         }
@@ -1594,6 +2643,27 @@ export function ConversationPane(): React.JSX.Element {
           </MessageBar>
         )}
 
+        {/* task 051 (FR-16): proactive suggestions render at the top of the pane — they arrive
+            from the Layer-C spine independent of a dispatch turn, so they are NOT in the
+            transcript-footer chip slot. Renders nothing when there are no live suggestions. */}
+        {suggestions.suggestionSlot}
+
+        {/* UAT round-4 (item #9): "Rerun a full analysis" — a persistent act-on CARD (not a chip;
+            ASSISTANT-UI-ELEMENT-CRITERIA.md) offered after a QUICK-depth review completes.
+            UAT round-6 (item #14): the card MOVED OUT of this top-of-pane region (it read as pinned
+            above the notifications area) and INTO the transcript footer (SprkChat.transcriptFooterSlot,
+            see `transcriptFooter` above), so it renders inline beneath the "Quick scan…" completion
+            message and scrolls WITH the conversation. */}
+
+        {/* nda-r1 follow-up (UAT 2026-07-26): "Review an NDA" moved OUT of this top-of-pane
+            notification slot (it read as "hidden" above the fold) and INTO the Suggested-Next-Steps
+            strip as an in-line card, alongside "Summarize this file / Revise document". See
+            getAppendedLocalChips + LOCAL_CHIP.ndaReview → handleReviewNda. Rendered only when the
+            classifier flagged the upload as a registered document-review type (host gates on
+            ndaReviewFileRef; task 064 generalized the docType→capability match to a small registry
+            in localActionChips.ts, DOCUMENT_REVIEW_CAPABILITIES — today only "nda" is registered,
+            so behavior is unchanged). */}
+
         {showWelcomePanel && <WelcomePanel />}
         {showWelcomeCards && (
           <WelcomeStartCards
@@ -1601,7 +2671,10 @@ export function ConversationPane(): React.JSX.Element {
             onCreateMatter={handleWelcomeCreateMatter}
             onCompose={handleWelcomeCompose}
             // R4-2 (UAT 2026-07-19): "More…" opens the Quick Start modal (same modal the ⋮ menu uses).
-            onMore={() => setQuickStartOpen(true)}
+            onMore={() => {
+              setQuickStartTab("create");
+              setQuickStartOpen(true);
+            }}
           />
         )}
 
@@ -1696,6 +2769,18 @@ export function ConversationPane(): React.JSX.Element {
               // post-mount document-action chips ABOVE them in the SAME footer slot (both beneath the
               // last message). The node is memoized so slot-keyed auto-scroll fires only on change.
               transcriptFooterSlot={transcriptFooter}
+              // ai-advanced-capabilities-nda-r1 task 011 (FR-04b): the runtime model-tier picker,
+              // rendered directly above the composer via SprkChat's `aboveInputSlot` seam (the
+              // Click-path next-step chip strip's former slot — see types.ts doc; this is now its
+              // only consumer). Disabled during the same in-flight windows the composer itself locks
+              // on, so the picker can't change mid-turn.
+              aboveInputSlot={
+                <AssistantModelTierPicker
+                  value={modelTierOverride}
+                  onChange={setModelTierOverride}
+                  disabled={attachments.isPromoting || eventBatch.isEventInFlight || chips.dispatching}
+                />
+              }
               onPlaybookChange={playbook.handlePlaybookChange}
               predefinedPrompts={predefinedPrompts}
               hostContext={hostContext}
@@ -1757,10 +2842,25 @@ export function ConversationPane(): React.JSX.Element {
         </div>
       </div>
 
-      {/* P1-8: Quick Start opened from the chips' "More…" card (see openLibraryModalRef). */}
+      {/* P1-8: Quick Start opened from the chips' "More…" card (see openLibraryModalRef) AND, since
+          R7-1, from the ⋮ "Quick Start" menu (onQuickStart above) — the ONE modal for both entries. */}
       <QuickStartModal
         open={quickStartOpen}
         onClose={() => setQuickStartOpen(false)}
+        initialTab={quickStartTab}
+        // ai-advanced-capabilities-analysis-hub-r1: the Analysis tab's "Agreement Review"
+        // card. Close Quick Start, then ask WorkspacePane (which injects the wizard's
+        // Xrm services + resolves regarding from the host record) to host the Create
+        // Analysis wizard AS A MODAL. The wizard does not take a tab; on finish it opens
+        // its result tab as today.
+        onCreateAnalysis={(workTypeValue, workTypeLabel) => {
+          setQuickStartOpen(false);
+          dispatch("workspace", {
+            type: "open_create_analysis_wizard",
+            analysisWorkType: workTypeValue,
+            analysisWorkTypeLabel: workTypeLabel,
+          });
+        }}
         getFileContext={getQuickStartFileContext}
         // R5-9: Quick Start "Send Email" opens the shared Email Compose modal (blank), not the
         // playbook-library web resource. Close Quick Start first so the two modals don't stack.
@@ -1768,6 +2868,52 @@ export function ConversationPane(): React.JSX.Element {
           setQuickStartOpen(false);
           setEmailSeed({});
         }}
+        // R7-2 (UAT 2026-07-21): a launched wizard opens in a separate tab, leaving the Assistant
+        // pane with no next step. Inject a determinative next-step message so the pane never
+        // dead-ends; the consumer cards (transcriptFooter) remain as follow-on actions. Only the
+        // wizard/surface cards navigate away — the in-app cards (Send Email / Meeting) don't need it.
+        onCardLaunched={(cardId) => {
+          const WIZARD_CARDS = [
+            "create-matter-wizard",
+            "create-project-wizard",
+            "assign-work",
+            "document-upload-wizard",
+            "find-similar-wizard",
+          ];
+          if (WIZARD_CARDS.includes(cardId)) {
+            injection.enqueue(
+              makeLocalAssistantMessage(
+                "I've started that for you in a separate tab. When you're back, you can attach a file, ask a question about it, or pick another next step below.",
+              ),
+            );
+          }
+        }}
+      />
+
+      {/* task 024 (spec FR-08): attaching a file to a LIVE chat (prior messages already exist)
+          prompts new-session vs add-to-current — never a silent default. "New session" pairs the
+          hook's file-carryover bookkeeping (prepareFilesForNewSession) with the EXISTING
+          "New session" seam (handleNewSession — clear + remount, task 021/022/023's archive
+          semantics: the prior session stays fully retrievable from History regardless, since
+          ListRecentSessionsAsync is not filtered by the Dataverse archived marker) so no new
+          client-side session/fork logic is introduced here. */}
+      <FileAttachSessionPrompt
+        pending={attachments.pendingFileSessionChoice}
+        onChooseNewSession={() => {
+          attachments.prepareFilesForNewSession();
+          handleNewSession();
+        }}
+        onChooseAddToCurrent={attachments.chooseAddToCurrentSession}
+        onDismiss={attachments.dismissFileSessionChoice}
+      />
+
+      {/* #8 (UAT 2026-07-21): "What the Assistant remembers about you" — review + forget over the
+          shipped GET/DELETE /api/memory/user endpoints. Opened from the ⋮ Assistant Tools "Memory" entry. */}
+      <MemoryDialog
+        open={memoryOpen}
+        onClose={() => setMemoryOpen(false)}
+        authenticatedFetch={authenticatedFetch}
+        bffBaseUrl={bffBaseUrl}
       />
 
       {/* R5-9 (UAT 2026-07-20): the shared Email Compose modal (SendEmailDialog → EmailComposer).
@@ -1780,6 +2926,7 @@ export function ConversationPane(): React.JSX.Element {
         initialSubject={emailSeed?.initialSubject}
         initialBody={emailSeed?.initialBody}
         initialBodyFormat="PlainText"
+        onSearchRecipients={handleSearchRecipients}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={bffBaseUrl}
         onSent={() => setEmailSeed(null)}

@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>Knowledge packs — NDA pack (taxonomy home) + general fallback + registry refs</title>
+    <phase>0 Foundation</phase>
+    <gate>unblocked (deps 001,002 both completed this session)</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Grounding-data authoring + registry value updates; no product code. The grounding-zero risk is covered by an explicit verification step, not code review.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Content restructuring against a fully-specified pack shape; the high-judgment prompt work happened in 002.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001,002</deps>
+    <tags>ai, rag, data</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Make the knowledge sub-domain axis real: the NDA pack becomes the home of the B1–B16 clause taxonomy/rubric that
+    task 002 de-embedded from the prompt, a broad GENERAL agreement-review fallback pack is authored, and both are
+    referenced from sprk_agreementtype behavior columns so the router can bind them.
+  </prompt>
+  <role>SPAARKE AI grounding author. RAG reference indexing, knowledge-pack structure, retrieval verification.</role>
+  <goal>
+    NDA + general packs exist in the reference index; sprk_agreementtype rows nda/general point at them
+    (sprk_knowledgepackref) with classification cues set; production-filter retrieval returns non-zero chunks for both.
+  </goal>
+
+  <context>
+    <background>
+      nda-r1 seeded the Spaarke NDA Standard (KNW-011) into spaarke-rag-references with tenantId="system"; the B1–B16
+      clause-name taxonomy currently lives as labels in the nda-review prompt (002 removes it). The pack shape must give
+      the generalized Action what "HOW TO COMPARE" needs: clause taxonomy + firm positions per clause. The GENERAL pack
+      is the deliberately-lower-value fallback: broad agreement-review guidance (common clause categories, generic risk
+      posture) — enough to run a useful review with no type-specific standard. nda-r1 LESSON (grounding-zero): the
+      tenantId RAG filter once returned 0 of 8 golden chunks while output "looked grounded" — ALWAYS verify with the
+      EXACT production retrieval filter against the live index.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/ai-advanced-capabilities-nda-r1/notes/spaarke-nda-standard-baseline.md</file>
+      <file role="modify">infra/dataverse/sprk_agreementtype-rows.json (behavior values)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceRetrievalService.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">registry rows + behavior columns to point at packs</dependency>
+      <dependency task="002" status="pending">the de-embedded taxonomy + what the generalized prompt expects from retrieval</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Pack content is grounding DATA consumed via retrieval — the Action prompt must not re-embed positions; scope: pack authoring + any prompt cross-check.</constraint>
+    <constraint source="ADR-015">Reference/grounding content follows the data-governance tiering; packs carry no client/tenant-confidential material. Scope: both packs.</constraint>
+    <constraint source="project">General pack is FALLBACK-grade by design (design Lens 3d value model) — do not gold-plate it into a per-type standard; type-specific packs are separate projects.</constraint>
+    <constraint source="project">Tenant pin: verify the execution tenant matches the seeded tenantId or retrieval returns zero (nda-r1 NFR-06 lesson). Scope: the verification step, both packs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>RAG grounding + reference indexing</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/indexing-pipeline.md</file>
+      <file>.claude/skills/add-reference-to-index/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="reference indexing" location=".claude/skills/add-reference-to-index/SKILL.md">Index pack docs into spaarke-rag-references; the KNW-011 NDA standard seeding (nda-r1 task 012) is the worked precedent.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; read 002's final prompt (what retrieval must supply) + the nda-r1 standard baseline.</step>
+    <step order="1">Restructure the NDA pack: KNW-011 standard + the B1–B16 taxonomy/rubric as retrievable content (per-clause chunks preferred for citation granularity).</step>
+    <step order="2">Author the general fallback pack (broad clause categories + generic risk posture + explicit "no firm standard — general review" framing the Action can cite).</step>
+    <step order="3">Index both via add-reference-to-index; record pack refs.</step>
+    <step order="4">Set sprk_knowledgepackref + sprk_classificationcue on nda + general rows (update seed JSON + env).</step>
+    <step order="5">VERIFY with the exact production retrieval filter (ReferenceRetrievalService path incl. tenant filter): non-zero chunks for an NDA query AND a general-agreement query.</step>
+    <step order="6">Update TASK-INDEX.md: 003 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If production-filter retrieval returns zero chunks for either pack and the cause is tenant/index config (not content), STOP and escalate the tenant-pin config rather than working around with prompt-embedded content.</trigger>
+  </escalation>
+
+  <tools><tool name="terminal">add-reference-to-index, retrieval verification</tool><tool name="dataverse-mcp">registry row updates</tool></tools>
+
+  <outputs>
+    <output type="config">reference-index entries (NDA pack restructured + general pack) + updated infra/dataverse/sprk_agreementtype-rows.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Production-filter retrieval returns non-zero chunks for the NDA pack and the general pack (grounding-zero check).</criterion>
+    <criterion testable="true">Given the 002 Action + NDA pack, a sample NDA review cites B-clause standardRefs sourced from RETRIEVED content (not prompt-embedded).</criterion>
+    <criterion testable="true">Given the 002 Action + general pack, a non-NDA agreement review runs and cites the general pack's guidance.</criterion>
+    <criterion testable="true">nda + general registry rows carry non-null knowledgepackref + classificationcue; seed JSON matches env.</criterion>
+    <criterion testable="true">Negative: querying with a mismatched tenant filter returns zero (the pin is real) — documented, not silently ignored.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design Lens 3(d) value model: type packs = the value, general = fallback. Per-type packs (lease/employment/…) are OUT of scope — sibling projects register rows later with zero code.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

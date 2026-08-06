@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="teams-app-r1">
+  <metadata>
+    <title>Foundation spike — Teams-tab workforce SSO → membership (both principal planes) + SPA unchanged</title>
+    <phase>0 Foundation Spike &amp; ADR</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth-sensitive; validates the core architectural assumption before broad build commits (FR-16).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security/auth-sensitive, novel end-to-end validation across a non-Xrm Teams host with high ambiguity.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Foundation gate — its go/no-go result governs whether Phase 1+ start; run in main session first.</parallel-reason>
+    <deps>none</deps>
+    <tags>auth, teams, spike, bff-api</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Stand up a minimal Teams personal-tab spike that authenticates the user with workforce Entra SSO/NAA and proves, end-to-end in a real Teams tab (desktop AND web), all three foundation paths: (a) a systemuser resolves to ADR-034 membership records; (b) a contact-only workforce user resolves to contact-anchored membership records; (c) the existing standalone SPA still signs in and works on the CIAM plane. This spike de-risks the whole project — treat a failure on any path as a go/no-go signal to surface, not something to code around.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Microsoft Teams JS SDK (app.initialize, getAuthToken/NAA), MSAL v5, Microsoft Entra multitenant apps, and the Spaarke BFF broker + ADR-034 membership. Follow ADRs strictly.</role>
+
+  <goal>
+    A working spike (throwaway-acceptable, under notes/spikes/) demonstrating: workforce SSO in a Teams tab yields a BFF-valid token; the BFF resolves that token to (i) a systemuser → membership set and (ii) a contact-only principal → contact-anchored membership set; and the standalone SPA continues to work via CIAM. Findings + go/no-go recorded in notes/spikes/foundation-spike-findings.md.
+  </goal>
+
+  <context>
+    <background>
+      R1 rests on the assumption that a Teams workforce identity can be brokered to the BFF and resolved to a membership-scoped record set with no new authorization model (design.md §4/§5, spec FR-16). Because @spaarke/auth is Xrm-bound + MSAL v3 and cannot serve a non-Xrm Teams host, and because Teams SSO/NAA has known desktop-client popup quirks, this MUST be proven before broad build.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/external-spa/src/auth/msal-config.ts</file>
+      <file role="canonical-reference">src/client/external-spa/src/auth/msal-auth.ts</file>
+      <file role="canonical-reference">src/client/office-addins</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Membership/MembershipEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IdentityNormalizationService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</file>
+      <file role="output">projects/teams-app-r1/notes/spikes/foundation-spike-findings.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">The Teams host authenticates with workforce Entra via Teams SSO/NAA (multitenant); do NOT attempt CIAM sign-in inside Teams, and do NOT route this host through @spaarke/auth (Xrm-bound + MSAL v3). This is the A2-amendment posture (task 002).</constraint>
+    <constraint source="project">Broker-only (NFR-02): the workforce token authenticates to the BFF only; never exchange it downstream. This spike proves resolution + membership read, not OBO.</constraint>
+    <constraint source="ADR-034">Contact-anchored resolution reuses the existing MembershipResolverService engine (BuildFetchXml already matches ContactId) filtered to access-conferring roles; do NOT build a second membership mechanism.</constraint>
+    <constraint source="project">Spike code lives under projects/teams-app-r1/notes/spikes/ — it is not production code and is exempt from the full test/deploy gates. Do NOT commit throwaway spike scaffolding into src/ without a follow-on task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Teams workforce SSO + BFF membership resolution</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+      <file>projects/teams-app-r1/adr-028-amendment-draft.md</file>
+    </files>
+    <patterns>
+      <pattern name="Standalone MSAL broker auth" location="src/client/external-spa/src/auth/msal-config.ts">Standalone PublicClientApplication, sessionStorage, Bearer-to-BFF; mirror the authority-config shape for the workforce authority.</pattern>
+      <pattern name="AAD oid → systemuser" location="src/server/api/Sprk.Bff.Api/Api/Membership/MembershipEndpoints.cs">ResolveSystemUserIdAsync converts an AAD oid to a systemuserid — reuse for the systemuser plane.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Register/confirm a Teams personal-tab manifest pointing at a minimal spike page; use the existing multitenant Entra app (1e40baad-…) which already carries access_as_user + Teams redirect URIs.</step>
+    <step order="2">Implement workforce SSO acquisition in the spike (Teams JS getAuthToken / NAA), acquiring a token for the BFF audience; verify it validates against the BFF workforce default JwtBearer scheme.</step>
+    <step order="3">Exercise the BFF membership path for a systemuser caller (AAD oid → systemuser → ADR-034 membership) and confirm the returned record set matches expectation.</step>
+    <step order="4">Exercise the contact-only path: a workforce user with NO systemuser (resolve AAD oid → contact by azureactivedirectoryobjectid/verified email) and confirm contact-anchored membership returns the expected records.</step>
+    <step order="5">Confirm the standalone external SPA still signs in via CIAM and lists its records (no regression).</step>
+    <step order="6">Run in BOTH Teams desktop and Teams web; capture any popup/Conditional-Access behavior differences.</step>
+    <step order="7">Record findings + explicit go/no-go (per path) in notes/spikes/foundation-spike-findings.md, including any assumption that failed and its impact.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">If any path fails or a design assumption is invalidated, document in notes/ and escalate before Phase 1 starts.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Teams SSO/NAA cannot yield a BFF-valid workforce token in the desktop client (popup/Conditional-Access block), OR the contact-only plane cannot resolve to membership, STOP and escalate (root CLAUDE.md §6) — this is a go/no-go signal, not a coding problem to work around.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build the spike client</tool>
+    <tool name="dotnet">Run/inspect the BFF locally</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/teams-app-r1/notes/spikes/foundation-spike-findings.md</output>
+    <output type="code">projects/teams-app-r1/notes/spikes/ (throwaway spike scaffolding)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a systemuser opening the Teams tab, when workforce SSO completes, then the BFF resolves the token to that systemuser and returns their ADR-034 membership record set with no second login.</criterion>
+    <criterion testable="true">Given a contact-only workforce user (no systemuser), when they open the tab, then the BFF resolves to their contactId and returns contact-anchored membership records filtered to access-conferring roles.</criterion>
+    <criterion testable="true">Given the standalone SPA, when a CIAM user signs in, then it still lists their records (no regression).</criterion>
+    <criterion testable="true">All three paths are verified in BOTH Teams desktop and Teams web, with desktop-vs-web differences recorded.</criterion>
+    <criterion testable="true">notes/spikes/foundation-spike-findings.md records an explicit go/no-go per path and any invalidated assumption.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is spike-first by owner directive (spec FR-16, notes/pipeline-run-guidance.md). Load-bearing external prerequisite: systemuser.sprk_primarycontact must be linked for a systemuser's contact-role assignments to resolve (admin-owned, out of scope) — if unlinked in the dev org, note member_skipped: no_systemuser_mapping and validate the contact-only plane by verified email instead. Dev org has demo data (7 contacts / 163 systemusers).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. This is a FULL-rigor task (Step 9.5 gates apply to any src/ code produced).</protocol>
+  </execution>
+</task>

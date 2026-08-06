@@ -45,7 +45,7 @@ import {
   MessageBar,
   MessageBarBody,
 } from "@fluentui/react-components";
-import { KanbanBoard } from "@spaarke/ui-components";
+import { KanbanBoard, OOB_MODAL_SIZES } from "@spaarke/ui-components";
 import { KanbanCard } from "./KanbanCard";
 import { KanbanHeader } from "./KanbanHeader";
 import { ThresholdSettingsPopover } from "./ThresholdSettings";
@@ -608,6 +608,8 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
           // Param name kept as `eventId` for SmartTodo Code Page compatibility;
           // the value carried is a `sprk_todoid` GUID post R3 FR-29.
           const data = todoId ? `eventId=${encodeURIComponent(todoId)}` : undefined;
+          // `record` OOB size (85%×85%) — sourced from oobModalSizes.ts (spec
+          // FR-11/FR-18, task 090); was an independent 85%×85% literal.
           xrm.Navigation.navigateTo(
             {
               pageType: "webresource",
@@ -616,8 +618,8 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
             },
             {
               target: 2,
-              width: { value: 85, unit: "%" },
-              height: { value: 85, unit: "%" },
+              width: OOB_MODAL_SIZES.record.width,
+              height: OOB_MODAL_SIZES.record.height,
             }
           );
         }

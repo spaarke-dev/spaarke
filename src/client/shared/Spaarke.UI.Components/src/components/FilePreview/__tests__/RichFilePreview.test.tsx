@@ -65,6 +65,20 @@ describe('RichFilePreview', () => {
       renderWithProviders(<RichFilePreview {...props} />);
       expect(screen.getByText('Document Preview')).toBeInTheDocument();
     });
+
+    it('renders the title by default (showTitle omitted)', async () => {
+      renderWithProviders(<RichFilePreview {...defaultProps()} />);
+      expect(screen.getByText('Contract.pdf')).toBeInTheDocument();
+    });
+
+    it('suppresses its own title when showTitle=false (wrapper owns the title — no double header)', async () => {
+      // The nav-mode dialog shell renders the title; the renderer must not, or
+      // the two stack into a "double header". The 3-dot menu still renders.
+      renderWithProviders(<RichFilePreview {...defaultProps({ showTitle: false })} />);
+      expect(screen.queryByText('Contract.pdf')).not.toBeInTheDocument();
+      // The rest of the renderer still mounts (metadata Details render).
+      expect(screen.getByText('Alice')).toBeInTheDocument();
+    });
   });
 
   describe('preview-URL fetch lifecycle', () => {
@@ -275,6 +289,32 @@ describe('RichFilePreview', () => {
       // Multiple em-dashes are expected (Created by, Created, Size, Type)
       const emDashes = screen.getAllByText('—');
       expect(emDashes.length).toBeGreaterThanOrEqual(4);
+    });
+  });
+
+  describe('showMetadataPane (task 060 — RichFilePreviewDialog preset re-base)', () => {
+    it('renders its own Tags+Details pane by default (showMetadataPane omitted)', () => {
+      renderWithProviders(<RichFilePreview {...defaultProps()} />);
+      expect(screen.getByText('Tags')).toBeInTheDocument();
+      expect(screen.getByText('Details')).toBeInTheDocument();
+    });
+
+    it('suppresses its own Tags+Details pane when showMetadataPane=false (wrapper owns the meta column)', () => {
+      renderWithProviders(<RichFilePreview {...defaultProps({ showMetadataPane: false })} />);
+      expect(screen.queryByText('Tags')).not.toBeInTheDocument();
+      expect(screen.queryByText('Details')).not.toBeInTheDocument();
+      // The stage (iframe container) and the 3-dot menu still render — only
+      // the metadata pane is suppressed.
+      expect(screen.getByRole('button', { name: /More actions for/i })).toBeInTheDocument();
+    });
+
+    it('still renders the preview iframe when showMetadataPane=false', async () => {
+      const props = defaultProps({ showMetadataPane: false });
+      const { container } = renderWithProviders(<RichFilePreview {...props} />);
+      await waitFor(() => {
+        const iframe = container.querySelector('iframe');
+        expect(iframe).not.toBeNull();
+      });
     });
   });
 

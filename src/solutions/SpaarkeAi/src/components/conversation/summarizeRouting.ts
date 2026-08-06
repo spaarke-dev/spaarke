@@ -148,6 +148,25 @@ export function buildFileConfirmationMessage(filenames: readonly string[]): stri
 }
 
 /**
+ * Compose→Assistant ingest confirmation (UAT 2026-07-24). When a user opens/uploads a file in
+ * the Compose widget, `registerComposeActiveDocument` uploads its bytes to the chat session as a
+ * ChatSessionFile — so the Assistant can already act on it — but the user only sees the collapsed
+ * "File attached" / "File classified" entries and thinks it is NOT attached in the Assistant.
+ *
+ * This is the PROSE affordance that tells the user the file is now available in the Assistant —
+ * the mirror of the Assistant→Compose "I have opened the file in the Compose tab…" message
+ * (SendWorkspaceArtifactHandler). Emitted once per file at the ingest ceremony. CLIENT-RENDERED
+ * only (not in BFF chat history), same as the other local-message helpers. Pure / total.
+ */
+export function buildComposeAttachedToAssistantMessage(fileName: string | undefined): string {
+  const name = fileName && fileName.trim().length > 0 ? fileName.trim() : "your document";
+  return (
+    `I've added **${name}** to our conversation. You can now ask me to summarize, ` +
+    `review, or answer questions about it here — or keep editing it in the Compose tab.`
+  );
+}
+
+/**
  * Build the deterministic Assistant interjection emitted on a multi-file
  * combined-summary turn (R5 task 020; FR-03 session-files branch):
  *

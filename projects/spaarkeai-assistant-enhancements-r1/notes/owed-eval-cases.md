@@ -99,6 +99,46 @@
 | E-P17-04 | after upload, tap **"Draft a response"** | `draft-correspondence` dispatch | informational draft rendered in-pane |
 | E-P17-05 | after upload, tap **"More…"** | Quick Start modal opens (P1-8) | not the retired playbook library |
 
+## From task 050 (list-tasks capability + create/list ambiguity — 2026-07-22)
+
+> Authored the `list-tasks` capability (Binding `5b1870b9-…`, Action `57651aad-…`, disposition `surface_launch`, `surfaces=assistant`) — "what are my tasks?" opens the **My Tasks** workspace grid tab (sprk_event Task-subtype + statecode=0 + ownerid eq-userid; grid config `ac05e4f1-…`). Also added a "do NOT use to view/list" disambiguation cue to `create-task` + `create-todo` toolDescriptions.
+
+### Positive dispatch-selection
+
+| # | Utterance | Expected capability | Notes |
+|---|---|---|---|
+| E-050-01 | "what are my tasks?" | `list-tasks` | core view trigger |
+| E-050-02 | "show my open tasks" | `list-tasks` | synonym |
+| E-050-03 | "what's on my plate?" | `list-tasks` | colloquial view |
+| E-050-04 | "do I have any deadlines coming up?" | `list-tasks` | deadline/open-work view |
+
+### Disambiguation (VIEW vs CREATE — the authored ambiguity)
+
+| # | Utterance | Expected capability | Assertion |
+|---|---|---|---|
+| E-050-05 | "what are my tasks?" | `list-tasks` (NOT create-task) | a bare view question must not select the create capability |
+| E-050-06 | "create a follow-up task to send this by Friday" | `create-task` (NOT list-tasks) | a create/time-blocked utterance must not select the view capability |
+| E-050-07 | "add a to-do to review the indemnity clause" | `create-todo` (NOT list-tasks) | explicit create-todo unaffected by the list cue |
+| E-050-08 | "show me my to-dos" | `list-tasks` (NOT create-todo) | list-tasks is the VIEW capability for tasks AND to-dos |
+
+### Negative (no capability over-triggers)
+
+| # | Utterance | Expected | Notes |
+|---|---|---|---|
+| E-050-09 | "summarize this document" | `chat-summarize` (NOT list-tasks) | list-tasks must not steal generic asks |
+| E-050-10 | "write a brief on the chevron doctrine" | `compose-draft-document` (NOT list-tasks) | drafting never selects the view capability |
+
+### Surface-open (grid tab — verified client-side, mirrors 012/013)
+
+| # | Assertion |
+|---|---|
+| E-050-11 | `list-tasks` dispatches with disposition `surface_launch`; the terminal SSE emits `binding.ConsumerType='list-tasks'`; the SpaarkeAi client (`handleSurfaceLaunch`) opens the `my-tasks-list` workspace widget (config `ac05e4f1-…`). No server-side Dataverse write; the grid queries `sprk_event` client-side (ownerid eq-userid). |
+| E-050-12 | The `list-tasks` Action makes NO `dataverse.create_record` / write-tool call (`sprk_allowstools=false` structurally prevents it); its LLM output is a one-line acknowledgement only (never enumerated/fabricated task rows). |
+
 ---
 
-*Add new rows below as later catalog tasks (050 authoring, 044 grounding) accrue eval debt.*
+## CONSUMED by task 051 (2026-07-23)
+
+All owed cases above were authored into a dedicated R1 eval family joined to the `Category=GoldenUtteranceEval` merge gate — `tests/integration/contract/Eval/assistant-r1-eval-cases.json` (20 `AR1-###` cases) + `AssistantEnhancementsR1EvalTests.cs` (6 facts). The family covers create-todo (E-002-05/06), create-project (E-UAT1-01..06), list-tasks + VIEW-vs-CREATE (E-050-01..12), the FR-E4 profile-injection non-flip (operational, in-gate), and the AC3 incoherent practice-area × matter-type proof. Full gate GREEN 92/92. Surface-open behavior (E-*-1x) stays client-verified (012/013) by design. Dispatch-selection here is grounded against the real closed catalog (constant / mirror row / cited seeding task) rather than a live model — the same no-live-loop stance as the golden P0/P3 pending-by-design cases. See `tests/integration/contract/Eval/readme.md` → "Assistant-Enhancements-R1 eval family".
+
+*Add new rows above this section if a later catalog task accrues fresh eval debt.*

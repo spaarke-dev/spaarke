@@ -39,15 +39,34 @@ import {
 } from '@fluentui/react-components';
 import { Dismiss16Regular } from '@fluentui/react-icons';
 
-import type { ComposeCheckoutLockedByInfo, ComposeCheckoutStatus } from './ComposeWorkspace.types';
+import type {
+  ComposeCheckoutLockedByInfo,
+  ComposeCheckoutStatus,
+  ComposePartialApplyInfo,
+  ComposeReviewFindingsDegraded,
+} from './ComposeWorkspace.types';
 import type { ComposeAssistantToWorkspaceFlow } from '../types/compose-contracts';
 
 export interface ComposeBannerStackProps {
   errorMessage: string | null;
+  /** UAT #10/#11 (task 052): when true, the errorMessage is a Word co-authoring lock (HTTP 423). Render the
+   *  honest "Open in Word" bar (warning intent) with Retry + Reload-from-Word actions instead of the generic
+   *  save-error bar. There is no programmatic unlock — the actions are retry + pull-Word's-version. */
+  saveErrorIsLock?: boolean;
+  /** Retry the save (used by the lock bar — succeeds once Word is closed). */
+  onRetrySave?: () => void;
+  /** Reload the latest SPE bytes (used by the lock bar — pulls Word's version as the new baseline). */
+  onReloadFromWord?: () => void;
   checkoutStatus: ComposeCheckoutStatus;
   checkoutLockedBy: ComposeCheckoutLockedByInfo | null;
   checkoutFailureMessage: string | null;
   importWarnings: Array<{ type: string; message: string }>;
+  /**
+   * UAT round-7 #8 — when true, the "Some formatting was simplified" import banner is suppressed (the
+   * reviewer asked to remove the formatting warnings). The warnings still exist in the data; they just
+   * don't render. Default false (every other consumer keeps the banner).
+   */
+  hideImportWarnings?: boolean;
   pendingAssistantInsert: ComposeAssistantToWorkspaceFlow | null;
   /**
    * UAT #7 (compose-r2): a monotonically-incrementing token bumped by the parent on every
@@ -55,6 +74,21 @@ export interface ComposeBannerStackProps {
    * MessageBar that auto-dismisses after {@link SAVE_SUCCESS_VISIBLE_MS}. 0 = no save yet.
    */
   saveSuccessToken?: number;
+  /**
+   * Prong 1 (task 055): populated when the last save applied only PART of the edit batch (some ops could
+   * not be anchored server-side). Renders an honest warning bar — "Saved, but N of M edits couldn't be
+   * anchored; please redo them" — INSTEAD of the plain "Saved ✓" success bar. Null/omitted on a clean save.
+   */
+  partialApply?: ComposePartialApplyInfo | null;
+  /**
+   * ai-advanced-capabilities-agreements-r1 task 032 (FR-16 128KB budget, Leg B) — populated when a
+   * prior agreement-review's findings could not be fully restored on reopen (the 128KB inline-payload
+   * cap silently dropped the ledger entry server-side, or a present-but-corrupted findings payload
+   * yielded zero usable items). Renders an honest "couldn't be fully restored" notice — the closed
+   * guarantee's Leg B ("the truncated case shows an explicit notice — never silent absence"). Null on
+   * a clean restore (the normal case).
+   */
+  reviewFindingsDegraded?: ComposeReviewFindingsDegraded | null;
 }
 
 /** How long the transient "Saved ✓" confirmation stays up before auto-dismissing. */
@@ -118,12 +152,18 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
   const styles = useStyles();
   const {
     errorMessage,
+    saveErrorIsLock = false,
+    onRetrySave,
+    onReloadFromWord,
     checkoutStatus,
     checkoutLockedBy,
     checkoutFailureMessage,
     importWarnings,
+    hideImportWarnings = false,
     pendingAssistantInsert,
     saveSuccessToken = 0,
+    partialApply = null,
+    reviewFindingsDegraded = null,
   } = props;
 
   // FR-21 (DEF-15, R3 UAT round-3 carry-in): the "Document opened with N
@@ -146,7 +186,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     setImportWarningsDismissed(true);
   }, [importWarningsSig]);
 
-  const showImportWarnings = importWarnings.length > 0 && !importWarningsDismissed;
+  const showImportWarnings = importWarnings.length > 0 && !importWarningsDismissed && !hideImportWarnings;
 
   // UAT #7: a successful Save previously showed no confirmation — the button flipped from
   // "Saving" back to idle silently. Surface a transient success MessageBar whenever the parent
@@ -161,13 +201,37 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     return () => clearTimeout(timer);
   }, [saveSuccessToken]);
 
-  const showSaveSuccessBanner = showSaveSuccess && !errorMessage;
+  // Prong 1 (task 055): a partial-apply outcome (some ops couldn't be anchored). Dismissable; re-shows on
+  // each NEW partial save (the parent passes a fresh object per saveSucceeded, cleared to null otherwise).
+  const showPartialApply = !!partialApply && partialApply.unresolvedCount > 0;
+  const [partialApplyDismissed, setPartialApplyDismissed] = React.useState(false);
+  React.useEffect(() => {
+    // Reset the dismissal whenever a new partial-apply summary arrives (or it clears).
+    setPartialApplyDismissed(false);
+  }, [partialApply]);
+  const showPartialApplyBanner = showPartialApply && !partialApplyDismissed;
+
+  // A partial save DID persist (the resolvable edits) but is not a clean success — suppress the plain
+  // "Saved ✓" bar in favor of the honest partial-apply warning so the two never stack redundantly.
+  const showSaveSuccessBanner = showSaveSuccess && !errorMessage && !showPartialApplyBanner;
+
+  // Task 032 — same dismiss-and-reshow-on-a-new-instance pattern as `partialApply` above: dismissable,
+  // re-shows if a NEW degraded-restore object arrives (a different session/count), stays dismissed for
+  // the SAME object reference otherwise.
+  const showReviewFindingsDegraded = !!reviewFindingsDegraded;
+  const [reviewFindingsDegradedDismissed, setReviewFindingsDegradedDismissed] = React.useState(false);
+  React.useEffect(() => {
+    setReviewFindingsDegradedDismissed(false);
+  }, [reviewFindingsDegraded]);
+  const showReviewFindingsDegradedBanner = showReviewFindingsDegraded && !reviewFindingsDegradedDismissed;
 
   const showStack =
     showImportWarnings ||
     !!errorMessage ||
     !!pendingAssistantInsert ||
     showSaveSuccessBanner ||
+    showPartialApplyBanner ||
+    showReviewFindingsDegradedBanner ||
     checkoutStatus === 'conflict' ||
     checkoutStatus === 'failed' ||
     checkoutStatus === 'cancelled';
@@ -196,7 +260,80 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
         </MessageBar>
       ) : null}
 
-      {errorMessage ? (
+      {showPartialApplyBanner && partialApply ? (
+        // Prong 1 (task 055): the save PERSISTED the resolvable edits but couldn't anchor some ops — honest
+        // "please redo" prompt (never silently applied a wrong edit, never silently dropped one). The
+        // resolved edits are safe; the user re-does just the unresolved ones.
+        <MessageBar intent="warning" data-testid="compose-workspace-partial-apply-banner" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Some edits couldn&apos;t be saved</MessageBarTitle>
+            {`Saved ${partialApply.appliedCount} of ${partialApply.total} edit${partialApply.total === 1 ? '' : 's'}. ` +
+              `${partialApply.unresolvedCount} edit${partialApply.unresolvedCount === 1 ? '' : 's'} couldn't be ` +
+              `placed in the document and ${partialApply.unresolvedCount === 1 ? 'was' : 'were'} not saved — please redo ` +
+              `${partialApply.unresolvedCount === 1 ? 'it' : 'them'}. Nothing else was lost.`}
+          </MessageBarBody>
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-partial-apply-dismiss"
+                onClick={() => setPartialApplyDismissed(true)}
+              />
+            }
+          />
+        </MessageBar>
+      ) : null}
+
+      {showReviewFindingsDegradedBanner && reviewFindingsDegraded ? (
+        // Task 032 (FR-16 128KB budget, Leg B) — an honest "couldn't be fully restored" notice.
+        // 'skipped': the ledger read shows no findings at all but a same-tab marker recorded a prior
+        // review's results (the 128KB inline-payload cap likely dropped the entry server-side).
+        // 'malformed': a findings-shaped entry IS present but every item failed the projection guard.
+        <MessageBar intent="warning" data-testid="compose-workspace-review-findings-degraded-banner" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Review results couldn&apos;t be fully restored</MessageBarTitle>
+            {reviewFindingsDegraded.reason === 'skipped'
+              ? `A prior review of this document (about ${reviewFindingsDegraded.expectedCount} finding${reviewFindingsDegraded.expectedCount === 1 ? '' : 's'}) could not be restored — the results may have exceeded the storage limit for this session. Re-run the review to refresh the findings.`
+              : "A prior review's stored results were incomplete and couldn't be restored. Re-run the review to refresh the findings."}
+          </MessageBarBody>
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-review-findings-degraded-dismiss"
+                onClick={() => setReviewFindingsDegradedDismissed(true)}
+              />
+            }
+          />
+        </MessageBar>
+      ) : null}
+
+      {errorMessage && saveErrorIsLock ? (
+        // UAT #10/#11 (task 052): honest Word co-authoring lock bar. No programmatic unlock exists — offer
+        // Retry (works once Word is closed) + Reload from Word (pull Word's version as the new baseline).
+        <MessageBar intent="warning" data-testid="compose-workspace-word-lock-banner" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Open in Word</MessageBarTitle>
+            {errorMessage}
+          </MessageBarBody>
+          <MessageBarActions>
+            {onRetrySave ? (
+              <Button size="small" appearance="primary" onClick={onRetrySave} data-testid="compose-word-lock-retry">
+                Retry Save
+              </Button>
+            ) : null}
+            {onReloadFromWord ? (
+              <Button size="small" onClick={onReloadFromWord} data-testid="compose-word-lock-reload">
+                Reload from Word
+              </Button>
+            ) : null}
+          </MessageBarActions>
+        </MessageBar>
+      ) : errorMessage ? (
         <MessageBar intent="error" data-testid="compose-workspace-error-banner" aria-live="polite">
           <MessageBarBody>
             <MessageBarTitle>Save error</MessageBarTitle>
@@ -236,10 +373,11 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
       ) : null}
 
       {showImportWarnings ? (
-        <MessageBar intent="warning" data-testid="compose-workspace-import-warning-banner" aria-live="polite">
+        <MessageBar intent="info" data-testid="compose-workspace-import-warning-banner" aria-live="polite">
           <MessageBarBody>
-            <MessageBarTitle>Document opened with {importWarnings.length} simplification(s)</MessageBarTitle>
-            Some advanced features may not be preserved on save.
+            <MessageBarTitle>Some formatting was simplified</MessageBarTitle>
+            This document uses advanced Word features that Compose shows in a simplified view. Your original file
+            isn&apos;t changed until you save.
           </MessageBarBody>
           {/* FR-21/DEF-15: Fluent v9's MessageBar dismiss affordance — the trailing
               container action. Clears the banner AND persists the dismissal to

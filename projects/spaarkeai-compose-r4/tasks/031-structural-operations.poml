@@ -1,0 +1,164 @@
+<task id="031" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Structural operations — split/merge/insert/delete paragraph, sequenced last (FR-05)</title>
+    <phase>3 Patch Engine</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Extends the byte-author `.cs` on the BFF hot path; paragraph-mark deletion via `w:pPr/w:rPr/w:del` is the hardest OOXML edge. FULL per root §8.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Paragraph-mark deletion via `w:pPr/w:rPr/w:del` (the merge case) is flagged by prior art as the hardest OOXML edge (bridge-prior-art finding #6).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Extends `ComposeShadowPatchEngine.cs` — the same file as task 030; sequential within the phase.</parallel-reason>
+    <deps>030</deps>
+    <amendment date="2026-07-22" by="orchestrator (Phase-2 coverage-gate finding)">
+      SCOPE EXTENSION — client half. In addition to the SERVER structural ops in the Patch Engine, this task
+      MUST wire the CLIENT structural-step→operation emission: the task-020 interceptor's `onStructuralStep`
+      seam (currently unwired) must emit `splitParagraph`/`mergeParagraph`/`insertParagraph`/`deleteParagraph`
+      operations (per the task-003 schema) into the rebased op-log, so whole-paragraph delete/merge is captured
+      client-side. This closes the coverage gap that blocked task 023 (see `notes/task-023-coverage-gap.md`);
+      task 023 (delete `collectEditedParagraphs`) now depends on this task landing.
+    </amendment>
+    <tags>bff-api,docx</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started>2026-07-22</started>
+    <completed>2026-07-22</completed>
+    <completion-note>
+      SERVER (ComposeShadowPatchEngine.cs): the four structural ops implemented + SEQUENCED LAST (two-pass
+      applier — text/mark ops first, structural collected + applied after, so text-op run-local anchors are
+      unaffected; proven by Apply_StructuralOpsSequencedLast_TextAnchorUnaffected). Tracked representation is a
+      paragraph-MARK revision in w:pPr/w:rPr (MarkParagraphMark): split = inserted mark on the leading para +
+      trailing runs moved to a new w14:paraId (cloned pPr); merge = w:del on the TARGET (predecessor) para-mark
+      glyph — bridge-prior-art #6, the hardest edge; insert = new empty para w/ inserted mark; delete = strike
+      runs (w:del/w:delText) + deleted para-mark (the retired {paraId,text:''} sentinel semantic — closes task
+      023 server-side). Unrepresentable edges REFUSED via new ComposePatchErrorKind.StructuralOperationRefused
+      (merge across a table/section boundary, colliding newParaId, split of a field-bearing para) — handled, not
+      corrupted. setBlockAttr remains at its own StructuralOpNotYetImplemented seam (outside the four-op scope).
+      CLIENT (stepOperationInterceptor.ts): classifyStructuralStep diffs paraId-bearing blocks before/after a
+      block-boundary ReplaceStep/ReplaceAroundStep to EMIT mergeParagraph/deleteParagraph/splitParagraph/
+      insertParagraph into the RebasedOperationLog (buildAnchor + deriveOperation extended for the four types);
+      whole-paragraph delete/merge is now CAPTURED, not silently deferred — closes the task-023 coverage gap
+      client-side. Verify: server dotnet build clean; 547 Compose tests green (7 new structural + ordering +
+      table-refusal); client typecheck clean on the two touched files (pre-existing unrelated @spaarke/ai-widgets
+      module errors remain); 31 stepOperationInterceptor jest tests green (4 new structural). Publish 49.90 MB
+      compressed incl PDBs (+0.27 vs ~49.63 baseline, ≤60). No NEW package / no NEW HIGH CVE (the
+      System.Security.Cryptography.Xml HIGH is pre-existing transitive). ADR-007/010/013 clean; Tier-1
+      NetArchTest ADR-013 green (the 3 ArchTest failures — ADR-007 Graph isolation, ADR-010 concrete/Options —
+      are pre-existing whole-assembly scans, not introduced here). Do NOT commit; TASK-INDEX/current-task
+      untouched per orchestrator instruction. Task 023 may now proceed (its dep on 031 is satisfied).
+    </completion-note>
+  </metadata>
+
+  <prompt>
+    Extend the Patch Engine (`src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs`,
+    built in task 030) to apply the four STRUCTURAL operations — `splitParagraph`, `mergeParagraph`,
+    `insertParagraph`, `deleteParagraph` — as operations. These MUST be SEQUENCED LAST in the applier
+    (after all text/mark operations) so that text-op run-local-offset anchors resolved earlier in the
+    pass are not shifted by structural changes. The hardest edge is `mergeParagraph`: deleting a
+    paragraph mark is a `w:del` on the para-mark glyph carried in `w:pPr/w:rPr` (bridge-prior-art
+    finding #6 — the hardest OOXML edge). Continue to mutate the OpenXml DOM, never string-edit
+    `document.xml`. This is a MODIFY of task 030's engine, not a new file. Keep the engine stateless,
+    `byte[]`-in/`byte[]`-out, no AI internals.
+  </prompt>
+
+  <role>
+    Senior .NET 8 / Open XML SDK developer who understands OOXML paragraph structure (`w:p`, `w:pPr`,
+    `w:rPr` para-mark, section breaks, tables) and the tracked-change representation of structural edits
+    (a merged paragraph = a tracked deletion of the paragraph mark, not a naive node removal).
+  </role>
+
+  <goal>
+    The Patch Engine applies split/merge/insert/delete paragraph as first-class operations, sequenced
+    last so text-op anchors are unaffected, with paragraph-mark deletion (merge) represented as a
+    `w:del` on the para-mark glyph in `w:pPr/w:rPr`; each structural op round-trips correctly on the
+    corpus, and an edge that cannot be represented safely (e.g. merging a paragraph into a following
+    table) is refused rather than corrupting the package.
+  </goal>
+
+  <context>
+    <background>
+      Design §5 (structural ops applied natively — the capability the paragraph-diff never had), §5.6
+      pitfall (b) "paragraph-mark deletion = `w:del` on the para-mark glyph in `w:pPr/w:rPr` — the
+      hardest edge". Spec FR-05 acceptance: each structural op round-trips (incl. paragraph-mark
+      deletion via `w:pPr/w:rPr/w:del`). Owner clarification: structural edits are IN core, sequenced
+      last. Task 030 built the text/mark applier + resolve-by-paraId; this task adds the structural
+      layer on top and enforces its ordering-last discipline.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs — add splitParagraph / mergeParagraph / insertParagraph / deleteParagraph applied LAST in the operation pass; merge = `w:del` on the para-mark in `w:pPr/w:rPr`</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ — task 003 operation-schema structural op types (`splitParagraph`/`mergeParagraph`/`insertParagraph`/`deleteParagraph`/`setBlockAttr`)</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §5 (Patch backend, structural ops), §5.6 pitfall (b)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-05</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">`ComposeShadowPatchEngine` core (text/mark applier + resolve-by-paraId + native w:ins/w:del/w:comment) — this task extends it with structural ops.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-05">The engine MUST support paragraph split / merge / insert / delete as operations; each MUST round-trip correctly on the corpus, including paragraph-mark deletion via `w:pPr/w:rPr/w:del`.</constraint>
+    <constraint source="project / ordering">Structural ops MUST be SEQUENCED LAST in the applier (after all text/mark ops) so text-op run-local-offset anchors resolved earlier are not shifted by structural changes.</constraint>
+    <constraint source="spec / NFR-01">Mutate the OpenXml DOM, NEVER string-edit `document.xml`; untouched subtrees stay byte-identical.</constraint>
+    <constraint source="ADR-007 / ADR-010 / ADR-013">Engine stays `byte[]`-in/`byte[]`-out, stateless concrete singleton, no AI internals (Tier-1 NetArchTest green) — unchanged from task 030.</constraint>
+    <constraint source="project / §10 Placement Justification">State the Placement Justification in the PR and cite `.claude/constraints/bff-extensions.md`. Run `/conflict-check` before the PR. Report publish size delta vs ~49.63 MB (≤60 MB) + no new HIGH CVE.</constraint>
+    <constraint source="ADR-038 / NFR-06">Structural-op round-trip proof lands in the task 034 seam slices; unit-green ≠ done. NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OOXML structural edits (paragraph split/merge/insert/delete); paragraph-mark deletion via `w:pPr/w:rPr/w:del`; applier ordering discipline; BFF hygiene</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-r4/notes/bridge-prior-art.md</file>
+    </files>
+    <patterns>
+      <pattern name="Paragraph-mark deletion (merge)" location="projects/spaarkeai-compose-r4/notes/bridge-prior-art.md finding #6 / design §5.6(b)">
+        Merging two paragraphs = a tracked deletion of the first paragraph's mark: `w:del` on the para-mark glyph carried in `w:pPr/w:rPr`, NOT a naive removal of the `w:p` node. The hardest structural edge — model it explicitly.
+      </pattern>
+      <pattern name="Sequence-structural-last" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs">
+        Apply all text/mark ops (offset-anchored) first, then apply structural ops, so structural node changes never invalidate an earlier text-op's run-local-offset anchor.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration. Confirm task 030 is complete (the engine exists). Read the task 003 structural op-type definitions. Load knowledge files + `bff-extensions.md`; state the Placement Justification for the PR.</step>
+    <step order="1" name="Insert / delete / split paragraph">Implement `insertParagraph` (new `w:p` at the anchor, carrying a fresh `w14:paraId`), `deleteParagraph` (tracked deletion of the `w:p`), and `splitParagraph` (divide a `w:p` at the run-local-offset, preserving `w:pPr` on the resulting paragraphs). Mutate the DOM.</step>
+    <step order="2" name="Merge paragraph — the hardest edge">Implement `mergeParagraph` as a `w:del` on the para-mark glyph in the first paragraph's `w:pPr/w:rPr` (bridge-prior-art (b)), joining the runs. Handle the boundary case where the following block is a table or a section break — refuse/guard rather than corrupt.</step>
+    <step order="3" name="Sequence structural ops last">Ensure the applier applies structural ops AFTER all text/mark ops in the pass, so earlier text-op run-local-offset anchors are unaffected. Add focused unit tests for ordering under `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/`.</step>
+    <step order="4" name="Build + verify">Build the BFF; run the Tier-1 NetArchTest facade check; run existing `Services/Compose` unit tests (no regression). Round-trip proof lands in the task 034 seam slices.</step>
+    <step order="5" name="Size/CVE + index + deviations">Publish; report absolute size + delta vs ~49.63 MB (≤60 MB); `dotnet list package --vulnerable --include-transitive` (no new HIGH CVE). Update TASK-INDEX.md: set this task's status to ✅. Document any deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs (extended — split/merge/insert/delete paragraph, sequenced last; merge via w:pPr/w:rPr/w:del)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ (structural-op unit tests, incl. ordering + para-mark deletion)</output>
+    <output type="report">Publish-size delta vs ~49.63 MB; CVE scan; Placement Justification; /conflict-check result for the PR</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Each structural op (split / merge / insert / delete paragraph) round-trips correctly on the corpus, including paragraph-mark deletion represented via `w:pPr/w:rPr/w:del`.</criterion>
+    <criterion testable="true">Structural ops are applied LAST in the pass; a text op and a structural op on the same paragraph both land correctly (text-op anchors unaffected by the structural change).</criterion>
+    <criterion testable="true">NEGATIVE: a merge of a paragraph with a following table (or a section-break boundary) is handled or refused, NOT corrupted (the package still opens in Word).</criterion>
+    <criterion testable="true">The engine stays stateless / `byte[]`-in/out / no AI internals (Tier-1 NetArchTest green); DOM is mutated, `document.xml` is never string-edited.</criterion>
+    <criterion testable="true">Publish size reported delta vs ~49.63 MB, ≤60 MB; no new HIGH CVE; BFF build + NetArchTest green; `/conflict-check` run before the PR.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The paragraph-mark-deletion (merge) edge cannot be represented as a valid `w:del` on `w:pPr/w:rPr` for a corpus case (e.g. merging across a section break, into a table cell, or over a paragraph carrying list/numbering that Word will re-derive). STOP and surface per root §6 / §6.5 rather than emitting a package Word may repair or corrupt.</trigger>
+  </escalation>
+
+  <notes>
+    No `&lt;justification&gt;` — this MODIFIES task 030's engine (no new surface). Structural ops are the capability the retired paragraph-diff synthesizer never had; sequencing-last is the discipline that keeps text and structural ops composable in a single pass.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -183,4 +183,33 @@ public class ContactNameMatchRungTests
         _dv.Verify(d => d.QueryContactsByFullNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
+
+    [Fact]
+    public async Task Evaluate_ContactProvenance_IsParseableByReviewUiKeyAnchoredRegex()
+    {
+        // The contact name rides the quote-delimited provenance mini-format the CommunicationConnections review
+        // UI parses (provenance.ts parseNameMatch uses key="([^"]*)" with NO unescape), routed through the shared
+        // RungProvenanceFormat. The double-quote neutralization itself is covered by RecordNameMatchRungTests; a
+        // raw double-quote is unreachable on the contact path anyway (the exact full-name guard rejects any
+        // candidate whose fullname != the regex-extracted phrase, and the NameRunPattern never yields a "). What
+        // this protects is the reachable regression risk: that the contact provenance segments stay parseable by
+        // the client's key-anchored regex (a reordered/misquoted segment would silently break the review UI).
+        var contactId = Guid.NewGuid();
+        SetupContact("Sara Chen", contactId);
+
+        var matches = await Build().EvaluateAsync(
+            Envelope(subject: "Intro to Sara Chen"),
+            new AssociationContext(), CancellationToken.None);
+
+        var match = matches.Should().ContainSingle().Subject;
+        match.Target!.Name.Should().Be("Sara Chen");
+
+        // The client parses each value with key="([^"]*)"; both anchored keys must extract intact.
+        System.Text.RegularExpressions.Regex.Match(match.Provenance, "name=\"([^\"]*)\"")
+            .Groups[1].Value.Should().Be("Sara Chen");
+        System.Text.RegularExpressions.Regex.Match(match.Provenance, "reason=\"([^\"]*)\"")
+            .Groups[1].Value.Should().Be("name in subject");
+        match.Provenance.Should().Contain("where=subject");
+        match.Provenance.Should().Contain("matched=fullname");
+    }
 }

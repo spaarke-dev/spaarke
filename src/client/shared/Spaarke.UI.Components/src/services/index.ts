@@ -230,3 +230,26 @@ export type { IFieldMappingHandlerConfig, IFieldMappingApplicationResult } from 
 // draft-in-chat create flow into a pre-seeded wizard / OOB form. Files by
 // reference; `resolvedLookups` slot filled by task 013.
 export * from './surfaceHandoff';
+
+// membership — client resolver for the shared user-record membership service.
+// Backs the DataGrid `behavior.membershipFilter` feature (task 050): resolves
+// "records the caller is on" via GET /api/users/me/memberships/{entityType} for
+// an IN(ids) overlay. Context-agnostic (host injects authenticatedFetch).
+export { createMembershipResolver } from './membership';
+export type {
+  MembershipResolver,
+  MembershipResolveOptions,
+  MembershipResponseBody,
+  MembershipFetch,
+} from './membership';
+
+// Analysis file open/preview via the sprk_documentid → sprk_document SPE hop (ADR-007).
+// Hoisted from the SpaarkeAi solution (2026-07-29 audit) so AnalysisHubWidget consumes it
+// directly instead of restating the document-hop + preview-url closure locally.
+export { resolveAnalysisDocumentId, resolveAnalysisFilePreview } from './analysisFileResolution';
+export type {
+  AnalysisFilePreviewDeps,
+  AnalysisFilePreviewResolution,
+  AnalysisFilePreviewResolved,
+  AnalysisFilePreviewNoDocument,
+} from './analysisFileResolution';

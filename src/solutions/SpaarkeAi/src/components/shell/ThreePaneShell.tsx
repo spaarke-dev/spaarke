@@ -56,7 +56,7 @@
  */
 
 import * as React from "react";
-import { makeStyles, Toaster, useToastController, useId, Toast, ToastTitle } from "@fluentui/react-components";
+import { makeStyles, Toaster, useToastController, Toast, ToastTitle } from "@fluentui/react-components";
 import { ChatRegular, AppsListRegular, DocumentRegular } from "@fluentui/react-icons";
 import { ThreePaneLayout } from "@spaarke/ui-components";
 import type { EntityContext, EntityType } from "@spaarke/ai-context";
@@ -106,6 +106,10 @@ export type { ComposeLaunchContextValue } from "@spaarke/compose-components";
 // parent (the document is persisted before the gate opens).
 import { useCreateOnSaveAssociationGate } from "../compose/useCreateOnSaveAssociationGate";
 import { CreateOnSaveAssociationGateDialog } from "../compose/CreateOnSaveAssociationGateDialog";
+// UAT round-1 follow-on (task 071): "Notify me when completed" — the review-complete toast
+// bridge. Mounted alongside the shell's Toaster below (SPAARKEAI_SHELL_TOASTER_ID) so it shares
+// the SAME portal/stacking order as restore-failure toasts (§11 reuse — no second Toaster).
+import { ReviewCompleteToast } from "./ReviewCompleteToast";
 
 // ---------------------------------------------------------------------------
 // ShellStage — lifecycle state type (four-stage, design.md Section 2.3)
@@ -239,6 +243,85 @@ export interface ThreePaneShellProps {
   composeDocument?: ComposeDocumentRef | null;
   /** SPE container/drive id from URL — optional; resolved at runtime if absent. */
   composeDriveId?: string;
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1 task 041 (FR-13): the ACTIVE work type the launch
+   * is scoped to (e.g. `"agreement-analysis"` for an Agreement Review; Compose-only). Threaded
+   * into `ComposeLaunchContextValue.activeWorkType` so `ComposeWorkspace` → `ComposeEditor` scope
+   * the inline AI toolbar via `getToolsForSurface`. Omitted preserves the unscoped `'*'` default.
+   */
+  activeWorkType?: string;
+
+  // ---------------------------------------------------------------------------
+  // Analysis entry-matrix params (task 050 — spec §12 / FR-14).
+  //
+  // Published to WorkspacePane via AnalysisLaunchContext so it can place the
+  // launch in the correct host with pre-set context (2a/2b hub; 2c/2d existing).
+  // Omitting all of them preserves the default three-pane cold-load (BFF default
+  // layout) — every non-analysis launch is unaffected.
+  // ---------------------------------------------------------------------------
+
+  /** Analysis entry mode: 'new' opens the Analysis hub; 'existing' opens an analysis by id. */
+  analysisMode?: "new" | "existing";
+  /** `sprk_analysis` GUID to open (analysisMode='existing'). */
+  analysisId?: string;
+  /** `sprk_worktype` Choice value for a new analysis (analysisMode='new'). */
+  worktype?: string;
+  /**
+   * ai-advanced-capabilities-agreements-r1 task 022 (spec FR-09; hub A3 deferred deep-threading
+   * leg — cold-load/deep-link door): the level-2 agreement sub-domain (`sprk_agreementtype.sprk_key`,
+   * e.g. "nda") for a cold-load open of the Analysis entry matrix. Published on
+   * `AnalysisLaunchContextValue` alongside `mode`/`analysisId`/`worktype`; WorkspacePane's
+   * analysis-entry effect treats it as EXPLICIT/authoritative over its own open-existing
+   * derivation (task 022) — same envelope contract as the wizard-finish door (`bd64a69d4`).
+   */
+  subDomain?: string;
+}
+
+// ---------------------------------------------------------------------------
+// AnalysisLaunchContext (task 050 — spec §12 / FR-14)
+//
+// Publishes the analysis entry-matrix launch info to WorkspacePane (which is
+// rendered deep inside ThreePaneLayout with no props). Mirrors the established
+// ComposeLaunchContext / useComposeLaunch pattern — WorkspacePane consumes it
+// via useAnalysisLaunch() and falls through to the default cold-load when null.
+//
+// §11 justification — EXISTING: no context carries analysis-entry intent to
+// WorkspacePane today (ComposeLaunchContext is Compose-only; entityContext
+// carries the record but not the new-vs-existing/hub intent). EXTENSION: a new
+// context is required because WorkspacePane takes no props and the four-case
+// host mapping needs the mode. COST-OF-DOING-NOTHING: without it, an
+// `openSpaarkeAi(analysisId|worktype)` launch cannot open the hub or an existing
+// analysis — the entry matrix (2a/2b/2d) is unrealizable.
+// ---------------------------------------------------------------------------
+
+export interface AnalysisLaunchContextValue {
+  /** 'new' → open the Analysis hub; 'existing' → open an analysis by id. */
+  mode: "new" | "existing";
+  /** `sprk_analysis` GUID (mode='existing'). */
+  analysisId?: string;
+  /** `sprk_worktype` Choice value (mode='new'). */
+  worktype?: string;
+  /**
+   * ai-advanced-capabilities-agreements-r1 task 022 (spec FR-09; hub A3 deferred deep-threading
+   * leg): the level-2 agreement sub-domain (`sprk_agreementtype.sprk_key`, e.g. "nda") when the
+   * cold-load/deep-link URL carried an explicit `subDomain` param. EXPLICIT/authoritative —
+   * WorkspacePane's `mode='existing'` effect prefers this over its own DB-derived value (read
+   * from the persisted `sprk_agreementtype` lookup on reopen); absent when the launch carried no
+   * hint, in which case the derivation (or, later, the classifier) fills the envelope instead.
+   */
+  subDomain?: string;
+}
+
+export const AnalysisLaunchContext =
+  React.createContext<AnalysisLaunchContextValue | null>(null);
+AnalysisLaunchContext.displayName = "AnalysisLaunchContext";
+
+/**
+ * Consume the analysis entry-matrix launch info from inside WorkspacePane.
+ * Returns null when the app was not launched into an analysis entry mode.
+ */
+export function useAnalysisLaunch(): AnalysisLaunchContextValue | null {
+  return React.useContext(AnalysisLaunchContext);
 }
 
 // ---------------------------------------------------------------------------
@@ -472,6 +555,15 @@ export function useRestoreContext(): RestoreContextValue | null {
 // SessionRestoreManager — applies restore spec to session + dispatches events
 // ---------------------------------------------------------------------------
 
+/**
+ * The shell's single, shared Toaster id. Was previously minted per-mount via
+ * `useId("restore-toast")` — SessionRestoreManager is a singleton within
+ * ThreePaneShell (mounted exactly once per shell instance), so a fixed string
+ * is safe and lets OTHER shell-level components target the SAME mounted
+ * `<Toaster>` (task 071 `ReviewCompleteToast` — §11 reuse, no second Toaster).
+ */
+export const SPAARKEAI_SHELL_TOASTER_ID = "spaarkeai-shell-toaster";
+
 interface SessionRestoreManagerProps {
   children: React.ReactNode;
   sessionId: string | undefined;
@@ -502,8 +594,9 @@ function SessionRestoreManager({ children, sessionId }: SessionRestoreManagerPro
     isAuthenticated
   );
 
-  // Toast for restore failure
-  const toasterId = useId("restore-toast");
+  // Toast for restore failure — shared Toaster id (task 071 ReviewCompleteToast
+  // targets the SAME id, §11 reuse).
+  const toasterId = SPAARKEAI_SHELL_TOASTER_ID;
   const { dispatchToast } = useToastController(toasterId);
 
   // Track whether we've already applied the restore spec (guard against double-apply).
@@ -584,6 +677,8 @@ function SessionRestoreManager({ children, sessionId }: SessionRestoreManagerPro
   return (
     <RestoreContext.Provider value={restoreContextValue}>
       <Toaster toasterId={toasterId} position="top" />
+      {/* task 071 — review-complete toast bridge; headless, shares this Toaster (§11 reuse). */}
+      <ReviewCompleteToast toasterId={toasterId} />
       {children}
     </RestoreContext.Provider>
   );
@@ -628,7 +723,31 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
     composeMode,
     composeDocument = null,
     composeDriveId = "",
+    activeWorkType,
+    analysisMode,
+    analysisId,
+    worktype,
+    subDomain,
   } = props;
+
+  // task 050 (spec §12 / FR-14): assemble the analysis entry-matrix launch value
+  // so WorkspacePane can route to the correct host (hub for new; existing by id).
+  // Null unless the app was launched into an analysis entry mode — every
+  // non-analysis launch keeps the default cold-load.
+  //
+  // task 022 (spec FR-09; hub A3 deferred deep-threading leg): `subDomain` rides alongside —
+  // additive on both branches. Omitted (undefined) when the cold-load URL carried no hint,
+  // which WorkspacePane's `mode='existing'` effect treats as "explicit path silent" (falls
+  // through to its own DB-derived value, never a fabricated default).
+  const analysisLaunch = React.useMemo<AnalysisLaunchContextValue | null>(() => {
+    if (analysisMode === "existing" && analysisId) {
+      return { mode: "existing", analysisId, ...(subDomain ? { subDomain } : {}) };
+    }
+    if (analysisMode === "new") {
+      return { mode: "new", worktype, ...(subDomain ? { subDomain } : {}) };
+    }
+    return null;
+  }, [analysisMode, analysisId, worktype, subDomain]);
 
   // spaarkeai-compose-r1 task 092: assemble the Compose launch context so
   // downstream panes can respond to modal-launch mode. `null` when the app is
@@ -656,9 +775,12 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
               // failed/absent association is non-fatal (surfaced via the gate's own `error` state).
               onCreateOnSaveAssociationComplete(newDocumentId);
             },
+            // task 041 (FR-13): forward the launch's active work type so getToolsForSurface
+            // scopes the Compose AI toolbar (e.g. Agreement Review).
+            activeWorkType,
           }
         : null,
-    [composeMode, composeDocument, composeDriveId, onCreateOnSaveAssociationComplete],
+    [composeMode, composeDocument, composeDriveId, activeWorkType, onCreateOnSaveAssociationComplete],
   );
 
   // Build the entity context for AiSessionProvider from URL params.
@@ -719,6 +841,7 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
       >
         <ShellStageManager>
           <SessionRestoreManager sessionId={sessionId}>
+           <AnalysisLaunchContext.Provider value={analysisLaunch}>
             <PaneCollapseContext.Provider value={paneCollapseCtx}>
               <div className={styles.shell}>
                 {/*
@@ -798,6 +921,7 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
                */}
               <CreateOnSaveAssociationGateDialog {...associationGateDialogProps} />
             </PaneCollapseContext.Provider>
+           </AnalysisLaunchContext.Provider>
           </SessionRestoreManager>
         </ShellStageManager>
       </AiSessionProvider>

@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>Interactive orientation — classify on chat-upload, orient the session, confirmation gate</title>
+    <phase>2 Classifier + Routing</phase>
+    <gate>blocked (deps 020,003)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Client-heavy conversation-surface change (ConversationPane hot file) wiring a new AI capability into the session flow; UX judgment + ADR-041 confirmation semantics.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Complex but fully specified: gate semantics, thresholds, and UI element criteria are all pre-decided in design Lens 3(d) + the UI-element standard.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>020,003</deps>
+    <tags>ai, frontend, fluent-ui, spaarkeai</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Wire the interactive path: a file dropped into the Assistant with "review this document" (or the review intent)
+    triggers the classifier (020), then ORIENTS the session — set activeWorkType='agreement-analysis', bind the matched
+    type's knowledge pack, scope the tool palette (getToolsForSurface), focus follow-on suggestions — with the
+    CONFIRMATION GATE: auto-proceed only at/above the near-certain threshold (per-row sprk_confidencethreshold, null →
+    0.85 global); below → confirm proposed type + pick-another; composite → choice-of-lens ("employment · just the
+    NDA · both") where BOTH binds multiple packs (1-to-many routing).
+  </prompt>
+  <role>SPAARKE platform developer. SpaarkeAi conversation surface, PaneEventBus, Fluent v9, ADR-041 confirmation semantics.</role>
+  <goal>
+    "Review this document" on an untyped upload orients the session correctly (right pack, scoped tools) with the gate
+    behavior exact: never a silent wrong-grounding run, never a silent decline; "both" runs the review under each selected pack.
+  </goal>
+
+  <context>
+    <background>
+      Entry seam: the chat-upload path (useAttachments / DocumentUploadedEventStream) + review-intent detection in
+      ConversationPane routing. Orientation targets: activeWorkType plumbing is shipped end-to-end (hub 041/052 —
+      launch-resolver → composeLaunchContext → ComposeAiToolbar getToolsForSurface); the classifier path SETS the same
+      context for an in-chat-originated review. subDomain is now a first-class field on ComposeLaunchContextValue (hub
+      bd64a69d4) — the orientation writes it. Confirmation UI: per ASSISTANT-UI-ELEMENT-CRITERIA this is a
+      throwaway turn-follow-on → CHIP-style confirmation (proposed type + pick-another + both options), not a modal;
+      ADR-041: gate state lands in the ledger, no double-ask. "Both" = dispatch the review once per selected pack
+      (sequential, ADR-016). CHAT-ATTACHMENT-POLICY caps bind the upload path.
+    </background>
+    <relevant-files>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/conversation/localActionChips.ts (or the chip seam step 1 identifies)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/context/composeLaunchContext.ts (subDomain field)</file>
+      <file role="canonical-reference">src/solutions/SpaarkeAi/src/components/conversation/useConsumerChips.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">classifier output contract</dependency>
+      <dependency task="003" status="pending">packs to bind (nda + general)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-041">Confirmation is deterministic policy: risk/threshold as catalog DATA (per-row threshold), gate state persisted (no re-ask on the same turn after answer); scope: the gate implementation.</constraint>
+    <constraint source="ADR-016">"Both" and any multi-pack run dispatches SEQUENTIALLY; scope: multi-pack execution.</constraint>
+    <constraint source="ADR-030">Cross-pane orientation (workspace/compose context updates) rides typed PaneEventBus events — no ad-hoc coupling; scope: orientation writes.</constraint>
+    <constraint source="ADR-021">Confirmation chips/UI use Fluent v9 semantic tokens + dark mode; scope: new UI.</constraint>
+    <constraint source="project">NEVER silent-wrong-grounding, NEVER silent-decline: below-threshold ALWAYS confirms; non-agreement gets an explicit "this doesn't look like an agreement" response with the general option. Scope: all gate branches.</constraint>
+    <constraint source="project">Keyword-heuristic chips must not mis-fire (ASSISTANT-UI-ELEMENT-CRITERIA) — the gate renders only on actual classifier output, not text heuristics.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Conversation-surface orientation + confirmation UX</topic>
+    <files>
+      <file>.claude/adr/ADR-041-judgment-confirmation-completion-policy.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>docs/standards/CHAT-ATTACHMENT-POLICY.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+    <patterns>
+      <pattern name="chip confirmations" location="src/solutions/SpaarkeAi/src/components/conversation/useConsumerChips.tsx">The shipped chip framework the gate options render through.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; trace the chat-upload → review-intent path and where dispatch decides the consumer; identify the exact insertion seam for classify-first.</step>
+    <step order="1">Wire classify-on-review-intent (020 capability) for untyped uploads; skip classification when subDomain already present (explicit path owns it — 023).</step>
+    <step order="2">Implement the gate: threshold resolution (row override → global 0.85) → auto-proceed / confirm chips / composite choice-of-lens (incl. Both).</step>
+    <step order="3">Orientation writes: activeWorkType + subDomain into the session/compose context; tool palette scoping verified via getToolsForSurface.</step>
+    <step order="4">Multi-pack "both": sequential dispatch per selected pack; outcomes surface per pack.</step>
+    <step order="5">Tests: gate branches (auto/confirm/composite/non-agreement), orientation state, no-mis-fire (chip renders only on classifier output).</step>
+    <step order="6">Update TASK-INDEX.md: 021 ✅. Commit before any sibling task touches ConversationPane (hot-file rule).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If binding a pack per-dispatch (the "both" case) is not expressible through the existing binding/scope resolution without server changes, STOP and present options (server-side scope param vs sequential re-bind) before modifying the BFF.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Untyped upload orients + confirms">
+      <steps><step>Upload an agreement (no wizard); type "review this document"</step><step>Observe classifier gate behavior per confidence</step><step>Confirm a type; review runs grounded on that pack</step></steps>
+      <expected>Below-threshold shows the confirm chips; after confirm, tools are agreement-scoped and the review cites the right pack.</expected>
+    </test>
+    <test name="Composite choice-of-lens">
+      <steps><step>Upload an employment agreement containing an NDA addendum</step><step>Choose "both"</step></steps>
+      <expected>Two sequential reviews run (one per pack); outcomes labelled per lens.</expected>
+    </test>
+    <test name="Dark mode"><steps><step>Toggle dark mode</step></steps><expected>Gate chips use semantic tokens; no hardcoded colors (ADR-021).</expected></test>
+  </ui-tests>
+
+  <tools><tool name="npm">SpaarkeAi build + tests</tool></tools>
+
+  <outputs>
+    <output type="code">ConversationPane.tsx + chip seam (orientation + gate)</output>
+    <output type="test">gate-branch unit tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Untyped agreement upload + "review this" → classifier runs; at ≥ threshold the review auto-proceeds bound to the matched pack (assert pack ref in dispatch).</criterion>
+    <criterion testable="true">Below threshold → confirmation chips (proposed + pick-another); NO dispatch until answered; answer recorded (no double-ask).</criterion>
+    <criterion testable="true">Composite doc → choice-of-lens incl. Both; Both runs sequentially once per pack.</criterion>
+    <criterion testable="true">Non-agreement doc → explicit response + general option; no fabricated agreement review.</criterion>
+    <criterion testable="true">After orientation, getToolsForSurface returns the agreement-analysis palette (assert activeWorkType + subDomain set).</criterion>
+    <criterion testable="true">Negative: a text message merely CONTAINING "review" without an attached/target doc does not fire the gate.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-07/FR-08 + FR-09 interactive half; design Lens 3(d). This task is the "wire a reader" moment for the hub's A3 — after it lands, notify hub to finish the cold-load threading + open-existing derivation (or 022 does them).
+
+COMPLETION (2026-07-31): all 6 acceptance criteria PASS (full detail: notes/021-execution-notes.md). Trigger surface
+= additive `agreement-classify` Binding row (§10 justified, no new endpoint). Gate implemented as a new hook
+(useAgreementReviewGate.ts) + pure module (agreementReviewRouting.ts), wired into ConversationPane's existing
+decorate-hook interception BEFORE detectReviseThisDocumentIntent. Pack-binding threaded additively:
+LinearRunContext.KnowledgeSourceIds -> ActionRunner.RetrieveReferenceGroundingAsync (fixes the task-003 whole-corpus
+finding) via a new subDomain->registry lookup in SessionDispatchOrchestrator. "Both" dispatches sequentially
+(ADR-016). No escalation fired. Tests: BFF 9628/0/101 (was 9625/0/101); SpaarkeAi conversation suite 49/445 (was
+46/405); new dedicated seam test (AgreementReviewKnowledgeScopeSeamTests, 3 cases) proves the server-side threading
+through the real WebApplicationFactory app. Self-review (code-review + adr-check) surfaced and fixed one real race
+condition (concurrent double-invocation of the same file's gate) and flagged one judgment call (ADR-041 Gate-ledger
+formalism vs this gate's lighter session-scoped state — Path A, documented in notes). UI-tests (live browser,
+dark-mode) deferred to 060/061 per assignment; covered at unit/e2e-wire level here.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

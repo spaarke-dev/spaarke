@@ -33,16 +33,12 @@ import {
 import {
   ChevronLeft20Regular,
   ChevronRight20Regular,
-  Dismiss12Regular,
-  Settings16Regular,
+  DismissCircle16Filled,
   WarningRegular,
 } from "@fluentui/react-icons";
 import { WidgetErrorBoundary } from "@spaarke/ui-components";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 import type { WorkspaceWidgetProps } from "@spaarke/ai-widgets";
-import { useDispatchPaneEvent } from "@spaarke/ai-widgets";
-import { SPAARKEAI_TEMPLATE_FILTER } from "../../constants/workspaceTemplateFilter";
-import { resolveRuntimeConfig } from "@spaarke/auth";
 
 // NOTE (task 098 — 2026-05-22): the per-tab pin button was removed from
 // every tab row. Pin state is still owned by `services/pinnedWorkspaces.ts`
@@ -136,6 +132,15 @@ const useStyles = makeStyles({
     maxWidth: "160px",
   },
 
+  // UAT round-4 (item #10a): fixed-size leading slot for the tiny background-review spinner on a
+  // Compose tab, so the label column stays aligned whether or not the spinner is present.
+  reviewSpinnerSlot: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+
   // Tab title — task 098 (2026-05-22): bumped one Fluent v9 step
   // (fontSizeBase200 → fontSizeBase300) per operator feedback. The tab is
   // still visually a tab (TabList size="small") but the label is now slightly
@@ -146,6 +151,15 @@ const useStyles = makeStyles({
     whiteSpace: "nowrap",
     fontSize: tokens.fontSizeBase300,
     lineHeight: tokens.lineHeightBase300,
+    color: tokens.colorNeutralForeground2,
+  },
+
+  // UAT 2026-07-20: the selected tab reads in brand blue (semibold) so the
+  // active workspace is unmistakable. Semantic tokens only (ADR-021) so dark
+  // mode inverts correctly.
+  tabLabelSelected: {
+    color: tokens.colorBrandForeground1,
+    fontWeight: tokens.fontWeightSemibold,
   },
 
   // Loading badge inside the tab (replaces label while resolving).
@@ -159,20 +173,31 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
 
-  // Close button — task 098 (2026-05-22): downsized via Dismiss12Regular
-  // (the 12px icon variant) so the × is visually subordinate to the bumped
-  // tab title. Button hit area kept at 16×16 for accessibility (WCAG min
-  // target ~24px is relaxed for icon-inside-tab affordances per Fluent v9
-  // tab pattern; the surrounding tab itself is the primary 40px target).
+  // Close button — UAT 2026-07-20: the × is now a circular dismiss glyph
+  // (DismissCircle16). On the SELECTED tab it fills brand blue with a white
+  // glyph (see `closeButtonSelected` + the Filled icon in JSX); on other tabs
+  // it is a subtle neutral outline circle that brightens on hover. Button hit
+  // area kept at 18×18 (the surrounding tab is the primary 40px target).
   closeButton: {
     minWidth: "unset",
-    height: "16px",
-    width: "16px",
+    height: "18px",
+    width: "18px",
     padding: "0",
     flexShrink: 0,
+    borderRadius: tokens.borderRadiusCircular,
     color: tokens.colorNeutralForeground3,
     ":hover": {
       color: tokens.colorNeutralForeground1,
+      backgroundColor: tokens.colorNeutralBackground3Hover,
+    },
+  },
+  // Selected-tab close glyph — brand blue so the circled × matches the blue
+  // active-tab label. Hover keeps the brand color (the filled circle already
+  // reads as an affordance).
+  closeButtonSelected: {
+    color: tokens.colorBrandForeground1,
+    ":hover": {
+      color: tokens.colorBrandForeground1,
       backgroundColor: tokens.colorNeutralBackground3Hover,
     },
   },
@@ -204,25 +229,6 @@ const useStyles = makeStyles({
       display: "none",
     },
     backgroundColor: tokens.colorNeutralBackground2,
-  },
-
-  // R6 Pillar 9 / task 098 — visibility-toggle strip above the active widget.
-  // Subtle thin bar, semantic tokens only (ADR-021 dark-mode parity).
-  visibilityBar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    // FIX #6 (spaarkeai-compose-r2) — the "Visible to assistant" toggle was
-    // removed; this bar now holds only the workspace-layout edit gear.
-    columnGap: tokens.spacingHorizontalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
-    backgroundColor: tokens.colorNeutralBackground1,
-    borderBottomWidth: tokens.strokeWidthThin,
-    borderBottomStyle: "solid",
-    borderBottomColor: tokens.colorNeutralStroke2,
   },
 
   // Loading state within the content area.
@@ -292,6 +298,14 @@ export interface WorkspaceTabManagerComponentProps {
   onTabChange: (tabId: string) => void;
   /** Called when the user clicks the close button on a tab. */
   onTabClose: (tabId: string) => void;
+  /**
+   * Task 025 (spec FR-09) — called when a widget reports a live data-change patch via its
+   * `onDataChange` prop (e.g. AnalysisEditorWidget persisting in-progress edit state). Forwards
+   * to `WorkspaceTabManager.updateTab(tabId, mergedData)` so the edit rides the existing tab
+   * persistence write-through. Optional — omitted in contexts that don't wire tab persistence
+   * (e.g. isolated unit tests).
+   */
+  onTabDataChange?: (tabId: string, patch: unknown) => void;
 
   /**
    * When true, suppress the tab-bar strip and render only the active
@@ -309,112 +323,18 @@ export interface WorkspaceTabManagerComponentProps {
    * Defaults to `false` so non-compose consumers see no behaviour change.
    */
   hideTabBar?: boolean;
-}
 
-// ---------------------------------------------------------------------------
-// Wizard launch helper — R2 UAT §4.1 (2026-07-03). Gear icon in the visibility
-// bar opens the WorkspaceLayoutWizard at the Choose Layout step for the
-// active workspace tab. Reuses the existing `sprk_workspacelayoutwizard`
-// webresource + navigateTo pattern from ManageWorkspacesPane, plus the R2
-// `startAtStep` URL param wired into wizard main.tsx.
-// ---------------------------------------------------------------------------
-
-function getXrmForWizard(): unknown {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const w = window as any;
-  return w?.Xrm ?? w?.parent?.Xrm ?? w?.top?.Xrm ?? null;
-}
-
-const WIZARD_RESULT_STORAGE_KEY = "spaarke:workspace-wizard:last-result";
-const WIZARD_RESULT_MAX_AGE_MS = 60_000;
-
-interface WizardDialogResult {
-  confirmed: boolean;
-  layoutId?: string;
-  at?: number;
-}
-
-function readWizardDialogResult(): WizardDialogResult | null {
-  try {
-    const raw = window.sessionStorage?.getItem(WIZARD_RESULT_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as WizardDialogResult;
-    if (typeof parsed.at === "number" && Date.now() - parsed.at > WIZARD_RESULT_MAX_AGE_MS) {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function consumeWizardDialogResult(): void {
-  try {
-    window.sessionStorage?.removeItem(WIZARD_RESULT_STORAGE_KEY);
-  } catch { /* storage may be disabled */ }
-}
-
-/**
- * Launch the edit wizard for an existing workspace layout. Opens at the
- * wizard's default step for edit mode (Arrange Sections, per §3.1). After the
- * wizard closes, if it reports a successful save via sessionStorage, invoke
- * `onSaved` so the caller can refresh the affected tab (§3.3).
- *
- * Renamed from `launchEditWizardForTab` after operator feedback
- * (2026-07-03 round 2): user wanted the gear icon to open at Arrange rather
- * than Choose Layout.
- */
-async function launchEditWizardForTab(
-  layoutId: string,
-  onSaved?: (savedLayoutId: string) => void,
-): Promise<void> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrmForWizard() as any;
-  if (!xrm?.Navigation?.navigateTo) {
-    console.warn(
-      "[WorkspaceTabManagerComponent] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Gear-icon launch is a no-op.",
-    );
-    return;
-  }
-
-  const bffBaseUrl = (await resolveRuntimeConfig()).bffBaseUrl ?? "";
-  const parts: string[] = [
-    "mode=edit",
-    `bffBaseUrl=${encodeURIComponent(bffBaseUrl)}`,
-    `layoutId=${encodeURIComponent(layoutId)}`,
-    `templateFilter=${encodeURIComponent(SPAARKEAI_TEMPLATE_FILTER.join(","))}`,
-    // Default edit behavior: land on Arrange Sections. No `startAtStep`
-    // override needed (App.tsx sets it internally from `mode === "edit"`).
-  ];
-  const data = parts.join("&");
-
-  try {
-    await xrm.Navigation.navigateTo(
-      {
-        pageType: "webresource",
-        webresourceName: "sprk_workspacelayoutwizard",
-        data,
-      },
-      {
-        target: 2,
-        width: { value: 60, unit: "%" },
-        height: { value: 70, unit: "%" },
-        title: "Edit Workspace",
-      },
-    );
-  } catch (err: unknown) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const code = (err as any)?.errorCode;
-    if (code !== 2) {
-      console.warn("[WorkspaceTabManagerComponent] Wizard launch error:", err);
-    }
-  }
-
-  const dialogResult = readWizardDialogResult();
-  if (dialogResult?.confirmed && onSaved) {
-    onSaved(dialogResult.layoutId ?? layoutId);
-    consumeWizardDialogResult();
-  }
+  /**
+   * UAT round-4 (item #10a): true while a review whose progress modal was dismissed ("Continue working
+   * in background") is STILL running server-side. When true, a tiny circular progress indicator (Fluent
+   * `Spinner size="tiny"`) is rendered on every `compose` tab header - the run's liveness after the modal
+   * has been dismissed and fully unmounted. Cleared when the run completes (completion then surfaces via
+   * the existing `ReviewCompleteToast`). Defaults to `false` (no indicator).
+   *
+   * The indicator is scoped to `compose` tabs because an agreement review always runs against a document
+   * open in a Compose tab; a non-compose tab never hosts a review, so it never shows the spinner.
+   */
+  composeReviewRunning?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -430,12 +350,15 @@ interface ActiveWidgetContentProps {
    * while inactive can suppress "I am the active surface" side effects (active-document claim).
    */
   isActiveTab?: boolean;
+  /** Task 025 (FR-09) — see WorkspaceTabManagerComponentProps.onTabDataChange. */
+  onTabDataChange?: (tabId: string, patch: unknown) => void;
 }
 
 function ActiveWidgetContent({
   tab,
   styles,
   isActiveTab = true,
+  onTabDataChange,
 }: ActiveWidgetContentProps): React.JSX.Element {
   // Loading — registry promise not yet resolved.
   if (tab.isLoading || tab.Component === null) {
@@ -447,6 +370,15 @@ function ActiveWidgetContent({
   }
 
   const Widget = tab.Component as React.ComponentType<WorkspaceWidgetProps>;
+
+  // Task 025 (FR-09): a stable per-tab callback so a widget's live edit-state patch (e.g.
+  // AnalysisEditorWidget's in-progress draft) reaches WorkspaceTabManager.updateTab and rides
+  // the existing tab-persistence write-through. Undefined when the host didn't wire
+  // onTabDataChange (e.g. isolated unit-test render) — the widget's own onDataChange prop is
+  // then undefined too, which every widget must already tolerate (optional prop).
+  const onDataChange = onTabDataChange
+    ? (patch: unknown): void => onTabDataChange(tab.id, patch)
+    : undefined;
 
   // ai-spaarke-ai-workspace-UI-r1 brittleness Phase D.2 (2026-06-09):
   // Per-widget isolation — a render error in this widget is caught and
@@ -466,6 +398,7 @@ function ActiveWidgetContent({
           isLoading={false}
           tabId={tab.id}
           isActiveTab={isActiveTab}
+          onDataChange={onDataChange}
         />
       </WidgetErrorBoundary>
     </div>
@@ -488,10 +421,11 @@ export function WorkspaceTabManagerComponent({
   activeTabId,
   onTabChange,
   onTabClose,
+  onTabDataChange,
   hideTabBar = false,
+  composeReviewRunning = false,
 }: WorkspaceTabManagerComponentProps): React.JSX.Element {
   const styles = useStyles();
-  const dispatch = useDispatchPaneEvent();
 
   // Resolve the active tab record.
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
@@ -514,27 +448,6 @@ export function WorkspaceTabManagerComponent({
   const composeTabs = tabs.filter((t) => t.widgetType === "compose");
   const activeIsCompose =
     activeTab !== null && activeTab.widgetType === "compose";
-
-  // R2 UAT §3.3 (2026-07-03): after gear-icon edit wizard closes with a save,
-  // close the affected tab and dispatch a fresh widget_load so the tab
-  // remounts with the new layout. Force-remount is simpler than plumbing a
-  // per-widget "refresh" method through the registry.
-  const handleGearIconClick = React.useCallback(
-    (tabId: string, layoutId: string, layoutName: string) => {
-      void launchEditWizardForTab(layoutId, (savedLayoutId) => {
-        // Close the old tab; re-dispatch widget_load with the saved id so a
-        // fresh tab renders the updated layout.
-        onTabClose(tabId);
-        dispatch("workspace", {
-          type: "widget_load",
-          widgetType: "workspace",
-          widgetData: { layoutId: savedLayoutId, layoutName },
-          displayName: layoutName,
-        });
-      });
-    },
-    [onTabClose, dispatch],
-  );
 
   // ---------------------------------------------------------------------------
   // Tab overflow arrows — task 107 (2026-05-22)
@@ -703,6 +616,14 @@ export function WorkspaceTabManagerComponent({
             // removed (operator: "pin belongs in the workspace selection
             // surface, not on every open tab"). Tab rows now contain only
             // the label + close affordance.
+            //
+            // UAT 2026-07-20: the selected tab's label turns brand blue and
+            // its close × becomes a filled brand circle so the active
+            // workspace is unmistakable.
+            const isSelected = tab.id === activeTabId;
+            // UAT round-4 (item #10a): a dismissed-but-still-running review shows a tiny circular
+            // progress indicator on its Compose tab header, until the run completes.
+            const showReviewSpinner = composeReviewRunning && tab.widgetType === "compose";
             return (
               <Tab
                 key={tab.id}
@@ -710,32 +631,58 @@ export function WorkspaceTabManagerComponent({
                 data-testid={`workspace-tab-${tab.id}`}
               >
                 <div className={styles.tabContent}>
+                  {showReviewSpinner ? (
+                    <span
+                      className={styles.reviewSpinnerSlot}
+                      data-testid={`workspace-tab-review-spinner-${tab.id}`}
+                      role="status"
+                      aria-label="Review running in the background"
+                      title="Review running in the background"
+                    >
+                      <Spinner size="extra-tiny" />
+                    </span>
+                  ) : null}
                   {tab.isLoading ? (
                     <span className={styles.tabLoadingBadge}>
                       <Spinner size="extra-tiny" />
                       <span className={styles.tabLabel}>{tab.displayName}</span>
                     </span>
                   ) : (
-                    <span className={styles.tabLabel} title={tab.displayName}>
+                    <span
+                      className={mergeClasses(
+                        styles.tabLabel,
+                        isSelected && styles.tabLabelSelected,
+                      )}
+                      title={tab.displayName}
+                    >
                       {tab.displayName}
                     </span>
                   )}
 
-                  <Tooltip
-                    content={`Close ${tab.displayName}`}
-                    relationship="label"
-                    positioning="below"
-                  >
-                    <Button
-                      className={mergeClasses(styles.closeButton)}
-                      appearance="subtle"
-                      icon={<Dismiss12Regular />}
-                      size="small"
-                      aria-label={`Close ${tab.displayName}`}
-                      data-testid={`workspace-tab-close-${tab.id}`}
-                      onClick={(e) => handleCloseClick(e, tab.id)}
-                    />
-                  </Tooltip>
+                  {/* UAT 2026-07-21: the close affordance shows ONLY on the
+                      active tab — inactive tabs render no × (activate first to
+                      close). The glyph is a filled brand circle to match the
+                      blue active-tab label. */}
+                  {isSelected ? (
+                    <Tooltip
+                      content={`Close ${tab.displayName}`}
+                      relationship="label"
+                      positioning="below"
+                    >
+                      <Button
+                        className={mergeClasses(
+                          styles.closeButton,
+                          styles.closeButtonSelected,
+                        )}
+                        appearance="subtle"
+                        icon={<DismissCircle16Filled />}
+                        size="small"
+                        aria-label={`Close ${tab.displayName}`}
+                        data-testid={`workspace-tab-close-${tab.id}`}
+                        onClick={(e) => handleCloseClick(e, tab.id)}
+                      />
+                    </Tooltip>
+                  ) : null}
                 </div>
               </Tab>
             );
@@ -764,40 +711,12 @@ export function WorkspaceTabManagerComponent({
       {/* Active tab content                                                   */}
       {/* ------------------------------------------------------------------ */}
       <div className={styles.content}>
-        {/* FIX #6 (spaarkeai-compose-r2) — the per-tab "Visible to assistant"
-            toggle was REMOVED. The Assistant's active document now follows the
-            ACTIVE tab (WorkspacePane drives register/withdraw on tab activation
-            via the compose visibility conduit) — visibility is implicit, no UI.
-            What remains here is the workspace-LAYOUT edit gear (R2 UAT §4.1):
-            it opens the edit wizard for the active workspace layout. It is
-            shown ONLY for workspace-layout tabs (widgetType === "workspace")
-            with a resolvable layoutId — so it never appears on the Compose
-            surface (widgetType 'compose'), and the bar itself does not render
-            for compose tabs. */}
-        {activeTab !== null &&
-         activeTab.widgetType === "workspace" &&
-         (activeTab.widgetData as { layoutId?: string } | null)?.layoutId ? (
-          <div className={styles.visibilityBar}>
-            <Tooltip content="Edit workspace layout" relationship="label" withArrow>
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<Settings16Regular />}
-                aria-label="Edit workspace layout"
-                onClick={() =>
-                  handleGearIconClick(
-                    activeTab.id,
-                    (activeTab.widgetData as { layoutId: string }).layoutId,
-                    (activeTab.widgetData as { layoutName?: string }).layoutName
-                      ?? activeTab.displayName
-                      ?? "Workspace",
-                  )
-                }
-                data-testid="workspace-edit-gear"
-              />
-            </Tooltip>
-          </div>
-        ) : null}
+        {/* UAT 2026-07-20: the workspace-LAYOUT edit gear was removed from the
+            content area per operator request ("remove the workspace layout
+            gear"). Editing a workspace layout is still available from the
+            Manage Workspaces pane's per-row "⋯ → Edit" action. The per-tab
+            "Visible to assistant" toggle had already been removed (FIX #6,
+            spaarkeai-compose-r2), so the whole visibility bar is now gone. */}
 
         {/* Compose keep-alive hosts (UAT round-7 #1; multi-tab — spaarkeai-compose-r2).
             One host PER compose tab, ALL mounted; each hidden (display:none,
@@ -822,13 +741,19 @@ export function WorkspaceTabManagerComponent({
                 tab={composeTab}
                 styles={styles}
                 isActiveTab={isActiveComposeTab}
+                onTabDataChange={onTabDataChange}
               />
             </div>
           );
         })}
 
         {activeTab !== null && !activeIsCompose ? (
-          <ActiveWidgetContent tab={activeTab} styles={styles} isActiveTab />
+          <ActiveWidgetContent
+            tab={activeTab}
+            styles={styles}
+            isActiveTab
+            onTabDataChange={onTabDataChange}
+          />
         ) : activeTab === null ? (
           <div className={styles.errorState}>
             <WarningRegular className={styles.errorIcon} />

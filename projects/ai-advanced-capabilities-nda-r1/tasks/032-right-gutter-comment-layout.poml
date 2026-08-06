@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>Right-gutter comment layout aligned to edits (ProseMirror coordsAtPos)</title>
+    <phase>3 Compose Review Experience</phase>
+    <gate>clean</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Brownfield ProseMirror positioning: right-rail column, live-pos resolution, collision/stacking; moderate net-new UI.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Brownfield UI positioning with a proven precedent (TrackChangesExtension widget decorations); complex-but-specified — Sonnet xhigh fits.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies the same comment/editor layout files as 031; sequential after 031.</parallel-reason>
+    <deps>031</deps>
+    <tags>frontend, react, pcf, fluent-ui</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Move Tiptap comments from the docked list to a right-side gutter aligned vertically to their anchored ranges.
+    Resolve each thread's LIVE anchor position (the hook currently stores anchorText, not from/to), use coordsAtPos
+    for Y placement, absolutely position comment cards in a right rail, and handle collision/stacking. Leverage the
+    proven ProseMirror widget-decoration positioning from TrackChangesExtension.
+  </prompt>
+
+  <role>
+    SPAARKE Compose client developer. Expert in ProseMirror decorations, coordsAtPos, and Fluent v9 layout. Follow
+    ADR-021 + ADR-049.
+  </role>
+
+  <goal>
+    Comment cards render in a right-rail column, each vertically aligned to its clause; cards reflow on scroll/edit
+    and collide-avoid; the earlier docked list is replaced (or superseded) for the review flow.
+  </goal>
+
+  <context>
+    <background>
+      Today comments are a docked list panel (ComposeCommentThread) + inline highlight span, with no line alignment.
+      editorScrollWrap is already position:relative. The hook stores anchorText, not live from/to — resolving the
+      live position is a real sub-task. coordsAtPos ships but is unused. TrackChangesExtension already proves
+      widget-decoration positioning. Requirement: comments on the RIGHT, aligned with suggested edits (spec FR-16).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Compose.Components/src/components/ComposeCommentThread.tsx</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/hooks/useComposeCommentThreads.ts</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/ (TrackChangesExtension.ts)</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</file>
+    </relevant-files>
+    <dependencies>031 (advisory comments must exist to lay out).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Live position comes from resolving the CommentAnchorMark span to from/to in the current doc; do not trust stale stored positions.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; dark-mode compliant; the right rail adapts to theme.</constraint>
+    <constraint source="project">Store/resolve live anchor pos (fix anchorText→live from/to) — a named sub-task. Use coordsAtPos for Y. Handle collision/stacking so overlapping anchors don't render cards on top of each other. Cards align to their clause, alongside any suggested edit.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md</file>
+    </files>
+    <patterns>
+      <pattern name="Widget-decoration positioning" location="src/client/shared/Spaarke.Compose.Components/src/ (TrackChangesExtension.ts)">
+        Reuse the widget-decoration + coordsAtPos approach proven here for positioning right-rail cards.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Add live-position resolution: resolve each thread's CommentAnchorMark span to current from/to (replace reliance on stored anchorText).</step>
+    <step order="2">Add a right-rail column in editorScrollWrap; compute each card's Y via coordsAtPos.</step>
+    <step order="3">Absolutely position cards; implement collision/stacking for near-adjacent anchors.</step>
+    <step order="4">Reflow on scroll + doc change; align cards to their clause (and adjacent suggested edits).</step>
+    <step order="5">Verify dark mode + run UI tests; update TASK-INDEX.md: mark 032 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build the shared Compose lib + code page.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/ (right-gutter layout + live-pos resolution)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given advisory comments exist, when Compose renders, then each comment card appears in a right rail vertically aligned to its clause.</criterion>
+    <criterion testable="true">Card positions use live-resolved anchor positions (not stale anchorText) and update on scroll/edit.</criterion>
+    <criterion testable="true">Near-adjacent comments collision-avoid (no overlapping cards).</criterion>
+    <criterion testable="true">The right rail is dark-mode compliant (Fluent v9 tokens).</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Right-gutter alignment">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=webresource&amp;webresourceName=sprk_SpaarkeAi</url>
+      <steps>
+        <step>Run NDA-REVIEW; open Compose</step>
+        <step>Verify comment cards render in a right rail aligned to clauses</step>
+        <step>Scroll and verify cards track their anchors; check overlapping anchors stack</step>
+      </steps>
+      <expected>Cards align to clauses, track on scroll, no overlap; no console errors.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Verify right-rail cards adapt (no white in dark mode)</step>
+      </steps>
+      <expected>All colors use Fluent v9 semantic tokens per ADR-021.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Visual anchor: mirror TrackChangesExtension's positioning; the "clean and modern" bar is met by matching the
+    existing Compose comment/edit styling, not a new house style.
+
+    COMPLETED (gate CLEAN). New `ComposeCommentGutter.tsx` (+ test) renders one Fluent v9 card per advisory-comment
+    thread in a right-rail column mounted inside `editorScrollWrap`. Live-position resolution reuses (exports)
+    `findCommentAnchorRange` from `ComposeCommentThread.types.ts` (task 040's primitive) — never reads the thread's
+    stale `anchorText`. Y placement via `editor.view.coordsAtPos(span.from)`, wrapped in try/catch (DOM measurement
+    can legitimately fail on a not-yet-painted view). Collision/stacking is a pure, unit-tested greedy pass
+    (`layoutCommentGutterCards`) using measured card heights, with a code-review-caught-and-fixed bug: the FIRST
+    paint estimates unmeasured heights at DEFAULT_CARD_HEIGHT_PX (96px); a follow-up `requestAnimationFrame` pass
+    now re-measures + re-stacks once cards mount, so the estimate never silently persists (regression test added).
+    Reflow wired to editor transactions, scroll, and window resize. `editorSurface` gets a `paddingRight` reserve
+    (`editorSurfaceWithGutter`) so cards sit in true margin space, not overlapping body text.
+
+    Metadata passthrough (gate022031 follow-ons): (a) `riskLevel`/`sectionRef`/`standardRef` now flow
+    PaneEventTypes.ComposeAdvisoryCommentItem -> ComposeWorkspace.onAdvisoryComments -> AdvisoryCommentInput ->
+    useComposeCommentThreads.createThread's new optional metadata param -> ComposeCommentThreadModel -> the
+    gutter card's risk badge + citation (previously only {targetText, explanation} crossed the placeAdvisoryComments
+    call). (b) the Action's real `overallRisk` field now rides the `compose_advisory_comments` wire
+    (useNdaReviewAdvisoryCommentsBridge.ts dispatches `result.overallRisk`, which was already typed but previously
+    dropped); NdaReviewSummaryPanel now prefers it over the client-derived `deriveOverallRisk` fallback.
+
+    Build/tests: Spaarke.AI.Widgets (typecheck+build clean), Spaarke.Compose.Components (typecheck+build clean,
+    559/559 tests green), SpaarkeAi (surface-gate typecheck 0 new errors, 647/656 tests green — the 9 failures are
+    the pre-existing, unrelated three-pane-compose-coordination.e2e AiSessionProvider gap already logged in
+    current-task.md). Self-gates: code-review found + fixed one real timing bug (collision math using a stale
+    height estimate past first paint); adr-check CLEAN (ADR-049/021/030/012/039/040 — no BFF touched, no new AI
+    dispatch). UI test (browser, --chrome) is env-blocked per project convention — not faked; see acceptance
+    self-check below.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates + Step 9.7 ui-test.</protocol>
+  </execution>
+</task>

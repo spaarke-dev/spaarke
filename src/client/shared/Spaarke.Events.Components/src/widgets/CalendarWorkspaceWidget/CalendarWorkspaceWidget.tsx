@@ -126,6 +126,7 @@ import { addMonths, startOfMonth } from '../../utils/dateMath';
 // See task 033b deviations doc for rationale.
 import { DataGrid, type HostFilterCondition } from '../../../../Spaarke.UI.Components/src/components/DataGrid';
 import { XrmDataverseClient } from '../../../../Spaarke.UI.Components/src/services/XrmDataverseClient';
+import { OOB_MODAL_SIZES } from '../../../../Spaarke.UI.Components/src/utils/adapters/oobModalSizes';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration — the sprk_gridconfiguration record id that drives the grid.
@@ -1060,6 +1061,8 @@ export const CalendarWorkspaceWidget: React.FC<CalendarWorkspaceWidgetProps> = (
     }
     const cleanId = eventId.replace(/[{}]/g, '');
     try {
+      // `record` OOB size (85%×85%) — record-modal-selection.md invariant
+      // (spec FR-11/FR-18, task 090); was an ad-hoc 80%×80% literal.
       xrm.Navigation.navigateTo(
         {
           pageType: 'entityrecord',
@@ -1068,8 +1071,8 @@ export const CalendarWorkspaceWidget: React.FC<CalendarWorkspaceWidgetProps> = (
         },
         {
           target: 2,
-          width: { value: 80, unit: '%' },
-          height: { value: 80, unit: '%' },
+          width: OOB_MODAL_SIZES.record.width,
+          height: OOB_MODAL_SIZES.record.height,
           position: 1,
         }
       );

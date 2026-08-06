@@ -2,11 +2,18 @@
 <manifest>
   <control namespace="Spaarke.Controls"
            constructor="TrackingFieldTrio"
-           version="1.0.5"
+           version="1.0.11"
            display-name-key="Tracking Field Trio"
-           description-key="Compact 3-field control for tracking flags (v1.0.5). Combines two Yes/No toggles (Monitor, High Priority) with a 3-value segmented picker (Access Permission). Designed to fit inside a 33% form column."
+           description-key="Compact 3-field control for tracking flags (v1.0.11). Combines two Yes/No toggles (Monitor, High Priority) with a 3-value segmented picker (Access Permission), plus an opt-in governance toolbar (grant-access modal + email-members icons). Designed to fit inside a 33% form column."
            control-type="standard">
-    <external-service-usage enabled="false" />
+    <!-- task 041 — the grant modal calls the BFF external-access endpoints via
+         @spaarke/auth's authenticatedFetch (MSAL), so this control now needs
+         external-service-usage declared for the auth + BFF hosts, mirroring
+         SemanticSearchControl's manifest. -->
+    <external-service-usage enabled="true">
+      <domain>*.azurewebsites.net</domain>
+      <domain>login.microsoftonline.com</domain>
+    </external-service-usage>
 
     <property name="monitor"
               display-name-key="Monitor"
@@ -48,6 +55,33 @@
               usage="input"
               required="false"
               default-value="false" />
+
+    <!-- v1.0.9 (task 041, teams-app-r1) — auth config for the access-grant
+         modal's BFF calls (@spaarke/auth). Mirrors SemanticSearchControl's
+         established property naming. All optional: when omitted, @spaarke/auth
+         falls back to window.__SPAARKE_MSAL_CLIENT_ID__ / __SPAARKE_BFF_URL__
+         (see authInit.ts), so an environment that already sets those globals
+         needs no manifest configuration. -->
+    <property name="apiBaseUrl"
+              display-name-key="API Base URL"
+              description-key="BFF API base URL used by the access-grant modal (task 041)"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
+
+    <property name="clientAppId"
+              display-name-key="Client App ID"
+              description-key="Azure AD application (client) ID for PCF MSAL authentication"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
+
+    <property name="bffAppId"
+              display-name-key="BFF App ID"
+              description-key="BFF API application ID for OAuth scope construction"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
 
     <resources>
       <code path="index.ts" order="1" />

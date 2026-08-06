@@ -40,4 +40,18 @@ public sealed record LinearRunContext
     /// runs.
     /// </summary>
     public string? TenantId { get; init; }
+
+    /// <summary>
+    /// ai-advanced-capabilities-agreements-r1 task 021 (FR-08 pack binding): an optional scope for
+    /// <see cref="ActionRunner.RetrieveReferenceGroundingAsync"/>'s reference-knowledge search
+    /// (<c>spaarke-rag-references</c> knowledge-source ids, e.g. <c>["KNW-011"]</c> for the NDA
+    /// standard). Null (the default) preserves the pre-021 behavior EXACTLY — an unscoped, whole-corpus
+    /// search (every existing caller omits this property). Populated only by
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Chat.SessionDispatchOrchestrator"/> when the dispatch args
+    /// carry a <c>subDomain</c> resolved against the <c>sprk_agreementtype</c> registry's
+    /// <c>sprk_knowledgepackref</c> column — so a classified review run is grounded on the matched
+    /// type's own pack instead of being crowded out by the whole reference corpus (the gap task 003
+    /// flagged: <c>ActionRunner</c> never set <c>KnowledgeSourceIds</c> before this).
+    /// </summary>
+    public IReadOnlyList<string>? KnowledgeSourceIds { get; init; }
 }

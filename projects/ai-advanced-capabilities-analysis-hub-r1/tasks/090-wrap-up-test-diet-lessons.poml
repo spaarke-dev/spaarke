@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Wrap-up + /test-diet reconciliation + lessons-learned</title>
+    <phase>7 Deploy</phase>
+    <gate>072 complete</gate>
+    <status>completed</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation + closeout orchestration on a completed project; no code authoring. Runs the mandatory project-close /test-diet gate (CLAUDE.md §7).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runs closeout skills + doc updates against a finished project; mechanical, no design authoring.</model-tier-reason>
+    <effort>low</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task; depends on all prior work; sequential closeout.</parallel-reason>
+    <deps>072</deps>
+    <tags>wrap-up</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Close out the project: update the README status to Complete, run the mandatory project-close /test-diet
+    reconciliation (per root CLAUDE.md §7) and cite its report, write notes/lessons-learned.md, set all TASK-INDEX
+    rows to ✅, and reset current-task.md to none.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer performing project closeout. Follow CLAUDE.md §7 (completion + project-close
+    test-diet gate).
+  </role>
+
+  <goal>
+    The project is verifiably complete: README marked Complete; /test-diet has run and its report is cited;
+    notes/lessons-learned.md exists; all TASK-INDEX rows are ✅; current-task.md reset to none.
+  </goal>
+
+  <context>
+    <background>
+      Mandatory final task. The project-close /test-diet gate (CLAUDE.md §7, binding per ci-cd-unit-test-remediation-r1
+      FR-B09) reconciles tests added/modified during the project against the ADR-038 build-vs-maintain classifier; it
+      is read-only (emits git rm/mv commands for the reviewer, does not auto-execute). Lessons capture corrections +
+      confirmed non-obvious approaches from the project (reuse-first composition, fork-on-analysis server placement,
+      retirement ordering).
+    </background>
+    <relevant-files>
+      <file role="modify">projects/ai-advanced-capabilities-analysis-hub-r1/README.md</file>
+      <file role="modify">projects/ai-advanced-capabilities-analysis-hub-r1/tasks/TASK-INDEX.md</file>
+      <file role="modify">projects/ai-advanced-capabilities-analysis-hub-r1/current-task.md</file>
+      <file role="new">projects/ai-advanced-capabilities-analysis-hub-r1/notes/lessons-learned.md</file>
+      <file role="new">projects/ai-advanced-capabilities-analysis-hub-r1/notes/test-diet-report.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="072" status="pending">End-to-end UI tests passed (9 Success Criteria verified) — the project is functionally complete.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md-7">SCOPE: this closeout. Run /test-diet BEFORE marking the project complete; the wrap-up must cite the test-diet report (or document the skip rationale). Skipping the gate is a HARD WARNING.</constraint>
+    <constraint source="ADR-038">SCOPE: project tests. /test-diet reconciles project tests against the build-vs-maintain classifier; it is read-only (emits git rm/mv for the reviewer) — do not auto-delete tests.</constraint>
+    <constraint source="CLAUDE.md-7">SCOPE: task transition. After completion, reset current-task.md to none and set every TASK-INDEX row to ✅; history stays in TASK-INDEX + per-task .poml files.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project-closeout</topic>
+    <files>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/context-handoff/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="test-diet reconciliation" location=".claude/skills/test-diet/SKILL.md">
+        Classify project-added/modified tests as scaffolding (delete) vs maintain (keep at KEEP path); output notes/test-diet-report.md; read-only.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare MINIMAL rigor; load test-diet + ADR-038; confirm 072 is ✅.</step>
+    <step order="1">Run /test-diet; capture the report at notes/test-diet-report.md; cite it in the wrap-up.</step>
+    <step order="2">Update README.md: Status → Complete; check the 9 Success Criteria; add a changelog entry.</step>
+    <step order="3">Write notes/lessons-learned.md (corrections + confirmed non-obvious approaches from the project).</step>
+    <step order="4">Set every row in TASK-INDEX.md to ✅; mark 090 ✅.</step>
+    <step order="5">Reset current-task.md to none (project complete).</step>
+    <step order="6">Document any deviation / skip rationale in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If /test-diet surfaces AMBIGUOUS tests requiring reviewer judgment, surface them for the reviewer rather than deleting/keeping silently; do not auto-execute its git rm/mv output.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Run /test-diet + git.</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-advanced-capabilities-analysis-hub-r1/README.md</output>
+    <output type="docs">projects/ai-advanced-capabilities-analysis-hub-r1/notes/test-diet-report.md</output>
+    <output type="docs">projects/ai-advanced-capabilities-analysis-hub-r1/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">README.md is marked Complete with the 9 Success Criteria checked and a changelog entry added.</criterion>
+    <criterion testable="true">/test-diet has run and notes/test-diet-report.md exists and is cited in the wrap-up.</criterion>
+    <criterion testable="true">notes/lessons-learned.md exists with project corrections + confirmed approaches.</criterion>
+    <criterion testable="true">All rows in TASK-INDEX.md are ✅; current-task.md is reset to none.</criterion>
+    <criterion testable="true">Negative: the project is NOT declared complete until /test-diet has run and its report is cited (or a skip rationale documented).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Mandatory closeout per CLAUDE.md §7. Do not mark the project complete until the test-diet gate has run. Reference:
+    the nda-r1 wrap-up (090) for the closeout shape.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute Step 11; run the project-close /test-diet gate.</protocol>
+  </execution>
+</task>

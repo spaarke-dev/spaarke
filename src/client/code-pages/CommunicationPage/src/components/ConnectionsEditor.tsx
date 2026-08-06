@@ -14,15 +14,7 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Button,
-  Badge,
-  Divider,
-  Tooltip,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Text, Button, Badge, Divider, Tooltip } from '@fluentui/react-components';
 import {
   Briefcase20Regular,
   Building20Regular,

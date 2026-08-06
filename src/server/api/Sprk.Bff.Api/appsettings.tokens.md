@@ -18,6 +18,7 @@ Tokens use the format `#{TOKEN_NAME}#` which is compatible with Azure DevOps and
 | `#{REDIS_INSTANCE_NAME}#` | Redis cache instance prefix | `spaarke:` |
 | `#{SERVICE_BUS_QUEUE_NAME}#` | Service Bus queue name | `sdap-jobs` |
 | `#{AI_SUMMARIZE_MODEL}#` | OpenAI model for summarization | `gpt-4o-mini` |
+| `#{AI_REASONING_MODEL}#` | OpenAI deployment for Reasoning-tier Actions (`DocumentIntelligence:ReasoningModel`; ADR-016 model-tier routing). Leave unset/empty until a reasoning-class deployment exists — `ModelTierDeploymentResolver` falls back to `StandardModel` when empty/whitespace, so Reasoning-tagged Actions still execute rather than 404ing. Added by `ai-advanced-capabilities-nda-r1` task 013; see `projects/ai-advanced-capabilities-nda-r1/notes/task-013-reasoning-provisioning.md` for the provisioning runbook + model recommendation. | `` (empty) in dev until provisioned; recommended target `gpt-5` (`reasoning_effort=medium`) once deployed |
 | `#{AI_SEARCH_INDEX_NAME}#` | AI Search index for records (Analysis + AiSearch:AllowedIndexes) | `spaarke-records-index` |
 | `#{SHARED_KNOWLEDGE_INDEX_NAME}#` | **Canonical single read/write RAG knowledge index** — feeds BOTH `AiSearch:KnowledgeIndexName` (reads) and `Analysis:SharedIndexName` (deprecated writes) per FR-26 / FAILURE-MODES G-9. Set once; both keys resolve to it. | `spaarke-files-index` |
 | `#{DISCOVERY_INDEX_NAME}#` | AI Search discovery-tier index (`AiSearch:DiscoveryIndexName` + AllowedIndexes) | `spaarke-discovery-index` |
@@ -102,6 +103,7 @@ DATAVERSE_ORG_NAME=spaarkedev1
 REDIS_INSTANCE_NAME=spaarke:
 SERVICE_BUS_QUEUE_NAME=sdap-jobs
 AI_SUMMARIZE_MODEL=gpt-4o-mini
+AI_REASONING_MODEL=            # empty until reasoning deployment is provisioned (task 013); target: gpt-5
 AI_SEARCH_INDEX_NAME=spaarke-records-index
 SHARED_KNOWLEDGE_INDEX_NAME=spaarke-files-index
 DISCOVERY_INDEX_NAME=spaarke-discovery-index
@@ -118,6 +120,8 @@ MULTI_DOCUMENT_ENABLED=false
 COPILOT_SSO_PROVIDER_APP_ID=auth-3e04ab58-8450-44d6-b95b-daca16b6cbdb
 COPILOT_AGENT_APP_ID=<set per environment>
 ```
+
+- **`DocumentIntelligence:FastModel` / `StandardModel` / `ReasoningModel`** — model-tier deployment routing (ADR-016; wired end-to-end by `ai-advanced-capabilities-nda-r1` task 010, `ReasoningModel` tokenized by task 013). `FastModel`/`StandardModel` reuse `#{AI_SUMMARIZE_MODEL}#` so existing environments see no behavior/cost change. `ReasoningModel` uses its own distinct token, `#{AI_REASONING_MODEL}#` — do NOT alias it to `AI_SUMMARIZE_MODEL` (it must be free to point at a different deployment/model family, e.g. `gpt-5`, once provisioned). Leave the token unset/empty in environments without a reasoning deployment; set `DocumentIntelligence__ReasoningModel` (or the `AI_REASONING_MODEL` CI/CD variable) once the reasoning-tier deployment exists — see `projects/ai-advanced-capabilities-nda-r1/notes/task-013-reasoning-provisioning.md` for the provisioning runbook and recommended model.
 
 ## Notes
 

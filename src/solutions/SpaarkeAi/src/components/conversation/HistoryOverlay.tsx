@@ -72,6 +72,22 @@
  * @see WorkspacePaneMenu.tsx — sibling pattern this mirrors (task 089)
  * @see ContextPaneMenu.tsx — sibling pattern this mirrors (task 095)
  * @see errorTelemetry.ts — TELEMETRY_HISTORY_LOAD_FAILURE constant
+ *
+ * Two-tier session model — explicit promotion (ai-advanced-capabilities-analysis-hub-r1 task 023,
+ * spec FR-07): a loose (casual/ad-hoc) chat session persists and appears in this list like any
+ * other, but is NEVER auto-associated with an `sprk_analysis` record. Each row carries a small
+ * "Promote…" affordance that opens an inline Fluent v9 Dialog to name + bind the session to a NEW
+ * Analysis via `POST /api/ai/analysis/promote` (a bind on the session's EXISTING Dataverse row —
+ * no new session is minted, contrast with the fork endpoint, task 021). Originally kept entirely
+ * local to this file (zero `HistoryMenuProps`/`ConversationPane.tsx` changes) — that held until
+ * `ai-advanced-capabilities-agreements-r1` task 023 (spec FR-09 classifier door) needed to write the
+ * resolved `sprk_agreementtype` lookup onto a JUST-PROMOTED Analysis when the promoted session went
+ * through the classifier gate. Two ADDITIVE, OPTIONAL props were introduced for exactly that:
+ * `resolveClassifiedSubDomain` + `dataService` (see their own doc comments) — omitting both preserves
+ * promote's byte-identical pre-023 behavior.
+ *
+ * @see agreementTypeLookupWrite.ts — the task 023 write helper this component's promote success
+ *      handler invokes (fire-and-forget; never blocks/fails the promote UX that already succeeded).
  */
 
 import * as React from "react";
@@ -85,15 +101,25 @@ import {
   Spinner,
   Text,
   Tooltip,
+  Dialog,
+  DialogSurface,
+  DialogBody,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Field,
+  Input,
   makeStyles,
   tokens,
 } from "@fluentui/react-components";
-import { HistoryRegular } from "@fluentui/react-icons";
+import { HistoryRegular, ArrowUpRegular } from "@fluentui/react-icons";
 import { buildBffApiUrl, type AuthenticatedFetchFn } from "@spaarke/auth";
+import type { IDataService } from "@spaarke/ui-components";
 import {
   logTelemetryError,
   TELEMETRY_HISTORY_LOAD_FAILURE,
 } from "../../telemetry/errorTelemetry";
+import { applyAgreementTypeToAnalysis } from "./agreementTypeLookupWrite";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -123,6 +149,19 @@ export interface HistoryMenuProps {
   bffBaseUrl: string;
   /** Per-request authenticated fetch from useAiSession(). No token snapshot. */
   authenticatedFetch: AuthenticatedFetchFn;
+  /**
+   * task 023 (agreements-r1, classifier-path lookup write) — optional resolver returning the
+   * agreement sub-domain key (`sprk_agreementtype.sprk_key`) the classifier gate resolved for the
+   * given `sessionId`, if known. The caller (ConversationPane) only knows this for its OWN current
+   * session — a promote of a different/older listed session returns `null`/`undefined`. When a
+   * promote succeeds AND this resolves a key AND `dataService` is supplied, the newly-bound
+   * Analysis's `sprk_agreementtype` lookup is written so persistence matches routing (see
+   * `agreementTypeLookupWrite.ts`). Omitted (undefined) preserves promote's EXACT pre-023 behavior —
+   * additive, optional, no fabricated default.
+   */
+  resolveClassifiedSubDomain?: (sessionId: string) => string | null | undefined;
+  /** Xrm.WebApi data service for the task 023 lookup write. Required only alongside `resolveClassifiedSubDomain`. */
+  dataService?: IDataService;
 }
 
 /**
@@ -204,6 +243,22 @@ const useStyles = makeStyles({
   retryButton: {
     marginTop: tokens.spacingVerticalXS,
   },
+  /** Row layout: title/meta stack grows; the "Promote…" affordance sits at the trailing edge. */
+  itemRow: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    gap: tokens.spacingHorizontalS,
+  },
+  promoteButton: {
+    minWidth: "auto",
+    flexShrink: 0,
+  },
+  promoteError: {
+    color: tokens.colorPaletteRedForeground1,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -264,6 +319,8 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
   onSelectSession,
   bffBaseUrl,
   authenticatedFetch,
+  resolveClassifiedSubDomain,
+  dataService,
 }) => {
   const styles = useStyles();
 
@@ -388,8 +445,106 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
     setReloadKey((k) => k + 1);
   }, []);
 
+  // ── Explicit promotion (task 023, spec FR-07) ───────────────────────────
+  //
+  // `promoteTarget` non-null opens the naming Dialog for that session. Kept as component-local
+  // state — no lift to ConversationPane (see file-header rationale).
+  const [promoteTarget, setPromoteTarget] = React.useState<{
+    sessionId: string;
+    title: string;
+  } | null>(null);
+  const [promoteName, setPromoteName] = React.useState<string>("");
+  const [promoting, setPromoting] = React.useState<boolean>(false);
+  const [promoteError, setPromoteError] = React.useState<string | null>(null);
+
+  const handleOpenPromote = React.useCallback(
+    (event: React.MouseEvent, sessionId: string, title: string): void => {
+      // Stop propagation so this doesn't also select/resume the session or close the Menu.
+      event.preventDefault();
+      event.stopPropagation();
+      setPromoteError(null);
+      setPromoteName("");
+      setPromoteTarget({ sessionId, title });
+    },
+    []
+  );
+
+  const handleClosePromote = React.useCallback((): void => {
+    setPromoteTarget(null);
+    setPromoteError(null);
+    setPromoting(false);
+  }, []);
+
+  const handleConfirmPromote = React.useCallback(async (): Promise<void> => {
+    if (!promoteTarget || !promoteName.trim() || !bffBaseUrl) {
+      return;
+    }
+    setPromoting(true);
+    setPromoteError(null);
+    try {
+      const url = buildBffApiUrl(bffBaseUrl, "/api/ai/analysis/promote");
+      const response = await authenticatedFetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: promoteTarget.sessionId, name: promoteName.trim() }),
+      });
+      if (!response.ok) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let detail: any = null;
+        try {
+          detail = await response.json();
+        } catch {
+          // non-JSON error body — fall through to the generic message below
+        }
+        setPromoteError(
+          (detail && typeof detail.detail === "string" && detail.detail) ||
+            "Couldn't promote this conversation. Try again."
+        );
+        setPromoting(false);
+        return;
+      }
+
+      // task 023 (classifier-path lookup write, spec FR-09): if the promoted session's classifier
+      // resolution is known (only true for the CURRENT session — see the prop doc comment) AND a
+      // dataService is supplied, write the resolved sprk_agreementtype lookup onto the newly-bound
+      // Analysis so persistence matches routing. Fire-and-forget: NEVER blocks or fails the promote
+      // UX that already succeeded — a write failure only logs (mirrors
+      // agreementTypeLookupWrite.ts's own graceful-degrade contract).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let promoteBody: any = null;
+      try {
+        promoteBody = await response.json();
+      } catch {
+        // Non-JSON success body (unexpected, but non-fatal — the promote itself already succeeded).
+      }
+      const analysisId = typeof promoteBody?.analysisId === "string" ? promoteBody.analysisId : null;
+      const subDomainKey = resolveClassifiedSubDomain?.(promoteTarget.sessionId);
+      if (analysisId && subDomainKey && dataService) {
+        void applyAgreementTypeToAnalysis(dataService, analysisId, subDomainKey).then((result) => {
+          if (!result.success) {
+            console.warn("[HistoryMenu] task 023 lookup write did not complete:", result.warning);
+          }
+        });
+      }
+
+      setPromoting(false);
+      setPromoteTarget(null);
+      // Refresh the list so the promoted session's row reflects its (now Analysis-owned) state
+      // on next open.
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setPromoteError(message || "Couldn't promote this conversation. Try again.");
+      setPromoting(false);
+    }
+  }, [promoteTarget, promoteName, bffBaseUrl, authenticatedFetch, resolveClassifiedSubDomain, dataService]);
+
   // ── Render ───────────────────────────────────────────────────────────────
+  // Fragment wraps the Menu + the promote Dialog as SIBLINGS — Fluent v9 `<Menu>` only expects a
+  // `MenuTrigger` + `MenuPopover` pair as children, so the Dialog is rendered alongside it, not
+  // nested inside it.
   return (
+    <>
     <Menu
       open={open}
       onOpenChange={(_, data) => setOpen(data.open)}
@@ -463,13 +618,28 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
                   aria-label={ariaLabel}
                   data-testid={`history-menu-item-${s.sessionId}`}
                 >
-                  <span className={styles.itemInner}>
-                    <span className={styles.itemTitle} title={s.title}>
-                      {s.title}
+                  <span className={styles.itemRow}>
+                    <span className={styles.itemInner}>
+                      <span className={styles.itemTitle} title={s.title}>
+                        {s.title}
+                      </span>
+                      {relative && (
+                        <span className={styles.itemMeta}>{relative}</span>
+                      )}
                     </span>
-                    {relative && (
-                      <span className={styles.itemMeta}>{relative}</span>
-                    )}
+                    {/* task 023 (FR-07) — explicit promotion into a new, named Analysis. A loose
+                        session is never auto-promoted; this is the only opt-in affordance. */}
+                    <Tooltip content="Promote to Analysis…" relationship="label">
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={<ArrowUpRegular />}
+                        aria-label={`Promote conversation to Analysis: ${s.title}`}
+                        className={styles.promoteButton}
+                        data-testid={`history-menu-promote-${s.sessionId}`}
+                        onClick={(e) => handleOpenPromote(e, s.sessionId, s.title)}
+                      />
+                    </Tooltip>
                   </span>
                 </MenuItem>
               );
@@ -478,6 +648,52 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
         </MenuList>
       </MenuPopover>
     </Menu>
+      <Dialog
+        open={promoteTarget !== null}
+        onOpenChange={(_, data) => {
+          if (!data.open) handleClosePromote();
+        }}
+      >
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Promote to Analysis</DialogTitle>
+            <DialogContent>
+              <Text size={200}>
+                Bind this conversation to a new, named Analysis. The conversation itself is
+                unchanged — it just becomes discoverable from the Analysis hub.
+              </Text>
+              <Field label="Analysis name" required style={{ marginTop: tokens.spacingVerticalM }}>
+                <Input
+                  value={promoteName}
+                  onChange={(_, data) => setPromoteName(data.value)}
+                  placeholder={promoteTarget?.title ?? "Analysis name"}
+                  disabled={promoting}
+                  data-testid="promote-analysis-name-input"
+                />
+              </Field>
+              {promoteError && (
+                <Text size={200} className={styles.promoteError} role="alert">
+                  {promoteError}
+                </Text>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="secondary" onClick={handleClosePromote} disabled={promoting}>
+                Cancel
+              </Button>
+              <Button
+                appearance="primary"
+                onClick={() => void handleConfirmPromote()}
+                disabled={promoting || !promoteName.trim()}
+                data-testid="promote-analysis-confirm"
+              >
+                {promoting ? <Spinner size="tiny" /> : "Promote"}
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+    </>
   );
 };
 

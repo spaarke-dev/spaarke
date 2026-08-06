@@ -14,8 +14,8 @@
  *      Receiver / picker UI is OUT OF SCOPE for R1 of this task; the callback
  *      fires so a parent (ComposeWorkspace, task 042) can route the action.
  *
- *   2. **Search for Document** — opens the existing Spaarke Document search
- *      flow (Path A: pick an existing `sprk_document` record). Receiver is the
+ *   2. **Open Document** (task 039 P2: label was "Search for Document") — opens the existing
+ *      Spaarke Document search flow (Path A: pick an existing `sprk_document` record). Receiver is the
  *      existing SemanticSearch surface; the callback fires so the parent can
  *      route the action.
  *
@@ -69,7 +69,12 @@
 
 import * as React from 'react';
 import { makeStyles, tokens, Button, Card, Text } from '@fluentui/react-components';
-import { DocumentArrowUpRegular, SearchRegular } from '@fluentui/react-icons';
+import {
+  DocumentArrowUpRegular,
+  SearchRegular,
+  DocumentAddRegular,
+  DocumentBulletListRegular,
+} from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 semantic tokens only (ADR-021)
@@ -158,7 +163,8 @@ export interface ComposeEmptyStateProps {
   onBrowseRequested: () => void;
 
   /**
-   * Invoked when the user clicks the "Search for Document" CTA. The parent
+   * Invoked when the user clicks the "Open Document" CTA (task 039 P2 renamed the label
+   * from "Search for Document"; behavior + handler name unchanged). The parent
    * routes this to:
    *   - R1 standard: PaneEventBus dispatch on the `workspace` channel with
    *     an additive `compose_search_requested`-style event (consumer wires the
@@ -167,6 +173,21 @@ export interface ComposeEmptyStateProps {
    *   - Test harness: a `jest.fn()` (or equivalent) to assert click intent.
    */
   onSearchRequested: () => void;
+
+  /**
+   * Item 7 (UAT round-4): invoked when the user clicks "Blank page". The parent
+   * mounts an empty born-in-editor working draft (create-on-save on first Save).
+   * Optional so existing direct-render call sites remain valid; the CTA renders
+   * only when supplied.
+   */
+  onBlankRequested?: () => void;
+
+  /**
+   * Item 7 (UAT round-4): invoked when the user clicks "Open template". Today the
+   * parent mounts a single generic starter scaffold; the affordance is the seam
+   * for a future template picker. Optional — the CTA renders only when supplied.
+   */
+  onTemplateRequested?: () => void;
 
   /**
    * When `true`, both CTAs render as disabled (focusable but not actionable).
@@ -199,6 +220,8 @@ export interface ComposeEmptyStateProps {
 export function ComposeEmptyState({
   onBrowseRequested,
   onSearchRequested,
+  onBlankRequested,
+  onTemplateRequested,
   disabled = false,
 }: ComposeEmptyStateProps): React.JSX.Element {
   const styles = useStyles();
@@ -212,15 +235,42 @@ export function ComposeEmptyState({
     >
       <Card className={styles.card} appearance="subtle">
         <Text as="h2" size={500} className={styles.heading}>
-          Open a document to start composing
+          Start composing
         </Text>
         <Text size={300} className={styles.description}>
-          Browse and upload a file to draft from, or search for an existing Spaarke document.
+          Start from a blank page or a template, upload a file to draft from, or search for an existing Spaarke
+          document.
         </Text>
 
         <div className={styles.actions} role="group" aria-label="Open document options">
+          {onBlankRequested ? (
+            <Button
+              appearance="primary"
+              icon={<DocumentAddRegular />}
+              disabled={disabled}
+              onClick={onBlankRequested}
+              className={styles.cta}
+              aria-label="Start a new blank document"
+              data-testid="compose-empty-state-blank"
+            >
+              Blank page
+            </Button>
+          ) : null}
+          {onTemplateRequested ? (
+            <Button
+              appearance="outline"
+              icon={<DocumentBulletListRegular />}
+              disabled={disabled}
+              onClick={onTemplateRequested}
+              className={styles.cta}
+              aria-label="Start from a document template"
+              data-testid="compose-empty-state-template"
+            >
+              Open template
+            </Button>
+          ) : null}
           <Button
-            appearance="primary"
+            appearance={onBlankRequested ? 'outline' : 'primary'}
             icon={<DocumentArrowUpRegular />}
             disabled={disabled}
             onClick={onBrowseRequested}
@@ -239,7 +289,7 @@ export function ComposeEmptyState({
             aria-label="Search for an existing Spaarke document"
             data-testid="compose-empty-state-search"
           >
-            Search for Document
+            Open Document
           </Button>
         </div>
       </Card>

@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Extend openSpaarkeAi (analysisId/worktype/regarding) + ribbon launcher</title>
+    <phase>5 Entry model + record integration</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New launch-param surface on the shared modal-open primitive + a new ribbon script on Matter/Project forms; drives record-driven entry (2b/2d); modifies .ts frontend surface consumed by the retirement phase (060/061).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mirror-first extension of a shipped precedent (`composeMode`/`openSpaarkeAiCompose` + `DocumentComposeLaunch`); the shape to copy is explicit — literal parameter addition, no novel design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Extends the shared `openSpaarkeAi` primitive that 050 (routing) and 053 (ADR-039 enforcement) depend on; sequence after 050/051 and before 053.</parallel-reason>
+    <deps>050,051</deps>
+    <tags>frontend, spaarkeai, ribbon, launch</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add `analysisId`, `worktype`, and `regarding` params to `openSpaarkeAi` (spec §13.3 / FR-16), mirroring the shipped
+    `composeMode`/`openSpaarkeAiCompose` precedent at `launch-resolver.ts:268`. Then add a `sprk_matter`/`sprk_project`
+    ribbon script that reads the form record id and calls the extended `openSpaarkeAi` (mirror `DocumentComposeLaunch.ts:91`).
+    Opening an existing analysis passes `analysisId`; opening new-in-record passes `worktype` + `regarding`=parent. The
+    ribbon opens the three-pane modal (target=2) with regarding context. Sonnet 5: mirror the precedent literally; do not
+    add params beyond these three.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the `launch-resolver` modal-open primitive, the `openSpaarkeAiCompose` mirror
+    precedent, and Dataverse ribbon command scripts (`DocumentComposeLaunch`). Follow ADRs strictly.
+  </role>
+
+  <goal>
+    `openSpaarkeAi` accepts `analysisId`/`worktype`/`regarding` (threaded through `buildLaunchUrl` into the `sprk_spaarkeai`
+    web-resource `data`, mirroring `composeMode`); a `sprk_matter`/`sprk_project` ribbon command reads the form record id and
+    calls `openSpaarkeAi` — opening the three-pane modal with regarding context (new-in-record: worktype + regarding=parent;
+    existing: analysisId). Build is green; ui-tests below pass.
+  </goal>
+
+  <context>
+    <background>
+      §13.3 fixes the modal-open primitive as `openSpaarkeAi(params, target=2)` and instructs mirroring the
+      `composeMode`/`openSpaarkeAiCompose` precedent to add `analysisId`/`worktype`/`regarding`. `launch-resolver.ts:268`
+      (`openSpaarkeAiCompose`) shows the exact shape: force a mode/param, thread it via `buildLaunchUrl` into
+      `navigateTo({pageType:'webresource', webresourceName:'sprk_spaarkeai', data}, {target:2, 80%×80%})`.
+      `DocumentComposeLaunch.ts:91` (`openInCompose`) is the ribbon-script precedent: read the form record id from
+      `primaryControl.data.entity.getId()`, normalize braces, call the launch primitive; never throw out of a ribbon callback.
+      Task 050 established the four-case host mapping that consumes these params; task 051 added the subgrids that invoke this
+      ribbon/open path.
+    </background>
+    <relevant-files>
+      <file role="modify">src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</file>
+      <file role="new">src/solutions/SpaarkeAi/src/ribbon/ (new: AnalysisRecordLaunch.ts — sprk_matter/sprk_project ribbon script)</file>
+      <file role="canonical-reference">src/solutions/SpaarkeAi/src/utils/launch-resolver.ts:268 (openSpaarkeAiCompose mirror precedent)</file>
+      <file role="canonical-reference">src/solutions/SpaarkeAi/src/ribbon/DocumentComposeLaunch.ts:91 (openInCompose ribbon precedent)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Entry-matrix host routing — consumes analysisId/worktype/regarding to place 2b/2d in the correct host with pre-set context.</dependency>
+      <dependency task="051" status="pending">Record subgrids on Matter/Project forms — the surfaces the ribbon launcher is invoked from.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: extend `openSpaarkeAi` with exactly three params — `analysisId`, `worktype`, `regarding` — threaded through `buildLaunchUrl` mirroring `composeMode`; MUST NOT change the existing `openSpaarkeAi` signature semantics for current callers (additive only).</constraint>
+    <constraint source="ADR-039">SCOPE: the ribbon launcher + param extension — record-driven opens go via `openSpaarkeAi` deep-link; MUST NOT route through `surfaceLaunchRegistry`.</constraint>
+    <constraint source="project">SCOPE: the ribbon script mirrors `DocumentComposeLaunch.openInCompose` — read `primaryControl.data.entity.getId()`, normalize braces, open empty/graceful on missing id; the callback MUST NOT throw (ribbon bars error out on throw).</constraint>
+    <constraint source="project">SCOPE: new-in-record passes `worktype` + `regarding`=parent (2b); opening an existing analysis passes `analysisId` (2d). Do not cross the two payloads.</constraint>
+    <constraint source="ADR-021">SCOPE: the three-pane modal opened by the ribbon MUST render correctly in dark mode.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+    </files>
+    <patterns>
+      <pattern name="openSpaarkeAiCompose mirror" location="src/solutions/SpaarkeAi/src/utils/launch-resolver.ts:268">
+        Copy the pattern: default a param, spread into `buildLaunchUrl({...params, worktype, analysisId, regarding})`, open target=2 at 80%×80%. Additive to `openSpaarkeAi` — do not fork a whole new function unless the precedent did.
+      </pattern>
+      <pattern name="DocumentComposeLaunch ribbon script" location="src/solutions/SpaarkeAi/src/ribbon/DocumentComposeLaunch.ts:91">
+        Read record id from `primaryControl.data.entity.getId()`, strip braces, guard unsaved/empty, call the launch primitive; never throw out of the callback.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; load ADR-039, ADR-021, and the surface-launch mechanism doc.</step>
+    <step order="1">Study `openSpaarkeAiCompose` (launch-resolver.ts:268) + `buildLaunchUrl` and `DocumentComposeLaunch.openInCompose` (:91).</step>
+    <step order="2">Add `analysisId`/`worktype`/`regarding` to the `openSpaarkeAi` params type and thread them through `buildLaunchUrl` into the `sprk_spaarkeai` `data`, mirroring `composeMode` (additive; existing callers unaffected).</step>
+    <step order="3">Author the `sprk_matter`/`sprk_project` ribbon script (mirror `DocumentComposeLaunch`): read `primaryControl.data.entity.getId()`, normalize braces, guard unsaved, call `openSpaarkeAi` with worktype + regarding=parent (new) or analysisId (existing).</step>
+    <step order="4">Verify the ribbon opens the three-pane modal (target=2) with regarding context; opening an existing analysis threads `analysisId`.</step>
+    <step order="5">Run the ui-tests (incl. ADR-021 dark-mode); build `npm run build:prod` clean.</step>
+    <step order="6">Update TASK-INDEX.md: set task 052 status to ✅.</step>
+    <step order="7">Document any deviation in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If threading `analysisId`/`worktype`/`regarding` additively breaks an existing `openSpaarkeAi` caller or requires diverging from the `composeMode` precedent (e.g. a new URL-param convention), STOP and escalate per CLAUDE.md §6 rather than reshaping the shared primitive silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`openSpaarkeAiCompose` (launch-resolver.ts:268) + `DocumentComposeLaunch.openInCompose` (:91) — the shipped `composeMode` param-threading + ribbon-launch precedent.</existing>
+    <extension>Yes — mirror the precedent: add `analysisId`/`worktype`/`regarding` to `openSpaarkeAi` and add one Matter/Project ribbon script; no new modal-open primitive or navigateTo abstraction is introduced.</extension>
+    <cost-of-doing-nothing>No record-driven way to open or create an analysis in modal context (entry cases 2b/2d) — the ribbon on Matter/Project cannot pass regarding/worktype/analysisId to the SpaarkeAi modal, leaving record integration inert.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="ribbon new-in-record opens modal with regarding">
+      <steps><step>On a saved Matter/Project record, click the Analysis ribbon button (new).</step></steps>
+      <expected>The three-pane SpaarkeAi modal opens (target=2, 80%×80%) with `worktype` + `regarding`=the parent record threaded through the URL.</expected>
+    </test>
+    <test name="open existing passes analysisId">
+      <steps><step>Open an existing analysis from the record subgrid.</step></steps>
+      <expected>`openSpaarkeAi` is called with `analysisId`; the existing analysis loads in the modal.</expected>
+    </test>
+    <test name="unsaved-record guard">
+      <steps><step>Invoke the ribbon on a new/unsaved form (no GUID).</step></steps>
+      <expected>The callback logs a warning and does not throw; no broken command bar.</expected>
+    </test>
+    <test name="dark-mode (ADR-021)">
+      <steps><step>Set the host theme to dark; open the modal via the ribbon.</step></steps>
+      <expected>The three-pane modal renders correctly in dark mode.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build the SpaarkeAi code page (`npm run build:prod`).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/utils/launch-resolver.ts (analysisId/worktype/regarding params)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/ribbon/AnalysisRecordLaunch.ts (Matter/Project ribbon script)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`openSpaarkeAi` accepts `analysisId`/`worktype`/`regarding` and threads them through `buildLaunchUrl` into the `sprk_spaarkeai` `data` (mirroring `composeMode`); existing callers are unaffected (additive).</criterion>
+    <criterion testable="true">Given a saved Matter/Project record, when the Analysis ribbon button is clicked (new), then the three-pane modal opens with `worktype` + `regarding`=the parent record.</criterion>
+    <criterion testable="true">Given an existing analysis opened from a record, when the launcher runs, then `openSpaarkeAi` is called with `analysisId`.</criterion>
+    <criterion testable="true">Negative: on an unsaved form (no record id) the ribbon callback logs a warning and does NOT throw.</criterion>
+    <criterion testable="true">Negative: the ribbon/open path uses `openSpaarkeAi`, not `surfaceLaunchRegistry` (grep-clean).</criterion>
+    <criterion testable="true">The modal renders correctly in dark mode (ADR-021); `npm run build:prod` is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec §13.3 / FR-16. Mirror `openSpaarkeAiCompose` (launch-resolver.ts:268) + `DocumentComposeLaunch` (:91). Consumed by
+    the 050 host routing; enforced ADR-039-clean by task 053.
+
+    COMPLETED 2026-07-29.
+
+    **launch-resolver.ts**: added `analysisId`/`worktype`/`regarding` directly to the base `SpaarkeAiLaunchParams`
+    interface (NOT a new extended interface like `SpaarkeAiComposeLaunchParams` — these params drive the SAME
+    three-pane shell `openSpaarkeAi` already opens, unlike Compose which bypasses it). Threaded through
+    `buildLaunchUrl` mirroring the `composeMode` block; braces stripped on `analysisId`/`regarding` like `entityId`.
+    `openSpaarkeAi`'s signature is unchanged (still `SpaarkeAiLaunchParams`) — fully additive; back-compat tests for
+    `openSpaarkeAi`/`openSpaarkeAiCompose` pass unmodified.
+
+    **AnalysisRecordLaunch.ts** (new): two exported handlers mirroring `DocumentComposeLaunch.openInCompose`'s
+    invocation-only shape (ADR-006) — `openNewAnalysisFromRecord(primaryControl, worktype)` (entry 2b: reads
+    entityId/entityLogicalName from the form, guards unsaved/empty id, then guards empty `worktype` too — added
+    during code-review Step 9.5 because a misconfigured ribbon StaticValue would otherwise silently degrade to the
+    default cold-load instead of the hub, with no diagnostic; opens with worktype + regarding=parent) and
+    `openExistingAnalysis(analysisId)` (entry 2d: opens with analysisId only). Neither function throws — mirrors
+    `DocumentComposeLaunch`'s "ribbon callbacks must never throw" contract. The ribbon XML itself (CrmParameters,
+    RibbonDiffXml) is explicitly task 071's job per its own POML — this task authors JS/TS only, confirmed against
+    task 051's completion notes ("Task 052 ... is the task that will wire any custom open behavior").
+
+    **Design resolution — worktype semantics**: confirmed via codebase research that a specific `worktype` value
+    does NOT pre-select a hub card — `AnalysisHubWidget` always renders all cards; any non-empty `worktype` string
+    only flips `main.tsx`'s `analysisMode` derivation to `"new"`. `openNewAnalysisFromRecord` therefore takes
+    `worktype` as a caller-supplied parameter (from the ribbon's StaticValue CrmParameter) rather than hardcoding
+    a value — the ribbon script stays invocation-only and has no opinion on which work type a button represents.
+
+    **ADR-039 compliance**: no import or call of `surfaceLaunchRegistry` anywhere in the new/modified files; the
+    docblock's explanatory mention of the name (to document why it is NOT used) mirrors the same convention already
+    present in `WorkspacePane.tsx`/`ConversationPane.tsx`. Grep-verified clean.
+
+    **Gates**: code-review — additive-only correctness confirmed (git diff stat: +78 lines, 0 deletions in
+    launch-resolver.ts); found and fixed one real Warning (missing empty-`worktype` guard, described above) before
+    completion. adr-check — ADR-006 (invocation-only, confirmed clean), ADR-039 (no registry routing, confirmed
+    clean), ADR-021 (N/A — zero rendering/React code in these files, legitimate non-applicability not a scope-skip),
+    ADR-028 (no manual token handling at the ribbon boundary, confirmed clean) — 0 violations.
+
+    **Tests**: SpaarkeAi typecheck (`tsc-surface-gate`) — 0 surface-owned errors. Full SpaarkeAi jest suite — 81
+    suites / 722 tests green (includes 8 new tests in `launch-resolver.test.ts` + 9 new tests in the new
+    `AnalysisRecordLaunch.test.ts`, covering the POML's 3 ui-tests testable at this layer: new-in-record
+    worktype+regarding threading, open-existing analysisId threading, unsaved-record guard). ADR-021 dark-mode
+    ui-test is deferred to task 071's deployed-environment verification (no rendering surface exists in this
+    task's files to test against).
+
+    No deviation from the POML's directional steps or escalation trigger (the additive threading did not break
+    any existing `openSpaarkeAi` caller; no divergence from the `composeMode` precedent was required).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL: code-review + adr-check).</protocol>
+  </execution>
+</task>

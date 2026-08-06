@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>Comms-Assessed Producer — RunAssessmentEmissionAsync Emit-Only Log to Fire-and-Forget Producer</title>
+    <phase>4 Comms-RI Proving Producer + Policy</phase>
+    <gate>blocked-until:031,024,email-r4-W10</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Code implementation modifying a shipped .cs file in Services/Communication/ plus a new producer type and DI registration; tags include bff-api; this task ADDS a tests/integration/seam/** file, so the TEST-MODIFYING override row (root CLAUDE.md §8) applies unconditionally regardless of the default STANDARD/FULL heuristic.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>shared Services/Communication; email-r4 merge-order</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single-file hot spot: this task is the only one permitted to touch CommunicationEnrichmentService.cs's step-5 body in this wave; it is also externally gated on the email-r4 W10 merge (Services/Communication/** is theirs until that lands) and internally gated on 031 (Layer-A seam exists) and 024 (communication-arrived producer precedent in the same file).</parallel-reason>
+    <deps>031,024</deps>
+    <tags>bff-api, api, services, integration-test</tags>
+    <estimated-effort>4-6h</estimated-effort>
+  </metadata>
+
+  <prompt>Replace the emit-only structured log in `CommunicationEnrichmentService.RunAssessmentEmissionAsync` (step 5 of enrichment) with a fire-and-forget, non-fatal `communication_assessed` producer, so the comms-RI pipeline (tasks 041/042) has a real signal to consume instead of a greppable-but-inert log line. Enrichment must never fail because the producer failed (NFR-05).</prompt>
+
+  <role>SPAARKE platform developer with BFF background/producer and ADR-032 null-object experience. You are extending an existing, shipped enrichment pipeline — not building new infrastructure — so match its existing non-fatal-step idiom exactly rather than inventing a new one.</role>
+
+  <goal>`RunAssessmentEmissionAsync` (`CommunicationEnrichmentService.cs:216-238`) calls a new producer seam instead of only logging. The producer call is fire-and-forget and non-fatal: a producer exception is caught, logged, and enrichment completes normally. The producer type is registered unconditionally in `CommunicationModule.cs` with a safe (no-op/log-only) default implementation, because task 041's real policy-gate consumer does not exist yet. A `tests/integration/seam/Communication/` test proves both the success path and the producer-throws-non-fatal path. No outbox row is written by this task (that is task 042's job, downstream of the 041 policy gate) and `EventRulesService.FireAsync` is never called.</goal>
+
+  <context>
+    <background>
+      email-r4's `CommunicationEnrichmentService` step 5 currently only emits a structured `LogInformation` line documenting the intended `communication_assessed` signal — the in-code XML doc on `RunAssessmentEmissionAsync` explicitly says "EMIT-ONLY (task 010)... the consumer wiring lands in task 052 (W5)" and cites "ESCALATION E5" for why it did not route through `IEventRulesService.FireAsync` (chat-session/SSE-shaped, wrong fit). Per the notification-spine spec FR-11 (re-homed from email-r4 050-054), this task closes that gap: replace the log-only body with a real producer call. The next task in this phase (041, comms policy layer) is the eventual consumer of this signal; it does not exist yet when this task executes, so this task must define the seam and a safe default, not a real policy decision. Task 042 (RI actions via seam) is the task that actually writes `kind=communication-assessed` outbox rows and mirrors to `appnotification` — this task produces the input signal only.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ICommunicationEnrichmentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/EventRules/EventRulesService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/EventRules/EventRulesOptions.cs</file>
+      <file>tests/integration/seam/Communication/MessagingSpineSeamTests.cs</file>
+      <file>tests/integration/seam/README.md</file>
+      <file>tests/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">The producer call inside `RunAssessmentEmissionAsync` MUST be fire-and-forget and non-fatal: a thrown exception from the producer MUST be caught and logged, never rethrown into the enrichment step, so `RunStepAsync`'s existing `try/catch` continues to see a completed step (NFR-05). Mirror the existing non-fatal idiom already used at `CommunicationEnrichmentService.cs:241-255` (`RunStepAsync`) rather than inventing a second error-handling shape.</constraint>
+    <constraint source="ADR-032">The new producer type this task introduces MUST be registered unconditionally in `CommunicationModule.cs` with a safe default implementation (log-only / no downstream side effect), so the app starts and the call succeeds identically before AND after task 041 wires the real policy consumer. Do not gate the registration behind a config flag that does not exist yet.</constraint>
+    <constraint source="project">This task MUST NOT write to the Layer-B outbox and MUST NOT call `IEventRulesService.FireAsync` — those are explicitly out of scope per the spec (§Out of Scope) and per the existing in-code "ESCALATION E5" rationale on `RunAssessmentEmissionAsync`. The outbox write of `kind=communication-assessed` happens later, in task 042, after the RI actions execute.</constraint>
+    <constraint source="ADR-038">Any behavior change to `CommunicationEnrichmentService.cs` (a producer feeding the RI pipeline) requires a `tests/integration/seam/**` test proving fire-and-forget non-fatality — a contract-shape test (DI registration only, or "does not throw") is not sufficient per the seam-test README.</constraint>
+    <constraint source="project">Do not remove or weaken the existing `RunStepAsync` best-effort wrapper semantics (NFR-06) for the other enrichment steps while modifying step 5.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+    <patterns>
+      <pattern name="Non-fatal step wrapper" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs:241-255 (RunStepAsync)">The existing try/catch-log-continue idiom for NFR-06 — mirror this exact shape for the producer's non-fatality (NFR-05), do not introduce a different error-handling pattern for the same file.</pattern>
+      <pattern name="DI kill-switch / unconditional registration" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs">The `Configure&lt;TOptions&gt;` + `AddSingleton` registration shape already used for `AutoFileOptions`/`SemanticMatchOptions`/`AiClassificationOptions` kill-switches — follow this shape for the new producer's registration (unconditional registration; a safe default implementation, not a config-gated conditional one, since there is no flag to gate on yet).</pattern>
+      <pattern name="Seam test composition" location="tests/integration/seam/Communication/MessagingSpineSeamTests.cs">Real production types through the composed path; only the true external/data boundary is doubled. Namespace `Sprk.Bff.Api.Tests.Seam.Communication`; class name suffix `SeamTests`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run `/conflict-check`. Confirm the email-r4 W10 merge has landed (i.e., `Services/Communication/CommunicationEnrichmentService.cs` on `master` already reflects W10's ownership boundary, not an in-flight state) BEFORE making any edits. If not merged, STOP and follow the escalation below — do not proceed to step 2.</step>
+    <step order="2">Define a minimal producer seam in `Services/Communication/`: an interface with a single async publish method plus a small signal type carrying the fields `RunAssessmentEmissionAsync` already logs today (CommunicationId, Direction, Subject, From, RecipientCount) — the minimum task 041 will need to evaluate tenant/matter rules later. Name the seam so its purpose is unambiguous (it publishes the `communication_assessed` signal); do not reuse `IEventRulesService` or any AI-chat-shaped contract.</step>
+    <step order="3">Implement a safe default (log-only, no side effect) implementation of the interface and register it unconditionally in `CommunicationModule.cs`, following the existing kill-switch registration shape. Document in an XML comment that this is the interim default until task 041 registers the real policy-gate consumer.</step>
+    <step order="4">Replace the body of `RunAssessmentEmissionAsync` (`CommunicationEnrichmentService.cs:230-238`) to call the new producer fire-and-forget, wrapped so a thrown exception is caught, logged (distinct log message/level from the success path, correlatable by CommunicationId), and swallowed — enrichment must complete regardless.</step>
+    <step order="5">Update the XML doc comment above `RunAssessmentEmissionAsync` to remove the stale "EMIT-ONLY (task 010)... consumer wiring lands in task 052 (W5)" language (obsolete numbering from the pre-re-homing plan) and describe the current producer + the deferred-decision seam for task 041/042.</step>
+    <step order="6">Add `tests/integration/seam/Communication/CommsAssessedProducerSeamTests.cs` (namespace `Sprk.Bff.Api.Tests.Seam.Communication`) proving: (a) the real enrichment step 5 path invokes the producer with the expected signal shape on success; (b) a producer implementation that throws still lets `RunAssessmentEmissionAsync`/enrichment complete without propagating (NFR-05); (c) existing `CommunicationEnrichmentService` unit/seam tests continue to pass unmodified.</step>
+    <step order="7">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed output; report absolute size + diff vs the ~49.63 MB incl-PDB baseline (state the PDB convention used). Run `dotnet list package --vulnerable --include-transitive` and confirm 0 new HIGH-severity CVE.</step>
+    <step order="8">State the Placement Justification (per `.claude/constraints/bff-extensions.md`) for the new producer type in the PR description / task notes — why it lives in `Services/Communication/` alongside the emit point rather than elsewhere.</step>
+    <step order="9">Update tasks/TASK-INDEX.md: set this task to ✅ completed.</step>
+    <step order="10">Document any deviations in projects/spaarke-notification-spine-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If email-r4 W10 has not merged, STOP and escalate (Services/Communication is theirs); /conflict-check first.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="terminal">Shell (publish size measurement, CVE scan, /conflict-check)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ (NEW producer interface + safe-default implementation file)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (modified — unconditional registration)</output>
+    <output type="test">tests/integration/seam/Communication/CommsAssessedProducerSeamTests.cs (NEW)</output>
+    <output type="docs">projects/spaarke-notification-spine-r1/notes/ (BFF publish-size report + Placement Justification note)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given email-r4 W10 has NOT merged at task start, when this task begins, then execution stops at the escalation trigger and no edits land in CommunicationEnrichmentService.cs.</criterion>
+    <criterion testable="true">Given email-r4 W10 HAS merged, when `RunAssessmentEmissionAsync` runs for a normal inbound/outbound communication, then it invokes the new producer (not just a log line) with a signal carrying at minimum CommunicationId, Direction, Subject, From, RecipientCount.</criterion>
+    <criterion testable="true">Given the producer implementation throws an exception, when `RunAssessmentEmissionAsync` executes, then the enrichment step completes successfully (no exception propagates to the caller) and the failure is logged with the CommunicationId (NFR-05).</criterion>
+    <criterion testable="true">Given the producer succeeds, when it runs, then no row is written to the Layer-B outbox and `IEventRulesService.FireAsync` is never invoked by this code path.</criterion>
+    <criterion testable="true">Given the app starts with no additional configuration, when DI resolves the new producer interface, then resolution succeeds via the unconditionally-registered safe-default implementation (no startup failure, no missing-registration exception).</criterion>
+    <criterion testable="true">`tests/integration/seam/Communication/CommsAssessedProducerSeamTests.cs` exists and covers both the success-path signal shape and the producer-throws non-fatal case; all pre-existing `CommunicationEnrichmentService` tests pass unmodified.</criterion>
+    <criterion testable="true">BFF publish measured ≤60 MB compressed; absolute size + diff vs ~49.63 MB incl-PDB baseline reported (PDB convention stated); 0 new HIGH-severity CVE from `dotnet list package --vulnerable --include-transitive`; Placement Justification stated per `.claude/constraints/bff-extensions.md`.</criterion>
+    <criterion testable="true">`/conflict-check` was run before the PR and its outcome (clean, or documented resolution) is recorded in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-11 / NFR-05. Plan Phase 4 deliverable 1. The stale in-code comment on `RunAssessmentEmissionAsync` references "task 052 (W5)" and "ESCALATION E5" from the pre-re-homing email-r4 numbering — update it, but the underlying reasoning (do not route through `IEventRulesService.FireAsync`) still holds and should be preserved in spirit. This task intentionally does NOT decide the comms policy rule store or execute RI actions — those are 041 and 042.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

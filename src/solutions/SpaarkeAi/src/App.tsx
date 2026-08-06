@@ -2,9 +2,23 @@
  * App.tsx — SpaarkeAi root application component (R2).
  *
  * Provider tree (per ADR-021, ADR-022):
- *   FluentProvider (theme detection — resolveCodePageTheme + setupCodePageThemeListener)
+ *   FluentProvider (theme detection — resolveCodePageTheme + setupCodePageThemeListener;
+ *     scaled via scaleTheme(theme, uiScale) — P0.5/FR-06, see useUiScale below)
  *     └─ AppWithAuth (gates render on auth-ready, no token snapshot)
  *          └─ ThreePaneShell (R2 root shell — PaneEventBus + stage lifecycle + ThreePaneLayout)
+ *              (DisplaySizeMenu removed from the embedded surface 2026-08-03 — see render comment)
+ *
+ * App-shell UI-scale (P0.5, spec FR-06 / design §6.9, spaarke-modal-system project):
+ *   `useUiScale()` resolves ONE `uiScale` value from (a) the auto ≥2560 CSS px
+ *   viewport breakpoint and (b) the persisted "Display size" setting. That
+ *   value feeds `scaleTheme(theme, uiScale)` at the FluentProvider below
+ *   (Fluent internals — buttons/inputs/spacing/text — scale in lock-step) AND
+ *   sets the `--sprk-ui-scale` CSS variable on `document.documentElement` (the
+ *   SprkModal size math + any future custom CSS reads this). Mechanism is the
+ *   scaled theme, NEVER CSS `zoom` (rejected — under-scales portaled fixed
+ *   dialogs at 4K). SprkModal itself only INHERITS `uiScale` as a prop; no
+ *   SprkModal instance is rendered by this shell yet (conversions are P2+) —
+ *   `uiScale` from this hook is the seam those tasks thread through.
  *
  * Auth pattern (Spaarke Auth v2, post-task-021):
  *   - @spaarke/auth is initialized in main.tsx via ensureAuthInitialized().
@@ -31,6 +45,8 @@ import { FluentProvider, makeStyles, tokens } from "@fluentui/react-components";
 import {
   resolveCodePageTheme,
   setupCodePageThemeListener,
+  scaleTheme,
+  useUiScale,
 } from "@spaarke/ui-components";
 import { getAuthProvider } from "@spaarke/auth";
 import { getBffBaseUrl } from "./config/runtimeConfig";
@@ -58,6 +74,19 @@ const useStyles = makeStyles({
     overflow: "hidden",
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
+  },
+  // P0.5 (FR-06): the app-shell "Display size" affordance sits in a slim,
+  // right-aligned strip above the three-pane shell. SpaarkeAi has no
+  // pre-existing appearance/settings surface (ThemeToggle lives only in
+  // LegalWorkspace's standalone PageHeader) — this is the new, narrow,
+  // single-purpose home for it. Does not touch ThreePaneShell/pane headers.
+  scaleBar: {
+    display: "flex",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    flexShrink: 0,
+    paddingInline: tokens.spacingHorizontalS,
+    paddingBlock: tokens.spacingVerticalXXS,
   },
   layoutShell: {
     flex: 1,
@@ -104,6 +133,39 @@ export interface AppProps {
   speDriveId?: string;
   /** Display name of the document for the workspace title (Compose-only). */
   speFileName?: string;
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1 task 041 (FR-13): the ACTIVE work type the launch
+   * is scoped to (e.g. `"agreement-analysis"` for an Agreement Review; Compose-only). Forwarded
+   * to `ThreePaneShell` → `ComposeLaunchContext` → `ComposeWorkspace` → `ComposeEditor`, scoping
+   * the inline AI toolbar via `getToolsForSurface`. Omitted preserves the unscoped `'*'` default.
+   */
+  activeWorkType?: string;
+
+  // ---------------------------------------------------------------------------
+  // Analysis entry-matrix params (task 050 — spec §12 / FR-14).
+  //
+  // Parsed by main.tsx from the URL and forwarded to ThreePaneShell, which
+  // publishes them as an AnalysisLaunchContext consumed by WorkspacePane:
+  //   - analysisMode='new'      → open the Analysis hub (Create-new cards). With a
+  //                               record context present (entityLogicalName/entityId)
+  //                               the hub pre-sets regarding=parent (2b); else 2a.
+  //   - analysisMode='existing' → open the existing analysis by id (2d/2c), no cards.
+  // Omitted for every non-analysis launch (Compose, session-restore, plain).
+  // ---------------------------------------------------------------------------
+
+  /** Analysis entry mode: 'new' opens the hub, 'existing' opens an analysis by id. */
+  analysisMode?: "new" | "existing";
+  /** `sprk_analysis` GUID to open (analysisMode='existing'). */
+  analysisId?: string;
+  /** `sprk_worktype` Choice value for a new analysis (analysisMode='new'). */
+  worktype?: string;
+  /**
+   * ai-advanced-capabilities-agreements-r1 task 022 (spec FR-09; hub A3 deferred deep-threading
+   * leg — cold-load/deep-link door): the level-2 agreement sub-domain (`sprk_agreementtype.sprk_key`,
+   * e.g. "nda") for a cold-load open of the Analysis entry matrix. Forwarded to `ThreePaneShell` →
+   * `AnalysisLaunchContext`. Omitted for every non-agreement launch.
+   */
+  subDomain?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -190,6 +252,14 @@ function AppWithAuth(props: AppProps): React.JSX.Element {
       className={styles.appRoot}
       data-spaarkeai-mode={props.composeMode === "editor" ? "compose" : undefined}
     >
+      {/* P0.5 (FR-06) "Display size" control — REMOVED from the embedded surface
+          (owner UAT 2026-08-03): the manual toggle only scales Spaarke code-page
+          content, not the surrounding OOB MDA chrome/views, which reads as broken
+          when SpaarkeAi runs inside the MDA. The auto ≥2560px breakpoint in
+          useUiScale() still applies (silent, load-bearing for 4K modal sizing).
+          Restore `<div className={styles.scaleBar}><DisplaySizeMenu /></div>`
+          (+ the DisplaySizeMenu import) when the three-pane page ships as a
+          standalone app, where whole-surface scaling is coherent. */}
       <div className={styles.layoutShell}>
         <ThreePaneShell
           bffBaseUrl={bffBaseUrl}
@@ -201,6 +271,11 @@ function AppWithAuth(props: AppProps): React.JSX.Element {
           composeMode={props.composeMode}
           composeDocument={initialComposeDocument}
           composeDriveId={props.speDriveId ?? ""}
+          activeWorkType={props.activeWorkType}
+          analysisMode={props.analysisMode}
+          analysisId={props.analysisId}
+          worktype={props.worktype}
+          subDomain={props.subDomain}
         />
       </div>
     </div>
@@ -232,8 +307,25 @@ export const App: React.FC<AppProps> = (props) => {
     return cleanup;
   }, []);
 
+  // P0.5 (FR-06 / design §6.9): the app-shell `uiScale` — auto ≥2560 breakpoint
+  // + persisted "Display size" setting (useUiScale reuses the SAME
+  // theme-storage listener as above; see hooks/useUiScale.ts). scaleTheme
+  // short-circuits to `theme` itself when uiScale===1 (the common case), so
+  // this is a no-op until a user opts into Large/Extra-large or the viewport
+  // crosses the 2560 breakpoint.
+  const { uiScale } = useUiScale();
+  const scaledTheme = React.useMemo(() => scaleTheme(theme, uiScale), [theme, uiScale]);
+
+  // The SAME uiScale value also sets the `--sprk-ui-scale` CSS variable
+  // (design §6.9) on the document root — a portal-safe location, since
+  // Fluent Dialog surfaces (SprkModal) portal to document.body, still a
+  // descendant of :root, regardless of where they mount in the React tree.
+  React.useEffect(() => {
+    document.documentElement.style.setProperty("--sprk-ui-scale", String(uiScale));
+  }, [uiScale]);
+
   return (
-    <FluentProvider theme={theme}>
+    <FluentProvider theme={scaledTheme}>
       <AppWithAuth {...props} />
     </FluentProvider>
   );

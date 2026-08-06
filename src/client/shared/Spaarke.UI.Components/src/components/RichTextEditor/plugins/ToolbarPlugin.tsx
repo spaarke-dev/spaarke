@@ -57,6 +57,13 @@ import { $getNearestNodeOfType } from '@lexical/utils';
 
 interface ToolbarPluginProps {
   isDarkMode?: boolean;
+  /**
+   * Optional host-supplied controls rendered at the trailing end of the toolbar
+   * (after a divider). Context-agnostic: the shared editor just renders whatever
+   * ReactNode is passed. EmailComposer uses this for its attachment / record-lookup /
+   * connector actions so they sit inline with the formatting tools (owner UAT 2026-07-24).
+   */
+  toolbarSlot?: React.ReactNode;
 }
 
 type BlockType = 'paragraph' | 'h1' | 'h2' | 'h3' | 'quote' | 'ul' | 'ol';
@@ -85,7 +92,7 @@ const useStyles = makeStyles({
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function ToolbarPlugin({ isDarkMode = false }: ToolbarPluginProps): React.ReactElement {
+export function ToolbarPlugin({ isDarkMode = false, toolbarSlot }: ToolbarPluginProps): React.ReactElement {
   const [editor] = useLexicalComposerContext();
   const styles = useStyles();
 
@@ -321,6 +328,15 @@ export function ToolbarPlugin({ isDarkMode = false }: ToolbarPluginProps): React
           aria-pressed={blockType === 'ol'}
         />
       </Tooltip>
+
+      {/* Host-supplied trailing controls (EmailComposer: attachments / record lookup /
+          connector). Only rendered when provided, so other consumers are unaffected. */}
+      {toolbarSlot && (
+        <>
+          <ToolbarDivider />
+          {toolbarSlot}
+        </>
+      )}
     </Toolbar>
   );
 }

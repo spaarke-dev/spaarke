@@ -24,12 +24,11 @@ import {
 } from "@fluentui/react-icons";
 import type { IDocument } from "../../types/entities";
 import { getFileTypeIcon } from "../../utils/fileIconMap";
-import { navigateToEntity, openRecordDialog } from "../../utils/navigation";
 import { getEffectiveDarkMode } from "../../providers/ThemeProvider";
 import { authenticatedFetch } from "../../services/authInit";
 import { getDocumentOpenLinks } from "../../services/DocumentApiService";
 import { getBffBaseUrl, getTenantId } from "../../config/runtimeConfig";
-import { RecordCardShell, CardIcon, AiSummaryPopover, FindSimilarDialog } from "@spaarke/ui-components";
+import { RecordCardShell, CardIcon, AiSummaryPopover, FindSimilarViewerDialog, createXrmNavigationService } from "@spaarke/ui-components";
 import type { ISummaryData } from "@spaarke/ui-components";
 import { FilePreviewDialog } from "../FilePreview/FilePreviewDialog";
 
@@ -126,10 +125,8 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
 
     // ----- Card double-click → open record -----
     const handleDoubleClick = React.useCallback(() => {
-      navigateToEntity({
-        action: "openRecord",
-        entityName: "sprk_document",
-        entityId: doc.sprk_documentid,
+      createXrmNavigationService().openRecord("sprk_document", doc.sprk_documentid).catch((err) => {
+        console.error("[DocumentCard] openRecord failed:", err);
       });
     }, [doc.sprk_documentid]);
 
@@ -138,10 +135,8 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
       (e: React.MouseEvent | React.KeyboardEvent) => {
         if ("key" in e && e.key === "Enter") {
           e.preventDefault();
-          navigateToEntity({
-            action: "openRecord",
-            entityName: "sprk_document",
-            entityId: doc.sprk_documentid,
+          createXrmNavigationService().openRecord("sprk_document", doc.sprk_documentid).catch((err) => {
+            console.error("[DocumentCard] openRecord failed:", err);
           });
         }
       },
@@ -160,7 +155,9 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
     // (`Xrm.Navigation.navigateTo` with target: 2) so users can dismiss
     // back to the workspace pane without losing scroll/tab state.
     const handleExpand = React.useCallback(() => {
-      openRecordDialog("sprk_document", doc.sprk_documentid);
+      createXrmNavigationService().openRecordModal?.("sprk_document", doc.sprk_documentid).catch((err) => {
+        console.error("[DocumentCard] openRecordModal failed:", err);
+      });
     }, [doc.sprk_documentid]);
 
     // ----- Tool: Open File -----
@@ -329,7 +326,7 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
         />
 
         {/* Child dialogs */}
-        <FindSimilarDialog
+        <FindSimilarViewerDialog
           open={!!findSimilarUrl}
           onClose={() => setFindSimilarUrl(null)}
           url={findSimilarUrl}

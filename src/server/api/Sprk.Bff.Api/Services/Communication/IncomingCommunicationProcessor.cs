@@ -8,6 +8,7 @@ using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Communication.Engine;
@@ -44,6 +45,7 @@ public sealed class IncomingCommunicationProcessor
     private readonly ICommunicationEnrichmentService _enrichmentService;
     private readonly IThreadResolver? _threadResolver;
     private readonly CommunicationParticipantIndexer? _participantIndexer;
+    private readonly CommunicationArrivedProducer? _arrivedProducer;
     private readonly CommunicationOptions _options;
     private readonly ITextExtractor _textExtractor;
     private readonly AttachmentMatchOptions _attachmentMatchOptions;
@@ -78,7 +80,8 @@ public sealed class IncomingCommunicationProcessor
         IConfiguration configuration,
         ILogger<IncomingCommunicationProcessor> logger,
         IThreadResolver? threadResolver = null,
-        CommunicationParticipantIndexer? participantIndexer = null)
+        CommunicationParticipantIndexer? participantIndexer = null,
+        CommunicationArrivedProducer? arrivedProducer = null)
     {
         _graphClientFactory = graphClientFactory;
         _communicationService = communicationService;
@@ -95,6 +98,7 @@ public sealed class IncomingCommunicationProcessor
         _enrichmentService = enrichmentService;
         _threadResolver = threadResolver;
         _participantIndexer = participantIndexer;
+        _arrivedProducer = arrivedProducer;
         _options = options.Value;
         _textExtractor = textExtractor;
         _attachmentMatchOptions = attachmentMatchOptions.Value;
@@ -339,6 +343,16 @@ public sealed class IncomingCommunicationProcessor
                 ct);
         }
 
+        // ── Step 4.8: communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal ──
+        // Emit the Layer-C refresh signal AFTER association (4.5) + thread (4.6) + participant index (4.7): the
+        // fan-out reads the participant junction just written, and the envelope needs the thread/regarding just
+        // stamped — so this is the correct emit point, NOT the raw CreateCommunicationRecordAsync. The producer is
+        // internally non-fatal (never throws), so capture never fails on a producer error (NFR-05).
+        if (_arrivedProducer is not null)
+        {
+            await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId, ct);
+        }
+
         // ── Step 5: Process attachments ──────────────────────────────────────────
         // Process attachments when: account has AutoCreateRecords enabled, OR account
         // could not be resolved (default to processing rather than silently dropping).
@@ -363,8 +377,12 @@ public sealed class IncomingCommunicationProcessor
         }
 
         // ── Step 6: Archive .eml to SPE (best-effort, if opt-in) ─────────────────
-        // Default to archiving if ArchiveIncomingOptIn is not set (null) or is true.
-        if (account?.ArchiveIncomingOptIn != false)
+        // FR-17: archiving is DEFAULT-ON, forward-only for monitored (receive-enabled) accounts.
+        // The gate archives unless the account has EXPLICITLY opted out (ArchiveIncomingOptIn == false);
+        // an unset flag (null) is the intended default and archives. An unresolved account (null) also
+        // defaults to archiving. Decision lives in CommunicationAccount.ShouldArchiveIncoming() so the
+        // default-on contract is pinned by unit test. No historical mail is backfilled (forward-only).
+        if (account?.ShouldArchiveIncoming() ?? true)
         {
             try
             {
@@ -513,9 +531,13 @@ public sealed class IncomingCommunicationProcessor
     private async Task<Guid> CreateCommunicationRecordAsync(
         Message message, string mailboxEmail, string graphMessageId, CancellationToken ct)
     {
-        // Determine body content: prefer uniqueBody (stripped of reply/forward content) over full body
-        var bodyContent = message.UniqueBody?.Content ?? message.Body?.Content ?? string.Empty;
-        var bodyContentType = message.UniqueBody?.ContentType ?? message.Body?.ContentType;
+        // Determine body content: prefer the FULL body (the complete conversation thread) over
+        // Graph's uniqueBody, which strips all quoted reply/forward content and reduces a multi-
+        // message thread to only the latest message. Owner UAT 2026-08-03: an incoming email
+        // carrying a 5-message thread must be stored WITH the thread, not just the top message.
+        // uniqueBody is retained only as a fallback for the rare case Graph omits body.
+        var bodyContent = message.Body?.Content ?? message.UniqueBody?.Content ?? string.Empty;
+        var bodyContentType = message.Body?.ContentType ?? message.UniqueBody?.ContentType;
 
         // Map CC recipients to semicolon-separated string
         var ccRecipients = message.CcRecipients?
@@ -606,6 +628,11 @@ public sealed class IncomingCommunicationProcessor
 
             var sb = new StringBuilder();
             var extractedCount = 0;
+            // Task 041 / FR-13: retain each attachment's extracted text + page structure (identity the flat
+            // `sb` concatenation discards) so the attachment-grounded action extractor can produce a
+            // machine-verified per-attachment/page locator. Built from the SAME extraction pass — no second
+            // extraction, no cost delta.
+            var perAttachment = new List<AttachmentExtractedText>();
 
             foreach (var attachment in fileAttachments)
             {
@@ -630,6 +657,12 @@ public sealed class IncomingCommunicationProcessor
                         if (sb.Length > 0) sb.Append('\n');
                         sb.Append(result.Text);
                         extractedCount++;
+
+                        perAttachment.Add(new AttachmentExtractedText(
+                            FileName: fileName,
+                            DocumentId: null, // the child sprk_document is created later in the pipeline
+                            FullText: result.Text!,
+                            Pages: result.Pages ?? Array.Empty<ExtractedPage>()));
                     }
                 }
                 catch (Exception ex)
@@ -650,7 +683,7 @@ public sealed class IncomingCommunicationProcessor
                 "Extracted attachment text for matching | GraphMessageId: {GraphMessageId}, Attachments: {Count}, Chars: {Chars}",
                 graphMessageId, extractedCount, text.Length);
 
-            return envelope with { AttachmentText = text };
+            return envelope with { AttachmentText = text, AttachmentTexts = perAttachment };
         }
         catch (Exception ex)
         {
@@ -750,6 +783,11 @@ public sealed class IncomingCommunicationProcessor
 
         var processedCount = 0;
 
+        // FR-D1 / FR-06: resolve the RAG grounding key ONCE for this communication — every attachment
+        // shares the same regarding, so resolving inside the per-attachment enqueue would refetch it N times.
+        var parentEntity = await RegardingParentEntityMapper.ResolveAsync(
+            _genericEntityService, communicationId, _logger, ct);
+
         foreach (var attachment in fileAttachments)
         {
             var fileName = attachment.Name ?? $"attachment_{processedCount + 1}";
@@ -796,8 +834,8 @@ public sealed class IncomingCommunicationProcessor
                     // Enqueue AI analysis for the attachment (best-effort)
                     await EnqueueDocumentAnalysisAsync(attachmentDocumentId.Value, communicationId, ct);
 
-                    // Enqueue RAG indexing for semantic search (best-effort)
-                    await EnqueueRagIndexingAsync(driveId, fileHandle.Id, attachmentDocumentId.Value, fileName, communicationId, ct);
+                    // Enqueue RAG indexing for semantic search (best-effort); grounding resolved once above.
+                    await EnqueueRagIndexingAsync(driveId, fileHandle.Id, attachmentDocumentId.Value, fileName, communicationId, parentEntity, ct);
                 }
 
                 // Create sprk_communicationattachment record
@@ -913,7 +951,10 @@ public sealed class IncomingCommunicationProcessor
         // Enqueue RAG indexing for semantic search (best-effort)
         if (fileHandle?.Id is not null)
         {
-            await EnqueueRagIndexingAsync(driveId, fileHandle.Id, documentId, emlResult.FileName, communicationId, ct);
+            // FR-D1 / FR-06: resolve the grounding key for the archived .eml (single doc, one resolve).
+            var parentEntity = await RegardingParentEntityMapper.ResolveAsync(
+                _genericEntityService, communicationId, _logger, ct);
+            await EnqueueRagIndexingAsync(driveId, fileHandle.Id, documentId, emlResult.FileName, communicationId, parentEntity, ct);
         }
     }
 
@@ -983,7 +1024,7 @@ public sealed class IncomingCommunicationProcessor
     /// </summary>
     private async Task EnqueueRagIndexingAsync(
         string driveId, string itemId, Guid documentId, string fileName,
-        Guid communicationId, CancellationToken ct)
+        Guid communicationId, ParentEntityContext? parentEntity, CancellationToken ct)
     {
         var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
 
@@ -995,7 +1036,10 @@ public sealed class IncomingCommunicationProcessor
             FileSizeBytes: null,
             ContentType: null,
             DocumentId: documentId.ToString(),
-            ParentEntity: null,
+            // FR-D1 / FR-06: the communication's resolved regarding, resolved ONCE per communication by
+            // the caller (avoids a per-attachment refetch) so matter-scoped RAG returns this correspondence
+            // (was null). Best-effort/non-fatal (NFR-04): null when no representable regarding is set.
+            ParentEntity: parentEntity,
             SearchIndexName: null, // handler runs ISearchIndexNameResolver chain
             Source: "InboundEmail",
             CorrelationId: communicationId.ToString("N"));

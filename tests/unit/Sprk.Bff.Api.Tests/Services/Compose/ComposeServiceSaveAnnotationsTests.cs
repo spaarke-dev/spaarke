@@ -1,23 +1,19 @@
-// Redline/comment save fidelity (spaarkeai-compose-r2 UAT-R7 #2/#3/#4) — unit tests for
-// ComposeService.SaveAsync's annotation-apply branch (the fix that routes SAVE through the proven
-// DocxAnnotationWriter so pending redlines persist as NATIVE Word tracked-changes + comments).
+// Clean-save byte fidelity (FR-06a) — unit test for ComposeService.SaveAsync's clean-save path.
 //
-// Before this fix, Save uploaded whatever bytes the client sent — and the client's mark-blind
-// tipTapToDocxBytes writer flattened insertion/deletion marks to plain body text (both the original
-// AND the AI text landed as ordinary text; zero w:ins/w:del; no comments). The fix: the client now
-// sends a clean BASELINE + a structured annotation list, and SaveAsync applies them onto the baseline
-// via DocxAnnotationWriter.Annotate BEFORE the SPE write — exactly the pattern PushAnnotationsAsync
-// already uses. These tests prove, through the REAL DocxAnnotationWriter and by re-opening the SAVED
-// OOXML the SPE write layer received (no OOXML mock), that:
-//   (a) a redlined+commented Save persists a .docx carrying real w:ins / w:del / w:comment; and
-//   (b) a Save with no annotations persists the baseline BYTE-IDENTICAL (the plain no-redline Save
-//       is unchanged — FR-06a byte fidelity preserved).
+// R4 task 032 retired the save-path DocxAnnotationWriter composition branch (the old
+// SaveComposeDocumentRequest.Annotations payload): all save/annotation writing now routes through the
+// single ComposeShadowPatchEngine, driven by the request's OperationLog + (paraId,range)-anchored
+// Comments. The save-path native-redline/comment composition once asserted here is now covered by
+// ComposeShadowPatchEngineTests (engine behavior) + the through-the-wire seam slices
+// (ComposeFidelitySeamTests / ComposeImportedAnchorsSurviveSaveSeamTests) — so the retired
+// save-path-Annotations tests were removed with the contract. What remains is the load-bearing
+// clean-save invariant: a Save carrying neither an OperationLog nor Comments persists the baseline
+// BYTE-IDENTICAL (FR-06a — the plain no-redline Save never re-serializes document.xml).
 //
 // Mocking boundary (ADR-038 §4 "mock at module boundaries"): every collaborator mocked is a genuine
 // external boundary (ISpeFileOperations → SPE/Graph facade; IGenericEntityService → Dataverse;
 // ChatSessionManager → Redis-backed store; IPostUploadIndexingEnqueuer → RAG indexing seam). The
-// class-under-test (ComposeService) and its DocxAnnotationWriter collaborator are REAL. Same boundary
-// set as ComposeServiceUploadFidelityTests.cs, which this file extends for the annotation branch.
+// class-under-test (ComposeService) is REAL. Same boundary set as ComposeServiceUploadFidelityTests.cs.
 
 using System;
 using System.IO;
@@ -72,9 +68,7 @@ public sealed class ComposeServiceSaveAnnotationsTests
     private ComposeService CreateSut() => new(
         _spe.Object,
         _sessions.Object,
-        _dataverse.Object,
-        new DocxAnnotationWriter(),
-        _indexing.Object,
+        _dataverse.Object,        _indexing.Object,
         NullLogger<ComposeService>.Instance);
 
     private static FileHandleDto ReplacedDriveItem() => new(
@@ -108,6 +102,13 @@ public sealed class ComposeServiceSaveAnnotationsTests
 
     private void ArrangeReplaceExisting(out Func<byte[]> capturedBytesAccessor)
     {
+        // FR-08 (task 050): SaveAsync's replace-content branch fetches the live metadata (eTag) up front
+        // to assert the version stamp before applying. No prior stamp exists in these tests (a Strict mock
+        // must have an explicit setup for every invocation) — returning null degrades to "not stale".
+        _spe.Setup(s => s.GetFileMetadataAsUserAsync(
+                It.IsAny<HttpContext>(), ExistingDriveId, ExistingSpeItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((FileHandleDto?)null);
+
         byte[]? captured = null;
         _spe.Setup(s => s.ReplaceFileContentAsUserAsync(
                 It.IsAny<HttpContext>(), ExistingDriveId, ExistingSpeItemId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
@@ -132,61 +133,9 @@ public sealed class ComposeServiceSaveAnnotationsTests
                 It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
 
-    // ── #2/#4: a redlined + commented Save persists native w:ins / w:del / w:comment ──────────────
+    // ── plain Save: no operation log / no comments → baseline persisted BYTE-IDENTICAL (FR-06a) ─────
     [Fact]
-    public async Task SaveAsync_WithRedlineAndCommentAnnotations_PersistsDocxWithNativeTrackedChangesAndComment()
-    {
-        ArrangeReplaceExisting(out var capturedBytes);
-        ArrangeExistingRecordFound();
-        ArrangeIndexingSubmitted();
-
-        // Baseline = the reject-state document: the ORIGINAL "indemnify" is present (its struck
-        // half), the proposed "defend" is NOT (an insertion is dropped in the reject baseline). The
-        // annotations re-apply the redline (replace "indemnify" → "defend") + one comment.
-        var baseline = CreateDocx("The Supplier shall indemnify the Customer.");
-        var annotations = new[]
-        {
-            // Insertion BEFORE Deletion for the replace pair (the client bridge orders it this way so
-            // the writer's anchor lookup still finds the live original before it becomes w:delText).
-            new DocxAnnotation { Kind = TrackChangeKind.Insertion, TargetText = "indemnify", NewText = "defend", Author = "Spaarke Assistant", Date = When },
-            new DocxAnnotation { Kind = TrackChangeKind.Deletion, TargetText = "indemnify", Author = "Spaarke Assistant", Date = When },
-            new DocxAnnotation { Kind = TrackChangeKind.Comment, TargetText = "Customer", CommentText = "Name the counterparty entity.", Author = "Spaarke Assistant", Date = When },
-        };
-
-        var sut = CreateSut();
-        var request = new SaveComposeDocumentRequest
-        {
-            DocumentSpeId = ExistingSpeItemId,
-            DriveId = ExistingDriveId,
-            Content = baseline,
-            SessionId = Guid.NewGuid().ToString(),
-            TenantId = Tenant,
-            Annotations = annotations,
-        };
-
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
-
-        // Re-open the exact bytes the SPE write layer received and assert the NATIVE markup landed.
-        using var doc = WordprocessingDocument.Open(new MemoryStream(capturedBytes()), false);
-        var body = doc.MainDocumentPart!.Document!.Body!;
-
-        var ins = body.Descendants<InsertedRun>().Single();
-        ins.Descendants<Text>().Single().Text.Should().Be("defend", "the proposed text saves as a native w:ins");
-
-        var del = body.Descendants<DeletedRun>().Single();
-        del.Descendants<DeletedText>().Single().Text.Should().Be("indemnify", "the struck original saves as a native w:del (w:delText)");
-
-        var comment = doc.MainDocumentPart!.WordprocessingCommentsPart!.Comments!.Elements<Comment>().Single();
-        comment.InnerText.Should().Be("Name the counterparty entity.", "the comment saves as a native w:comment");
-        body.Descendants<CommentRangeStart>().Single().Id!.Value.Should().Be(comment.Id!.Value);
-
-        // The saved bytes are the ANNOTATED render, not the flattened baseline the client sent.
-        capturedBytes().Should().NotBeEquivalentTo(baseline, "SaveAsync applied the annotations before persisting");
-    }
-
-    // ── plain Save: no annotations → baseline persisted BYTE-IDENTICAL (FR-06a fidelity preserved) ─
-    [Fact]
-    public async Task SaveAsync_WithNoAnnotations_PersistsBaselineByteIdentical()
+    public async Task SaveAsync_WithNoOperationLogOrComments_PersistsBaselineByteIdentical()
     {
         ArrangeReplaceExisting(out var capturedBytes);
         ArrangeExistingRecordFound();
@@ -201,7 +150,7 @@ public sealed class ComposeServiceSaveAnnotationsTests
             Content = baseline,
             SessionId = Guid.NewGuid().ToString(),
             TenantId = Tenant,
-            Annotations = null, // a plain no-redline Save
+            // No OperationLog and no Comments → a clean Save: the engine is a byte-identical passthrough.
         };
 
         await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
@@ -209,34 +158,6 @@ public sealed class ComposeServiceSaveAnnotationsTests
         capturedBytes().Should().BeEquivalentTo(
             baseline,
             options => options.WithStrictOrdering(),
-            "with no annotations the baseline is persisted byte-identical — no DocxAnnotationWriter transform");
-    }
-
-    // ── empty (non-null) annotation list is also a no-op (defensive: client always sends the field) ─
-    [Fact]
-    public async Task SaveAsync_WithEmptyAnnotationList_PersistsBaselineByteIdentical()
-    {
-        ArrangeReplaceExisting(out var capturedBytes);
-        ArrangeExistingRecordFound();
-        ArrangeIndexingSubmitted();
-
-        var baseline = CreateDocx("Still nothing to annotate here.");
-        var sut = CreateSut();
-        var request = new SaveComposeDocumentRequest
-        {
-            DocumentSpeId = ExistingSpeItemId,
-            DriveId = ExistingDriveId,
-            Content = baseline,
-            SessionId = Guid.NewGuid().ToString(),
-            TenantId = Tenant,
-            Annotations = Array.Empty<DocxAnnotation>(),
-        };
-
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
-
-        capturedBytes().Should().BeEquivalentTo(
-            baseline,
-            options => options.WithStrictOrdering(),
-            "an empty annotation list is a no-op — the baseline persists unchanged");
+            "with no operation log or comments the baseline is persisted byte-identical — the patch engine never re-serializes document.xml on a clean Save");
     }
 }

@@ -47,6 +47,8 @@ export const mattersRegistration: SectionRegistration = {
       id: "matters",
       type: "content",
       title: "Matters",
+      // Grid-backed section: DataGrid renders its own elevated header (round-8.2).
+      hideTitle: true,
       style: { overflow: "hidden" },
       renderContent: () =>
         React.createElement(DataverseEntityViewWidget, {

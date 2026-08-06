@@ -1,0 +1,22 @@
+# Lessons Learned — spaarkeai-assistant-enhancements-r1
+
+> Appended at project close (2026-07-23). Confirmed non-obvious approaches + corrections worth carrying forward.
+
+## What worked (confirmed approaches)
+
+- **Extend the catalog, don't build a pipeline.** R1's whole thesis — reposition the Assistant as a grounded dispatcher — was delivered by adding Bindings/Actions + one client registry entry per surface, reusing the shipped ADR-039 dispatch spine. No new intent mechanism, no second decider. The surface-launch capabilities (create-matter/task/todo/event/project, list-tasks) each cost an Action+Binding in data + ONE `surfaceLaunchRegistry` entry in code. This is the pattern to keep (see `docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md`).
+- **Surface identity stays in CODE, prompt/description content stays in DATA.** The r2 "surfaceTarget" idea (data-defined routing) was investigated and correctly **abandoned** — it would have contradicted ADR-039 and re-introduced data-defined orchestration the owner has consistently rejected. The line held: only elements a business analyst can positively enhance (action prompts, tool/bundle descriptions, chip labels) live in data; routing/surface identity lives in the registry.
+- **Optional-inject + quiet-no-op for dispatch-spine enrichment.** The 010 constrained-field resolver was wired into dispatch (`ISurfaceLaunchEnricher`) as a nullable last-ctor-param, quiet no-op on unmapped consumer-type/failure, registered unconditionally (§10 F.1 symmetric). This let the highest-blast-radius class (`SessionDispatchOrchestrator`) gain behavior without breaking existing test constructions — the safe way to extend a hot class.
+- **Eval coverage as a net-new family joined by trait, not an edit to the shared golden file.** Task 051 added R1 eval coverage as `assistant-r1-eval-cases.json` + `AssistantEnhancementsR1EvalTests.cs` carrying `[Trait("Category","GoldenUtteranceEval")]` — zero edit to the shared `golden-utterances.json` (whose closed §3-UC set + P1/P2 activation guards are owned by another project) and zero CI-YAML change. This is the clean way a project adds merge-gate coverage (matches the Resourcefulness/Origin-classification/Memory precedent).
+- **Honest catalog grounding trichotomy.** For eval cases, `existing` (ConsumerTypes constant) / `mirrored` (in `sprk_playbookconsumer-rows.json`) / `live-catalog` (seeded on dev, parity pending) let create-todo/create-project be covered honestly without inventing constants or faking mirror rows. Surface-launch create capabilities have no server-side `ConsumerTypes` dependency — they correctly carry no constant.
+
+## Corrections (things that were stale / wrong)
+
+- **The 090 "R1.5 spec-pass follow-on" deferral was stale.** By the time close-out ran, R1.5 (proactive push) had been folded into `spaarke-notification-spine-r1` (owner decision 2026-07-20) and SHIPPED — proactive Daily-Briefing suggestion cards are live on dev. Filing a spec-pass issue would have been noise for delivered work. Lesson: re-check "deferred" items against what actually shipped before filing — deferrals recorded early in a long project can be overtaken by events.
+- **"Add a task" chat elicitation was NOT broken.** The confusing document chips were a keyword-heuristic mis-fire (`EmitMissingContextChipsIfNeededAsync`) + a client label leak (`[action:…]` prefix), both fixed. The create-task/create-todo bindings were correctly `Surface Launch` + `Loop Elicitation` all along. Lesson: diagnose the catalog state before assuming a routing bug.
+- **Don't re-deploy at 054 if the surfaces already shipped.** R1 deployed incrementally (each UAT batch → BFF/code-page/catalog). By 054 the deploy was already done + smoke-verified; 054 became a formalization step (`notes/deploy-report.md`), and 051 added test-only files with no deployable delta. Owner ruling confirmed: "if 054 is a deploy we don't have to do that again."
+
+## Process notes
+
+- **Incremental merge-to-master shrinks the wrap-up.** Because R1 merged each batch to master, `git merge-base` at close showed only the latest delta. The /test-diet had to scope to the full-project test delta (by task markers), not the merge-base delta — worth remembering for any incrementally-merged project's diet.
+- **Husky lint-staged runs prettier + dotnet format on commit.** New JSON/CS files get auto-formatted at commit; verified green post-format.

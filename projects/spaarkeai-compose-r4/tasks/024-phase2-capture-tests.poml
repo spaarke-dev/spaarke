@@ -1,0 +1,212 @@
+<task id="024" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Phase-2 client capture tests (Vitest) — interceptor, atom node, rebased log</title>
+    <phase>2 Frontend capture</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Test-modifying task (tags include testing/e2e-test) — FULL unconditionally per root §8 TEST-MODIFYING override; covers the load-bearing capture surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Test authoring against three completed, well-specified client surfaces; default sonnet tier suffices.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>020,021,022</deps>
+    <tags>frontend,testing,e2e-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Author the Vitest coverage for the Phase-2 client capture surface (Success Criterion 2 — placement
+    determinism, client side): (1) the step→operation interceptor (task 020) — a typed edit at an interior
+    location emits an operation with the CORRECT `(paraId, runIndex, run-local-offset)` anchor; (2) the
+    opaque-atom node (task 021) — atoms render non-editable and preserve document order, and typing inside
+    one is a no-op; (3) the rebased operation log (task 022) — rebasing correctness, including the
+    rebase-across-concurrent-edits case (edit A then a later edit B earlier in the same paragraph) and the
+    op-inside-deleted-content flagging. Test files are colocated under
+    `src/client/shared/Spaarke.Compose.Components/src/` beside the code they cover (the repo's colocated
+    `*.test.ts(x)` convention). MIT ProseMirror base only — NO `@tiptap-pro/*` (NFR-03). Per ADR-038, these
+    are behavior tests of real editor transactions — NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or
+    ctor-null tests. `build:prod` must be green.
+  </prompt>
+
+  <role>
+    Senior React/TypeScript test engineer fluent in Vitest + ProseMirror/TipTap test harnessing (constructing
+    editor states, dispatching transactions, asserting emitted operations). Understands ADR-038 (behavior
+    over mocks) and the three capture surfaces under test (020/021/022).
+  </role>
+
+  <goal>
+    A green Vitest suite covering all three Phase-2 behaviors: correct interior-edit anchors from the
+    interceptor; the atom node non-editable + order-preserving with typing a no-op; the rebased op log correct
+    across concurrent edits including the deleted-content flag. The suite includes the rebase-across-concurrent
+    -edits case and the atom-is-non-editable negative case. `npm run build:prod` for the shared lib is green.
+  </goal>
+
+  <context>
+    <background>
+      Plan Phase 2 task 024 (Phase-2 client capture tests). These cover the three surfaces built in this
+      phase: `stepOperationInterceptor.ts` (020, extended by 022) and `opaqueAtomNode.ts` (021). Success
+      Criterion 2 (placement determinism) is the client-side acceptance. ADR-038 mandates behavior tests of
+      real transactions, not mock/DI/ctor scaffolding. The repo convention is colocated `*.test.ts(x)` files
+      (see the existing `docxBridge.paraId.test.ts`, `ComposeEditor.paraId.test.tsx`).
+    </background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.test.ts — NEW Vitest: interceptor anchors + rebased-log correctness (020/022)</file>
+      <file role="new">src/client/shared/Spaarke.Compose.Components/src/widgets/opaqueAtomNode.test.ts — NEW Vitest: atom non-editable + order-preserving + typing no-op (021)</file>
+      <file role="dependency-output">src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts — code under test (tasks 020 + 022)</file>
+      <file role="dependency-output">src/client/shared/Spaarke.Compose.Components/src/widgets/opaqueAtomNode.ts — code under test (task 021)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.paraId.test.ts — the repo's colocated Vitest + editor-state harness convention to mirror</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.paraId.test.tsx — an existing paraId editor test to follow for harness setup</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-03, FR-02, NFR-02, NFR-03</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">Step→operation interceptor — the anchor-emission code under test.</dependency>
+      <dependency task="021" status="pending">Opaque-atom node — the non-editable node under test.</dependency>
+      <dependency task="022" status="pending">Rebased op log — the rebasing correctness under test.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-03, FR-02">Tests MUST assert the interior-edit anchor correctness `(paraId, runIndex, offset)`, atom non-editability + order preservation, and rebasing correctness (incl. concurrent-edit + deleted-content cases). Scope: the two new test files.</constraint>
+    <constraint source="ADR-038 / NFR-06">Behavior tests of real ProseMirror transactions only. MUST NOT use `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests. Scope: this task's tests.</constraint>
+    <constraint source="spec / NFR-03">MIT ProseMirror base + `@tiptap/extension-*` only in the test harness; NO `@tiptap-pro/*` / AGPL / EigenPal. Scope: test imports.</constraint>
+    <constraint source="project / colocated tests">Test files are colocated `*.test.ts(x)` beside the code under test, per the repo convention. Scope: file placement.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Vitest + ProseMirror/TipTap behavior testing; editor-state harness; anchor + rebasing assertions; ADR-038 test discipline</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r4/design.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Colocated editor-state Vitest" location="src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.paraId.test.ts">
+        The repo's colocated `*.test.ts` pattern building editor state and asserting behavior — mirror its harness setup for the capture tests.
+      </pattern>
+      <pattern name="paraId editor test harness" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.paraId.test.tsx">
+        How an existing test mounts the editor + dispatches transactions to assert paraId behavior — reuse for interceptor/atom tests.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (root §8; TEST-MODIFYING override → FULL). Confirm tasks 020/021/022 are complete (the code under test exists). Load ADR-038 + the colocated-test convention.</step>
+    <step order="1" name="Interceptor anchor tests">In `stepOperationInterceptor.test.ts`, assert: an interior typed edit emits an op with the correct `(paraId, runIndex, run-local-offset)`; multi-run paragraph maps to the right run; no `{paraId,text}` payload.</step>
+    <step order="2" name="Rebased-log tests">In the same file, assert: rebase-across-concurrent-edits (A then earlier B) keeps A's anchor consistent; document-order serialization with a base version; op-inside-deleted-content is flagged, not dropped.</step>
+    <step order="3" name="Atom-node tests">In `opaqueAtomNode.test.ts`, assert: fields/SDT render as non-editable atoms in correct order; typing inside an atom is a no-op (negative case); the atom carries its paraId. Checkpoint (context-handoff) per root §5.</step>
+    <step order="4" name="Run + build">Run the Vitest suite green for all three behaviors; run `npm run build:prod` (NOT `npm run build`) for the shared lib; confirm no `@tiptap-pro/*`.</step>
+    <step order="5" name="Close-out">Update `tasks/TASK-INDEX.md`: set this task's status to ✅. Document any deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <ui-tests>
+    <ui-test name="Interceptor anchor test is green">
+      <steps>Run the interceptor test covering an interior typed edit in a multi-run paragraph.</steps>
+      <expected>The test asserts the emitted op's `(paraId, runIndex, run-local-offset)` matches the edit location; suite passes.</expected>
+    </ui-test>
+    <ui-test name="Rebase-across-concurrent-edits test is green">
+      <steps>Run the rebased-log test with edit A then a later edit B earlier in the same paragraph, plus the deleted-content case.</steps>
+      <expected>A's anchor is asserted rebased-correct; the deleted-content op is asserted flagged (not dropped); suite passes.</expected>
+    </ui-test>
+    <ui-test name="Atom-is-non-editable negative test is green">
+      <steps>Run the atom test attempting to type into an atom and asserting order.</steps>
+      <expected>Typing is asserted a no-op; atoms are asserted non-editable and in document order; suite passes.</expected>
+    </ui-test>
+    <ui-test name="Dark-mode render (ADR-021)">
+      <steps>Include a render assertion mounting the editor with atoms under the Fluent v9 dark theme provider.</steps>
+      <expected>Atom placeholders render legibly with theme tokens in dark mode; no hard-coded light colors; assertion passes.</expected>
+    </ui-test>
+  </ui-tests>
+
+  <escalation>
+    <trigger>If a test reveals that one of the capture surfaces (020/021/022) does not actually satisfy its FR-03/FR-02 acceptance (e.g. an anchor resolves wrong, or an op is silently dropped), STOP and surface it (root §6) — a failing behavior is a code defect to route back, not a test to weaken.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No test coverage exists for the step interceptor / opaque-atom node / rebased op log (all new client surface).</existing>
+    <extension>No — these are the tests for the new capture surface, not a reusable component.</extension>
+    <cost-of-doing-nothing>The FR-03 capture correctness + rebase-across-concurrent-edits behavior has no regression guard.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.test.ts (interceptor anchors + rebased-log correctness)</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/opaqueAtomNode.test.ts (atom non-editable + order + paraId)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Tests are green for the interceptor's interior-edit anchor correctness `(paraId, runIndex, run-local-offset)`.</criterion>
+    <criterion testable="true">Tests are green for the atom node being non-editable and order-preserving, including the atom-is-non-editable negative case.</criterion>
+    <criterion testable="true">Tests are green for the rebased op log, including the rebase-across-concurrent-edits case and the op-inside-deleted-content flag.</criterion>
+    <criterion testable="true">No `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests are introduced (ADR-038).</criterion>
+    <criterion testable="true">No `@tiptap-pro/*` / AGPL / EigenPal dependency in the harness; `npm run build:prod` for the shared lib is green (NFR-03).</criterion>
+    <criterion testable="true">The dark-mode render assertion (ADR-021) passes with theme tokens.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Test coverage for the new client capture surface (no `&lt;justification&gt;` — tests for already-justified
+    tasks 020/021/022). Colocated `*.test.ts` per repo convention. Client task (no BFF surface) — no
+    publish-size / CVE gate. Success Criterion 2 (placement determinism), client side.
+
+    **Completed 2026-07-22.** Two of the three cross-cutting cases the POML calls out were found
+    ALREADY fully covered by the existing task-020/021/022 colocated suites — added nothing
+    duplicate:
+    - (a) rebase-across-concurrent-edits end-to-end → already covered by
+      `stepOperationInterceptor.test.ts`'s `RebasedOperationLog — rebase-across-concurrent-edits`
+      describe block ("rebases an earlier op's anchor so it still resolves to its intended
+      position after a later, earlier-positioned edit" — Edit A then Edit B earlier in the same
+      paragraph, asserted in `log.serialize()`'s `orderedOps`).
+    - (b) atom-is-non-editable negative case exercised through the editor schema → already covered
+      by `opaqueAtomNode.test.ts`'s `non-editability — typing inside an atom is a no-op` describe
+      block (real headless `Editor`, both block + inline atoms, `setTextSelection(atomPos+1)
+      .insertContent('X')` asserted as a structural no-op).
+
+    (c) — the ADR-021 dark-mode semantic-token assertion — was the one genuine gap and is the only
+    new file added: **`ComposeEditor.opaqueAtomTheme.test.ts`** (5 tests, all green). It targets
+    the color rules that actually make the R4 opaque-atom placeholders legible in dark mode —
+    `ComposeEditor.tsx`'s own `useStyles()` `.compose-atom*` Griffel blocks — since
+    `opaqueAtomNode.test.ts`'s existing "no inline hex/style" check only proves the ATOM NODE's own
+    `renderHTML()` is theme-independent by construction (it emits static classes only); the color
+    tokens live one layer up, in `ComposeEditor.tsx`.
+
+    **Deviation from the POML's literal approach (documented, not silent):** the standard repo
+    ADR-021 pattern (`ComposeToolbarPolish.test.tsx` §4 — mount the real `ComposeEditor` under
+    `FluentProvider theme={webDarkTheme}`) was attempted first and found NOT runnable in this
+    worktree: `ComposeEditor.tsx` transitively imports `@spaarke/auth` and (via
+    `ComposeAiToolbar.tsx`) `@spaarke/ui-components`; neither has a built `dist/` here, and
+    `@spaarke/ui-components` has no `node_modules` installed at all (verified: `npm run build` in
+    `Spaarke.Auth` fails on a missing `@azure/msal-browser` peer dep; `npm run build` in
+    `Spaarke.UI.Components` fails with dozens of "Cannot find module 'react'" — `node_modules`
+    itself is absent). This is the SAME pre-existing, documented gap root `CLAUDE.md` calls out
+    ("Pre-existing `@spaarke/*` sibling-dist ... errors are environmental — ignore") and this
+    package's own `jest.config.js` documents (`@spaarke/*` runtime deps need
+    `scripts/Build-AllClientComponents.ps1 -Component SharedLibs` run first) — confirmed NOT
+    specific to this task: `ComposeToolbarPolish.test.tsx` (pre-existing, unmodified) fails to even
+    load in this worktree with the identical `Cannot find module '@spaarke/auth'` /
+    `'@spaarke/ui-components'` errors. Rather than block task 024 on an unrelated environment-setup
+    gap, `ComposeEditor.opaqueAtomTheme.test.ts` verifies the SAME production rule TEXT at the
+    "unit level" the POML calls for: it reads `ComposeEditor.tsx`'s actual source, extracts each
+    `.compose-atom*` rule block by brace-depth, and asserts every color-bearing declaration
+    references `tokens.*` (never a hex/rgb literal or inline `style=`) — a real regression guard
+    against the exact ADR-021 failure mode, without depending on the broken module graph. A
+    full-mount variant (seeding atom content via the existing `initialHtml` prop) is the natural
+    follow-up once `Build-AllClientComponents.ps1` has been run in this worktree — flagged, not
+    silently dropped.
+
+    Verification: `npx jest ComposeEditor.opaqueAtomTheme opaqueAtomNode stepOperationInterceptor`
+    → 3 suites, 48 tests, all green. `npm run typecheck` shows only PRE-EXISTING `@spaarke/ai-
+    widgets` / `@spaarke/document-operations` sibling-dist errors in files this task did not touch
+    (`ComposeAiToolbar.tsx`, `ComposeToolbar.tsx`, `ComposeWorkspace.tsx`,
+    `useComposeWorkspaceReceivers.ts`, `types/compose-contracts.ts`) — zero errors in the new file.
+    This package has no `build:prod` script (that convention is PCF-specific per root CLAUDE.md
+    §12); `npm run build` (`tsc`) would surface the same pre-existing sibling-dist errors.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

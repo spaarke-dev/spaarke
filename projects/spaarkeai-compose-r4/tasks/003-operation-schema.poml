@@ -1,0 +1,211 @@
+<task id="003" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>The shared versioned operation schema — the spine both ends compile against (FR-11)</title>
+    <phase>0 Gate</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>The load-bearing shared contract implemented identically by client and server; modifies/creates `.cs` + `.ts`; high blast radius — every capture, patch, and AI-anchoring task compiles against it.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The load-bearing shared contract both client and server implement identically; a mis-shaped op type propagates drift into every downstream task. High blast radius, design judgment required.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W0a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New contract files (server Operations/ + client compose-operations.ts); no file overlap with task 002 (fixtures) — both run in wave W0a.</parallel-reason>
+    <deps></deps>
+    <tags>bff-api,contract,docx,frontend</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started>2026-07-22</started>
+    <completed>2026-07-22</completed>
+  </metadata>
+
+  <completion-notes date="2026-07-22">
+    DELIVERED (additive-only — legacy writers/contracts untouched, retired in later tasks 023/032):
+    - SERVER: src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs — the closed
+      set of ten op records (insertText/deleteRange/replaceRange/setMark/clearMark/splitParagraph/
+      mergeParagraph/insertParagraph/deleteParagraph/setBlockAttr) as a System.Text.Json polymorphic
+      union (`[JsonPolymorphic type]` + `[JsonDerivedType(…, "insertText")]`), anchored by
+      ComposeRunPoint{runIndex,offset} / ComposeRunRange{start,end}; envelope ComposeOperationLog
+      {schemaVersion, operations}; ComposeOperationSchema.Version = "compose-ops-v1". Pure records; no
+      AI internals, no Graph types.
+    - CLIENT: src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts — the mirror
+      discriminated union + COMPOSE_OPERATION_TYPES + isComposeOperation/isComposeOperationLog guards.
+      EXTENDS (re-exported from) src/types/compose-contracts.ts + the package barrel src/index.ts — no fork.
+    - TESTS: tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeOperationSchemaTests.cs (4 pass) +
+      src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.test.ts (9 pass) —
+      round-trip client→server→client byte-stable + wire-discriminator + validation coverage.
+
+    KEY OP-SHAPE DECISION (escalation NOT fired): structural ops (split/merge/insert) reference a second
+    paragraph via newParaId/targetParaId carried in the Slate `properties` slot — these are durable
+    w14:paraIds (NOT run-ids, NOT absolute positions), so the {paraId,runIndex,offset|range} anchor
+    remains sufficient and D2/I-3-compliant. Full rationale + the anchor↔op table:
+    projects/spaarkeai-compose-r4/notes/task-003-operation-schema-decisions.md.
+
+    VERIFICATION: BFF build green (0 err); server 4/4 + client 9/9 tests pass; Tier-1 NetArchTest
+    ADR013_ComposeFacadeTests green; publish 46.11 MB compressed incl PDBs (≤60 ceiling; ~neutral vs
+    ~49.63 baseline; zero new runtime package); no NEW HIGH CVE (no .csproj change — pre-existing
+    System.Security.Cryptography.Xml 8.0.3 HIGH is baseline debt). conflict-check = soft warn (sibling
+    compose worktrees share the BFF hot-path; no file overlap — new additive surface). code-review +
+    adr-check (Step 9.5): PASS, 0 Critical / 0 blocking Warning. Placement Justification: contract stays
+    in Services/Compose/ (pure byte-author input for the future ComposeShadowPatchEngine; ADR-013/007
+    compliant; zero NuGet) per .claude/constraints/bff-extensions.md §10.
+  </completion-notes>
+
+  <prompt>
+    Define the versioned operation contract that is the spine of R4 — the single schema both the client
+    (ProseMirror step→operation interceptor) and the server (Patch Engine) implement IDENTICALLY (FR-11).
+    The op types are a CLOSED set: `insertText`, `deleteRange`, `replaceRange`, `setMark`, `clearMark`,
+    `splitParagraph`, `mergeParagraph`, `insertParagraph`, `deleteParagraph`, `setBlockAttr`. Every op is
+    anchored `{paraId, runIndex, offset|range}` and the envelope carries a schema **version** field. Borrow
+    Slate's discriminated-union op shape (`{type, path/anchor, offset, properties}`) — see
+    `notes/bridge-prior-art.md` finding #2 — as the SHAPE, not the identity model (our durable key is
+    `w14:paraId`, which Slate lacks).
+
+    Author it in two places that mirror each other exactly:
+    - SERVER: `src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs` (+ related op-type
+      records and a schema-version constant). Pure C# records; no AI internals, no Graph types.
+    - CLIENT: `src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts`, EXTENDING the
+      existing `src/types/compose-contracts.ts` (do not fork or duplicate the contracts module).
+
+    The schema is the single source both ends VALIDATE against; a serialized op MUST round-trip
+    client→server→client without loss. Do NOT bake in AI-internal types (ADR-013) or Graph types (ADR-007).
+    This task does NOT implement capture or patch — it defines and validates the CONTRACT only.
+  </prompt>
+
+  <role>
+    Contract architect fluent in both .NET 8 records (discriminated-union-style with a `type` discriminator +
+    `JsonPolymorphic`/`JsonDerivedType` or an explicit tag) and TypeScript discriminated unions. Understands
+    the R4 anchor model `(paraId, runIndex, run-local-offset)` (D2) and that this schema is the one artifact
+    both ends must agree on byte-for-byte in serialization.
+  </role>
+
+  <goal>
+    A versioned, closed-set operation contract implemented identically on client and server: server records
+    under `Services/Compose/Operations/` and a client discriminated union under
+    `src/types/compose-operations.ts` (extending `compose-contracts.ts`), covering all ten op types each
+    anchored `{paraId, runIndex, offset|range}` with a schema-version field on the envelope. A serialized
+    operation log round-trips client→server→client with no loss; both ends validate against the same schema.
+    No AI-internal or `Microsoft.Graph` types appear in the server contract (Tier-1 NetArchTest stays green).
+  </goal>
+
+  <context>
+    <background>
+      D1 (design §0) locks step-level operational deltas as the R4 delta model; FR-11 (spec) names the closed
+      op-type set and the `{paraId, runIndex, offset|range}` anchor + a version field. This is the spine both
+      the client interceptor (task 020) and the server Patch Engine (task 030) compile against; the offset→run
+      addressing table (task 011) resolves the fine anchor at patch time. Prior art: `notes/bridge-prior-art.md`
+      finding #2 (Slate's small closed discriminated-union op set — the cleanest public schema to mirror; borrow
+      the SHAPE, not Slate's session-only `path` identity — our durable key is `w14:paraId`). The existing
+      client contracts live in `src/types/compose-contracts.ts` — EXTEND it, do not duplicate. The old
+      text-/paragraph-coarse contracts (`DocxAnnotation.TargetText`, `ComposeEditedParagraph {paraId,text}`)
+      are retired; this schema replaces both (spec §New Components).
+    </background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs — the server operation contract (base + the ten op-type records + a schema-version constant), pure C# records</file>
+      <file role="new">src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts — the client discriminated union mirroring the server contract</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts — extend (import/augment) with the operation types; do NOT fork the contracts module</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r4/notes/bridge-prior-art.md finding #2 (Slate discriminated-union op shape to mirror) + finding #4 (paraId+runIndex+offset anchor rationale)</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §0 D1/D2, §5 (capture/patch), §5.6 (prior art)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-11, FR-03, FR-04, NFR-05</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">No task dependencies — startable Phase-0 gate task. Tasks 005 (applier spike), 011, 020, 030, 040 all compile against this schema.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-11">The op-type set is a CLOSED union of exactly: insertText, deleteRange, replaceRange, setMark, clearMark, splitParagraph, mergeParagraph, insertParagraph, deleteParagraph, setBlockAttr. Every op is anchored `{paraId, runIndex, offset|range}` and the envelope carries a schema-version field. Scope: identical shape on client and server.</constraint>
+    <constraint source="project / D2">The durable anchor is `(paraId, runIndex, run-local-offset)`; the schema MUST NOT use run-*ids* or absolute editor positions as the durable anchor. Scope: offsets are run-local; run boundaries are resolved at patch time (not encoded as durable ids).</constraint>
+    <constraint source="ADR-013 / NFR-05">The server contract in `Services/Compose/Operations/` MUST inject/reference NO AI-internal type (`IOpenAiClient`/executor/routing) — Tier-1 NetArchTest stays green. Scope: pure records; the AI redline path produces ops via the facade, not here.</constraint>
+    <constraint source="ADR-007">No `Microsoft.Graph` type in the operation contract. Scope: the schema is transport-agnostic bytes-and-anchors, not a Graph type.</constraint>
+    <constraint source="project">The schema is the SINGLE source both ends validate against; a serialized op log MUST round-trip client→server→client without loss. Scope: add round-trip validation tests (server unit + client Vitest).</constraint>
+    <constraint source="project / §11">EXTEND the existing `src/types/compose-contracts.ts`; do NOT create a parallel/duplicate contracts module on the client. Scope: `compose-operations.ts` augments, it does not fork.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Shared client/server operation contract; Slate discriminated-union op shape; paraId+runIndex+offset anchor; facade discipline (no AI internals)</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r4/notes/bridge-prior-art.md</file>
+    </files>
+    <patterns>
+      <pattern name="Slate closed discriminated-union op set" location="projects/spaarkeai-compose-r4/notes/bridge-prior-art.md finding #2">
+        `{type, path, offset, properties}` — mirror the closed-set discriminator shape; substitute `w14:paraId` for Slate's session-only `path` as the durable key.
+      </pattern>
+      <pattern name="paraId+runIndex+run-local-offset anchor" location="projects/spaarkeai-compose-r4/notes/bridge-prior-art.md finding #4/#6">
+        A bare (paraId, char-offset) drifts under a same-paragraph earlier edit; the durable anchor is (paraId, runIndex, run-local-offset), run boundaries re-derived on apply. Encode offsets as run-local, never absolute.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL). Load bridge-prior-art findings #2/#4/#6, design §0 D1/D2, spec §FR-11, and the existing `compose-contracts.ts`. State the Placement Justification (contract stays in `Services/Compose/`; cites `.claude/constraints/bff-extensions.md`).</step>
+    <step order="1" name="Design the closed op-type set">Enumerate the ten op types + the `{paraId, runIndex, offset|range}` anchor + the schema-version field. Confirm each op can be expressed by the anchor alone; if any cannot, STOP and escalate before finalizing (see escalation).</step>
+    <step order="2" name="Author the server contract">Write `Services/Compose/Operations/ComposeOperation.cs` (+ related op-type records + a schema-version constant) as pure C# records with a `type` discriminator. No AI-internal, no Graph types.</step>
+    <step order="3" name="Author the client contract">Write `src/types/compose-operations.ts` as a discriminated union mirroring the server shape; extend `compose-contracts.ts` (import/augment, no duplication).</step>
+    <step order="4" name="Round-trip validation">Add round-trip validation: a server unit test (`tests/unit/Sprk.Bff.Api.Tests/Services/Compose/`) and a client Vitest asserting a serialized op log round-trips client→server→client without loss. Confirm both ends validate against the same schema.</step>
+    <step order="5" name="Guards + build">Build the BFF and the shared lib; run the Tier-1 NetArchTest facade check (no AI internals in `Services/Compose/`). Report BFF publish size absolute + delta vs ~49.63 MB (zero new runtime package expected).</step>
+    <step order="6" name="Close out">Update `projects/spaarkeai-compose-r4/tasks/TASK-INDEX.md`: set task 003 status to ✅. Document any op-type shape decision or deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>An op type in the closed set CANNOT be expressed by the `{paraId, runIndex, offset|range}` anchor alone (e.g., a structural op that needs a cross-paragraph reference the anchor can't carry) — STOP and surface it before finalizing the schema; a mis-shaped op propagates drift into every downstream task.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Two coarse contracts overlap conceptually: `DocxAnnotation` (text-anchored, retired) and `ComposeEditedParagraph {paraId,text}` (paragraph-coarse, retired). Verified in notes/as-built-inventory.md.</existing>
+    <extension>Cannot extend either — both are text-/paragraph-coarse; the op schema is the new paraId+offset spine that supersedes both. The client side DOES extend the existing `compose-contracts.ts` module (no fork).</extension>
+    <cost-of-doing-nothing>Without a single shared op contract, client and server cannot agree on ID-anchored edits; the two-path drift that caused Bug A returns and structural edits remain impossible.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs (+ related op-type records + schema-version constant)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts (client discriminated union)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts (extended, not forked)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ + client Vitest — round-trip validation</output>
+    <output type="report">BFF publish size absolute + delta vs ~49.63 MB; Tier-1 NetArchTest result; Placement Justification</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Editor mounts with the operation-schema types">
+      <steps>
+        <step>Open a Compose doc in the editor.</step>
+        <step>Verify it mounts with no console error after the schema types (`compose-operations.ts`) are consumed.</step>
+      </steps>
+      <expected>The editor renders and no console error is thrown.</expected>
+    </test>
+    <test name="Dark mode compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode.</step>
+        <step>Verify the Compose surface colors adapt via semantic tokens.</step>
+      </steps>
+      <expected>All colors use semantic tokens per ADR-021.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">The server contract at `Services/Compose/Operations/ComposeOperation.cs` and the client union at `src/types/compose-operations.ts` both define the exact closed set of ten op types, each anchored `{paraId, runIndex, offset|range}`, with a schema-version field on the envelope.</criterion>
+    <criterion testable="true">A serialized operation log round-trips client→server→client without loss (round-trip test green on both ends).</criterion>
+    <criterion testable="true">The client contract EXTENDS `compose-contracts.ts` (no duplicate/parallel contracts module).</criterion>
+    <criterion testable="true">NEGATIVE: no run-*id* or absolute editor position is used as a durable anchor anywhere in the schema.</criterion>
+    <criterion testable="true">NEGATIVE: `Services/Compose/Operations/` references no AI-internal type and no `Microsoft.Graph` type; Tier-1 NetArchTest is green.</criterion>
+    <criterion testable="true">BFF publish size reported absolute + delta vs ~49.63 MB (≤60 MB); zero new runtime package added; BFF + shared-lib builds green.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 003 as ✅ and any op-shape decision is recorded in projects/spaarkeai-compose-r4/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This schema is the critical-path spine (plan.md Critical Path: 003 → 005 → 006 → 030 …). Tasks 005, 011,
+    020, 030, and 040 all compile against it. Keep it minimal + closed — resist adding op types beyond FR-11's
+    set. Run `/conflict-check` before the BFF PR (`Services/Compose/` overlaps compose-r1/r2/r3 +
+    ai-architecture-redesign-r2).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

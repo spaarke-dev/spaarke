@@ -105,6 +105,92 @@ export interface IAttachmentItem {
   linkUrl?: string;
 }
 
+/**
+ * One entity target in the composer's record-lookup menu (owner UAT round 5) — the
+ * RegardingResolver pattern: a search icon opens a menu of these, and choosing one runs
+ * the host's `onLookupRecord`.
+ */
+export interface IRecordLookupTarget {
+  /** Entity logical name, e.g. `sprk_matter`, `sprk_document`, `contact`. */
+  logicalName: string;
+  /** User-facing label shown in the lookup menu. */
+  displayName: string;
+}
+
+/**
+ * A record the user picked via the host's `onLookupRecord` (RegardingResolver-style
+ * `Xrm.Utility.lookupObjects`). A `sprk_document` pick is added to the attachments
+ * (Attach/Link per row); any OTHER record type is inserted as a link in the body.
+ */
+export interface IPickedRecord {
+  entityType: string;
+  id: string;
+  name: string;
+  /** Host-built record URL (deep-link) — used for the body link / the document Link option. */
+  url?: string;
+  /** File size in bytes when the pick is a document (optional). */
+  sizeBytes?: number;
+}
+
+/**
+ * A selectable email template (Wave E, owner UAT 2026-07-30). Minimal shape the compose
+ * template picker needs to LIST OOB Dataverse `template` records — the host resolves these
+ * via `Xrm.WebApi` (see `createXrmEmailComposeHandlers.onListEmailTemplates`).
+ */
+export interface IEmailTemplateSummary {
+  /** Dataverse `template` row id (`templateid`). */
+  id: string;
+  /** Display title (`title`). */
+  name: string;
+}
+
+/**
+ * The RENDERED template (Wave E). Returned by the host's render callback, which calls the
+ * BFF `POST /api/communications/template/render` so `{!entity.field}` field codes merge from
+ * the confirmed PRIMARY regarding record. `isHtml` drives the composer body format.
+ */
+export interface IEmailTemplateRenderResult {
+  subject: string;
+  body: string;
+  isHtml: boolean;
+}
+
+/**
+ * One AI-draft quick action offered by the compose "sparkle" menu (Wave E). `intent` is a stable
+ * key the host maps to a server-side prompt (admin-editable — the label is UI-only). The engine
+ * ships a default set; a host may override via {@link IEmailComposerProps.aiDraftActions}.
+ */
+export interface IEmailAiDraftAction {
+  /** Stable intent key sent to the host (e.g. 'reply', 'concise', 'formal'). */
+  intent: string;
+  /** Menu label shown to the user. */
+  label: string;
+}
+
+/**
+ * Request the composer hands to the host's AI-draft callback (Wave E). The host builds the actual
+ * prompt server-side from `intent` (+ `userInstruction` for the free-text "Enter prompt" action)
+ * and the supplied body/subject context, calls the BFF, and returns the drafted text.
+ */
+export interface IEmailAiDraftRequest {
+  /** The picked action's {@link IEmailAiDraftAction.intent}, or `'custom'` for the free-text prompt. */
+  intent: string;
+  /** Free-text instruction for the `'custom'` intent (the "Enter prompt" action). */
+  userInstruction?: string;
+  /** Current message body (HTML or plain per {@link isHtml}) — the text to refine or reply to. */
+  currentBody: string;
+  /** Whether {@link currentBody} is HTML (drives how the host frames the prompt + reads the result). */
+  isHtml: boolean;
+  /** Current subject, for context. */
+  subject?: string;
+}
+
+/** The AI-drafted body (Wave E). `isHtml` drives the composer body format; defaults to the request's when omitted. */
+export interface IEmailAiDraftResult {
+  text: string;
+  isHtml?: boolean;
+}
+
 /** Files a hosting wizard has already uploaded, offered as a pre-checked attachment source. */
 export interface IWizardContext {
   uploadedFiles: {
@@ -222,6 +308,14 @@ export interface EmailComposerState {
   subject: string;
   body: string;
   bodyFormat: EmailComposerBodyFormat;
+  /**
+   * The quoted previous-thread block (attribution header + original message body) for a
+   * reply/forward, WITHOUT the leading room above it. Stored so an AI draft can re-append it
+   * after generating the author's message — the previous thread must survive an AI draft and
+   * be included when the reply/forward is sent (owner UAT 2026-08-03 R5 items 1/2). Absent for
+   * new/compose/draft/view.
+   */
+  quotedThread?: string;
   attachments: IAttachmentItem[];
   sendMode: CommunicationSendMode;
   fromMailbox?: string;
@@ -244,14 +338,30 @@ export type EmailComposerAction =
   | { type: 'SET_MODE'; mode: EmailComposerMode; patch?: Partial<EmailComposerState> }
   | { type: 'ADD_ATTACHMENT'; item: IAttachmentItem }
   | { type: 'REMOVE_ATTACHMENT'; id: string }
+  | { type: 'RESOLVE_ATTACHMENT_DOCUMENT'; id: string; documentId: string; driveItemId?: string; linkUrl?: string }
   | { type: 'TOGGLE_ATTACHMENT_SELECTED'; id: string }
   | { type: 'TOGGLE_ATTACHMENT_LINK'; id: string }
+  | { type: 'ADD_ASSOCIATION'; association: ICommunicationAssociation }
+  | { type: 'SET_PRIMARY_ASSOCIATION'; association: ICommunicationAssociation }
+  | { type: 'REMOVE_ASSOCIATION'; entityType: string; entityId: string }
   | { type: 'SET_VALIDATION_ERRORS'; result: IValidationResult }
   | { type: 'BEGIN_SEND' }
   | { type: 'END_SEND' }
   | { type: 'BEGIN_SAVE_DRAFT' }
   | { type: 'END_SAVE_DRAFT' }
   | { type: 'RESET'; state: EmailComposerState };
+
+// ---------------------------------------------------------------------------
+// Conversation context (R3 task 020, FR-07) — additive, optional
+// ---------------------------------------------------------------------------
+
+/** A lightweight, clickable record reference rendered in the composer (FR-07). */
+export interface IComposerRecordLink {
+  /** Absolute or app-relative URL to the record. */
+  url: string;
+  /** Human label (e.g. "Matter: Smith v. Jones"). */
+  label: string;
+}
 
 // ---------------------------------------------------------------------------
 // Props contract (design §5.4)
@@ -283,6 +393,24 @@ export interface IEmailComposerProps {
   /** Default `true` — renders `associations[]` as read-only Fluent Tags via `AssociationChips`. */
   showAssociations?: boolean;
 
+  // — Conversation context (R3 task 020, FR-07/FR-19) — all optional/additive —
+  /**
+   * Active conversation thread id. When set, it is carried into the send
+   * payload (`SendCommunicationOptions.threadId`) so the backend pins the sent
+   * email to this thread (FR-19) — via the EXISTING send path, NOT a new send
+   * branch (ADR-045). Undefined = today's behavior (server find-or-create).
+   */
+  threadId?: string;
+  /**
+   * Optional record-link affordance rendered below the linked-record chips
+   * (FR-07) — a lightweight "this email is about <record>" link. Purely
+   * presentational; auto-association + thread pinning are handled by
+   * `associations` (ADR-024 mechanism) + `threadId`, not by this link.
+   * Unsafe-scheme urls (`javascript:`/`data:`/`vbscript:`) degrade to a
+   * non-clickable label.
+   */
+  recordLink?: IComposerRecordLink;
+
   // — Attachment sources —
   /** Default `['wizard','related','local','spe']` when `wizardContext` present, else `['local','related','spe']`. */
   attachmentSources?: IComposerAttachmentSource[];
@@ -297,12 +425,120 @@ export interface IEmailComposerProps {
    */
   initialAttachments?: IAttachmentItem[];
 
+  /**
+   * Resolve a locally-picked file to a governed `sprk_document` (task 042 /
+   * FR-20 attach-on-compose). The engine is context-agnostic (ADR-012) and
+   * owns no upload transport — the HOST injects this, wired to its EXISTING
+   * Document-upload surface (e.g. `POST /api/documents`); it is NOT a new send
+   * or upload path in the send engine (ADR-045). When provided, a local pick
+   * that passes the CHAT-ATTACHMENT-POLICY 25 MB + MIME gate is uploaded and
+   * the returned `documentId` is patched onto the attachment so it flows into
+   * the existing `sendCommunication()` `attachmentDocumentIds`. When OMITTED,
+   * local picks remain display-only (the pre-task-042 behavior — back-compat)
+   * and are excluded from the send payload until resolved. Rejection (throw)
+   * removes the item and surfaces an inline error; it never blocks the send of
+   * the already-resolved attachments.
+   *
+   * An optional `linkUrl` (the uploaded document's SPE web URL) is patched onto
+   * the attachment too — it lights up the per-row **Link** toggle so the author
+   * can opt into inserting a body link to the doc alongside (or instead of)
+   * attaching the bytes (owner UAT 2026-07-30, item 9b). Omit it to offer
+   * Attach only.
+   */
+  onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
+  /**
+   * Resolve a recipient-openable SPE **sharing link** for a governed `sprk_document`
+   * (owner UAT 2026-07-30 R2 item 12). Called AT SEND for every attachment the author toggled
+   * **Link** on that has a `documentId` — the returned URL REPLACES the attachment's `linkUrl` in
+   * the body-link block, so recipients (including external) open the actual file rather than an
+   * internal Dataverse/SPE-storage URL. Best-effort: return `null` (or throw) and the send keeps the
+   * prior `linkUrl` — a share-link failure NEVER blocks the send. Context-agnostic (ADR-012): the
+   * host owns the BFF call (`POST /api/documents/{id}/share-link`). Omitted → links keep their
+   * original (internal) URL, unchanged.
+   */
+  onResolveShareLink?: (documentId: string) => Promise<string | null>;
+
   // — Recipient directory lookup (RecipientField) —
   /** Mirrors `searchUsersAndContacts(dataService, query)` shape, pre-bound by the host. */
   onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
+  /**
+   * Advanced recipient lookup (owner UAT 2026-07-24): clicking a field's To/Cc/Bcc label box
+   * opens the host's OOB people picker (`Xrm.Utility.lookupObjects` over contact + systemuser)
+   * and resolves the picked record(s) to email address(es). Additive to the typeahead — the
+   * user can still type. Returns the recipients to append (or empty/null if cancelled).
+   */
+  onLookupRecipients?: (field: 'to' | 'cc' | 'bcc') => Promise<IRecipient[] | null>;
+
+  /**
+   * Record-lookup targets for the attachments "look up a record" tool (owner UAT round 5).
+   * When supplied with {@link onLookupRecord}, a search icon opens a menu of these entity
+   * types (RegardingResolver pattern). A `sprk_document` pick attaches (Attach/Link); any
+   * other type inserts a link to the record in the message body.
+   */
+  recordLookupCatalog?: IRecordLookupTarget[];
+  /**
+   * Runs the host lookup for the chosen entity type (RegardingResolver-style
+   * `Xrm.Utility.lookupObjects`) and returns the picked record (or null if cancelled).
+   * Context-agnostic (ADR-012): the host owns the Xrm bridge + the record URL.
+   */
+  onLookupRecord?: (entityType: string) => Promise<IPickedRecord | null>;
+  /**
+   * Add a relationship to the communication (owner UAT 2026-07-24, connector toolbar icon).
+   * The host runs `Xrm.Utility.lookupObjects` across the regarding catalog and WRITES the
+   * association (Option B: same `applyRegardingSelection` path the CommunicationConnections
+   * "Link another" uses), then returns the picked record so the composer shows it in the
+   * "Related to" section. Context-agnostic (ADR-012): the host owns the Xrm bridge + write.
+   */
+  onAddRelationship?: () => Promise<IPickedRecord | null>;
+
+  // — Template picker (Wave E, owner UAT 2026-07-30) — additive/optional —
+  /**
+   * Lists selectable email templates (OOB Dataverse `template` records). Host-resolved via
+   * `Xrm.WebApi`. The toolbar template button renders ONLY when BOTH this and
+   * {@link onRenderEmailTemplate} are supplied AND the composer is editable; omit either → hidden.
+   */
+  onListEmailTemplates?: () => Promise<IEmailTemplateSummary[]>;
+  /**
+   * Renders a chosen template — the host calls the BFF `POST /api/communications/template/render`,
+   * passing the confirmed PRIMARY regarding (`associations[0]`) so `{!entity.field}` codes merge
+   * from that record — and returns the subject/body to fill. Context-agnostic (ADR-012): the host
+   * owns auth + the BFF URL.
+   */
+  onRenderEmailTemplate?: (args: {
+    templateId: string;
+    regardingEntityType?: string;
+    regardingRecordId?: string;
+  }) => Promise<IEmailTemplateRenderResult>;
+
+  // — AI draft "sparkle" (Wave E, owner UAT 2026-07-30) — additive/optional —
+  /**
+   * Generates/refines the message body via AI. The toolbar sparkle button renders ONLY when this
+   * is supplied AND the composer is editable; omit → hidden. The host owns the BFF call + prompt
+   * text (the intents are stable keys, the prompts are server-side/admin-editable). Context-agnostic
+   * (ADR-012): the engine passes the current body/subject and applies the returned text.
+   */
+  onDraftWithAi?: (req: IEmailAiDraftRequest) => Promise<IEmailAiDraftResult>;
+  /**
+   * Overrides the default sparkle quick-actions (Draft a reply / Summarize the thread / Make it
+   * concise / Formal tone / Friendly tone / Fix grammar & tone). The free-text "Enter prompt" action
+   * is always appended. Optional — omit to use the defaults.
+   */
+  aiDraftActions?: IEmailAiDraftAction[];
 
   // — Send-side behavior —
+  /**
+   * FIXES the send mode + hides the From switcher (host-locked). Use when the caller
+   * mandates one mailbox. For a DEFAULT that the user can still change, use
+   * {@link defaultSendMode} instead.
+   */
   sendMode?: CommunicationSendMode;
+  /**
+   * Seeds the INITIAL send mode while leaving the From switcher interactive (owner UAT
+   * 2026-07-30, item 3). The email surface passes `'user'` so a reply/new defaults to
+   * sending from the signed-in user, switchable to the Spaarke shared mailbox. Ignored
+   * when {@link sendMode} is set (that path locks the mode). Default `'sharedMailbox'`.
+   */
+  defaultSendMode?: CommunicationSendMode;
   fromMailbox?: string;
   /** Archive sent `.eml` to SPE. Default `true`. */
   archiveToSpe?: boolean;
@@ -335,6 +571,39 @@ export interface IEmailComposerProps {
 
   /** Optional className applied to the root layout container. */
   className?: string;
+
+  // — Dialog maximize/restore (owner UAT 2026-07-30, item 11) — additive/optional —
+  /**
+   * When supplied, the chromed header renders a maximize/restore button next to the
+   * close (X) affordance. The host (e.g. `SendEmailDialog`) owns the actual surface
+   * sizing — the engine only surfaces the toggle click. Omitted → no button (every
+   * existing caller is unaffected). Context-agnostic (ADR-012): the engine never sizes
+   * a host surface itself.
+   */
+  onToggleMaximize?: () => void;
+  /** Current maximize state — drives the button's icon + label. Only meaningful with {@link onToggleMaximize}. */
+  isMaximized?: boolean;
+
+  /**
+   * #713 chrome seam (spaarke-modal-system follow-up, 2026-08-03): the HOST owns
+   * the window chrome. When true, the engine suppresses its own header (title +
+   * `ModalWindowControls`) so a shell that already draws both — `SprkModal` in
+   * the canonical `SendEmailDialog` wrapper — doesn't double-render chrome. The
+   * body, fields, and `ComposerActionBar` are unchanged. Only meaningful for
+   * chromed mounts (`dialog`/`page`); inline mount never draws chrome anyway.
+   * Omitted (every pre-seam caller) → the engine draws its own header, as before.
+   */
+  hostOwnsChrome?: boolean;
+
+  /**
+   * Optional override for the chromed (page/dialog mount) header title. When
+   * supplied, it REPLACES the mode-derived word ('Reply'/'Forward'/'New
+   * Email'/…) — e.g. a caller can show `Reply: <subject>`. Additive/optional:
+   * omitted (the default for every existing caller) → the mode-derived title is
+   * used, unchanged. Ignored for the `inline` (wizard) mount, which renders no
+   * header.
+   */
+  titleOverride?: string;
 }
 
 // ---------------------------------------------------------------------------

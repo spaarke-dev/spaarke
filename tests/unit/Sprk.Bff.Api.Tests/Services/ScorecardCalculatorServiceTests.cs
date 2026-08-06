@@ -448,9 +448,10 @@ public class ScorecardCalculatorServiceTests
                 "sprk_matter",
                 matterId,
                 It.IsAny<Dictionary<string, object?>>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken>(
-                (_, _, fields, _) => capturedFields = fields)
+                It.IsAny<CancellationToken>(),
+                It.IsAny<Guid?>()))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>(
+                (_, _, fields, _, _) => capturedFields = fields)
             .Returns(Task.CompletedTask);
 
         // Act
@@ -462,7 +463,8 @@ public class ScorecardCalculatorServiceTests
                 "sprk_matter",
                 matterId,
                 It.IsAny<Dictionary<string, object?>>(),
-                It.IsAny<CancellationToken>()),
+                It.IsAny<CancellationToken>(),
+                It.IsAny<Guid?>()),
             Times.Once);
 
         // Assert - all 6 fields are present with correct values
@@ -492,7 +494,8 @@ public class ScorecardCalculatorServiceTests
                 "sprk_matter",
                 matterId,
                 It.IsAny<Dictionary<string, object?>>(),
-                It.IsAny<CancellationToken>()),
+                It.IsAny<CancellationToken>(),
+                It.IsAny<Guid?>()),
             Times.Once);
     }
 
@@ -509,9 +512,10 @@ public class ScorecardCalculatorServiceTests
                 It.IsAny<string>(),
                 It.IsAny<Guid>(),
                 It.IsAny<Dictionary<string, object?>>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken>(
-                (_, _, fields, _) => capturedFields = fields)
+                It.IsAny<CancellationToken>(),
+                It.IsAny<Guid?>()))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>(
+                (_, _, fields, _, _) => capturedFields = fields)
             .Returns(Task.CompletedTask);
 
         // Act

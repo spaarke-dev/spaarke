@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>Typed Envelope Contract + `kind` Taxonomy Lock</title>
+    <phase>1 Layer B + Contract + ADR-047</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New contract types + serialization tests in `Sprk.Bff.Api`, consumed by every downstream producer/consumer task in the project — meets the FULL-rigor bar per root CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Contract-type authoring following an exact spec (design.md §5A.3/§5B.4 already define the field lists); no open architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, api, contract</tags>
+    <estimated-effort>3-4h</estimated-effort>
+  </metadata>
+  <prompt>Define the typed envelope contract (a `kind`-discriminated payload shape) and lock the `kind` taxonomy — the wire format every producer writes to the outbox (task 012) and every consumer (SignalR client, poll endpoint) reads — carrying IDs and minimal display metadata only, never message bodies, privileged content, or pre-authorized action tokens.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Author plain C# contract types (records/DTOs) — no business logic, no Dataverse access; this is the shape every other task in the project serializes into and deserializes out of.</role>
+  <goal>C# envelope contract types exist in `Sprk.Bff.Api` (a `kind` discriminator plus a communication-envelope shape and a suggestion-envelope shape, matching design.md §5A.3 and §5B.4 field-for-field) with serialization round-trip tests, and the `kind` taxonomy is locked as a closed set of string constants: active `suggestion` | `communication-assessed` | `communication-arrived`, reserved `job-complete` | `share` | `system-alert` (defined, no consumers).</goal>
+  <context>
+    <background>
+      Every producer in this project (Phase 2's `communication-arrived`, Phase 4's `communication-assessed`, Phase 5's `suggestion`) writes an envelope of this shape into the outbox's JSON payload column (task 011/012); every consumer (the SignalR client subscriber, task 021; the poll endpoint, task 022; the Assistant renderer, task 051) deserializes it. Getting the field list wrong here means every downstream task either reworks its contract or silently drifts from the spec's privacy invariant (NFR-02/03: the spine is an accelerator, never an authorization bypass — envelopes carry no content a recipient couldn't already re-fetch via the access-checked BFF).
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-notification-spine-r1/design.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project">The communication envelope MUST contain exactly these fields (design.md §5A.3, verbatim): `kind` ("communication-arrived" | "communication-assessed"), `communicationId` (GUID), `threadId` (GUID), `channel` ("email" | "message" | "sms"), `direction` ("inbound" | "outbound"), `regardingRecordId` (per ADR-024), `senderDisplay` (display name only), `snippet?` (OPTIONAL, short, ONLY when the record is non-private/non-privileged), `badgeDelta` (integer, e.g. +1 unread). No other fields.</constraint>
+    <constraint source="project">The suggestion envelope MUST contain exactly these fields (design.md §5B.4, verbatim): `kind` ("suggestion"), `suggestionId` (GUID), `source` ("daily-briefing" | "event" | "insight"), `regardingRecordId` (per ADR-024), `title` (short display string), `snippet?` (OPTIONAL, short, access-checked), `actionHint` (string driving the renderer + re-entered dispatch, e.g. "create-matter"), `expiresAt` (datetime). No other fields.</constraint>
+    <constraint source="NFR-02/NFR-03">MUST NOT add a field carrying a message body, a privileged-content excerpt beyond the access-gated optional `snippet?`, or any pre-authorized action token — a suggestion or communication envelope is never itself sufficient to perform the action; consumers re-fetch/re-ground through the BFF at action time.</constraint>
+    <constraint source="project">The `kind` taxonomy is a closed set — model it as a string-const/enum-backed discriminator, not a free-form string, so a typo or a novel kind fails to compile/serialize rather than silently reaching a consumer that doesn't understand it. Reserved kinds (`job-complete`, `share`, `system-alert`) are defined as valid discriminator VALUES with no envelope shape and no consumer wired — they exist to prevent a later producer from picking a colliding ad-hoc string.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-notification-spine-r1/design.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+    </files>
+    <patterns>
+      <pattern name="discriminated contract type" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/">Follow the existing `PublicContracts/` facade's convention for typed, serializable DTOs (records with `System.Text.Json` attributes where needed) as the nearest in-repo precedent for a discriminated wire contract.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Re-read design.md §5A.3 and §5B.4 verbatim; transcribe the field lists exactly — do not add, rename, or drop a field.</step>
+    <step order="2">Define the `kind` taxonomy as a closed set (string constants or a backing enum with `[JsonStringEnumConverter]` or equivalent): active values `suggestion`, `communication-assessed`, `communication-arrived`; reserved values `job-complete`, `share`, `system-alert` (kebab-case, exactly as spec FR-10 locks them).</step>
+    <step order="3">Define the communication envelope type and the suggestion envelope type (plain C# records), placed in `Sprk.Bff.Api` where task 012's outbox service and future producers/consumers can reference them (propose the exact namespace/folder at task time — likely `Services/Notifications/Envelopes/` or similar, adjacent to task 012's service).</step>
+    <step order="4">Write serialization round-trip tests: each envelope type serializes to JSON and deserializes back to an equal value; the `kind` discriminator round-trips correctly; an unrecognized `kind` string fails deserialization rather than silently producing a default/null envelope.</step>
+    <step order="5">Write a negative test asserting neither envelope type has a field that could carry a message body or an action token (e.g., a reflection-based test enumerating property names against the closed field list above, so a future PR that adds a forbidden field fails CI rather than silently drifting).</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to completed.</step>
+    <step order="7">Document any deviations in projects/spaarke-notification-spine-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If any envelope field under discussion would require carrying a message body, privileged content beyond the access-gated optional snippet, or a pre-authorized action token, STOP and escalate (NFR-02/NFR-03) rather than adding the field.</trigger>
+  </escalation>
+  <tools>
+    <tool name="dotnet">Build/test the BFF</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Notifications/Envelopes/ (exact path/filenames chosen at task time)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Notifications/EnvelopeSerializationTests.cs (or equivalent name)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the communication envelope type, when its properties are enumerated, then they match design.md §5A.3's field list exactly (kind, communicationId, threadId, channel, direction, regardingRecordId, senderDisplay, snippet?, badgeDelta) — no additions, no omissions.</criterion>
+    <criterion testable="true">Given the suggestion envelope type, when its properties are enumerated, then they match design.md §5B.4's field list exactly (kind, suggestionId, source, regardingRecordId, title, snippet?, actionHint, expiresAt) — no additions, no omissions.</criterion>
+    <criterion testable="true">Given a communication envelope instance, when serialized to JSON and deserialized back, then the round-tripped value equals the original (property-by-property).</criterion>
+    <criterion testable="true">Given a suggestion envelope instance, when serialized to JSON and deserialized back, then the round-tripped value equals the original.</criterion>
+    <criterion testable="true">Given an unrecognized `kind` string in incoming JSON (negative case), when deserialization is attempted, then it fails explicitly rather than producing a silently-valid envelope with an unknown kind.</criterion>
+    <criterion testable="true">Given the reserved kinds (`job-complete`, `share`, `system-alert`), when the taxonomy type is inspected, then they exist as valid discriminator values with no envelope shape and no consumer reference anywhere in the codebase (grep-verified).</criterion>
+    <criterion testable="true">Given the two envelope types, when checked, then neither contains a field capable of carrying a full message body, privileged content beyond the gated `snippet?`, or a pre-authorized action token — verified by the reflection-based negative test from step 5.</criterion>
+  </acceptance-criteria>
+  <notes>Spec FR-03 + FR-10. This task defines TYPES only — no producer writes an envelope yet (that starts in Phase 2/4/5) and no consumer reads one yet (Phase 2/5). Task 012's outbox service stores the envelope as its JSON payload column; this task is what makes that payload typed rather than a bag of `object?`.
+
+**Completion summary (2026-07-21)**: Implemented `NotificationKind` (closed enum, 6 values: 3 active + 3 reserved) with a custom fail-closed `NotificationKindJsonConverter` in `src/server/api/Sprk.Bff.Api/Services/Notifications/Envelopes/NotificationKind.cs`; `CommunicationEnvelope` (9 fields, §5A.3 verbatim) in `CommunicationEnvelope.cs`; `SuggestionEnvelope` (8 fields, §5B.4 verbatim) in `SuggestionEnvelope.cs`. Both envelopes carry a `Validate()` guard restricting `Kind` to their own shape's allowed value(s) (mirrors `GateDecisionV2.Validate()` precedent). Tests: `tests/unit/Sprk.Bff.Api.Tests/Services/Notifications/EnvelopeSerializationTests.cs` — 33 tests (round-trip incl. null-snippet, kind-discriminator round-trip for all 6 taxonomy values, unrecognized-kind-fails-deserialization for both envelopes + the bare enum, kind-shape `Validate()` guards, and two reflection-based closed-field-list tests). `dotnet build -c Release`: succeeded, 0 errors (19 pre-existing warnings, none in new files). `dotnet test --filter EnvelopeSerializationTests`: 33/33 passed. Grep-verified reserved kinds (`job-complete`/`share`/`system-alert`) have no consumer reference anywhere else in `src/` (the one unrelated `JobComplete` hit is Office SSE's own `SseHelper.EventTypes.JobComplete` string constant — a different vocabulary, not this taxonomy). Deviations/design notes: `projects/spaarke-notification-spine-r1/notes/013-envelope-contract-taxonomy-deviations.md`. No BLOCKED condition — no forbidden field (message body / privileged content / action token) was ever proposed.</notes>
+  <justification>
+    <existing>No existing type in the codebase models a `kind`-discriminated cross-consumer signal envelope — verified by grep across `Services/Ai/PublicContracts/` and `Services/Communication/` for "envelope"/"kind" discriminator patterns; the nearest concept is `PublicContracts/Binding.cs`'s disposition enum, which is a different axis (routing, not payload shape).</existing>
+    <extension>No — this is a new, narrowly-scoped contract type pair with no existing home to extend; it is intentionally NOT folded into `Binding.cs` or any AI-internal contract because the outbox/spine consumes it independently of the AI dispatch path (a communication-arrived envelope has nothing to do with dispatch).</extension>
+    <cost-of-doing-nothing>Without a locked, typed contract, every producer (Phases 2/4/5) and consumer (Phases 2/5) either invents its own ad-hoc JSON shape (drift risk, silent privacy-invariant violations) or blocks waiting for the first producer to define one informally — the exact "each consumer forks its own shape" failure this project exists to prevent.</cost-of-doing-nothing>
+  </justification>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

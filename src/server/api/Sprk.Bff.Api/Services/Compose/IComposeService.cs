@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Compose.Operations;
 
 namespace Sprk.Bff.Api.Services.Compose;
 
@@ -69,6 +70,25 @@ public interface IComposeService
     Task<UploadComposeDocumentResult> UploadAsync(
         UploadComposeDocumentRequest request,
         HttpContext httpContext,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// FR-01 (task 010, spaarkeai-compose-fidelity-r4.5, WS-1 "one reader everywhere"): builds the
+    /// server DOCX→editor projection from caller-supplied bytes using the SAME single-walk
+    /// <see cref="ComposeDocxProjectionBuilder"/> <see cref="LoadAsync"/> uses internally (F-2 — one
+    /// reader). Used by the <c>POST /api/compose/upload</c> transient-mount door, which reads its
+    /// bytes from <c>ITenantCache</c> rather than SPE, so it cannot call <see cref="LoadAsync"/>
+    /// itself; this thin seam lets it reuse the identical builder/shape instead of a divergent
+    /// projection path. Pure / synchronous — no I/O, no Graph (ADR-007). Fail-closed like the Load
+    /// path: an unreadable or empty source returns <see cref="ComposeProjectionStatus.Failed"/> with
+    /// <c>CanEdit=false</c>, never throws.
+    /// </summary>
+    /// <param name="content">The document's raw bytes (e.g. an Assistant-uploaded <c>.docx</c>).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The SAME <see cref="ComposeDocxProjection"/> shape
+    /// <see cref="LoadComposeDocumentResult.Projection"/> carries.</returns>
+    ComposeDocxProjection ProjectDocument(
+        ReadOnlyMemory<byte> content,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -148,46 +168,21 @@ public interface IComposeService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// FR-24 push-annotations: download the current SPE bytes, render the accepted Compose
-    /// annotations into them as native Open XML track-changes + comments (via
-    /// <see cref="DocxAnnotationWriter"/>), and persist the result to SPE with optimistic
-    /// concurrency (<c>If-Match</c> ETag). Mirrors <see cref="SaveAsync"/>'s SPE-orchestration
-    /// role — the pure OOXML authoring is delegated to the writer, the SPE hop to the
-    /// <c>SpeFileStore</c> facade (ADR-007). No AI reach (ADR-013).
+    /// G10 (FR-09, task 040): the manual "Refresh Profile" leg — re-run the Document Profile on demand for
+    /// an existing <c>sprk_document</c>, reusing the SAME fire-and-forget pipeline the save-hook +
+    /// reload/onload re-trigger use (never a second trigger). User-initiated and UNCONDITIONAL (unlike the
+    /// storm-guarded reload leg), but still best-effort/fire-and-forget — returns immediately; the profile
+    /// fields populate shortly after under the caller's OBO identity. Returns <c>true</c> when the profile
+    /// was dispatched.
     /// </summary>
-    /// <remarks>
-    /// The write uses the caller-supplied load-time ETag so a document changed under the caller
-    /// (e.g. a Word-for-Web autosave) is rejected, not overwritten. On rejection the facade throws
-    /// <see cref="Infrastructure.Graph.EtagPreconditionFailedException"/> (412, ETag moved) or
-    /// <see cref="Infrastructure.Graph.DocumentLockedByWordException"/> (423, open in Word); the
-    /// endpoint maps both to ProblemDetails. Nothing partially writes.
-    /// </remarks>
-    /// <param name="request">Push payload: SPE drive-item id + drive id + tenant id + load-time
-    /// ETag + the accepted annotations.</param>
-    /// <param name="httpContext">HTTP context for OBO auth into Graph. Required.</param>
+    /// <param name="request">Refresh payload: the <c>sprk_documentid</c> (required) + optional SPE
+    /// drive-item id / eTag used only to stamp the profiled version so an immediate reopen does not
+    /// redundantly re-trigger.</param>
+    /// <param name="httpContext">HTTP context for OBO auth into the profile pipeline. Required.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>A <see cref="PushAnnotationsResult"/> with the new SPE version id + ETag + size.</returns>
-    Task<PushAnnotationsResult> PushAnnotationsAsync(
-        PushAnnotationsRequest request,
+    Task<bool> RefreshProfileAsync(
+        RefreshComposeProfileRequest request,
         HttpContext httpContext,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// FR-28 (task 055) — Tier-2c PRE-CONFIRM preview: computes the deterministic
-    /// <see cref="ComposePushSavePreview"/> (comment/track-change counts + the Word-vs-Compose
-    /// split) for an annotation batch the caller is ABOUT to push, WITHOUT touching SPE (no
-    /// download, no write — purely categorizes the supplied batch + an optional session-derived
-    /// Compose-only count). This is the data the future Policy v2 Tier 2c gate dialog renders
-    /// inside its ONE confirmation surface (design.md §2.4) BEFORE the user commits to
-    /// <see cref="PushAnnotationsAsync"/> — no UI is built here (clean seam; see the escalation
-    /// trigger in the owning task's POML for the gate-dialog + OutcomeCard rendering halves).
-    /// </summary>
-    /// <param name="request">Preview payload: tenant id + the annotation batch under
-    /// consideration + optional bound session id (for the Compose-only count).</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The computed <see cref="ComposePushSavePreview"/>.</returns>
-    Task<ComposePushSavePreview> PreviewPushAnnotationsAsync(
-        PreviewPushAnnotationsRequest request,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -260,6 +255,41 @@ public abstract record ComposeDocumentResult
     /// <summary><c>sprk_documentid</c> when the document has been promoted (Path A or
     /// post-first-Save); null otherwise (Path B / ephemeral).</summary>
     public Guid? DocumentRecordId { get; init; }
+}
+
+/// <summary>
+/// G1 (FR-01, task 020): durable cross-session authored-vs-imported origin marker for a Compose
+/// <c>sprk_document</c>, persisted on the Dataverse <c>sprk_composeorigin</c> choice field at
+/// create-on-save (<see cref="ComposeService.PromoteIfEphemeralAsync"/>) and returned by
+/// <see cref="IComposeService.LoadAsync"/> / <see cref="IComposeService.SaveAsync"/> so the client can
+/// route a reopened document onto the clean (Authored) or tracked (Imported) save path WITHOUT
+/// inferring origin from SPE-id presence or document content (NFR-02 — no text-search/inference in the
+/// write path; that fragile discriminator is exactly what G1 replaces).
+/// </summary>
+/// <remarks>
+/// AS-BUILT integer values (owner-created Dataverse choice field — see
+/// <c>projects/spaarkeai-compose-r5/notes/g1-origin-field-asbuilt.md</c>). Do NOT renumber:
+/// <list type="bullet">
+/// <item><see cref="Authored"/> = 100000000 — born in the editor (AI-drafted / blank / edited
+/// browse-local): <see cref="ComposeDocumentRenderer"/> authors the whole document from the client's
+/// content model; there is no retained baseline to delta onto (the SAME <c>request.ContentModel is not
+/// null</c> discriminant <see cref="ComposeService.SaveAsync"/> already uses to select the born-in-editor
+/// render branch).</item>
+/// <item><see cref="Imported"/> = 100000001 — the save carries retained SPE bytes (upload / browse /
+/// open-from-existing <c>.docx</c>). Also the DEFAULT for the Dataverse field itself.</item>
+/// </list>
+/// <para>
+/// <b>NULL-HANDLING (BINDING)</b>: pre-existing <c>sprk_document</c> rows that predate this field return
+/// <c>null</c> (no backfill). Every consumer of a nullable <see cref="ComposeOrigin"/> here MUST treat
+/// <c>null</c> as <see cref="Imported"/> — NEVER strict-equal a null/missing value to
+/// <see cref="Authored"/>.
+/// </para>
+/// </remarks>
+[JsonConverter(typeof(CamelCaseStringEnumConverter))]
+public enum ComposeOrigin
+{
+    Authored = 100000000,
+    Imported = 100000001,
 }
 
 /// <summary>Upload request payload (R2-reserved; see <see cref="IComposeService.UploadAsync"/>).</summary>
@@ -393,6 +423,21 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
     public IReadOnlyList<ParaIdMapEntry> ParaIdMap { get; init; } = Array.Empty<ParaIdMapEntry>();
 
     /// <summary>
+    /// Phase-1 mammoth removal (design <c>notes/design-server-side-docx-html-conversion.md</c>): the
+    /// server-side DOCX→editor projection — paraId-tagged HTML + status + fidelity warnings, produced by the
+    /// single-walk <see cref="ComposeDocxProjectionBuilder"/>. The client mounts <c>Projection.Html</c> via
+    /// <c>setContent</c> (the paraId extension parses <c>data-paraid</c>) instead of running mammoth +
+    /// position-stamping ids. Fail-closed: the client keys off <see cref="ComposeDocxProjection.Status"/> /
+    /// <see cref="ComposeDocxProjection.CanEdit"/>, NOT <c>Html.Length</c>. Defaulted so existing constructions
+    /// remain valid; <see cref="ComposeService.LoadAsync"/> always populates it. Tier-3 HTML — never logged.
+    /// </summary>
+    public ComposeDocxProjection Projection { get; init; } = new()
+    {
+        Status = ComposeProjectionStatus.Failed,
+        CanEdit = false,
+    };
+
+    /// <summary>
     /// FR-24 (task 050, import round-trip): the existing native Word tracked changes (<c>w:ins</c>/
     /// <c>w:del</c>, any authorship) recovered from the load-time <c>.docx</c> by the EXISTING
     /// <see cref="DocxAnnotationReader"/> (reused verbatim), run server-side ALONGSIDE the mammoth
@@ -422,6 +467,18 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
     /// (best-effort; a malformed source degrades to no imported comments, never fails Load).
     /// </summary>
     public IReadOnlyList<ImportedComment> ImportedComments { get; init; } = Array.Empty<ImportedComment>();
+
+    /// <summary>
+    /// G1 (FR-01, task 020): the persisted <see cref="ComposeOrigin"/> marker for Path A loads (an
+    /// existing <c>sprk_document</c> record — <see cref="ComposeDocumentResult.DocumentRecordId"/> is
+    /// non-null). Read from the <c>sprk_composeorigin</c> Dataverse field; <c>null</c> for Path B
+    /// continuation (no record yet — nothing to read) OR a legacy pre-existing record with no value
+    /// (no backfill — see <see cref="ComposeOrigin"/> remarks). Callers MUST treat a <c>null</c> value
+    /// as <see cref="ComposeOrigin.Imported"/> — NEVER strict-equal it to
+    /// <see cref="ComposeOrigin.Authored"/>. Drives the client's clean-vs-tracked save routing on reopen
+    /// (NFR-02 — no SPE-id/content inference).
+    /// </summary>
+    public ComposeOrigin? Origin { get; init; }
 }
 
 /// <summary>
@@ -527,16 +584,31 @@ public sealed record SaveComposeDocumentRequest
     public string? BaselineVersionId { get; init; }
 
     /// <summary>
-    /// E1 (FR-01/FR-02, task 022, Option C — design §4.2): the editor paragraphs the user CHANGED, each
-    /// keyed by its <c>w14:paraId</c> (E2 splice key) with its new settled text. When non-empty,
-    /// <see cref="SaveAsync"/> drives <see cref="ComposeParagraphRedlineSynthesizer"/> to rewrite exactly
-    /// these paragraphs in the resolved baseline as native <c>w:ins</c>/<c>w:del</c> tracked changes (a
-    /// word-level diff old→new), preserving every untouched paragraph + all structure by construction —
-    /// the "delta onto the retained original" that replaces the R2 whole-document reconstruction. Null/empty
-    /// on a clean Save or a create-on-save (nothing to splice; the baseline persists as-is). An unmatched
-    /// paraId is a handled synthesis error (<c>ComposeRedlineException</c>), never a silent wrong write.
+    /// R4 FR-06 (task 032, the write-path cutover — supersedes the retired R3 paragraph-diff decision, Path B /
+    /// ADR-049): the ordered, rebased task-003 OPERATION LOG the client captured this dirty session
+    /// (<c>(paraId, runIndex, run-local-offset)</c>-anchored insertText/deleteRange/replaceRange/setMark/
+    /// clearMark + the four structural paragraph ops). When non-empty, <see cref="SaveAsync"/> applies it via
+    /// the single <see cref="ComposeShadowPatchEngine"/> onto the resolved baseline (the "base version" =
+    /// <see cref="Content"/> or the <see cref="BaselineVersionId"/> re-fetch) — surgical, ID-anchored, ZERO
+    /// write-path text-search (I-7), preserving every untouched paragraph + all structure by construction.
+    /// This REPLACES the retired <c>ComposeEditedParagraph</c> paragraph-diff payload + its
+    /// <c>ComposeParagraphRedlineSynthesizer</c>. Null/empty on a clean Save or a create-on-save (nothing to
+    /// apply; the baseline persists byte-identical). An op whose <c>w14:paraId</c>/anchor does not resolve is a
+    /// handled <see cref="ComposePatchException"/> (mapped to ProblemDetails), never a silent wrong write.
     /// </summary>
-    public IReadOnlyList<ComposeEditedParagraph>? EditedParagraphs { get; init; }
+    public ComposeOperationLog? OperationLog { get; init; }
+
+    /// <summary>
+    /// R4 FR-06 (task 032): durable, <c>(paraId, range)</c>-anchored comments to emit as native
+    /// <c>w:comment</c> via the <see cref="ComposeShadowPatchEngine"/> (its EDGE-1 comment-before-track-change
+    /// ordering) — the text-search-free (I-7) replacement for the save-path <see cref="DocxAnnotation"/>
+    /// comment payload the retired <c>DocxAnnotationWriter</c> path baked in. Applied together with
+    /// <see cref="OperationLog"/> in one engine pass. Null/empty → no comments baked on save (session comments
+    /// still persist as mutable UI state via <c>SaveComposeAnnotationsAsync</c> and bake to native OOXML via the
+    /// push-annotations path, both unchanged). The text-anchored push-annotations surface is retired/migrated by
+    /// task 036 (§6.5 Path-A boundary).
+    /// </summary>
+    public IReadOnlyList<ComposeAnchoredComment>? Comments { get; init; }
 
     /// <summary>
     /// E1 born-in-editor (FR-01a, task 026): the paraId-keyed editor CONTENT MODEL — the authoring source for
@@ -569,21 +641,6 @@ public sealed record SaveComposeDocumentRequest
     public string? DisplayName { get; init; }
 
     /// <summary>
-    /// Redline/comment save fidelity (spaarkeai-compose-r2 UAT-R7 #2/#3/#4): accepted-as-pending
-    /// track-change insertions/deletions + comments to materialize as NATIVE Word markup
-    /// (<c>w:ins</c>/<c>w:del</c>/<c>w:comment</c>) via <see cref="DocxAnnotationWriter"/> BEFORE
-    /// persisting. The client sends (a) <see cref="Content"/> as a clean BASELINE <c>.docx</c> — the
-    /// document with pending redlines reduced to their committed (reject-state) text and accepted
-    /// edits already baked in — and (b) this list; <see cref="IComposeService.SaveAsync"/> re-applies
-    /// them on top so the saved <c>.docx</c> carries real tracked changes + comments instead of the
-    /// flattened plain text the client <c>tipTapToDocxBytes</c> writer (which has no track-change
-    /// branch) would otherwise produce. Null/empty → the baseline is persisted byte-identical (a plain
-    /// no-redline Save is unchanged; FR-06a byte fidelity preserved). Same <see cref="DocxAnnotation"/>
-    /// shape the push-annotations path uses (reuse, not a parallel contract).
-    /// </summary>
-    public IReadOnlyList<DocxAnnotation>? Annotations { get; init; }
-
-    /// <summary>
     /// C2 fix (UAT 2026-07-20): the client's ordered load-time paraId map — one entry per editor
     /// paragraph in document order carrying its <c>w14:paraId</c> + reject-state text. When present,
     /// <see cref="SaveAsync"/> runs <see cref="ComposeBaselineParaIdStamper"/> to stamp any MINTED ids
@@ -595,6 +652,42 @@ public sealed record SaveComposeDocumentRequest
     /// skipped and behavior is unchanged.
     /// </summary>
     public IReadOnlyList<ComposeBaselineParaId>? ParaIdMap { get; init; }
+
+    /// <summary>
+    /// Task 041 (Phase 4, NDA-REVIEW Summary Page): optional Summary Page content, deterministically derived
+    /// from the ONE ledgered NDA-REVIEW result (<c>{overallRisk, flaggedSections[]}</c>, task 023) — NO
+    /// second LLM call (see <see cref="ComposeSummaryPageGenerator"/>). When present, <see cref="SaveAsync"/>
+    /// appends it as a page-broken, non-tracked section at the END of <c>contentToPersist</c> via
+    /// <see cref="ComposeDocumentRenderer.AppendSection"/> (ADR-049; the retired <c>DocxAnnotationWriter</c>
+    /// stays retired). Null/absent (every non-NDA-REVIEW Compose save) → no Summary Page appended, unchanged
+    /// behavior.
+    /// </summary>
+    public NdaReviewSummaryPageInput? SummaryPage { get; init; }
+
+    /// <summary>
+    /// G7 (FR-06, task 022): a CLIENT-MINTED stable key for a TRANSIENT (not-yet-promoted) Compose draft,
+    /// minted once (<c>crypto.randomUUID()</c>) when the draft is mounted and sent on every create-on-save.
+    /// It is the durable dedup identity that fixes the 8-duplicate defect: a transient draft has no SPE
+    /// drive-item id until its first save mints one, and the transient create-on-save branch minted a NEW
+    /// SPE item on EVERY call, so lost/raced round-trips (concurrent saves, a re-created mount, a new tab)
+    /// each produced another SPE item → another <c>sprk_document</c> row. Persisted onto the
+    /// <c>sprk_composetransientkey</c> column (single-column alt-key <c>sprk_composetransientkey_uk</c>) at
+    /// create-on-save; on a subsequent create-on-save with the SAME key, <see cref="SaveAsync"/> resolves the
+    /// existing record BY THIS KEY (never by content — I-7/NFR-02) and REPLACES its SPE item in place instead
+    /// of minting a duplicate. Null on the replace path (a promoted doc already has its SPE id) and for older
+    /// clients that predate G7 (behavior unchanged — no dedup, R1 mint-each-call).
+    /// </summary>
+    public string? TransientKey { get; init; }
+
+    /// <summary>
+    /// G7 (FR-06, task 022): the deliberate <b>Save New Document</b> fork. When <c>true</c>, a create-on-save
+    /// SKIPS the <see cref="TransientKey"/> dedup lookup and always mints a fresh SPE item + a fresh
+    /// <c>sprk_document</c> row — the user explicitly asked for a NEW document, not a new version of the
+    /// existing one. The client pairs this with a freshly-minted <see cref="TransientKey"/> so the forked
+    /// document gets its own dedup identity going forward. Default <c>false</c> = <b>Save Version</b> (replace
+    /// in place / dedup — the primary action).
+    /// </summary>
+    public bool ForkNew { get; init; }
 }
 
 /// <summary>Save outcome — new SPE version id + resolved <c>sprk_documentid</c>.</summary>
@@ -629,6 +722,89 @@ public sealed record SaveComposeDocumentResult : ComposeDocumentResult
     /// only for legacy callers that predate FR-05 (always populated by the current Save path).
     /// </summary>
     public JobAwareCompletionState? CompletionState { get; init; }
+
+    /// <summary>
+    /// FR-08 (task 050): when this save detected a STALE base (the version stamp this service persisted
+    /// after its own last write no longer matched the live SPE eTag), the <see cref="AnnotationReanchorService"/>
+    /// band summary for the re-anchored operation log + comments — AUTO (exact paraId match) applied
+    /// through the Patch Engine; REVIEW/ORPHAN surfaced here for the client to present, never silently
+    /// applied and never silently dropped. Null on every non-stale save (the common case).
+    /// </summary>
+    public ReanchorSummary? ReanchorSummary { get; init; }
+
+    /// <summary>
+    /// Prong 1 (task 055 — keep-edits graceful degradation). Populated ONLY when the loaded-doc apply
+    /// hit an op-level anchoring refusal and the service fell back to best-effort per-paragraph recovery:
+    /// the resolvable paragraph-units were applied and the unresolvable ops are surfaced here (never
+    /// silently applied — the paragraph is the atomic unit under the engine's intra-paragraph sequential
+    /// rebasing — and never silently dropped). Null on the common path (the whole batch applied cleanly,
+    /// or the refusal was batch-level — malformed docx / schema skew — which still fails hard). The client
+    /// shows a banner prompting the user to redo just the unresolved edits; their content is safe (still
+    /// in the editor's op-log until they retry).
+    /// </summary>
+    public PartialApplySummary? PartialApply { get; init; }
+
+    /// <summary>
+    /// G1 (FR-01, task 020): the <see cref="ComposeOrigin"/> this save resolved (server-side, from
+    /// <c>request.ContentModel is not null</c> — never SPE-id/content inference). Populated on EVERY
+    /// save (not only create-on-save) so a caller does not need a subsequent Load to learn the origin
+    /// of the document it just saved — e.g. task 021's clean-apply engine mode selection consumes this
+    /// directly. On a create-on-save this is also the value persisted onto the new <c>sprk_document</c>
+    /// row (see <see cref="ComposeService.PromoteIfEphemeralAsync"/>); on a replace-path save of an
+    /// already-promoted document the persisted field is UNCHANGED (origin is set once, at create) even
+    /// though this property still reports the save's own resolved discriminant.
+    /// </summary>
+    public ComposeOrigin? Origin { get; init; }
+}
+
+/// <summary>
+/// Prong 1 (task 055) — the best-effort partial-apply outcome surfaced on a
+/// <see cref="SaveComposeDocumentResult.PartialApply"/>. When a loaded-doc save hit an op-level anchoring
+/// refusal, the service applied the resolvable paragraph-units and lists the ops it could NOT anchor here so
+/// the client can prompt the user to redo just those edits — never silently applying a wrong edit (the
+/// paragraph is the atomic unit under the engine's intra-paragraph sequential rebasing) and never silently
+/// dropping one. Serialized camelCase to mirror the client type.
+/// </summary>
+public sealed record PartialApplySummary(
+    [property: JsonPropertyName("total")] int Total,
+    [property: JsonPropertyName("appliedCount")] int AppliedCount,
+    [property: JsonPropertyName("unresolvedCount")] int UnresolvedCount,
+    [property: JsonPropertyName("unresolved")] IReadOnlyList<UnresolvedComposeOp> Unresolved,
+    [property: JsonPropertyName("computedAtUtc")] DateTimeOffset ComputedAtUtc);
+
+/// <summary>
+/// Prong 1 (task 055) — one op the best-effort recovery could not anchor. Carries the durable
+/// <c>w14:paraId</c>, the op discriminator (<c>InsertTextOperation</c>, …), the
+/// <c>ComposePatchErrorKind</c> (as a string — the enum lives in the engine namespace, kept off this
+/// contract), and the engine's human-readable refusal reason so telemetry + the client banner self-explain.
+/// No document content — only anchor metadata (NFR-02 / I-7: nothing content-derived leaves the engine).
+/// </summary>
+public sealed record UnresolvedComposeOp(
+    [property: JsonPropertyName("paraId")] string ParaId,
+    [property: JsonPropertyName("opType")] string OpType,
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("reason")] string Reason);
+
+/// <summary>
+/// G10 (FR-09, task 040): manual "Refresh Profile" payload — re-run the Document Profile on demand for an
+/// existing <c>sprk_document</c>. See <see cref="IComposeService.RefreshProfileAsync"/>.
+/// </summary>
+public sealed record RefreshComposeProfileRequest
+{
+    /// <summary>The <c>sprk_documentid</c> to re-profile. Required.</summary>
+    public required Guid DocumentRecordId { get; init; }
+
+    /// <summary>Tenant id (ADR-015 Tier 3 isolation). Required.</summary>
+    public required string TenantId { get; init; }
+
+    /// <summary>Optional SPE drive-item id — used only to stamp the profiled version (with
+    /// <see cref="ETag"/>) so an immediate reopen does not redundantly re-trigger the storm-guarded
+    /// reload leg.</summary>
+    public string? DocumentSpeId { get; init; }
+
+    /// <summary>Optional current SPE eTag — stamped as the profiled version when supplied alongside
+    /// <see cref="DocumentSpeId"/>.</summary>
+    public string? ETag { get; init; }
 }
 
 /// <summary>Promote request payload.</summary>
@@ -672,6 +848,27 @@ public sealed record PromoteComposeDocumentRequest
 
     /// <summary>SPE web URL → <c>sprk_filepath</c> (enables "Open in SharePoint" links).</summary>
     public string? FilePath { get; init; }
+
+    /// <summary>
+    /// G1 (FR-01, task 020): the <see cref="ComposeOrigin"/> to persist onto <c>sprk_composeorigin</c>
+    /// WHEN a new <c>sprk_document</c> row is created by this call (threaded from
+    /// <see cref="ComposeService.SaveAsync"/>'s <c>request.ContentModel is not null</c> discriminant —
+    /// never SPE-id/content inference). Ignored on the idempotent existing-row path (origin is set
+    /// ONLY at create-on-save; a later replace-path save never mutates it). Defaults to
+    /// <see cref="ComposeOrigin.Imported"/> — the Dataverse field's own default — when a caller (e.g. a
+    /// standalone <c>/promote</c> call that predates G1) supplies none.
+    /// </summary>
+    public ComposeOrigin? Origin { get; init; }
+
+    /// <summary>
+    /// G7 (FR-06, task 022): the client-minted transient dedup key to STAMP onto <c>sprk_composetransientkey</c>
+    /// WHEN a new <c>sprk_document</c> row is created by this call (threaded from
+    /// <see cref="ComposeService.SaveAsync"/>). Ignored on the idempotent existing-row path (the key is set
+    /// ONCE, at create-on-save). Null for a replace-path save or an older client that predates G7. Enables the
+    /// next create-on-save with the same key to resolve THIS record via the <c>sprk_composetransientkey_uk</c>
+    /// alt-key and replace in place instead of minting a duplicate. See <see cref="SaveComposeDocumentRequest.TransientKey"/>.
+    /// </summary>
+    public string? TransientKey { get; init; }
 }
 
 /// <summary>Promote outcome — resolved <c>sprk_documentid</c> + a flag distinguishing
@@ -681,98 +878,6 @@ public sealed record PromoteComposeDocumentResult : ComposeDocumentResult
     /// <summary>True when the <c>sprk_document</c> row was created in this call. False
     /// when an existing row was returned (idempotent behavior on repeated Save).</summary>
     public required bool WasCreated { get; init; }
-}
-
-/// <summary>FR-24 push-annotations request payload.</summary>
-public sealed record PushAnnotationsRequest
-{
-    /// <summary>SPE drive (container) id. Required.</summary>
-    public required string DriveId { get; init; }
-
-    /// <summary>SPE drive-item id. Required.</summary>
-    public required string DocumentSpeId { get; init; }
-
-    /// <summary>Tenant id (multi-tenant isolation per ADR-015 Tier 3). Required.</summary>
-    public required string TenantId { get; init; }
-
-    /// <summary>Load-time ETag sent as <c>If-Match</c> for optimistic concurrency. Required — a
-    /// blind overwrite is not offered on this path (FR-24 / Spike 7 G-1).</summary>
-    public required string IfMatch { get; init; }
-
-    /// <summary>The accepted annotations (track-change insertions/deletions + comments) to
-    /// materialize as native Open XML markup. Required, non-empty.</summary>
-    public required IReadOnlyList<DocxAnnotation> Annotations { get; init; }
-
-    /// <summary>
-    /// FR-28 (task 055, additive/optional): bound <c>ChatSession</c> id. When supplied, the
-    /// Tier-2c preview attached to <see cref="PushAnnotationsResult.Preview"/> reflects the
-    /// session's current <c>DefinedTermsTracking</c> (FR-29) count as the "stays in Compose only"
-    /// side of the split (see <see cref="ComposePushSavePreview.ComposeOnlyCount"/>). Null (the
-    /// R2 default until the client sends it) degrades gracefully to <c>ComposeOnlyCount</c> = 0 —
-    /// never a failure.
-    /// </summary>
-    public string? SessionId { get; init; }
-}
-
-/// <summary>
-/// FR-28 (task 055) — Tier-2c PRE-CONFIRM preview request payload. See
-/// <see cref="IComposeService.PreviewPushAnnotationsAsync"/>.
-/// </summary>
-public sealed record PreviewPushAnnotationsRequest
-{
-    /// <summary>Tenant id (multi-tenant isolation per ADR-015 Tier 3). Required.</summary>
-    public required string TenantId { get; init; }
-
-    /// <summary>The annotation batch under consideration for push. Required, non-empty.</summary>
-    public required IReadOnlyList<DocxAnnotation> Annotations { get; init; }
-
-    /// <summary>
-    /// Optional bound <c>ChatSession</c> id — see <see cref="PushAnnotationsRequest.SessionId"/>
-    /// remarks for the identical Compose-only-count semantics.
-    /// </summary>
-    public string? SessionId { get; init; }
-}
-
-/// <summary>FR-24 push-annotations outcome — new SPE version id + ETag + size. Standalone (not a
-/// <see cref="ComposeDocumentResult"/>): the push path is document-scoped and carries no
-/// ChatSession binding.</summary>
-public sealed record PushAnnotationsResult
-{
-    /// <summary>SPE drive-item id the annotations were written to.</summary>
-    public required string DocumentSpeId { get; init; }
-
-    /// <summary>SPE drive (container) id.</summary>
-    public string? DriveId { get; init; }
-
-    /// <summary>New SPE version id committed by the annotated write.</summary>
-    public required string VersionId { get; init; }
-
-    /// <summary>Updated ETag after the write (matches Graph's response ETag).</summary>
-    public string? ETag { get; init; }
-
-    /// <summary>New file size after the write.</summary>
-    public long? Size { get; init; }
-
-    /// <summary>Count of annotations materialized into the document.</summary>
-    public required int AnnotationCount { get; init; }
-
-    /// <summary>
-    /// FR-28 (task 055): the Tier-2c preview computed as post-write completion evidence — the
-    /// SAME payload shape a future pre-confirm gate-dialog call
-    /// (<see cref="IComposeService.PreviewPushAnnotationsAsync"/>) returns before the push, echoed
-    /// back here so the completion OutcomeCard can show what was actually applied. Always
-    /// populated by the current push path.
-    /// </summary>
-    public ComposePushSavePreview? Preview { get; init; }
-
-    /// <summary>
-    /// FR-28 per-step push/save projection over the existing job pipeline
-    /// (<see cref="JobAwareCompletionState"/>): the ordered steps <c>push → save → version</c>
-    /// with each step's state, shaped to feed a future job-aware OutcomeCard once the core
-    /// Phase A0 contract (HANDOFF §2/§3) is consumable by the UI. Null only for legacy callers
-    /// that predate FR-28 (always populated by the current push path).
-    /// </summary>
-    public JobAwareCompletionState? CompletionState { get; init; }
 }
 
 /// <summary>

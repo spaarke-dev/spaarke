@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>Deploy — BFF, SpaarkeAi code page, Dataverse Actions/Bindings, AI Search index</title>
+    <phase>6 Deploy &amp; Wrap-up</phase>
+    <gate>done</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Multi-surface deployment; irreversible/ordered; publish-size gate; tags include deploy.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deployment execution against known deploy skills/scripts; prescriptive sequence, no design judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment; must run after all implementation + evals; sequential.</parallel-reason>
+    <deps>010,011,012,013,020,021,022,023,030,031,032,033,040,041,042,050,051,052</deps>
+    <tags>deploy, azure, bff-api, dataverse, pcf, azure-search</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Deploy the NDA advisory vertical: BFF (bff-deploy), SpaarkeAi code page (code-page-deploy), Dataverse
+    Actions/Bindings (dataverse-deploy), and the AI Search index seed. Enforce the ≤60 MB BFF publish-size gate
+    before deploying the API.
+  </prompt>
+
+  <role>
+    SPAARKE release engineer. Expert in the bff-deploy / code-page-deploy / dataverse-deploy skills and the
+    add-reference-to-index flow. Follow azure-deployment.md.
+  </role>
+
+  <goal>
+    All surfaces are deployed and reachable in the target environment; the end-to-end flow works against deployed
+    infrastructure; BFF publish size is ≤60 MB and recorded.
+  </goal>
+
+  <context>
+    <background>
+      Deliverables: BFF endpoints/services, SpaarkeAi client, Dataverse Actions + Binding rows, AI Search index
+      content. Deploy in dependency order (index + Dataverse before client verification).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>src/solutions/SpaarkeAi/</file>
+      <file>infra/dataverse/</file>
+    </relevant-files>
+    <dependencies>All implementation + eval tasks.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="azure-deployment.md">Run `dotnet publish -c Release` and confirm compressed output ≤60 MB before deploying the BFF; record absolute size + diff vs baseline. HARD STOP at 60 MB.</constraint>
+    <constraint source="CLAUDE.md-9">No secrets in config; use Key Vault for production secrets.</constraint>
+    <constraint source="project">Deploy Dataverse Actions/Bindings + the AI Search seed before verifying the client flow. Follow each deploy skill's own prescriptive steps.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Run the BFF publish-size check; HARD STOP if &gt;60 MB. Record size + diff.</step>
+    <step order="2">Deploy the AI Search index seed (NDA standard) if not already in the target env.</step>
+    <step order="3">Deploy Dataverse Actions + Binding rows (dataverse-deploy / seed scripts).</step>
+    <step order="4">Deploy the BFF (bff-deploy).</step>
+    <step order="5">Deploy the SpaarkeAi code page (code-page-deploy).</step>
+    <step order="6">Smoke-test end-to-end against the deployed environment.</step>
+    <step order="7">Update TASK-INDEX.md: mark 060 ✅; record deployment + size in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If BFF publish size exceeds 60 MB, STOP (HARD STOP per azure-deployment.md) and escalate for architecture review before deploying.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Publish the BFF.</tool>
+    <tool name="terminal">Run deploy skills/scripts.</tool>
+    <tool name="npm">Build the code page.</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-advanced-capabilities-nda-r1/notes/ (deployment record + publish size)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF publish compressed size is ≤60 MB and recorded; deploy proceeds only if under the ceiling.</criterion>
+    <criterion testable="true">BFF, code page, Dataverse Actions/Bindings, and AI Search index are deployed and reachable.</criterion>
+    <criterion testable="true">A deployed-environment smoke test of the end-to-end NDA flow succeeds.</criterion>
+    <criterion testable="true">No secrets are committed; production secrets are in Key Vault.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Prescriptive/ordered — deploy dependencies before dependents. Coordinate with any external Reasoning-deployment
+    provisioning from task 013.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute; prescriptive steps; enforce §10 size gate.</protocol>
+  </execution>
+</task>

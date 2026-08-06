@@ -1,0 +1,177 @@
+<task id="034" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Patch-engine seam slices + corpus round-trip proof (NFR-01/02)</title>
+    <phase>3 Patch Engine</phase>
+    <gate>passed</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `tests/**`, tags include `testing`/`integration-test` — TEST-MODIFYING override forces FULL per root §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Test authoring against a settled engine surface + the existing 004 harness; well-specified, no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>030,031,004</deps>
+    <tags>bff-api,testing,integration-test</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started>2026-07-22</started>
+    <completed>2026-07-22</completed>
+  </metadata>
+
+  <prompt>
+    Prove the Patch Engine through the wire. Author `WebApplicationFactory` seam slices under
+    `tests/integration/seam/Compose/` demonstrating: (1) an interior edit / redline / comment lands at
+    the intended `w14:paraId` with ZERO write-path text-search; (2) a corpus no-op save is byte-identical
+    on untouched parts (via the task 004 round-trip byte-diff harness); (3) each structural op
+    (split/merge/insert/delete paragraph) round-trips. Run across ≥3 corpus docs INCLUDING the CIPO doc.
+    A code audit MUST confirm no text-search exists in the write path. These are integration seam tests —
+    NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor-null tests (ADR-038). Exercise the
+    unknown-paraId path and assert it is REFUSED. This is test coverage for the engine built in 030/031 —
+    not new production surface.
+  </prompt>
+
+  <role>
+    Test engineer fluent in the Spaarke integration-seam pattern (`WebApplicationFactory` through-the-wire
+    slices) and OOXML byte-diffing. Understands ADR-038's KEEP categories and the banned mock/DI/ctor
+    test shapes, and treats the corpus byte-diff harness (task 004) as the acceptance instrument.
+  </role>
+
+  <goal>
+    Seam slices under `tests/integration/seam/Compose/` that prove — across ≥3 corpus docs incl. CIPO —
+    placement determinism (edit/redline/comment lands at the intended paraId, zero write-path
+    text-search), byte-preservation on untouched parts (via the 004 harness), and structural-op
+    round-trip; plus a code audit confirming no write-path text-search and a negative test that an
+    unknown-paraId op is refused.
+  </goal>
+
+  <context>
+    <background>
+      Spec NFR-01 (byte preservation — harness-verified), NFR-02 (placement determinism — corpus + code
+      audit + seam tests), NFR-06 (E2E DoD — through-the-wire seam per save/load change), Success Criteria
+      1/2/5. Design §5 (Patch backend), §3 (I-4/I-7). Task 004 built the round-trip byte-diff harness
+      (load → no-op save → byte-diff untouched subtrees); task 002 assembled the corpus (incl. CIPO). This
+      task wires the engine (030 core + 031 structural) into through-the-wire seam slices and uses the 004
+      harness as the byte-preservation instrument.
+    </background>
+    <relevant-files>
+      <file role="new">tests/integration/seam/Compose/ — `WebApplicationFactory` seam slices: placement determinism, byte-preservation (via 004 harness), structural-op round-trip, unknown-paraId refusal</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs — tasks 030 (core) + 031 (structural) — the surface under test</file>
+      <file role="dependency-output">tests/ — task 004 round-trip byte-diff harness (the byte-preservation instrument) + task 002 corpus fixtures (incl. CIPO)</file>
+      <file role="canonical-reference">docs/adr/ADR-038-testing-strategy.md — the 7 KEEP categories + `tests/integration/seam/**` vertical-slice-seam category; banned mock/DI/ctor shapes</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md NFR-01, NFR-02, NFR-06</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">`ComposeShadowPatchEngine` core — the write-path surface under test.</dependency>
+      <dependency task="031" status="pending">Structural operations — so the structural-op round-trip slices have a surface to exercise.</dependency>
+      <dependency task="004" status="pending">Round-trip byte-diff harness — the byte-preservation instrument these slices call.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / NFR-02 / project I-7">The slices MUST prove ZERO write-path text-search; a code audit MUST confirm no text-search in the write path. Placement determinism across ≥3 corpus docs incl. CIPO.</constraint>
+    <constraint source="spec / NFR-01">Byte-preservation on untouched parts MUST be proven via the task 004 harness (load → no-op save → byte-diff untouched subtrees).</constraint>
+    <constraint source="ADR-038 / NFR-06">Through-the-wire `WebApplicationFactory` slices only. NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor-null tests. Slices live under `tests/integration/seam/**`.</constraint>
+    <constraint source="project / corpus scope">Run across ≥3 corpus docs including the CIPO doc (the known 422 + empty-paragraph case). Reuse task 002 fixtures; do not hand-roll new sample docs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>WebApplicationFactory seam slices; OOXML byte-diff round-trip; ADR-038 KEEP categories + banned mock/DI/ctor shapes; corpus fixtures</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-r4/notes/as-built-inventory.md</file>
+    </files>
+    <patterns>
+      <pattern name="Through-the-wire seam slice" location="tests/integration/seam/">
+        A `WebApplicationFactory` slice drives the real endpoint → engine → bytes path (no mocked HTTP handler), asserting behavior at the seam. The ADR-038 KEEP shape for save/load/dispatch changes.
+      </pattern>
+      <pattern name="No-op-save byte-diff" location="tests/ (task 004 harness)">
+        Load → no-op save → byte-diff untouched subtrees; untouched package parts verbatim, untouched `document.xml` structurally faithful. The NFR-01 acceptance instrument.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (TEST-MODIFYING → FULL). Confirm tasks 030/031 (engine) and 004 (harness) + 002 (corpus) are available. Create `tests/integration/seam/Compose/`. Load ADR-038 + the test-architecture standard.</step>
+    <step order="1" name="Placement-determinism slices">Author slices that submit an interior edit / redline / comment and assert it lands at the intended `w14:paraId` with no write-path text-search, across ≥3 corpus docs incl. CIPO.</step>
+    <step order="2" name="Byte-preservation slice">Author the no-op-save slice using the task 004 harness: load → no-op save → byte-diff untouched subtrees are byte-identical.</step>
+    <step order="3" name="Structural-op + negative slices">Author slices exercising each structural op (split/merge/insert/delete) round-trip, and a NEGATIVE slice exercising the unknown-paraId op path and asserting it is REFUSED.</step>
+    <step order="4" name="Code audit + run">Run a code audit confirming no text-search in the write path. Run the seam suite green; confirm no banned mock/DI/ctor shapes were introduced. Update TASK-INDEX.md: set this task's status to ✅. Document any deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <justification>
+    <existing>No seam coverage exists proving zero-write-path-text-search + byte-identity on untouched parts for the new Patch Engine.</existing>
+    <extension>No — ADR-038 seam DoD requires a through-the-wire slice; the 004 harness is invoked here.</extension>
+    <cost-of-doing-nothing>NFR-01/NFR-02 acceptance (Success Criteria 1/2/5) has no automated proof before the hard-replace.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="test">tests/integration/seam/Compose/ (placement-determinism, byte-preservation, structural-op round-trip, unknown-paraId refusal seam slices)</output>
+    <output type="report">Corpus coverage (≥3 docs incl. CIPO); code-audit result (no write-path text-search) for the PR</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Seam slices are green across ≥3 corpus docs including the CIPO doc.</criterion>
+    <criterion testable="true">An interior edit / redline / comment slice proves the change lands at the intended `w14:paraId`; a code audit confirms NO text-search in the write path.</criterion>
+    <criterion testable="true">The no-op-save slice proves byte-identity on untouched parts via the task 004 harness.</criterion>
+    <criterion testable="true">Each structural op (split/merge/insert/delete) round-trips in a seam slice.</criterion>
+    <criterion testable="true">NEGATIVE: an unknown-paraId op path is exercised and asserted REFUSED.</criterion>
+    <criterion testable="true">No `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests were introduced; slices live under `tests/integration/seam/**`.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A corpus doc (esp. CIPO) fails byte-preservation or placement determinism in a way that indicates an engine defect rather than a test-harness gap. STOP and route the finding back to task 030/031 (do not weaken the assertion to make the slice pass) per root §6.</trigger>
+  </escalation>
+
+  <notes>
+    No `&lt;justification&gt;` — test coverage, not new production surface. This is the NFR-01/02 acceptance evidence for the Patch Engine and feeds task 006's / task 061's corpus proof. `parallel-safe:true` — separate test code, no production-file contention.
+
+    COMPLETED 2026-07-22. Two new files under `tests/integration/seam/Compose/`:
+    - `ComposePatchEngineSaveSeamTests.cs` — through-the-wire `WebApplicationFactory` slices driving
+      the REAL `POST /api/compose/documents/{id}/save` op-log route (task 032). Reuses
+      `ComposeFidelitySeamFixture` (tests/integration/seam/Ai/), `ComposeCorpusFixtureLocator` +
+      `ComposeOoxmlPackagePartComparer` (task 004) — extends coverage to non-empty operation logs
+      rather than duplicating the existing no-op-save proof. 6 `[Theory]` slices x 3 corpus docs
+      (incl. CIPO) = 18 cases: interior insertText (redline) placement determinism + zero-drift on
+      other paragraphs; anchored comment placement determinism; split/merge/insert/delete paragraph
+      round-trip (task 031's four structural ops); plus 1 `[Fact]` negative case — an unknown paraId
+      is refused as a typed 422 ProblemDetails (`ComposePatchErrorKind.ParagraphNotFound` →
+      "Change Could Not Be Applied"), with `SpeMock.Verify(..., Times.Never)` proving nothing was
+      partially written.
+    - `ComposeWritePathTextSearchAuditTests.cs` — the required CODE AUDIT: 2 source-text tests
+      confirming zero `.IndexOf(`/`.Contains(`/`.StartsWith(`/`.EndsWith(` usage in
+      `ComposeShadowPatchEngine.cs` (whole file) and in `ComposeService.cs`'s `SaveAsync` +
+      `ResolveSaveBaselineAsync` slice, plus confirmation the save path never invokes the retired
+      `DocxAnnotationWriter` (`_annotationWriter` — wired only to push-annotations, task 036 scope).
+
+    Deviation from the corpus-track-changes-clean note: NO synthetic doc was needed — all 3 seed
+    corpus docs (flat, single-section, table-free per corpus-manifest.md §1) supplied addressable
+    plain paragraphs for every case including the four structural ops. The one corpus gap
+    (a pre-existing tracked change to reconcile against, for `TrackedChangeReconciliationUnsupported`)
+    is out of this task's scope — that boundary has no corpus doc and is covered at the unit level
+    only (`ComposeShadowPatchEngineTests.cs`, task 030).
+
+    One fix during authoring: the anchored-comment test's byte-preservation assertion initially
+    expected ALL non-document.xml parts untouched, but adding a comment legitimately CREATES
+    `word/comments.xml` (none of the 3 seed docs carry one) — the assertion was corrected to exclude
+    that one legitimately-new part from the "untouched" bucket while still requiring every OTHER part
+    (styles, numbering, headers/footers, theme, media) stay byte-identical.
+
+    VERIFY: `dotnet build src/server/api/Sprk.Bff.Api/` — 0 errors (pre-existing warnings only).
+    `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Compose"` — 545/545 green
+    (no regressions). New tests specifically: 21/21 green (18 theory cases + 1 negative Fact + 2 audit
+    Facts). Publish size: 47 MB compressed (test-only change — unchanged from baseline, no BFF
+    production code touched). Quality gates (Step 9.5, TEST-MODIFYING override — mandatory per root
+    CLAUDE.md §8): code-review self-review found 0 Critical/Warning, 1 Suggestion (4 bare
+    `persisted.Should().NotBeNull()` assertions missing a `because` message — fixed to match the
+    file's own established messaging convention); adr-check found 0 violations (ADR-038 banned
+    patterns absent — grep-verified; no `Microsoft.Graph`/AI-internal injection; no new interfaces;
+    BFF Hygiene §10 does not trigger — test-only files, no `src/server/api/Sprk.Bff.Api/**` change).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

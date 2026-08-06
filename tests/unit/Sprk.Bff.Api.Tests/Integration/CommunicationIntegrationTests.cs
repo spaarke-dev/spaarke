@@ -1280,7 +1280,8 @@ public class CommunicationIntegrationTests
         string recipientEmail = "mailbox-central@spaarke.com",
         string subject = "E2E Inbound Test",
         string body = "<p>Hello from external sender.</p>",
-        string graphMessageId = "AAMkAGE1M2IyNGNm-inbound-001")
+        string graphMessageId = "AAMkAGE1M2IyNGNm-inbound-001",
+        string? uniqueBody = null)
     {
         // For inbound tests, we need Graph to return a message when fetched.
         // The IncomingCommunicationProcessor calls graphClient.Users[email].Messages[id].GetAsync
@@ -1294,7 +1295,9 @@ public class CommunicationIntegrationTests
             ccRecipients = Array.Empty<object>(),
             subject = subject,
             body = new { contentType = "html", content = body },
-            uniqueBody = new { contentType = "html", content = body },
+            // uniqueBody defaults to the same content as body unless a caller supplies a distinct
+            // (stripped) value — used by the thread-preservation regression test.
+            uniqueBody = new { contentType = "html", content = uniqueBody ?? body },
             receivedDateTime = DateTimeOffset.UtcNow.ToString("o"),
             hasAttachments = false,
             attachments = Array.Empty<object>()
@@ -1397,6 +1400,56 @@ public class CommunicationIntegrationTests
 
         // statecode = Active (0)
         ((OptionSetValue)capturedEntity["statecode"]).Value.Should().Be(0, "statecode should be Active (0)");
+    }
+
+    [Fact]
+    public async Task InboundPipeline_MultiMessageThread_StoresFullThreadNotUniqueBody()
+    {
+        // Regression (owner UAT 2026-08-03): an incoming email carrying a multi-message thread was
+        // stored with only the latest message because ingestion preferred Graph's uniqueBody (which
+        // strips all quoted reply/forward content). The full `body` must be stored so the whole
+        // thread is preserved on the sprk_communication record.
+        var recipientEmail = "mailbox-central@spaarke.com";
+        var graphMessageId = "AAMkAGE1M2IyNGNm-inbound-thread-001";
+        const string fullThread =
+            "<p>Latest message on top.</p><hr/><p>From: a@x.com</p><p>Older message #2 body.</p>" +
+            "<hr/><p>From: b@x.com</p><p>Oldest message #1 body.</p>";
+        const string strippedTop = "<p>Latest message on top.</p>";
+
+        var (graphFactoryMock, _) = CreateInboundGraphMock(
+            recipientEmail: recipientEmail,
+            subject: "Fw: Lexology Pricing",
+            body: fullThread,
+            uniqueBody: strippedTop,
+            graphMessageId: graphMessageId);
+
+        DataverseEntity? capturedEntity = null;
+        var dataverseMock = new Mock<IDataverseService>();
+        var accountEntity = new DataverseEntity("sprk_communicationaccount") { Id = Guid.NewGuid() };
+        accountEntity["sprk_emailaddress"] = recipientEmail;
+        accountEntity["sprk_name"] = "Central Mailbox";
+        accountEntity["sprk_displayname"] = "Spaarke Central";
+        accountEntity["sprk_receiveenabled"] = true;
+        accountEntity["sprk_autocreaterecords"] = false;
+        accountEntity["sprk_accounttype"] = new OptionSetValue(100000000);
+        dataverseMock
+            .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { accountEntity });
+        dataverseMock
+            .Setup(d => d.CreateAsync(
+                It.Is<DataverseEntity>(e => e.LogicalName == "sprk_communication"),
+                It.IsAny<CancellationToken>()))
+            .Callback<DataverseEntity, CancellationToken>((entity, _) => capturedEntity = entity)
+            .ReturnsAsync(Guid.NewGuid());
+
+        var processor = BuildIncomingProcessor(graphFactoryMock, dataverseMock);
+
+        await processor.ProcessAsync(recipientEmail, graphMessageId, ct: CancellationToken.None);
+
+        capturedEntity.Should().NotBeNull();
+        var storedBody = capturedEntity!.GetAttributeValue<string>("sprk_body");
+        storedBody.Should().Contain("Oldest message #1 body.", "the full thread must be stored, not the stripped uniqueBody");
+        storedBody.Should().Contain("Older message #2 body.");
     }
 
     [Fact]

@@ -11,6 +11,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Communication.Threads;
@@ -29,8 +30,8 @@ namespace Sprk.Bff.Api.Tests.Seam.Communication;
 /// already prove. Specifically, this file closes:
 ///
 /// <list type="bullet">
-/// <item><b>Full 11-entity by-regarding pass</b> — the unit suite explicitly covers 4 of the 11 ADR-024 regarding
-/// families (≥3 required by spec); this file data-drives ALL 11 straight from <see cref="RegardingFieldMap.All"/>
+/// <item><b>Full 12-entity by-regarding pass</b> — the unit suite explicitly covers 4 of the 12 ADR-024 regarding
+/// families (≥3 required by spec); this file data-drives ALL 12 straight from <see cref="RegardingFieldMap.All"/>
 /// (the single source of truth), closing the "11-entity theory if cheap" ask without hand-listing families twice.</item>
 /// <item><b>All-facets-composed filtered query</b> — the unit suite asserts each facet independently (plus one
 /// 2-facet AND for channel+participant); this file composes FIVE facets (thread, channel, from, to, participant)
@@ -98,6 +99,7 @@ public class CommunicationWorkspaceReadSeamTests
             _query.Object,
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
             _resolver.Object,
+            Mock.Of<ISystemUserIdentityResolver>(), // #675: default IsExternalAsync ⇒ false (internal caller) — preserves pre-fix behavior
             Mock.Of<ILogger<CommunicationThreadReadService>>());
     }
 
@@ -105,7 +107,7 @@ public class CommunicationWorkspaceReadSeamTests
         new(new ClaimsIdentity(new[] { new Claim("oid", Guid.NewGuid().ToString()) }, "test"));
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════════
-    // A. Full 11-entity by-regarding pass (composition gap — the unit suite covers 4 of 11 explicitly)
+    // A. Full 12-entity by-regarding pass (composition gap — the unit suite covers 4 of 12 explicitly)
     // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
     // Deliberately HARD-CODED (not derived from RegardingFieldMap.All at test time) so this is a genuine
@@ -114,7 +116,7 @@ public class CommunicationWorkspaceReadSeamTests
     // expected value from the same map the production code reads would only prove "the service calls the map",
     // never that the map itself is right — a mirror-test/tautology risk (ADR-038 §7 B6) the code-review pass
     // for this task explicitly caught and fixed. Values verified 1:1 against RegardingFieldMap.All as of task 080.
-    public static IEnumerable<object[]> AllElevenAdr024RegardingFamilies() => new[]
+    public static IEnumerable<object[]> AllTwelveAdr024RegardingFamilies() => new[]
     {
         new object[] { "sprk_matter", "sprk_regardingmatter" },
         new object[] { "sprk_project", "sprk_regardingproject" },
@@ -123,6 +125,7 @@ public class CommunicationWorkspaceReadSeamTests
         new object[] { "sprk_workassignment", "sprk_regardingworkassignment" },
         new object[] { "sprk_event", "sprk_regardingevent" },
         new object[] { "sprk_budget", "sprk_regardingbudget" },
+        new object[] { "sprk_reportcard", "sprk_regardingreportcard" },
         new object[] { "sprk_analysis", "sprk_regardinganalysis" },
         new object[] { "sprk_organization", "sprk_regardingorganization" },
         new object[] { "account", "sprk_regardingaccount" },
@@ -130,8 +133,8 @@ public class CommunicationWorkspaceReadSeamTests
     };
 
     [Theory]
-    [MemberData(nameof(AllElevenAdr024RegardingFamilies))]
-    public async Task ReadByRegardingAsync_AllElevenAdr024Families_ResolvesOwnTypedLookupAndBehavesIdentically(
+    [MemberData(nameof(AllTwelveAdr024RegardingFamilies))]
+    public async Task ReadByRegardingAsync_AllTwelveAdr024Families_ResolvesOwnTypedLookupAndBehavesIdentically(
         string entityType, string regardingField)
     {
         var threadId = Guid.NewGuid();
@@ -147,7 +150,7 @@ public class CommunicationWorkspaceReadSeamTests
         var result = await Sut().ReadByRegardingAsync(entityType, RecordId, Caller(), CancellationToken.None);
 
         // The ONLY per-family difference is which typed thread-regarding lookup is filtered on — proven for
-        // ALL 11 families here (data-driven off the same map the production code reads, so a future 12th family
+        // ALL 12 families here (data-driven off the same map the production code reads, so a future 12th family
         // is covered automatically without a 12th hand-written test case).
         threadQuery.Should().Contain($"_{regardingField}_value eq {RecordId}",
             $"family '{entityType}' must resolve its OWN typed regarding lookup, not another family's");
@@ -157,13 +160,13 @@ public class CommunicationWorkspaceReadSeamTests
     }
 
     [Fact]
-    public void AllElevenAdr024RegardingFamilies_StaysInSyncWith_RegardingFieldMapAll()
+    public void AllTwelveAdr024RegardingFamilies_StaysInSyncWith_RegardingFieldMapAll()
     {
         // Closes the loop on the hard-coded table above: THIS check catches drift the other direction (someone
         // adds/removes/renames a family in RegardingFieldMap.All without updating the literal test table), while
         // the Theory above catches drift in the map's actual VALUES. Together they give two-way regression
         // protection without either direction being a tautology.
-        var expected = AllElevenAdr024RegardingFamilies()
+        var expected = AllTwelveAdr024RegardingFamilies()
             .Select(row => ((string)row[0], (string)row[1]))
             .OrderBy(x => x.Item1, StringComparer.Ordinal)
             .ToList();
@@ -204,6 +207,7 @@ public class CommunicationWorkspaceReadSeamTests
             _query.Object,
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
             _resolver.Object,
+            Mock.Of<ISystemUserIdentityResolver>(), // #675: default IsExternalAsync ⇒ false (internal caller) — preserves pre-fix behavior
             Mock.Of<ILogger<CommunicationThreadReadService>>());
 
         var result = await sut.QueryCommunicationsAsync(
@@ -222,10 +226,15 @@ public class CommunicationWorkspaceReadSeamTests
             .And.Contain("sprk_sentat ge 2026-07-01")
             .And.Contain("sprk_sentat le 2026-07-31")
             .And.Contain($"sprk_communicationid eq {matchedMessageId}",
-                "the participant clause resolves to the junction's candidate id and composes as AND with every other facet");
-        // thread + channel + from + to + participant = 5 clauses ⇒ 4 " and " joins.
-        System.Text.RegularExpressions.Regex.Matches(messageQuery!, " and ").Count.Should().Be(4,
-            "all five facets must be AND-composed together in one filter, not just pairwise");
+                "the participant clause resolves to the junction's candidate id and composes as AND with every other facet")
+            .And.Contain("statecode eq 0",
+                "the shared read pipeline wraps every filtered query with the active-only (soft-delete) clause " +
+                "so deactivated messages drop out (messaging-r3 round-8 UAT fix)");
+        // thread + channel + from + to + participant = 5 facet clauses ⇒ 4 " and " joins between them,
+        // PLUS the shared pipeline's active-only wrap `(…facets…) and statecode eq 0` adds a 5th " and ".
+        System.Text.RegularExpressions.Regex.Matches(messageQuery!, " and ").Count.Should().Be(5,
+            "all five facets must be AND-composed together in one filter (4 joins), and the shared read " +
+            "pipeline ANDs the active-only soft-delete clause on top (the 5th join)");
         participantQuery.Should().Contain($"_sprk_systemuser_value eq {personId}");
     }
 
@@ -253,6 +262,7 @@ public class CommunicationWorkspaceReadSeamTests
             _query.Object,
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
             _resolver.Object,
+            Mock.Of<ISystemUserIdentityResolver>(), // #675: default IsExternalAsync ⇒ false (internal caller) — preserves pre-fix behavior
             Mock.Of<ILogger<CommunicationThreadReadService>>());
 
         var result = await sut.QueryCommunicationsAsync(
@@ -298,10 +308,14 @@ public class CommunicationWorkspaceReadSeamTests
                 $"{nameof(CommunicationAccessFilter)} must depend on nothing but its logger — internal-only + privilege are read directly off the message entity, never resolved via a membership/grant lookup ({banned})");
         }
 
-        // The read service's dependency shape is exactly the 4 collaborators the access-model-decision note
-        // prescribes (impersonated query, the shared 2-rule filter, the caller resolver, a logger) — no more,
-        // no fewer. A 5th dependency creeping in is exactly the shape a reintroduced union path would take.
-        readServiceParamTypeNames.Should().HaveCount(4);
+        // The read service's dependency shape is the access-model-decision collaborators (impersonated query, the
+        // shared 2-rule filter, the caller resolver, a logger) PLUS the #675/ISS-006 ISystemUserIdentityResolver —
+        // the sanctioned per-caller internal/external source that replaced the hardcoded IsInternalUser:true (5 total).
+        // The banned-seam guard above is the durable protection against a resurrected union path; the identity
+        // resolver is explicitly the ONLY sanctioned addition.
+        readServiceParamTypeNames.Should().HaveCount(5);
+        readServiceParamTypeNames.Should().Contain("ISystemUserIdentityResolver",
+            "the #675 fix injects the authoritative per-caller internal/external resolver (not a membership/grant union)");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -376,8 +390,8 @@ public class CommunicationWorkspaceReadSeamTests
         // First orphan for the record — Tier 1 (real strategy) Skips ⇒ Tier 2 lazily creates the per-record default.
         var firstRequest = MessageRequest(Guid.NewGuid());
         var firstComm = new DataverseEntity("sprk_communication") { Id = firstRequest.CommunicationId };
+        firstComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId);
         firstComm["sprk_regardingrecordid"] = matterId.ToString();
-        firstComm["sprk_regardingrecordtype"] = "sprk_matter";
         firstComm["sprk_regardingrecordname"] = "Acme v Widgets";
         SetupRegardingRead(entity, firstRequest.CommunicationId, firstComm);
         SetupNoExistingDefaultThread(entity);
@@ -395,8 +409,8 @@ public class CommunicationWorkspaceReadSeamTests
         // REAL production types (not a stub standing in for Tier 1).
         var secondRequest = MessageRequest(Guid.NewGuid());
         var secondComm = new DataverseEntity("sprk_communication") { Id = secondRequest.CommunicationId };
+        secondComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId);
         secondComm["sprk_regardingrecordid"] = matterId.ToString();
-        secondComm["sprk_regardingrecordtype"] = "sprk_matter";
         SetupRegardingRead(entity, secondRequest.CommunicationId, secondComm);
         SetupExistingDefaultThread(entity, defaultThreadId);
 
@@ -428,7 +442,10 @@ public class CommunicationWorkspaceReadSeamTests
         firstResult.Should().Be(masterThreadId);
         created.Should().ContainSingle();
         created[0].GetAttributeValue<OptionSetValue>("sprk_threadtype").Value.Should().Be(ThreadTypeDirect);
-        created[0].GetAttributeValue<string>("sprk_regardingrecordtype").Should().Be("systemuser");
+        // Master keyed on the owning-user GUID via sprk_regardingrecordid (globally unique). No text type attr;
+        // "systemuser" is not an ADR-024 family, so no typed regarding lookup either.
+        created[0].GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(ownerId.ToString());
+        created[0].Contains("sprk_regardingrecordtype").Should().BeFalse();
 
         // Second no-regarding orphan for the SAME owner — real strategy Skips again; the ladder JOINS the
         // existing master (ONE master per owning user) — idempotent, end-to-end, real production types.

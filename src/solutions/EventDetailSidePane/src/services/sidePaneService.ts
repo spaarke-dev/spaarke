@@ -7,6 +7,8 @@
  * @see design.md - Event Detail Side Pane specification
  */
 
+import { OOB_MODAL_SIZES } from '@spaarke/ui-components';
+
 /**
  * Xrm.App.sidePanes type definition (subset needed)
  */
@@ -146,10 +148,12 @@ export function openEventRecord(eventId: string): void {
       formId: EVENT_MODAL_FORM_ID,
     };
 
+    // `record` OOB size (85%×85%) — record-modal-selection.md invariant
+    // (spec FR-11/FR-18, task 090); was an ad-hoc 80%×80% literal.
     const navigationOptions = {
       target: 2,
-      width: { value: 80, unit: "%" },
-      height: { value: 80, unit: "%" },
+      width: OOB_MODAL_SIZES.record.width,
+      height: OOB_MODAL_SIZES.record.height,
       position: 1,
     };
 

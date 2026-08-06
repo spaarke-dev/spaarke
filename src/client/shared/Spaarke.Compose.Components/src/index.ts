@@ -13,7 +13,11 @@
 //
 // Licensing constraint (LOCKED at Spike #1, 2026-06-29): TipTap core +
 // StarterKit + 11 standard MIT extensions ONLY. No TipTap Pro packages.
-// DOCX bridge: mammoth ^1.8.0 (BSD-2-Clause) + docx ^9.0.3 (MIT). All OSS.
+// DOCX→editor read path: server-side projection (Sprk.Bff.Api `ComposeDocxProjectionBuilder`,
+// DocumentFormat.OpenXml, MIT). Task 013 (spaarkeai-compose-fidelity-r4.5, F-2 "one reader")
+// removed the client-side mammoth read path from Compose; `mammoth` ^1.8.0 (BSD-2-Clause)
+// remains a repo dependency for other consumers (SprkChat/Notepad in @spaarke/ui-components).
+// DOCX export path (TipTap → structured content model, server-rendered): docx ^9.0.3 (MIT).
 
 // -------------------------------------------------------------------------
 // Editor (Phase 4 task 045 — pre-Phase 7 origin)
@@ -25,6 +29,11 @@ export type {
   ComposeEditorDocumentRef,
   ComposeDraftPayload,
   ComposeDraftProvenance,
+  // NDA-REVIEW advisory comments (ai-advanced-capabilities-nda-r1 task 031) —
+  // ComposeEditorHandle.placeAdvisoryComments' input/output shapes.
+  AdvisoryCommentInput,
+  AdvisoryCommentFailure,
+  AdvisoryCommentPlacementResult,
 } from './widgets/ComposeEditor';
 export { ComposeFormatToolbar } from './widgets/ComposeFormatToolbar';
 export type { ComposeFormatToolbarProps } from './widgets/ComposeFormatToolbar';
@@ -58,6 +67,46 @@ export type { ComposeAiToolbarProps, ComposeAiToolbarAction, ComposeActionEnqueu
 export { useComposeToolbarActivation } from './widgets/useComposeToolbarActivation';
 export type { UseComposeToolbarActivationOptions } from './widgets/useComposeToolbarActivation';
 
+// R4 FR-07 — drift-proof AI generate-window bookmark (task 040, CAPTURE half). Drops a
+// request-scoped ProseMirror `SelectionBookmark` at the selection on Generate, rebases it through
+// concurrent user edits via the op-log `Mapping`, sends the target paraId as model context, and
+// resolves it to the current position on return (the apply/validate half is task 041).
+export { useAiGenerateBookmark, extractComposeOperations } from './widgets/hooks/useAiGenerateBookmark';
+export type {
+  AiGenerateBookmarkController,
+  AiGenerateBookmarkContext,
+  AiGenerateResolvedBookmark,
+  AiGenerateReturnResult,
+  AiGenerateOperationsResult,
+  AiGenerateRefusedResult,
+  AiGenerateUnknownResult,
+  AiGenerateReviewReason,
+  AiGenerateRefusalReason,
+  UseAiGenerateBookmarkOptions,
+} from './widgets/hooks/useAiGenerateBookmark';
+
+// R4 FR-07 — validate-before-apply + fuzzy-as-comment last resort (task 041, the APPLY half of
+// task 040's generate-window bookmark). Validates every AI-returned operation's paraId/offset
+// against the live document; a valid anchor applies cleanly, an unvalidatable one surfaces as a
+// review item (never silently placed, never silently dropped) via the shipped
+// `AnnotationReanchorService` fuzzy-reanchor route (injected, not reimplemented).
+export {
+  useAiApplyValidation,
+  validateComposeOperationAnchor,
+  applyValidatedComposeOperation,
+} from './widgets/hooks/useAiApplyValidation';
+export type {
+  AiApplyValidationController,
+  UseAiApplyValidationOptions,
+  AiApplyOutcome,
+  AiApplyReviewItem,
+  AiApplyFuzzyHint,
+  AiApplyReviewReason,
+  AiApplyReanchorFn,
+  AnchorValidationReason,
+  AnchorValidationResult,
+} from './widgets/hooks/useAiApplyValidation';
+
 // -------------------------------------------------------------------------
 // Workspace-level widgets (Phase 7 task 091 — moved from SpaarkeAi)
 // -------------------------------------------------------------------------
@@ -77,14 +126,50 @@ export { ComposeConflictDialog } from './widgets/ComposeConflictDialog';
 // -------------------------------------------------------------------------
 export { ComposeCommentThread } from './widgets/ComposeCommentThread';
 export type { ComposeCommentThreadProps, ComposeCommentPendingRange } from './widgets/ComposeCommentThread';
-export { composeCommentThreadsToDocxAnnotations } from './widgets/ComposeCommentThread.types';
+export { composeCommentThreadsToDocxAnnotations, findCommentAnchorRange } from './widgets/ComposeCommentThread.types';
 export type {
   ComposeCommentAuthorStamp,
   ComposeCommentReply,
   ComposeCommentThreadModel,
 } from './widgets/ComposeCommentThread.types';
 export { useComposeCommentThreads } from './widgets/hooks/useComposeCommentThreads';
-export type { UseComposeCommentThreadsResult, ComposeCommentRange } from './widgets/hooks/useComposeCommentThreads';
+export type {
+  UseComposeCommentThreadsResult,
+  ComposeCommentRange,
+  ComposeCommentThreadMetadata,
+} from './widgets/hooks/useComposeCommentThreads';
+
+// -------------------------------------------------------------------------
+// Right-gutter comment layout (ai-advanced-capabilities-nda-r1 task 032, FR-16) — right-rail cards
+// vertically aligned to each thread's LIVE anchor position (coordsAtPos), replacing/superseding the
+// docked-list-only presentation for the NDA-REVIEW advisory-comment flow. Mounted inside ComposeEditor.
+// -------------------------------------------------------------------------
+export {
+  ComposeCommentGutter,
+  layoutCommentGutterCards,
+  COMMENT_GUTTER_WIDTH_PX,
+} from './widgets/ComposeCommentGutter';
+export type { ComposeCommentGutterProps } from './widgets/ComposeCommentGutter';
+
+// -------------------------------------------------------------------------
+// Review-summary docked panel (ai-advanced-capabilities-nda-r1 task 030, FR-07) — the fuller
+// advisory digest (overallRisk + cited flagged-section findings) rendered inside Compose. Single
+// surface: no separate Analysis widget consumes this — mounted directly by ComposeWorkspace.
+// Renamed NdaReviewSummaryPanel -> AgreementReviewSummaryPanel (ai-advanced-capabilities-agreements-r1
+// task 010, pure rename); the old name is re-exported below as a deprecated alias (ADR-012 export
+// stability) so any existing consumer import keeps resolving.
+// -------------------------------------------------------------------------
+export {
+  AgreementReviewSummaryPanel,
+  deriveOverallRisk,
+  riskBadgeColor,
+  NDA_REVIEW_DISCLAIMER_TEXT,
+  /** @deprecated Use `AgreementReviewSummaryPanel` instead. */
+  NdaReviewSummaryPanel,
+} from './widgets/AgreementReviewSummaryPanel';
+export type { AgreementReviewSummaryPanelProps, NdaReviewFindingSummary } from './widgets/AgreementReviewSummaryPanel';
+/** @deprecated Use `AgreementReviewSummaryPanelProps` instead. */
+export type { NdaReviewSummaryPanelProps } from './widgets/AgreementReviewSummaryPanel';
 
 // -------------------------------------------------------------------------
 // Return-from-Word re-anchoring (FR-27 / task 054)
@@ -102,7 +187,6 @@ export type {
 
 // Word round-trip shuttle client callers (task 103 — gaps 3.1 / 3.4 / poll half of 3.5)
 export {
-  useComposePushAnnotations,
   useComposePullAnnotations,
   useComposeCheckChanges,
   anchoredAnnotationsToPriorAnchors,
@@ -116,8 +200,6 @@ export type {
   RecoveredRevision,
   PullAnnotationsResult,
   CheckChangesResult,
-  PushAnnotationsArgs,
-  UseComposePushAnnotationsResult,
   PullAnnotationsArgs,
   UseComposePullAnnotationsResult,
   CheckChangesArgs,
@@ -213,6 +295,69 @@ export type {
   ImportedComment,
 } from './types/compose-contracts';
 
+// -------------------------------------------------------------------------
+// R4 FR-11 — the shared, versioned operation schema (task 003)
+//
+// The op-schema spine both client (ProseMirror step interceptor, task 020) and
+// server (ComposeShadowPatchEngine, task 030) implement identically. Mirrors
+// `Sprk.Bff.Api.Services.Compose.Operations.ComposeOperation`. Round-trips
+// client → server → client without loss.
+// -------------------------------------------------------------------------
+export {
+  COMPOSE_OPERATION_SCHEMA_VERSION,
+  COMPOSE_OPERATION_TYPES,
+  isComposeOperation,
+  isComposeOperationLog,
+} from './types/compose-operations';
+export type {
+  ComposeOperationType,
+  ComposeRunPoint,
+  ComposeRunRange,
+  ComposeMarkType,
+  ComposeBlockAttr,
+  ComposeParagraphPosition,
+  InsertTextOperation,
+  DeleteRangeOperation,
+  ReplaceRangeOperation,
+  SetMarkOperation,
+  ClearMarkOperation,
+  SplitParagraphOperation,
+  MergeParagraphOperation,
+  InsertParagraphOperation,
+  DeleteParagraphOperation,
+  SetBlockAttrOperation,
+  ComposeOperation,
+  ComposeOperationLog,
+  // ai-advanced-capabilities-nda-r1 task 040 — comment-export wiring fix
+  ComposeAnchoredComment,
+} from './types/compose-operations';
+
+// -------------------------------------------------------------------------
+// R4 FR-03 — the ProseMirror step→operation interceptor (task 020)
+//
+// The CLIENT half of the bridge: a read-only ProseMirror plugin (headless TipTap
+// extension) that captures transaction STEPS as task-003 operations anchored
+// `(paraId, runIndex, run-local-offset)` (D1/D2, I-6). Registered additively in
+// ComposeEditor; the save/rebase path (task 022+) supplies `onOperations`.
+// -------------------------------------------------------------------------
+export {
+  StepOperationInterceptor,
+  COMPOSE_R4_STEP_INTERCEPTOR,
+  stepOperationInterceptorPluginKey,
+  STEP_INTERCEPTOR_IGNORE_META,
+  resolveRunAnchor,
+  runsOfBlock,
+  runLocalPoint,
+  classifyStep,
+  buildBatchRevisionOp,
+} from './widgets/stepOperationInterceptor';
+export type {
+  StepOperationInterceptorOptions,
+  StepClassification,
+  ComposeAnchor,
+  OperationEmitContext,
+} from './widgets/stepOperationInterceptor';
+
 // R3 FR-24 import round-trip (task 050) — render recovered Word revisions as first-class,
 // accept/reject-able insertion/deletion marks anchored by paraId (design §7). Exported for the
 // ComposeEditor mount + direct tests; most consumers pass `importedRevisions` to <ComposeEditor>.
@@ -232,12 +377,11 @@ export type { ApplyImportedCommentAnchorsResult } from './widgets/importedCommen
 // DOCX bridge helpers — exported for advanced consumers + tests. Most consumers should use ComposeEditor
 // (which orchestrates these internally). R3 task 027: the `docx.js` byte-authoring exporters
 // (`tipTapToDocxBytes`/`tipTapJsonToDocxBytes`/`buildRejectBaselineJson`) are REMOVED — the server owns
-// all `.docx` authoring; the client sends the structured content model / edited-paragraph deltas below.
-export {
-  docxToTipTapHtml,
-  stampParaIds,
-  captureParaIdSnapshot,
-  collectEditedParagraphs,
-  buildContentModel,
-} from './utils/docxBridge';
-export type { MammothConversionResult, TipTapNode } from './utils/docxBridge';
+// all `.docx` authoring; the client sends the structured content model / operation-log deltas below.
+// R4 task 023: `collectEditedParagraphs` (the paragraph-diff export) is REMOVED — dirty-save capture
+// routes only through the step interceptor's operation log (`serializeOperationLog` on the editor
+// handle); `buildContentModel` (the born-in-editor full-render path) is unchanged here (task 033).
+// Task 013 (spaarkeai-compose-fidelity-r4.5, F-2): `docxToTipTapHtml` (the client mammoth reader) and
+// its `MammothConversionResult` type are REMOVED — every entry path now hydrates a server projection.
+export { stampParaIds, captureParaIdSnapshot, buildContentModel } from './utils/docxBridge';
+export type { TipTapNode } from './utils/docxBridge';

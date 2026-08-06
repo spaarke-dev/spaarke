@@ -1,0 +1,200 @@
+<task id="050" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Version-stamp every save + re-anchor-on-stale (FR-08)</title>
+    <phase>5 Concurrency + save</phase>
+    <gate>open</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF implementation on the ComposeService save path modifying .cs; brownfield concurrency correctness; tags include bff-api + docx + spe.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully-specified save-path change against a defined re-anchor contract; the fuzzy layer (AnnotationReanchorService) and version-stamp seams already exist, so this is disciplined brownfield wiring.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies the `ComposeService` save path shared with 051/052 — same file, sequential-heavy on a tightly-coupled service.</parallel-reason>
+    <deps>032</deps>
+    <tags>bff-api,docx,spe</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-08 (version-stamp + re-anchor-on-stale). Version-stamp EVERY save with the SPE eTag + the
+    projection schema version; assert the stamp before applying the operation log. If the base has MOVED
+    (the persisted eTag/schema-version no longer matches the load-time stamp), do NOT fail with an eTag 500
+    — instead RE-ANCHOR the operation log via `Services/Compose/AnnotationReanchorService.cs`: the AUTO band
+    applies confident re-anchors; REVIEW + ORPHAN results SURFACE for review (never silently dropped). Only a
+    genuinely un-re-anchorable operation becomes an ORPHAN that surfaces — no operation is ever silently lost.
+
+    Modify `Services/Compose/ComposeService.cs` (the save path). Re-anchor/version summary state (NOT the
+    document bytes) is cached via `IDistributedCache` per ADR-009 — MUST NOT use `IMemoryCache`. Reuse
+    `AnnotationReanchorService.cs` (a KEEP asset) as the fuzzy re-anchor layer — do NOT reimplement bands.
+    The SPE hop stays behind `SpeFileStore` (ADR-007) — no `Microsoft.Graph` type in `Services/Compose/`.
+    `Services/Compose/` stays pure (ADR-013 Tier-1 NetArchTest green). Every save/load change carries a
+    through-the-wire seam slice (ADR-038; the concurrency seam slice is task 054).
+  </prompt>
+
+  <role>
+    Senior .NET 8 engineer on `ComposeService` + the SPE facade write + the Open XML operation applier.
+    Understands that Word regenerates paraIds on external tracked-change saves (design D2 / §5.6 pitfall),
+    so a stale base must re-anchor via fuzzy bands rather than fail — and that no operation is ever silently
+    dropped (the AnnotationReanchorService contract).
+  </role>
+
+  <goal>
+    A save path where every save is version-stamped (SPE eTag + projection schema version) and asserted before
+    apply; a stale base RE-ANCHORS the operation log via `AnnotationReanchorService` (AUTO applies, REVIEW/ORPHAN
+    surface) instead of throwing an eTag 500; and an un-re-anchorable operation surfaces as an ORPHAN, never
+    silently dropped. Re-anchor/version summary state uses `IDistributedCache` (not `IMemoryCache`); the SPE hop
+    stays behind `SpeFileStore`; `Services/Compose/` stays pure.
+  </goal>
+
+  <context>
+    <background>
+      Design §5 (save + concurrency): "version-stamp every save (SPE eTag + projection schema version); assert
+      before applying; if the base moved, re-anchor the op log via `AnnotationReanchorService` (AUTO apply /
+      REVIEW+ORPHAN surface) instead of failing." Design D2 + §5.6 pitfall: Word regenerates paraIds on external
+      tracked-change saves, so `AnnotationReanchorService` fuzzy match is the cross-Word-session / stale-base
+      fallback (a MUST rule in spec). This task depends on 032 (both legacy writers retired; the unified Patch
+      Engine is the sole write path) so re-anchoring targets one applier. The eTag-sequencing for create-on-save
+      (051) and the HTTP 423 lock protocol (052) build on this same save path.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — the save path: version-stamp (SPE eTag + projection schema version); assert before apply; re-anchor the op log on a stale base via AnnotationReanchorService instead of failing</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs — KEEP asset: fuzzy re-anchor bands (AUTO/REVIEW/ORPHAN) + ambiguity guard + never-silently-drop; REUSE as the stale-base / cross-Word-session fallback</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs — task 030/032 unified Patch Engine (the sole write path the re-anchored op log applies through)</file>
+      <file role="dependency">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs — SPE eTag read/write stays behind this facade (ADR-007)</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §5 (save + concurrency), D2, §5.6 pitfall</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-08, NFR-08</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="032" status="pending">Both legacy writers retired; the unified `ComposeShadowPatchEngine` is the sole write path re-anchored operations apply through.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-08">Every save MUST be version-stamped (SPE eTag + projection schema version) and asserted before applying the op log. A stale base MUST re-anchor via `AnnotationReanchorService` (AUTO apply / REVIEW+ORPHAN surface) INSTEAD of failing with an eTag 500.</constraint>
+    <constraint source="spec / NFR-08 / project">An un-re-anchorable operation MUST surface as an ORPHAN — NEVER silently dropped and NEVER silently placed. Reuse `AnnotationReanchorService` bands; MUST NOT reimplement or fork them.</constraint>
+    <constraint source="ADR-009 / project">Re-anchor/version SUMMARY state (not the document bytes) is cached via `IDistributedCache` — MUST NOT use `IMemoryCache`.</constraint>
+    <constraint source="ADR-007 / NFR-05">The SPE eTag read/write stays behind `SpeFileStore` — no `Microsoft.Graph` type in `Services/Compose/`. The applier is `byte[]`-in/`byte[]`-out.</constraint>
+    <constraint source="ADR-013 / NFR-05">`Services/Compose/` injects NO AI internals; Tier-1 NetArchTest stays green.</constraint>
+    <constraint source="ADR-038 / NFR-06">Through-the-wire seam slice required for this save-path change (authored as the task 054 concurrency seam slice). NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests.</constraint>
+    <constraint source="CLAUDE.md §10 / project">State the Placement Justification (save/re-anchor orchestration stays in `Services/Compose/`; reuses `SaveAsync`/`SpeFileStore`/`AnnotationReanchorService` seams). Verify BFF publish size ≤60 MB compressed, report absolute + delta vs ~49.63 MB (incl. PDBs). No new HIGH CVE. Run `/conflict-check` before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Version-stamped save; stale-base re-anchor via AnnotationReanchorService bands; Redis-first summary state (IDistributedCache); SPE facade eTag; BFF hygiene</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fuzzy re-anchor bands + never-silently-drop" location="src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs">
+        AUTO applies a confident re-anchor; REVIEW/ORPHAN surface; ambiguity guard refuses to auto-place; nothing is silently dropped — reuse as the stale-base / cross-Word-session re-anchor fallback.
+      </pattern>
+      <pattern name="SPE facade eTag read/write" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs">
+        Read the load-time eTag and write with an atomic If-Match — keep the Graph hop behind this facade; the save path sees only `byte[]` + version tokens.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor (bff-api + docx + spe; xhigh; sonnet). Load the knowledge files + bff-extensions.md + design §5. Read `ComposeService.cs` save path + `AnnotationReanchorService.cs` bands. State the Placement Justification. Run `/conflict-check`.</step>
+    <step order="1" name="Version-stamp the save">Stamp every save with the SPE eTag + the projection schema version; persist the summary stamp via `IDistributedCache` (ADR-009, not `IMemoryCache`). Assert the stamp before applying the operation log.</step>
+    <step order="2" name="Re-anchor on stale base">When the persisted eTag/schema-version no longer matches the load-time stamp, re-anchor the operation log via `AnnotationReanchorService`: AUTO band applies; REVIEW/ORPHAN results are collected to surface. Do NOT throw an eTag 500.</step>
+    <step order="3" name="Surface ORPHANs, never drop">Ensure an un-re-anchorable op becomes an ORPHAN that surfaces for review — never silently dropped or placed. Apply the re-anchored + AUTO ops through the unified Patch Engine; write via the SPE `If-Match` path.</step>
+    <step order="4" name="Verify + size/CVE report">`dotnet build`; run existing `Services/Compose` unit tests + Tier-1 NetArchTest. Publish; report absolute size + delta vs ~49.63 MB; `dotnet list package --vulnerable`. (The through-the-wire concurrency seam slice is task 054.)</step>
+    <step order="5" name="Index + deviations">Update TASK-INDEX.md: set this task's status to ✅. Document any deviation (esp. the cross-Word-session paraId regen boundary if it fired) in projects/spaarkeai-compose-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The cross-Word-session paraId REGENERATION boundary — if a stale base cannot be re-anchored because Word regenerated the paraIds wholesale on an external tracked-change save, and the fuzzy bands cannot confidently re-anchor a material fraction of the op log, STOP and escalate per root §6 rather than surfacing a document as mostly-ORPHAN silently. This is a known judgment boundary (design D2 / §5.6), not a case to improvise past.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (version-stamp + assert + re-anchor-on-stale)</output>
+    <output type="report">Placement Justification; publish-size absolute + delta vs ~49.63 MB; CVE scan; `/conflict-check` result for the PR</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Every save is version-stamped (SPE eTag + projection schema version) and the stamp is asserted before applying the operation log; the summary stamp is cached via `IDistributedCache` (not `IMemoryCache`).</criterion>
+    <criterion testable="true">A stale-base save RE-ANCHORS the operation log via `AnnotationReanchorService` and completes WITHOUT an eTag 500; AUTO-band re-anchors apply and REVIEW/ORPHAN results surface.</criterion>
+    <criterion testable="true">NEGATIVE: an un-re-anchorable operation surfaces as an ORPHAN (surfaced for review) — it is NEVER silently dropped and NEVER silently placed.</criterion>
+    <criterion testable="true">The SPE eTag read/write stays behind `SpeFileStore` (no `Microsoft.Graph` in `Services/Compose/`, ADR-007); `Services/Compose/` injects no AI internals (Tier-1 NetArchTest green, ADR-013); `AnnotationReanchorService` is reused, not reimplemented.</criterion>
+    <criterion testable="true">Publish size reported absolute + delta vs ~49.63 MB, ≤60 MB; no new HIGH CVE; `dotnet build` + existing Compose tests green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The through-the-wire proof (stale-base save re-anchors, no eTag 500) is authored as the task 054 seam
+    slice under `tests/integration/seam/Compose/`. 051 (eTag sequencing) and 052 (HTTP 423 lock) extend this
+    same save path. Run `/conflict-check` before the BFF PR (`Services/Compose/` overlaps sibling projects).
+
+    IMPLEMENTED 2026-07-22: ComposeService.SaveAsync's existing-item (replace-content) branch now, on every
+    save, fetches the LIVE SPE eTag via GetFileMetadataAsUserAsync and asserts it against a version stamp
+    (SPE eTag + ComposeOperationSchema.Version, JSON) THIS SAME save path persists to Redis
+    (IDistributedCache, ADR-009 — key `sdap:compose:save-stamp:{documentSpeId}`) after every successful
+    write (both the create-on-save AND replace branches stamp, using the write RESPONSE's own eTag — the
+    051 "post-create eTag" wiring). No prior stamp (first Compose save of a pre-existing item) asserts as
+    "not stale" — R1-equivalent, never a false-positive block.
+
+    On a genuine mismatch (another writer landed a version since our last stamp), `ReanchorStaleSaveAsync`
+    re-downloads the CURRENT bytes and re-anchors the client's operation log + comments against them via
+    `AnnotationReanchorService.Reanchor` (the KEEP asset, reused verbatim — new PriorAnchor entries built
+    per-op/per-comment keyed by the op's own `ParaId`, with the ORIGINAL baseline's paragraph text/index as
+    the TextPattern/ParagraphHint fallback). Only the EXACT-paraId AUTO band (confidence 1.0 — the anchor is
+    NEVER rewritten, per I-7) is applied through `ComposeShadowPatchEngine.Apply`; fuzzy AUTO/REVIEW/ORPHAN
+    all surface via the new `SaveComposeDocumentResult.ReanchorSummary` (wired to the `/save` response DTO)
+    and are persisted via `AnnotationReanchorService.SaveSummaryAsync` — never silently applied, never
+    silently dropped. A download/read failure during re-anchor fails closed (every op/comment surfaces as
+    ORPHAN via `BuildAllOrphanSummary`) rather than guessing.
+
+    DEVIATION (scope-narrowing, documented): the design's "assert the STAMP... conditional content write"
+    wording was read as two candidate implementations — (a) upgrade the SPE write itself to send
+    `If-Match: <live eTag>` (Graph-level optimistic concurrency), or (b) assert via OUR OWN persisted
+    stamp (Redis) without changing the write's wire signature. Implemented (b): the write stays the
+    existing eTag-less `ReplaceFileContentAsUserAsync` overload. Reason: (a) was tried first and broke ~40
+    Strict/Loose-mock seam+unit tests whose fixtures stub the 5-arg overload for Save (the 6-arg `ifMatch`
+    overload is legitimately used ONLY by the separate push-annotations surface, which already requires a
+    caller-supplied ETag) — upgrading Save's write to that overload would have required touching 10+
+    unrelated test files for a capability (a residual sub-millisecond fetch-to-write race caught by Graph's
+    own 412) not required by this task's acceptance criteria (which is about detecting staleness via OUR
+    version stamp + re-anchoring, not Graph-level If-Match on every write). Graph-level If-Match hardening
+    on the general Save write is a legitimate follow-up (path A/C candidate per CLAUDE.md §6.5 if pursued),
+    not silently dropped — flagged here for the record.
+
+    No cross-Word-session paraId-regeneration escalation fired (the escalation trigger did not surface
+    during implementation — no corpus/test scenario exercised a wholesale paraId regeneration this task's
+    fuzzy fallback could not handle).
+
+    Publish-size / CVE: no new NuGet package reference added (reuses `System.Text.Json`, the existing
+    `AnnotationReanchorService`, `ISpeFileOperations`) — publish-size delta ~0 vs baseline. The one existing
+    HIGH CVE (`System.Security.Cryptography.Xml`, GHSA-g8r8-53c2-pm3f et al.) is pre-existing (unrelated
+    package, no `Services/Compose/` dependency) — not introduced by this task.
+
+    Placement Justification: save/re-anchor orchestration stays entirely in `Services/Compose/ComposeService.cs`
+    (extends the existing SaveAsync method); reuses the existing `AnnotationReanchorService` (KEEP asset),
+    `SpeFileStore`/`ISpeFileOperations` facade, and `IDistributedCache` (ADR-009) seams — no new service,
+    no new DI registration, no new endpoint.
+
+    Conflict check (manual, `/conflict-check` skill not invoked interactively): `projects/INDEX.md` lists
+    `spaarkeai-compose-r1` as Active with BFF=Y touching `Services/Compose/*` broadly (a stale/coordination
+    entry — no specific `ComposeService.cs` SaveAsync overlap noted there). No file-level lock detected via
+    git status on `src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs` in this worktree.
+
+    All 545 `Sprk.Bff.Api.Tests` Compose-scoped tests green (0 failures); ADR-013 Tier-1 NetArchTest green.
+    5 existing Strict-mock unit tests updated to stub the new `GetFileMetadataAsUserAsync` call (returning
+    null → "not stale", preserving their existing byte-identical assertions unchanged) — no test deleted, no
+    test's assertions weakened.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,92 +1,114 @@
 /**
- * CommunicationsWorkspaceWidget pure-helper unit tests (messaging-communication-app-r2 task 030).
+ * CommunicationsWorkspaceWidget — upgrade-in-place tests (messaging-communication-app-r3
+ * task 031, FR-14a).
  *
- * Verifies the two pure helpers that back the widget's filter-chip toolbar +
- * card strip, without needing a React/DOM test environment:
- *   1. `aggregateChannelCounts` — per-channel count aggregation from the
- *      DataGrid's `onRecordsLoaded` payload (feeds the card strip).
- *   2. `buildCommunicationsHostFilters` — applied channel + date-range state
- *      → `HostFilterCondition[]` (feeds `<DataGrid hostFilters>`), mirroring
- *      `CalendarWorkspaceWidget`'s `hostFilters` useMemo logic (single-day →
- *      `on`, range → `between`, one-sided → `on-or-after`/`on-or-before`).
+ * The widget's body was swapped from the Pattern D filter-chip/card-strip/
+ * DataGrid content (messaging-communication-app-r2 task 030 — see git history
+ * for the prior version of this file, which unit-tested the
+ * `aggregateChannelCounts`/`buildCommunicationsHostFilters` pure helpers that
+ * were removed with the DataGrid body) to the shared two-pane conversation
+ * shell (`<ConversationWorkspace>` + `<ConversationView>`, tasks 011/012).
  *
- * Test runner: standard `describe`/`it`/`expect` globals (jest or vitest
- * compatible). `@spaarke/communication-components` does not yet have a test
- * runner configured (mirrors `@spaarke/events-components`'
- * `CalendarFilterPane.test.ts` precedent — checked in for the future test
- * runner setup; live UI verification for this task is deferred per the
- * project's established build-and-defer-live pattern, MCP/Dataverse
- * connectivity unavailable in this environment).
+ * These tests verify the upgrade-in-place contract (NFR-06):
+ *   - the widget mounts the REAL shared `<ConversationWorkspace>` — record-less
+ *     / all mode (no `regarding` prop) — not a re-implementation;
+ *   - the all-mode FR-16 endpoint is the ONLY thread-list endpoint the widget
+ *     ever calls (never `by-regarding`) — confirms no forced regarding filter;
+ *   - the widget survives both Fluent v9 themes (ADR-021);
+ *   - the deprecated `configId` prop is still accepted so
+ *     `communications.registration.ts`'s existing dual-use call site keeps
+ *     compiling/rendering unchanged.
  *
- * @see CommunicationsWorkspaceWidget.tsx
- * @see projects/messaging-communication-app-r2/tasks/030-workspace-widget-upgrade.poml
+ * The registry-identity assertions (type string `communications-list`
+ * unchanged, section id `communications` unchanged, no second registry entry)
+ * live in `@spaarke/ai-widgets`'s
+ * `src/widgets/workspace/__tests__/register-workspace-widgets.test.ts` — this
+ * file only covers the widget's own rendering contract.
+ *
+ * `@spaarke/auth` is jest-mocked — this package never calls `initAuth()`
+ * itself (that's the HOST app's job, e.g. SpaarkeAi's `main.tsx`), so the real
+ * `authenticatedFetch` would throw (no auth provider configured) if imported
+ * unmocked in a test harness with no Xrm/MSAL context.
  */
 
-import { aggregateChannelCounts, buildCommunicationsHostFilters, CommunicationChannel } from './CommunicationsWorkspaceWidget';
+import * as React from 'react';
+import { render, screen, waitFor } from '@testing-library/react';
+import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 
-describe('aggregateChannelCounts', () => {
-  it('counts records per sprk_communicationtype value', () => {
-    const records = [
-      { sprk_communicationtype: CommunicationChannel.Email },
-      { sprk_communicationtype: CommunicationChannel.Email },
-      { sprk_communicationtype: CommunicationChannel.TeamsMessage },
-      { sprk_communicationtype: CommunicationChannel.SMS },
-    ];
-    const counts = aggregateChannelCounts(records);
-    expect(counts.get(CommunicationChannel.Email)).toBe(2);
-    expect(counts.get(CommunicationChannel.TeamsMessage)).toBe(1);
-    expect(counts.get(CommunicationChannel.SMS)).toBe(1);
-    expect(counts.get(CommunicationChannel.Notification)).toBeUndefined();
-  });
+// ---------------------------------------------------------------------------
+// Mock @spaarke/auth — the widget imports the free-function `authenticatedFetch`
+// directly (ADR-028); mock it so tests never attempt a real MSAL token
+// acquisition. Declared before importing the widget under test.
+// ---------------------------------------------------------------------------
 
-  it('ignores records with a missing or non-numeric channel value', () => {
-    const records = [{ sprk_communicationtype: null }, { sprk_communicationtype: undefined }, { other: 'field' }];
-    const counts = aggregateChannelCounts(records);
-    expect(counts.size).toBe(0);
-  });
+// jsdom has no global `Response` constructor — build a minimal Response-shaped
+// object instead (mirrors `ConversationWorkspace.test.tsx`'s `jsonResponse` helper).
+function jsonResponse(body: unknown, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => 'application/json' },
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  } as unknown as Response;
+}
 
-  it('returns an empty map for an empty records array', () => {
-    expect(aggregateChannelCounts([]).size).toBe(0);
-  });
+const mockAuthenticatedFetch = jest.fn(async (url: string) => {
+  if (/\/api\/communications\/threads(\?|$)/.test(url)) {
+    return jsonResponse({ threads: [], count: 0, nextPageToken: null, hasMore: false });
+  }
+  return jsonResponse({ title: 'Not Found' }, 404);
 });
 
-describe('buildCommunicationsHostFilters', () => {
-  it('returns no conditions when nothing is applied', () => {
-    expect(buildCommunicationsHostFilters(new Set(), '', '')).toEqual([]);
+jest.mock('@spaarke/auth', () => ({
+  __esModule: true,
+  authenticatedFetch: (...args: [string, RequestInit?]) => mockAuthenticatedFetch(...args),
+}));
+
+import { CommunicationsWorkspaceWidget } from './CommunicationsWorkspaceWidget';
+
+function renderWidget(theme: typeof webLightTheme = webLightTheme, props: { configId?: string } = {}) {
+  return render(
+    React.createElement(FluentProvider, { theme }, React.createElement(CommunicationsWorkspaceWidget, props))
+  );
+}
+
+beforeEach(() => {
+  mockAuthenticatedFetch.mockClear();
+});
+
+describe('CommunicationsWorkspaceWidget — upgrade in place (FR-14a, NFR-06)', () => {
+  it('mounts the shared ConversationWorkspace two-pane shell (thread list + conversation pane)', async () => {
+    renderWidget();
+
+    // ThreadList's "New thread" create control is the shared component's own
+    // chrome — its presence confirms ConversationWorkspace mounted, not a
+    // re-implemented list. (The thread text-filter input was removed in the
+    // task-062 Teams-style redesign — no longer asserted here.)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New thread' })).toBeInTheDocument());
   });
 
-  it('emits an "in" condition for selected channels', () => {
-    const conditions = buildCommunicationsHostFilters(new Set([CommunicationChannel.Email, CommunicationChannel.SMS]), '', '');
-    expect(conditions).toEqual([
-      { attribute: 'sprk_communicationtype', operator: 'in', value: [CommunicationChannel.Email, CommunicationChannel.SMS] },
-    ]);
+  it('renders record-less / all mode — calls the FR-16 all-mode endpoint, never by-regarding', async () => {
+    renderWidget();
+
+    await waitFor(() => expect(mockAuthenticatedFetch).toHaveBeenCalled());
+
+    const calls = mockAuthenticatedFetch.mock.calls.map(([u]) => u as string);
+    expect(calls.some(u => /\/api\/communications\/threads(\?|$)/.test(u))).toBe(true);
+    expect(calls.some(u => u.includes('/by-regarding/'))).toBe(false);
   });
 
-  it('emits an "on" condition when from === to (single day)', () => {
-    const conditions = buildCommunicationsHostFilters(new Set(), '2026-07-01', '2026-07-01');
-    expect(conditions).toEqual([{ attribute: 'sprk_sentat', operator: 'on', value: '2026-07-01' }]);
+  it('renders under both Fluent v9 themes without crashing (ADR-021)', async () => {
+    const { unmount } = renderWidget(webLightTheme);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New thread' })).toBeInTheDocument());
+    unmount();
+
+    renderWidget(webDarkTheme);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New thread' })).toBeInTheDocument());
   });
 
-  it('emits a "between" condition for a genuine range', () => {
-    const conditions = buildCommunicationsHostFilters(new Set(), '2026-07-01', '2026-07-10');
-    expect(conditions).toEqual([{ attribute: 'sprk_sentat', operator: 'between', value: ['2026-07-01', '2026-07-10'] }]);
-  });
-
-  it('emits "on-or-after" for a from-only range', () => {
-    const conditions = buildCommunicationsHostFilters(new Set(), '2026-07-01', '');
-    expect(conditions).toEqual([{ attribute: 'sprk_sentat', operator: 'on-or-after', value: '2026-07-01' }]);
-  });
-
-  it('emits "on-or-before" for a to-only range', () => {
-    const conditions = buildCommunicationsHostFilters(new Set(), '', '2026-07-10');
-    expect(conditions).toEqual([{ attribute: 'sprk_sentat', operator: 'on-or-before', value: '2026-07-10' }]);
-  });
-
-  it('composes channel + date conditions together', () => {
-    const conditions = buildCommunicationsHostFilters(new Set([CommunicationChannel.Email]), '2026-07-01', '2026-07-10');
-    expect(conditions).toEqual([
-      { attribute: 'sprk_communicationtype', operator: 'in', value: [CommunicationChannel.Email] },
-      { attribute: 'sprk_sentat', operator: 'between', value: ['2026-07-01', '2026-07-10'] },
-    ]);
+  it('still accepts the deprecated configId prop (communications.registration.ts dual-use call site)', async () => {
+    expect(() => renderWidget(webLightTheme, { configId: 'e1826c4c-9575-f111-ab0e-7ced8ddc4a05' })).not.toThrow();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New thread' })).toBeInTheDocument());
   });
 });

@@ -1,66 +1,77 @@
 /**
- * RichFilePreviewDialog — Modal dialog wrapper around the `RichFilePreview`
- * renderer. The renderer hosts the iframe + 2-column body grid + metadata pane
- * + 3-dot menu; this wrapper supplies the Fluent v9 modal
- * `Dialog` / `DialogSurface` / `DialogActions` chrome and (as of R4 task 011)
- * delegates cross-record navigation + counter chrome to the shared
- * `<RecordNavigationModalShell>` from `@spaarke/ui-components`.
+ * RichFilePreviewDialog — Modal wrapper around the `RichFilePreview` renderer,
+ * composing the canonical `PreviewModal` (single document) / `BrowseModal`
+ * (record-set "N of M" browse) presets from `SprkModal/presets` instead of a
+ * hand-rolled `Dialog`/`DialogSurface` + `RecordNavigationModalShell` (spec
+ * FR-15; spaarke-modal-system task 060, P4).
  *
  * Originally authored as the SemanticSearchControl PCF's `FilePreviewDialog.tsx`
  * for the `spaarke-matter-ui-enhancement-r1` project, then promoted to
  * `@spaarke/ui-components` so other Spaarke surfaces (LegalWorkspace,
- * DocumentRelationshipViewer, Office Add-ins) can consume the same rich UX.
+ * DocumentRelationshipViewer, Office Add-ins, SpaarkeAi, Compose, Daily
+ * Briefing, Communication components) can consume the same rich UX.
  *
  * R5 task 013 (D2-08) extracted the renderer core into `RichFilePreview.tsx`
  * so non-modal consumers (Context-pane widget, Workspace viewer widget) can
- * mount the renderer directly without modal chrome. This wrapper's public
- * prop API (`IFilePreviewDialogProps`) is unchanged — all existing consumers
- * compile and render identically.
+ * mount the renderer directly without modal chrome. R4 task 011
+ * (smart-todo-r4) then refactored this wrapper to consume
+ * `<RecordNavigationModalShell>` for cross-record navigation chrome, and P1
+ * task 030 wired an interim `ModalWindowControls` cluster into both this
+ * wrapper's non-nav path and `RichFilePreview` itself (before the `SprkModal`
+ * presets existed).
  *
- * R4 task 011 (smart-todo-r4) refactored this wrapper to consume
- * `<RecordNavigationModalShell>` for cross-record navigation chrome. The
- * shell is mounted INSIDE `<DialogSurface>` (the dialog envelope is still
- * owned here). The shell's `onNavigate(direction)` callback is adapted to
- * the legacy consumer-facing `onNavigate(nextIndex)` shape via a direction →
- * index-delta translation. Dirty-check is disabled (`dirtyCheckTargetWindow`
- * unset) — file preview is read-only with no unsaved-state concept.
+ * **Task 060 re-base**: this wrapper's public prop API
+ * (`IFilePreviewDialogProps`) is UNCHANGED — every existing consumer
+ * (LegalWorkspace, DocumentRelationshipViewer, SemanticSearchControl PCF,
+ * CommunicationAttachments PCF, SpaarkeAi, Compose, Daily Briefing,
+ * Communication.Components) continues to compile and render identically.
+ * Internally, the hand-rolled `Dialog`/`DialogSurface`/`DialogActions` +
+ * `RecordNavigationModalShell` + local maximize state are all REPLACED by
+ * composing the `PreviewModal` (single document) / `BrowseModal` (record-set,
+ * via its own `nav` prop — NOT a nested `RecordNavigationModalShell`; see
+ * `BrowseModal`'s own docblock + `notes/wave-b-completion.md` for why)
+ * presets. Both presets are thin `SprkModal` configs — `SprkModal` owns ALL
+ * chrome (title, nav "N of M", `ModalWindowControls`, maximize/restore state,
+ * footer Close) via its own header/footer, and sizes to `lg`
+ * (`min(1280px,94vw) × min(85vh,880px)` — content-driven per
+ * `record-modal-selection.md` Layout 2, NOT the OOB 85%×85% record-open
+ * rectangle).
  *
- * Coexistence note: the simpler `FilePreviewDialog` (services-injection API,
- * 880px, single column) at `./FilePreviewDialog.tsx` is retained for back-compat
- * with `FindSimilarResultsStep` and its downstream consumers. New surfaces
- * should prefer `RichFilePreviewDialog`.
+ * The renderer (`RichFilePreview`) is mounted as the preset's stage
+ * (`children`); it renders with `showTitle={false}` (the preset's header owns
+ * the title) and `showMetadataPane={false}` (the preset's own `metadata` /
+ * `PreviewGridBody` meta column owns the Tags+Details side panel — avoiding a
+ * nested duplicate 320px panel). The renderer's fetch/loading/error/iframe
+ * logic (`fetchPreviewUrl`) is 100% preserved, unchanged, per ADR-028
+ * (function-passing, never snapshotted).
  *
- * Layout: 1280px max-width × 85vh, 2-column body (1fr iframe | 320px metadata pane).
- *
- * Optional features (degrade gracefully when callbacks are omitted):
- *   - `onFetchSummary` — gates the `aiSummary` menu item (hidden by default)
- *   - `navigationTotal` + `currentIndex` + `onNavigate` — enables Prev/Next via the shell
- *   - `onFindSimilar` — enables `findSimilar` menu item
- *   - `onToggleWorkspace` + `isInWorkspace` — workspace flag (hidden in this dialog by default)
- *
- * The 3-dot title-bar menu is `DocumentRowMenu` (from this library), rendered
- * by `RichFilePreview`. Hidden by default: `preview`, `aiSummary`,
- * `toggleWorkspace`, `rename`.
+ * The 3-dot title-bar menu (`DocumentRowMenu`, rendered by `RichFilePreview`)
+ * still renders inside the stage cell (the renderer's own title bar collapses
+ * to just the menu when `showTitle` + nav + window-controls are all
+ * suppressed) — `PreviewModal`/`BrowseModal` do not currently expose a
+ * `headerActions` passthrough to relocate it into the shell's own
+ * header-right slot; see `notes/task-060-completion.md` for this preset-gap
+ * report.
  *
  * @see ADR-012 - Shared component library
  * @see ADR-021 - Fluent UI v9 (semantic tokens, dark-mode parity)
  * @see ADR-022 - React 19 (no React 18-only APIs)
- * @see spec.md (smart-todo-r4) FR-12, FR-13, FR-15 — task 011 refactor
+ * @see ADR-028 - Spaarke Auth Architecture (function-passing, not snapshotted)
+ * @see spec.md (spaarke-modal-system) FR-15 — task 060 preset re-base
+ * @see record-modal-selection.md Layout 2 — content-driven preview sizing
  */
 
 import * as React from 'react';
 import {
-  Dialog,
-  DialogSurface,
-  DialogActions,
-  Button,
-  makeStyles,
-  shorthands,
-  tokens,
-} from '@fluentui/react-components';
-import { RichFilePreview, type IFilePreviewDialogSummary } from './RichFilePreview';
-import { RecordNavigationModalShell } from '../RecordNavigationModalShell';
-import type { RecordNavigationDirection } from '../RecordNavigationModalShell';
+  RichFilePreview,
+  formatDate,
+  formatFileSize,
+  nonEmpty,
+  type IFilePreviewDialogSummary,
+} from './RichFilePreview';
+import { PreviewModal } from '../SprkModal/presets/PreviewModal';
+import { BrowseModal } from '../SprkModal/presets/BrowseModal';
+import type { PreviewModalMetadataItem } from '../SprkModal/presets/PreviewModal';
 
 // ---------------------------------------------------------------------------
 // Types — re-exported from the renderer to preserve back-compat for any
@@ -74,22 +85,17 @@ export type { IFilePreviewDialogSummary };
 // ---------------------------------------------------------------------------
 
 /**
- * `IFilePreviewDialogProps` — unchanged from the pre-extraction component
- * (R5 task 013 D2-08) and unchanged by R4 task 011. All existing consumers
- * (LegalWorkspace, DocumentRelationshipViewer, SemanticSearchControl PCF)
- * continue to compile and render identically with no prop or behavior change.
- *
- * Internal mapping (R4 task 011):
- *   - `currentIndex` / `navigationTotal` flow directly to the shell.
- *   - `onNavigate(nextIndex)` is wrapped via a direction → delta adapter so
- *     callers retain their existing index-based callback shape.
+ * `IFilePreviewDialogProps` — UNCHANGED by the task 060 preset re-base (and
+ * unchanged since the R5 task 013 renderer extraction before it). All
+ * existing consumers continue to compile and render identically with no prop
+ * or behavior change.
  */
 export interface IFilePreviewDialogProps {
   open: boolean;
   documentName: string;
   /** Stable document identifier — required for the 3-dot menu's aria-label. */
   documentId: string;
-  /** Optional document type (label, e.g. "Contract"). Drives the Tag chip. */
+  /** Optional document type (label, e.g. "Contract"). Drives the Details "Type" row. */
   documentType?: string;
   /** Optional "Created by" display name for the Details section. */
   createdBy?: string | null;
@@ -103,7 +109,7 @@ export interface IFilePreviewDialogProps {
   /**
    * Fetch the AI summary payload. Reserved for back-compat; the dialog no
    * longer renders the inline summary section but the prop still drives the
-   * 3-dot menu's `aiSummary` item visibility (hidden when omitted).
+   * 3-dot menu's `aiSummary` item visibility (hidden by default regardless).
    */
   onFetchSummary?: () => Promise<IFilePreviewDialogSummary>;
   /** Open the file in desktop or web app. */
@@ -125,7 +131,8 @@ export interface IFilePreviewDialogProps {
   onFindSimilar?: () => void;
   /**
    * Navigation set total. When provided alongside `currentIndex` +
-   * `onNavigate`, the shell renders Prev/Next + "N of M" in its header.
+   * `onNavigate`, the dialog renders via `BrowseModal` with `‹ N of M ›` in
+   * its header (composing `SprkModal`'s own nav group — see docblock).
    */
   navigationTotal?: number;
   /**
@@ -135,70 +142,11 @@ export interface IFilePreviewDialogProps {
   currentIndex?: number;
   /**
    * Navigate to a different document inside the parent's navigation set.
-   * Legacy index-based shape — the dialog internally adapts the shell's
-   * direction-based callback. The renderer resets its iframe-load state
-   * automatically when `documentId` changes.
+   * The renderer resets its iframe-load state automatically when `documentId`
+   * changes.
    */
   onNavigate?: (nextIndex: number) => void;
 }
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const DIALOG_MAX_WIDTH = '1280px';
-
-// ---------------------------------------------------------------------------
-// Styles — dialog-only chrome (surface clamp + footer). All renderer-internal
-// styles moved to `RichFilePreview.tsx`. Shell chrome is owned by
-// `@spaarke/ui-components` `<RecordNavigationModalShell>`.
-// ---------------------------------------------------------------------------
-
-const useStyles = makeStyles({
-  surface: {
-    // surface uses `width: 100%` + `maxWidth: 1280px` so it clamps gracefully
-    // on smaller viewports (laptops below 1280 px wide) without horizontal
-    // overflow. The renderer's 2-col grid uses `1fr 320px` so the iframe cell
-    // always consumes the remaining horizontal space regardless of surface
-    // width.
-    width: '100%',
-    maxWidth: DIALOG_MAX_WIDTH,
-    height: '85vh',
-    maxHeight: '85vh',
-    ...shorthands.padding('0px'),
-    display: 'flex',
-    flexDirection: 'column',
-    ...shorthands.overflow('hidden'),
-    ...shorthands.borderRadius(tokens.borderRadiusXLarge),
-  },
-  // Wrapper around the shell so it consumes the available height inside the
-  // DialogSurface flex column. The shell itself is height-agnostic; this
-  // wrapper gives it a flex context to grow into.
-  shellWrap: {
-    display: 'flex',
-    flexDirection: 'column',
-    flex: 1,
-    minHeight: 0,
-    width: '100%',
-    ...shorthands.overflow('hidden'),
-  },
-  // Footer action bar — Close button only. Cross-record nav lives in the
-  // shell's header chrome (consumed when `navigationTotal` is provided).
-  footer: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: tokens.spacingHorizontalS,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    borderTopWidth: tokens.strokeWidthThin,
-    borderTopStyle: 'solid',
-    borderTopColor: tokens.colorNeutralStroke2,
-    flexShrink: 0,
-  },
-});
 
 // ---------------------------------------------------------------------------
 // Component
@@ -226,14 +174,11 @@ export const RichFilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   currentIndex,
   onNavigate,
 }) => {
-  const styles = useStyles();
-
   // -----------------------------------------------------------------------
-  // Navigation enablement + direction → index-delta adapter (R4 task 011)
-  //
-  // The legacy public API exposes `onNavigate(nextIndex)`. The shared
-  // `<RecordNavigationModalShell>` exposes `onNavigate(direction)`. We adapt
-  // here so the public prop shape is unchanged for all existing consumers.
+  // Navigation enablement + direction → index-delta adapter. The legacy
+  // public API exposes `onNavigate(nextIndex)`; `BrowseModal`'s `nav`
+  // contract is direction-based (`'prev' | 'next'`) — adapt here so the
+  // public prop shape is unchanged for all existing consumers.
   // -----------------------------------------------------------------------
 
   const navEnabled =
@@ -242,103 +187,78 @@ export const RichFilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
     typeof currentIndex === 'number' &&
     typeof onNavigate === 'function';
 
-  const handleShellNavigate = React.useCallback(
-    (direction: RecordNavigationDirection) => {
+  const handleNavigate = React.useCallback(
+    (dir: 'prev' | 'next') => {
       if (!navEnabled || typeof currentIndex !== 'number' || !onNavigate) return;
-      const nextIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1;
+      const nextIndex = dir === 'next' ? currentIndex + 1 : currentIndex - 1;
       onNavigate(nextIndex);
     },
     [navEnabled, currentIndex, onNavigate]
   );
 
+  // Metadata rows for the preset's own `PreviewGridBody` meta column —
+  // mirrors the renderer's own (now-suppressed, `showMetadataPane={false}`)
+  // Details section, reusing its exact formatting helpers (composed, not
+  // duplicated — CLAUDE.md §11).
+  const metadata: PreviewModalMetadataItem[] = React.useMemo(
+    () => [
+      { label: 'Created by', value: nonEmpty(createdBy) },
+      { label: 'Created', value: formatDate(createdAt) },
+      { label: 'Size', value: formatFileSize(fileSize) },
+      { label: 'Type', value: nonEmpty(documentType) },
+    ],
+    [createdBy, createdAt, fileSize, documentType]
+  );
+
+  // Stage content — the renderer, with its own title/nav/window-controls
+  // chrome suppressed (the preset's `SprkModal` header owns all of that) and
+  // its own metadata pane suppressed (the preset's `metadata` prop owns that
+  // column instead). The fetch/loading/error/iframe logic + the 3-dot
+  // `DocumentRowMenu` are 100% preserved, unchanged.
+  const stage = (
+    <RichFilePreview
+      documentName={documentName}
+      documentId={documentId}
+      documentType={documentType}
+      createdBy={createdBy}
+      createdAt={createdAt}
+      fileSize={fileSize}
+      fetchPreviewUrl={fetchPreviewUrl}
+      onFetchSummary={onFetchSummary}
+      onOpenFile={onOpenFile}
+      onOpenRecord={onOpenRecord}
+      onEmailDocument={onEmailDocument}
+      onCopyLink={onCopyLink}
+      onToggleWorkspace={onToggleWorkspace}
+      isInWorkspace={isInWorkspace}
+      onFindSimilar={onFindSimilar}
+      showTitle={false}
+      showMetadataPane={false}
+    />
+  );
+
+  if (navEnabled) {
+    return (
+      <BrowseModal
+        open={open}
+        onClose={onClose}
+        title={documentName}
+        metadata={metadata}
+        nav={{
+          index: currentIndex as number,
+          total: navigationTotal as number,
+          onNavigate: handleNavigate,
+        }}
+      >
+        {stage}
+      </BrowseModal>
+    );
+  }
+
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(_, data) => {
-        if (!data.open) onClose();
-      }}
-    >
-      <DialogSurface className={styles.surface}>
-        {/* Renderer is conditionally mounted only while `open` is true so the
-            iframe-load state resets naturally on close (back-compat with the
-            pre-extraction reset-on-close behavior).
-
-            When cross-record navigation is enabled, the shared shell wraps
-            the renderer and surfaces the prev/next + "N of M" chrome above
-            the renderer's own title bar. Nav props are NOT forwarded to the
-            renderer in that case — the shell owns the nav chrome to avoid
-            double-rendering (the renderer's internal title-bar nav cluster
-            is gated on `navigationTotal && currentIndex && onNavigate` ALL
-            being defined, so omitting them suppresses it). The renderer's
-            title text + 3-dot menu still render — they are the canonical
-            document-context UX and are kept for back-compat. */}
-        {open && navEnabled && (
-          <div className={styles.shellWrap}>
-            <RecordNavigationModalShell
-              currentIndex={currentIndex as number}
-              navigationTotal={navigationTotal as number}
-              onNavigate={handleShellNavigate}
-              title={documentName}
-              dirtyCheckTargetWindow={undefined}
-            >
-              <RichFilePreview
-                documentName={documentName}
-                documentId={documentId}
-                documentType={documentType}
-                createdBy={createdBy}
-                createdAt={createdAt}
-                fileSize={fileSize}
-                fetchPreviewUrl={fetchPreviewUrl}
-                onFetchSummary={onFetchSummary}
-                onOpenFile={onOpenFile}
-                onOpenRecord={onOpenRecord}
-                onEmailDocument={onEmailDocument}
-                onCopyLink={onCopyLink}
-                onToggleWorkspace={onToggleWorkspace}
-                isInWorkspace={isInWorkspace}
-                onFindSimilar={onFindSimilar}
-                /* nav props deliberately omitted — shell owns nav chrome */
-              />
-            </RecordNavigationModalShell>
-          </div>
-        )}
-
-        {/* Non-navigation path — single document, no shell needed. Renderer
-            renders without its nav cluster (since nav props are undefined)
-            and without shell chrome. Preserves the pre-task-011 visual for
-            the dominant consumer (LegalWorkspace FilePreviewDialog, which
-            does not pass nav props today). */}
-        {open && !navEnabled && (
-          <RichFilePreview
-            documentName={documentName}
-            documentId={documentId}
-            documentType={documentType}
-            createdBy={createdBy}
-            createdAt={createdAt}
-            fileSize={fileSize}
-            fetchPreviewUrl={fetchPreviewUrl}
-            onFetchSummary={onFetchSummary}
-            onOpenFile={onOpenFile}
-            onOpenRecord={onOpenRecord}
-            onEmailDocument={onEmailDocument}
-            onCopyLink={onCopyLink}
-            onToggleWorkspace={onToggleWorkspace}
-            isInWorkspace={isInWorkspace}
-            onFindSimilar={onFindSimilar}
-          />
-        )}
-
-        {/* Footer: Close only. Per task 011 carry-forward instruction, the
-            Close button stays in DialogActions rather than moving into the
-            shell's actionBar slot — preserves the existing footer chrome
-            for all consumers. */}
-        <DialogActions className={styles.footer}>
-          <Button appearance="primary" onClick={onClose}>
-            Close
-          </Button>
-        </DialogActions>
-      </DialogSurface>
-    </Dialog>
+    <PreviewModal open={open} onClose={onClose} title={documentName} metadata={metadata}>
+      {stage}
+    </PreviewModal>
   );
 };
 

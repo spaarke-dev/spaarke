@@ -1,0 +1,157 @@
+<task id="001" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Shadow-Document Architecture ADR + R3 paragraph-diff amendment (ADR Tension Path B)</title>
+    <phase>0 Gate</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Architectural — this is the founding ADR every downstream R4 task cites (invariants I-1…I-7, decisions D1–D5, the single anchor coordinate, the one Patch Engine); it also formalizes the ADR-Tension Path-B amendment that supersedes the R3 paragraph-diff project decision. High blast radius.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architectural ADR authoring — the founding document all downstream tasks cite; codifies the anchor model, invariants, and a Path-B amendment. Judgment-heavy, not literal transcription.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W0-adr</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Authors `.claude/adr/` — main-session-only per the Sub-Agent Write Boundary (root CLAUDE.md §3). Sub-agents cannot write `.claude/` paths; a parallel agent would be denied.</parallel-reason>
+    <deps></deps>
+    <tags>adr,architecture,docs</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Author the founding R4 architecture ADR: a NEW Shadow-Document ADR in `.claude/adr/` that codifies the
+    Shadow Document Architecture for Compose. It MUST record: the seven invariants I-1…I-7 (design §3), the
+    five locked decisions D1–D5 (design §0), the single durable anchor coordinate `(paraId, runIndex,
+    run-local-offset)` (D2), the one unified byte-author (`ComposeShadowPatchEngine`, D5), and the binding
+    rule "NO text-search in the write path" (I-7). It MUST also carry the ADR-Tension **Path-B amendment**
+    (root CLAUDE.md §6.5) that SUPERSEDES the R3 project decision codifying `ComposeParagraphRedlineSynthesizer`
+    (paragraph-diff) as the delta engine, replacing it with step-level operational deltas (spec §ADR Tensions,
+    design §9). Add a concise entry to `.claude/adr/INDEX.md`.
+
+    Pick the next FREE ADR number by surveying BOTH `.claude/adr/` and `docs/adr/` — do NOT assume a number.
+    Sibling projects are actively claiming ADR numbers in the 041–048 range (redesign-r2, email-r4, messaging,
+    notification-spine, participant-index). If the number you pick would collide with an in-flight sibling
+    claim, OR if you discover that a **doc ADR** (not merely an R3 project decision) already codified the
+    paragraph-diff choice — STOP and escalate per §6.5 before writing (the Path-B scope changes if a doc ADR
+    is in play). This is a docs deliverable; no `&lt;justification&gt;` required.
+  </prompt>
+
+  <role>
+    Architecture author fluent in ADR authoring conventions (concise `.claude/adr/` constraint form + full
+    reasoning), the Spaarke ADR-Tension resolution protocol (root CLAUDE.md §6.5, Path A/B/C), and the R4
+    Shadow Document Architecture (OOXML server-authoritative; TipTap as a lossy view+controller; ID-anchored
+    surgical operations). Understands this ADR is the reference every R4 task loads.
+  </role>
+
+  <goal>
+    A NEW ADR file at `.claude/adr/ADR-{NNN}-compose-shadow-document.md` (NNN = the next free number, chosen
+    by surveying `.claude/adr/` + `docs/adr/`) that codifies I-1…I-7, D1–D5, the anchor coordinate
+    `(paraId, runIndex, run-local-offset)`, the single Patch Engine, and the no-text-search-in-write-path
+    rule; PLUS a Path-B amendment section that explicitly supersedes the R3 paragraph-diff project decision
+    with the step-level operational delta model. A concise entry is added to `.claude/adr/INDEX.md`. The ADR
+    reads as the source of truth downstream R4 tasks cite; it does NOT change any AI catalog row or introduce
+    a new AI dispatch endpoint (ADR-039 frozen).
+  </goal>
+
+  <context>
+    <background>
+      R4 rips out the Compose translation/save layer and replaces it with a Shadow Document Architecture
+      (spec Executive Summary; design §5.0). The architecture is fully specified in design §3 (invariants),
+      §0 (D1–D5 locked decisions), §5 (end-to-end), and §9 (ADR Tensions). The single ADR-Tension requiring
+      a **Path-B amendment** is the R3 project decision that codified `ComposeParagraphRedlineSynthesizer`
+      (paragraph-diff) as the delta engine — R4 supersedes it with step-level operational deltas because
+      paragraph-diff cannot do structural edits and keeps a second text-search path alive (spec §ADR Tensions
+      row 1; design §9 row 1). All other tensions (ADR-013/007/038, NFR-03) are Path-C (comply) and need only
+      a mention. Survey shows `.claude/adr/` + `docs/adr/` currently populated through ADR-048; the next free
+      number is 049 unless a sibling has claimed it since — VERIFY at execution time.
+    </background>
+    <relevant-files>
+      <file role="new">.claude/adr/ADR-{NNN}-compose-shadow-document.md — the new Shadow-Document ADR (concise constraint form: MUST/MUST NOT rules for I-1…I-7, D1–D5, anchor coordinate, single Patch Engine, no-text-search; + Path-B amendment section superseding the R3 paragraph-diff decision)</file>
+      <file role="modify">.claude/adr/INDEX.md — add a concise one-line entry for the new ADR</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §0 (D1–D5), §3 (I-1…I-7), §5 (architecture), §9 (ADR Tensions — Path-B row)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md §ADR Tensions, §Technical Constraints (Applicable ADRs / MUST Rules)</file>
+      <file role="canonical-reference">.claude/adr/ADR-039-grounded-execution-closed-catalogs.md — an existing concise-ADR shape to mirror for tone + section layout</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">No task dependencies — this is a startable Phase-0 gate task.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">The ADR MUST codify all seven invariants I-1…I-7 (design §3) and all five locked decisions D1–D5 (design §0) as explicit MUST / MUST NOT rules — scope: the R4 Compose save/edit layer only, not other subsystems.</constraint>
+    <constraint source="project">The durable anchor coordinate is `(paraId, runIndex, run-local-offset)` (D2). The ADR MUST forbid run-*ids* and absolute editor positions as durable anchors, and MUST forbid text-search in the write path (I-7) — fuzzy content-match survives ONLY as a below-threshold surface-as-comment last resort on reload/cross-Word-session re-anchor.</constraint>
+    <constraint source="project / CLAUDE.md §6.5">The Path-B amendment section MUST explicitly name the superseded R3 decision (paragraph-diff `ComposeParagraphRedlineSynthesizer` as delta engine) and state the replacement (step-level operational deltas), following the §6.5 output format. Scope: this is a project-decision amendment, NOT a doc-ADR change — UNLESS execution discovers a doc ADR codified the paragraph-diff choice (then escalate).</constraint>
+    <constraint source="ADR-039">The ADR MUST NOT introduce a new AI dispatch endpoint or change any AI catalog row (engine frozen). Scope: the AI redline path stays envelope-only behind the facade.</constraint>
+    <constraint source="project / CLAUDE.md §3">This task writes to `.claude/adr/` — main-session-only. MUST NOT be delegated to a sub-agent (write boundary). Scope: the ADR file + INDEX entry.</constraint>
+    <constraint source="project">The chosen ADR number MUST be free in BOTH `.claude/adr/` and `docs/adr/`. Scope: survey both directories before writing; do not reuse or collide with an in-flight sibling number.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ADR authoring conventions; ADR-Tension Path-A/B/C resolution protocol; R4 Shadow Document invariants + locked decisions; AI-engine-frozen constraint</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>projects/spaarkeai-compose-r4/design.md</file>
+      <file>projects/spaarkeai-compose-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Concise ADR constraint form" location=".claude/adr/ADR-039-grounded-execution-closed-catalogs.md">
+        The `.claude/adr/` house style: a short context statement, a decision, then MUST / MUST NOT rules an agent can apply per-turn. Mirror this layout for the Shadow-Document ADR.
+      </pattern>
+      <pattern name="Path-B amendment output format" location="root CLAUDE.md §6.5">
+        The 🔔 ADR Conflict output format (ADR in question / specific rule / conflict / proposed path / rationale / impact / alternative rejected). Use it for the amendment section documenting the R3 paragraph-diff supersession.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL / 📋 REASON / 📖 PROTOCOL STEPS). Load the knowledge files, design §0/§3/§5/§9, and spec §ADR Tensions. Confirm this is a main-session write to `.claude/adr/` (not delegated).</step>
+    <step order="1" name="Pick the free ADR number">Survey `.claude/adr/` AND `docs/adr/`; list the highest ADR number in use and any in-flight sibling claims. Choose the next FREE number. If it would collide with an in-flight sibling claim, STOP and escalate (§6.5) before proceeding.</step>
+    <step order="2" name="Check for a superseded doc ADR">Grep `.claude/adr/` + `docs/adr/` for any ADR that codified the R3 paragraph-diff / `ComposeParagraphRedlineSynthesizer` decision. If a DOC ADR (not just an R3 project decision) codified it, STOP and escalate — the Path-B scope becomes a doc-ADR amendment, not a project-decision amendment.</step>
+    <step order="3" name="Author the ADR body">Write the new ADR: context, decision, then MUST/MUST NOT rules for I-1…I-7, D1–D5, the anchor coordinate `(paraId, runIndex, run-local-offset)`, the single `ComposeShadowPatchEngine` byte-author, and no-text-search-in-write-path. Note Path-C tensions (ADR-013/007/038, NFR-03) briefly.</step>
+    <step order="4" name="Author the Path-B amendment section">Add the amendment section in the §6.5 format that explicitly supersedes the R3 paragraph-diff project decision with step-level operational deltas; cite design §9 row 1 and spec §ADR Tensions row 1.</step>
+    <step order="5" name="Index entry">Add a concise one-line entry to `.claude/adr/INDEX.md` for the new ADR.</step>
+    <step order="6" name="Close out">Update `projects/spaarkeai-compose-r4/tasks/TASK-INDEX.md`: set task 001 status to ✅. Document any deviation (e.g., the chosen number, any escalation) in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The next free ADR number you pick collides with an in-flight sibling claim (redesign-r2, email-r4, messaging, notification-spine, participant-index are near ADR-041…048) — STOP, surface the number conflict, and confirm the number before writing.</trigger>
+    <trigger>A DOC ADR (in `.claude/adr/` or `docs/adr/`), not merely an R3 project decision, is found to codify the paragraph-diff choice — STOP and escalate per §6.5: the Path-B amendment scope changes from a project-decision amendment to a doc-ADR amendment and needs human sign-off.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No R4 architecture ADR exists; the R3 paragraph-diff decision is the closest prior art (superseded here via Path B).</existing>
+    <extension>N/A — this produces a governance ADR + INDEX entry, not a reusable code component.</extension>
+    <cost-of-doing-nothing>Downstream tasks have no ADR to cite for the invariants/anchor model, and the R3 paragraph-diff supersession stays an undocumented silent violation (CLAUDE.md §6.5).</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">.claude/adr/ADR-{NNN}-compose-shadow-document.md (new ADR — invariants, decisions, anchor coordinate, single Patch Engine, no-text-search, Path-B amendment)</output>
+    <output type="doc">.claude/adr/INDEX.md (concise entry added for the new ADR)</output>
+    <output type="report">Chosen ADR number + survey evidence; any §6.5 escalation, recorded in projects/spaarkeai-compose-r4/notes/</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A new ADR file exists at `.claude/adr/ADR-{NNN}-compose-shadow-document.md` where NNN is free in BOTH `.claude/adr/` and `docs/adr/` (no collision with an in-flight sibling).</criterion>
+    <criterion testable="true">The ADR codifies all seven invariants I-1…I-7 and all five locked decisions D1–D5 as explicit MUST / MUST NOT rules.</criterion>
+    <criterion testable="true">The ADR names the durable anchor coordinate `(paraId, runIndex, run-local-offset)`, mandates a single Patch Engine byte-author, and forbids text-search in the write path (I-7).</criterion>
+    <criterion testable="true">A Path-B amendment section (in the §6.5 format) explicitly supersedes the R3 paragraph-diff (`ComposeParagraphRedlineSynthesizer`) project decision with the step-level operational delta model.</criterion>
+    <criterion testable="true">The ADR introduces NO new AI dispatch endpoint and changes NO AI catalog row (ADR-039 frozen).</criterion>
+    <criterion testable="true">A concise entry for the new ADR is present in `.claude/adr/INDEX.md`.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 001 as ✅ and any deviation/escalation is recorded in projects/spaarkeai-compose-r4/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Survey at authoring time confirmed `.claude/adr/` + `docs/adr/` populated through ADR-048; the next free
+    number is expected to be 049, but VERIFY — siblings claim near this range. This ADR is the reference every
+    downstream R4 task loads; keep the concise form an agent can apply per-turn.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

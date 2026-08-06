@@ -425,14 +425,27 @@ export function ThreePaneLayout({
       {/* (Task 100) Sole-expanded left pane gets `flex: 1` so it fills the
           freed width when center + right are both collapsed; otherwise it
           stays at its user-resizable fixed `leftWidthPx`. */}
-      {isLeftVisible ? (
-        <div
-          className={mergeClasses(styles.leftPane, !isDragging && styles.panelAnimated)}
-          style={leftIsSoleExpanded ? { flex: '1 1 auto', width: 'auto' } : { width: `${leftWidthPx}px` }}
-        >
-          {leftPane}
-        </div>
-      ) : (
+      {/* STATE-LOSS FIX (nda-r1 UAT #2/#3): the pane is ALWAYS mounted; when collapsed it is
+          HIDDEN (display:none) instead of removed from the JSX. Previously the collapsed branch
+          dropped `{leftPane}` from the tree, so React UNMOUNTED it and destroyed all pane-local
+          state — the Assistant's chat session + history were lost on a collapse/expand cycle.
+          Keeping it mounted-but-hidden preserves that state; the collapsed STRIP still renders
+          alongside so the visual is unchanged. `display:none` also removes it from layout + tab
+          order (no focus trap), and aria-hidden hides it from assistive tech while collapsed. */}
+      <div
+        className={mergeClasses(styles.leftPane, !isDragging && styles.panelAnimated)}
+        style={
+          !isLeftVisible
+            ? { display: 'none' }
+            : leftIsSoleExpanded
+              ? { flex: '1 1 auto', width: 'auto' }
+              : { width: `${leftWidthPx}px` }
+        }
+        aria-hidden={!isLeftVisible}
+      >
+        {leftPane}
+      </div>
+      {!isLeftVisible && (
         <div
           className={styles.leftPaneCollapsed}
           onClick={toggleLeft}
@@ -482,9 +495,17 @@ export function ThreePaneLayout({
       {/* (Task 094) When `centerCollapsed===true` the center pane renders as
           a narrow vertical strip with a rotated label, mirroring the left
           and right collapsed strips. Click / Enter / Space re-expands. */}
-      {isCenterVisible ? (
-        <div className={styles.centerPane}>{centerPane}</div>
-      ) : (
+      {/* STATE-LOSS FIX (nda-r1 UAT #2/#3): center pane ALWAYS mounted; hidden when collapsed so
+          the WorkspacePane's open compose tabs (the NDA analysis) + its live editor state SURVIVE a
+          Workspace-pane collapse/close instead of being destroyed by an unmount. Strip renders alongside. */}
+      <div
+        className={styles.centerPane}
+        style={isCenterVisible ? undefined : { display: 'none' }}
+        aria-hidden={!isCenterVisible}
+      >
+        {centerPane}
+      </div>
+      {!isCenterVisible && (
         <div
           className={styles.centerPaneCollapsed}
           onClick={toggleCenter}
@@ -531,18 +552,22 @@ export function ThreePaneLayout({
           right pane absorbs the freed space (right is the canonical "primary
           content" surface in SpaarkeAi's three-pane). Otherwise it stays at
           its user-resizable fixed `rightWidthPx`. */}
-      {isRightVisible ? (
-        <div
-          className={mergeClasses(styles.rightPane, !isDragging && styles.panelAnimated)}
-          style={
-            rightIsSoleExpanded || rightFillsForCollapsedCenter
+      {/* STATE-LOSS FIX (nda-r1 UAT #2/#3): right pane ALWAYS mounted; hidden when collapsed so its
+          pane-local state survives collapse/expand. Strip renders alongside. */}
+      <div
+        className={mergeClasses(styles.rightPane, !isDragging && styles.panelAnimated)}
+        style={
+          !isRightVisible
+            ? { display: 'none' }
+            : rightIsSoleExpanded || rightFillsForCollapsedCenter
               ? { flex: '1 1 auto', width: 'auto' }
               : { width: `${rightWidthPx}px` }
-          }
-        >
-          {rightPane}
-        </div>
-      ) : (
+        }
+        aria-hidden={!isRightVisible}
+      >
+        {rightPane}
+      </div>
+      {!isRightVisible && (
         <div
           className={styles.rightPaneCollapsed}
           onClick={toggleRight}

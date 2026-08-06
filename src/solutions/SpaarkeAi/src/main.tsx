@@ -45,6 +45,7 @@ import {
 } from "@spaarke/auth";
 import { setRuntimeConfig } from "./config/runtimeConfig";
 import { ensureAuthInitialized } from "./services/authInit";
+import { initNotificationsClient } from "./services/notificationsBootstrap";
 import { App } from "./App";
 import type { IRuntimeConfig } from "@spaarke/auth";
 // Round 4 Fix 4.1 (2026-05-21): SpaarkeAi embeds `LegalWorkspaceApp` as a
@@ -272,6 +273,12 @@ async function bootstrap(): Promise<void> {
             html?: string;
             fileName?: string | null;
           };
+          // task 041 (FR-13): active work type — scopes the Compose AI toolbar via
+          // getToolsForSurface. Cross-cutting; applies regardless of door shape.
+          activeWorkType?: string;
+          // agreements-r1 contract A3: level-2 agreement sub-domain (sprk_agreementtype.sprk_key)
+          // carried alongside activeWorkType so the review machine opens oriented.
+          subDomain?: string;
         }
       | undefined;
     if (!seed) {
@@ -297,6 +304,8 @@ async function bootstrap(): Promise<void> {
           html: seed.draft.html,
           fileName: seed.draft.fileName ?? undefined,
         },
+        activeWorkType: seed.activeWorkType,
+        subDomain: seed.subDomain,
       };
       return <ComposeLaunchContext.Provider value={composeDraftLaunch}>{app}</ComposeLaunchContext.Provider>;
     }
@@ -320,6 +329,8 @@ async function bootstrap(): Promise<void> {
           sessionFileId: seed.upload.sessionFileId,
           fileName: seed.upload.fileName ?? undefined,
         },
+        activeWorkType: seed.activeWorkType,
+        subDomain: seed.subDomain,
       };
       return <ComposeLaunchContext.Provider value={composeUploadLaunch}>{app}</ComposeLaunchContext.Provider>;
     }
@@ -336,6 +347,8 @@ async function bootstrap(): Promise<void> {
         fileName: seed.fileName ?? undefined,
       },
       driveId: seed.speDriveId ?? "",
+      activeWorkType: seed.activeWorkType,
+      subDomain: seed.subDomain,
     };
     return <ComposeLaunchContext.Provider value={composeLaunch}>{app}</ComposeLaunchContext.Provider>;
   };
@@ -443,6 +456,17 @@ async function bootstrap(): Promise<void> {
   }
 
   // -------------------------------------------------------------------------
+  // 2a. Notification-spine FIRST consumer wiring (spaarke-notification-spine-r1
+  //     task 021, spec FR-05). Thin proof-of-wiring only (negotiate → connect →
+  //     kind-routed callback fires) — the real suggestion/communication UI is
+  //     task 051's job. Fire-and-forget + non-fatal, same pattern as auth init
+  //     above: a notifications-spine failure must never block SpaarkeAi's own
+  //     bootstrap. Started AFTER auth init so negotiate has a valid token.
+  //     See src/services/notificationsBootstrap.ts.
+  // -------------------------------------------------------------------------
+  void initNotificationsClient();
+
+  // -------------------------------------------------------------------------
   // 3. Parse URL parameters for entity context.
   //
   //    Dataverse passes data to web resources via two mechanisms:
@@ -460,6 +484,39 @@ async function bootstrap(): Promise<void> {
     dataParam ? decodeURIComponent(dataParam) : ""
   );
 
+  // UAT round 4 (2026-07-30): when SpaarkeAi is embedded as a web resource on an OOB
+  // Dataverse FORM (e.g. the sprk_analysis Analysis form, opened via row-click / ribbon
+  // "View" → openRecordModal), Dataverse does NOT pass the record id via URL/`data`
+  // params — so the page cold-loaded the DEFAULT workspace (Daily Briefing + Get Started
+  // cards) instead of THAT record. Resolve the host form's record via the SUPPORTED
+  // `Xrm.Utility.getPageContext()` API (works in modal/navigateTo forms where the
+  // deprecated `Xrm.Page` may be absent); fall back to `Xrm.Page` for older embed
+  // contexts. Returns the parent form's { entityName, entityId } or undefined.
+  const readParentFormRecordRef = (): { entityName: string; entityId: string } | undefined => {
+    const clean = (raw?: string): string | undefined =>
+      raw ? raw.replace(/^\{|\}$/g, "").toLowerCase() : undefined;
+    for (const w of [window.parent, window.top]) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const xrm: any = (w as any)?.Xrm;
+        if (!xrm) continue;
+        const input = xrm.Utility?.getPageContext?.()?.input;
+        if (input?.entityName && input?.entityId) {
+          const id = clean(input.entityId);
+          if (id) return { entityName: input.entityName as string, entityId: id };
+        }
+        const entity = xrm.Page?.data?.entity;
+        const name: string | undefined = entity?.getEntityName?.();
+        const id = clean(entity?.getId?.());
+        if (name && id) return { entityName: name, entityId: id };
+      } catch {
+        /* cross-origin / no Xrm — standalone or non-form host */
+      }
+    }
+    return undefined;
+  };
+  const parentFormRef = readParentFormRecordRef();
+
   // Accept BOTH param keys: the R2 app + UAT URL contract use `entityType`, but
   // the shared ribbon launcher (launch-resolver.ts buildLaunchUrl) emits
   // `entityLogicalName`. Reading only `entityType` silently dropped the host
@@ -470,11 +527,13 @@ async function bootstrap(): Promise<void> {
     dataParams.get("entityType") ??
     searchParams.get("entityLogicalName") ??
     dataParams.get("entityLogicalName") ??
+    parentFormRef?.entityName ??
     undefined;
 
   const entityId =
     searchParams.get("entityId") ??
     dataParams.get("entityId") ??
+    (parentFormRef && parentFormRef.entityName === entityLogicalName ? parentFormRef.entityId : undefined) ??
     undefined;
 
   const matterId =
@@ -525,6 +584,92 @@ async function bootstrap(): Promise<void> {
     dataParams.get("speFileName") ??
     undefined;
 
+  // task 041 (FR-13): active work type (e.g. "agreement-analysis") — scopes the Compose AI
+  // toolbar via getToolsForSurface. Compose-only; falls through to undefined (ComposeEditor's
+  // own '*' default) for every non-work-type-scoped launch.
+  const activeWorkTypeParam =
+    searchParams.get("activeWorkType") ??
+    dataParams.get("activeWorkType") ??
+    undefined;
+
+  // -------------------------------------------------------------------------
+  // Analysis entry-matrix params (task 050 — spec §12 / FR-14; consumes the
+  // params task 052's ribbon launcher emits per §13.3 / FR-16).
+  //
+  // The FOUR entry cases route to ONE Analysis experience (this three-pane) in
+  // two hosting contexts — the SpaarkeAi workspace and a code-page modal —
+  // discriminated purely by which params are present (no new URL-param
+  // convention; mirrors the `composeMode` read above):
+  //   - `analysisId` present  → EXISTING analysis (2d in-record modal / 2c URL
+  //                             open): resolve its bound session + open it, NO
+  //                             "Create new" cards.
+  //   - `worktype`  present   → NEW analysis (2a in-workspace / 2b in-record):
+  //                             open the Analysis hub (Create-new cards). When a
+  //                             record context is ALSO present (entityLogicalName
+  //                             + entityId, threaded by the 052 ribbon), the hub
+  //                             pre-sets regarding=parent (2b); with no record
+  //                             context the hub opens unforced (2a).
+  //
+  // These are READ here and threaded through App → ThreePaneShell → an
+  // AnalysisLaunchContext consumed by WorkspacePane. ADR-039 / §13.3: this is
+  // the deterministic CODE path (openSpaarkeAi deep-link + main.tsx mode
+  // routing), NOT the reactive in-chat surface-launch registry.
+  // -------------------------------------------------------------------------
+  // When embedded on the OOB `sprk_analysis` form (see readParentFormRecordRef above),
+  // adopt that record as the analysis to open (existing-mode). An explicit URL/`data`
+  // `analysisId` still wins.
+  const analysisId =
+    searchParams.get("analysisId") ??
+    dataParams.get("analysisId") ??
+    (parentFormRef?.entityName === "sprk_analysis" ? parentFormRef.entityId : undefined) ??
+    undefined;
+
+  const worktype =
+    searchParams.get("worktype") ??
+    dataParams.get("worktype") ??
+    undefined;
+
+  // `regarding` is the parent-record shorthand the 052 ribbon may pass for
+  // symmetry with `openSpaarkeAiCompose`. The regarding PRE-SET the hub applies
+  // is driven by entityLogicalName/entityId (already parsed above, the canonical
+  // entity-context channel AiSessionProvider consumes); `regarding` is parsed
+  // for completeness but the entity-context path is authoritative.
+  const regarding =
+    searchParams.get("regarding") ??
+    dataParams.get("regarding") ??
+    undefined;
+  void regarding;
+
+  // ai-advanced-capabilities-agreements-r1 task 022 (spec FR-09; hub A3 deferred deep-threading
+  // leg — cold-load/deep-link door): the level-2 agreement sub-domain (`sprk_agreementtype.sprk_key`,
+  // e.g. "nda") for a cold-load open of the Analysis entry matrix. Forwarded to App → ThreePaneShell
+  // → AnalysisLaunchContext (mirrors the analysisId/worktype/regarding read above byte-for-byte).
+  // Explicit (this param) is authoritative over the open-existing DB derivation (WorkspacePane task
+  // 022) and the classifier (task 021) — both of which fill it only when this is absent. Omitted for
+  // every non-agreement launch; existing launches are unaffected.
+  const subDomainParam =
+    searchParams.get("subDomain") ??
+    dataParams.get("subDomain") ??
+    undefined;
+
+  // task 041 (FR-13) live dispatch site (task 050 thread 3): map the Agreement
+  // Review work-type Choice value (100000000 — SprkAnalysisWorkType.AgreementAnalysis,
+  // src/types/sprkAnalysis.ts) to the `agreement-analysis` activeWorkType string so
+  // an Agreement analysis launch scopes the Compose AI toolbar via getToolsForSurface
+  // IF a Compose surface is opened during that analysis. An explicit `activeWorkType`
+  // param always wins; every non-Agreement / non-analysis launch is unaffected.
+  const WORK_TYPE_AGREEMENT_REVIEW = "100000000";
+  const activeWorkType =
+    activeWorkTypeParam ??
+    (worktype === WORK_TYPE_AGREEMENT_REVIEW ? "agreement-analysis" : undefined);
+
+  // Derive the analysis entry mode from the params above (existing wins).
+  const analysisMode: "new" | "existing" | undefined = analysisId
+    ? "existing"
+    : worktype
+      ? "new"
+      : undefined;
+
   // -------------------------------------------------------------------------
   // 4. Render the app
   // -------------------------------------------------------------------------
@@ -548,6 +693,11 @@ async function bootstrap(): Promise<void> {
           speDriveItemId={speDriveItemId}
           speDriveId={speDriveId}
           speFileName={speFileName}
+          activeWorkType={activeWorkType}
+          analysisMode={analysisMode}
+          analysisId={analysisId}
+          worktype={worktype}
+          subDomain={subDomainParam}
         />
       </AppErrorBoundary>
     </React.StrictMode>

@@ -1,0 +1,133 @@
+<task id="013" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>Category taxonomy + priority-weight config seed (`sprk_triagecategory` config table + starter seed)</title>
+    <phase>P1 — Schema &amp; catalog foundation</phase>
+    <gate>none (STANDARD — Step 9.5 skipped; new-surface config table with constraints)</gate>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <deps>001</deps>
+    <blocks>011 (lookup target), 023, 060</blocks>
+    <tags>dataverse, config</tags>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Creates a NEW Dataverse config table (`sprk_triagecategory`) + a starter seed — no BFF code, no Step 9.5 gates. STANDARD per §8 (new-surface schema/config with constraints). §11 Component Justification REQUIRED (new table). Dataverse-configurable-without-code (FR-16 / D-03) is the load-bearing property. Verify-or-create: the operator may have pre-created it in parallel.</rigor-reason>
+    <parallel-group>P1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Config-table authoring + a small seed against a documented spec — mechanical. Default execution tier at `medium` effort per §8.5 (schema/config).</model-tier-reason>
+    <effort>medium</effort>
+    <fr-refs>FR-16</fr-refs>
+  </metadata>
+
+  <prompt>
+    Create the NEW `sprk_triagecategory` config table + a starter seed so the category taxonomy and priority weights are Dataverse-configurable without code (FR-16 / D-03): an admin can add or reweight categories without a deploy. The triage fields task (011) points `sprk_communication.sprk_triagecategory` (a Lookup) at THIS table; the triage Action/Binding (022/023) resolves category names against it and reads priority weights from it.
+
+    **VERIFY-OR-CREATE**: the operator may have pre-created this table in a parallel schema pass. FIRST check via Dataverse MCP `describe` whether `sprk_triagecategory` exists; if it exists, RECONCILE its columns + seed rows against this spec (add missing columns / seed rows only; do NOT retype an in-use field or duplicate seed rows). CREATE the table + columns + seed only if absent.
+
+    Create the config table with (Spaarke naming conventions; verify conventions via MCP first):
+
+    1. **`sprk_name`** — the category display name (the taxonomy value; e.g. Filing, Deadline, Request, Correspondence — confirm the starter set at task time).
+    2. **`sprk_priorityweight`** — the priority weight (Whole Number or Decimal) the priority scorer / triage Action uses to rank categories.
+    3. **`sprk_enabled`** — Boolean kill-switch (an admin can disable a category without deleting it).
+    4. (Optional) **`sprk_description`** / **`sprk_extractionguidance`** — free-text guidance the triage Action can ground on when classifying (only if it aids FR-05/FR-06; keep lean).
+
+    Seed a STARTER taxonomy (a small, sensible closed set with default weights + all enabled) so the triage Action has categories to classify into on day one. Deploy the table + seed to the project solution. This is schema + seed ONLY — the classification LOGIC that reads the taxonomy is 022/023.
+  </prompt>
+
+  <role>
+    Spaarke Dataverse schema + config engineer. Fluent in the `dataverse-create-schema` skill (Web API + PowerShell) and Dataverse-configurable-taxonomy modeling (config table + seed vs hardcoded enum). You create exactly the config table FR-16 needs, seed a lean starter set, and verify-before-create so an operator's parallel pass is reconciled, not duplicated.
+  </role>
+
+  <goal>
+    A NEW `sprk_triagecategory` config table exists (verify-or-create-reconciled) with `sprk_name`, `sprk_priorityweight`, `sprk_enabled` (+ optional guidance), seeded with a lean starter taxonomy (all enabled, default weights). `sprk_communication.sprk_triagecategory` (task 011) can point at it; the triage Action (022/023) can resolve categories + read weights from it; an admin can add/reweight categories without code (FR-16 / D-03). No hardcoded category enum in code. No existing table/column retyped; no duplicate seed rows.
+  </goal>
+
+  <context>
+    <background>
+      FR-16 / D-03: category taxonomy and priority weights are Dataverse-tuneable with a seeded starter set — an admin adds or reweights categories without a code change. This decouples the triage vocabulary from the code: the triage Action (022/023) classifies into whatever categories the table holds, and the priority scorer reads the weights. Today there is no such table; without it categories would be a hardcoded enum (fails FR-16). This task creates the table + seed; the classification logic that reads it is 022/023, and the `sprk_communication` lookup that references it is 011.
+
+      §11 Component Justification (new config table): (1) **Existing overlap** — no category taxonomy table exists (task 001 / grep-confirmed); nearest is a hardcoded classification enum, which is not admin-configurable. (2) **Extension instead** — there is no existing config table to extend; a hardcoded enum fails the "no code change to reweight" requirement, so a Dataverse table is the minimal admin-configurable surface. (3) **Concrete cost-of-doing-nothing** — without it categories/weights are code-bound; an admin cannot add or reweight a category without a deploy (FR-16 fails) and the triage Action has no configurable taxonomy to classify into. Named contract failure, not "future flexibility."
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-intelligence-r1/notes/001-operator-schema-verification.md (task 001 output — whether `sprk_triagecategory` already exists; consume)</file>
+      <file>projects/email-communication-intelligence-r1/spec.md (FR-16, D-03 — Dataverse-tuneable taxonomy + starter set)</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Communication/CommunicationClassificationResult.cs (the classification output that carries the category the taxonomy governs)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-16 / D-03">The taxonomy + weights MUST be Dataverse-configurable (table + seed), NOT a hardcoded enum in code. Add/reweight a category is admin config, no deploy. Verify-before-create; reconcile any operator-pre-created table/seed.</constraint>
+    <constraint source="project">Verify option-set/lookup/number conventions via Dataverse MCP `describe` BEFORE creating columns. `sprk_communication.sprk_triagecategory` (task 011) is a Lookup to THIS table — align the primary-name + key so the lookup binds.</constraint>
+    <constraint source="project (lean)">Keep the table lean (name + weight + enabled + optional guidance). MUST NOT add speculative columns; the starter seed is a small closed set, all enabled.</constraint>
+    <constraint source="ADR-027">Author the table + seed into the project's managed solution per subscription-isolation/solution conventions; no direct prod-only unmanaged changes.</constraint>
+    <constraint source="project">Schema + seed ONLY. No classification logic (022/023), no BFF code.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+      <file>projects/email-communication-intelligence-r1/notes/001-operator-schema-verification.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Communication/CommunicationClassificationResult.cs</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>docs/data-model/INDEX.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse config table + seed" location=".claude/skills/dataverse-create-schema/SKILL.md">
+        Create a lean config table (name + weight + enabled) and seed a starter set via Web API; the app reads the table at runtime so admins reconfigure without a deploy. Verify-or-create — reconcile an operator-pre-created table + seed.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>No category taxonomy config table exists (task 001 confirms); the nearest is a code-bound classification enum, which is not admin-configurable.</existing>
+    <extension>A hardcoded enum fails the "add/reweight a category without code" requirement; there is no existing config table to extend, so a lean Dataverse table + seed is the minimal admin-configurable surface.</extension>
+    <cost-of-doing-nothing>Without it categories and priority weights are code-bound — an admin cannot add or reweight a category without a deploy (FR-16 fails) and the triage Action (022/023) has no configurable taxonomy to classify into. Concrete contract failure.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="1">Read task 001's note (whether `sprk_triagecategory` exists) + spec FR-16/D-03 + `CommunicationClassificationResult.cs` to fix the exact columns + confirm the starter taxonomy set + default weights.</step>
+    <step order="2">Via Dataverse MCP `describe`, check whether `sprk_triagecategory` exists; if present, enumerate columns + seed rows and reconcile against this spec (add missing only; do NOT retype/duplicate).</step>
+    <step order="3">Create the table (if absent) + missing columns via `dataverse-create-schema`: `sprk_name`, `sprk_priorityweight`, `sprk_enabled`, optional guidance. Align the primary-name/key so task 011's lookup binds. Verify conventions via MCP first.</step>
+    <step order="4">Seed the lean starter taxonomy (small closed set, default weights, all enabled) via Web API; skip any seed row that already exists (idempotent).</step>
+    <step order="5">Deploy the table + seed to the project solution. Verify: the table holds the starter rows; an admin can add a row / flip `sprk_enabled` without code; a `sprk_communication.sprk_triagecategory` lookup can resolve to a seeded row.</step>
+    <step order="6">Document the created table + seed (logical names, columns, the starter taxonomy + default weights) in `notes/013-category-taxonomy.md` for 011/022/023 + the §11 justification. Update `tasks/TASK-INDEX.md` (013 ✅) + `current-task.md`; confirm 011's lookup target + 023's classifier taxonomy are ready.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Consume the 001 note + spec + classification result shape</tool>
+    <tool name="mcp-dataverse-describe">Check for an existing table + conventions (read-only, before create)</tool>
+    <tool name="dataverse-create-schema">Create the table + columns</tool>
+    <tool name="dataverse-deploy">Deploy table + seed to the project solution</tool>
+    <tool name="write">The created-table + seed inventory note</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">Dataverse: `sprk_triagecategory` config table — `sprk_name`, `sprk_priorityweight`, `sprk_enabled` (+ optional guidance)</output>
+    <output type="data">Dataverse: starter taxonomy seed rows (lean closed set, default weights, all enabled) — idempotent</output>
+    <output type="docs">projects/email-communication-intelligence-r1/notes/013-category-taxonomy.md (table + seed inventory + starter taxonomy + default weights + §11 justification)</output>
+    <output type="docs">projects/email-communication-intelligence-r1/tasks/TASK-INDEX.md (status update 013 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`sprk_triagecategory` config table exists (verify-or-create-reconciled) with `sprk_name`, `sprk_priorityweight`, `sprk_enabled`.</criterion>
+    <criterion testable="true">A lean starter taxonomy is seeded (small closed set, default weights, all enabled); the seed is idempotent (no duplicate rows on re-run).</criterion>
+    <criterion testable="true">An admin can add a category / reweight / disable via `sprk_enabled` WITHOUT a code change (FR-16 / D-03); `sprk_communication.sprk_triagecategory` (011) can bind to a seeded row.</criterion>
+    <criterion testable="true">NEGATIVE: the taxonomy is NOT a hardcoded enum in code — it lives in the Dataverse table.</criterion>
+    <criterion testable="true">NEGATIVE: no existing table/column was retyped and no seed row was duplicated; an operator-pre-created table was reconciled.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 001 (whether the table pre-exists → verify-or-create). Is the Lookup target for task 011's `sprk_triagecategory` field and the taxonomy source for 022/023's classifier; gates the deploy (060). Keep the table lean — name + weight + enabled is the load-bearing set; do NOT over-model. The classification LOGIC that reads the taxonomy is 022/023, not this task.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply STANDARD rigor — schema/config creation, Step 9.5 gates SKIPPED. State the §11 Component Justification in the task note. Verify-or-create via MCP before creation; keep the seed idempotent; NEVER retype an in-use field. Model tier `sonnet` @ effort `medium`.
+    </protocol>
+  </execution>
+</task>

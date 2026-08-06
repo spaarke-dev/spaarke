@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Deploy BFF with Pillar A additions + size/CVE report</title>
+    <phase>1 Pillar A: Trusted threading &amp; external matching</phase>
+    <gate>blocked: 010,011,012,013,014,015,016</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment task via the bff-deploy skill (no new .cs authoring); verification + reporting, not implementation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runs an established deploy skill + records size/CVE numbers; mechanical, low ambiguity.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploys the shared BFF App Service — a single, irreversible-ish target; run sequentially after all Pillar A code tasks land.</parallel-reason>
+    <deps>010,011,012,013,014,015,016</deps>
+    <tags>deploy,bff-api</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the BFF (Sprk.Bff.Api) with all Pillar A additions to Azure App Service via the bff-deploy skill. Verify + report the compressed publish size (≤60 MB ceiling) and the cumulative delta vs the ~45.9 MB excl-PDB baseline, and confirm no new HIGH-severity CVE. Verify the tracking-footer + affinity config app settings and the Key Vault signing-key secret reference are present in the target environment.</prompt>
+  <role>SPAARKE platform DevOps engineer. Follow the bff-deploy skill and CLAUDE.md §10 BFF hygiene strictly.</role>
+  <goal>The BFF is deployed to the target App Service with Pillar A rungs/config live; a task-notes report records absolute compressed publish size + cumulative delta + PDB convention, the CVE check result, and confirmation that the Communication:TrackingFooter / Communication:Affinity app settings + the Key Vault signing-key secret reference are configured (footer defaults off until an operator enables it).</goal>
+
+  <context>
+    <background>CLAUDE.md §10 requires a publish-size + CVE report on every BFF-touching change; NFR-06/NFR-07 require the footer config app settings and the Key Vault signing-key secret. This task ships the Pillar A backend (tasks 010–016) as one deployable unit and records the hygiene numbers. Footer + affinity default OFF (operator flips on via app setting, no redeploy — ADR-018).</background>
+    <relevant-files>
+      <file role="canonical-reference">.claude/skills/bff-deploy/SKILL.md — the deployment procedure (dotnet publish -c Release + App Service deploy).</file>
+      <file role="canonical-reference">.claude/constraints/bff-extensions.md — the publish-size per-task verification rule (≤60 MB; ≥+5 MB single-task delta needs justification; ≥55 MB cumulative → architecture review).</file>
+      <file role="canonical-reference">.claude/constraints/azure-deployment.md — BFF publish-size verification + Key Vault reference conventions.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/CLAUDE.md — Configuration section: Communication:* app settings + Key Vault secret references + DefaultAzureCredential.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Footer/token signer.</dependency>
+      <dependency task="011" status="pending">Footer config.</dependency>
+      <dependency task="012" status="pending">Send-path injection.</dependency>
+      <dependency task="013" status="pending">TrackingTokenRung.</dependency>
+      <dependency task="014" status="pending">RecipientAliasRung + Bcc.</dependency>
+      <dependency task="015" status="pending">Thread self-association regression.</dependency>
+      <dependency task="016" status="pending">AffinityRung + sprk_affinity store.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="bff-extensions">MUST run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, measure the COMPRESSED output, and report absolute size + cumulative delta vs the ~45.9 MB excl-PDB baseline (state the PDB convention). Ceiling ≤60 MB (HARD STOP); ≥55 MB cumulative → architecture review; ≥+5 MB single-delta → justification. Scope: this deploy.</constraint>
+    <constraint source="bff-extensions">MUST run `dotnet list package --vulnerable --include-transitive` and confirm NO new HIGH-severity CVE before deploy. Scope: dependency check.</constraint>
+    <constraint source="ADR-028">The HMAC signing-key Key Vault secret reference MUST be present in the target App Service settings and resolvable via managed identity (DefaultAzureCredential); MUST NOT place the key material in app settings. Scope: env verification.</constraint>
+    <constraint source="ADR-018">Confirm Communication:TrackingFooter + Communication:Affinity app settings exist and default to OFF (operator enables without redeploy). Scope: env verification.</constraint>
+    <constraint source="project">Run /conflict-check before deploy — the BFF is shared with r5/messaging/notification-spine worktrees; do not deploy over an in-flight contending PR. Scope: coordination.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF deployment + publish-size/CVE hygiene</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+    </files>
+    <patterns>
+      <pattern name="bff-deploy" location=".claude/skills/bff-deploy/SKILL.md">The canonical BFF deploy + size-report flow.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load this POML, bff-deploy skill, bff-extensions.md, azure-deployment.md; declare RIGOR LEVEL STANDARD + sonnet/medium; confirm 010–016 are ✅ in TASK-INDEX.</step>
+    <step order="1">Run /conflict-check against contending BFF worktrees; hold if an in-flight PR touches the same files.</step>
+    <step order="2">dotnet build + dotnet test (full BFF suite green) before publishing.</step>
+    <step order="3">dotnet publish -c Release to deploy/api-publish/; measure compressed size; run the vulnerable-package check.</step>
+    <step order="4">Verify target App Service settings: Communication:TrackingFooter:* + Communication:Affinity:* present (default OFF) + the Key Vault signing-key secret reference resolvable via MI.</step>
+    <step order="5">Invoke the bff-deploy skill to deploy to the target environment (spaarke-bff-dev unless directed otherwise).</step>
+    <step order="6">Smoke-check /healthz + a capture/send path sanity check post-deploy.</step>
+    <step order="7">Write the hygiene report (absolute compressed size, cumulative delta, PDB convention, CVE result, config confirmation) to projects/email-communication-intelligence-r2/notes/.</step>
+    <step order="8">Update TASK-INDEX.md: set task 017 status to ✅.</step>
+    <step order="9">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the compressed publish size is ≥60 MB → HARD STOP and escalate per §6 (architecture review); if ≥55 MB cumulative or ≥+5 MB single-task delta, escalate with justification before deploying.</trigger>
+    <trigger>If the vulnerable-package check reports a NEW HIGH CVE, STOP and escalate — do not deploy.</trigger>
+    <trigger>If the Key Vault signing-key secret reference is missing/unresolvable in the target env, STOP — the footer feature must not go live without it (NFR-07).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF.</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">Sprk.Bff.Api deployed to the target App Service</output>
+    <output type="doc">projects/email-communication-intelligence-r2/notes/ — publish-size + CVE + config verification report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given tasks 010–016 are complete and the full BFF test suite is green, when the BFF is published, then the compressed publish size is reported (absolute + cumulative delta + PDB convention) and is ≤60 MB.</criterion>
+    <criterion testable="true">The vulnerable-package check reports no NEW HIGH-severity CVE.</criterion>
+    <criterion testable="true">The target App Service has Communication:TrackingFooter:* + Communication:Affinity:* settings (default OFF) and a resolvable Key Vault signing-key secret reference (key material not in app settings).</criterion>
+    <criterion testable="true">Post-deploy /healthz returns healthy and a capture/send sanity check passes.</criterion>
+    <criterion testable="true">Negative: if size ≥60 MB or a new HIGH CVE appears or the signing-key secret is missing, the deploy is halted and escalated (not forced through).</criterion>
+    <criterion testable="true">Build + tests green; the hygiene report is written to project notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md NFR-06, NFR-07; CLAUDE.md §10. Deploy is the Pillar A close-out; footer + affinity ship OFF (operator enables per ADR-018). Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

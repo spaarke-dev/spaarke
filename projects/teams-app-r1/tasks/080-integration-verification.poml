@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="teams-app-r1">
+  <metadata>
+    <title>End-to-end integration verification against graduation criteria</title>
+    <phase>8 Integration &amp; Wrap-Up</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Cross-cutting end-to-end verification of the auth→membership→enforcement spine, deployment posture, and dual-host parity; a false-positive pass would ship a broken graduation criterion.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting end-to-end verification spanning auth, membership, download, deployment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>integration verification needs all prior phases complete</parallel-reason>
+    <deps>045, 065, 072, 051</deps>
+    <tags>testing, integration-test, e2e-test, deploy</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Verify ALL seven graduation criteria end-to-end, each with a positive AND a negative path: (1) workforce SSO
+    yields no-second-login membership for a systemuser; (2) a contact-only workforce user resolves to
+    contact-anchored membership; (3) document download returns bytes for a member and 403-no-bytes for a non-member,
+    across all three principal types (systemuser, workforce-contact-only, CIAM-contact); (4) the same feature
+    components render in the standalone SPA and the Teams tab with no duplicated feature component (grep for host
+    forks); (5) the grant modal writes sprk_externalrecordaccess + sends an invite, and grants are revocable; (6) the
+    app installs from the org catalog in a second (customer) tenant via admin consent, and tid→env routing serves the
+    correct environment; (7) BFF publish is ≤60 MB compressed with no new HIGH-severity CVE. This is the last gate
+    before 090-project-wrap-up — treat any failing criterion as a go/no-go signal, not something to patch around
+    silently.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer + QA engineer. Expert in the dual-host collaboration architecture (external-spa +
+    Teams tab), workforce→principal resolution, ADR-034 membership, broker-only SPE access, and enterprise Teams
+    deployment (org catalog, admin consent, tid→env routing). Follow ADRs strictly; verify empirically, do not assume.
+  </role>
+
+  <goal>
+    A documented, evidence-backed pass/fail against every one of the seven README/design §9 graduation criteria,
+    each with both its positive path and its negative/adverse path verified. Any failure is escalated per root
+    CLAUDE.md §6, not silently worked around. Results recorded in
+    projects/teams-app-r1/notes/integration-verification-report.md.
+  </goal>
+
+  <context>
+    <background>
+      Phases 0-7 built the auth spine (spike → A2 amendment → shared MSAL + Teams SSO → workforce→principal resolver
+      → contact-anchored membership → enforcement), the broker download path, the access-grant modal + standing
+      grants, and the enterprise deployment posture (multitenant Entra + tid→env routing + Teams manifest/org-catalog
+      packaging). Each phase verified its own slice; this task is the FIRST point where all seven graduation criteria
+      are checked together, end-to-end, against the deployed artifact — the same posture the project will actually
+      ship in.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/teams-app-r1/README.md</file>
+      <file role="canonical-reference">projects/teams-app-r1/design.md</file>
+      <file role="canonical-reference">projects/teams-app-r1/spec.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Membership/MembershipEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
+      <file role="output">projects/teams-app-r1/notes/integration-verification-report.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Add vertical-slice seam tests for the workforce→principal→membership→enforcement
+      spine (the integration-heavy pyramid's KEEP category per docs/adr/ADR-038-testing-strategy.md); coverage here is
+      observation, not the gate — the graduation-criteria pass/fail is the gate.</constraint>
+    <constraint source="project">Every one of the seven graduation criteria MUST have both a positive path AND a
+      negative/adverse path verified before it counts as passing; a criterion verified only on the happy path is NOT
+      considered verified.</constraint>
+    <constraint source="project">The two-tenant install test is required — a single-tenant pass does NOT satisfy
+      graduation criterion 6 (org-catalog install + tid→env routing).</constraint>
+    <constraint source="project">Do NOT mark any criterion as passing based on code inspection alone where an
+      empirical/runtime check is feasible (e.g., an actual 403-no-bytes response, an actual second-tenant admin
+      consent + install) — empirical-reproduction-first.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Graduation-criteria end-to-end verification (auth spine, dual-host parity, enterprise deployment)</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+      <file>projects/teams-app-r1/plan.md</file>
+      <file>projects/teams-app-r1/README.md</file>
+    </files>
+    <patterns>
+      <pattern name="Vertical-slice seam test" location="docs/adr/ADR-038-testing-strategy.md">The workforce→principal→membership→enforcement spine is exactly the shape of ADR-038's seam-test KEEP category — one test per principal type exercising the real chain, not mocked at each layer.</pattern>
+      <pattern name="Host checklist as Teams acceptance test" location="docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md">§8 of the embedded-mode contract is the reusable Teams-host acceptance checklist referenced by design.md §8 — apply it to the Teams tab before signing off criterion 4.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Re-confirm the spike findings (task 001) are still valid post-build; if the auth spine changed materially since the spike, re-verify workforce SSO no-second-login for a systemuser in Teams desktop + web.</step>
+    <step order="2">Verify criterion 2: a contact-only workforce user (no systemuser) resolves to contact-anchored membership and sees exactly their allowlisted-role records; verify the negative case (a non-allowlisted/adverse contact role confers no access).</step>
+    <step order="3">Verify criterion 3: document download returns bytes for an authorized member and 403 with no bytes for a non-member, for all three principal types (systemuser, workforce-contact-only, CIAM-contact); confirm no driveId/itemId ever reaches the browser.</step>
+    <step order="4">Verify criterion 4: inspect/grep the shared core and both host adapters for any duplicated feature component; confirm the same feature components render in the SPA and the Teams tab with only adapter-level divergence (no §11 exception on file, or the exception is documented if one exists).</step>
+    <step order="5">Verify criterion 5: exercise the grant modal end-to-end — approve a membership candidate and add a named user, confirm sprk_externalrecordaccess rows are written with correct provenance, confirm the invite send fires, then revoke a grant and confirm access is removed.</step>
+    <step order="6">Verify criterion 6: perform a real second (customer) tenant admin-consent + org-catalog install; confirm tid→env routing serves the correct environment for that tenant; verify the negative case (an unconsented/unmapped tid is denied, not misrouted).</step>
+    <step order="7">Verify criterion 7: run dotnet publish -c Release for the BFF, measure compressed size against the ~49.63 MB baseline (ceiling ≤60 MB), and run dotnet list package --vulnerable --include-transitive to confirm no new HIGH-severity CVE.</step>
+    <step order="8">Write projects/teams-app-r1/notes/integration-verification-report.md recording pass/fail + evidence for each of the seven criteria (positive AND negative path for each), the no-duplicated-component grep output, and the publish-size/CVE numbers.</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to completed only if ALL seven criteria pass; otherwise leave it open and escalate per step 9 below.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ANY of the seven graduation criteria fails — including a failed negative/adverse path even when the
+    positive path passes — STOP, document the failure and its evidence in the verification report, and escalate per
+    root CLAUDE.md §6. Do NOT mark the project shippable or proceed to 090-project-wrap-up until the failure is
+    resolved or the human reviewer explicitly accepts a documented exception.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Publish + vulnerability scan the BFF</tool>
+    <tool name="npm">Build/run the SPA and Teams-tab surfaces</tool>
+    <tool name="terminal">Run seam tests, grep for duplicated components, run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/teams-app-r1/notes/integration-verification-report.md</output>
+    <output type="code">tests/integration/seam/ (workforce→principal→membership→enforcement vertical-slice tests, if not already covered by prior phase tasks)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A systemuser opens the Teams tab, signs in via workforce SSO with no second login, and sees exactly their membership records (Teams desktop + web).</criterion>
+    <criterion testable="true">A contact-only workforce user sees exactly their contact-anchored membership records; a non-allowlisted/adverse contact role confers no access (negative path verified).</criterion>
+    <criterion testable="true">Document download returns bytes for an authorized member and 403 with no bytes for a non-member, verified for all three principal types.</criterion>
+    <criterion testable="true">The same feature components render in the SPA and the Teams tab with no duplicated feature component; the grep is clean (or a §11 exception is on file).</criterion>
+    <criterion testable="true">The grant modal writes sprk_externalrecordaccess for both approved-membership and named-user paths, sends an invite, and a subsequently revoked grant removes access.</criterion>
+    <criterion testable="true">The app installs from the org catalog in a second (customer) tenant via admin consent; tid→env routing serves the correct environment; an unconsented/unmapped tid is denied rather than misrouted (negative path verified).</criterion>
+    <criterion testable="true">BFF publish is ≤60 MB compressed (with diff vs the ~49.63 MB baseline reported) and dotnet list package --vulnerable reports no new HIGH-severity CVE.</criterion>
+    <criterion testable="true">Given any one of the seven criteria fails on its positive or negative path, the task does NOT mark itself completed and instead escalates per root CLAUDE.md §6.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Teams tab renders and lists membership (desktop + web)">
+      <url>Teams personal-tab URL (per manifest staticTabs; desktop client + teams.microsoft.com web)</url>
+      <steps>
+        <step>Open the Spaarke tab in Teams desktop as a systemuser; confirm workforce SSO completes with no second login and the membership record list renders</step>
+        <step>Repeat in Teams web; confirm parity</step>
+      </steps>
+      <expected>Tab renders in both surfaces and lists exactly the signed-in principal's membership records; no console errors.</expected>
+    </test>
+    <test name="Non-member download returns 403 with no bytes">
+      <url>Teams tab document-download action for a record the signed-in principal is NOT a member of</url>
+      <steps>
+        <step>Attempt to download a document on a record outside the principal's accessible set</step>
+        <step>Inspect the network response</step>
+      </steps>
+      <expected>Response is 403 with no file bytes and no driveId/itemId leaked to the client.</expected>
+    </test>
+    <test name="ADR-021 dark mode in Teams-provided theme">
+      <url>Teams personal-tab URL, with Teams client theme set to Dark</url>
+      <steps>
+        <step>Switch the Teams client to dark theme</step>
+        <step>Confirm the tab adopts Teams' dark theme via the host-adapter theme source (not a manual toggle)</step>
+      </steps>
+      <expected>All surfaces render with Fluent v9 dark-mode tokens (no white/black hardcodes); no console errors.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    This is the last verification gate before 090-project-wrap-up. If a criterion fails, do not let 090 proceed —
+    the wrap-up task's acceptance criteria explicitly require this task's graduation-criteria pass as a precondition.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Follow task-execute for the
+    pre-execution checklist. FULL-rigor task — Step 9.5 gates (code-review + adr-check) apply to any new seam-test
+    code produced.</protocol>
+  </execution>
+</task>

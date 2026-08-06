@@ -59,17 +59,50 @@ export interface IThreadAttachmentRefDto {
   attachmentType: number | null;
 }
 
-/** Mirrors `ThreadMessageDto` — one `sprk_communication` row projected for the timeline. */
+/**
+ * Mirrors `ThreadMessageDto` — one `sprk_communication` row projected for the timeline.
+ *
+ * `direction`/`sentBy`/`sentByName` (R3 task 002 / FR-18) are the sender-identity
+ * enrichment fields: `sentBy` is the sender's `systemuserid` GUID
+ * (`_sprk_sentby_value`, serialized as a string), the CANONICAL signal
+ * `ConversationView` (task 011) keys mine/others bubble alignment on — NOT
+ * `from` (an email-address string). All three ride the SAME already-
+ * impersonated, already-access-filtered row as every other field here (no
+ * second query, no directory lookup, no access gate) — see the BFF doc
+ * comment on `ThreadMessageDto` in `CommunicationThreadReadModels.cs`.
+ */
 export interface IThreadMessageDto {
   messageId: string;
   body: string | null;
   bodyFormat: number | null;
   communicationType: number | null;
   from: string | null;
+  /** `sprk_subject` (R3 task 021 / FR-04) — the email-in-flow block subject; null when unset. */
+  subject: string | null;
+  /**
+   * `sprk_to` "To" header recipients (R3 task 021 / FR-04), server-split from the "; "-joined field. The
+   * authoritative recipient list of a row the caller is already permitted to read (never fabricated, never BCC).
+   * Empty array when unset.
+   */
+  to: string[];
+  /** `sprk_direction` choice int: Incoming=100000000, Outgoing=100000001; null when unset. */
+  direction: number | null;
+  /** Sender's `systemuserid` GUID (`_sprk_sentby_value`), serialized as a string; null when unset. */
+  sentBy: string | null;
+  /** Sender's display name (`sprk_sentbyname`); null when unset. */
+  sentByName: string | null;
   sentAt: string | null;
   createdOn: string | null;
   inReplyTo: string | null;
+  /** `sprk_privilegeclassification` (FR-21): None=100000000 / PotentiallyPrivileged=100000001 / Privileged=100000002. Display/review label — never gated the read (ADR-015). */
   privilege: number;
+  /**
+   * `sprk_isinternalonly` (FR-21). Only ever `true` on a row this (permitted, internal) caller may already read —
+   * the BFF's shared access filter drops internal-only rows for external callers, so this never over-discloses.
+   */
+  isInternalOnly: boolean;
+  /** `sprk_isprivate` (FR-21) — display-only privacy marker; never gates (impersonation enforces private-thread visibility server-side). */
+  isPrivate: boolean;
   attachments: IThreadAttachmentRefDto[];
 }
 
@@ -333,4 +366,41 @@ export async function sendTimelineMessage(
   client: ICommunicationApiClientOptions
 ): Promise<SendCommunicationResult> {
   return sendCommunication(options, client);
+}
+
+// ---------------------------------------------------------------------------
+// deactivateMessage — DELETE /api/communications/{id} (round 7 item 8)
+// ---------------------------------------------------------------------------
+//
+// Soft-deletes (deactivates) a single message (`sprk_communication`). The server sets statecode to Inactive rather
+// than physically deleting the row, so the action is reversible + preserves audit/archive history (operator decision,
+// round 7). The deactivated message drops out of the thread read on the next poll. Same authenticatedFetch/BFF path +
+// ProblemDetails error shape as every other call in this module (ADR-028 / ADR-019). `<ConversationView />` calls this
+// on a confirmed delete, then forces a poll to refresh.
+// ---------------------------------------------------------------------------
+
+/**
+ * Deactivates (soft-deletes) a message (`DELETE /api/communications/{id}`). Throws
+ * {@link CommunicationTimelineReadError} on any non-2xx response — including a 403 when the caller cannot see/modify the
+ * message. Email-type communications are NOT deleted via this path (round 7 item 8 — email deletion is owned by the
+ * email surface); the caller only offers this for message-type rows.
+ */
+export async function deactivateMessage(
+  messageId: string,
+  client: ICommunicationTimelineApiClientOptions
+): Promise<void> {
+  if (!messageId) {
+    throw new Error('deactivateMessage: messageId is required.');
+  }
+  if (!client.authenticatedFetch) {
+    throw new Error('deactivateMessage: authenticatedFetch is required.');
+  }
+
+  const path = `/api/communications/${encodeURIComponent(messageId)}`;
+  const url = client.bffBaseUrl ? client.bffBaseUrl.replace(/\/+$/, '') + path : path;
+  const response = await client.authenticatedFetch(url, { method: 'DELETE' });
+
+  if (!response.ok) {
+    throw await CommunicationTimelineReadError.fromResponse(response);
+  }
 }

@@ -26,7 +26,7 @@ import {
   ArrowSyncRegular,
   StopRegular,
   AttachRegular,
-  DismissRegular,
+  DismissCircle16Filled,
   PromptRegular,
   WarningRegular,
 } from '@fluentui/react-icons';
@@ -59,7 +59,10 @@ import { useDynamicSlashCommands } from './hooks/useDynamicSlashCommands';
 import { useChatFileAttachment } from './hooks/useChatFileAttachment';
 import type { ISprkChatInputHandle } from './types';
 import { Toaster, useToastController, useId, Toast, ToastTitle, ToastBody } from '@fluentui/react-components';
-import { ActionConfirmationDialog } from './ActionConfirmationDialog';
+// spaarke-modal-system task 042 (spec FR-13): the hand-rolled position:absolute
+// ActionConfirmationDialog overlay is retired; HITL action confirmations now
+// render via the shared ConfirmModal preset (Fluent Dialog envelope).
+import { ConfirmModal } from '../SprkModal/presets/ConfirmModal';
 import { actionOutcomeDataToCard } from './OutcomeCard';
 import {
   openCodePageDialog,
@@ -190,19 +193,20 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalXS),
   },
-  // Chip strip — visible only when files.length > 0. Horizontal wrap to handle
-  // up to MAX_ATTACHMENTS (5) chips across narrow panes.
+  // Chip strip — visible only when files.length > 0. R5-4: now an INLINE group inside the
+  // controls row (no own padding/full-width), wrapping across up to MAX_ATTACHMENTS (5) chips.
   chipStrip: {
-    display: 'flex',
+    display: 'inline-flex',
     flexWrap: 'wrap',
-    ...shorthands.gap(tokens.spacingHorizontalS),
-    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM, '0', tokens.spacingHorizontalM),
+    alignItems: 'center',
+    ...shorthands.gap(tokens.spacingHorizontalXS),
   },
-  // FR-09: single horizontal row containing [ Prompt ▾ ] [ + Attach ] above the
-  // input box. `spacingHorizontalS` gap between items per FR-09 acceptance.
+  // FR-09 + R5-4: one wrapping row holding [ Prompt ▾ ] [ + Attach ] AND the attached-file pills,
+  // above the input box. `flexWrap` lets the pills flow onto additional lines on narrow panes.
   controlsStrip: {
     display: 'flex',
     alignItems: 'center',
+    flexWrap: 'wrap',
     ...shorthands.gap(tokens.spacingHorizontalS),
     ...shorthands.padding(tokens.spacingVerticalXXS, tokens.spacingHorizontalM),
     ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke2),
@@ -236,8 +240,47 @@ const useStyles = makeStyles({
     display: 'inline-flex',
     alignItems: 'center',
   },
+  // UAT 2026-07-21: compact dismiss (×) as a brand-blue filled circle glyph —
+  // matches the workspace-tab close affordance. Small footprint so the pill
+  // reads tight.
   attachmentChipDismiss: {
-    minWidth: 'auto',
+    minWidth: '16px',
+    maxWidth: '16px',
+    height: '16px',
+    ...shorthands.padding('0'),
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorBrandForeground1,
+    ':hover': {
+      color: tokens.colorBrandForeground1,
+    },
+  },
+  // Ported from the retired ActionConfirmationDialog overlay (spaarke-modal-system
+  // task 042 — spec FR-13): the HITL action-confirmation parameters box, now
+  // rendered inside ConfirmModal's `message` slot. Semantic tokens only (ADR-021) —
+  // no hex, no '1px' literals, no inline color styles.
+  actionConfirmParameters: {
+    backgroundColor: tokens.colorNeutralBackground2,
+    ...shorthands.borderRadius(tokens.borderRadiusMedium),
+    ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
+    marginTop: tokens.spacingVerticalS,
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap(tokens.spacingVerticalXS),
+  },
+  actionConfirmParameterRow: {
+    display: 'flex',
+    ...shorthands.gap(tokens.spacingHorizontalS),
+    fontSize: tokens.fontSizeBase200,
+  },
+  actionConfirmParameterLabel: {
+    color: tokens.colorNeutralForeground3,
+    fontWeight: tokens.fontWeightSemibold,
+    minWidth: '100px',
+    flexShrink: 0,
+  },
+  actionConfirmParameterValue: {
+    color: tokens.colorNeutralForeground1,
+    wordBreak: 'break-word',
   },
 });
 
@@ -312,6 +355,42 @@ function mapInlineActionsToChipActions(actions: IInlineActionInfo[]): InlineAiAc
     actionType: (a.actionType === 'diff' ? 'diff' : 'chat') as 'chat' | 'diff',
     description: a.description,
   }));
+}
+
+/**
+ * Composes the `ConfirmModal` `message` node for a pending HITL action confirmation
+ * (spaarke-modal-system task 042 — spec FR-13). Ported verbatim in substance from the
+ * retired `ActionConfirmationDialog` overlay: the summary line, plus — when the action
+ * carries extracted parameters (e.g. "Recipient: john@example.com") — a bordered
+ * parameters box beneath it. This is body copy the user needs before confirming a
+ * side-effecting action, so it is preserved rather than dropped in the re-route.
+ */
+function renderActionConfirmationMessage(
+  action: IPendingAction,
+  styles: {
+    actionConfirmParameters: string;
+    actionConfirmParameterRow: string;
+    actionConfirmParameterLabel: string;
+    actionConfirmParameterValue: string;
+  }
+): React.ReactNode {
+  const paramEntries = Object.entries(action.parameters);
+  if (paramEntries.length === 0) {
+    return action.summary;
+  }
+  return (
+    <>
+      {action.summary}
+      <div className={styles.actionConfirmParameters} data-testid="action-parameters">
+        {paramEntries.map(([key, value]) => (
+          <div key={key} className={styles.actionConfirmParameterRow}>
+            <span className={styles.actionConfirmParameterLabel}>{key}:</span>
+            <span className={styles.actionConfirmParameterValue}>{value}</span>
+          </div>
+        ))}
+      </div>
+    </>
+  );
 }
 
 export const SprkChat: React.FC<ISprkChatProps> = ({
@@ -900,6 +979,28 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         console.warn('[SprkChat] gate reject failed:', err);
       });
   }, [pendingAction, apiBaseUrl, authenticatedFetch]);
+
+  /**
+   * ConfirmModal onClose/onConfirm wrappers (spaarke-modal-system task 042).
+   *
+   * The retired ActionConfirmationDialog overlay disabled BOTH its Cancel and
+   * Confirm buttons for the duration of the async dispatch, preventing any
+   * re-entrant confirm/cancel while a confirmation was in flight. The preset's
+   * `busy` prop (added in the P2 consolidation) now restores that visual
+   * disabled + spinner state; these thin wrappers remain as defense-in-depth so
+   * the Cancel button AND the header × (ConfirmModal's onClose covers both)
+   * stay no-ops while `isConfirmingAction` is true even if focus/keyboard
+   * activation races the disabled state.
+   */
+  const handleConfirmModalClose = React.useCallback(() => {
+    if (isConfirmingAction) return;
+    handleActionCancel();
+  }, [isConfirmingAction, handleActionCancel]);
+
+  const handleConfirmModalConfirm = React.useCallback(() => {
+    if (isConfirmingAction || !pendingAction) return;
+    handleActionConfirm(pendingAction);
+  }, [isConfirmingAction, pendingAction, handleActionConfirm]);
 
   // Initialize session on mount.
   //
@@ -2656,110 +2757,131 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         FR-06: Input remains editable on cold load (handleSend guards `!session`).
       */}
       <div className={styles.inputZone} data-testid="chat-input-zone">
-        {/* Region 1: chip strip — visible only when files have been attached */}
-        {attachmentFiles.length > 0 && (
-          <div className={styles.chipStrip} role="list" aria-label="Attached files" data-testid="attachment-chip-strip">
-            {attachmentFiles.map((file, index) => {
-              const isError = file.status === 'error';
-              const chipClassName = isError
-                ? `${styles.attachmentChip} ${styles.attachmentChipError}`
-                : styles.attachmentChip;
-              const statusNode =
-                file.status === 'extracting' ? (
-                  <Spinner size="extra-tiny" data-testid={`attachment-chip-status-extracting-${index}`} />
-                ) : file.status === 'ready' ? (
-                  <CheckmarkCircleRegular aria-label="Ready" data-testid={`attachment-chip-status-ready-${index}`} />
-                ) : (
-                  <WarningRegular
-                    aria-label="Extraction failed"
-                    data-testid={`attachment-chip-status-error-${index}`}
-                  />
-                );
+        {/* R5-4 (UAT 2026-07-20): the attached-file pills share ONE wrapping row with the
+            controls (paperclip / prompt) instead of taking a separate full-width strip above —
+            "this row can be used by the uploaded file(s)". Controls first, then the pills. */}
+        {/* UAT 2026-07-21: this strip now holds only the optional Prompt button
+            + the attached-file pills. The Attach (paperclip) button MOVED to the
+            composer bottom tray (SprkChatInput toolbarLeadingSlot). The strip is
+            hidden entirely when it would be empty (no Prompt button, no pills). */}
+        {(!hidePromptMenu || attachmentFiles.length > 0) && (
+          <div
+            className={styles.controlsStrip}
+            role="toolbar"
+            aria-label="Chat input actions"
+            data-testid="chat-input-controls-strip"
+          >
+            {/* CHAT-6 (UAT 2026-07-19): the slash-command ("Prompt") button is
+              suppressible per host — the slash menu is still reachable via `/`. */}
+            {!hidePromptMenu && (
+              <Button
+                appearance="subtle"
+                icon={<PromptRegular />}
+                onClick={handlePromptMenuButtonClick}
+                disabled={isStreaming}
+                aria-label="Open slash commands"
+                title="Open slash commands (/)"
+                data-testid="strip-prompt-menu-button"
+              />
+            )}
 
-              const chipBody = (
-                <div key={file.id} className={chipClassName} role="listitem" data-testid={`attachment-chip-${index}`}>
-                  <span className={styles.attachmentChipStatus} aria-hidden={file.status === 'ready'}>
-                    {statusNode}
-                  </span>
-                  <span className={styles.attachmentChipFilename} title={file.filename}>
-                    {file.filename}
-                  </span>
-                  <Button
-                    appearance="subtle"
-                    size="small"
-                    icon={<DismissRegular />}
-                    onClick={() => {
-                      // R5 task 020 / D2-11: notify host BEFORE local splice so
-                      // it can capture the chip metadata for the manifest +
-                      // session-files index cleanup cascade. Host failures do
-                      // NOT block the local removal — orphaned manifest/index
-                      // entries are bounded by the session-end cleanup
-                      // HostedService (R5 task 007).
-                      if (onAttachmentRemoved) {
-                        try {
-                          onAttachmentRemoved(file, index);
-                        } catch {
-                          // Host failures must not block the local chip removal.
-                        }
-                      }
-                      removeAttachmentFile(index);
-                    }}
-                    aria-label={`Remove ${file.filename}`}
-                    title={`Remove ${file.filename}`}
-                    className={styles.attachmentChipDismiss}
-                    data-testid={`attachment-chip-dismiss-${index}`}
-                  />
-                </div>
-              );
+            {attachmentFiles.length > 0 && (
+              <span
+                className={styles.chipStrip}
+                role="list"
+                aria-label="Attached files"
+                data-testid="attachment-chip-strip"
+              >
+                {attachmentFiles.map((file, index) => {
+                  const isError = file.status === 'error';
+                  const chipClassName = isError
+                    ? `${styles.attachmentChip} ${styles.attachmentChipError}`
+                    : styles.attachmentChip;
+                  // UAT 2026-07-21: the leading "ready" checkmark was removed —
+                  // a ready pill shows just its filename (the pill's presence IS
+                  // the "ready" signal). The in-progress spinner and error warning
+                  // remain, since those states are not otherwise conveyed.
+                  const statusNode =
+                    file.status === 'extracting' ? (
+                      <Spinner size="extra-tiny" data-testid={`attachment-chip-status-extracting-${index}`} />
+                    ) : file.status === 'error' ? (
+                      <WarningRegular
+                        aria-label="Extraction failed"
+                        data-testid={`attachment-chip-status-error-${index}`}
+                      />
+                    ) : null;
 
-              // For error chips, wrap in a Tooltip exposing the parse error.
-              return isError && file.error ? (
-                <Tooltip key={file.id} content={file.error} relationship="description" withArrow>
-                  {chipBody}
-                </Tooltip>
-              ) : (
-                chipBody
-              );
-            })}
+                  const chipBody = (
+                    <div
+                      key={file.id}
+                      className={chipClassName}
+                      role="listitem"
+                      data-testid={`attachment-chip-${index}`}
+                    >
+                      {statusNode !== null && <span className={styles.attachmentChipStatus}>{statusNode}</span>}
+                      <span className={styles.attachmentChipFilename} title={file.filename}>
+                        {file.filename}
+                      </span>
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={<DismissCircle16Filled />}
+                        onClick={() => {
+                          // R5 task 020 / D2-11: notify host BEFORE local splice so
+                          // it can capture the chip metadata for the manifest +
+                          // session-files index cleanup cascade. Host failures do
+                          // NOT block the local removal — orphaned manifest/index
+                          // entries are bounded by the session-end cleanup
+                          // HostedService (R5 task 007).
+                          if (onAttachmentRemoved) {
+                            try {
+                              onAttachmentRemoved(file, index);
+                            } catch {
+                              // Host failures must not block the local chip removal.
+                            }
+                          }
+                          removeAttachmentFile(index);
+                        }}
+                        aria-label={`Remove ${file.filename}`}
+                        title={`Remove ${file.filename}`}
+                        className={styles.attachmentChipDismiss}
+                        data-testid={`attachment-chip-dismiss-${index}`}
+                      />
+                    </div>
+                  );
+
+                  // For error chips, wrap in a Tooltip exposing the parse error.
+                  return isError && file.error ? (
+                    <Tooltip key={file.id} content={file.error} relationship="description" withArrow>
+                      {chipBody}
+                    </Tooltip>
+                  ) : (
+                    chipBody
+                  );
+                })}
+              </span>
+            )}
           </div>
         )}
 
-        {/* Region 2: controls strip — [ Prompt ▾ ] [ + Attach ] (FR-09) */}
-        <div
-          className={styles.controlsStrip}
-          role="toolbar"
-          aria-label="Chat input actions"
-          data-testid="chat-input-controls-strip"
-        >
-          {/* CHAT-6 (UAT 2026-07-19): the slash-command ("Prompt") button is
-              suppressible per host — the slash menu is still reachable via `/`. */}
-          {!hidePromptMenu && (
-            <Button
-              appearance="subtle"
-              icon={<PromptRegular />}
-              onClick={handlePromptMenuButtonClick}
-              disabled={isStreaming}
-              aria-label="Open slash commands"
-              title="Open slash commands (/)"
-              data-testid="strip-prompt-menu-button"
-            />
-          )}
-          <Button
-            appearance="subtle"
-            icon={<AttachRegular />}
-            onClick={handleAttachButtonClick}
-            disabled={isStreaming || attachmentFiles.length >= 5}
-            aria-label="Attach files"
-            title="Attach files (text, markdown, PDF, DOCX)"
-            data-testid="strip-attach-button"
-          />
-        </div>
-
         {/* Region 3: input box. `hideSlashButton` removes the in-input [/]
-            button to avoid duplicating the strip-mounted Prompt button. */}
+            button to avoid duplicating the strip-mounted Prompt button.
+            UAT 2026-07-21: the Attach (paperclip) button is passed as the
+            composer tray's leading slot so it sits bottom-left, opposite Send. */}
         <SprkChatInput
           ref={inputHandleRef}
           onSend={handleSend}
+          toolbarLeadingSlot={
+            <Button
+              appearance="subtle"
+              icon={<AttachRegular />}
+              onClick={handleAttachButtonClick}
+              disabled={isStreaming || attachmentFiles.length >= 5}
+              aria-label="Attach files"
+              title="Attach files (text, markdown, PDF, DOCX)"
+              data-testid="strip-attach-button"
+            />
+          }
           // Lock the composer for the WHOLE orchestration, not just the message
           // stream (UAT: a message typed while a file was uploading/classifying was
           // dropped). Busy = message streaming OR assistant typing OR a file still
@@ -2790,12 +2912,23 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         data-testid="attachment-file-input"
       />
 
-      {/* Task R2-039: HITL Action Confirmation Dialog — shown when an action requires user confirmation */}
-      <ActionConfirmationDialog
-        pendingAction={pendingAction}
-        onConfirm={handleActionConfirm}
-        onCancel={handleActionCancel}
-        isConfirming={isConfirmingAction}
+      {/* Task R2-039 / spaarke-modal-system task 042 (spec FR-13): HITL Action
+          Confirmation — re-based onto the shared ConfirmModal preset (Fluent Dialog
+          envelope via SprkModal). The hand-rolled position:absolute overlay is
+          retired; a11y (focus trap, ESC, aria-modal/alertdialog) now comes from
+          Fluent Dialog. `dismiss="alert"` (ConfirmModal's fixed contract) matches
+          the overlay's actual behavior: no backdrop-click-cancel was ever wired up,
+          and its ESC handling only fired incidentally when focus already sat inside
+          the dialog — never a true light-dismiss gesture. */}
+      <ConfirmModal
+        open={!!pendingAction}
+        onClose={handleConfirmModalClose}
+        onConfirm={handleConfirmModalConfirm}
+        title={pendingAction ? `Confirm Action: ${pendingAction.actionName}` : ''}
+        message={pendingAction ? renderActionConfirmationMessage(pendingAction, styles) : ''}
+        confirmLabel={isConfirmingAction ? 'Confirming…' : 'Confirm'}
+        cancelLabel="Cancel"
+        busy={isConfirmingAction}
       />
 
       {/* Task R2-039: Fluent v9 Toaster for autonomous action success/error feedback (ADR-021) */}

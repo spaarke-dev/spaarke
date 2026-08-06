@@ -164,6 +164,22 @@ public static class ChatEndpoints
             .ProducesProblem(401)
             .ProducesProblem(404);
 
+        // GET /api/ai/chat/sessions/by-analysis/{analysisId} — resolve the session bound to an
+        // Analysis for the hub-grid reopen flow (ai-advanced-capabilities-analysis-hub-r1 task 031,
+        // spec FR-11). Read-only projection over the task-020 GetSessionsByAnalysisAsync FK query —
+        // no new store, no new session-binding write path. Route is a literal 3-segment path
+        // ("by-analysis" is not a route parameter) so it cannot collide with the sibling
+        // DELETE /sessions/{sessionId} 2-segment route.
+        group.MapGet("/sessions/by-analysis/{analysisId:guid}", GetSessionByAnalysisAsync)
+            .AddAiAuthorizationFilter()
+            .WithName("GetSessionByAnalysis")
+            .WithSummary("Resolve the chat session bound to an sprk_analysis record (FR-11 reopen)")
+            .WithDescription("Returns the most recently created chat session bound to the given sprk_analysis via the sprk_aichatsummary.sprk_analysis FK (task 020). 404 when no session has ever been bound to this Analysis — callers MUST NOT mint a new session in that case (no silent empty-session creation).")
+            .Produces<AnalysisSessionSummary>()
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(404);
+
         // PATCH /api/ai/chat/sessions/{sessionId}/tabs — write-through workspace tab persistence (NFR-09, task 065)
         // Endpoint filters match the sibling /messages route (ADR-008): auth + ai-stream rate limit.
         group.MapMethods("/sessions/{sessionId}/tabs", ["PATCH"], SaveTabsAsync)
@@ -396,7 +412,6 @@ public static class ChatEndpoints
         SprkChatAgentFactory agentFactory,
         PendingPlanManager pendingPlanManager,
         IChatClient chatClient,
-        [FromServices] IWorkingDocumentService workingDocumentService,
         [FromServices] IMatterContextDetector matterContextDetector,
         [FromServices] IConversationHistorySanitizer conversationHistorySanitizer,
         [FromServices] CrossMatterSafetyTelemetry crossMatterTelemetry,
@@ -464,11 +479,12 @@ public static class ChatEndpoints
         response.Headers["X-Accel-Buffering"] = "no";
 
         logger.LogInformation(
-            "SendMessage: session={SessionId}, tenant={TenantId}, msgLen={MsgLen}, attachments={AttachmentCount}, attachmentChars={AttachmentChars}, document={DocumentId}",
+            "SendMessage: session={SessionId}, tenant={TenantId}, msgLen={MsgLen}, attachments={AttachmentCount}, attachmentChars={AttachmentChars}, document={DocumentId}, modelTierOverride={ModelTierOverride}",
             sessionId, tenantId, request.Message.Length,
             request.Attachments?.Count ?? 0,
             request.Attachments?.Sum(a => a.TextContent?.Length ?? 0) ?? 0,
-            request.DocumentId ?? session.DocumentId);
+            request.DocumentId ?? session.DocumentId,
+            request.ModelTierOverride);
 
         // === AIPU2-028: Cross-Matter Conversation Safety (FR-408) ===
         // Before building the agent or AI history, detect whether the session has pivoted
@@ -629,6 +645,11 @@ public static class ChatEndpoints
                 // names it the default target when the LLM omits fileIds. Deterministic scoping lives
                 // in SessionDispatchOrchestrator.ResolveTargetFiles.
                 activeSessionFileId: session.ActiveDocument?.SessionFileId,
+                // ai-advanced-capabilities-nda-r1 task 011: the Assistant's runtime tier-picker
+                // selection for this turn — forwarded to every projected capability tool so a
+                // text-path dispatch composes it with the Binding's own tier override (ADR-039 — the
+                // ONE resolver). Null (the default) is a no-op.
+                modelTierOverride: request.ModelTierOverride,
                 cancellationToken: cancellationToken);
 
             // Convert session history to AI framework messages for context
@@ -945,19 +966,15 @@ public static class ChatEndpoints
                 CreatedAt: DateTimeOffset.UtcNow,
                 SequenceNumber: seqBase + 2);
 
-            var finalSession = await historyManager.AddMessageAsync(updatedSession, assistantMessage, CancellationToken.None);
+            await historyManager.AddMessageAsync(updatedSession, assistantMessage, CancellationToken.None);
 
-            // Persist chat history to sprk_chathistory when session is scoped to an analysis record.
-            // EntityType "sprk_analysisoutput" with EntityId = analysisId identifies analysis sessions.
-            if (session.HostContext?.EntityType == "sprk_analysisoutput" &&
-                Guid.TryParse(session.HostContext.EntityId, out var analysisGuid))
-            {
-                var historyPayload = finalSession.Messages
-                    .Select(m => new { role = m.Role.ToString(), content = m.Content, timestamp = m.CreatedAt.ToString("O") })
-                    .ToArray();
-                var chatHistoryJson = JsonSerializer.Serialize(historyPayload);
-                await workingDocumentService.UpdateChatHistoryAsync(analysisGuid, chatHistoryJson, CancellationToken.None);
-            }
+            // task 064 (ADR-040 Path A, spec §13.5 / FR-22): the sprk_chathistory per-turn write to
+            // sprk_analysis was removed here — task 062/064's hand-trace confirmed the ONLY reader
+            // (AnalysisDocumentLoader.GetOrReloadFromDataverseAsync, feeding GET/save/export) no
+            // longer reads that column, so this write became provably dead. Cosmos (via
+            // historyManager.AddMessageAsync above) is the sole transcript store-of-record; analysis
+            // sessions remain discoverable via GET /api/ai/chat/sessions/by-analysis/{id} (task 031).
+            // See notes/task-064-chathistory-read-drop.md.
         }
         catch (OperationCanceledException)
         {
@@ -1893,6 +1910,71 @@ public static class ChatEndpoints
 
         return Results.Ok(response);
     }
+
+    // =========================================================================
+    // Session-by-Analysis lookup (ai-advanced-capabilities-analysis-hub-r1 task 031, FR-11)
+    // =========================================================================
+    //
+    // PLACEMENT JUSTIFICATION (CLAUDE.md §10 BFF Hygiene + ADR-013):
+    //   Extends the EXISTING /api/ai/chat/sessions group in-process — no new DI module, no new
+    //   package. Reuses IChatDataverseRepository.GetSessionsByAnalysisAsync (task 020, already
+    //   registered by AnalysisServicesModule — symmetric registration, §F.1). Read-only; publish-size
+    //   delta is code-only (~a few KB IL).
+    //   Project CLAUDE.md MUST rule: "Standardize on ChatEndpoints (Redis→Cosmos); NEVER extend
+    //   AnalysisEndpoints in-memory session model" — this lives on ChatEndpoints, not AnalysisEndpoints.
+
+    /// <summary>
+    /// GET /api/ai/chat/sessions/by-analysis/{analysisId}
+    /// Resolves the chat session bound to an <c>sprk_analysis</c> record for the hub-grid reopen
+    /// flow (FR-11). An Analysis may have accrued more than one bound session over its lifetime
+    /// (fork-on-analysis, task 021); reopen targets the MOST RECENTLY CREATED one (archived or not
+    /// — an archived session still holds its durable transcript, task 022, and reopening it is a
+    /// legitimate "view history" action, not a resume-writes action).
+    /// </summary>
+    private static async Task<IResult> GetSessionByAnalysisAsync(
+        Guid analysisId,
+        HttpContext httpContext,
+        IChatDataverseRepository dataverseRepository,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        var sessions = await dataverseRepository.GetSessionsByAnalysisAsync(tenantId, analysisId, cancellationToken);
+        if (sessions.Count == 0)
+        {
+            return Results.Problem(
+                statusCode: 404,
+                title: "Not Found",
+                detail: $"No chat session is bound to analysis '{analysisId}'.");
+        }
+
+        return Results.Ok(SelectMostRecentSession(sessions));
+    }
+
+    /// <summary>
+    /// Picks the session to reopen when an <c>sprk_analysis</c> has accrued more than one bound
+    /// session over its lifetime (fork-on-analysis, task 021): the MOST RECENTLY CREATED one wins,
+    /// archived or not — an archived session still holds its durable transcript (task 022), and
+    /// reopening it is a legitimate "view history" action, not a resume-writes action.
+    ///
+    /// Sessions with no <see cref="AnalysisSessionSummary.CreatedOn"/> (should not occur in
+    /// practice — <c>CreateSessionAsync</c> always stamps it — but defensively sorted last so a
+    /// missing timestamp never shadows a dated session) never win over a dated one.
+    ///
+    /// <c>internal</c> (not <c>private</c>) so this branchy selection rule is unit-testable directly
+    /// via <c>InternalsVisibleTo</c> — no reflection into a private member (ADR-038 §7 / tests
+    /// CLAUDE.md B8 ban).
+    /// </summary>
+    /// <param name="sessions">Non-empty session list for one Analysis (caller 404s on empty).</param>
+    internal static AnalysisSessionSummary SelectMostRecentSession(IReadOnlyList<AnalysisSessionSummary> sessions) =>
+        sessions.OrderByDescending(s => s.CreatedOn ?? DateTimeOffset.MinValue).First();
 
     // =========================================================================
     // Decision-traceability read surface (AIR2-038 / FR-A1-09 — D-F4)
@@ -2869,17 +2951,22 @@ public static class ChatEndpoints
         "attach a document",
         "attach a file",
         "please upload",
-        "please provide",
-        "please share",
+        // UAT 2026-07-22: the bare "please provide" / "please share" / "you can provide" /
+        // "you need to provide" / "please send" keywords were OVERBROAD — they matched
+        // non-document replies (e.g. a create-task clarification: "could you please provide
+        // some details"), firing the document/matter action chips in the wrong context. The
+        // document-SPECIFIC variants below ("provide a/the document", "share a/the document",
+        // "send me the document/file") already cover the genuine document-missing cases, so the
+        // bare forms are removed / tightened to require a document|file object.
         "no document",
         "no file",
         "don't have a document",
         "don't have access to a document",
-        "haven't provided",
-        "haven't shared",
+        "haven't provided a document",
+        "haven't shared a document",
         "you need to upload",
-        "you need to provide",
-        "you need to share",
+        "you need to provide a document",
+        "you need to share a document",
         "to analyze a document",
         "to review a document",
         "to compare documents",
@@ -2887,8 +2974,7 @@ public static class ChatEndpoints
         "could not find a document",
         "couldn't find a document",
         "you can upload",
-        "you can provide",
-        "please send",
+        "you can provide a document",
         "send me the document",
         "send me the file",
         "i need a document",
@@ -3102,6 +3188,16 @@ public record ChatSessionCreatedResponse(string SessionId, DateTimeOffset Create
 /// in-memory only). Default null preserves backwards compatibility for clients that omit
 /// the field. See <see cref="ValidateAttachments"/> for validation rules (NFR-04).
 /// </param>
+/// <param name="ModelTierOverride">
+/// ai-advanced-capabilities-nda-r1 task 011: the Assistant's runtime model-tier picker selection for
+/// THIS turn (raw <c>sprk_aimodeltier</c> option-set value — the SAME wire vocabulary the maker-facing
+/// catalog editor already uses, e.g. <c>100000002</c> = Reasoning). Forwarded to
+/// <see cref="Sprk.Bff.Api.Services.Ai.Chat.SprkChatAgentFactory.CreateAgentAsync"/> and, from there, to
+/// every projected capability tool for the turn — it composes with (does not replace) the dispatched
+/// Binding's own <c>sprk_modeltieroverride</c> / <see cref="Sprk.Bff.Api.Services.Ai.PublicContracts.Binding.EffectiveModelTier"/>
+/// through the ONE tier→deployment resolver (ADR-039). Default <c>null</c> = no override; the Action's
+/// own tier governs unchanged (pre-task-011 behavior).
+/// </param>
 /// <remarks>
 /// FR-P2-05 hard cutover (task 034): the former soft-slash bias field was RETIRED
 /// end-to-end (NFR-08). There is no longer any client-to-server intent-bias hint —
@@ -3111,7 +3207,8 @@ public record ChatSessionCreatedResponse(string SessionId, DateTimeOffset Create
 public record ChatSendMessageRequest(
     string Message,
     string? DocumentId = null,
-    IReadOnlyList<ChatMessageAttachment>? Attachments = null);
+    IReadOnlyList<ChatMessageAttachment>? Attachments = null,
+    AiModelTier? ModelTierOverride = null);
 
 /// <summary>
 /// In-memory chat-message attachment with client-extracted text content (FR-07).

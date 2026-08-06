@@ -19,6 +19,7 @@ public static class RegardingFieldMap
         ("sprk_workassignment", "sprk_regardingworkassignment"),
         ("sprk_event", "sprk_regardingevent"),
         ("sprk_budget", "sprk_regardingbudget"),
+        ("sprk_reportcard", "sprk_regardingreportcard"),
         ("sprk_analysis", "sprk_regardinganalysis"),
         ("sprk_organization", "sprk_regardingorganization"),
         ("account", "sprk_regardingaccount"),

@@ -19,7 +19,6 @@
 import * as React from 'react';
 import {
   Input,
-  Field,
   Tag,
   TagGroup,
   Spinner,
@@ -47,6 +46,42 @@ function splitTokens(raw: string): string[] {
     .filter(s => s.length > 0);
 }
 
+/**
+ * Resolve a directory result into the email address + display name to commit
+ * as a recipient (task 123 / UAT R4 C12-1).
+ *
+ * Order of resolution:
+ *   1. `item.email` — the FIRST-CLASS email field (`userLookup.ts` now populates
+ *      it from `internalemailaddress` / `emailaddress1`). Authoritative.
+ *   2. Fallback: parse the email out of the `"Full Name (email)"` display
+ *      string, for callers that don't set `item.email`.
+ *
+ * Returns `null` when NO valid email can be resolved (e.g. a contact with no
+ * `emailaddress1`). A `null` result MUST NOT be turned into a recipient — the
+ * previous code fell back to using the bare display name (e.g. "ralph") as the
+ * recipient value, which then failed validation. Such rows are rendered
+ * non-selectable instead.
+ */
+function resolveRecipientEmail(item: ILookupItem): { email: string; displayName?: string } | null {
+  const parenMatch = item.name.match(/\(([^)]+)\)\s*$/);
+  const displayFromName = parenMatch ? item.name.slice(0, parenMatch.index).trim() || undefined : undefined;
+
+  const explicit = item.email?.trim();
+  if (explicit && EMAIL_RE.test(explicit)) {
+    // Prefer the display-name segment of "Name (email)"; else the whole name.
+    return { email: explicit, displayName: displayFromName ?? (item.name.trim() || undefined) };
+  }
+
+  if (parenMatch) {
+    const parsed = parenMatch[1].trim();
+    if (EMAIL_RE.test(parsed)) {
+      return { email: parsed, displayName: displayFromName };
+    }
+  }
+
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -60,6 +95,12 @@ export interface IRecipientFieldProps {
   onChange: (recipients: IRecipient[]) => void;
   /** Directory search — host binds `searchUsersAndContacts(dataService, query)`. */
   onSearch?: (query: string) => Promise<ILookupItem[]>;
+  /**
+   * Advanced OOB people lookup (owner UAT 2026-07-24). When supplied, the To/Cc/Bcc label
+   * box becomes a button that opens the host's OOB picker and appends the resolved
+   * recipient(s). Additive to the typeahead — the user can still type free-text.
+   */
+  onLookup?: () => Promise<IRecipient[] | null>;
   /** Field-level validation error message (from `IValidationResult`), if any. */
   errorMessage?: string;
 }
@@ -74,11 +115,67 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
   },
-  tagGroup: {
+  // Inline "To [ input ]" row (owner UAT mockup 2026-07-22): a boxed label on the
+  // left, an underline input filling the rest — the Outlook-style recipient row.
+  inlineRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  labelBox: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    minWidth: '44px',
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    ...shorthands.border(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase300,
+  },
+  // When an OOB lookup is wired, the label box acts as a button (owner UAT 2026-07-24).
+  labelBoxClickable: {
+    cursor: 'pointer',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+      color: tokens.colorNeutralForeground1,
+    },
+  },
+  // The right-hand cell: a bordered box holding the resolved chips AND the text
+  // input, wrapping together (owner UAT 2026-07-22 #2 — a selected recipient enters
+  // the field as a chip, not a list below it).
+  fieldBox: {
+    flexGrow: 1,
+    minWidth: 0,
     display: 'flex',
     flexWrap: 'wrap',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
-    marginTop: tokens.spacingVerticalXXS,
+    paddingBottom: tokens.spacingVerticalXXS,
+    borderBottomWidth: tokens.strokeWidthThin,
+    borderBottomStyle: 'solid',
+    borderBottomColor: tokens.colorNeutralStroke1,
+  },
+  chipInput: {
+    flexGrow: 1,
+    minWidth: '140px',
+    backgroundColor: 'transparent',
+    // Strip the Fluent Input's own border/focus-underline so it reads as a bare text
+    // field inside `fieldBox` (which owns the underline).
+    ...shorthands.border('0'),
+    '::after': {
+      borderBottomWidth: 0,
+    },
+  },
+  // `display: contents` so the chips flow as direct flex children of `fieldBox`
+  // and wrap inline with the text input, rather than as a block below it.
+  tagGroup: {
+    display: 'contents',
   },
   tagInvalid: {
     ...shorthands.borderColor(tokens.colorPaletteRedBorder2),
@@ -118,16 +215,24 @@ const useStyles = makeStyles({
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
   },
+  resultItemDisabled: {
+    cursor: 'default',
+    color: tokens.colorNeutralForegroundDisabled,
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1,
+    },
+  },
+  noEmailHint: {
+    marginLeft: 'auto',
+    paddingLeft: tokens.spacingHorizontalS,
+    color: tokens.colorNeutralForeground3,
+    fontStyle: 'italic',
+  },
   errorText: {
     color: tokens.colorPaletteRedForeground1,
   },
   requiredMark: {
     color: tokens.colorPaletteRedForeground1,
-  },
-  labelRow: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXXS,
   },
 });
 
@@ -143,6 +248,7 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
   value,
   onChange,
   onSearch,
+  onLookup,
   errorMessage,
 }) => {
   const styles = useStyles();
@@ -221,11 +327,16 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
 
   const handleSelectResult = React.useCallback(
     (item: ILookupItem) => {
-      // ILookupItem.name is formatted "Full Name (email)" (userLookup.ts) —
-      // extract the email; fall back to the whole name if no email is present.
-      const match = item.name.match(/\(([^)]+)\)\s*$/);
-      const email = match ? match[1] : item.name;
-      const displayName = match ? item.name.slice(0, match.index).trim() : undefined;
+      // Resolve to the contact's actual email (first-class `item.email`, else
+      // parsed from the "Full Name (email)" display string). A result with no
+      // usable email is NON-SELECTABLE — never commit the display name as the
+      // recipient value (task 123 / UAT R4 C12-1 + parallel R6-5, both 2026-07-21:
+      // the "Invalid email address: {name}" bug). This variant is stricter than
+      // the R6-5 inline fix — it refuses to commit an unusable recipient rather
+      // than falling back to `item.name`.
+      const resolved = resolveRecipientEmail(item);
+      if (!resolved) return;
+      const { email, displayName } = resolved;
       const existingEmails = new Set(value.map(r => r.email.toLowerCase()));
       if (!existingEmails.has(email.toLowerCase())) {
         onChange([...value, { email, displayName, resolved: true, sourceId: item.id, entityType: item.entityType }]);
@@ -243,6 +354,19 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
     },
     [value, onChange]
   );
+
+  // Advanced OOB people lookup (owner UAT 2026-07-24) — dedup by email against the current set.
+  const handleLookup = React.useCallback(() => {
+    if (!onLookup || disabled) return;
+    void onLookup()
+      .then(picked => {
+        if (!picked || picked.length === 0) return;
+        const existing = new Set(value.map(r => r.email.toLowerCase()));
+        const added = picked.filter(r => r.email && !existing.has(r.email.toLowerCase()));
+        if (added.length > 0) onChange([...value, ...added]);
+      })
+      .catch(err => console.warn('[RecipientField] lookup failed:', label, err));
+  }, [onLookup, disabled, value, onChange, label]);
 
   // Debounced directory search over the live draft.
   React.useEffect(() => {
@@ -282,74 +406,113 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const renderLabel = (): React.ReactElement => (
-    <span className={styles.labelRow}>
-      {label}
-      {required && (
-        <span aria-hidden="true" className={styles.requiredMark}>
-          {' *'}
-        </span>
-      )}
-    </span>
-  );
-
   return (
     <div className={styles.wrapper} ref={wrapperRef} role="group" aria-label={label}>
-      <Field label={renderLabel()} required={required} validationState={errorMessage ? 'error' : 'none'}>
-        <Input
-          value={draft}
-          onChange={handleInputChange}
-          onKeyDown={handleKeyDown}
-          onBlur={handleBlur}
-          placeholder={placeholder ?? `Add ${label.toLowerCase()} — separate with ; or ,`}
-          aria-label={label}
-          disabled={disabled}
-          autoComplete="off"
-        />
-      </Field>
-
-      {value.length > 0 && (
-        <TagGroup
-          className={styles.tagGroup}
-          aria-label={`${label} recipients`}
-          onDismiss={(_, data) => handleRemove(String(data.value))}
-        >
-          {value.map(r => (
-            <Tag
-              key={r.email}
-              value={r.email}
-              dismissible={!disabled}
-              className={mergeClasses(!EMAIL_RE.test(r.email) ? styles.tagInvalid : undefined)}
-              appearance={r.resolved ? 'filled' : 'outline'}
+      <div className={styles.inlineRow}>
+        {onLookup ? (
+          <span
+            className={mergeClasses(styles.labelBox, styles.labelBoxClickable)}
+            role="button"
+            tabIndex={disabled ? -1 : 0}
+            aria-label={`Look up ${label} recipients`}
+            title={`Look up ${label} recipients`}
+            onClick={handleLookup}
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handleLookup();
+              }
+            }}
+          >
+            {label}
+            {required && <span className={styles.requiredMark}>{' *'}</span>}
+          </span>
+        ) : (
+          <span className={styles.labelBox} aria-hidden="true">
+            {label}
+            {required && <span className={styles.requiredMark}>{' *'}</span>}
+          </span>
+        )}
+        <div className={styles.fieldBox}>
+          {value.length > 0 && (
+            <TagGroup
+              className={styles.tagGroup}
+              aria-label={`${label} recipients`}
+              onDismiss={(_, data) => handleRemove(String(data.value))}
             >
-              {r.displayName ? `${r.displayName} (${r.email})` : r.email}
-            </Tag>
-          ))}
-        </TagGroup>
-      )}
+              {value.map(r => (
+                <Tag
+                  key={r.email}
+                  value={r.email}
+                  dismissible={!disabled}
+                  size="small"
+                  className={mergeClasses(!EMAIL_RE.test(r.email) ? styles.tagInvalid : undefined)}
+                  appearance={r.resolved ? 'filled' : 'outline'}
+                >
+                  {r.displayName ? `${r.displayName} (${r.email})` : r.email}
+                </Tag>
+              ))}
+            </TagGroup>
+          )}
+          <Input
+            className={styles.chipInput}
+            value={draft}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            onBlur={handleBlur}
+            placeholder={value.length > 0 ? '' : (placeholder ?? `Add ${label.toLowerCase()} — separate with ; or ,`)}
+            aria-label={label}
+            disabled={disabled}
+            autoComplete="off"
+          />
+        </div>
+      </div>
 
       {loading && <Spinner size="tiny" label="Searching..." />}
 
       {showResults && (
         <div className={styles.resultsList} role="listbox" aria-label={`${label} search results`}>
-          {results.map(item => (
-            <div
-              key={item.id}
-              className={styles.resultItem}
-              role="option"
-              aria-selected={false}
-              tabIndex={0}
-              onClick={() => handleSelectResult(item)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  handleSelectResult(item);
+          {results.map(item => {
+            // A result with no resolvable email cannot become a valid recipient —
+            // render it clearly non-selectable rather than letting a click commit
+            // the display name as an invalid recipient (task 123 / UAT R4 C12-1).
+            const selectable = resolveRecipientEmail(item) !== null;
+            return (
+              <div
+                key={item.id}
+                className={mergeClasses(styles.resultItem, !selectable && styles.resultItemDisabled)}
+                role="option"
+                aria-selected={false}
+                aria-disabled={!selectable}
+                tabIndex={selectable ? 0 : -1}
+                // CRITICAL: prevent the input from blurring when a suggestion is
+                // clicked. Without this, mousedown blurs the <Input> → `handleBlur`
+                // commits the half-typed draft (e.g. "ralp") as a free-text recipient
+                // AND hides this list, so the `onClick` below never fires and the
+                // selection is lost (UAT round: "selecting a name only takes 'ralp'").
+                // preventDefault on mousedown keeps focus, so onClick → handleSelectResult runs.
+                onMouseDown={e => e.preventDefault()}
+                onClick={selectable ? () => handleSelectResult(item) : undefined}
+                onKeyDown={
+                  selectable
+                    ? e => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handleSelectResult(item);
+                        }
+                      }
+                    : undefined
                 }
-              }}
-            >
-              <Text size={200}>{item.name}</Text>
-            </div>
-          ))}
+              >
+                <Text size={200}>{item.name}</Text>
+                {!selectable && (
+                  <Text size={200} className={styles.noEmailHint}>
+                    no email address
+                  </Text>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 

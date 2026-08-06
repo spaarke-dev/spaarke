@@ -149,11 +149,16 @@ public class DataverseWebApiService : IDataverseService
     }
 
     /// <summary>
-    /// Sends a PATCH request with JSON body and per-request auth headers.
+    /// Sends a PATCH request with JSON body and per-request auth headers. When
+    /// <paramref name="impersonateSystemUserId"/> is a real Dataverse <c>systemuserid</c>, the PATCH runs AS that
+    /// user (<c>MSCRMCallerID</c> impersonation — effective privileges = intersection of app user + impersonated
+    /// user, honest <c>modifiedby</c>); null/empty = app-only (existing callers byte-unchanged). This is the
+    /// write-plane counterpart of the impersonated read (<see cref="RetrieveMultipleImpersonatedAsync"/>), added
+    /// for the Job B apply path (task 031).
     /// </summary>
-    private async Task<HttpResponseMessage> SendPatchAsJsonAsync<T>(string url, T payload, CancellationToken ct = default)
+    private async Task<HttpResponseMessage> SendPatchAsJsonAsync<T>(string url, T payload, CancellationToken ct = default, Guid? impersonateSystemUserId = null)
     {
-        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Patch, url, ct);
+        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Patch, url, ct, impersonateSystemUserId);
         request.Content = JsonContent.Create(payload);
         return await _httpClient.SendAsync(request, ct);
     }
@@ -255,7 +260,9 @@ public class DataverseWebApiService : IDataverseService
             return null;
         }
 
-        var url = $"sprk_analysises({guid})?$select=sprk_name,sprk_workingdocument,sprk_chathistory,statuscode,createdon,modifiedon,_sprk_documentid_value";
+        // task 064 (ADR-040 Path A, spec §13.5 / FR-22): sprk_chathistory dropped from $select —
+        // see DataverseServiceClientImpl.GetAnalysisAsync for the removal rationale.
+        var url = $"sprk_analysises({guid})?$select=sprk_name,sprk_workingdocument,statuscode,createdon,modifiedon,_sprk_documentid_value";
         _logger.LogDebug("Retrieving analysis: {Id}", id);
 
         try
@@ -281,8 +288,6 @@ public class DataverseWebApiService : IDataverseService
                     ? Guid.Parse(docId.GetString()!) : Guid.Empty,
                 WorkingDocument = data.TryGetValue("sprk_workingdocument", out var wd) && wd.ValueKind != JsonValueKind.Null
                     ? wd.GetString() : null,
-                ChatHistory = data.TryGetValue("sprk_chathistory", out var ch) && ch.ValueKind != JsonValueKind.Null
-                    ? ch.GetString() : null,
                 StatusCode = data.TryGetValue("statuscode", out var status) ? status.GetInt32() : 0,
                 CreatedOn = data.TryGetValue("createdon", out var created) ? created.GetDateTime() : DateTime.MinValue,
                 ModifiedOn = data.TryGetValue("modifiedon", out var modified) ? modified.GetDateTime() : DateTime.MinValue
@@ -419,6 +424,49 @@ public class DataverseWebApiService : IDataverseService
 
         _logger.LogDebug("[DATAVERSE-API] Created analysis output {OutputId} for analysis {AnalysisId}", outputId, output.AnalysisId);
         return outputId;
+    }
+
+    /// <summary>FR-14 (task 051) — the Review Summary Memo READ path (REST variant; the live-wired
+    /// implementation is <see cref="DataverseServiceClientImpl"/>, but this class implements the same
+    /// composite <see cref="IDataverseService"/> interface and must satisfy it too). Most-recent-first
+    /// so a re-generated memo (a future re-run) always reads back as the latest row.</summary>
+    public async Task<AnalysisOutputEntity?> GetLatestAnalysisOutputByNameAsync(Guid analysisId, string name, CancellationToken ct = default)
+    {
+        var escapedName = name.Replace("'", "''");
+        var filter = $"_sprk_analysisid_value eq {analysisId} and sprk_name eq '{escapedName}'";
+        var url = $"sprk_analysisoutputs?$select=sprk_analysisoutputid,sprk_name,sprk_value&$filter={Uri.EscapeDataString(filter)}&$orderby=createdon desc&$top=1";
+
+        _logger.LogDebug("[DATAVERSE-API] Querying latest analysis output named '{Name}' for analysis {AnalysisId}", name, analysisId);
+
+        try
+        {
+            var response = await SendGetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (result?.Value == null || result.Value.Count == 0)
+            {
+                return null;
+            }
+
+            var data = result.Value[0];
+            var idString = data.TryGetValue("sprk_analysisoutputid", out var idElement) && idElement.ValueKind != JsonValueKind.Null
+                ? idElement.GetString()
+                : null;
+
+            return new AnalysisOutputEntity
+            {
+                Id = Guid.TryParse(idString, out var outputId) ? outputId : Guid.Empty,
+                Name = data.TryGetValue("sprk_name", out var nameEl) && nameEl.ValueKind != JsonValueKind.Null ? nameEl.GetString() : null,
+                Value = data.TryGetValue("sprk_value", out var valueEl) && valueEl.ValueKind != JsonValueKind.Null ? valueEl.GetString() : null,
+                AnalysisId = analysisId,
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error querying latest analysis output named '{Name}' for analysis {AnalysisId}", name, analysisId);
+            throw;
+        }
     }
 
     /// <summary>
@@ -1925,7 +1973,17 @@ public class DataverseWebApiService : IDataverseService
         _logger.LogDebug(
             "[DATAVERSE-IMPERSONATE] GET {EntitySet} as caller {CallerSystemUserId}", entitySetName, callerSystemUserId);
 
-        var response = await SendGetAsync(url, ct, impersonateSystemUserId: callerSystemUserId);
+        // Request FormattedValue annotations so a lookup's display name (e.g. sprk_sentby → the sender's
+        // systemuser display name) rides the SAME impersonated row as the lookup value itself. This is the
+        // canonical Dataverse way to project a related record's name without a second query OR a broken/
+        // never-written denormalized name column (messaging-r3 2026-07-22 — replaced the unqueryable
+        // sprk_sentbyname column). Annotations are additive extra keys ("{field}@OData.Community.Display.
+        // V1.FormattedValue") that non-communication readers of this impersonated seam simply ignore.
+        using var request = await CreateAuthenticatedRequestAsync(
+            HttpMethod.Get, url, ct, impersonateSystemUserId: callerSystemUserId);
+        request.Headers.TryAddWithoutValidation(
+            "Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
+        var response = await _httpClient.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
 
         var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
@@ -2054,7 +2112,8 @@ public class DataverseWebApiService : IDataverseService
         string entityLogicalName,
         Guid recordId,
         Dictionary<string, object?> fields,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Guid? impersonateSystemUserId = null)
     {
 
 
@@ -2066,9 +2125,12 @@ public class DataverseWebApiService : IDataverseService
 
         var entitySetName = await GetEntitySetNameAsync(entityLogicalName, ct);
 
-        _logger.LogInformation("Updating record fields: {Entity}({Id}), {FieldCount} fields", entityLogicalName, recordId, fields.Count);
+        _logger.LogInformation(
+            "Updating record fields: {Entity}({Id}), {FieldCount} fields{Impersonation}",
+            entityLogicalName, recordId, fields.Count,
+            impersonateSystemUserId is { } imp && imp != Guid.Empty ? $" (impersonating {imp})" : string.Empty);
 
-        var response = await SendPatchAsJsonAsync($"{entitySetName}({recordId})", fields, ct);
+        var response = await SendPatchAsJsonAsync($"{entitySetName}({recordId})", fields, ct, impersonateSystemUserId);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -2639,6 +2701,26 @@ public class DataverseWebApiService : IDataverseService
     {
         throw new NotImplementedException(
             "QueryRecordTypeRefAsync is implemented in DataverseServiceClientImpl.");
+    }
+
+    public Task<IReadOnlyList<Entity>> QueryAllRecordTypeRefsAsync(CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "QueryAllRecordTypeRefsAsync is implemented in DataverseServiceClientImpl.");
+    }
+
+    public Task<IReadOnlyList<Entity>> QueryRecordsByNumberFieldAsync(
+        string entityLogicalName, string numberFieldLogicalName, string value, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "QueryRecordsByNumberFieldAsync is implemented in DataverseServiceClientImpl.");
+    }
+
+    public Task<IReadOnlyList<Entity>> QueryRecordsByNumberFieldValuesAsync(
+        string entityLogicalName, string numberFieldLogicalName, IReadOnlyCollection<string> values, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "QueryRecordsByNumberFieldValuesAsync is implemented in DataverseServiceClientImpl.");
     }
 
     public Task<Guid?> QuerySystemUserByAzureAdOidAsync(string azureAdObjectId, CancellationToken ct = default)

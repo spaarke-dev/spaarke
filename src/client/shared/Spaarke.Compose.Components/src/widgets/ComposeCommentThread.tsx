@@ -54,6 +54,13 @@ import {
 import { CommentCheckmark16Regular, Dismiss16Regular } from '@fluentui/react-icons';
 import { useComposeCommentThreads } from './hooks/useComposeCommentThreads';
 import type { ComposeCommentThreadModel } from './ComposeCommentThread.types';
+// G9 (FR-08, task 031): position-link the pane to in-document anchors (scroll-sync helpers).
+import {
+  resolveThreadAnchorPositions,
+  pickActiveThreadId,
+  scrollEditorToThreadAnchor,
+  resolveViewportTopPos,
+} from './commentScrollSync';
 
 const useStyles = makeStyles({
   panel: {
@@ -115,6 +122,15 @@ const useStyles = makeStyles({
   },
   threadResolved: {
     backgroundColor: tokens.colorNeutralBackground3,
+  },
+  // G9 (task 031): the thread whose anchor is at the document viewport top (doc→pane tracking) OR the
+  // one the user just selected (pane→doc jump). Theme-token accent only (ADR-021 — no hex).
+  threadActive: {
+    border: `1px solid ${tokens.colorBrandStroke1}`,
+    boxShadow: `0 0 0 1px ${tokens.colorBrandStroke1}`,
+  },
+  threadClickable: {
+    cursor: 'pointer',
   },
   threadHeader: {
     display: 'flex',
@@ -197,17 +213,98 @@ export interface ComposeCommentThreadProps {
   pendingRange?: ComposeCommentPendingRange | null;
   /** Called after a new thread is successfully created — the host clears `pendingRange`. */
   onThreadCreated?: (threadId: string) => void;
+  /**
+   * Item 5b (UAT round-4, FR-23): fired whenever the live thread list changes (create / reply /
+   * resolve / import). The host (ComposeEditor) captures the latest threads so save can persist
+   * session comments as native `w:comment`s. Pass a STABLE callback (the panel calls it in an effect
+   * keyed on the thread list) to avoid churn.
+   */
+  onThreadsChanged?: (threads: readonly ComposeCommentThreadModel[]) => void;
   /** Seeds the panel's thread list on first mount (e.g. a future FR-25 hydration). */
   initialThreads?: readonly ComposeCommentThreadModel[];
+  /**
+   * G9 (FR-08, task 031): the editor's scroll container (ComposeEditor's `editorScrollRef`). When
+   * supplied, the pane scroll-TRACKS it: as the reader scrolls the document, the thread whose anchor is
+   * nearest the viewport top is highlighted + scrolled into pane view (doc→pane). Optional — when
+   * omitted the pane still supports the pane→doc jump (click a comment → editor scrolls to its anchor),
+   * just not live scroll-tracking. Client-only; no persistence.
+   */
+  scrollContainerRef?: React.RefObject<HTMLElement | null>;
 }
 
 export function ComposeCommentThread(props: ComposeCommentThreadProps): React.JSX.Element | null {
-  const { editor, open, onClose, author = 'You', pendingRange, onThreadCreated, initialThreads } = props;
+  const {
+    editor,
+    open,
+    onClose,
+    author = 'You',
+    pendingRange,
+    onThreadCreated,
+    onThreadsChanged,
+    initialThreads,
+    scrollContainerRef,
+  } = props;
   const styles = useStyles();
   const threadsState = useComposeCommentThreads(editor, author, initialThreads);
 
   const [draftText, setDraftText] = React.useState<string>('');
   const [replyDrafts, setReplyDrafts] = React.useState<Record<string, string>>({});
+
+  // G9 (FR-08, task 031): position-link the pane to in-document anchors.
+  const [activeThreadId, setActiveThreadId] = React.useState<string | null>(null);
+  // Per-thread card DOM refs so the active card can be scrolled into pane view (doc→pane).
+  const cardRefs = React.useRef<Map<string, HTMLDivElement>>(new Map());
+
+  const { threads: liveThreads } = threadsState;
+
+  // pane → doc: clicking a comment card scrolls the editor to its live anchor + marks it active.
+  const handleSelectThread = React.useCallback(
+    (threadId: string): void => {
+      if (scrollEditorToThreadAnchor(editor, threadId)) {
+        setActiveThreadId(threadId);
+      }
+    },
+    [editor]
+  );
+
+  // doc → pane: track the editor's scroll container; the thread whose anchor is nearest the viewport
+  // top becomes active + is scrolled into pane view. rAF-throttled; correctness over animation (no
+  // smooth-scroll of the pane — a plain 'nearest' scroll avoids reflow jank on rapid document scroll).
+  React.useEffect(() => {
+    if (!open || !editor) return;
+    const container = scrollContainerRef?.current ?? null;
+    if (!container) return;
+
+    let frame = 0;
+    const onScroll = (): void => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        const topPos = resolveViewportTopPos(editor, container);
+        if (topPos === null) return; // no layout (e.g. jsdom) — leave the active thread unchanged
+        const positions = resolveThreadAnchorPositions(editor, liveThreads);
+        const next = pickActiveThreadId(positions, topPos);
+        if (next) {
+          setActiveThreadId(next);
+          cardRefs.current.get(next)?.scrollIntoView({ block: 'nearest' });
+        }
+      });
+    };
+
+    container.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', onScroll);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [open, editor, scrollContainerRef, liveThreads]);
+
+  // Item 5b (UAT round-4, FR-23): report the live thread list up so the host can persist session
+  // comments on save. Runs REGARDLESS of `open` (hooks precede the early return) — thread state
+  // persists across open/close, and the host must see it even while the panel is collapsed.
+  const { threads } = threadsState;
+  React.useEffect(() => {
+    onThreadsChanged?.(threads);
+  }, [threads, onThreadsChanged]);
 
   if (!open) return null;
 
@@ -285,11 +382,36 @@ export function ComposeCommentThread(props: ComposeCommentThreadProps): React.JS
           threadsState.threads.map(thread => (
             <div
               key={thread.id}
-              className={mergeClasses(styles.thread, thread.resolved ? styles.threadResolved : undefined)}
+              ref={el => {
+                if (el) cardRefs.current.set(thread.id, el);
+                else cardRefs.current.delete(thread.id);
+              }}
+              className={mergeClasses(
+                styles.thread,
+                thread.resolved ? styles.threadResolved : undefined,
+                thread.id === activeThreadId ? styles.threadActive : undefined
+              )}
               data-testid={`compose-comment-thread-${thread.id}`}
               data-resolved={thread.resolved ? 'true' : 'false'}
+              data-active={thread.id === activeThreadId ? 'true' : 'false'}
             >
-              <div className={styles.threadHeader}>
+              {/* G9 (task 031): the header is the pane→doc jump affordance — clicking it scrolls the
+                  editor to this comment's in-document anchor. A button role keeps it keyboard-reachable
+                  without stealing the reply/resolve controls below. */}
+              <div
+                className={mergeClasses(styles.threadHeader, styles.threadClickable)}
+                role="button"
+                tabIndex={0}
+                aria-label={`Go to comment by ${thread.author} in the document`}
+                data-testid={`compose-comment-jump-${thread.id}`}
+                onClick={() => handleSelectThread(thread.id)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleSelectThread(thread.id);
+                  }
+                }}
+              >
                 <Avatar name={thread.author} size={24} />
                 <div className={styles.threadHeaderText}>
                   <Text

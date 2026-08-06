@@ -1,0 +1,171 @@
+<task id="011" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Intra-paragraph offset-addressing table in the projection (FR-01)</title>
+    <phase>1 Backend ingest</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF `.cs` (tags include bff-api); offset→run mapping over formatted/split runs + existing tracked changes is the hardest ingest surface and load-bearing for the Patch Engine — code-review + adr-check MUST run at Step 9.5.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>offset→run mapping over formatted/split runs + existing tracked changes is the hardest ingest surface; correctness here determines whether every downstream edit lands (D2 fine anchor). High blast radius across the Patch Engine.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W1b</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies `ComposeDocxProjectionBuilder.cs` + `ComposeDocxProjection.cs` — both shared with task 012; sequence 011 BEFORE 012.</parallel-reason>
+    <deps>001,003</deps>
+    <tags>bff-api,docx</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Extend `ComposeDocxProjectionBuilder` and the `ComposeDocxProjection` record so the projection emits,
+    alongside the existing paragraph-level paraId map, an INTRA-PARAGRAPH OFFSET-ADDRESSING TABLE:
+    a per-paraId run-boundary map that deterministically maps an editor-offset within a paraId to the
+    exact OOXML run split. This is the D2 fine anchor — paraId (node) is the coarse anchor; runIndex +
+    run-local-offset is the fine anchor. The table MUST account for formatted/split runs (a single logical
+    span can be several `w:r` with different `w:rPr`) and for EXISTING tracked changes (`w:ins`/`w:del`
+    already present in the loaded doc), so that offset N in paraId X resolves to a specific
+    `(runIndex, run-local-offset)` that the Patch Engine (Phase 3) will split at. Be literal about the
+    contract: given a paraId and an editor-offset, the table yields the run split deterministically; an
+    offset PAST the paragraph end is REJECTED, not silently clamped. This is the offset→run mapping the
+    bridge lives or dies on (design §5.0) — spiked in Phase 0 (task 005), owned here.
+  </prompt>
+
+  <role>
+    Senior .NET 8 developer with deep `DocumentFormat.OpenXml` run-model expertise: the `w:p` → `w:r` →
+    `w:t`/`w:delText` structure, run splitting at a character offset, `w:rPr` formatting boundaries, and
+    how pre-existing `w:ins`/`w:del` tracked changes partition a paragraph's text. Understands the D2
+    anchor model and that this table is the deterministic contract the client op-capture and the server
+    Patch Engine both rely on (I-3, I-6, FR-04).
+  </role>
+
+  <goal>
+    The projection emits an intra-paragraph offset-addressing table (paraId → ordered run-boundary map)
+    that deterministically maps an editor-offset within a paraId to the exact `(runIndex, run-local-offset)`
+    run split, correctly accounting for formatted/split runs and pre-existing tracked changes; the table
+    round-trips offsets → run splits on the corpus; an out-of-range offset is rejected, not clamped.
+  </goal>
+
+  <context>
+    <background>
+      Design §5.0 names offset→run mapping as one of the bridge's three hard pieces: "editor-offset N in
+      paraId X → the exact OOXML run split, accounting for formatted/split runs and existing tracked
+      changes." Design §5 "Ingest": the projection emits "the paraId map **+** an intra-paragraph
+      offset-addressing table (paraId → run-boundary map)." Spec FR-01 acceptance: "addressing table
+      round-trips offsets to run splits deterministically." The §11 three-question gate classes this as an
+      EXTENSION of `ComposeDocxProjection` (existing `ParaIdMap` is paragraph-level only) — extend, don't
+      add a parallel projection. Phase 0 task 003 (operation schema) defines the `{paraId, runIndex, offset}`
+      shape both ends compile against; this table is the server side that resolves that anchor to a run
+      split. Task 005 spiked the offset→run mapping on the CIPO doc — carry that wisdom.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — emit the intra-paragraph offset-addressing table during projection (per-paraId run-boundary map)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjection.cs — extend the record to carry the addressing table alongside the paragraph-level paraId map</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs — `ExtractParaIds` / document-order walk for paraId resolution</file>
+      <file role="dependency-output">projects/spaarkeai-compose-r4/notes/ — task 003 operation schema (`{paraId, runIndex, offset|range}`), task 005 applier-spike findings on CIPO offset→run mapping</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §5.0 (bridge hard pieces), §5 (Ingest), §3 (I-3)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-01, FR-04, NFR-02</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Shadow-Document ADR — the addressing model this table implements.</dependency>
+      <dependency task="003" status="pending">Operation schema — defines the `{paraId, runIndex, offset|range}` anchor this table resolves to a run split.</dependency>
+    </dependencies>
+  </context>
+
+  <justification>
+    <existing>`ComposeDocxProjection.ParaIdMap` is paragraph-LEVEL only — it addresses whole paragraphs, with no intra-paragraph run/offset resolution.</existing>
+    <extension>YES — extend `ComposeDocxProjectionBuilder` + the `ComposeDocxProjection` record to carry the addressing table alongside the existing paraId map. No new service, no new DI registration, no parallel projection type.</extension>
+    <cost-of-doing-nothing>Without the offset-addressing table, operations can only address WHOLE paragraphs — the editor is back to paragraph-granularity, defeating D2's fine anchor and reintroducing the coarse-delta / re-diff-runs failure the operational model exists to remove.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="spec / FR-01">The projection MUST emit an intra-paragraph offset-addressing table (paraId → run-boundary map) that round-trips offsets to run splits deterministically. Scope: the mapping accounts for formatted/split runs AND pre-existing `w:ins`/`w:del` tracked changes.</constraint>
+    <constraint source="project / D2,I-3">Anchor is `(paraId, runIndex, run-local-offset)`; run boundaries are resolved by the SDK's split-run-at-offset. Scope: the table is the deterministic server-side resolution of that anchor — never text-search, never absolute editor position.</constraint>
+    <constraint source="spec / FR-01 negative">An editor-offset PAST the paragraph end MUST be rejected, not silently clamped. Scope: the table's lookup contract surfaces out-of-range as a refusal.</constraint>
+    <constraint source="ADR-013 / NFR-05">`Services/Compose/` injects NO AI internals; Tier-1 NetArchTest stays green. Scope: no `IOpenAiClient`/executor/routing type.</constraint>
+    <constraint source="ADR-007">byte[]-in/byte[]-out; no `Microsoft.Graph` type in `Services/Compose/`. Scope: table is built from package bytes only.</constraint>
+    <constraint source="project / §10 Placement Justification">Extends KEEP assets in `Services/Compose/` (no new service). State the Placement Justification in the PR; cite `.claude/constraints/bff-extensions.md`. Run `/conflict-check` before the BFF PR (overlaps r1/r2/r3 + ai-architecture-redesign-r2). Sequence AFTER nothing but BEFORE task 012 (shared files).</constraint>
+    <constraint source="ADR-038 / NFR-06">Through-the-wire proof is task 013's seam slice; NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests.</constraint>
+    <constraint source="project / §10 publish-size">Report publish size absolute + delta vs ~49.63 MB baseline, ≤60 MB; no new runtime package; verify no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Intra-paragraph offset→run mapping; OOXML run splitting at a character offset; formatted/split runs; pre-existing w:ins/w:del partitioning; projection contract extension; BFF hygiene</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Custom w:p→HTML projection (extend)" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs">
+        The projection builder already maps `w:p` → HTML with `data-paraid`; extend the same walk to also emit, per paraId, the ordered run-boundary offsets so an editor-offset resolves to a `(runIndex, run-local-offset)`.
+      </pattern>
+      <pattern name="Offset→run split determinism" location="projects/spaarkeai-compose-r4/notes/">
+        Carry the task 005 CIPO applier-spike findings: how formatted/split runs and existing tracked changes partition a paragraph's editor-visible text, so the offset math is deterministic and matches what the Patch Engine will split.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration. Load knowledge files + `.claude/constraints/bff-extensions.md` + the task 003 operation schema + task 005 spike notes. State the Placement Justification and the `&lt;justification&gt;` (existing/extension/cost). Run `/conflict-check` (shared `Services/Compose/` files; sequence before 012).</step>
+    <step order="1" name="Model the run-boundary map">Define the addressing-table shape on the `ComposeDocxProjection` record: per-paraId, an ordered map from editor-offset ranges to `(runIndex, run-local-offset)`. Reconcile the offset space with what the client op-capture sees (task 003 schema).</step>
+    <step order="2" name="Build the table in projection">In `ComposeDocxProjectionBuilder`, as each paragraph is projected, walk its runs in document order and record run boundaries; account for formatted/split runs (multiple `w:r`) and pre-existing `w:ins`/`w:del` that partition the editor-visible text.</step>
+    <step order="3" name="Deterministic offset→run resolution">Ensure a given (paraId, offset) resolves to exactly one `(runIndex, run-local-offset)` run split; make the lookup reject an offset past paragraph end rather than clamping.</step>
+    <step order="4" name="Round-trip verification">Verify on the corpus that offsets round-trip to run splits deterministically (the table's split matches an independent SDK split at the same offset). Include a formatted/split-run doc and a doc with pre-existing tracked changes.</step>
+    <step order="5" name="Build + facade + size/CVE">Build BFF; run `Services/Compose` unit tests; run Tier-1 NetArchTest. Publish; report size absolute + delta vs ~49.63 MB; `dotnet list package --vulnerable --include-transitive`.</step>
+    <step order="6" name="Close out">Update `tasks/TASK-INDEX.md`: set this task's status to ✅. Document any deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The split-run-over-existing-tracked-changes edge: if a paragraph already contains `w:ins`/`w:del` such that the editor-offset space and the OOXML run partition are AMBIGUOUS (more than one defensible run split for a given offset), STOP and surface the ambiguity with the specific corpus case rather than picking silently — this is the hardest bridge edge (design §5.0) and a wrong choice mis-places every downstream edit. Escalate per root §6 / §6.5.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (emits the intra-paragraph offset-addressing table)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjection.cs (record extended with the addressing table)</output>
+    <output type="report">Publish-size absolute + delta vs ~49.63 MB; CVE scan; Placement Justification; `&lt;justification&gt;`; NetArch facade result</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">The projection emits an intra-paragraph offset-addressing table (paraId → run-boundary map) that deterministically maps an editor-offset within a paraId to the exact `(runIndex, run-local-offset)` OOXML run split, on the corpus docs.</criterion>
+    <criterion testable="true">The table correctly accounts for formatted/split runs (multiple `w:r` for one logical span) and for pre-existing `w:ins`/`w:del` tracked changes in the loaded doc.</criterion>
+    <criterion testable="true">Offsets round-trip to run splits deterministically: the table's resolved split matches an independent SDK split at the same offset across the corpus.</criterion>
+    <criterion testable="true">Negative: an editor-offset past the paragraph end is REJECTED (surfaced as out-of-range), not silently clamped.</criterion>
+    <criterion testable="true">`Services/Compose/` injects no AI-internal type (Tier-1 NetArchTest green); no `Microsoft.Graph` type in `Services/Compose/`.</criterion>
+    <criterion testable="true">BFF builds green; publish size reported absolute + delta vs ~49.63 MB baseline, ≤60 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Shared-file task with 012 (both touch `ComposeDocxProjectionBuilder.cs`) — sequence 011 BEFORE 012;
+    `parallel-safe:false`. This is the offset→run mapping design §5.0 flags as where R4 "succeeds or
+    struggles"; opus/xhigh is deliberate. Through-the-wire proof lives in task 013.
+
+    COMPLETED 2026-07-22. Extended `ComposeDocxProjection` with `OffsetAddressingTable`
+    (`ParaOffsetMap`/`RunBoundary`/`RunTrackChange`/`RunOffsetResolution`) and `ComposeDocxProjectionBuilder`
+    to emit it in the identity pass (index-aligned with `ParaIdMap` by construction). Run-index space = the
+    editor-visible run FLATTEN (mirrors `RenderInline`: hyperlink/ins/del/sdt descent) — the offset space the
+    client measures; on a track-changes-clean, hyperlink-free paragraph it coincides with the task-005 spike's
+    `para.Elements<Run>()`. Deterministic left-biased resolution; out-of-range REJECTED not clamped
+    (`TryResolve`=false / `Resolve` throws). Pre-existing `w:ins`/`w:del` runs are INCLUDED + tagged
+    (`RunTrackChange`) so they stay addressable — the table records the structural fact, task 030 owns the
+    tracked-change merge semantic. ESCALATION NOT FIRED: the table is deterministic (one split per offset), and
+    the corpus is track-changes-clean (manifest note 1a; live-redline is placeholder row 4, not supplied) so no
+    ambiguous corpus case exists to surface. Verified: BFF build green; ComposeDocxProjectionBuilderTests pass
+    (5 new in-memory + 1 corpus theory over all 3 fixtures — determinism, contiguous spans, every in-domain
+    offset resolves, past-end rejected, incl. CIPO 108 paras + Engagement Letter mid-run w:br); Tier-1 NetArch
+    `ADR013_ComposeFacadeTests` green; publish 46.11 MB compressed (0 delta vs baseline, ≤60 MB); no new HIGH
+    CVE (zero package adds). Design record: `notes/task-011-offset-addressing-table-decisions.md`. Task 030
+    must index the SAME flatten (carries `patch-engine-ab-decision.md` finding #2 forward). Gates: code-review +
+    adr-check clean.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

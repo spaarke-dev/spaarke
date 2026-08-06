@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Cross-path reconciliation — sprk_communication ↔ sprk_document via internet-message-id</title>
+    <phase>2 Pillar C — De-duplication</phase>
+    <gate>blocked: needs 021 (canonical message-id dedup)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF code linking two Dataverse representations on the contended capture/upload path; correctness-sensitive (review surface must show one email); tags include bff-api. code-review + adr-check MANDATORY at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified linking behavior over an existing canonical identity (internet-message-id) that task 021 establishes; no new concurrency primitive. Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the `Services/Communication` + `Services/Office` reconcile/persist path — contended with r5 / messaging worktrees. Sequential, main-session; `/conflict-check` before PR.</parallel-reason>
+    <deps>021</deps>
+    <tags>bff-api, communication, dedup, dataverse</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Implement FR-C4: a captured `sprk_communication` and a user-saved `sprk_document` archive of the SAME email reconcile via internet-message-id — link (not duplicate) the two representations so the review surface shows ONE email, not two. This closes the capture-vs-upload split for the email-archive case.</prompt>
+  <role>SPAARKE BFF developer. Follow ADR-045 (extend, do not fork), ADR-024/027, ADR-010/032 strictly.</role>
+  <goal>When both a captured `sprk_communication` and a user-saved `sprk_document` archive of the same email exist, they are LINKED via internet-message-id (a queryable relationship/reference), not duplicated; the review surface resolves them to one email; the link is idempotent and non-fatal. Unit + seam tests prove the two representations link rather than double-surface.</goal>
+
+  <context>
+    <background>R1 left a capture-vs-upload split: a mailbox-captured email becomes a `sprk_communication`; a user "Save to Spaarke" of the same email's archive can land as a `sprk_document` (.eml). FR-C4 reconciles them: keyed on internet-message-id (the canonical identity task 021 establishes), link the `sprk_document` archive to the `sprk_communication` so the reconciliation/review surface (Pillar E) shows one email. This is the message↔document bridge, distinct from task 021 (message↔message dedup) and task 024 (file↔file content dedup).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/CommunicationService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/Models.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="021" status="pending">Establishes internet-message-id as the canonical dedup identity + the reconcile hook; this task reuses that identity to bridge to the document archive.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-C4">SCOPE: cross-path. The captured `sprk_communication` and the user-saved `sprk_document` archive of the same email MUST be linked (not duplicated); the review surface MUST resolve to one email.</constraint>
+    <constraint source="ADR-045">SCOPE: reconciliation. Reuse the internet-message-id canonical identity + existing relationship fields; MUST NOT introduce a parallel matching mechanism or a `sprk_reconciliation`-style entity — extend, not fork. If a link field/relationship is genuinely absent, answer the §11 gate before adding one.</constraint>
+    <constraint source="project">SCOPE: idempotency + direction. Linking is idempotent (re-processing does not create duplicate links) and works regardless of arrival order (capture-then-upload OR upload-then-capture).</constraint>
+    <constraint source="NFR-04">SCOPE: reconciliation logic. Non-fatal — a link failure logs + degrades, never throws out of capture/upload.</constraint>
+    <constraint source="§10-BFF">SCOPE: this BFF change. PR carries Placement Justification; report publish-size absolute + delta (≤60 MB ceiling); no new HIGH CVE. Any new relationship/column lands in the managed solution (ADR-027).</constraint>
+    <constraint source="ADR-038">SCOPE: tests. Add a seam test proving the two representations link (both arrival orders); update unit tests. KEEP path; no banned test shapes.</constraint>
+    <constraint source="project">SCOPE: coordination. `/conflict-check` against r5 / messaging before the PR (shared Services/Communication + Services/Office).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Bridging a captured communication to its user-saved document archive on a shared canonical identity</topic>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Canonical identity from 021" location="src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs">internet-message-id is the shared key; reuse the lookup 021 adds to resolve the counterpart representation.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load POML + project CLAUDE.md + spec FR-C4/NFR-04 + ADR-045/024/027. Declare RIGOR LEVEL: FULL. Invoke task-execute.</step>
+    <step order="1">Identify (or, if genuinely absent, justify via §11 + add to managed solution) the link field/relationship between `sprk_communication` and its `sprk_document` .eml archive.</step>
+    <step order="2">On document-archive persist (OfficeDocumentPersistence), resolve any existing `sprk_communication` by internet-message-id and link them; on communication capture, resolve any existing archived `sprk_document` and link — both arrival orders.</step>
+    <step order="3">Make linking idempotent + non-fatal (NFR-04).</step>
+    <step order="4">Add a seam test: capture-then-upload AND upload-then-capture both end linked, review surface resolves to one email. Update unit tests.</step>
+    <step order="5">Build/test/publish; record publish-size delta + CVE scan.</step>
+    <step order="6">Step 9.5: code-review + adr-check; PR carries Placement Justification + size/CVE results.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If no existing field/relationship can bridge `sprk_communication` ↔ `sprk_document` and the only option appears to be a new reconciliation entity, STOP and escalate per CLAUDE.md §6/§11 before creating one (extend-not-fork; the communication stays the reconciliation unit — ADR-045).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish; publish-size; CVE scan</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs + Services/Communication/** (link logic)</output>
+    <output type="test">tests/integration/seam/Communication/** + tests/unit/Sprk.Bff.Api.Tests/**</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a captured `sprk_communication` and a later user-saved `sprk_document` archive of the same email, when the archive persists, then the two are linked via internet-message-id (not duplicated).</criterion>
+    <criterion testable="true">Given the reverse order (archive first, capture later), when capture runs, then they still link — order-independent.</criterion>
+    <criterion testable="true">Given the review surface, when it renders the reconciled pair, then it shows one email, not two.</criterion>
+    <criterion testable="true">Given the same pair re-processed, when linking runs again, then no duplicate link is created (idempotent).</criterion>
+    <criterion testable="true">Negative (non-fatal): Given the link logic throws, when capture/upload runs, then it is caught + logged and the primary path is not failed.</criterion>
+    <criterion testable="true">All unit + seam tests pass; build green; publish size ≤60 MB with delta reported; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-C4 + NFR-04; plan Phase 2 C4. Depends on 021's canonical identity. Message↔document bridge — distinct from 021 (message↔message) + 024 (file↔file). Feeds Pillar E "one email" review surface.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

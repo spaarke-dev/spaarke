@@ -17,7 +17,7 @@
  */
 
 import * as React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import type { Editor } from '@tiptap/react';
@@ -208,44 +208,40 @@ describe('ComposeFormatToolbar — Font dropdown (relocated character formatting
 });
 
 // ---------------------------------------------------------------------------
-// 3. Link add/edit (window.prompt flow preserved)
+// 3. Link — DISABLED in both modes (task 038; supersedes the old window.prompt flow).
+//    Hyperlinks are not representable in R4 (no mark op, no content-model href — R5 G5),
+//    so the control is present-but-disabled and fires neither the prompt nor a command.
 // ---------------------------------------------------------------------------
 
-describe('ComposeFormatToolbar — Link add/edit (window.prompt preserved)', () => {
+describe('ComposeFormatToolbar — Link ENABLED both modes (G5 task 033)', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
 
-  it('prompts for a URL and applies a link when none is active', async () => {
+  it('the link button is ENABLED and opens the URL prompt + fires setLink when clicked', async () => {
     const user = userEvent.setup();
-    jest.spyOn(window, 'prompt').mockReturnValue('https://example.test');
+    const promptSpy = jest.spyOn(window, 'prompt').mockReturnValue('https://example.test');
     const { controls } = renderFormatToolbar();
     await user.click(screen.getByTestId('compose-format-font-menu'));
 
-    await user.click(screen.getByTestId('compose-format-link'));
-
-    expect(window.prompt).toHaveBeenCalled();
+    const link = screen.getByTestId('compose-format-link');
+    expect(link).not.toBeDisabled();
+    await user.click(link);
+    expect(promptSpy).toHaveBeenCalled();
     expect(controls.commands).toContain('setLink');
   });
 
-  it('shows "Remove link" and unsets the link when a link is already active', async () => {
+  it('when a link mark is active, clicking removes it (unsetLink, no prompt)', async () => {
     const user = userEvent.setup();
+    const promptSpy = jest.spyOn(window, 'prompt');
     const { controls } = renderFormatToolbar({ active: new Set(['link']), linkHref: 'https://old.test' });
     await user.click(screen.getByTestId('compose-format-font-menu'));
 
-    expect(screen.getByLabelText('Remove link')).toBeInTheDocument();
-    await user.click(screen.getByTestId('compose-format-link'));
+    const link = screen.getByTestId('compose-format-link');
+    expect(link).not.toBeDisabled();
+    await user.click(link);
+    expect(promptSpy).not.toHaveBeenCalled(); // an active link removes directly, no URL prompt
     expect(controls.commands).toContain('unsetLink');
-  });
-
-  it('cancelling the prompt (null) applies no command', async () => {
-    const user = userEvent.setup();
-    jest.spyOn(window, 'prompt').mockReturnValue(null);
-    const { controls } = renderFormatToolbar();
-    await user.click(screen.getByTestId('compose-format-font-menu'));
-
-    await user.click(screen.getByTestId('compose-format-link'));
-    expect(controls.commands).toHaveLength(0);
   });
 });
 
@@ -273,29 +269,26 @@ describe('ComposeFormatToolbar — Paragraph dropdown (lists / blockquote / alig
 });
 
 // ---------------------------------------------------------------------------
-// 5. Word dropdown — Open-in-Word Web/Desktop + Push to Word wired
+// 5. Word dropdown — Open-in-Word Web/Desktop wired
 // ---------------------------------------------------------------------------
 
 describe('ComposeFormatToolbar — Word dropdown (host-bound handlers)', () => {
-  it('opening Word reveals the three actions and each fires its handler', async () => {
+  it('opening Word reveals the Open-in-Word actions and each fires its handler', async () => {
     const user = userEvent.setup();
     const onOpenInWord = jest.fn();
     const onOpenInWordDesktop = jest.fn();
-    const onPushToWord = jest.fn();
-    renderFormatToolbar({}, { props: { onOpenInWord, onOpenInWordDesktop, onPushToWord, canPushToWord: true } });
+    renderFormatToolbar({}, { props: { onOpenInWord, onOpenInWordDesktop } });
 
     await user.click(screen.getByTestId('compose-format-word-menu'));
 
     await user.click(screen.getByTestId('compose-format-open-word-web'));
     await user.click(screen.getByTestId('compose-format-open-word-desktop'));
-    await user.click(screen.getByTestId('compose-format-push-to-word'));
 
     expect(onOpenInWord).toHaveBeenCalledTimes(1);
     expect(onOpenInWordDesktop).toHaveBeenCalledTimes(1);
-    expect(onPushToWord).toHaveBeenCalledTimes(1);
   });
 
-  it('Open-in-Word items are disabled when wordActionsDisabled is set; Push is disabled without canPushToWord', async () => {
+  it('Open-in-Word items are disabled when wordActionsDisabled is set', async () => {
     const user = userEvent.setup();
     renderFormatToolbar(
       {},
@@ -303,9 +296,7 @@ describe('ComposeFormatToolbar — Word dropdown (host-bound handlers)', () => {
         props: {
           onOpenInWord: jest.fn(),
           onOpenInWordDesktop: jest.fn(),
-          onPushToWord: jest.fn(),
           wordActionsDisabled: true,
-          canPushToWord: false,
         },
       }
     );
@@ -313,33 +304,323 @@ describe('ComposeFormatToolbar — Word dropdown (host-bound handlers)', () => {
 
     expect(screen.getByTestId('compose-format-open-word-web')).toBeDisabled();
     expect(screen.getByTestId('compose-format-open-word-desktop')).toBeDisabled();
-    expect(screen.getByTestId('compose-format-push-to-word')).toBeDisabled();
   });
 });
 
 // ---------------------------------------------------------------------------
-// 6. Save button — right-aligned icon button honoring canSave / isSaving
+// 5b. Table dropdown — Insert table INVERTED to born-in-editor-only (task 038,
+//     supersedes task 037: the renderer authors born-in-editor tables cleanly;
+//     the engine silently drops loaded-doc tables — so the polarity is flipped).
 // ---------------------------------------------------------------------------
 
-describe('ComposeFormatToolbar — Save button', () => {
-  it('is enabled and fires onSave when canSave is true', async () => {
+describe('ComposeFormatToolbar — Table insert INVERTED to born-in-editor-only (task 038)', () => {
+  it('Insert table is ENABLED by default (hasLoadedBaseline omitted ⇒ born-in-editor treatment ⇒ enabled)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar();
+    await user.click(screen.getByTestId('compose-format-table-menu'));
+    // Regression guard: existing callers that never pass the prop keep table authoring.
+    expect(screen.getByTestId('compose-format-table-insert')).not.toBeDisabled();
+  });
+
+  it('Insert table is ENABLED in BORN-IN-EDITOR mode (hasLoadedBaseline=false — renderer authors tables cleanly)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: false } });
+    await user.click(screen.getByTestId('compose-format-table-menu'));
+    expect(screen.getByTestId('compose-format-table-insert')).not.toBeDisabled();
+  });
+
+  it('Insert table is DISABLED on a LOADED doc (hasLoadedBaseline=true — engine has no table op, would silently drop)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
+    await user.click(screen.getByTestId('compose-format-table-menu'));
+    // task 038 inverts task 037: a loaded/imported doc cannot have a NEW table inserted (SDL-3).
+    expect(screen.getByTestId('compose-format-table-insert')).toBeDisabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5c. Deferred edit-path controls (task 038 zero-error guardrails) — heading /
+//     list disabled on a LOADED doc, enabled born-in-editor; hyperlink disabled
+//     in BOTH modes. Maps to failure modes SDL-1/2 (heading/list), SDL-4/5
+//     (hyperlink). ET-1 (alignment) was RE-ENABLED on loaded docs by R5 task 010
+//     (G3 alignment applier — ComposeShadowPatchEngine now emits a tracked
+//     w:pPrChange) — see the alignment-specific describe block below.
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — edit-path controls on a LOADED doc (task 038; heading/list re-enabled by R5 task 011)', () => {
+  it('on a LOADED doc, the heading dropdown is ENABLED (R5 task 011 — SDL-1 guard removed)', () => {
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
+    // The engine now applies a setBlockAttr Style op as a tracked w:pPrChange — the menu is openable.
+    expect(screen.getByTestId('compose-format-heading-menu')).not.toBeDisabled();
+  });
+
+  it('on a LOADED doc, the bullet + numbered list buttons are ENABLED (R5 task 011 — SDL-2 guard removed)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
+    await user.click(screen.getByTestId('compose-format-paragraph-menu'));
+    expect(screen.getByTestId('compose-format-bullet-list')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-ordered-list')).not.toBeDisabled();
+  });
+
+  it('on a BORN-IN-EDITOR doc, heading / list are ENABLED', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: false } });
+    // Heading renders as an openable menu trigger (not the disabled loaded-doc button).
+    expect(screen.getByTestId('compose-format-heading-menu')).not.toBeDisabled();
+    await user.click(screen.getByTestId('compose-format-paragraph-menu'));
+    expect(screen.getByTestId('compose-format-bullet-list')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-ordered-list')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-left')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-center')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-right')).not.toBeDisabled();
+  });
+
+  it('the hyperlink button is ENABLED in BOTH modes (G5 task 033 — SDL-4/5 guard removed)', async () => {
+    const user = userEvent.setup();
+    // Born-in-editor (authored clean w:hyperlink path).
+    const { unmount } = renderFormatToolbar({}, { props: { hasLoadedBaseline: false } });
+    await user.click(screen.getByTestId('compose-format-font-menu'));
+    expect(screen.getByTestId('compose-format-link')).not.toBeDisabled();
+    unmount();
+
+    // Loaded (tracked w:hyperlink edit path).
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
+    await user.click(screen.getByTestId('compose-format-font-menu'));
+    expect(screen.getByTestId('compose-format-link')).not.toBeDisabled();
+  });
+
+  it('blockquote stays ENABLED on a loaded doc (not in the deferred set — the paste banner is its safety net)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
+    await user.click(screen.getByTestId('compose-format-paragraph-menu'));
+    expect(screen.getByTestId('compose-format-blockquote')).not.toBeDisabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5d. Alignment re-enabled on a LOADED doc (R5 task 010 — G3 alignment applier,
+//     removes the R4 ET-1 guard). ComposeShadowPatchEngine now applies a
+//     setBlockAttr Alignment op as a tracked w:pPrChange, so the alignment
+//     buttons are gated ONLY by the read-only `disabled` prop, independent of
+//     `hasLoadedBaseline`. Heading/list joined this set in R5 task 011; only
+//     table-insert stays deferred (to R5 task 014).
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — alignment controls (R5 task 010, ET-1 guard removed)', () => {
+  it('on a LOADED doc, the alignment buttons are ENABLED', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
+    await user.click(screen.getByTestId('compose-format-paragraph-menu'));
+    expect(screen.getByTestId('compose-format-align-left')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-center')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-right')).not.toBeDisabled();
+    // Heading/list are ALSO re-enabled on the SAME loaded doc (R5 task 011); only table stays deferred (task 014).
+    expect(screen.getByTestId('compose-format-bullet-list')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-ordered-list')).not.toBeDisabled();
+  });
+
+  it('on a BORN-IN-EDITOR doc, the alignment buttons are ENABLED (unchanged)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: false } });
+    await user.click(screen.getByTestId('compose-format-paragraph-menu'));
+    expect(screen.getByTestId('compose-format-align-left')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-center')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-right')).not.toBeDisabled();
+  });
+
+  it('the alignment buttons are unreachable when the toolbar is read-only (Paragraph trigger itself disabled), on either doc mode', () => {
+    const { unmount } = renderFormatToolbar({}, { props: { hasLoadedBaseline: true, disabled: true } });
+    expect(screen.getByTestId('compose-format-paragraph-menu')).toBeDisabled();
+    unmount();
+
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: false, disabled: true } });
+    expect(screen.getByTestId('compose-format-paragraph-menu')).toBeDisabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. Save split-button (G7 task 022) — "Save Version" primary + "Save New Document" menu item
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Save split-button (G7 task 022)', () => {
+  // The SplitButton root carries the testid; its first inner <button> is the primary action.
+  const getPrimary = () => within(screen.getByTestId('compose-format-save')).getAllByRole('button')[0];
+
+  it('renders "Save Version" as the primary action and "Save New Document" in the caret menu', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true } });
+
+    // Primary action = Save Version (the default / replace-in-place choice).
+    expect(screen.getByRole('button', { name: /save version/i })).toBeInTheDocument();
+    // The caret menu opens the deliberate-fork item.
+    await user.click(screen.getByRole('button', { name: /save options/i }));
+    expect(await screen.findByTestId('compose-format-save-new')).toBeInTheDocument();
+  });
+
+  it('the primary action fires onSave("version")', async () => {
     const user = userEvent.setup();
     const onSave = jest.fn();
     renderFormatToolbar({}, { props: { onSave, canSave: true } });
 
-    const save = screen.getByTestId('compose-format-save');
-    expect(save).not.toBeDisabled();
-    await user.click(save);
-    expect(onSave).toHaveBeenCalledTimes(1);
+    await user.click(getPrimary());
+    expect(onSave).toHaveBeenCalledWith('version');
   });
 
-  it('is disabled when canSave is false or a save is in flight', () => {
+  it('the caret-menu "Save New Document" fires onSave("new")', async () => {
+    const user = userEvent.setup();
+    const onSave = jest.fn();
+    renderFormatToolbar({}, { props: { onSave, canSave: true } });
+
+    await user.click(screen.getByRole('button', { name: /save options/i }));
+    await user.click(await screen.findByTestId('compose-format-save-new'));
+    expect(onSave).toHaveBeenCalledWith('new');
+  });
+
+  it('the primary action is disabled when canSave is false or a save is in flight', () => {
     const { unmount } = renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: false } });
-    expect(screen.getByTestId('compose-format-save')).toBeDisabled();
+    expect(getPrimary()).toBeDisabled();
     unmount();
 
     renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true, isSaving: true } });
-    expect(screen.getByTestId('compose-format-save')).toBeDisabled();
+    expect(getPrimary()).toBeDisabled();
+  });
+
+  it('ADR-021: renders the split-button under a dark theme (theme tokens, no crash)', () => {
+    renderFormatToolbar({}, { theme: webDarkTheme, props: { onSave: jest.fn(), canSave: true } });
+    expect(screen.getByRole('button', { name: /save version/i })).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6a. Refresh Profile button (G10 task 040)
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Refresh Profile button (G10 task 040)', () => {
+  it('is not rendered when no onRefreshProfile handler is wired (unpromoted doc)', () => {
+    renderFormatToolbar();
+    expect(screen.queryByTestId('compose-format-refresh-profile')).not.toBeInTheDocument();
+  });
+
+  it('renders and fires onRefreshProfile when clicked (promoted doc)', async () => {
+    const user = userEvent.setup();
+    const onRefreshProfile = jest.fn();
+    renderFormatToolbar({}, { props: { onRefreshProfile } });
+
+    const btn = screen.getByTestId('compose-format-refresh-profile');
+    expect(btn).toBeInTheDocument();
+    await user.click(btn);
+    expect(onRefreshProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it('ADR-021: renders under a dark theme', () => {
+    renderFormatToolbar({}, { theme: webDarkTheme, props: { onRefreshProfile: jest.fn() } });
+    expect(screen.getByTestId('compose-format-refresh-profile')).toBeInTheDocument();
+  });
+
+  it('UAT #9 (task 054): disables the button and shows a spinner while a refresh is in flight', () => {
+    renderFormatToolbar({}, { props: { onRefreshProfile: jest.fn(), isRefreshingProfile: true } });
+    const btn = screen.getByTestId('compose-format-refresh-profile');
+    expect(btn).toBeInTheDocument();
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute('aria-label', 'Refreshing document profile');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// UAT #5 (task 053) — "Reload from source" button. Distinct from Refresh Profile:
+// it reloads the latest SPE bytes on demand; the host wires it only for a doc with an SPE source.
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Reload from source button (UAT #5 task 053)', () => {
+  it('is not rendered when no onReloadFromSource handler is wired (born-in-editor / no SPE source)', () => {
+    renderFormatToolbar();
+    expect(screen.queryByTestId('compose-format-reload-from-source')).not.toBeInTheDocument();
+  });
+
+  it('renders and fires onReloadFromSource when clicked (doc with an SPE source)', async () => {
+    const user = userEvent.setup();
+    const onReloadFromSource = jest.fn();
+    renderFormatToolbar({}, { props: { onReloadFromSource } });
+
+    const btn = screen.getByTestId('compose-format-reload-from-source');
+    expect(btn).toBeInTheDocument();
+    await user.click(btn);
+    expect(onReloadFromSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('is distinct from the Refresh-Profile button (both can render together)', () => {
+    renderFormatToolbar({}, { props: { onReloadFromSource: jest.fn(), onRefreshProfile: jest.fn() } });
+    expect(screen.getByTestId('compose-format-reload-from-source')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-refresh-profile')).toBeInTheDocument();
+  });
+
+  it('ADR-021: renders under a dark theme', () => {
+    renderFormatToolbar({}, { theme: webDarkTheme, props: { onReloadFromSource: jest.fn() } });
+    expect(screen.getByTestId('compose-format-reload-from-source')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6c. Open Document button — opens the source Dataverse Document in the shared
+//     preview modal (RichFilePreviewDialog + BFF preview-url), wired by the host.
+//     Gated by `onOpenDocument`: rendered only when the host wires a handler
+//     (a doc with a preview source is loaded); hidden otherwise. Mirrors the
+//     onRefreshProfile / onReloadFromSource gating pattern.
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Open Document button', () => {
+  it('is not rendered when no onOpenDocument handler is wired (no previewable document)', () => {
+    renderFormatToolbar();
+    expect(screen.queryByTestId('compose-format-open-document')).not.toBeInTheDocument();
+  });
+
+  it('renders and fires onOpenDocument when clicked (doc with a preview source)', async () => {
+    const user = userEvent.setup();
+    const onOpenDocument = jest.fn();
+    renderFormatToolbar({}, { props: { onOpenDocument } });
+
+    const btn = screen.getByTestId('compose-format-open-document');
+    expect(btn).toBeInTheDocument();
+    expect(btn).toHaveAttribute('aria-label', 'Open document');
+    await user.click(btn);
+    expect(onOpenDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it('is disabled when the toolbar is read-only (disabled prop)', () => {
+    renderFormatToolbar({}, { props: { onOpenDocument: jest.fn(), disabled: true } });
+    expect(screen.getByTestId('compose-format-open-document')).toBeDisabled();
+  });
+
+  it('ADR-021: renders under a dark theme', () => {
+    renderFormatToolbar({}, { theme: webDarkTheme, props: { onOpenDocument: jest.fn() } });
+    expect(screen.getByTestId('compose-format-open-document')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6b. Track Changes toggle (item 4, UAT round-4)
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Track Changes toggle (item 4)', () => {
+  it('is not rendered when no onToggleTrackChanges handler is wired', () => {
+    renderFormatToolbar();
+    expect(screen.queryByTestId('compose-format-track-changes')).not.toBeInTheDocument();
+  });
+
+  it('renders and fires onToggleTrackChanges when clicked', async () => {
+    const user = userEvent.setup();
+    const onToggleTrackChanges = jest.fn();
+    renderFormatToolbar({}, { props: { onToggleTrackChanges, trackChangesEnabled: false } });
+
+    const toggle = screen.getByTestId('compose-format-track-changes');
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await user.click(toggle);
+    expect(onToggleTrackChanges).toHaveBeenCalledTimes(1);
+  });
+
+  it('reflects the ON state via aria-pressed', () => {
+    renderFormatToolbar({}, { props: { onToggleTrackChanges: jest.fn(), trackChangesEnabled: true } });
+    expect(screen.getByTestId('compose-format-track-changes')).toHaveAttribute('aria-pressed', 'true');
   });
 });
 
@@ -367,5 +648,442 @@ describe('ComposeFormatToolbar — sticky pin, global disable, dark mode', () =>
     const { container } = renderFormatToolbar({}, { theme: webDarkTheme });
     expect(screen.getByTestId('compose-format-toolbar')).toBeInTheDocument();
     expect(container.innerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review dropdown (ai-advanced-capabilities-nda-r1 UAT round-2 items #1/#2)
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Review Summary / Notes toggles (UAT round-7 #5: two separate icons)', () => {
+  const reviewProps = (over: Partial<ComposeFormatToolbarProps> = {}): Partial<ComposeFormatToolbarProps> => ({
+    hasReview: true,
+    reviewSummaryOpen: false,
+    reviewNotesOpen: true,
+    onToggleReviewSummary: jest.fn(),
+    onToggleReviewNotes: jest.fn(),
+    ...over,
+  });
+
+  it('is hidden when no review is present (hasReview falsy)', () => {
+    renderFormatToolbar({}, { props: reviewProps({ hasReview: false }) });
+    expect(screen.queryByTestId('compose-format-review-summary-toggle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-format-review-notes-toggle')).not.toBeInTheDocument();
+  });
+
+  it('is hidden when the toggle handlers are not wired', () => {
+    renderFormatToolbar({}, { props: { hasReview: true } });
+    expect(screen.queryByTestId('compose-format-review-summary-toggle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-format-review-notes-toggle')).not.toBeInTheDocument();
+  });
+
+  it('shows two separate icon toggles (no dropdown) when a review is present and handlers are wired', () => {
+    renderFormatToolbar({}, { props: reviewProps() });
+    expect(screen.queryByTestId('compose-format-review-menu')).not.toBeInTheDocument(); // the dropdown is gone
+    const summary = screen.getByTestId('compose-format-review-summary-toggle');
+    const notes = screen.getByTestId('compose-format-review-notes-toggle');
+    expect(summary).toHaveAttribute('aria-label', 'Toggle Review Summary');
+    expect(notes).toHaveAttribute('aria-label', 'Toggle Review Notes');
+    // Pressed state reflects the visibility booleans (summary closed, notes open).
+    expect(summary).toHaveAttribute('aria-pressed', 'false');
+    expect(notes).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('clicking the Review Summary icon fires onToggleReviewSummary (and not Notes)', async () => {
+    const user = userEvent.setup();
+    const onToggleReviewSummary = jest.fn();
+    const onToggleReviewNotes = jest.fn();
+    renderFormatToolbar({}, { props: reviewProps({ onToggleReviewSummary, onToggleReviewNotes }) });
+
+    await user.click(screen.getByTestId('compose-format-review-summary-toggle'));
+
+    expect(onToggleReviewSummary).toHaveBeenCalledTimes(1);
+    expect(onToggleReviewNotes).not.toHaveBeenCalled();
+  });
+
+  it('clicking the Review Notes icon fires onToggleReviewNotes (and not Summary)', async () => {
+    const user = userEvent.setup();
+    const onToggleReviewSummary = jest.fn();
+    const onToggleReviewNotes = jest.fn();
+    renderFormatToolbar({}, { props: reviewProps({ onToggleReviewSummary, onToggleReviewNotes }) });
+
+    await user.click(screen.getByTestId('compose-format-review-notes-toggle'));
+
+    expect(onToggleReviewNotes).toHaveBeenCalledTimes(1);
+    expect(onToggleReviewSummary).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR-14 (ai-advanced-capabilities-agreements-r1 task 051) — "Create Summary Memo" dropdown.
+// Pure forwarder (mirrors the Word dropdown pattern): the toolbar only calls the host-provided
+// onGenerateMemo/onEmailMemo handlers — it owns no fetch/download/EmailComposer logic itself.
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Create Summary Memo dropdown (FR-14, task 051)', () => {
+  it('is hidden when no review is present, even with both handlers wired', () => {
+    renderFormatToolbar({}, { props: { hasReview: false, onGenerateMemo: jest.fn(), onEmailMemo: jest.fn() } });
+    expect(screen.queryByTestId('compose-format-memo-menu')).not.toBeInTheDocument();
+  });
+
+  it('is hidden when a review is present but neither handler is wired', () => {
+    renderFormatToolbar({}, { props: { hasReview: true } });
+    expect(screen.queryByTestId('compose-format-memo-menu')).not.toBeInTheDocument();
+  });
+
+  it('shows the dropdown trigger when a review is present and at least one handler is wired', () => {
+    renderFormatToolbar({}, { props: { hasReview: true, onGenerateMemo: jest.fn() } });
+    expect(screen.getByTestId('compose-format-memo-menu')).toBeInTheDocument();
+  });
+
+  it('opening the dropdown reveals Generate + Email items and each fires its own handler', async () => {
+    const user = userEvent.setup();
+    const onGenerateMemo = jest.fn();
+    const onEmailMemo = jest.fn();
+    renderFormatToolbar({}, { props: { hasReview: true, onGenerateMemo, onEmailMemo } });
+
+    await user.click(screen.getByTestId('compose-format-memo-menu'));
+    await user.click(screen.getByTestId('compose-format-memo-generate'));
+
+    expect(onGenerateMemo).toHaveBeenCalledTimes(1);
+    expect(onEmailMemo).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTestId('compose-format-memo-menu'));
+    await user.click(screen.getByTestId('compose-format-memo-email'));
+
+    expect(onEmailMemo).toHaveBeenCalledTimes(1);
+    expect(onGenerateMemo).toHaveBeenCalledTimes(1);
+  });
+
+  it('a menu item without its handler wired renders disabled (never silently no-ops on click)', async () => {
+    const user = userEvent.setup();
+    const onGenerateMemo = jest.fn();
+    renderFormatToolbar({}, { props: { hasReview: true, onGenerateMemo } });
+
+    await user.click(screen.getByTestId('compose-format-memo-menu'));
+
+    // Fluent's MenuItem renders a <div role="menuitem"> (not a native button/input), so its
+    // disabled state surfaces as aria-disabled, not the native `disabled` attribute jest-dom's
+    // toBeDisabled() checks for.
+    expect(screen.getByTestId('compose-format-memo-generate')).not.toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByTestId('compose-format-memo-email')).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('disables both actions and shows a spinner on the trigger while isMemoActionInFlight', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar(
+      {},
+      {
+        props: {
+          hasReview: true,
+          onGenerateMemo: jest.fn(),
+          onEmailMemo: jest.fn(),
+          isMemoActionInFlight: true,
+        },
+      }
+    );
+
+    expect(screen.getByTestId('compose-format-memo-menu')).toBeDisabled();
+  });
+
+  it('is disabled entirely when the global `disabled` prop is set', () => {
+    renderFormatToolbar(
+      {},
+      {
+        props: {
+          hasReview: true,
+          onGenerateMemo: jest.fn(),
+          onEmailMemo: jest.fn(),
+          disabled: true,
+        },
+      }
+    );
+
+    expect(screen.getByTestId('compose-format-memo-menu')).toBeDisabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// UAT round-1 (2026-08-03) owner feedback — three toolbar layout/labelling changes:
+//   #3 Create Summary Memo → icon-only, repositioned to the FAR LEFT of the toolbar.
+//   #5 Save Version → icon-only (split/dropdown behavior unchanged).
+//   #6 Word dropdown → moved OUT of the format-menus row to the action side (right,
+//      near Save), icon-only.
+// Each control keeps its existing testid + wiring; these tests assert the NEW
+// icon-only/no-visible-text presentation, the accessible name (aria-label) + Tooltip,
+// and — for #3/#6 — the new DOM position relative to the other toolbar controls.
+//
+// #3's FAR-LEFT placement is SUPERSEDED by UAT round-4 #12 (2026-08-04, see the
+// dedicated describe block below) — the owner moved Memo off the far-left position
+// into the regrouped action-icon area. The far-left-position assertion below was
+// replaced accordingly; #5/#6 (icon-only + Word's post-format-menu, pre-Save
+// position) remain accurate under the round-4 layout and are unchanged.
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — UAT round-1 (2026-08-03): repositioning + icon-only (#3/#5/#6)', () => {
+  /** Returns the data-testid of every descendant of the toolbar, in DOM order. */
+  function toolbarTestIdOrder(): string[] {
+    const toolbar = screen.getByTestId('compose-format-toolbar');
+    return Array.from(toolbar.querySelectorAll('[data-testid]')).map(el => el.getAttribute('data-testid') as string);
+  }
+
+  it('#3 (superseded position, round-4 #12): Create Summary Memo is icon-only (no visible text), carries aria-label + Tooltip — no longer the far-left/first control (see the round-4 describe block for its current position)', () => {
+    renderFormatToolbar({}, { props: { hasReview: true, onGenerateMemo: jest.fn() } });
+
+    const memoTrigger = screen.getByTestId('compose-format-memo-menu');
+    expect(memoTrigger).toHaveAttribute('aria-label', 'Create Summary Memo');
+    expect(memoTrigger.textContent).toBe(''); // icon-only — no visible label text
+
+    // Round-4 #12: Memo now sits AFTER the format-menu group, not ahead of it.
+    const order = toolbarTestIdOrder();
+    expect(order[0]).not.toBe('compose-format-memo-menu');
+    expect(order.indexOf('compose-format-memo-menu')).toBeGreaterThan(order.indexOf('compose-format-table-menu'));
+  });
+
+  it('#3: the memo dropdown still opens and fires its handlers from its (now regrouped) position (behavior unchanged)', async () => {
+    const user = userEvent.setup();
+    const onGenerateMemo = jest.fn();
+    renderFormatToolbar({}, { props: { hasReview: true, onGenerateMemo } });
+
+    await user.click(screen.getByTestId('compose-format-memo-menu'));
+    await user.click(screen.getByTestId('compose-format-memo-generate'));
+    expect(onGenerateMemo).toHaveBeenCalledTimes(1);
+  });
+
+  it('#5: Save Version is icon-only (no visible text) — the accessible name survives via aria-label on the primary action', () => {
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true } });
+
+    const saveWrapper = screen.getByTestId('compose-format-save');
+    const primaryButton = within(saveWrapper).getAllByRole('button')[0];
+    expect(primaryButton).toHaveAttribute('aria-label', 'Save version');
+    expect(primaryButton.textContent).toBe(''); // icon-only — no visible "Save Version" text
+  });
+
+  it('#5: a Tooltip is present on the Save trigger (hover reveals the full "Save Version" label)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true } });
+
+    const saveWrapper = screen.getByTestId('compose-format-save');
+    const primaryButton = within(saveWrapper).getAllByRole('button')[0];
+    await user.hover(primaryButton);
+    expect(await screen.findByText('Save Version')).toBeInTheDocument();
+  });
+
+  it('#6: the Word dropdown is icon-only (aria-label "Word", no visible text) and RELOCATED to the action side — after every format-menu trigger, immediately before Save', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar(
+      {},
+      { props: { onOpenInWord: jest.fn(), onOpenInWordDesktop: jest.fn(), onSave: jest.fn(), canSave: true } }
+    );
+
+    const wordTrigger = screen.getByTestId('compose-format-word-menu');
+    expect(wordTrigger).toHaveAttribute('aria-label', 'Word');
+    expect(wordTrigger.textContent).toBe(''); // icon-only — no visible "Word" text
+
+    const order = toolbarTestIdOrder();
+    // Moved OUT of the format-menus row: now sits after Body/Paragraph/Font/Table...
+    expect(order.indexOf('compose-format-word-menu')).toBeGreaterThan(order.indexOf('compose-format-heading-menu'));
+    expect(order.indexOf('compose-format-word-menu')).toBeGreaterThan(order.indexOf('compose-format-paragraph-menu'));
+    expect(order.indexOf('compose-format-word-menu')).toBeGreaterThan(order.indexOf('compose-format-font-menu'));
+    expect(order.indexOf('compose-format-word-menu')).toBeGreaterThan(order.indexOf('compose-format-table-menu'));
+    // ...and on the action side, immediately before Save ("near the save/run controls").
+    expect(order.indexOf('compose-format-word-menu')).toBeLessThan(order.indexOf('compose-format-save'));
+
+    // Popover content is UNCHANGED — Open web / Open desktop still reachable and still fire.
+    await user.click(wordTrigger);
+    expect(screen.getByTestId('compose-format-open-word-web')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-open-word-desktop')).toBeInTheDocument();
+  });
+
+  it('#6: a Tooltip is present on the Word trigger (hover reveals the "Word" label)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { onOpenInWord: jest.fn() } });
+
+    const wordTrigger = screen.getByTestId('compose-format-word-menu');
+    await user.hover(wordTrigger);
+    expect(await screen.findByText('Word')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// UAT round-4 (2026-08-04) owner feedback — two toolbar changes:
+//   #11 MENU ALLOCATION — the Word dropdown must contain ONLY "Open in Word (web)" /
+//        "Open in Word (desktop)"; its legacy Save/Save New Document duplicate
+//        entries (round-1's "UX-1 parity affordance") are REMOVED. Save stays the
+//        ONE split-button (Save Version primary / Save New Document caret). Zero
+//        functional overlap between the two menus.
+//   #12 REGROUP + SPACING — format menus (Body/Paragraph/Font/Table) stay at the
+//        left; the action icons regroup left→right as FOUR `ToolbarDivider`-
+//        separated groups: [Review Summary · Create Summary Memo] | [Word · Save] |
+//        [Review Notes · Track Changes] | [Undo · Redo · Info]. Supersedes round-1
+//        #3's far-left Memo placement. Open Document / Reload from source / Refresh
+//        Profile (not named in the owner's order) are placed immediately after the
+//        format-menu group and before the regrouped action groups — a flagged
+//        placement decision, not a deletion.
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — UAT round-4 (2026-08-04): menu allocation (#11) + regroup/spacing (#12)', () => {
+  /** Returns the data-testid of every descendant of the toolbar, in DOM order. */
+  function toolbarTestIdOrder(): string[] {
+    const toolbar = screen.getByTestId('compose-format-toolbar');
+    return Array.from(toolbar.querySelectorAll('[data-testid]')).map(el => el.getAttribute('data-testid') as string);
+  }
+
+  const allControlsProps = (): Partial<ComposeFormatToolbarProps> => ({
+    onOpenInWord: jest.fn(),
+    onOpenInWordDesktop: jest.fn(),
+    onSave: jest.fn(),
+    canSave: true,
+    hasReview: true,
+    reviewSummaryOpen: false,
+    onToggleReviewSummary: jest.fn(),
+    reviewNotesOpen: false,
+    onToggleReviewNotes: jest.fn(),
+    onToggleTrackChanges: jest.fn(),
+    trackChangesEnabled: false,
+    onGenerateMemo: jest.fn(),
+    onEmailMemo: jest.fn(),
+    onOpenDocument: jest.fn(),
+    onReloadFromSource: jest.fn(),
+    onRefreshProfile: jest.fn(),
+    reviewDisclaimer: 'Not legal advice.',
+  });
+
+  // ---- #11: menu allocation ----
+
+  it('#11: the Word menu contains ONLY the two Open-in-Word items — no Save / Save New Document duplicate, even when onSave is wired', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar(
+      {},
+      { props: { onOpenInWord: jest.fn(), onOpenInWordDesktop: jest.fn(), onSave: jest.fn(), canSave: true } }
+    );
+
+    await user.click(screen.getByTestId('compose-format-word-menu'));
+
+    expect(screen.getByTestId('compose-format-open-word-web')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-open-word-desktop')).toBeInTheDocument();
+    // The former Word-menu Save duplicate testids must be entirely absent from the DOM.
+    expect(screen.queryByTestId('compose-format-word-save')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-format-word-save-new')).not.toBeInTheDocument();
+    expect(screen.queryByText('Save Version')).not.toBeInTheDocument();
+    expect(screen.queryByText('Save New Document')).not.toBeInTheDocument();
+  });
+
+  it('#11: the Word menu items read "Open in Word (web)" / "Open in Word (desktop)"', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { onOpenInWord: jest.fn(), onOpenInWordDesktop: jest.fn() } });
+
+    await user.click(screen.getByTestId('compose-format-word-menu'));
+
+    expect(screen.getByTestId('compose-format-open-word-web')).toHaveTextContent('Open in Word (web)');
+    expect(screen.getByTestId('compose-format-open-word-desktop')).toHaveTextContent('Open in Word (desktop)');
+  });
+
+  it('#11: Save remains the ONE entry point — the split-button still renders "Save Version" primary + "Save New Document" caret item', async () => {
+    const user = userEvent.setup();
+    const onSave = jest.fn();
+    renderFormatToolbar({}, { props: { onSave, canSave: true } });
+
+    const saveWrapper = screen.getByTestId('compose-format-save');
+    const primaryButton = within(saveWrapper).getAllByRole('button')[0];
+    await user.click(primaryButton);
+    expect(onSave).toHaveBeenCalledWith('version');
+
+    await user.click(screen.getByRole('button', { name: /save options/i }));
+    const saveNew = await screen.findByTestId('compose-format-save-new');
+    await user.click(saveNew);
+    expect(onSave).toHaveBeenCalledWith('new');
+  });
+
+  // ---- #12: regroup + spacing ----
+
+  it('#12: exactly THREE ToolbarDividers are rendered, separating the four action-icon groups', () => {
+    renderFormatToolbar({}, { props: allControlsProps() });
+    expect(screen.getByTestId('compose-format-divider-1')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-divider-2')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-divider-3')).toBeInTheDocument();
+  });
+
+  it('#12: format menus (Body/Paragraph/Font/Table) stay at the left, unchanged relative order', () => {
+    renderFormatToolbar({}, { props: allControlsProps() });
+    const order = toolbarTestIdOrder();
+    expect(order[0]).toBe('compose-format-heading-menu');
+    expect(order.indexOf('compose-format-heading-menu')).toBeLessThan(order.indexOf('compose-format-paragraph-menu'));
+    expect(order.indexOf('compose-format-paragraph-menu')).toBeLessThan(order.indexOf('compose-format-font-menu'));
+    expect(order.indexOf('compose-format-font-menu')).toBeLessThan(order.indexOf('compose-format-table-menu'));
+  });
+
+  it('#12: the EXACT owner-specified left→right action-icon order — [Review Summary · Memo] | [Word · Save] | [Review Notes · Track Changes] | [Undo · Redo · Info]', () => {
+    renderFormatToolbar({}, { props: allControlsProps() });
+    const order = toolbarTestIdOrder();
+    const idx = (id: string): number => order.indexOf(id);
+
+    // Group 1
+    expect(idx('compose-format-review-summary-toggle')).toBeLessThan(idx('compose-format-memo-menu'));
+    // Divider 1 separates Group 1 from Group 2
+    expect(idx('compose-format-memo-menu')).toBeLessThan(idx('compose-format-divider-1'));
+    expect(idx('compose-format-divider-1')).toBeLessThan(idx('compose-format-word-menu'));
+    // Group 2
+    expect(idx('compose-format-word-menu')).toBeLessThan(idx('compose-format-save'));
+    // Divider 2 separates Group 2 from Group 3
+    expect(idx('compose-format-save')).toBeLessThan(idx('compose-format-divider-2'));
+    expect(idx('compose-format-divider-2')).toBeLessThan(idx('compose-format-review-notes-toggle'));
+    // Group 3
+    expect(idx('compose-format-review-notes-toggle')).toBeLessThan(idx('compose-format-track-changes'));
+    // Divider 3 separates Group 3 from Group 4
+    expect(idx('compose-format-track-changes')).toBeLessThan(idx('compose-format-divider-3'));
+    expect(idx('compose-format-divider-3')).toBeLessThan(idx('compose-format-undo'));
+    // Group 4
+    expect(idx('compose-format-undo')).toBeLessThan(idx('compose-format-redo'));
+    expect(idx('compose-format-redo')).toBeLessThan(idx('compose-format-review-info'));
+  });
+
+  it('#12: the unmentioned icons (Open Document / Reload from source / Refresh Profile) are preserved — placed after the format-menu group and before Group 1, in their pre-round-4 relative order', () => {
+    renderFormatToolbar({}, { props: allControlsProps() });
+    const order = toolbarTestIdOrder();
+    const idx = (id: string): number => order.indexOf(id);
+
+    expect(screen.getByTestId('compose-format-open-document')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-reload-from-source')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-refresh-profile')).toBeInTheDocument();
+
+    // After the format-menu group...
+    expect(idx('compose-format-table-menu')).toBeLessThan(idx('compose-format-open-document'));
+    // ...preserved relative order...
+    expect(idx('compose-format-open-document')).toBeLessThan(idx('compose-format-reload-from-source'));
+    expect(idx('compose-format-reload-from-source')).toBeLessThan(idx('compose-format-refresh-profile'));
+    // ...and before Group 1 (Review Summary is the first control of the regrouped action area).
+    expect(idx('compose-format-refresh-profile')).toBeLessThan(idx('compose-format-review-summary-toggle'));
+  });
+
+  it('#12: with the review-only controls absent (no hasReview), the format menus, unmentioned icons, Word/Save, and Undo/Redo/Info still render in order around the dividers', () => {
+    renderFormatToolbar(
+      {},
+      {
+        props: {
+          onOpenInWord: jest.fn(),
+          onOpenInWordDesktop: jest.fn(),
+          onSave: jest.fn(),
+          canSave: true,
+          onOpenDocument: jest.fn(),
+          onReloadFromSource: jest.fn(),
+          onRefreshProfile: jest.fn(),
+        },
+      }
+    );
+    const order = toolbarTestIdOrder();
+    const idx = (id: string): number => order.indexOf(id);
+
+    expect(screen.queryByTestId('compose-format-memo-menu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-format-review-summary-toggle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-format-review-notes-toggle')).not.toBeInTheDocument();
+
+    expect(idx('compose-format-table-menu')).toBeLessThan(idx('compose-format-open-document'));
+    expect(idx('compose-format-refresh-profile')).toBeLessThan(idx('compose-format-divider-1'));
+    expect(idx('compose-format-divider-1')).toBeLessThan(idx('compose-format-word-menu'));
+    expect(idx('compose-format-word-menu')).toBeLessThan(idx('compose-format-save'));
+    expect(idx('compose-format-save')).toBeLessThan(idx('compose-format-divider-2'));
+    expect(idx('compose-format-divider-3')).toBeLessThan(idx('compose-format-undo'));
+    expect(idx('compose-format-undo')).toBeLessThan(idx('compose-format-redo'));
   });
 });

@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>Deploy — BFF + SpaarkeAi code page + Dataverse data (Actions/Bindings/registry)</title>
+    <phase>6 Deploy + Verify</phase>
+    <gate>blocked (all implementation tasks)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deployment to the shared dev environment; publish-size + CVE gates; irreversible env changes.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scripted deploys with established runbooks.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Environment deploy — serialized by definition.</parallel-reason>
+    <deps>003,012,023,032,033,042,051,052</deps>
+    <tags>deploy, bff, spaarkeai, dataverse</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Deploy the full increment to dev: BFF (classifier node, FK fix, memo rendering/persistence), the SpaarkeAi code
+    page (orientation, gate, batch, durable recall, toolbar), and Dataverse data (agreement-review Action + schemas,
+    Binding disposition, sprk_agreementtype seeds/values). Verify size/CVE gates and post-deploy smoke.
+  </prompt>
+  <role>SPAARKE platform developer/operator. Deployment runbooks.</role>
+  <goal>All increments live on spaarke-bff-dev + sprk_spaarkeai + spaarkedev1; gates green; smoke passes.</goal>
+
+  <context>
+    <background>
+      Vehicles: scripts/Deploy-BffApi.ps1 (bff-deploy skill; default AppServiceName spaarke-bff-dev),
+      scripts/Deploy-SpaarkeAi.ps1 (code page), scripts/seed-data/Deploy-Actions.ps1 + Verify-OutputSchemaField.ps1
+      (Action), scripts/dataverse/Seed-PlaybookConsumers.ps1 -DiffOnly (Binding), the 001 seed pattern (registry).
+      PRE-CHECK: PR #690 (LFS Compose seam fixtures) should be merged before CI runs Compose seam/eval tests — verify
+      its status; also note dependabot #266 (OpenXml bump) if merged mid-project. Publish-size: report absolute +
+      diff vs baseline (~49.63 MB incl. PDBs; ceiling 60 MB); dotnet list package --vulnerable --include-transitive.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">scripts/Deploy-BffApi.ps1</file>
+      <file role="canonical-reference">scripts/Deploy-SpaarkeAi.ps1</file>
+      <file role="canonical-reference">scripts/Capture-BffBaseline.ps1</file>
+    </relevant-files>
+    <dependencies>All implementation phases complete (deps list).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-029">Publish ≤60 MB (report absolute + delta + PDB convention); no new HIGH CVE; scope: BFF deploy.</constraint>
+    <constraint source="ADR-027">Dataverse data via the seed scripts (mirror-first), diff-verified; scope: data deploy.</constraint>
+    <constraint source="project">/conflict-check before the deploy PR (hot-path BFF+SpaarkeAi; compose-r5/notification-spine active on shared surfaces).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Deployment</topic>
+    <files>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+    <patterns><pattern name="hub deploy precedent" location="projects/ai-advanced-capabilities-analysis-hub-r1/notes/HANDOFF-2026-07-29.md">Recent BFF deploy report format (hash-verify, size).</pattern></patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Declare rigor; /conflict-check; verify PR #690 status; capture pre-deploy baseline.</step>
+    <step order="1">Deploy Dataverse data (Action + schemas → verify; Binding -DiffOnly → verify; registry rows → read_query verify).</step>
+    <step order="2">Deploy BFF (Deploy-BffApi.ps1); healthz + endpoint smoke (classifier dispatch, fork/promote, compose-outputs).</step>
+    <step order="3">Deploy SpaarkeAi code page (Deploy-SpaarkeAi.ps1); load smoke (three-pane, review flow).</step>
+    <step order="4">Report: publish size (absolute + delta), CVE scan, deployed hashes/versions.</step>
+    <step order="5">Update TASK-INDEX.md: 060 ✅. Run context-handoff (post-deploy checkpoint rule).</step>
+  </steps>
+
+  <escalation>
+    <trigger>Size ≥55 MB cumulative or ≥+5 MB single-task delta → stop and escalate per §10 before pushing the deploy.</trigger>
+  </escalation>
+
+  <tools><tool name="terminal">deploy scripts, PAC CLI, az</tool><tool name="dataverse-mcp">data verification</tool></tools>
+  <outputs><output type="deployment">dev environment updated + deploy report in notes/</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">healthz 200; classifier + review + fork/promote + compose-outputs endpoints respond on dev.</criterion>
+    <criterion testable="true">Publish size reported ≤60 MB with delta; zero new HIGH CVEs.</criterion>
+    <criterion testable="true">Deployed Action outputschema verified (Verify-OutputSchemaField.ps1); Binding disposition=compose verified (-DiffOnly clean).</criterion>
+    <criterion testable="true">Negative: a rollback path is stated in the deploy report (previous package retained).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec NFR-01. Deploy report → notes/deploy-report-060.md.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

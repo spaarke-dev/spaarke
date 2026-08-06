@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="056" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Task/deadline reconcile tab (Job C) — FormModal editable task form, create-and-complete + ad-hoc, nothing deadline-bearing auto-finalizes (ADR-015)</title>
+    <phase>5 Pillar E — Reconciliation UI</phase>
+    <gate>deps 034,052,053 complete (Job C apply/create-task kind + confirmed association + shell)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>User-facing write surface (.tsx) creating deadline-bearing tasks under audit; correctness-critical (ADR-015 no-auto-finalize + NFR-10 gating); net-new tab; §8 FULL.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>FormModal preset + the task-034 create-task kind/apply endpoint; fully specified — sonnet default.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes shared Spaarke.Communication.Components (r5-owned). Serialize main-session; /conflict-check before the PR.</parallel-reason>
+    <deps>034,052,053</deps>
+    <tags>frontend, fluent-ui, communication, proposals, tasks, pillar-e</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build the Tasks reconcile tab (Job C) as a `SprkModal` `FormModal` preset. For the CONFIRMED record only (NFR-10),
+    render `kind:"create-task"` proposals as an EDITABLE task form — name · description · base date · due date · final
+    due date · assigned-to (lookup) · status · completed date — each with Accept / Reject / Hold; Accept → the task-034
+    (D5) Job C apply endpoint under audit. The reviewer may CREATE AND COMPLETE a task in one session (set status =
+    Completed + completed date on confirm) and may ADD an AD-HOC task ("+ New task" → the same create-task form) not
+    proposed by the engine. Consume the new `create-task` discriminator on the queue-feed (task 034). Keep the tab
+    React-version-agnostic (dual-use — also mounts on the email record form). Nothing deadline-bearing auto-finalizes
+    without explicit confirmation (ADR-015).
+  </prompt>
+  <role>SPAARKE platform developer. SprkModal FormModal preset + the Job C create-task apply contract. Follow ADRs strictly.</role>
+  <goal>A Tasks tab (FormModal) renders the confirmed record's create-task proposals as an editable form (incl. status/completed-date), Accept creates the task via the task-034 apply endpoint under audit, create-and-complete works inline, an ad-hoc "+ New task" can be added, nothing auto-finalizes without confirmation, and the tab is NFR-10-gated + dual-use.</goal>
+
+  <context>
+    <background>
+      FR-E5 (spec §105): the Tasks tab renders `kind:"create-task"` proposals as an editable task form (name /
+      description / base date / due date / final due date / assigned-to lookup / status / completed date), each Accept /
+      Reject / Hold; Accept → the FR-D5 apply endpoint (task 034). Create-and-complete in one session (status=Completed
+      + completed date on confirm); ad-hoc "+ New task" not proposed by the engine. Requires the new `create-task`
+      discriminator on the queue-feed — today `QueueFeedItemKinds` has only `association-exception` + `pending-proposal`
+      (added by task 034). Nothing deadline-bearing auto-finalizes without confirmation (ADR-015). NFR-10 gating +
+      re-scope on override as in the Fields tab. Dual-use on the email record form (ADR-022).
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/FormModal.tsx</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Models/QueueFeedModels.cs</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationBrowseShell/ReconciliationBrowseShell.tsx</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/TaskReconcileTab.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="034" status="pending">Job C apply endpoint + the create-task queue-feed discriminator this tab consumes + POSTs to.</dependency>
+      <dependency task="052" status="pending">Confirmed association (NFR-10 precondition) + re-scope on override.</dependency>
+      <dependency task="053" status="pending">Reader/browse shell + right-pane tab slot.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-015">SCOPE: task confirmation. Nothing deadline-bearing (due/final-due) auto-finalizes without explicit reviewer confirmation; Accept is the confirming action. No silent create/complete.</constraint>
+    <constraint source="ADR-050">SCOPE: the tab modal. Use the FormModal preset (Cancel-left, explicit dismiss); do NOT hand-roll a form dialog.</constraint>
+    <constraint source="NFR-10">SCOPE: gating. Actionable ONLY for a confirmed record; re-scope on override; never create against an unconfirmed/overridden record.</constraint>
+    <constraint source="ADR-022">SCOPE: the tab. React-version-agnostic (dual-use on the PCF/React-16/17 email form); deep-import /logic where host-version-sensitive.</constraint>
+    <constraint source="ADR-021">SCOPE: the tab. Fluent v9 tokens; light + dark themes.</constraint>
+    <constraint source="project">SCOPE: apply. Accept POSTs the task-034 Job C apply endpoint under audit (reflecting any inline completion). Ad-hoc tasks go through the SAME create-task path — no second create mechanism.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Job C task/deadline reconcile tab</topic>
+    <files>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+    </files>
+    <patterns>
+      <pattern name="FormModal preset" location="src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/FormModal.tsx">Mount the editable task form in FormModal; Accept = Save/confirm.</pattern>
+      <pattern name="create-task queue-feed kind" location="src/server/api/Sprk.Bff.Api/Services/Communication/Models/QueueFeedModels.cs">Consume the new create-task discriminator (task 034); Accept POSTs the Job C apply endpoint.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; declare RIGOR: FULL. Study FormModal + the task-034 create-task kind + apply endpoint contract.</step>
+    <step order="1">Author TaskReconcileTab.tsx in a FormModal: for the confirmed record, list create-task proposals as editable forms (name/description/base/due/final/assigned-to lookup/status/completed date).</step>
+    <step order="2">Gate on NFR-10 (confirm-record-first state; re-scope on override); wire proposal citations to task 054's jump/highlight.</step>
+    <step order="3">Accept → POST the task-034 Job C apply endpoint under audit, reflecting inline status=Completed + completed date when set (create-and-complete in one session).</step>
+    <step order="4">Add "+ New task" → the SAME create-task form for an ad-hoc task not proposed by the engine.</step>
+    <step order="5">Wire Reject=terminal-dismiss, Hold=leave Proposed; ensure no due/final-due auto-finalizes without Accept (ADR-015).</step>
+    <step order="6">Mount the tab in the browse-shell right pane AND on the email record form (dual-use).</step>
+    <step order="7">Add ui-tests (editable fields incl. status/completed; create-and-complete; ad-hoc task; no auto-finalize; gated + re-scope; ADR-021 dark-mode) and run them.</step>
+    <step order="8">Update TASK-INDEX.md: set 056 status to ✅.</step>
+    <step order="9">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the task-034 apply path cannot reflect an inline status=Completed/completed-date (create-and-complete), STOP and escalate per CLAUDE.md §6 — do NOT create the task then silently complete it via a second call that bypasses the audited apply.</trigger>
+    <trigger>If any deadline-bearing field would finalize without an explicit Accept, STOP — that is an ADR-015 violation, escalate per §6.5.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The Fields reconcile tab (task 055) is the closest neighbor but binds Job B field-updates, not Job C create-task proposals with a task lifecycle (status/completed/ad-hoc). No task-reconcile surface exists.</existing>
+    <extension>No — the Fields tab's proposal model (current→value) does not express a task form (name/dates/assigned-to/status/completed + create-and-complete + ad-hoc). The new tab reuses FormModal + the task-034 create-task path; it is the only task-lifecycle reconcile surface.</extension>
+    <cost-of-doing-nothing>Without it, Job C's extracted deadlines/actions stay invisible and un-actioned; a reviewer cannot create (or create-and-complete) a task from an email, and no ad-hoc task can be added — FR-E5 has no host.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Editable task form incl. status/completed">
+      <steps><step>Open Tasks for a confirmed record with a create-task proposal.</step></steps>
+      <expected>An editable form renders name/description/base/due/final/assigned-to lookup/status/completed date; all editable before Accept.</expected>
+    </test>
+    <test name="Create-and-complete in one session">
+      <steps><step>Set status=Completed + completed date; click Accept.</step></steps>
+      <expected>The task is created via the task-034 audited apply reflecting the completion; no separate silent complete call.</expected>
+    </test>
+    <test name="Ad-hoc + New task">
+      <steps><step>Click "+ New task"; fill the form; Accept.</step></steps>
+      <expected>An ad-hoc task not proposed by the engine is created via the SAME create-task path.</expected>
+    </test>
+    <test name="No auto-finalize + NFR-10 gate">
+      <steps><step>Open with a due-dated proposal but do NOT click Accept; then open with no confirmed record; then override.</step></steps>
+      <expected>Nothing deadline-bearing finalizes without Accept (ADR-015); unconfirmed → not actionable; override → re-scopes to the new record.</expected>
+    </test>
+    <test name="ADR-021 dark-mode">
+      <steps><step>Render the tab under the dark Fluent theme.</step></steps>
+      <expected>FormModal + task form render with correct contrast via Fluent tokens.</expected>
+    </test>
+  </ui-tests>
+  <tools><tool name="npm">Build/test the shared lib.</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/TaskReconcileTab.tsx</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/__tests__/TaskReconcileTab.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a confirmed record with a create-task proposal, when Tasks renders, then an editable task form shows name/description/base/due/final/assigned-to/status/completed date in a FormModal.</criterion>
+    <criterion testable="true">Given status=Completed + completed date set inline, when Accept is clicked, then the task-034 apply endpoint creates the task under audit reflecting the completion (create-and-complete in one session).</criterion>
+    <criterion testable="true">Given "+ New task", when filled + Accepted, then an ad-hoc task is created via the same create-task path (no second create mechanism).</criterion>
+    <criterion testable="true">Given a deadline-bearing proposal, nothing finalizes without an explicit Accept (ADR-015); Reject terminal-dismisses; Hold leaves Proposed.</criterion>
+    <criterion testable="true">Given no confirmed association / an overridden record, Tasks is not actionable and re-scopes on override (NFR-10); the tab also mounts on the email record form (dual-use, React-version-agnostic).</criterion>
+    <criterion testable="true">Negative: no create against an unconfirmed/overridden record and no silent auto-finalize (asserted); ADR-021 dark-mode passes; all unit/ui tests pass; shared-lib build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-E5 (§105). Consumes the task-034 create-task queue-feed kind + Job C apply endpoint. Citation click-through = task 054.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

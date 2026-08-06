@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,6 +15,7 @@ using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Compose.Operations;
 using Sprk.Bff.Api.Services.Jobs;
 
 namespace Sprk.Bff.Api.Services.Compose;
@@ -57,6 +60,18 @@ public class ComposeService : IComposeService
     private const string FileSizeAttribute = "sprk_filesize";
     private const string MimeTypeAttribute = "sprk_mimetype";
     private const string FilePathAttribute = "sprk_filepath";
+    // G1 (FR-01, task 020): the durable cross-session authored-vs-imported origin marker (owner-created
+    // choice field; notes/g1-origin-field-asbuilt.md). Written ONLY at create-on-save
+    // (PromoteIfEphemeralAsync) and read on Path A loads (LoadAsync) — see ComposeOrigin remarks for the
+    // AS-BUILT integer values + BINDING null-handling contract.
+    private const string ComposeOriginAttribute = "sprk_composeorigin";
+    // G7 (FR-06, task 022): the client-minted transient dedup key (owner-created Single-line-text column +
+    // single-column alt-key sprk_composetransientkey_uk; notes/g7-transient-key-schema.md). Stamped ONLY at
+    // create-on-save (PromoteIfEphemeralAsync). Resolved via the alt-key in TryFindDocumentByTransientKeyAsync
+    // BEFORE minting a transient SPE item, so repeated create-on-save calls with the same key replace one
+    // record in place instead of minting duplicates (the 8-duplicate defect). Resolve by KEY, never by
+    // content (I-7/NFR-02).
+    private const string ComposeTransientKeyAttribute = "sprk_composetransientkey";
 
     // FR-05 create-on-save backbone — the consumer-declared ordered step set the
     // JobAwareCompletionStateProjector projects (container → record → profile-analysis → indexing).
@@ -66,26 +81,15 @@ public class ComposeService : IComposeService
     internal const string StepProfileAnalysis = "profile-analysis";
     internal const string StepIndexing = "indexing";
 
-    // FR-28 push/save pipeline (task 055) — the consumer-declared step set for the
-    // push-annotations orchestration: push (native OOXML render) → save (SPE write) →
-    // version (new version id confirmed). Mirrors the FR-05 step-naming convention above
-    // (stable string keys a future JobAwareCompletionState OutcomeCard renders).
-    internal const string StepPush = "push";
-    internal const string StepSave = "save";
-    internal const string StepVersion = "version";
-
     private const string ComposeCreateOnSaveJobType = "compose-create-on-save";
-    private const string ComposePushSaveJobType = "compose-push-save";
     private const string DocxContentType =
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
     private readonly ISpeFileOperations _spe;
     private readonly ChatSessionManager _sessions;
     private readonly IGenericEntityService _dataverse;
-    private readonly DocxAnnotationWriter _annotationWriter;
     private readonly IPostUploadIndexingEnqueuer _indexing;
     private readonly ILogger<ComposeService> _logger;
-    private readonly ComposePushSaveStatusStore? _pushSaveStatusStore;
     // FR-05 Fork C (compose-r2, UAT #7b): the ADR-013-safe profile seam is the OBO-capable
     // IDocumentProfileAi facade (Services/Ai/PublicContracts). ComposeService injects ONLY this
     // facade — NOT IAppOnlyAnalysisService / IOpenAiClient / IPlaybookService / IConsumerRoutingService
@@ -105,8 +109,8 @@ public class ComposeService : IComposeService
     // + User claims from HttpContext — see TokenHelper.ExtractBearerToken / GraphClientFactory.ForUserAsync;
     // the user access token stays valid long enough to exchange after the response). Best-effort: the
     // background task swallows + logs every failure, so a profile miss can never crash the process or
-    // affect the already-returned save. Optional + defaults null (same rationale as _pushSaveStatusStore
-    // below) so existing 6-arg test constructors keep compiling; the field is now the availability GATE
+    // affect the already-returned save. Optional + defaults null (same availability-gate rationale as
+    // _cache below) so existing 6-arg test constructors keep compiling; the field is now the availability GATE
     // (null → nothing to dispatch), while the actual run resolves a FRESH facade from the detached scope.
     private readonly IDocumentProfileAi? _documentProfileAi;
     // compose-r2 FR-30 (#629): durable Record-scope memory-capture facade (ADR-013). Optional + defaults
@@ -124,13 +128,16 @@ public class ComposeService : IComposeService
     // existing test constructors compile unchanged; DI resolves the registered singleton in every host.
     // Stateless + thread-safe — a default construction is functionally identical to the DI singleton.
     private readonly ParaIdPreParser _paraIdPreParser;
-    // FR-01/FR-03/FR-07 (task 022, E1 — Option C, design §4.2): the retained-original REDLINE SYNTHESIZER.
-    // On a dirty save it rewrites ONLY the client's edited paragraphs (paraId-keyed) in the resolved
-    // baseline as native w:ins/w:del, preserving every untouched paragraph + all structure — the "delta
-    // onto the retained original" that replaces the R2 whole-document reconstruction. Optional + defaults
-    // to a fresh instance (stateless, thread-safe) so existing test constructors compile unchanged; DI
+    // FR-06 (task 032, the write-path cutover — supersedes the retired R3 paragraph-diff synthesizer, Path B /
+    // ADR-049): the SINGLE unified byte-author. On a dirty save it applies the client's ordered, rebased
+    // task-003 operation log (+ any (paraId,range)-anchored comments) surgically onto the resolved baseline as
+    // native w:ins/w:del/w:comment — ID-anchored, ZERO write-path text-search (I-7), preserving every untouched
+    // paragraph + all structure. REPLACES both ComposeParagraphRedlineSynthesizer AND DocxAnnotationWriter,
+    // both now fully retired (task 036 removed the last text-search byte-author — the push-annotations surface).
+    // It is the SOLE byte-author (I-5). Optional +
+    // defaults to a fresh instance (stateless, thread-safe) so existing test constructors compile unchanged; DI
     // resolves the registered singleton (ComposeModule) in every host.
-    private readonly ComposeParagraphRedlineSynthesizer _redlineSynthesizer;
+    private readonly ComposeShadowPatchEngine _patchEngine;
     // FR-01a (task 026, E1 born-in-editor): the from-scratch high-fidelity OOXML AUTHORING engine. On a
     // born-in-editor save (request.ContentModel present — an AI-drafted/blank/browse-local doc with no
     // retained original), it renders the .docx server-side (real styles + style-linked multi-level numbering
@@ -150,12 +157,29 @@ public class ComposeService : IComposeService
     // ParaIdPreParser mints but never wrote into the bytes. Pure/stateless; optional + defaults to a
     // fresh instance so existing test constructors compile unchanged.
     private readonly ComposeBaselineParaIdStamper _baselineParaIdStamper;
+    // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): the single-walk
+    // server-side DOCX→editor projection. On Load it emits paraId-tagged HTML AND the ordered paraId map
+    // from ONE traversal (the client no longer runs mammoth or position-stamps ids) — eliminating the
+    // two-engine drift that produced the recurring save-abort bug class. The map it returns is the load
+    // path's single paraId authority (also feeds imported-revision/comment paraId resolution). Pure/
+    // stateless; optional + defaults to a fresh instance so existing test constructors compile unchanged.
+    private readonly ComposeDocxProjectionBuilder _projectionBuilder;
+    // FR-08 (task 050): the raw distributed cache handle for the save-path version stamp (Redis, ADR-009 —
+    // NOT IMemoryCache). Optional + defaults null so existing test constructors keep compiling; DI resolves
+    // the real IDistributedCache (AddStackExchangeRedisCache) in every non-test host. Null in a bare test
+    // constructor is the availability gate for the Redis-backed save-path features below.
+    private readonly IDistributedCache? _cache;
+    // FR-08 (task 050): the KEEP-asset fuzzy re-anchor engine (bands + ambiguity guard + never-silently-drop),
+    // REUSED verbatim as the stale-base / cross-Word-session fallback for the save-path operation log — see
+    // ReanchorStaleSaveAsync. Constructed only when a cache is available (the _cache availability gate
+    // above); null in a test host with no cache means staleness is asserted but never
+    // re-anchored (the save proceeds on the resolved baseline unchanged, R1-equivalent behavior).
+    private readonly AnnotationReanchorService? _reanchorService;
 
     public ComposeService(
         ISpeFileOperations spe,
         ChatSessionManager sessions,
         IGenericEntityService dataverse,
-        DocxAnnotationWriter annotationWriter,
         IPostUploadIndexingEnqueuer indexing,
         ILogger<ComposeService> logger,
         IDistributedCache? cache = null,
@@ -164,34 +188,33 @@ public class ComposeService : IComposeService
         IHostApplicationLifetime? appLifetime = null,
         IComposeMemoryCapture? memoryCapture = null,
         ParaIdPreParser? paraIdPreParser = null,
-        ComposeParagraphRedlineSynthesizer? redlineSynthesizer = null,
+        ComposeShadowPatchEngine? patchEngine = null,
         ComposeDocumentRenderer? documentRenderer = null,
         DocxAnnotationReader? annotationReader = null,
-        ComposeBaselineParaIdStamper? baselineParaIdStamper = null)
+        ComposeBaselineParaIdStamper? baselineParaIdStamper = null,
+        ComposeDocxProjectionBuilder? projectionBuilder = null)
     {
         _spe = spe;
         _sessions = sessions;
         _dataverse = dataverse;
-        _annotationWriter = annotationWriter;
         _indexing = indexing;
         _logger = logger;
         _documentProfileAi = documentProfileAi;
         _scopeFactory = scopeFactory;
         _paraIdPreParser = paraIdPreParser ?? new ParaIdPreParser();
-        _redlineSynthesizer = redlineSynthesizer ?? new ComposeParagraphRedlineSynthesizer();
+        _patchEngine = patchEngine ?? new ComposeShadowPatchEngine();
         _documentRenderer = documentRenderer ?? new ComposeDocumentRenderer();
         // FR-24 (task 050): reuse the existing reader verbatim — stateless singleton-shaped, so a fresh
         // instance is functionally identical to the DI-registered one (mirrors _paraIdPreParser above).
         _annotationReader = annotationReader ?? new DocxAnnotationReader();
         _baselineParaIdStamper = baselineParaIdStamper ?? new ComposeBaselineParaIdStamper();
+        _projectionBuilder = projectionBuilder ?? new ComposeDocxProjectionBuilder();
         _appLifetime = appLifetime;
         _memoryCapture = memoryCapture;
-        // ADR-009: cross-request push/save job state lives in Redis, never IMemoryCache.
-        // Optional + defaults null so existing 6-arg test constructors (sibling task suites
-        // 013/050/060/062/102) keep compiling unchanged; DI (AddScoped<IComposeService,
-        // ComposeService>) resolves the real IDistributedCache registered via
-        // AddStackExchangeRedisCache in every non-test host, so production always persists.
-        _pushSaveStatusStore = cache is not null ? new ComposePushSaveStatusStore(cache) : null;
+        // FR-08 (task 050): ADR-009 Redis when present in every non-test host, null (no staleness
+        // re-anchor) in a bare test constructor.
+        _cache = cache;
+        _reanchorService = cache is not null ? new AnnotationReanchorService(cache) : null;
     }
 
     /// <inheritdoc />
@@ -205,6 +228,12 @@ public class ComposeService : IComposeService
             "see spec §10.5 Placement Justification. Use LoadAsync with the resulting " +
             "SPE drive-item id. This method is reserved for R2+ inline upload.");
     }
+
+    /// <inheritdoc />
+    // FR-01 (task 010, spaarkeai-compose-fidelity-r4.5): reuses the SAME _projectionBuilder instance
+    // LoadAsync builds the Load-path projection from — one builder, one shape, both doorways (F-2).
+    public ComposeDocxProjection ProjectDocument(ReadOnlyMemory<byte> content, CancellationToken cancellationToken = default)
+        => _projectionBuilder.Build(content, cancellationToken);
 
     /// <inheritdoc />
     public async Task<LoadComposeDocumentResult> LoadAsync(
@@ -250,22 +279,50 @@ public class ComposeService : IComposeService
             content = buffer.ToArray();
         }
 
-        // FR-08 (E2, task 010): pre-parse the load-time bytes for the ordered w14:paraId map alongside
-        // the (client-side) mammoth convert, which discards paraId. Single Open XML pass (NFR-08).
-        // Best-effort — a malformed/unreadable source must NOT fail Load (which historically did no
-        // server-side parse of the content); the client degrades to fuzzy-only anchoring (task 012)
-        // when the map is empty.
-        IReadOnlyList<ParaIdMapEntry> paraIdMap;
-        try
+        // FR-01 (task 010, ingest — design §5, I-1/I-3): mint + PERSIST a w14:paraId into the retained
+        // package's DOM for every editable paragraph that lacks one — durable across a load → save →
+        // reload round-trip, not merely carried in the projection map below. Idempotent
+        // (ComposeBaselineParaIdStamper.MintAndPersist): a document whose paragraphs already all carry
+        // ids returns byte-identical (no-op). Running this BEFORE the projection build means the builder
+        // — which reads but never writes existing ids — sees a body with no gaps, so its own ParaIdMap is
+        // automatically consistent with what is now physically in `content`. That same mutated `content`
+        // is what Load returns as Content and what the client echoes back as the same-session Save
+        // fast-path baseline (ResolveSaveBaselineAsync), so the persisted ids survive that round-trip by
+        // construction — same-session durable minting; a Word-regenerated cross-session id collision is
+        // AnnotationReanchorService's fuzzy-fallback boundary, not this step's concern.
+        var ingestParaIdStamp = _baselineParaIdStamper.MintAndPersist(content);
+        if (ingestParaIdStamp.Mutated)
         {
-            paraIdMap = _paraIdPreParser.Parse(content).Entries;
+            content = ingestParaIdStamp.Bytes;
+            _logger.LogInformation(
+                "Compose load: minted + persisted {MintedCount} w14:paraId(s) into the retained package for drive={DriveId} item={DocumentSpeId}.",
+                ingestParaIdStamp.ParaIdMap.Count(e => e.IsMinted), request.DriveId, request.DocumentSpeId);
         }
-        catch (Exception ex)
+
+        // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): the single-walk
+        // projection builder produces BOTH the paraId-tagged editor HTML AND the ordered w14:paraId map from
+        // ONE traversal — replacing the client-side mammoth convert + position-based paraId stamping (the
+        // two-engine drift that caused the "matches no paragraph in the retained original" save failures).
+        // The builder's map is the load path's single paraId authority; it is produced in
+        // Descendants<Paragraph>() order (reader-aligned) so the imported-revision/comment ParagraphHint
+        // resolution below keeps working. Fail-closed + best-effort: an unreadable source yields
+        // Status=Failed/empty map (NEVER throws) and Load still returns the source bytes (§3.3). The builder
+        // supersedes the ParaIdPreParser single-pass on the Load path (one paragraph-enumeration authority).
+        var projection = _projectionBuilder.Build(content, cancellationToken);
+        IReadOnlyList<ParaIdMapEntry> paraIdMap = projection.ParaIdMap;
+        if (projection.Status == ComposeProjectionStatus.Failed)
         {
-            _logger.LogWarning(ex,
-                "Compose load: paraId pre-parse failed for drive={DriveId} item={DocumentSpeId}; returning empty map",
-                request.DriveId, request.DocumentSpeId);
-            paraIdMap = Array.Empty<ParaIdMapEntry>();
+            _logger.LogWarning(
+                "Compose load: DOCX projection failed for drive={DriveId} item={DocumentSpeId} (code={Code}); client will fail closed (read-only / Open in Word)",
+                request.DriveId, request.DocumentSpeId, projection.Warnings.FirstOrDefault()?.Code);
+        }
+        else if (projection.Warnings.Count > 0)
+        {
+            // Counts-only (privacy — no document content). Surfaces fidelity gaps to engineering (F-03).
+            _logger.LogInformation(
+                "Compose load: DOCX projection partial for drive={DriveId} item={DocumentSpeId}; warnings={Warnings}",
+                request.DriveId, request.DocumentSpeId,
+                string.Join(",", projection.Warnings.Select(w => $"{w.Code}:{w.Count}")));
         }
 
         // FR-24/FR-25 (task 050 + task 051, import round-trip): run the EXISTING DocxAnnotationReader ONCE
@@ -380,11 +437,49 @@ public class ComposeService : IComposeService
                 ct: cancellationToken)
             .ConfigureAwait(false);
 
+        // FR-17 (task 041, design.md §4 WS-4, owner clarification "WS-4 store" = BOTH stores):
+        // persist the paraId -> legal-number map into the R4 session ledger (ADR-040) alongside
+        // AnchoredAnnotations/DefinedTermsTracking/ActiveDocument — the SAME three-tier ChatSession
+        // stack (Redis hot / Cosmos warm), no new store. The map already rides on the projection
+        // payload returned below (ParaIdMap, task 040); this mirrors the SAME per-paragraph
+        // reference fields onto the session so a reload — or a consumer that reads the session
+        // directly without re-running the projection (e.g. task 042's citation resolver) —
+        // resolves paraId -> number without a recompute divergence. Reassigned on EVERY load from
+        // the freshest Build() output: unchanged paragraphs keep the SAME entry because R4's
+        // AnnotationReanchorService/ComposeBaselineParaIdStamper keep a paragraph's physical
+        // w14:paraId stable across edits; new/split paragraphs simply appear as new map entries
+        // (R4 re-anchor — this task does not reconcile or diff the two snapshots).
+        var referenceMap = BuildReferenceMap(paraIdMap);
+        session = session with { ReferenceMap = referenceMap };
+        await _sessions.UpdateSessionCacheAsync(session, cancellationToken).ConfigureAwait(false);
+
         // FR-33 (task 062, design.md §8): restore prior decisions from the ledger alongside the
         // FR-29 annotations — task 061's read-only GetActionHistory query over the resumed
         // session's Outputs/ToolChains. No new stored structure (ADR-040); a freshly-minted
         // session naturally has an empty ledger.
         var actionHistory = GetActionHistory(session);
+
+        // G1 (FR-01, task 020): read the persisted sprk_composeorigin marker for Path A loads (an
+        // existing sprk_document record) so the client can route a reopened Authored doc onto the
+        // clean payload instead of the op-log/tracked path (NFR-02 — never inferred from SPE-id or
+        // content). Path B continuation (no DocumentRecordId — the doc is not yet promoted) has no
+        // row to read; Origin stays null. Best-effort: a read failure OR a legacy row with no stored
+        // value degrades to Origin=null — NEVER fails Load. The BINDING null-handling contract (see
+        // ComposeOrigin remarks) is the CALLER's obligation: null MUST be treated as Imported, never
+        // strict-equal to Authored.
+        ComposeOrigin? origin = request.DocumentRecordId.HasValue
+            ? await ReadPersistedOriginAsync(request.DocumentRecordId.Value, cancellationToken).ConfigureAwait(false)
+            : null;
+
+        // G10 (FR-09, task 040): reload/onload re-trigger of the Document Profile — storm-safe (fires only
+        // when the doc changed since Compose last profiled it). Path A only (an existing sprk_document to
+        // profile). Best-effort — never blocks or fails Load.
+        if (request.DocumentRecordId is { } reloadRecordId && !string.IsNullOrWhiteSpace(metadata.ETag))
+        {
+            await MaybeRetriggerProfileOnLoadAsync(
+                reloadRecordId, request.DocumentSpeId, metadata.ETag!, httpContext, cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         return new LoadComposeDocumentResult
         {
@@ -401,9 +496,48 @@ public class ComposeService : IComposeService
             DefinedTermsTracking = session.DefinedTermsTracking ?? Array.Empty<DefinedTerm>(),
             ActionHistory = actionHistory,
             ParaIdMap = paraIdMap,
+            Projection = projection,
             ImportedRevisions = importedRevisions,
             ImportedComments = importedComments,
+            Origin = origin,
         };
+    }
+
+    /// <summary>
+    /// G1/G2 (FR-01/FR-02, tasks 020/021): reads the durable <c>sprk_composeorigin</c> marker for an
+    /// existing <c>sprk_document</c>. Server-authoritative — the origin decision is the persisted marker,
+    /// never inferred from SPE-id presence or document content (NFR-02 / I-7). Best-effort: a read failure
+    /// OR a legacy row with no stored value returns <c>null</c> and NEVER throws — callers apply the BINDING
+    /// null-handling contract (treat <c>null</c> as <see cref="ComposeOrigin.Imported"/>, never strict-equal
+    /// to <see cref="ComposeOrigin.Authored"/>). Consumed by <see cref="LoadAsync"/> (returns it to the
+    /// client) and <see cref="SaveAsync"/> (selects the engine's clean-vs-tracked apply mode).
+    /// </summary>
+    private async Task<ComposeOrigin?> ReadPersistedOriginAsync(Guid documentRecordId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var documentEntity = await _dataverse.RetrieveAsync(
+                    DocumentLogicalName,
+                    documentRecordId,
+                    new[] { ComposeOriginAttribute },
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (documentEntity is not null
+                && documentEntity.Contains(ComposeOriginAttribute)
+                && documentEntity[ComposeOriginAttribute] is OptionSetValue originOptionSet)
+            {
+                return (ComposeOrigin)originOptionSet.Value;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose: sprk_composeorigin lookup failed for record={DocumentRecordId} — origin treated as null (callers apply the BINDING null-handling contract: null = Imported).",
+                documentRecordId);
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -431,6 +565,36 @@ public class ComposeService : IComposeService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// FR-17 (task 041, design.md §4 WS-4): projects a Load-time <see cref="ParaIdMapEntry"/> map
+    /// (task 040's per-paragraph reference set) onto the session-ledger shape
+    /// (<see cref="ParaReferenceMapEntry"/>) for persistence on <see cref="ChatSession.ReferenceMap"/>.
+    /// Pure 1:1 field carry — no recomputation, no numbering logic: this method persists task 040's
+    /// ALREADY-computed values, it does not derive new ones (ADR-013/007 purity: <c>Services/
+    /// Compose/</c> stays <c>byte[]</c>-in/projection-out, no AI-internal type, no <c>Microsoft.Graph</c>
+    /// above <c>SpeFileStore</c>).
+    /// </summary>
+    private static IReadOnlyList<ParaReferenceMapEntry> BuildReferenceMap(IReadOnlyList<ParaIdMapEntry> paraIdMap)
+    {
+        if (paraIdMap.Count == 0)
+        {
+            return Array.Empty<ParaReferenceMapEntry>();
+        }
+
+        var entries = new List<ParaReferenceMapEntry>(paraIdMap.Count);
+        foreach (var entry in paraIdMap)
+        {
+            entries.Add(new ParaReferenceMapEntry(
+                ParaId: entry.ParaId,
+                ComputedNumber: entry.ComputedNumber,
+                NumberingLevel: entry.NumberingLevel,
+                ListPath: entry.ListPath,
+                HeadingLevel: entry.HeadingLevel));
+        }
+
+        return entries;
     }
 
     /// <summary>
@@ -500,20 +664,19 @@ public class ComposeService : IComposeService
         //            after a page refresh (client bytes gone) still lands the delta on the correct version.
         //      A create-on-save (no DocumentSpeId) always supplies Content as the document bytes.
         //
-        //   2. Synthesize the USER's paragraph text-edits (request.EditedParagraphs, paraId-keyed) as a
-        //      word-level w:ins/w:del delta ONTO the baseline via ComposeParagraphRedlineSynthesizer —
-        //      rewriting ONLY the edited paragraphs, preserving every untouched paragraph + all structure
-        //      by construction (Option C; replaces the retired R2 whole-document reconstruction). An empty
-        //      edit list is a structural round-trip (no revisions) → a clean Save stays byte-identical.
+        //   2. Apply the client's ordered, rebased task-003 OPERATION LOG (request.OperationLog) + any
+        //      (paraId,range)-anchored comments (request.Comments) surgically ONTO the baseline via the SINGLE
+        //      ComposeShadowPatchEngine (FR-06 cutover, task 032) — emitting native w:ins/w:del/w:comment,
+        //      ID-anchored, ZERO write-path text-search (I-7), preserving every untouched paragraph + all
+        //      structure by construction. This REPLACES both now-fully-retired writers
+        //      (ComposeParagraphRedlineSynthesizer paragraph-diff + DocxAnnotationWriter, whose last use — the
+        //      push-annotations surface — was retired by task 036). An empty log + no comments is a clean
+        //      Save → the baseline stays byte-identical.
         //
-        //   3. Apply AI redlines/comments (request.Annotations) as NATIVE OOXML (w:ins/w:del/w:comment)
-        //      via the SAME DocxAnnotationWriter the push path uses (PushAnnotationsAsync) — UNCHANGED
-        //      (UAT-R7 #2/#3/#4; task 023 verifies the AI-redline-onto-Option-C-baseline composition).
-        //
-        // All three transforms are pure/in-memory BEFORE any SPE write, so a bad edit (unmatched paraId →
-        // ComposeRedlineException) or bad annotation batch (DocxAnnotationException) throws before the
-        // write — no partial SPE version can land. A no-edit, no-annotation Save persists the baseline
-        // byte-identical (FR-06a byte-identity preserved — see ComposeServiceUploadFidelityTests.cs).
+        // The transform is pure/in-memory BEFORE any SPE write, so a refusal (unresolved paraId/anchor,
+        // unsupported schema version, opaque-atom/structural refusal → ComposePatchException) throws before the
+        // write — no partial or wrong SPE version can land. A no-op Save persists the baseline byte-identical
+        // (FR-06a byte-identity preserved — see ComposeServiceUploadFidelityTests.cs).
         // ────────────────────────────────────────────────────────────────────────────
         var observedAt = DateTimeOffset.UtcNow;
         var isTransientCreate = string.IsNullOrWhiteSpace(request.DocumentSpeId);
@@ -521,47 +684,244 @@ public class ComposeService : IComposeService
         byte[] contentToPersist = await ResolveSaveBaselineAsync(request, httpContext, cancellationToken)
             .ConfigureAwait(false);
 
-        // C2 fix (UAT 2026-07-20): stamp the client's minted paraIds physically onto the baseline's
-        // id-less paragraphs BEFORE the synthesizer/annotation writer resolve against it. This completes
-        // the "apply minted ids physically" step ParaIdPreParser mints but never wrote into the source
-        // bytes (its own remark) — without it, editing/accepting a redline on an originally-id-less
-        // paragraph (or any paragraph of an uploaded doc, whose ids are all client-minted) fails with
-        // "w14:paraId matches no paragraph in the retained original". Text-verified + fill-gaps-only +
-        // count-gated + fail-open (see ComposeBaselineParaIdStamper) — a no-op when the map is absent
-        // (older client) or nothing qualifies, so a doc whose paragraphs already carry ids is unchanged.
-        // Gated on an EditedParagraphs delta being present: the stamp only matters for the synthesizer's
-        // paraId resolution, and running it on a clean/annotation-only save would needlessly rewrite the
-        // bytes and break the FR-06a byte-identical clean-save invariant (ComposeServiceUploadFidelityTests).
-        // Skipped on the born-in-editor path (ContentModel present → the renderer already mints ids into
-        // the bytes it authors; the client sends no map there).
-        if (request.ContentModel is null
-            && request.EditedParagraphs is { Count: > 0 }
-            && request.ParaIdMap is { Count: > 0 })
+        // FR-06 (task 032, the write-path cutover): apply the client's ordered, rebased task-003 operation log
+        // (+ any (paraId,range)-anchored comments) surgically onto the resolved baseline via the SINGLE
+        // ComposeShadowPatchEngine. This REPLACES the retired ComposeParagraphRedlineSynthesizer (paragraph-diff)
+        // AND DocxAnnotationWriter (fully retired by task 036 — its last use was the push-annotations surface). Skipped on
+        // the born-in-editor path (ContentModel present → the renderer authored the whole doc, minting ids into
+        // its own bytes; there is no baseline to patch and the client sends no op-log there).
+        var hasOperations = request.OperationLog is { Operations.Count: > 0 };
+        var hasComments = request.Comments is { Count: > 0 };
+
+        // G1 (FR-01, task 020): the durable origin discriminator — mirrors the SAME ContentModel-presence
+        // signal the born-in-editor render branch above already keys off (ResolveSaveBaselineAsync's "(a0)
+        // BORN-IN-EDITOR" check). ContentModel present → the renderer authors the whole document from the
+        // client's content model (Authored, no retained baseline to delta onto); ContentModel absent → the
+        // save carries retained SPE bytes, whether a delta (op-log) or a byte-identical replace (Imported).
+        // Resolved ONLY from this server-side discriminant — NEVER from SPE-id presence or a content/text
+        // match (NFR-02, I-7). Computed on every save (not only create-on-save) so it can ride the returned
+        // SaveComposeDocumentResult for immediate client/consumer use (e.g. task 021's clean-apply engine
+        // mode selection) — but it is PERSISTED onto sprk_document ONLY at create-on-save (see the
+        // PromoteComposeDocumentRequest.Origin wiring below); a replace-path save of an already-promoted
+        // document never mutates the stored value.
+        // UAT #1A hardening (task 050): Authored requires a ContentModel AND no retained original bytes — i.e. a
+        // genuine born-in-editor doc with no baseline to delta onto. A save that carries retained original bytes
+        // (Content) is IMPORTED even if a ContentModel is also (erroneously) present, so a client-side routing
+        // slip can never durably mis-stamp an imported doc Authored (which would force every later op-log save
+        // onto the clean branch and silently drop redlines — the SEV-1 UAT regression). ContentModel absent →
+        // Imported. Still resolved ONLY from server-side request shape — never from SPE-id presence or a
+        // content/text match (NFR-02, I-7).
+        var origin = request.ContentModel is not null && request.Content.IsEmpty
+            ? ComposeOrigin.Authored
+            : ComposeOrigin.Imported;
+
+        // G2 (FR-02, task 021 / R5-D2 Candidate A): the CLEAN-APPLY decision for the op-log/engine path.
+        // A reopened AUTHORED doc sends an op-log (ContentModel null) — the ContentModel discriminant above
+        // would mislabel it Imported, so the DURABLE sprk_composeorigin marker is authoritative here (read
+        // server-side, never inferred from SPE-id/content — NFR-02/I-7). When the marker says Authored, the
+        // engine applies edits CLEAN (plain runs, physical deletes, no w:pPrChange) so an authored doc's own
+        // cross-session edits carry NO redlines (REQ-1); Imported/legacy-null stay on the tracked default
+        // (REQ-2 not regressed). Best-effort: a marker read failure degrades to tracked (safe — worst case an
+        // authored doc shows redlines, never data loss). ContentModel-present saves take the renderer path
+        // (no engine Apply) and are already clean by construction.
+        var cleanApply = false;
+        if (request.ContentModel is null && request.DocumentRecordId is { } originRecordId)
         {
-            contentToPersist = _baselineParaIdStamper.Stamp(contentToPersist, request.ParaIdMap);
+            var persistedOrigin = await ReadPersistedOriginAsync(originRecordId, cancellationToken).ConfigureAwait(false);
+            if (persistedOrigin == ComposeOrigin.Authored)
+            {
+                origin = ComposeOrigin.Authored;
+                cleanApply = true;
+            }
         }
 
-        if (request.EditedParagraphs is { Count: > 0 })
+        // ────────────────────────────────────────────────────────────────────────────
+        // FR-08 (task 050, design §5 "Save + concurrency"): version-stamp + assert-before-apply +
+        // re-anchor-on-stale. Only meaningful for an EXISTING item (a transient create has no prior base
+        // that could have moved). Every save of an existing item fetches the LIVE SPE eTag (never a
+        // client-supplied precondition — the client cannot assert its own currency), and asserts it
+        // against the version stamp THIS SAME save path persisted after its own last write (ADR-009
+        // IDistributedCache, never IMemoryCache). No stamp yet (first Compose save of a pre-existing item)
+        // means nothing to assert against — proceeds unstaled, R1-equivalent. A genuine mismatch means the
+        // base moved under the client since it loaded (another writer landed a new version): re-anchor the
+        // operation log via AnnotationReanchorService (the KEEP asset, reused verbatim — never reimplemented)
+        // INSTEAD of blindly overwriting or throwing an eTag 500. AUTO (exact paraId match) re-anchors apply;
+        // REVIEW/ORPHAN surface for the user — never silently applied, never silently dropped.
+        // ────────────────────────────────────────────────────────────────────────────
+        string? preWriteETag = null;
+        ReanchorSummary? reanchorSummary = null;
+        PartialApplySummary? partialApplySummary = null; // prong 1 (task 055) — set iff best-effort recovery ran
+
+        if (!isTransientCreate && !string.IsNullOrWhiteSpace(request.DriveId))
         {
-            _logger.LogInformation(
-                "Compose save: synthesizing a paraId-keyed redline for {EditCount} edited paragraph(s) onto the retained original baseline (session={SessionId}).",
-                request.EditedParagraphs.Count, request.SessionId);
-            contentToPersist = _redlineSynthesizer.SynthesizeRedline(
-                contentToPersist, request.EditedParagraphs, ResolveRevisionAuthor(httpContext), observedAt);
+            var currentMetadata = await _spe.GetFileMetadataAsUserAsync(
+                    httpContext, request.DriveId!, request.DocumentSpeId!, cancellationToken)
+                .ConfigureAwait(false);
+            preWriteETag = currentMetadata?.ETag;
+
+            if (preWriteETag is not null && request.ContentModel is null && (hasOperations || hasComments))
+            {
+                var storedStamp = await GetSaveVersionStampAsync(request.DocumentSpeId!, cancellationToken)
+                    .ConfigureAwait(false);
+                var isStale = storedStamp is not null
+                    && !string.Equals(storedStamp.ETag, preWriteETag, StringComparison.Ordinal);
+
+                if (isStale)
+                {
+                    var (patchedBytes, summary) = await ReanchorStaleSaveAsync(
+                            request, contentToPersist, httpContext, observedAt, trackChanges: !cleanApply, cancellationToken)
+                        .ConfigureAwait(false);
+
+                    contentToPersist = patchedBytes;
+                    reanchorSummary = summary;
+
+                    _logger.LogWarning(
+                        "Compose save: stale base for driveItem={DocumentSpeId} (stamped eTag={StoredETag}, live eTag={CurrentETag}) — re-anchored via AnnotationReanchorService: auto={Auto} review={Review} orphan={Orphan} of {Total} op(s)/comment(s). AUTO re-anchors applied; REVIEW/ORPHAN surfaced (never silently applied, never silently dropped).",
+                        request.DocumentSpeId, storedStamp?.ETag, preWriteETag,
+                        summary.AutoCount, summary.ReviewCount, summary.OrphanCount, summary.Total);
+
+                    // ReanchorStaleSaveAsync already applied the AUTO-band ops/comments through the Patch
+                    // Engine onto the freshly-fetched current bytes — skip the normal apply block below
+                    // (it would otherwise re-apply the FULL unfiltered log onto a now-stale baseline).
+                    hasOperations = false;
+                    hasComments = false;
+                }
+            }
         }
 
-        if (request.Annotations is { Count: > 0 })
+        if (request.ContentModel is null && (hasOperations || hasComments))
         {
+            // C2 fix (UAT 2026-07-20): stamp the client's minted paraIds physically onto the baseline's id-less
+            // paragraphs BEFORE the engine resolves each op's (paraId, runIndex, run-local-offset) anchor against
+            // it. Without it, an edit on an originally-id-less paragraph (or any paragraph of an uploaded doc,
+            // whose ids are all client-minted) would refuse with ParagraphNotFound. Text-verified + fill-gaps-only
+            // + count-gated + fail-open (see ComposeBaselineParaIdStamper) — a no-op when the map is absent
+            // (older client) or nothing qualifies, so a doc whose paragraphs already carry ids is unchanged.
+            if (request.ParaIdMap is { Count: > 0 })
+            {
+                contentToPersist = _baselineParaIdStamper.Stamp(contentToPersist, request.ParaIdMap);
+            }
+
             _logger.LogInformation(
-                "Compose save: applying {AnnotationCount} redline/comment annotation(s) to the baseline before persist (session={SessionId}).",
-                request.Annotations.Count, request.SessionId);
-            contentToPersist = _annotationWriter.Annotate(contentToPersist, request.Annotations);
+                "Compose save: applying operation log ({OpCount} op(s)) + {CommentCount} comment(s) via the Patch Engine onto the retained baseline (session={SessionId}).",
+                request.OperationLog?.Operations.Count ?? 0, request.Comments?.Count ?? 0, request.SessionId);
+
+            // Pure/in-memory BEFORE any SPE write: a refusal (unresolved paraId/anchor, unsupported schema
+            // version, opaque-atom/structural refusal) throws ComposePatchException here — mapped to a
+            // ProblemDetails by the endpoint — so no partial or wrong SPE version can land.
+            var revisionAuthor = ResolveRevisionAuthor(httpContext);
+            var editLog = request.OperationLog ?? new ComposeOperationLog();
+            try
+            {
+                contentToPersist = _patchEngine.Apply(
+                    contentToPersist,
+                    editLog,
+                    request.Comments,
+                    revisionAuthor,
+                    observedAt,
+                    trackChanges: !cleanApply);
+            }
+            catch (ComposePatchException ex) when (!IsBatchLevelPatchRefusal(ex.Kind))
+            {
+                // Prong 1 (task 055 — keep-edits graceful degradation). An OP-LEVEL anchoring refusal (a
+                // single op whose paraId/anchor can't resolve) no longer loses the WHOLE editing session:
+                // best-effort apply the resolvable paragraph-units and SURFACE the unresolvable ops so the
+                // client prompts the user to redo just those edits. Never silently applies a wrong edit (the
+                // paragraph is the atomic unit under the engine's intra-paragraph sequential rebasing) and
+                // never silently drops one. Prong 2's paraOffset anchor already fixed the common root cause;
+                // this is the residual safety net. BATCH-level refusals (malformed docx / schema skew) are
+                // filtered OUT by the `when` guard and still throw hard → the endpoint's ProblemDetails.
+                _logger.LogWarning(ex,
+                    "Compose save: batch patch refusal ({Kind}) on the loaded-doc path — entering best-effort per-paragraph recovery (session={SessionId}).",
+                    ex.Kind, request.SessionId);
+
+                var bestEffortBytes = ApplyBestEffortByParagraph(
+                    contentToPersist, editLog, request.Comments, revisionAuthor, observedAt,
+                    trackChanges: !cleanApply, out var partial);
+
+                if (partial.AppliedCount == 0)
+                {
+                    // Nothing resolved — no op applied AND no advisory comment baked (agreements-r1 UAT #4:
+                    // AppliedCount now folds in baked comments, so a comments-only review save where at least
+                    // one note anchored preserves that partial success instead of re-throwing). There is no
+                    // partial success to preserve here. Fail HARD exactly as before prong 1 (a typed
+                    // ProblemDetails via the endpoint), rather than persist a no-op version + a partial-apply
+                    // banner. A wholly-unanchorable batch stays a hard refusal (the op-log + notes survive
+                    // client-side for a retry). Re-throws the ORIGINAL op-level refusal.
+                    _logger.LogWarning(
+                        "Compose save: best-effort recovery resolved ZERO of {Total} op(s) — re-throwing the original refusal ({Kind}) as a hard failure (session={SessionId}).",
+                        partial.Total, ex.Kind, request.SessionId);
+                    throw;
+                }
+
+                contentToPersist = bestEffortBytes;
+                partialApplySummary = partial;
+
+                _logger.LogWarning(
+                    "Compose save: best-effort recovery applied {Applied}/{Total} op(s); {Unresolved} surfaced as unresolvable (session={SessionId}).",
+                    partial.AppliedCount, partial.Total, partial.UnresolvedCount, request.SessionId);
+            }
+        }
+        // UAT round-3 (2026-07-27) — advisory comments on the CREATE-ON-SAVE / ContentModel path.
+        // The block above only bakes comments when ContentModel is null (a loaded-doc delta save). But a
+        // DIRTY transient save (the reviewer's session goes dirty the moment the AI places comment marks)
+        // sends a rendered ContentModel instead — App Insights showed the NDA saving as
+        // transientCreate=True with a ContentModel, so its advisory comments were silently dropped (no
+        // native w:comment reached Word). The renderer (ComposeDocumentRenderer.SynthesizeDocument) stamps
+        // each block's CLIENT paraId into the rendered .docx (CarryClientParaId/AssignParaIds), and the
+        // comment anchors reference those SAME client-minted paraIds — so a comments-only patch resolves
+        // cleanly. Empty op-log + comments is a first-class ComposeShadowPatchEngine.Apply case; pass a
+        // fresh ComposeOperationLog() so its SchemaVersion matches. Runs BEFORE the SummaryPage append +
+        // SPE write, mirroring the loaded-doc block's ordering.
+        // FAIL-SOFT: a create-on-save currently succeeds WITHOUT comments; baking must never regress that
+        // to a hard failure. If a comment's paraId can't resolve (e.g. a non-hex editor id the renderer
+        // re-minted, or a range shifted by pending-insert exclusion), log it and persist the rendered
+        // bytes uncommented rather than throwing — the save still lands; the drop is visible in telemetry.
+        else if (request.ContentModel is not null && hasComments)
+        {
+            try
+            {
+                var withComments = _patchEngine.Apply(
+                    contentToPersist,
+                    new ComposeOperationLog(),
+                    request.Comments,
+                    ResolveRevisionAuthor(httpContext),
+                    observedAt);
+                contentToPersist = withComments;
+
+                _logger.LogInformation(
+                    "Compose save: baked {CommentCount} advisory comment(s) as native w:comment onto the rendered ContentModel (create-on-save path) (session={SessionId}).",
+                    request.Comments?.Count ?? 0, request.SessionId);
+            }
+            catch (ComposePatchException ex)
+            {
+                _logger.LogWarning(ex,
+                    "Compose save: could not bake {CommentCount} advisory comment(s) onto the rendered ContentModel ({Kind}) — persisting the document WITHOUT them so the save still succeeds (session={SessionId}).",
+                    request.Comments?.Count ?? 0, ex.Kind, request.SessionId);
+            }
+        }
+
+        // Task 041 (Phase 4, NDA-REVIEW Summary Page): when the caller supplies the ledgered NDA-REVIEW
+        // result, append the Summary Page (TL;DR + flagged-section overview + recommendations) as a
+        // page-broken, non-tracked section at the END of the document — AFTER any edit-log/comment
+        // application above, so the summary always lands as the true tail of what gets persisted. Pure,
+        // deterministic, no second LLM call (ComposeSummaryPageGenerator); no new package (ADR-049 — reuses
+        // ComposeDocumentRenderer, never the retired DocxAnnotationWriter).
+        if (request.SummaryPage is not null)
+        {
+            var summaryBlocks = ComposeSummaryPageGenerator.Build(request.SummaryPage);
+            contentToPersist = _documentRenderer.AppendSection(contentToPersist, summaryBlocks);
+
+            _logger.LogInformation(
+                "Compose save: appended NDA-REVIEW Summary Page ({FindingCount} flagged section(s), overallRisk={OverallRisk}) to the document (session={SessionId}).",
+                request.SummaryPage.FlaggedSections.Count, request.SummaryPage.OverallRisk, request.SessionId);
         }
 
         _logger.LogInformation(
-            "Compose save: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} container={ContainerId} transientCreate={IsTransientCreate} session={SessionId} record={DocumentRecordId} size={SizeBytes}",
+            "Compose save: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} container={ContainerId} transientCreate={IsTransientCreate} contentModel={HasContentModel} comments={CommentCount} session={SessionId} record={DocumentRecordId} size={SizeBytes}",
             request.TenantId, request.DriveId, request.DocumentSpeId, request.ContainerId,
-            isTransientCreate, request.SessionId, request.DocumentRecordId, request.Content.Length);
+            isTransientCreate, request.ContentModel is not null, request.Comments?.Count ?? 0,
+            request.SessionId, request.DocumentRecordId, request.Content.Length);
 
         // ────────────────────────────────────────────────────────────────────────────
         // STEP 1 — container (FR-05, Fork A + Fork B).
@@ -577,37 +937,82 @@ public class ComposeService : IComposeService
 
         if (isTransientCreate)
         {
-            if (string.IsNullOrWhiteSpace(request.ContainerId))
+            // ─── G7 (FR-06, task 022): transient-key dedup — the 8-duplicate fix ───
+            // A transient draft has no SPE id until its first save mints one; this branch minted a NEW SPE
+            // item on EVERY create-on-save call, so a lost/raced round-trip (concurrent saves, a re-created
+            // mount, a new tab) produced another item → another sprk_document row. The client mints a stable
+            // transient key once at mount and sends it on every create-on-save; BEFORE minting, resolve it
+            // against the durable sprk_composetransientkey_uk alt-key. A hit REUSES the existing record's SPE
+            // item (replace in place, no new mint, no new row). Save-New (ForkNew) deliberately SKIPS the
+            // dedup to fork a fresh record. Resolves by KEY, never by content (I-7/NFR-02).
+            TransientKeyMatch? dedupMatch = null;
+            if (!request.ForkNew && !string.IsNullOrWhiteSpace(request.TransientKey))
             {
-                _logger.LogWarning(
-                    "Compose create-on-save: transient draft with no client-supplied ContainerId — failing the '{Step}' step honestly (session={SessionId}). No server-side BU→container resolver (multi-container INV-7).",
-                    StepContainer, request.SessionId);
-                return BuildContainerFailedResult(request, observedAt);
+                dedupMatch = await TryFindDocumentByTransientKeyAsync(request.TransientKey!, cancellationToken)
+                    .ConfigureAwait(false);
             }
 
-            // Fork B: mint the SPE drive-item in the supplied container under the user's OBO
-            // identity (the Compose user holds the file ACL; MI does not — same constraint that
-            // deferred profile). Idempotency: this branch only runs when DocumentSpeId is absent;
-            // once created, the client re-Saves with the returned id → the replace path below, so
-            // the drive-item is never double-created.
-            var driveId = await _spe.ResolveDriveIdAsync(request.ContainerId, cancellationToken).ConfigureAwait(false);
-            using var createStream = new MemoryStream(contentToPersist, writable: false);
-            var created = await _spe.UploadSmallAsUserAsync(
-                    httpContext, driveId, fileName, createStream, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (created is null || string.IsNullOrEmpty(created.Id))
+            if (dedupMatch is { } match
+                && !string.IsNullOrWhiteSpace(match.SpeId)
+                && !string.IsNullOrWhiteSpace(match.DriveId))
             {
-                _logger.LogError(
-                    "Compose create-on-save: SPE drive-item creation returned null/empty for container={ContainerId} — failing the '{Step}' step (session={SessionId}).",
-                    request.ContainerId, StepContainer, request.SessionId);
-                return BuildContainerFailedResult(request, observedAt);
-            }
+                // Dedup hit: the transient key already resolved to a record with a live SPE item — replace
+                // that item's content in place. No new mint, no new row (the promote step below finds the
+                // existing record by sprk_graphitemid → idempotent no-op).
+                using var replaceStream = new MemoryStream(contentToPersist, writable: false);
+                var replaced = await _spe.ReplaceFileContentAsUserAsync(
+                        httpContext, match.DriveId!, match.SpeId!, replaceStream, cancellationToken)
+                    .ConfigureAwait(false);
 
-            saved = created;
-            effectiveSpeId = created.Id;
-            effectiveDriveId = created.DriveId ?? driveId;
-            fileName = created.Name ?? fileName;
+                if (replaced is null || string.IsNullOrEmpty(replaced.Id))
+                {
+                    throw new InvalidOperationException(
+                        $"Compose transient-key dedup: SPE replace failed for existing item drive={match.DriveId} item={match.SpeId} (transientKey matched record {match.RecordId}).");
+                }
+
+                saved = replaced;
+                effectiveSpeId = match.SpeId!;
+                effectiveDriveId = match.DriveId;
+                fileName = replaced.Name ?? fileName;
+
+                _logger.LogInformation(
+                    "Compose create-on-save: transientKey matched existing sprk_document {DocumentRecordId} (driveItem={DocumentSpeId}) — replaced in place, no duplicate mint (session={SessionId}).",
+                    match.RecordId, match.SpeId, request.SessionId);
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(request.ContainerId))
+                {
+                    _logger.LogWarning(
+                        "Compose create-on-save: transient draft with no client-supplied ContainerId — failing the '{Step}' step honestly (session={SessionId}). No server-side BU→container resolver (multi-container INV-7).",
+                        StepContainer, request.SessionId);
+                    return BuildContainerFailedResult(request, observedAt);
+                }
+
+                // Fork B: mint the SPE drive-item in the supplied container under the user's OBO identity
+                // (the Compose user holds the file ACL; MI does not — same constraint that deferred profile).
+                // First save of this transient key (or a deliberate Save-New fork): once created, the record
+                // is stamped with the transient key (promote step below) so the NEXT create-on-save with the
+                // same key takes the dedup replace path above — never a double mint.
+                var driveId = await _spe.ResolveDriveIdAsync(request.ContainerId, cancellationToken).ConfigureAwait(false);
+                using var createStream = new MemoryStream(contentToPersist, writable: false);
+                var created = await _spe.UploadSmallAsUserAsync(
+                        httpContext, driveId, fileName, createStream, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (created is null || string.IsNullOrEmpty(created.Id))
+                {
+                    _logger.LogError(
+                        "Compose create-on-save: SPE drive-item creation returned null/empty for container={ContainerId} — failing the '{Step}' step (session={SessionId}).",
+                        request.ContainerId, StepContainer, request.SessionId);
+                    return BuildContainerFailedResult(request, observedAt);
+                }
+
+                saved = created;
+                effectiveSpeId = created.Id;
+                effectiveDriveId = created.DriveId ?? driveId;
+                fileName = created.Name ?? fileName;
+            }
         }
         else
         {
@@ -615,6 +1020,13 @@ public class ComposeService : IComposeService
                 throw new ArgumentException("DriveId is required for SPE drive-item access when DocumentSpeId is supplied.", nameof(request));
 
             using var contentStream = new MemoryStream(contentToPersist, writable: false);
+            // FR-08 (task 050): the write itself stays the existing etag-less overload (unchanged R1
+            // behavior + write-path signature) — preWriteETag is used above purely for the staleness
+            // ASSERT (comparing our own persisted version stamp to the live eTag) and below to SEED the
+            // next save's stamp when the write's own response carries no eTag. Upgrading this write to a
+            // Graph-level If-Match precondition is a further-hardening candidate, not required by this
+            // task's acceptance criteria (staleness is asserted + re-anchored via OUR OWN stamp, not via
+            // Graph's optimistic-concurrency response).
             var replaced = await _spe.ReplaceFileContentAsUserAsync(
                     httpContext, request.DriveId, request.DocumentSpeId!, contentStream, cancellationToken)
                 .ConfigureAwait(false);
@@ -630,6 +1042,13 @@ public class ComposeService : IComposeService
             effectiveDriveId = request.DriveId;
             fileName = replaced.Name ?? fileName;
         }
+
+        // FR-08 (task 050/051): version-stamp the save that just landed — the POST-WRITE eTag returned by
+        // THIS write (create or replace, whichever branch ran) becomes the assert-baseline for the NEXT
+        // save of this same item (never a pre-write/pre-create precondition). Best-effort: a Redis miss
+        // here never fails an already-successful save; it only means the next save's staleness assert
+        // degrades to "no stamp = not stale" (R1-equivalent), never a false negative that blocks a save.
+        await SetSaveVersionStampAsync(effectiveSpeId, saved.ETag, observedAt, cancellationToken).ConfigureAwait(false);
 
         // ────────────────────────────────────────────────────────────────────────────
         // STEP 2 — record (FR-06 idempotent promotion). Repeated saves see the existing row.
@@ -649,6 +1068,13 @@ public class ComposeService : IComposeService
             FileSize = saved.Size ?? contentToPersist.Length,
             MimeType = DocxContentType,
             FilePath = saved.WebUrl,
+            // G1 (FR-01, task 020): persisted onto sprk_composeorigin ONLY when this call actually
+            // creates the row (PromoteIfEphemeralAsync's idempotent existing-row branch ignores it).
+            Origin = origin,
+            // G7 (FR-06, task 022): stamped onto sprk_composetransientkey ONLY when this call creates the
+            // row, so the next create-on-save with the same key dedups via the alt-key (see the transient
+            // branch above). Null on the replace path / older clients — no dedup identity, unchanged behavior.
+            TransientKey = request.TransientKey,
         };
 
         var promotion = await PromoteIfEphemeralAsync(promoteRequest, httpContext, cancellationToken)
@@ -741,6 +1167,9 @@ public class ComposeService : IComposeService
             Size = saved.Size,
             WasPromotedThisSave = promotion.WasCreated,
             CompletionState = completion,
+            ReanchorSummary = reanchorSummary,
+            PartialApply = partialApplySummary,
+            Origin = origin,
         };
     }
 
@@ -824,6 +1253,643 @@ public class ComposeService : IComposeService
             "a same-session save, or a BaselineVersionId (+ DriveId + DocumentSpeId) to re-fetch the " +
             "load-time version (FR-06). A docx.js reconstruction is not a valid baseline (FR-01).",
             nameof(request));
+    }
+
+    // =========================================================================
+    // FR-08 (task 050) — save-path version stamp + stale-base re-anchor (design §5 "Save + concurrency",
+    // NFR-08). The stamp (SPE eTag + operation-schema version) is persisted via IDistributedCache (ADR-009)
+    // after every save of an existing item and asserted against the LIVE eTag at the top of the NEXT save.
+    // A mismatch re-anchors the operation log via AnnotationReanchorService — REUSED verbatim, never
+    // reimplemented (CLAUDE.md §11 / task constraint).
+    // =========================================================================
+
+    private const string SaveVersionStampKeyPrefix = "sdap:compose:save-stamp:";
+    private static readonly JsonSerializerOptions SaveStampJsonOptions = new(JsonSerializerDefaults.Web);
+
+    /// <summary>The save-path version stamp persisted per <c>documentSpeId</c> (ADR-009 Redis) — the SPE
+    /// eTag + operation-schema version this service last wrote, asserted against the live eTag at the top
+    /// of the next save of the same item.</summary>
+    private sealed record ComposeSaveVersionStamp(
+        [property: JsonPropertyName("eTag")] string ETag,
+        [property: JsonPropertyName("schemaVersion")] string SchemaVersion,
+        [property: JsonPropertyName("savedAtUtc")] DateTimeOffset SavedAtUtc);
+
+    /// <summary>Reads the persisted version stamp for <paramref name="documentSpeId"/> (null when absent, no
+    /// cache configured, or a Redis read fails — all three degrade to "not stale", never a false-positive
+    /// re-anchor and never a blocked save).</summary>
+    private async Task<ComposeSaveVersionStamp?> GetSaveVersionStampAsync(string documentSpeId, CancellationToken ct)
+    {
+        if (_cache is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var json = await _cache.GetStringAsync(SaveVersionStampKeyPrefix + documentSpeId, ct).ConfigureAwait(false);
+            return json is null ? null : JsonSerializer.Deserialize<ComposeSaveVersionStamp>(json, SaveStampJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose save: failed to read the version stamp for driveItem={DocumentSpeId} — treating as no prior stamp (not stale).",
+                documentSpeId);
+            return null;
+        }
+    }
+
+    /// <summary>Persists the version stamp for <paramref name="documentSpeId"/> after a successful write
+    /// (create or replace). Best-effort: a Redis write failure here never fails the already-successful save
+    /// — it only means the NEXT save's staleness assert degrades to "no stamp" (not stale), same as a
+    /// freshly-onboarded item that has never been stamped.</summary>
+    private async Task SetSaveVersionStampAsync(string documentSpeId, string? eTag, DateTimeOffset savedAtUtc, CancellationToken ct)
+    {
+        if (_cache is null || string.IsNullOrEmpty(eTag))
+        {
+            return;
+        }
+
+        try
+        {
+            var stamp = new ComposeSaveVersionStamp(eTag, ComposeOperationSchema.Version, savedAtUtc);
+            await _cache.SetStringAsync(SaveVersionStampKeyPrefix + documentSpeId, JsonSerializer.Serialize(stamp, SaveStampJsonOptions), ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose save: failed to persist the version stamp for driveItem={DocumentSpeId} — the save itself succeeded; a future assert may miss this save.",
+                documentSpeId);
+        }
+    }
+
+    // =========================================================================
+    // G10 (FR-09, task 040) — Document Profile re-run: reload/onload re-trigger (storm-safe) + the shared
+    // manual "Refresh Profile" leg. Both reuse the EXISTING fire-and-forget DispatchBackgroundProfile
+    // pipeline (never a second trigger). The storm guard is a DEDICATED per-doc "profiled-at eTag" stamp
+    // (IDistributedCache, ADR-009) — INTENTIONALLY separate from the FR-08 save-version stamp so it never
+    // perturbs the save-path staleness/re-anchor semantics. A reopen re-profiles ONLY when the live eTag
+    // differs from the last-profiled eTag (an external Word edit, or a doc Compose never profiled); an
+    // unchanged reopen matches the stamp → skip (no profiling storm on repeated reopens).
+    // =========================================================================
+
+    private const string ProfiledETagKeyPrefix = "sdap:compose:profiled-etag:";
+
+    private async Task<string?> GetProfiledETagAsync(string documentSpeId, CancellationToken ct)
+    {
+        if (_cache is null)
+        {
+            return null;
+        }
+        try
+        {
+            return await _cache.GetStringAsync(ProfiledETagKeyPrefix + documentSpeId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose profile (G10): failed to read the profiled-eTag stamp for driveItem={DocumentSpeId} — treating as never-profiled (may re-trigger once).",
+                documentSpeId);
+            return null;
+        }
+    }
+
+    private async Task SetProfiledETagAsync(string documentSpeId, string eTag, CancellationToken ct)
+    {
+        if (_cache is null || string.IsNullOrEmpty(eTag))
+        {
+            return;
+        }
+        try
+        {
+            await _cache.SetStringAsync(ProfiledETagKeyPrefix + documentSpeId, eTag, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose profile (G10): failed to persist the profiled-eTag stamp for driveItem={DocumentSpeId} — a future reopen may re-trigger once more (best-effort, never a storm).",
+                documentSpeId);
+        }
+    }
+
+    /// <summary>
+    /// G10 (FR-09, task 040): the reload/onload re-trigger. On a Path A reopen (an existing
+    /// <c>sprk_document</c>), re-dispatch the fire-and-forget Document Profile ONLY when the doc CHANGED
+    /// since Compose last profiled it (live eTag ≠ the profiled-eTag stamp) — then stamp the current eTag so
+    /// a subsequent unchanged reopen skips (the storm guard closes the loop). Best-effort: never blocks or
+    /// fails Load; a null <c>_documentProfileAi</c>/cache simply no-ops.
+    /// </summary>
+    private async Task MaybeRetriggerProfileOnLoadAsync(
+        Guid documentRecordId, string documentSpeId, string liveETag, HttpContext httpContext, CancellationToken ct)
+    {
+        try
+        {
+            var profiledETag = await GetProfiledETagAsync(documentSpeId, ct).ConfigureAwait(false);
+            if (string.Equals(profiledETag, liveETag, StringComparison.Ordinal))
+            {
+                return; // unchanged since the last profile — skip (no storm)
+            }
+
+            DispatchBackgroundProfile(documentRecordId, httpContext);
+            await SetProfiledETagAsync(documentSpeId, liveETag, ct).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Compose reload profile re-trigger (G10): document {DocumentRecordId} (driveItem={DocumentSpeId}) changed since last profile (profiledETag={ProfiledETag}, liveETag={LiveETag}) — profile re-dispatched fire-and-forget.",
+                documentRecordId, documentSpeId, profiledETag, liveETag);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose reload profile re-trigger (G10): failed for document {DocumentRecordId} — best-effort, Load unaffected.",
+                documentRecordId);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> RefreshProfileAsync(
+        RefreshComposeProfileRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.DocumentRecordId == Guid.Empty)
+        {
+            throw new ArgumentException("A DocumentRecordId is required to refresh a Compose document's profile.", nameof(request));
+        }
+
+        // G10 manual leg: a user-initiated on-demand re-run. UNCONDITIONAL (unlike the reload guard) — the
+        // user explicitly asked to refresh — but still fire-and-forget + best-effort. Stamp the current eTag
+        // (when known) so an immediately-following reopen does not redundantly re-trigger.
+        DispatchBackgroundProfile(request.DocumentRecordId, httpContext);
+        if (!string.IsNullOrWhiteSpace(request.DocumentSpeId) && !string.IsNullOrWhiteSpace(request.ETag))
+        {
+            await SetProfiledETagAsync(request.DocumentSpeId!, request.ETag!, cancellationToken).ConfigureAwait(false);
+        }
+
+        _logger.LogInformation(
+            "Compose manual profile refresh (G10): document {DocumentRecordId} — profile re-dispatched fire-and-forget on user request.",
+            request.DocumentRecordId);
+        return true;
+    }
+
+    /// <summary>
+    /// FR-08 (task 050): the base moved under the client since it was loaded (the persisted version stamp's
+    /// eTag no longer matches the live SPE eTag). Re-anchors <paramref name="request"/>'s operation log +
+    /// comments against the FRESHLY re-downloaded current bytes via <see cref="AnnotationReanchorService"/>
+    /// (the KEEP asset, reused verbatim), applies ONLY the exact-paraId AUTO band through the Patch Engine,
+    /// and returns the patched bytes alongside the full band summary. REVIEW/ORPHAN ops/comments are
+    /// deliberately NOT applied — an op's anchor is never rewritten (I-7, no write-path text-search), so a
+    /// fuzzy (non-exact-id) match is not safe to auto-apply; it surfaces in the summary instead, never
+    /// silently applied and never silently dropped.
+    /// </summary>
+    private async Task<(byte[] PatchedBytes, ReanchorSummary Summary)> ReanchorStaleSaveAsync(
+        SaveComposeDocumentRequest request,
+        byte[] originalBaseline,
+        HttpContext httpContext,
+        DateTimeOffset observedAt,
+        bool trackChanges,
+        CancellationToken cancellationToken)
+    {
+        // Re-download the CURRENT (live) bytes — the base the op log must now be checked against. A
+        // download miss fails closed: every op/comment surfaces as ORPHAN (never a silent apply onto a
+        // baseline we could not verify).
+        Stream? stream;
+        try
+        {
+            stream = await _spe.DownloadFileAsUserAsync(httpContext, request.DriveId!, request.DocumentSpeId!, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose save: stale-base re-anchor could not re-download the current bytes for driveItem={DocumentSpeId} — every op/comment surfaces as ORPHAN.",
+                request.DocumentSpeId);
+            return (originalBaseline, BuildAllOrphanSummary(request, observedAt));
+        }
+
+        if (stream is null)
+        {
+            return (originalBaseline, BuildAllOrphanSummary(request, observedAt));
+        }
+
+        byte[] currentBytes;
+        await using (stream.ConfigureAwait(false))
+        {
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+            currentBytes = buffer.ToArray();
+        }
+
+        // Seam A (UAT round-2 item #4 — advisory comments must survive a STALE save and bake as native
+        // w:comment). The client's minted paraIds live only in request.ParaIdMap — physically absent from
+        // BOTH the retained baseline AND the freshly-fetched current bytes. Without them, an advisory
+        // comment's client-minted ParaId resolves to nothing in currentParaIds below → 0.0 re-anchor score
+        // → ORPHAN band → surfaced-but-never-baked (the exact "comments don't survive Save to Word" bug the
+        // non-stale path does NOT have, because it stamps first — see the sibling Stamp call in SaveAsync).
+        // Stamp both corpora with the SAME fail-open, count-gated, text-verified stamper: where the version
+        // bump was benign (unchanged paragraph structure + text — a metadata touch or an eTag-counter move
+        // that did not really edit content), the client paraId becomes physically present in currentBytes →
+        // ResolveByParaId hits confidence 1.0 → AUTO → the exact-paraId auto-apply gate below bakes the
+        // comment. Where the current bytes genuinely diverged (different paragraph count, or the anchored
+        // text changed), the stamper no-ops (count gate / text-verify) and the comment correctly stays
+        // ORPHAN — never a wrong-paragraph stamp. Stamping originalBaseline too repopulates each comment's
+        // TextPattern (via the IndexOfParaId hint below) so a text-drifted clause surfaces as REVIEW rather
+        // than a blind ORPHAN in the re-anchor banner.
+        if (request.ParaIdMap is { Count: > 0 })
+        {
+            originalBaseline = _baselineParaIdStamper.Stamp(originalBaseline, request.ParaIdMap);
+            currentBytes = _baselineParaIdStamper.Stamp(currentBytes, request.ParaIdMap);
+        }
+
+        IReadOnlyList<string> oldParagraphs;
+        IReadOnlyList<string?> oldParaIds;
+        IReadOnlyList<string> currentParagraphs;
+        IReadOnlyList<string?> currentParaIds;
+        try
+        {
+            oldParagraphs = AnnotationReanchorService.ExtractParagraphTexts(originalBaseline);
+            oldParaIds = AnnotationReanchorService.ExtractParaIds(originalBaseline);
+            currentParagraphs = AnnotationReanchorService.ExtractParagraphTexts(currentBytes);
+            currentParaIds = AnnotationReanchorService.ExtractParaIds(currentBytes);
+        }
+        catch (Exception ex) when (ex is DocxAnnotationException or ArgumentException)
+        {
+            _logger.LogWarning(ex,
+                "Compose save: stale-base re-anchor could not read the paragraph corpus for driveItem={DocumentSpeId} — every op/comment surfaces as ORPHAN.",
+                request.DocumentSpeId);
+            return (currentBytes, BuildAllOrphanSummary(request, observedAt));
+        }
+
+        var ops = request.OperationLog?.Operations ?? Array.Empty<ComposeOperation>();
+        var comments = request.Comments ?? Array.Empty<ComposeAnchoredComment>();
+
+        var priorAnchors = new List<PriorAnchor>(ops.Count + comments.Count);
+        for (var i = 0; i < ops.Count; i++)
+        {
+            var op = ops[i];
+            var hint = IndexOfParaId(oldParaIds, op.ParaId);
+            priorAnchors.Add(new PriorAnchor(
+                Id: $"op-{i}",
+                Type: op.GetType().Name,
+                TextPattern: hint >= 0 && hint < oldParagraphs.Count ? oldParagraphs[hint] : string.Empty,
+                ParagraphHint: hint,
+                Preview: null,
+                ParaId: op.ParaId));
+        }
+
+        for (var i = 0; i < comments.Count; i++)
+        {
+            var c = comments[i];
+            var hint = IndexOfParaId(oldParaIds, c.ParaId);
+            priorAnchors.Add(new PriorAnchor(
+                Id: $"comment-{i}",
+                Type: "comment",
+                TextPattern: hint >= 0 && hint < oldParagraphs.Count ? oldParagraphs[hint] : string.Empty,
+                ParagraphHint: hint,
+                Preview: c.CommentText,
+                ParaId: c.ParaId));
+        }
+
+        var summary = AnnotationReanchorService.Reanchor(priorAnchors, currentParagraphs, request.DocumentSpeId, observedAt, currentParaIds);
+
+        // Only an EXACT paraId match (confidence 1.0 — the paragraph's w14:paraId is still present,
+        // unchanged, in the current document) is safe to auto-apply verbatim: the op's anchor is never
+        // rewritten, so a fuzzy AUTO (a different paraId that merely scored well on content) would apply
+        // the op against the WRONG paragraph id and fail to resolve (or worse, silently mis-anchor). Fuzzy
+        // AUTO/REVIEW/ORPHAN all surface for review — never silently applied.
+        var autoIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var r in summary.Annotations)
+        {
+            if (r.Band == ReanchorBand.Auto && r.Confidence >= 1.0)
+            {
+                autoIds.Add(r.Id);
+            }
+        }
+
+        var autoOps = new List<ComposeOperation>();
+        for (var i = 0; i < ops.Count; i++)
+        {
+            if (autoIds.TryGetValue($"op-{i}", out _))
+            {
+                autoOps.Add(ops[i]);
+            }
+        }
+
+        var autoComments = new List<ComposeAnchoredComment>();
+        for (var i = 0; i < comments.Count; i++)
+        {
+            if (autoIds.TryGetValue($"comment-{i}", out _))
+            {
+                autoComments.Add(comments[i]);
+            }
+        }
+
+        byte[] patched;
+        try
+        {
+            patched = (autoOps.Count == 0 && autoComments.Count == 0)
+                ? currentBytes
+                : _patchEngine.Apply(
+                    currentBytes,
+                    new ComposeOperationLog { SchemaVersion = request.OperationLog?.SchemaVersion ?? ComposeOperationSchema.Version, Operations = autoOps },
+                    autoComments,
+                    ResolveRevisionAuthor(httpContext),
+                    observedAt,
+                    trackChanges: trackChanges);
+        }
+        catch (ComposePatchException ex)
+        {
+            // An AUTO-band op that still fails to resolve at patch time (an edge case beyond the reanchor's
+            // own exact-paraId check) is never silently applied — degrade the whole batch to ORPHAN rather
+            // than guess a partial apply that could mis-place bytes.
+            _logger.LogWarning(ex,
+                "Compose save: stale-base re-anchor's AUTO band failed to apply for driveItem={DocumentSpeId} ({Kind}) — degrading the whole batch to ORPHAN.",
+                request.DocumentSpeId, ex.Kind);
+            return (currentBytes, BuildAllOrphanSummary(request, observedAt));
+        }
+
+        if (_reanchorService is not null)
+        {
+            try
+            {
+                await _reanchorService.SaveSummaryAsync(request.DocumentSpeId!, summary, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Compose save: failed to persist the stale-base re-anchor summary for driveItem={DocumentSpeId} — the save itself succeeded.",
+                    request.DocumentSpeId);
+            }
+        }
+
+        return (patched, summary);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────
+    // Prong 1 (task 055) — best-effort per-paragraph recovery for an OP-LEVEL patch refusal on the loaded-doc
+    // save path. Distinct from ReanchorStaleSaveAsync above (which handles a STALE BASE — an eTag mismatch —
+    // by content-similarity re-anchoring across old→current paragraphs). Here the base is CURRENT; a single op
+    // just fails to anchor. Rather than lose the whole editing session (the pre-prong-1 behavior: any refusal
+    // → 422), apply the resolvable paragraph-units and surface the unresolvable ops.
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A <see cref="ComposePatchErrorKind"/> that condemns the WHOLE batch (the docx itself is unreadable, or
+    /// the op-log schema version is unsupported) rather than a single op's anchor — for these, best-effort
+    /// partial apply is meaningless, so the save must still fail hard (mapped to a ProblemDetails by the
+    /// endpoint). Every OTHER kind is an op-level anchoring/resolution refusal eligible for prong-1 recovery.
+    /// </summary>
+    private static bool IsBatchLevelPatchRefusal(ComposePatchErrorKind kind) =>
+        kind is ComposePatchErrorKind.MalformedDocument or ComposePatchErrorKind.UnsupportedSchemaVersion;
+
+    /// <summary>
+    /// True for a STRUCTURAL / whole-document op — one that splits/merges/inserts/deletes paragraphs, edits a
+    /// table's structure, or reconciles EVERY tracked revision (scope=All). These span or renumber paragraphs
+    /// (and mint child paraIds later ops depend on), so under the engine's intra-paragraph sequential rebasing
+    /// they are NOT safe to apply piecemeal: prong-1 groups them into ONE all-or-nothing unit applied LAST
+    /// (mirroring the engine's own structural-last pass). Inline ops (text/mark/setBlockAttr/single-revision)
+    /// are grouped by paraId instead — the paragraph being the safe atomic unit.
+    /// </summary>
+    private static bool IsStructuralOrGlobalOp(ComposeOperation op) => op switch
+    {
+        SplitParagraphOperation or MergeParagraphOperation or InsertParagraphOperation
+            or DeleteParagraphOperation or TableOperation => true,
+        AcceptRevisionOperation { Scope: ComposeRevisionScope.All } => true,
+        RejectRevisionOperation { Scope: ComposeRevisionScope.All } => true,
+        _ => false,
+    };
+
+    /// <summary>
+    /// Prong 1 (task 055). Applies <paramref name="log"/> onto <paramref name="baseline"/> in the LARGEST
+    /// units provably safe under the engine's intra-paragraph sequential rebasing, applying every unit that
+    /// resolves and surfacing every unit that refuses (never a wrong edit, never a silent drop):
+    /// <list type="bullet">
+    /// <item>Inline ops (text/mark/setBlockAttr/single-revision) grouped by <c>paraId</c> — the paragraph is
+    ///   atomic (dropping one op would leave later same-paragraph ops mis-anchored), applied in first-seen
+    ///   order; each paragraph's anchored comments ride its unit so the engine's comments-first-per-Apply
+    ///   ordering (EDGE-1) is preserved per paragraph.</item>
+    /// <item>Structural / All-revision ops as ONE all-or-nothing unit applied LAST (keeps minted-paraId
+    ///   lineage intact).</item>
+    /// </list>
+    /// Each unit runs through the SAME <see cref="ComposeShadowPatchEngine.Apply"/> onto the cumulative bytes,
+    /// so the byte result for the resolvable paragraphs matches the clean-batch path. A unit throwing a
+    /// batch-level refusal (a malformed cumulative package — not expected mid-recovery) propagates.
+    /// </summary>
+    private byte[] ApplyBestEffortByParagraph(
+        byte[] baseline,
+        ComposeOperationLog log,
+        IReadOnlyList<ComposeAnchoredComment>? comments,
+        string author,
+        DateTimeOffset observedAt,
+        bool trackChanges,
+        out PartialApplySummary summary)
+    {
+        var ops = log.Operations ?? Array.Empty<ComposeOperation>();
+        var schemaVersion = log.SchemaVersion;
+
+        // Inline ops grouped by paraId (first-seen order preserved) + a single structural/global unit.
+        var inlineOrder = new List<string>();
+        var inlineOps = new Dictionary<string, List<ComposeOperation>>(StringComparer.OrdinalIgnoreCase);
+        var structural = new List<ComposeOperation>();
+        foreach (var op in ops)
+        {
+            if (IsStructuralOrGlobalOp(op))
+            {
+                structural.Add(op);
+                continue;
+            }
+            if (!inlineOps.TryGetValue(op.ParaId, out var list))
+            {
+                list = new List<ComposeOperation>();
+                inlineOps[op.ParaId] = list;
+                inlineOrder.Add(op.ParaId);
+            }
+            list.Add(op);
+        }
+
+        // Distribute anchored comments into their paraId's unit; a comment whose paraId carries no inline op
+        // gets its own comment-only unit (still applied in the inline pass, so it lands before any structural
+        // change to that paragraph — mirrors the engine's comments-first ordering).
+        var commentsByPara = new Dictionary<string, List<ComposeAnchoredComment>>(StringComparer.OrdinalIgnoreCase);
+        var unbakeableComments = 0;
+        foreach (var c in comments ?? Array.Empty<ComposeAnchoredComment>())
+        {
+            var key = c.ParaId ?? string.Empty;
+            if (!commentsByPara.TryGetValue(key, out var list))
+            {
+                list = new List<ComposeAnchoredComment>();
+                commentsByPara[key] = list;
+                if (!inlineOps.ContainsKey(key))
+                {
+                    inlineOrder.Add(key); // comment-only paragraph unit
+                    inlineOps[key] = new List<ComposeOperation>();
+                }
+            }
+            list.Add(c);
+        }
+
+        var unresolved = new List<UnresolvedComposeOp>();
+        var appliedCount = 0;
+        // agreements-r1 UAT round-1 #4: a COMMENT is a NON-DESTRUCTIVE change, so a comments-only review
+        // save (empty op-log — a review placed advisory notes but made no text edits) must degrade
+        // gracefully, not lose the WHOLE save when one note can't anchor. Pre-fix the "did anything apply?"
+        // signal counted only OPS, so a fully-bakeable comment contributed 0 and the caller's
+        // `appliedCount == 0` guard re-threw the anchor refusal → 422, discarding even the notes that DID
+        // anchor. Count baked comments as applied work (folded into the summary below) so the guard stays
+        // correct AND surface the unbakeable notes on `unresolved` (skip-with-report, never a silent drop).
+        // A failing TEXT op still lands in `unresolved` exactly as before — its honest contract is unchanged.
+        var bakedCommentCount = 0;
+        var current = baseline;
+
+        // Inline paragraph units first, then the structural unit LAST.
+        foreach (var paraId in inlineOrder)
+        {
+            var unitOps = inlineOps[paraId];
+            commentsByPara.TryGetValue(paraId, out var unitComments);
+            var (bytes, refusal) = TryApplyPatchUnit(current, schemaVersion, unitOps, unitComments, author, observedAt, trackChanges);
+            if (refusal is null)
+            {
+                current = bytes;
+                appliedCount += unitOps.Count;
+                if (unitComments is not null)
+                    bakedCommentCount += unitComments.Count;
+            }
+            else
+            {
+                foreach (var op in unitOps)
+                    unresolved.Add(new UnresolvedComposeOp(op.ParaId, op.GetType().Name, refusal.Kind.ToString(), refusal.Message));
+                if (unitComments is not null)
+                {
+                    unbakeableComments += unitComments.Count;
+                    // Surface each un-anchorable advisory note so the client reports it (skip-with-report).
+                    // OpType "AdvisoryComment" distinguishes a non-destructive note from a lost edit op.
+                    foreach (var c in unitComments)
+                        unresolved.Add(new UnresolvedComposeOp(c.ParaId ?? string.Empty, "AdvisoryComment", refusal.Kind.ToString(), refusal.Message));
+                }
+            }
+        }
+
+        if (structural.Count > 0)
+        {
+            var (bytes, refusal) = TryApplyPatchUnit(current, schemaVersion, structural, null, author, observedAt, trackChanges);
+            if (refusal is null)
+            {
+                current = bytes;
+                appliedCount += structural.Count;
+            }
+            else
+            {
+                foreach (var op in structural)
+                    unresolved.Add(new UnresolvedComposeOp(op.ParaId, op.GetType().Name, refusal.Kind.ToString(), refusal.Message));
+            }
+        }
+
+        if (unbakeableComments > 0)
+        {
+            _logger.LogWarning(
+                "Compose save: best-effort recovery could not bake {UnbakeableComments} advisory comment(s) whose paragraph unit refused.",
+                unbakeableComments);
+        }
+
+        // Comments are first-class items in the partial-apply accounting alongside ops: Total counts every
+        // op + comment, AppliedCount counts applied ops + baked comments, and the invariant
+        // Total == AppliedCount + UnresolvedCount holds. An op-only batch (the existing seam cases) has no
+        // comments, so these reduce to ops.Count / appliedCount exactly as before (no behavior change).
+        summary = new PartialApplySummary(
+            Total: ops.Count + (comments?.Count ?? 0),
+            AppliedCount: appliedCount + bakedCommentCount,
+            UnresolvedCount: unresolved.Count,
+            Unresolved: unresolved,
+            ComputedAtUtc: observedAt);
+        return current;
+    }
+
+    /// <summary>
+    /// Applies ONE prong-1 unit through the patch engine, returning the patched bytes on success or the
+    /// ORIGINAL bytes + the op-level <see cref="ComposePatchException"/> on refusal. A batch-level refusal
+    /// (malformed / schema — see <see cref="IsBatchLevelPatchRefusal"/>) is rethrown (the cumulative bytes are
+    /// unusable). A unit with no ops and no comments is a byte-identical no-op (the engine's passthrough).
+    /// </summary>
+    private (byte[] Bytes, ComposePatchException? Refusal) TryApplyPatchUnit(
+        byte[] input,
+        string schemaVersion,
+        IReadOnlyList<ComposeOperation> unitOps,
+        IReadOnlyList<ComposeAnchoredComment>? unitComments,
+        string author,
+        DateTimeOffset observedAt,
+        bool trackChanges)
+    {
+        try
+        {
+            var bytes = _patchEngine.Apply(
+                input,
+                new ComposeOperationLog { SchemaVersion = schemaVersion, Operations = unitOps },
+                unitComments,
+                author,
+                observedAt,
+                trackChanges: trackChanges);
+            return (bytes, null);
+        }
+        catch (ComposePatchException ex) when (!IsBatchLevelPatchRefusal(ex.Kind))
+        {
+            return (input, ex);
+        }
+    }
+
+    /// <summary>0-based index of the FIRST current paraId equal to <paramref name="paraId"/> (case-sensitive
+    /// — <see cref="AnnotationReanchorService.ExtractParaIds"/> already upper-cases every id), or -1 when
+    /// absent/null.</summary>
+    private static int IndexOfParaId(IReadOnlyList<string?> paraIds, string? paraId)
+    {
+        if (string.IsNullOrEmpty(paraId))
+        {
+            return -1;
+        }
+
+        for (var i = 0; i < paraIds.Count; i++)
+        {
+            if (string.Equals(paraIds[i], paraId, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>Fail-closed summary: every op/comment in <paramref name="request"/> surfaces as ORPHAN
+    /// (never silently applied, never silently dropped) when the current base could not be re-downloaded or
+    /// read.</summary>
+    private static ReanchorSummary BuildAllOrphanSummary(SaveComposeDocumentRequest request, DateTimeOffset observedAt)
+    {
+        var opsCount = request.OperationLog?.Operations.Count ?? 0;
+        var commentsCount = request.Comments?.Count ?? 0;
+        var total = opsCount + commentsCount;
+
+        var annotations = new List<ReanchoredAnnotation>(total);
+        for (var i = 0; i < opsCount; i++)
+        {
+            annotations.Add(new ReanchoredAnnotation(
+                Id: $"op-{i}", Type: request.OperationLog!.Operations[i].GetType().Name, Preview: null,
+                Band: ReanchorBand.Orphan, Confidence: 0.0, MatchedParagraphIndex: -1,
+                ContentSimilarity: 0.0, StructuralProximity: 0.0, Ambiguous: false, MatchedParagraphPreview: null));
+        }
+        for (var i = 0; i < commentsCount; i++)
+        {
+            annotations.Add(new ReanchoredAnnotation(
+                Id: $"comment-{i}", Type: "comment", Preview: request.Comments![i].CommentText,
+                Band: ReanchorBand.Orphan, Confidence: 0.0, MatchedParagraphIndex: -1,
+                ContentSimilarity: 0.0, StructuralProximity: 0.0, Ambiguous: false, MatchedParagraphPreview: null));
+        }
+
+        return new ReanchorSummary(
+            DocumentSpeId: request.DocumentSpeId,
+            Total: total,
+            AutoCount: 0,
+            ReviewCount: 0,
+            OrphanCount: total,
+            Annotations: annotations,
+            ComputedAtUtc: observedAt);
     }
 
     /// <summary>
@@ -1014,6 +2080,23 @@ public class ComposeService : IComposeService
         // hard precondition of this method). Mark it so downstream readers stop rejecting it.
         entity[HasFileAttribute] = true;
 
+        // G1 (FR-01, task 020): persist the durable origin marker ONLY at create-on-save (this branch —
+        // the idempotent existing-row branch above never reaches here, so a subsequent replace-path save
+        // never mutates an already-persisted origin). Defaults to Imported (the Dataverse field's own
+        // default) when the caller supplies none (e.g. a standalone /promote call that predates G1) —
+        // never left unset, so a fresh row is never silently null-origin.
+        entity[ComposeOriginAttribute] = new OptionSetValue((int)(request.Origin ?? ComposeOrigin.Imported));
+
+        // G7 (FR-06, task 022): stamp the client-minted transient dedup key ONLY at create (this branch;
+        // the idempotent existing-row branch above never reaches here). The single-column alt-key
+        // sprk_composetransientkey_uk makes this the durable dedup identity for repeated create-on-save
+        // calls (see TryFindDocumentByTransientKeyAsync + the SaveAsync transient branch). Omitted for a
+        // replace-path save or an older client that predates G7 (nulls are not enforced-unique).
+        if (!string.IsNullOrWhiteSpace(request.TransientKey))
+        {
+            entity[ComposeTransientKeyAttribute] = request.TransientKey!;
+        }
+
         if (request.FileSize.HasValue)
         {
             // sprk_filesize is a Whole Number (int) column; the OrganizationService write path is
@@ -1040,13 +2123,26 @@ public class ComposeService : IComposeService
         }
         catch (InvalidOperationException ex)
         {
-            // Narrow race — concurrent Save promoted first. Re-resolve.
+            // Narrow race — a concurrent Save promoted first. Re-resolve by BOTH keys:
+            //   • sprk_graphitemid_uk — the classic case (two saves of the SAME minted SPE item), OR
+            //   • G7 (task 022) sprk_composetransientkey_uk — two truly-concurrent FIRST saves of the same
+            //     transient draft each minted their OWN SPE item (different graphitemid) but carry the SAME
+            //     transient key, so the loser's create fails the transient-key unique constraint. Re-resolving
+            //     by the transient key lands the loser on the winner's record → ONE record, no duplicate
+            //     (the loser's minted item is orphaned, an acceptable rare edge — never a duplicate ROW).
             _logger.LogWarning(ex,
-                "Compose promote: create failed for driveItem={DocumentSpeId} — likely concurrent promotion. Re-resolving via alternate key.",
+                "Compose promote: create failed for driveItem={DocumentSpeId} — likely concurrent promotion. Re-resolving via alternate key (graphItemId, then transientKey).",
                 request.DocumentSpeId);
 
             var raceWinnerId = await TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
                 .ConfigureAwait(false);
+
+            if (!raceWinnerId.HasValue && !string.IsNullOrWhiteSpace(request.TransientKey))
+            {
+                var transientKeyWinner = await TryFindDocumentByTransientKeyAsync(request.TransientKey!, cancellationToken)
+                    .ConfigureAwait(false);
+                raceWinnerId = transientKeyWinner?.RecordId;
+            }
 
             if (!raceWinnerId.HasValue)
             {
@@ -1403,260 +2499,6 @@ public class ComposeService : IComposeService
         };
     }
 
-    /// <inheritdoc />
-    public async Task<PushAnnotationsResult> PushAnnotationsAsync(
-        PushAnnotationsRequest request,
-        HttpContext httpContext,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        if (string.IsNullOrWhiteSpace(request.DriveId))
-            throw new ArgumentException("DriveId is required for SPE drive-item access.", nameof(request));
-        if (string.IsNullOrWhiteSpace(request.DocumentSpeId))
-            throw new ArgumentException("DocumentSpeId (drive-item id) is required.", nameof(request));
-        if (string.IsNullOrWhiteSpace(request.TenantId))
-            throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
-        if (string.IsNullOrWhiteSpace(request.IfMatch))
-            throw new ArgumentException("IfMatch (load-time ETag) is required — a blind overwrite is not offered on the push-annotations path.", nameof(request));
-        if (request.Annotations is null || request.Annotations.Count == 0)
-            throw new ArgumentException("At least one annotation is required.", nameof(request));
-
-        _logger.LogInformation(
-            "Compose push-annotations: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} annotations={AnnotationCount}",
-            request.TenantId, request.DriveId, request.DocumentSpeId, request.Annotations.Count);
-
-        var observedAt = DateTimeOffset.UtcNow;
-
-        // 1) Download the CURRENT bytes via the facade (ADR-007 — no Graph type here).
-        var stream = await _spe.DownloadFileAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
-            .ConfigureAwait(false);
-        if (stream is null)
-        {
-            throw new InvalidOperationException(
-                $"SPE drive-item not found or unreadable: drive={request.DriveId} item={request.DocumentSpeId}");
-        }
-
-        byte[] sourceBytes;
-        await using (stream.ConfigureAwait(false))
-        {
-            using var buffer = new MemoryStream();
-            await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
-            sourceBytes = buffer.ToArray();
-        }
-
-        // ────────────────────────────────────────────────────────────────────────────
-        // FR-28 (task 055) — push/save pipeline with per-step JobAwareCompletionState
-        // projection (push → save → version). A failure at either step aborts the pipeline
-        // with NO partial write: the SPE write only happens after the pure Annotate render
-        // fully succeeds (an in-memory transform — nothing is sent to SPE until step 3), and
-        // ReplaceFileContentAsUserAsync's If-Match is atomic at the Graph boundary (the whole
-        // new version lands or the whole call is rejected — never a half-applied version).
-        // Every branch below persists the resulting per-step state to Redis (ADR-009) before
-        // propagating/returning, so a future job-aware OutcomeCard has real state to read
-        // regardless of outcome.
-        // ────────────────────────────────────────────────────────────────────────────
-
-        // 2) Render annotations into native OOXML markup. Pure — no I/O, no AI (ADR-013).
-        //    DocxAnnotationException (malformed / target-not-found) propagates to the endpoint,
-        //    which maps it to 400 / 422 ProblemDetails. This runs BEFORE the write, so a bad
-        //    annotation batch never leaves a partial SPE version.
-        byte[] annotatedBytes;
-        try
-        {
-            annotatedBytes = _annotationWriter.Annotate(sourceBytes, request.Annotations);
-        }
-        catch (Exception ex)
-        {
-            await PersistPushSaveStatusAsync(
-                    request.DocumentSpeId,
-                    FailedSignal(StepPush, $"push failed: {ex.Message}"),
-                    NotStartedSignal(StepSave),
-                    NotStartedSignal(StepVersion),
-                    observedAt,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            throw;
-        }
-
-        // 3) Persist with optimistic concurrency (If-Match). A drive-item that moved under the
-        //    caller (Word autosave) surfaces as EtagPreconditionFailedException (412); an open
-        //    Word co-authoring session surfaces as DocumentLockedByWordException (423). Both
-        //    propagate to the endpoint. Nothing partially writes.
-        using var annotatedStream = new MemoryStream(annotatedBytes, writable: false);
-        FileHandleDto? saved;
-        try
-        {
-            saved = await _spe.ReplaceFileContentAsUserAsync(
-                    httpContext, request.DriveId, request.DocumentSpeId, annotatedStream, request.IfMatch, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            await PersistPushSaveStatusAsync(
-                    request.DocumentSpeId,
-                    CompletedSignal(StepPush),
-                    FailedSignal(StepSave, $"save failed: {ex.Message}"),
-                    NotStartedSignal(StepVersion),
-                    observedAt,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            throw;
-        }
-
-        if (saved is null || string.IsNullOrEmpty(saved.Id))
-        {
-            await PersistPushSaveStatusAsync(
-                    request.DocumentSpeId,
-                    CompletedSignal(StepPush),
-                    FailedSignal(StepSave, "SPE annotated-write returned no version id"),
-                    NotStartedSignal(StepVersion),
-                    observedAt,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            throw new InvalidOperationException(
-                $"SPE annotated-write failed: drive-item not found or version not returned. drive={request.DriveId} item={request.DocumentSpeId}");
-        }
-
-        // 4) All three steps landed — persist the terminal-success state.
-        var completion = await PersistPushSaveStatusAsync(
-                request.DocumentSpeId,
-                CompletedSignal(StepPush),
-                CompletedSignal(StepSave),
-                CompletedSignal(StepVersion),
-                observedAt,
-                cancellationToken)
-            .ConfigureAwait(false);
-
-        // 5) Tier-2c preview echo (design.md §2.4 / HANDOFF §4): comment/track-change counts +
-        //    the Word-vs-Compose split, attached as post-write completion evidence. The SAME
-        //    calculator backs the pre-confirm PreviewPushAnnotationsAsync path below.
-        var composeOnlyCount = await ResolveComposeOnlyCountAsync(request.TenantId, request.SessionId, cancellationToken)
-            .ConfigureAwait(false);
-        var preview = ComposePushSavePreviewCalculator.Compute(request.Annotations, composeOnlyCount);
-
-        return new PushAnnotationsResult
-        {
-            DocumentSpeId = request.DocumentSpeId,
-            DriveId = request.DriveId,
-            VersionId = saved.Id,
-            ETag = saved.ETag,
-            Size = saved.Size,
-            AnnotationCount = request.Annotations.Count,
-            Preview = preview,
-            CompletionState = completion,
-        };
-    }
-
-    /// <inheritdoc />
-    public async Task<ComposePushSavePreview> PreviewPushAnnotationsAsync(
-        PreviewPushAnnotationsRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        if (string.IsNullOrWhiteSpace(request.TenantId))
-            throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
-        if (request.Annotations is null || request.Annotations.Count == 0)
-            throw new ArgumentException("At least one annotation is required.", nameof(request));
-
-        var composeOnlyCount = await ResolveComposeOnlyCountAsync(request.TenantId, request.SessionId, cancellationToken)
-            .ConfigureAwait(false);
-        return ComposePushSavePreviewCalculator.Compute(request.Annotations, composeOnlyCount);
-    }
-
-    // =========================================================================
-    // FR-28 push/save pipeline — helpers (per-step job-aware projection + Redis persistence).
-    // Mirrors the FR-05 create-on-save helpers above (CompletedSignal / ProjectCreateOnSaveState)
-    // — same JobAwareCompletionStateProjector, a different consumer-declared step set.
-    // =========================================================================
-
-    /// <summary>
-    /// FR-28: resolves the "stays in Compose only" count for the Tier-2c preview from the
-    /// session's <c>DefinedTermsTracking</c> (FR-29) — the one Compose-domain collection with no
-    /// Word-native OOXML representation (contrast anchored annotations, which map onto the
-    /// <c>DocxAnnotation</c> push payload). Returns 0 (graceful degrade, not a failure) when no
-    /// session id is supplied — callers that predate this optional field still get a valid
-    /// preview, just with <c>ComposeOnlyCount</c> = 0.
-    /// </summary>
-    private async Task<int> ResolveComposeOnlyCountAsync(string tenantId, string? sessionId, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(sessionId))
-        {
-            return 0;
-        }
-
-        var state = await GetComposeAnnotationsAsync(tenantId, sessionId, ct).ConfigureAwait(false);
-        return state.DefinedTermsTracking.Count;
-    }
-
-    /// <summary>
-    /// FR-28: projects the push/save per-step signals through the shared
-    /// <see cref="JobAwareCompletionStateProjector"/> and persists the result to Redis (ADR-009)
-    /// via <see cref="ComposePushSaveStatusStore"/> — best-effort: a Redis outage is logged and
-    /// swallowed here so it never masks or rolls back a document write/failure that has already
-    /// happened on its own terms (see <see cref="ComposePushSaveStatusStore"/> remarks). The
-    /// projected state is always returned/used for the in-flight HTTP response regardless of
-    /// whether the Redis write succeeded.
-    /// </summary>
-    private async Task<JobAwareCompletionState> PersistPushSaveStatusAsync(
-        string documentSpeId,
-        StoredStepSignal pushSignal,
-        StoredStepSignal saveSignal,
-        StoredStepSignal versionSignal,
-        DateTimeOffset observedAt,
-        CancellationToken ct)
-    {
-        var job = new JobContract
-        {
-            JobType = ComposePushSaveJobType,
-            SubjectId = documentSpeId,
-            CorrelationId = documentSpeId,
-            IdempotencyKey = $"compose-push-save-{documentSpeId}-{observedAt.Ticks}",
-        };
-
-        var completion = JobAwareCompletionStateProjector.Project(
-            job,
-            new List<StoredStepSignal> { pushSignal, saveSignal, versionSignal },
-            observedAt);
-
-        if (_pushSaveStatusStore is not null)
-        {
-            try
-            {
-                await _pushSaveStatusStore.SaveAsync(documentSpeId, completion, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "Compose push-save: failed to persist cross-request completion state to Redis for driveItem={DocumentSpeId} — the in-flight response is unaffected.",
-                    documentSpeId);
-            }
-        }
-
-        return completion;
-    }
-
-    /// <summary>A stored terminal-failure signal for a step (single attempt, so never
-    /// RetryPending — the push/save pipeline does not auto-retry within one HTTP call).</summary>
-    private static StoredStepSignal FailedSignal(string stepName, string detail) => new()
-    {
-        StepName = stepName,
-        StoredStatus = JobStatus.Failed,
-        Started = true,
-        Attempt = 1,
-        MaxAttempts = 1,
-        Detail = detail,
-    };
-
-    /// <summary>A stored non-terminal "never started" signal for a step that never ran because an
-    /// earlier step in the SAME pipeline invocation failed first (pipeline-abort semantics — no
-    /// partial write, no partial step).</summary>
-    private static StoredStepSignal NotStartedSignal(string stepName) => new()
-    {
-        StepName = stepName,
-        StoredStatus = null,
-        Started = false,
-    };
-
     // =========================================================================
     // FR-29 anchored annotations (task 060). See design.md §8 + ChatSession.cs
     // class-level remarks on AnchoredAnnotation for the Path-A deviation note.
@@ -1857,6 +2699,57 @@ public class ComposeService : IComposeService
             _logger.LogDebug(ex,
                 "Compose promote alt-key lookup threw InvalidOperationException for driveItem={DocumentSpeId} — treating as not-found",
                 driveItemId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// G7 (FR-06, task 022): the resolved dedup identity for a transient key — the <c>sprk_document</c> row id
+    /// plus the SPE pointer (<c>sprk_graphitemid</c> + <c>sprk_graphdriveid</c>) needed to REPLACE its content
+    /// in place instead of minting a duplicate. <see cref="SpeId"/>/<see cref="DriveId"/> are <c>null</c> only
+    /// for a row that somehow carries a transient key but no SPE pointer (a G7-created row always has both) —
+    /// the caller then falls back to minting.
+    /// </summary>
+    private sealed record TransientKeyMatch(Guid RecordId, string? SpeId, string? DriveId);
+
+    /// <summary>
+    /// G7 (FR-06, task 022): looks up an existing <c>sprk_document</c> row by the client-minted transient key
+    /// via the <c>sprk_composetransientkey_uk</c> alternate key, returning its id + SPE pointer (so the caller
+    /// can replace in place). Returns <c>null</c> when no row carries the key (the first save of this draft,
+    /// or a Save-New fork). Resolves by KEY, never by content (I-7/NFR-02). Mirrors
+    /// <see cref="TryFindDocumentByGraphItemIdAsync"/> exactly (same best-effort not-found on a thrown
+    /// InvalidOperationException).
+    /// </summary>
+    private async Task<TransientKeyMatch?> TryFindDocumentByTransientKeyAsync(
+        string transientKey,
+        CancellationToken cancellationToken)
+    {
+        var key = new KeyAttributeCollection
+        {
+            { ComposeTransientKeyAttribute, transientKey },
+        };
+
+        try
+        {
+            var entity = await _dataverse.RetrieveByAlternateKeyAsync(
+                DocumentLogicalName,
+                key,
+                new[] { DocumentIdAttribute, GraphItemIdAttribute, GraphDriveIdAttribute },
+                cancellationToken).ConfigureAwait(false);
+
+            if (entity is null)
+            {
+                return null;
+            }
+
+            var speId = entity.Contains(GraphItemIdAttribute) ? entity[GraphItemIdAttribute] as string : null;
+            var driveId = entity.Contains(GraphDriveIdAttribute) ? entity[GraphDriveIdAttribute] as string : null;
+            return new TransientKeyMatch(entity.Id, speId, driveId);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogDebug(ex,
+                "Compose transient-key alt-key lookup threw InvalidOperationException for transientKey — treating as not-found");
             return null;
         }
     }

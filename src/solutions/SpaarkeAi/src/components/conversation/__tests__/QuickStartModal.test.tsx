@@ -72,19 +72,24 @@ function renderModal(props?: {
   onClose?: () => void;
   theme?: typeof webLightTheme;
   getFileContext?: () => { sessionId: string | null; fileIds: string[]; fileNames: string[] } | null;
-}): { onClose: jest.Mock } {
+  initialTab?: "create" | "analysis";
+  onCreateAnalysis?: (workTypeValue: number, workTypeLabel: string) => void;
+}): { onClose: jest.Mock; onCreateAnalysis: jest.Mock } {
   const theme = props?.theme ?? webLightTheme;
   const onClose = (props?.onClose as jest.Mock) ?? jest.fn();
+  const onCreateAnalysis = (props?.onCreateAnalysis as jest.Mock) ?? jest.fn();
   render(
     <FluentProvider theme={theme}>
       <QuickStartModal
         open={props?.open ?? true}
         onClose={onClose}
         getFileContext={props?.getFileContext}
+        initialTab={props?.initialTab}
+        onCreateAnalysis={onCreateAnalysis}
       />
     </FluentProvider>,
   );
-  return { onClose };
+  return { onClose, onCreateAnalysis };
 }
 
 // ---------------------------------------------------------------------------
@@ -176,17 +181,21 @@ describe("QuickStartModal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('launches "Assign Work" via launchAssignWorkWizard and closes the modal', async () => {
+  it('launches "Assign Work" via the hand-off envelope (launchSurface, create-work-assignment) and closes the modal', async () => {
+    // R5-8: "Assign Work" is a SURFACE_LAUNCH_REGISTRY entry (create-work-assignment) and its
+    // wizard reads the handoff envelope, so it routes through launchSurface (carrying session files
+    // when present) rather than the file-less Path-B launchAssignWorkWizard.
     const onClose = jest.fn();
     renderModal({ onClose });
     const user = userEvent.setup();
 
     await user.click(screen.getByText("Assign Work"));
 
-    expect(mockLaunchAssignWorkWizard).toHaveBeenCalledWith({
+    expect(mockLaunchSurface).toHaveBeenCalledWith({
+      consumerType: "create-work-assignment",
       bffBaseUrl: "https://test-bff.example.com",
     });
-    expect(mockLaunchSurface).not.toHaveBeenCalled();
+    expect(mockLaunchAssignWorkWizard).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -201,6 +210,51 @@ describe("QuickStartModal", () => {
       bffBaseUrl: "https://test-bff.example.com",
       intent: "email-compose",
     });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Tabbed surface (ai-advanced-capabilities-analysis-hub-r1)
+  // -------------------------------------------------------------------------
+
+  it("defaults to the Create tab (GetStartedCardsWidget) and shows both tabs", () => {
+    renderModal();
+
+    expect(screen.getByTestId("quick-start-tablist")).toBeInTheDocument();
+    expect(screen.getByTestId("quick-start-tab-create")).toBeInTheDocument();
+    expect(screen.getByTestId("quick-start-tab-analysis")).toBeInTheDocument();
+    // Create tab active by default.
+    expect(screen.getByTestId("getstartedcards-widget")).toBeInTheDocument();
+    expect(screen.queryByTestId("analysis-cards-widget")).not.toBeInTheDocument();
+  });
+
+  it("opens directly on the Analysis tab when initialTab='analysis'", () => {
+    renderModal({ initialTab: "analysis" });
+
+    expect(screen.getByTestId("analysis-cards-widget")).toBeInTheDocument();
+    expect(screen.queryByTestId("getstartedcards-widget")).not.toBeInTheDocument();
+  });
+
+  it("switching to the Analysis tab reveals the analysis cards", async () => {
+    renderModal();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId("quick-start-tab-analysis"));
+
+    expect(screen.getByTestId("analysis-cards-widget")).toBeInTheDocument();
+    expect(screen.getByTestId("analysis-card-nda-analysis")).toBeInTheDocument();
+  });
+
+  it("NDA Analysis card fires onCreateAnalysis (Agreement Review work type) and closes", async () => {
+    const onClose = jest.fn();
+    const onCreateAnalysis = jest.fn();
+    renderModal({ initialTab: "analysis", onClose, onCreateAnalysis });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /NDA Analysis/i }));
+
+    expect(onCreateAnalysis).toHaveBeenCalledTimes(1);
+    expect(onCreateAnalysis).toHaveBeenCalledWith(100000000, "NDA Analysis");
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

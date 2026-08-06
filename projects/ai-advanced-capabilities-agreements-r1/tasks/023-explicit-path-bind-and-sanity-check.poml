@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>Explicit-path deterministic bind + classifier-path lookup write + mismatch sanity-check</title>
+    <phase>2 Classifier + Routing</phase>
+    <gate>blocked (deps 020,022)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Routing correctness on both entry paths + Dataverse write on the classifier path; .tsx changes in workspace/conversation surfaces.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified routing semantics (design Lens 3d: wizard authoritative, classifier fills absence, optional warn-only sanity check).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>020,022</deps>
+    <tags>spaarkeai, frontend, ai, dataverse</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Complete FR-09's two-mode contract. EXPLICIT: a wizard/envelope-supplied subDomain binds that pack DETERMINISTICALLY
+    (no classifier guess); the classifier optionally sanity-checks and only WARNS on a mismatch (the user's explicit
+    choice wins). CLASSIFIER PATH: when the classifier (021) resolves a type for a chat-started review that gets
+    promoted to an Analysis, write the sprk_agreementtype lookup so persistence matches routing (the wizard path's
+    write shipped with hub A1).
+  </prompt>
+  <role>SPAARKE platform developer. Routing policy, Dataverse writes via authenticatedFetch/webApi shim.</role>
+  <goal>Explicit subDomain always wins and binds without classification; classifier-resolved types persist to the Analysis lookup; mismatch = warn-only.</goal>
+
+  <context>
+    <background>
+      Design Lens 3(d) + spec FR-09: hint (wizard) authoritative. The hub A1 commit persists sprk_agreementtypeid on
+      wizard-finish, so the EXPLICIT door's persistence exists — this task makes routing HONOR the envelope value
+      (skip classification, bind pack directly per registry row) and adds the warn-only sanity check (run the classifier
+      non-blocking; if top candidate ≠ explicit choice at high confidence, surface an informational notice — never block,
+      never re-route). CLASSIFIER path: after 021 orientation + promote/fork (033 wires the full auto-run; here wire the
+      lookup write for classifier-resolved sessions bound to an Analysis — nav-prop per hub A1's discoverNavProps
+      pattern, PascalCase fallback sprk_AgreementType).
+    </background>
+    <relevant-files>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (explicit-skip + sanity notice)</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx (bind honoring the envelope)</file>
+      <file role="canonical-reference">git show 1e1a6579b (A1 persistence pattern incl. discoverNavProps)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">classifier (sanity check)</dependency>
+      <dependency task="022" status="pending">envelope delivering subDomain on all doors</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Explicit ALWAYS wins: with subDomain present, NO classification gate renders and NO re-route occurs; the sanity check is warn-only and non-blocking. Scope: routing policy.</constraint>
+    <constraint source="ADR-044">Lookup writes use canonical GUIDs + the A1 nav-prop discovery pattern; scope: the classifier-path write.</constraint>
+    <constraint source="ADR-041">The mismatch notice is informational (no gate state, no ask); scope: sanity-check UI.</constraint>
+    <constraint source="project">sprk_analysisoutput sentinel footgun: HostContext.EntityId is an sprk_analysis GUID — never query the output table with it. Scope: any Analysis resolution here.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Two-mode routing + Dataverse lookup writes</topic>
+    <files>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/adr/ADR-041-judgment-confirmation-completion-policy.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>projects/ai-advanced-capabilities-agreements-r1/notes/HUB-R1-REVIEW-2026-07-30.md</file>
+    </files>
+    <patterns>
+      <pattern name="A1 lookup persistence" location="git show 1e1a6579b">discoverNavProps + PascalCase fallback for the sprk_agreementtype lookup write — reuse verbatim.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; re-read 021's gate branches to place the explicit-skip cleanly (one routing decision point, not two).</step>
+    <step order="1">Explicit door: subDomain present → bind pack from registry row, skip gate; wire the warn-only sanity check (non-blocking classifier run; notice on high-confidence mismatch).</step>
+    <step order="2">Classifier door: on Analysis bind (promote/fork), write the resolved sprk_agreementtype lookup via the A1 pattern.</step>
+    <step order="3">Tests: explicit-wins (no gate, right pack), mismatch-warns (notice, no re-route), classifier-path lookup persisted.</step>
+    <step order="4">Update TASK-INDEX.md: 023 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If honoring explicit-wins requires suppressing a hub-owned gate/flow (cross-surface ownership), coordinate with hub rather than overriding their seam.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Explicit wins"><steps><step>Launch via wizard with type=employment</step></steps><expected>No classifier gate; review grounded on the employment pack.</expected></test>
+    <test name="Mismatch notice"><steps><step>Wizard type=nda on an employment doc</step></steps><expected>Review runs as NDA; a non-blocking informational notice appears.</expected></test>
+  </ui-tests>
+  <tools><tool name="npm">SpaarkeAi build + tests</tool></tools>
+
+  <outputs>
+    <output type="code">routing policy (explicit-skip + sanity) + classifier-path lookup write</output>
+    <output type="test">routing-policy tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Wizard-launched (subDomain=employment) review binds the employment row's pack with ZERO classifier gate rendered.</criterion>
+    <criterion testable="true">Explicit=nda on a clearly-employment doc → review runs as NDA (user wins) + an informational mismatch notice appears.</criterion>
+    <criterion testable="true">A classifier-resolved chat review promoted to an Analysis shows the sprk_agreementtype lookup populated (read_query proof).</criterion>
+    <criterion testable="true">Negative: sanity-check failure (classifier error) never blocks the explicit run.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-09; design Lens 3(d) two-mode model. 033 consumes this for wizard auto-run.
+
+Completed 2026-07-31. ONE routing decision point (ConversationPane.handleDecorateOutboundBodyWithRevise's
+review-intent `if` block, ~:1768) branches explicit vs classifier — never two ifs. Explicit door:
+`useAgreementReviewGate.runExplicit(fileId, fileName, subDomainKey)` — deterministic dispatch (reuses the
+SAME `dispatchReview` `runGate` already uses), zero classifier gate, zero chips; the classifier still runs
+NON-BLOCKING via `runClassify` for a warn-only sanity check (`resolveAgreementReviewSanityMismatch` — new
+pure fn in agreementReviewRouting.ts, mirrors resolveAgreementReviewGateDecision's threshold logic) —
+mismatch surfaces one informational chat message (`makeLocalAssistantMessage`, no chip/gate); classifier
+error/unavailable silently produces no notice, never blocks. Classifier door: new
+`agreementTypeLookupWrite.ts` module (discoverNavProps + PascalCase fallback `sprk_AgreementType`, mirrors
+hub A1's mechanism per `git show 1e1a6579b` but corrects A1's still-unfixed stale `sprk_agreementtypeid`
+columnName search — task 022 empirically confirmed the live column is `sprk_agreementtype`); wired into
+`HistoryOverlay.tsx`'s existing "Promote to Analysis…" flow (the only client-reachable session->Analysis
+bind today) via two additive optional props (`resolveClassifiedSubDomain`, `dataService`) — zero behavior
+change when omitted. New `useAgreementReviewGate.getLastResolvedSubDomainKey()` tracks the classifier's
+last single-type resolution (not "both" — ambiguous for a single-valued lookup; not `runExplicit` — already
+persisted by its own door). 33 new tests (agreementReviewRouting +8, useAgreementReviewGate +21 across two
+new describe blocks, agreementTypeLookupWrite +11 new file, ConversationPane explicit-door e2e +2 new file);
+package suite 89 suites/826 tests all green (baseline 87/792); typecheck 0 surface-owned errors; `npm run
+build` green. See notes/023-execution-notes.md for full detail incl. one dropped test file (Fluent v9 Menu
++ jsdom RTL-timing flakiness, unrelated to production correctness — decision documented).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

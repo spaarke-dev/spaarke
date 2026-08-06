@@ -1,8 +1,8 @@
 // Task 024 — FR-07/FR-01a/NFR-06 through-the-wire fidelity seam slice test (KEEP path: seam).
 //
 // THE E2E DEFINITION-OF-DONE this closes (spec NFR-06 + NFR-07, amended 2026-07-18): every prior
-// fidelity assertion for the E1 delta-save cutover (task 022) and the born-in-editor renderer
-// (task 026) ran at the SERVICE-UNIT level — calling `ComposeParagraphRedlineSynthesizer` /
+// fidelity assertion for the E1 write-path cutover (task 022/032) and the born-in-editor renderer
+// (task 026) ran at the SERVICE-UNIT level — calling the `ComposeShadowPatchEngine` /
 // `ComposeDocumentRenderer` directly (see `Nfr09RealTemplateHardeningTests`,
 // `ComposeDocumentRendererTests`). None of those drove the REAL `/api/compose/documents/*` routes
 // end to end, so a broken wire between `ComposeEndpoints` → `SaveComposeDocumentRequest` →
@@ -11,7 +11,7 @@
 //
 // TWO seam paths, matching the 2026-07-18 re-architecture amendment on this task's POML:
 //
-//   (A) LOADED-DOCUMENT DIRTY SAVE — POSTs an edit ({content, editedParagraphs}) to a REAL,
+//   (A) LOADED-DOCUMENT DIRTY SAVE — POSTs an edit ({content, operationLog}) to a REAL,
 //       Word-authored, richly-formatted fixture (letterhead headers/footers, a 9-level clause
 //       numbering definition, custom styles, footnotes, 6 tables incl. 3 nested — the same
 //       `commonpaper-cloud-service-agreement.docx` fixture task 003's NFR-09 hardening gate
@@ -19,7 +19,7 @@
 //       persisted bytes at the `ISpeFileOperations.ReplaceFileContentAsUserAsync` facade boundary,
 //       and asserts BYTE-IDENTITY (not merely structural equivalence — amended FR-07) for every
 //       UNTOUCHED paragraph + every non-body part (headers/footers/footnotes/styles/numbering,
-//       which `ComposeParagraphRedlineSynthesizer` never opens), while the 3 EDITED paragraphs
+//       which `ComposeShadowPatchEngine` never opens), while the 3 EDITED paragraphs
 //       carry native `w:ins`/`w:del` tracked changes.
 //
 //   (B) BORN-IN-EDITOR CREATE-ON-SAVE — POSTs a paraId-keyed `contentModel` (a 1/1.1/1.1.1 clause
@@ -42,7 +42,7 @@
 // Banned-pattern compliance (ADR-038 §4 + tests/CLAUDE.md): NO Mock<HttpMessageHandler>; NO
 // DI-registration test; NO ctor-null test. Mocks live ONLY at the ISpeFileOperations /
 // IGenericEntityService / IPostUploadIndexingEnqueuer module boundaries — the HTTP boundary, the
-// real ComposeEndpoints route mapping, and the real ComposeService/ComposeParagraphRedlineSynthesizer/
+// real ComposeEndpoints route mapping, and the real ComposeService/ComposeShadowPatchEngine/
 // ComposeDocumentRenderer/ParaIdPreParser are all production types.
 
 using System.Net;
@@ -103,9 +103,18 @@ public sealed class ComposeFidelitySeamTests : IClassFixture<ComposeFidelitySeam
         // paragraph-selection convention on this same fixture).
         var targets = EditableParagraphs(original, minLen: 25).Take(3).ToList();
         targets.Should().HaveCountGreaterThanOrEqualTo(3);
-        var edits = targets
-            .Select(t => new { paraId = t.ParaId, newText = t.Text + " (as amended)" })
-            .ToList();
+        // The task-003 operation log the client captures for a loaded-doc dirty save: one insertText per
+        // edited paragraph, anchored at (paraId, runIndex 0, offset 0) — the ComposeShadowPatchEngine
+        // lands a native w:ins at that anchor, leaving every untouched paragraph byte-identical.
+        var operations = targets
+            .Select(t => (object)new
+            {
+                type = "insertText",
+                paraId = t.ParaId,
+                at = new { runIndex = 0, offset = 0 },
+                text = "(as amended) ",
+            })
+            .ToArray();
         var editedIdSet = targets.Select(t => t.ParaId.ToUpperInvariant()).ToHashSet();
 
         const string speId = "spe-item-fidelity-loaded-001";
@@ -152,20 +161,20 @@ public sealed class ComposeFidelitySeamTests : IClassFixture<ComposeFidelitySeam
 
         using var client = _fixture.CreateAuthenticatedClient();
 
-        // ── Act: the REAL wire contract task 027's client sends for a loaded-doc dirty save —
-        //    the same-session fast-path retained-original `content` + the paraId-keyed
-        //    `editedParagraphs` delta (see SaveComposeDocumentBody / ComposeEndpoints.Save). ──────
+        // ── Act: the REAL wire contract task 032's client sends for a loaded-doc dirty save —
+        //    the same-session fast-path retained-original `content` + the task-003 `operationLog`
+        //    (see SaveComposeDocumentBody / ComposeEndpoints.Save). ──────
         var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
         {
             sessionId,
             tenantId = ComposeFidelitySeamFixture.TestTenantId,
             driveId,
             content = original,
-            editedParagraphs = edits,
+            operationLog = new { schemaVersion = "compose-ops-v2", operations },
         });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK,
-            "the real save route resolves the fast-path baseline + synthesizes the redline over the real wire");
+            "the real save route resolves the fast-path baseline + applies the operation log via the patch engine over the real wire");
         var result = await response.Content.ReadFromJsonAsync<SaveComposeDocumentResponse>();
         result.Should().NotBeNull();
         result!.DocumentSpeId.Should().Be(speId);
@@ -376,9 +385,19 @@ public sealed class ComposeFidelitySeamTests : IClassFixture<ComposeFidelitySeam
             tenantId = ComposeFidelitySeamFixture.TestTenantId,
             driveId = resolvedDriveId,
             content = rendered,
-            editedParagraphs = new[]
+            operationLog = new
             {
-                new { paraId = editedHeadingParaId, newText = "Confidential Information and Trade Secrets" },
+                schemaVersion = "compose-ops-v2",
+                operations = new object[]
+                {
+                    new
+                    {
+                        type = "insertText",
+                        paraId = editedHeadingParaId,
+                        at = new { runIndex = 0, offset = 0 },
+                        text = "Amended ",
+                    },
+                },
             },
         });
 
@@ -461,7 +480,7 @@ public sealed class ComposeFidelitySeamTests : IClassFixture<ComposeFidelitySeam
     }
 
     /// <summary>
-    /// Asserts every non-body part <c>ComposeParagraphRedlineSynthesizer</c> never opens (it loads +
+    /// Asserts every non-body part the <c>ComposeShadowPatchEngine</c> never opens (it loads +
     /// saves ONLY <c>MainDocumentPart.Document</c>) is raw-byte identical before vs after a dirty save —
     /// headers, footers, footnotes, styles, and numbering.
     /// </summary>
@@ -558,7 +577,7 @@ public sealed class ComposeFidelitySeamTests : IClassFixture<ComposeFidelitySeam
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════
-// Fixture — keeps the REAL ComposeService (+ ComposeParagraphRedlineSynthesizer + ComposeDocumentRenderer
+// Fixture — keeps the REAL ComposeService (+ ComposeShadowPatchEngine + ComposeDocumentRenderer
 // + ParaIdPreParser); mocks ONLY the external SPE / Dataverse-entity / indexing module boundaries, per
 // ADR-038 §"mock at module boundaries" and the ComposeCreateOnSaveFixture precedent. Config-key set
 // mirrors the canonical Compose fixtures (bff-extensions.md §F.2 Fixture-Config-FIRST).
@@ -687,7 +706,7 @@ public sealed class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverseServiceMock.Object);
 
-            // ── The point of this fixture: KEEP the real ComposeService (+ redline synthesizer +
+            // ── The point of this fixture: KEEP the real ComposeService (+ shadow patch engine +
             //    document renderer + paraId pre-parser); mock ONLY the external SPE / Dataverse-entity
             //    / indexing boundaries it depends on (ADR-038 §"mock at module boundaries"). ──────────
             services.RemoveAll<ISpeFileOperations>();

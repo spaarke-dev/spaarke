@@ -1,0 +1,148 @@
+<task id="030" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>WS-3: numbering-model reader (numbering.xml + style-linked numbering)</title>
+    <phase>3 WS-3 Numbering</phase>
+    <gate>blocked until 022</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.cs` (`ComposeDocxProjectionBuilder.cs`), adds a new read-side capability inside the builder; `bff-api`/`compose` tags; feeds the numbering-exactness release blocker (NFR-02). Step 9.5 code-review + adr-check run unconditionally.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Complex but FULLY-SPECIFIED OOXML numbering-model parse (numbering.xml → abstractNum/level fields + style-linked `w:numPr`); brownfield read inside an existing builder — xhigh effort for exhaustive field coverage, but a mechanical parse with a closed input schema, no cross-cutting architectural blast radius → sonnet, not opus (the computation engine 031 is the opus task).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Adds to shared `Services/Compose/ComposeDocxProjectionBuilder.cs` — the same file 031/032 extend and 020/021/022 modified. WS-3 is the flagship sequential stretch per plan.md group W3.</parallel-reason>
+    <deps>022</deps>
+    <tags>bff-api,compose,docx</tags>
+    <estimated-effort>1.5 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build the read-side numbering-MODEL reader — the parse that the WS-3 computation engine (031) consumes (design
+    §4 WS-3 inputs; spec FR-11 inputs, FR-12). For each paragraph, parse `w:numPr` (`w:numId` + `w:ilvl`). Parse
+    `numbering.xml`: `w:num` → `w:abstractNumId` → `w:abstractNum`, capturing per level `w:numFmt`
+    (decimal/lowerLetter/upperLetter/lowerRoman/upperRoman/bullet/…), the `w:lvlText` template (e.g. `%1.%2`),
+    `w:start`, `w:lvlRestart`, `w:isLgl`, and `w:lvlOverride`/`w:startOverride`. ALSO resolve STYLE-LINKED
+    numbering — a paragraph style (e.g. `Heading2`) that carries the `w:numPr`, so heading clauses are numbered by
+    their style rather than a direct paragraph `w:numPr`. Expose this parsed model so 031's computation engine can
+    replay Word's algorithm over it. This task builds the model ONLY — computation is 031.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer building the read side of the numbering model inside the BFF Compose projection.
+    Deep expert in the OOXML numbering part (`numbering.xml`: `w:num`/`w:abstractNum`/`w:lvl` with `w:numFmt`/
+    `w:lvlText`/`w:start`/`w:lvlRestart`/`w:isLgl`/`w:lvlOverride`/`w:startOverride`) and style-linked numbering
+    (`styles.xml` paragraph style carrying `w:numPr`, `w:numStyleLink`/`w:styleLink`). Understands F-3 (numbering
+    is a computation over this model). Follow ADRs — `Services/Compose/` stays pure `byte[]`-in/projection-out.
+  </role>
+
+  <goal>
+    A parsed numbering model, exposed from inside `ComposeDocxProjectionBuilder`, that for every numbered paragraph
+    resolves: its `(numId, ilvl)` (direct OR style-linked via `pStyle`), and the abstractNum/level definition
+    (`w:numFmt`, `w:lvlText`, `w:start`, `w:lvlRestart`, `w:isLgl`, `w:lvlOverride`/`w:startOverride`). The model is
+    the closed input the WS-3 computation engine (031) walks — no computation happens in this task. Style-linked
+    numbering (Heading2 carrying `w:numPr`) resolves to the same model as a direct `w:numPr`.
+  </goal>
+
+  <context>
+    <background>
+      The projection today reads `w:numPr` for a SINGLE bit — bullet-vs-ordered (`ResolveOrdered` `:791-814`) —
+      then leaves the number to the browser's `&lt;ol&gt;` auto-count; multi-level is discarded to a warning count
+      (`:271`); heading-style numbers are dropped (`:762-775`, `:781-782`). There is no parse of the numbering
+      model at all. WS-3's flagship computation (031) needs that model first: the per-level format/template/start/
+      restart/override, plus the style-linked case where a paragraph style carries the `w:numPr`. This task builds
+      the reader; 031 replays Word's algorithm over it and 032 renders the result. The write-side mirror
+      (`ComposeDocumentRenderer.cs` `LevelText`/`StartNumberingValue`) authors this exact model — read-side must
+      parse what write-side authors (the round-trip is proven in 033).
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — add the numbering-model reader (a new read-side capability inside the builder). RE-GREP `ResolveOrdered` (`:791-814`), `ListInfo` (`:779-789`), the heading-style handling (`:762-775`, `:781-782`), the multi-level warning (`:271`) before editing.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs — the write-side numbering mirror (`LevelText` `:574`/`:609`, `StartNumberingValue` `:572`/`:607`, `ParagraphStyleIdInLevel` `:586` for style-linking). This authors the model the reader parses; use it to confirm the field set to read.</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/{heading-style-numbering,multilevel-1-1-1,nda-interrupted-clauses}.docx — the numbering exemplars (task 001) whose `numbering.xml`/styles the reader must parse.</file>
+      <file role="spec">projects/spaarkeai-compose-fidelity-r4.5/spec.md — FR-11 (inputs: `w:numPr`, `numbering.xml` fields), FR-12 (style-linked numbering resolved), NFR-06 (determinism).</file>
+      <file role="design">projects/spaarkeai-compose-fidelity-r4.5/design.md §4 WS-3 "Inputs (all present in the docx)".</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="022" status="pending">WS-2 hardened + audited reader — the numbering model is built on the completed read foundation.</dependency>
+      <dependency task="001" status="pending">Provides the heading-style / multi-level / interrupted-clause exemplars whose numbering model the reader parses.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-11">The reader MUST parse each paragraph's `w:numPr` (`w:numId`+`w:ilvl`) and the `numbering.xml` chain `w:num`→`w:abstractNumId`→`w:abstractNum` with per-level `w:numFmt`, `w:lvlText`, `w:start`, `w:lvlRestart`, `w:isLgl`, and `w:lvlOverride`/`w:startOverride`. Scope: parse into a model — NO number is computed in this task (that is 031).</constraint>
+    <constraint source="spec / FR-12">Style-linked numbering MUST be resolved — a paragraph style (e.g. `Heading2`) carrying the `w:numPr` numbers its clauses by style. Scope: resolve the effective `(numId, ilvl)` for a paragraph whose numbering comes from its `pStyle`, not a direct `w:numPr`.</constraint>
+    <constraint source="project / single-walk invariant">The model must fit the projection's single document-order walk (`:18-26`). Scope: expose the parsed model so 031 can compute in the SAME single walk — do not introduce a second full-document pass.</constraint>
+    <constraint source="ADR-007 / ADR-013">`Services/Compose/` stays pure `byte[]`-in/projection-out; no `Microsoft.Graph`, no AI-internal type. Scope: the reader parses only the OOXML numbering + styles parts.</constraint>
+    <constraint source="ADR-038">Any test added is KEEP-path over the real builder + corpus. Scope: no `Mock&lt;HttpMessageHandler&gt;`/DI/ctor-null tests.</constraint>
+    <constraint source="project / BFF Hygiene §10">Pure-OOXML read on the existing `DocumentFormat.OpenXml` dependency — expected ~0 MB publish delta. Scope: `dotnet publish -c Release`, report compressed size + diff vs ~49.63 MB baseline; `/conflict-check` before PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OOXML numbering part (numbering.xml: w:num/w:abstractNum/w:lvl, w:numFmt/w:lvlText/w:start/w:lvlRestart/w:isLgl/w:lvlOverride/w:startOverride); style-linked numbering (styles.xml pStyle carrying w:numPr, w:numStyleLink); F-3 determinism</topic>
+    <files>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Write-side authors the model to read" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs (:570-640)">
+        The renderer authors `AbstractNum`/`Level` with `StartNumberingValue`, `LevelText` (`%N.` cascade), `NumberingFormat`, and `ParagraphStyleIdInLevel` (style-linking). The reader parses exactly these — confirm the field set against the writer so 033's round-trip agrees.
+      </pattern>
+      <pattern name="Resolve style-linked numbering" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (heading-style handling :762-775, :781-782)">
+        Where a paragraph has no direct `w:numPr`, follow its `pStyle` into `styles.xml` to find the style's `w:numPr` — the effective `(numId, ilvl)` for that paragraph. This is why heading clauses ("4.2 Confidentiality") are numbered.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL / 📋 REASON: modifies `.cs`, new read-side capability, NFR-02 release-blocker path / 📖 PROTOCOL STEPS incl. Step 9.5). Load spec FR-11/12 + NFR-06 + design §4 WS-3 inputs.</step>
+    <step order="1" name="RE-GREP the numbering surfaces">Grep `ResolveOrdered`/`ListInfo`/heading-style handling in the builder and `LevelText`/`StartNumberingValue`/`ParagraphStyleIdInLevel` in the renderer to confirm current line numbers + the authored field set.</step>
+    <step order="2" name="Parse the abstractNum model">Parse `numbering.xml`: `w:num`→`w:abstractNumId`→`w:abstractNum`, capturing per level `w:numFmt`, `w:lvlText`, `w:start`, `w:lvlRestart`, `w:isLgl`, and `w:lvlOverride`/`w:startOverride`.</step>
+    <step order="3" name="Resolve per-paragraph (numId, ilvl)">For each paragraph, resolve its effective `(numId, ilvl)` — direct `w:numPr` OR style-linked via `pStyle` (FR-12).</step>
+    <step order="4" name="Expose the model for 031">Expose the parsed model (keyed appropriately, e.g. per `(abstractNumId, level)` + per-paragraph resolution) so the 031 computation engine can walk it in the projection's single doc-order pass. No number is computed here.</step>
+    <step order="5" name="Sanity test the parse">Add a KEEP-path test that the model parses the corpus exemplars correctly (right formats/templates/starts/style-links) — assert the MODEL, not a computed label.</step>
+    <step order="6" name="Build + publish-size check">`dotnet build` + `dotnet test` green; `dotnet publish -c Release` size + diff (~0). `/conflict-check` before PR.</step>
+    <step order="7" name="Close out">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 030 to ✅. Record any deviation (e.g. a numbering construct not covered) in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a corpus doc uses a numbering construct NOT covered by the model — e.g. `w:numStyleLink`/`w:styleLink` chains, picture bullets, or an override shape the parse does not represent — STOP and surface it; do not silently ignore. NFR-02 (numbering-exact) is a release blocker, and an unparsed construct means the computation engine (031) computes from an incomplete model.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`ComposeDocxProjectionBuilder.cs` `ResolveOrdered` (`:791-814`) reads only a single bullet-vs-ordered bit; `ComposeDocumentRenderer.cs` authors numbering on the WRITE side. There is NO read-side parse of the numbering model (grep of the builder for `abstractNum`/`lvlText`/`numFmt` = none).</existing>
+    <extension>Yes — a new read-side capability INSIDE the existing `ComposeDocxProjectionBuilder`, not a new abstraction or service. It parses the same model the existing renderer authors.</extension>
+    <cost-of-doing-nothing>Without the parsed model there is nothing for the computation engine (031) to replay Word's algorithm over — heading-style numbers stay dropped and multi-level stays discarded to a warning count; the core legal-fidelity defect (numbers collapse / disappear) cannot be fixed.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build + test the BFF Compose suite; `dotnet publish -c Release` for the size check.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (numbering-model reader — abstractNum/level parse + style-linked (numId, ilvl) resolution)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeDocxProjectionBuilderTests.cs (model-parse sanity test over the numbering exemplars)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a numbering exemplar, when parsed, then the model exposes per-level `w:numFmt`, `w:lvlText`, `w:start`, `w:lvlRestart`, `w:isLgl`, and any `w:lvlOverride`/`w:startOverride` for its abstractNum.</criterion>
+    <criterion testable="true">Given `heading-style-numbering.docx`, when a paragraph's numbering comes from its `pStyle` (e.g. Heading2), then the reader resolves the effective `(numId, ilvl)` from the style (FR-12) — not only direct `w:numPr`.</criterion>
+    <criterion testable="true">The model fits the single document-order walk (`:18-26`) — 031 can compute in the same pass with no second full-document scan.</criterion>
+    <criterion testable="true">Negative: a numbering construct outside the model (e.g. `w:numStyleLink` chain, picture bullet) triggers the escalation, not a silent skip.</criterion>
+    <criterion testable="true">No number is computed in this task (parse only); `Services/Compose/` stays pure (ADR-007/013); Tier-1 NetArch green.</criterion>
+    <criterion testable="true">BFF build + Compose suite green; publish ~0 MB delta vs ~49.63 MB baseline; `/conflict-check` clean.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 030 as ✅ and any deviation is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    First WS-3 task — the model this reader exposes is the closed input the flagship computation engine (031)
+    replays Word's algorithm over, and the round-trip test (033) proves the read-side model equals what
+    `ComposeDocumentRenderer` authors. Keep this task to the PARSE — do not start computing labels (that is 031).
+    TASK-INDEX.md + current-task.md are owned by the main session (sub-agent write boundary).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

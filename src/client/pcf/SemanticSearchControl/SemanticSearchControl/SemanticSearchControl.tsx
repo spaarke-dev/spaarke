@@ -60,7 +60,7 @@ import type { TagFilterOption } from '@spaarke/ui-components/dist/types/TagFilte
 import { authenticatedFetch } from '@spaarke/auth';
 import { initializeAuth } from './authInit';
 import { getEnvironmentVariable, getApiBaseUrl } from '../../shared/utils/environmentVariables';
-import { FindSimilarDialog } from '@spaarke/ui-components/dist/components/FindSimilarDialog';
+import { FindSimilarViewerDialog } from '@spaarke/ui-components/dist/components/FindSimilarViewer';
 import {
   DocumentEmailWizard,
   type IDocumentEmailWizardItem,
@@ -1837,7 +1837,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.76 • Built 2026-06-10</Text>
+        <Text size={100}>v1.1.80 • Built 2026-08-05</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so
@@ -1876,7 +1876,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       )}
 
       {/* Find Similar — shared iframe dialog */}
-      <FindSimilarDialog open={!!findSimilarUrl} onClose={() => setFindSimilarUrl(null)} url={findSimilarUrl} />
+      <FindSimilarViewerDialog open={!!findSimilarUrl} onClose={() => setFindSimilarUrl(null)} url={findSimilarUrl} />
 
       {/* Document Email Wizard — unified single-doc + bulk Email surface.
           When launched from a row's 3-dot menu, `handleEmailDocument`

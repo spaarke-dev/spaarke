@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="teams-app-r1">
+  <metadata>
+    <title>Contact-anchored membership entry on MembershipResolverService (role-allowlist filtered)</title>
+    <phase>2 BFF Workforce→Principal Resolver &amp; Membership</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Membership/auth core — the sole source of record access for non-systemuser workforce users; errors here directly cause over- or under-exposure of records.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Membership/auth core — role-allowlist correctness is security-load-bearing.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Critical-path auth spine on shared BFF authz/membership files; serial chain.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add a contact-only entry point to `MembershipResolverService` that builds a `PersonIdentity` from a contactId (no systemuser required), reusing `BuildFetchXml`, filtered to the convention-based access-conferring role allowlist (any `contact`-target lookup whose logical name matches the `sprk_assigned*` convention, via the ADR-034 `MembershipFieldDiscoveryService` metadata discovery + a config/data-driven exclusion list).
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in the ADR-034 user-record-membership engine (`MembershipResolverService`, `MembershipFieldDiscoveryService`), Dataverse FetchXML, and role-allowlist security filtering. Follow ADRs strictly.</role>
+
+  <goal>
+    `MembershipResolverService` gains a contact-only entry point — given a contactId (no systemuser), it builds a `PersonIdentity` and returns the same membership record set the systemuser path returns, filtered to the access-conferring role allowlist discovered via `MembershipFieldDiscoveryService` (any `sprk_assigned*`-convention contact lookup, minus a config/data-driven exclusion list). A newly added `sprk_assigned*` field must auto-qualify with no code change; adverse/non-allowlisted contact fields must never match.
+  </goal>
+
+  <context>
+    <background>
+      Per design.md §5, ADR-034's `BuildFetchXml` already matches `ContactId` but has no entry point that accepts a bare contactId without a systemuser. Task 020's workforce-principal resolver returns a contact-only principal for non-systemuser workforce users (spec D11/Owner Clarifications "Option B"); this task gives that principal a membership source. The role allowlist is intentionally convention-based (owner-confirmed, spec.md Resolved Decisions), not a hardcoded field list, so future `sprk_assigned*` fields auto-qualify.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipFieldDiscoveryService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IMembershipResolverService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Models/MembershipDescriptor.cs</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>`MembershipResolverService.BuildFetchXml` already matches `ContactId` internally, and `MembershipFieldDiscoveryService` already discovers `contact`-target lookup fields by metadata — but there is no contact-only entry point (a `PersonIdentity` built from a bare contactId, no systemuser).</existing>
+    <extension>Yes — add an additive entry point that reuses `BuildFetchXml` and the metadata-discovery mechanism; do not fork the engine or build a second membership mechanism (ADR-034 Path C per root CLAUDE.md §6.5).</extension>
+    <cost-of-doing-nothing>Without this entry point, non-systemuser workforce users (Owner Clarifications "Option B") get no membership-based access at all in Teams, and the grant modal (Phase 4, task-dependent on this) has no candidate source to populate for approval.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-034">SCOPE: `Services/Ai/Membership/MembershipResolverService.cs` and its metadata-discovery dependency. Reuse the existing engine (`BuildFetchXml`) via an additive contact-only entry point — do NOT fork or duplicate the FetchXml-building logic; this is ADR-034 Path C (comply-with-intent + additive note), not a second membership mechanism.</constraint>
+    <constraint source="project">SCOPE: role-allowlist filtering. Access-conferring roles = ONLY `contact`-target lookups whose logical name matches the `sprk_assigned*` convention, resolved via `MembershipFieldDiscoveryService` metadata discovery + a config/data-driven exclusion list — NEVER a hardcoded field list. Adverse/informational roles (opposing-counsel, regarding-person, polymorphic `sprk_regardingrecord*`) MUST NEVER confer access. A newly added `sprk_assigned*` field MUST auto-qualify with no code change (spec.md Resolved Decisions, NFR-05).</constraint>
+    <constraint source="ADR-029">Publish size MUST be measured and reported: run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, report the compressed size against the ~49.63 MB (incl. PDBs) baseline, and confirm no M365 Agents SDK / Bot packages were added. Ceiling ≤60 MB compressed.</constraint>
+    <constraint source="project">Run `/conflict-check` before opening the BFF PR (13+ active worktrees contend on `Sprk.Bff.Api`). Do NOT inject Graph SDK types or AI-internal types into the membership entry point. State the Placement Justification in the PR description.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Contact-anchored membership entry (ADR-034 additive extension)</topic>
+    <files>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="ContactId FetchXml matching" location="src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs">BuildFetchXml already matches on ContactId inside the systemuser-anchored flow — reuse this to build the contact-only entry point rather than writing new FetchXml.</pattern>
+      <pattern name="Convention-based field discovery" location="src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipFieldDiscoveryService.cs">Discovers contact-target lookup fields by metadata, not a hardcoded list — apply the `sprk_assigned*` convention filter + exclusion list on top of this discovery, do not bypass it.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `MembershipResolverService.BuildFetchXml`, `MembershipFieldDiscoveryService`, and `MembershipDescriptor`/`IMembershipResolverService` to confirm the exact reusable surface and where a systemuser-anchored assumption currently blocks a contact-only call.</step>
+    <step order="2">Add a contact-only entry point (e.g., `ResolveByContactIdAsync` or equivalent on `IMembershipResolverService`) that builds a `PersonIdentity` from a bare contactId and calls into the existing `BuildFetchXml`/engine path — no systemuser required.</step>
+    <step order="3">Apply the role-allowlist filter: use `MembershipFieldDiscoveryService`'s metadata discovery to enumerate `contact`-target lookups, filter to the `sprk_assigned*` naming convention, then subtract a config/data-driven exclusion list. Verify the R1 verified set (`sprk_assignedattorney1/2`, `sprk_assignedparalegal1/2`, `sprk_assignedtoexternal`, `sprk_assignedtointernal` on `sprk_project`) passes and polymorphic `sprk_regardingrecord*` fields are naturally excluded (not contact lookups).</step>
+    <step order="4">Add unit tests: (a) a contactId on an allowlisted role returns the expected record; (b) a contactId on a non-allowlisted/adverse contact field never matches; (c) a synthetic new `sprk_assigned*`-convention field auto-qualifies without a code change; (d) the exclusion list correctly suppresses a field that matches the convention but is data/config-excluded.</step>
+    <step order="5">Run `dotnet publish -c Release` and report the compressed size vs the ~49.63 MB baseline per ADR-029.</step>
+    <step order="6">Run `/conflict-check` before opening the PR; state the Placement Justification in the PR description.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `BuildFetchXml` cannot be reused for a contact-only entry point without forking the engine (e.g., it is structurally coupled to a systemuser identity), STOP and escalate (root CLAUDE.md §6.5) — forking would violate ADR-034 Path C and requires an ADR amendment decision, not a silent fork.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test the BFF; run `dotnet publish` for the size check</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IMembershipResolverService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a contactId, when the contact-only entry point runs, then it returns records where that contact is on an allowlisted `sprk_assigned*` contact-role lookup, across entities.</criterion>
+    <criterion testable="true">Given a contactId on a non-allowlisted or adverse contact field (e.g. an opposing-counsel lookup, or a polymorphic `sprk_regardingrecord*` field), when the entry point runs, then that field NEVER confers a match.</criterion>
+    <criterion testable="true">Given a newly-added `sprk_assigned*`-convention field on any entity, when the entry point runs, then it auto-qualifies with NO code change (metadata-discovery-driven).</criterion>
+    <criterion testable="true">Given a field on the config/data-driven exclusion list, when the entry point runs, then it is excluded even though it matches the `sprk_assigned*` naming convention.</criterion>
+    <criterion testable="true">The engine (`BuildFetchXml`) is reused, not forked; BFF publish size is measured/reported (≤60 MB), and `/conflict-check` is run before the PR with the Placement Justification stated.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on task 020's resolved contact-only principal. Task 022 (accessible-record-set enforcement) composes this membership source with the systemuser ADR-034 path and the grant/standing-grant sources — do not change this entry point's return shape after 022 starts without re-opening it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. This is a FULL-rigor task (Step 9.5 gates apply).</protocol>
+  </execution>
+</task>

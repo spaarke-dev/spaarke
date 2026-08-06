@@ -23,6 +23,23 @@ export const COMMUNICATION_TYPE_MESSAGE = 100000004;
 export const BODY_FORMAT_PLAIN_TEXT = 100000000;
 export const BODY_FORMAT_HTML = 100000001;
 
+/**
+ * `sprk_direction` choice-int constants (R3 task 002 / FR-18), mirrors
+ * `Sprk.Bff.Api/Services/Communication/CommunicationThreadReadModels.cs`
+ * `ThreadMessageDto.Direction` doc comment: Incoming=100000000, Outgoing=100000001.
+ */
+export const DIRECTION_INCOMING = 100000000;
+export const DIRECTION_OUTGOING = 100000001;
+
+/**
+ * `sprk_privilegeclassification` choice-int constants (R3 task 043 / FR-21), mirrors
+ * `Sprk.Bff.Api/Services/Communication/Access/CommunicationAccessModels.cs`
+ * `CommunicationPrivilegeClassification`. Privilege is a badge/review signal ONLY — it never gates a read (ADR-015).
+ */
+export const PRIVILEGE_NONE = 100000000;
+export const PRIVILEGE_POTENTIALLY_PRIVILEGED = 100000001;
+export const PRIVILEGE_PRIVILEGED = 100000002;
+
 // ---------------------------------------------------------------------------
 // Channel + body format (timeline's own friendly domain shape)
 // ---------------------------------------------------------------------------
@@ -53,6 +70,31 @@ export interface TimelineMessage {
   /** Raw `sprk_communicationtype` int, kept for callers that need the exact wire value. */
   channelTypeRaw: number | null;
   sender?: string | null;
+  /**
+   * The sender's Dataverse `systemuserid` GUID (R3 task 002 / FR-18, from the
+   * BFF's `ThreadMessageDto.SentBy` — `_sprk_sentby_value`). This is the
+   * CANONICAL identity signal for mine/others bubble alignment
+   * (`ConversationView`, task 011) — NOT `sender` (an email-address string,
+   * which is unreliable for alignment: shared-mailbox sends, display-name/
+   * address mismatches, or an external participant's email coinciding with
+   * an internal user's alias all break email-string equality). Null when the
+   * sender-enrichment fields are unset (e.g. a row predating task 002, or a
+   * sender with no resolvable systemuserid) — such a message can never
+   * resolve as "mine" and always renders as an "others" bubble.
+   */
+  senderSystemUserId?: string | null;
+  /** The sender's display name (R3 task 002 / FR-18, from `ThreadMessageDto.SentByName` / `sprk_sentbyname`). */
+  senderName?: string | null;
+  /** `sprk_subject` (R3 task 021 / FR-04) — rendered as the email-in-flow block subject; null/undefined when unset. */
+  subject?: string | null;
+  /**
+   * `sprk_to` "To" header recipients (R3 task 021 / FR-04) — the email-in-flow block's recipient line. The
+   * authoritative recipient list of a row the caller may read (never fabricated, never BCC). Empty/undefined for
+   * chat messages (which have no To header).
+   */
+  to?: string[];
+  /** `sprk_direction` (R3 task 002 / FR-18): `'incoming'` | `'outgoing'`, or `null` when unset. */
+  direction?: 'incoming' | 'outgoing' | null;
   /** Display/sort timestamp — `sentAt ?? createdOn`. */
   sentOn?: string | null;
   /** Raw `createdOn` — used as the incremental-poll cursor (see `useThreadPoll`). */
@@ -68,6 +110,14 @@ export interface TimelineMessage {
   inReplyTo?: string | null;
   /** Access-filter-derived privilege flag (ADR-015 — never gates the read; badge-only signal). */
   privilege: number;
+  /**
+   * `sprk_isinternalonly` (FR-21) marker. Only ever `true` on a row this caller may already read (the BFF drops
+   * internal-only rows for external callers) — rendering it never implies access anyone lacks. Undefined on rows
+   * predating task 043; treated as `false` for display.
+   */
+  isInternalOnly?: boolean;
+  /** `sprk_isprivate` (FR-21) marker — display only; never a gate. Undefined on rows predating task 043 → `false`. */
+  isPrivate?: boolean;
   attachments: TimelineAttachment[];
 }
 
@@ -163,6 +213,19 @@ export interface CommunicationTimelineBaseProps {
 
   /** Fired when a poll or send fails (the component also renders an inline error). */
   onError?: (error: Error) => void;
+
+  /**
+   * Open/preview/download an attachment on a message via the existing SPE
+   * document-viewer path (task 042 / FR-20). Rendered on any message
+   * (`MessageRow`) whose attachment resolved to a governed `sprk_document`.
+   * Hands the attachment + message back so the HOST mounts the shared
+   * `<RichFilePreviewDialog />` (fed by `/api/documents/{id}/preview-url` +
+   * `/open-links`) — NOT a new inline previewer (FR-20). Context-agnostic
+   * (ADR-012): this component never mounts the viewer. Omit it and attachments
+   * render as non-interactive chips. Access-filtering per NFR-01 — see
+   * `MessageAttachments` header.
+   */
+  onOpenAttachment?: (attachment: TimelineAttachment, message: TimelineMessage) => void;
 
   /** Optional className applied to the root layout container. */
   className?: string;

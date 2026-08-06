@@ -23,7 +23,7 @@
 
 .PARAMETER Component
     Build only specific components by name. Accepts an array of component names.
-    Names match directory names (e.g., "LegalWorkspace", "AnalysisWorkspace", "PCF").
+    Names match directory names (e.g., "LegalWorkspace", "SemanticSearch", "PCF").
     Special names: "SharedLibs", "PCF", "ExternalSPA".
 
 .EXAMPLE
@@ -78,6 +78,7 @@ $RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path
 # is performed by each consumer's tsc pass (SpaarkeAi, LegalWorkspace, WorkspaceLayoutWizard).
 $SharedLibs = @(
     @{ Name = "Spaarke.Auth";                 Path = "$RepoRoot\src\client\shared\Spaarke.Auth" }
+    @{ Name = "Spaarke.Notifications";        Path = "$RepoRoot\src\client\shared\Spaarke.Notifications" }        # depends on Auth (peer + file: devDep → builds standalone). Added 2026-07-21 by spaarke-notification-spine-r1 (task 021 shipped @spaarke/notifications + the SpaarkeAi file: dep but omitted this build-orchestration entry → fresh-master SpaarkeAi builds failed on the unbuilt lib).
     @{ Name = "Spaarke.SdapClient";           Path = "$RepoRoot\src\client\shared\Spaarke.SdapClient" }
     @{ Name = "Spaarke.AI.Context";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Context" }           # depends on Auth
     @{ Name = "Spaarke.AI.Outputs";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Outputs" }
@@ -120,7 +121,6 @@ $ViteSolutions = @(
 
 # Webpack code pages (src/client/code-pages/)
 $WebpackCodePages = @(
-    "AnalysisWorkspace"
     "DocumentRelationshipViewer"
     "PlaybookBuilder"
     "SemanticSearch"

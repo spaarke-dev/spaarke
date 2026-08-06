@@ -550,6 +550,90 @@ public class ChatSessionManagerTests
     }
 
     [Fact]
+    public async Task GetSessionAsync_StaleSessionPastTtl_CosmosHasTranscript_RestoresHistory_NoEmptySessionDataLoss()
+    {
+        // Task 025 / spec FR-09 acceptance criterion: a Redis-expired (stale/TTL-expired) session
+        // MUST resolve against the durable Cosmos transcript rather than returning an empty
+        // session. This simulates the TTL-expiry reopen scenario end to end: Redis miss (as if
+        // SessionCacheTtl elapsed), Cosmos holds the full prior message history.
+        _cacheMock
+            .Setup(c => c.GetAsync<ChatSession>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ChatSession?)null);
+
+        var priorMessages = new List<SessionMessage>
+        {
+            new() { MessageId = "m1", Role = "user", Content = "What are the key terms?", Timestamp = DateTimeOffset.UtcNow.AddHours(-30) },
+            new() { MessageId = "m2", Role = "assistant", Content = "The key terms are...", Timestamp = DateTimeOffset.UtcNow.AddHours(-30) },
+        };
+        var storedSession = new StoredSession
+        {
+            Id = "session-ttl-expired",
+            SessionId = "session-ttl-expired",
+            TenantId = TenantId,
+            PlaybookId = PlaybookId,
+            Messages = priorMessages,
+            WidgetStates = [],
+            CreatedAt = DateTimeOffset.UtcNow.AddHours(-30),
+            LastActivity = DateTimeOffset.UtcNow.AddHours(-25), // past the 24h sliding TTL
+        };
+        _persistenceMock
+            .Setup(p => p.LoadSessionAsync(TenantId, "session-ttl-expired", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(storedSession);
+
+        SetupCacheSetSuccess();
+
+        // Act
+        var result = await _sutWithCosmos.GetSessionAsync(TenantId, "session-ttl-expired");
+
+        // Assert — prior history restored, NOT an empty session.
+        result.Should().NotBeNull();
+        result!.Messages.Should().HaveCount(2, "the durable Cosmos transcript must be restored, not discarded");
+        result.Messages[0].Content.Should().Be("What are the key terms?");
+        result.Messages[1].Content.Should().Be("The key terms are...");
+
+        _repoMock.Verify(r => r.GetSessionAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "Dataverse must not be consulted — Cosmos already restored the durable transcript");
+    }
+
+    [Fact]
+    public async Task GetSessionAsync_CosmosReadThrows_FallsBackToDataverse_DoesNotThrow()
+    {
+        // Task 025 hardening: a transient Cosmos failure during the stale-session fallback read
+        // must NOT abort the whole lookup — it must degrade to the Dataverse cold path instead of
+        // propagating (which a caller could otherwise misread as "not found" and mint an empty
+        // session on top of a still-existing durable transcript).
+        _cacheMock
+            .Setup(c => c.GetAsync<ChatSession>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ChatSession?)null);
+
+        _persistenceMock
+            .Setup(p => p.LoadSessionAsync(TenantId, "session-cosmos-down", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Cosmos DB transient failure"));
+
+        var dataverseSession = CreateTestSession("session-cosmos-down");
+        _repoMock
+            .Setup(r => r.GetSessionAsync(TenantId, "session-cosmos-down", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(dataverseSession);
+
+        SetupCacheSetSuccess();
+
+        // Act
+        var act = async () => await _sutWithCosmos.GetSessionAsync(TenantId, "session-cosmos-down");
+
+        // Assert
+        var result = await act.Should().NotThrowAsync(
+            "a Cosmos read failure must degrade gracefully to the Dataverse fallback, never throw");
+        result.Subject.Should().NotBeNull();
+        result.Subject!.SessionId.Should().Be("session-cosmos-down");
+    }
+
+    [Fact]
     public async Task CreateSessionAsync_CosmosWriteFailure_RedisWriteSucceeds_NoExceptionThrown()
     {
         // Arrange — Dataverse succeeds
@@ -586,6 +670,120 @@ public class ChatSessionManagerTests
     // =========================================================================
     // Private helpers
     // =========================================================================
+
+    // =========================================================================
+    // PromoteSessionToAnalysisAsync — explicit promotion (task 023, spec FR-07)
+    // Binds an EXISTING loose session to a NEW sprk_analysis in place — a bind, not a mint.
+    // =========================================================================
+
+    [Fact]
+    public async Task PromoteSessionToAnalysisAsync_BindsExistingRow_AndUpdatesHostContextInPlace()
+    {
+        // Arrange — a loose session (no HostContext) is currently cached (Redis hit path).
+        var looseSession = CreateTestSession("session-promote");
+        var analysisId = Guid.NewGuid();
+
+        _cacheMock
+            .Setup(c => c.GetAsync<ChatSession>(
+                TenantId, CacheResource, "session-promote", CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(looseSession);
+        _cacheMock
+            .Setup(c => c.RefreshAsync(
+                TenantId, CacheResource, "session-promote", CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        SetupCacheSetSuccess();
+
+        _repoMock
+            .Setup(r => r.BindSessionToAnalysisAsync(TenantId, "session-promote", analysisId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _sut.PromoteSessionToAnalysisAsync(TenantId, "session-promote", analysisId, "My Analysis");
+
+        // Assert — the SAME session id, now Analysis-owned via the task-020 HostContext convention.
+        result.Should().NotBeNull();
+        result!.SessionId.Should().Be("session-promote");
+        result.HostContext.Should().NotBeNull();
+        result.HostContext!.EntityType.Should().Be("sprk_analysisoutput");
+        result.HostContext.EntityId.Should().Be(analysisId.ToString());
+        result.HostContext.EntityName.Should().Be("My Analysis");
+
+        // The FK bind targeted the EXISTING row — no CreateSessionAsync (no new session/row minted).
+        _repoMock.Verify(
+            r => r.BindSessionToAnalysisAsync(TenantId, "session-promote", analysisId, It.IsAny<CancellationToken>()),
+            Times.Once);
+        _repoMock.Verify(
+            r => r.CreateSessionAsync(It.IsAny<ChatSession>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "promotion must bind the existing session, never mint a new one");
+
+        // The updated session was written through to the cache (Redis re-warm).
+        _cacheMock.Verify(c => c.SetSlidingAsync(
+            TenantId, CacheResource, "session-promote", CacheVersion,
+            It.IsAny<ChatSession>(), It.IsAny<TimeSpan>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task PromoteSessionToAnalysisAsync_WhenSessionNotFound_ReturnsNullAndDoesNotBind()
+    {
+        // Arrange — Redis miss + no Dataverse cold-tier row (session genuinely gone).
+        _cacheMock
+            .Setup(c => c.GetAsync<ChatSession>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ChatSession?)null);
+        _repoMock
+            .Setup(r => r.GetSessionAsync(TenantId, "session-gone", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ChatSession?)null);
+
+        // Act
+        var result = await _sut.PromoteSessionToAnalysisAsync(TenantId, "session-gone", Guid.NewGuid(), "Orphan Attempt");
+
+        // Assert
+        result.Should().BeNull();
+        _repoMock.Verify(
+            r => r.BindSessionToAnalysisAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task PromoteSessionToAnalysisAsync_WhenFkBindThrows_PropagatesAndDoesNotUpdateCache()
+    {
+        // Arrange — the Dataverse FK write fails. UNLIKE CreateSessionAsync's tolerant posture, the
+        // durable FK is promotion's entire deliverable — the failure MUST propagate so the caller
+        // (AnalysisEndpoints.PromoteSession) can compensate by deleting the orphaned Analysis, rather
+        // than silently leaving a "promoted" session with no durable, queryable bind.
+        var looseSession = CreateTestSession("session-bind-fails");
+        var analysisId = Guid.NewGuid();
+
+        _cacheMock
+            .Setup(c => c.GetAsync<ChatSession>(
+                TenantId, CacheResource, "session-bind-fails", CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(looseSession);
+        _cacheMock
+            .Setup(c => c.RefreshAsync(
+                TenantId, CacheResource, "session-bind-fails", CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        _repoMock
+            .Setup(r => r.BindSessionToAnalysisAsync(TenantId, "session-bind-fails", analysisId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated Dataverse outage"));
+
+        // Act
+        var act = async () => await _sut.PromoteSessionToAnalysisAsync(TenantId, "session-bind-fails", analysisId, "Failed Promote");
+
+        // Assert — the exception propagates; no cache write (no partial-promotion state left behind).
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        _cacheMock.Verify(c => c.SetSlidingAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+            It.IsAny<ChatSession>(), It.IsAny<TimeSpan>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
 
     private static ChatSession CreateTestSession(string sessionId)
         => new ChatSession(

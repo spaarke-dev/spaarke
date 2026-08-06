@@ -158,3 +158,6 @@ infra/**/modules/*.json
 backfill-parent-records-progress.json
 backfill-documents-progress.json
 .claude/worktrees/
+
+# Exported/unpacked Dataverse solutions, PCF bundles, deploy logs (regenerable build output; ~380MB — never commit)
+exports/

@@ -43,6 +43,7 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
     private readonly IThreadResolver? _threadResolver;
     private readonly IDirectThreadAccessService? _directThreadAccess;
     private readonly CommunicationParticipantIndexer? _participantIndexer;
+    private readonly CommunicationArrivedProducer? _arrivedProducer;
     private readonly ILogger<MessagingIngestor> _logger;
 
     /// <param name="threadResolver">
@@ -71,13 +72,15 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
         ILogger<MessagingIngestor> logger,
         IThreadResolver? threadResolver = null,
         IDirectThreadAccessService? directThreadAccess = null,
-        CommunicationParticipantIndexer? participantIndexer = null)
+        CommunicationParticipantIndexer? participantIndexer = null,
+        CommunicationArrivedProducer? arrivedProducer = null)
     {
         _genericEntityService = genericEntityService;
         _enrichmentService = enrichmentService;
         _threadResolver = threadResolver;
         _directThreadAccess = directThreadAccess;
         _participantIndexer = participantIndexer;
+        _arrivedProducer = arrivedProducer;
         _logger = logger;
     }
 
@@ -169,6 +172,15 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
                 ex,
                 "Enrichment failed (non-fatal) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
                 communicationId, request.CorrelationId);
+        }
+
+        // ── communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal ──
+        // Emit AFTER thread resolution + participant index (the fan-out junction + thread lookup are now
+        // populated) — the same emit point the email inbound path uses, so capture is channel-identical. The
+        // producer is internally non-fatal (never throws), so a producer error never fails capture (NFR-05).
+        if (_arrivedProducer is not null)
+        {
+            await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId, cancellationToken);
         }
 
         return new ChannelIngestResult { CommunicationId = communicationId, WasDuplicate = false };

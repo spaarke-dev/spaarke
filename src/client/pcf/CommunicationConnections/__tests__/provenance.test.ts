@@ -14,7 +14,7 @@ import {
   connectionTarget,
   confidenceBand,
   type ProvenanceDoc,
-} from '../CommunicationConnections/provenance';
+} from '@spaarke/communication-components/logic/connections/provenance';
 
 function docWith(partial: Partial<ProvenanceDoc>): ProvenanceDoc {
   return {

@@ -1,0 +1,139 @@
+<task id="052" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>WS-5 decision record: ship pagination in R4.5 vs fast-follow</title>
+    <phase>5 Page/Line Spike</phase>
+    <gate>blocked until 050,051</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Decision synthesis producing a notes deliverable — no code, no shipping surface. STANDARD; Step 9.5 skipped by default. (Note: a "ship in R4.5" outcome is a scope expansion that triggers a §6 human escalation before any implementation task is added.)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Go/defer decision weighing the fidelity ceiling, licensing, and ops cost against R4.5 scope — architectural judgment warranting Opus per root §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Synthesizes the outputs of 050 (LibreOffice measurement) and 051 (Word-service + licensing) — cannot run until both notes exist.</parallel-reason>
+    <deps>050,051</deps>
+    <tags>spike,decision</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Synthesize the LibreOffice measurement (task 050) and the Word-service + licensing evaluation (task 051) into a
+    decision record `projects/spaarkeai-compose-fidelity-r4.5/notes/ws5-pagination-decision.md`: compare
+    LibreOffice-headless vs Word-rendering-service on measured Word-divergence, licensing path (permissive-only;
+    separate-process sidecar, out of the BFF publish), and ops cost; and deliver a SHIP-IN-R4.5 vs FAST-FOLLOW
+    recommendation (spec FR-19). The product must make NO page/line "100%" claim beyond what the chosen engine
+    guarantees (F-5 honest layout numbering). If ship is recommended, the pagination engine is a sidecar with its
+    own size/ops budget — NOT added to the BFF publish — AND shipping expands project scope beyond the spike, which
+    MUST be escalated to the human per root §6 before any implementation task is created.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer synthesizing a bounded research spike into a go/defer decision. Understands F-5
+    (page/line numbers are rendering artifacts; never fabricated; delivered only via an explicit engine where in
+    scope), the NFR-03 permissive-only boundary, and the CLAUDE.md §6 scope-expansion escalation duty (a
+    ship-in-R4.5 recommendation moves beyond the spike this project committed to). Follow ADRs strictly.
+  </role>
+
+  <goal>
+    A decision record `projects/spaarkeai-compose-fidelity-r4.5/notes/ws5-pagination-decision.md` that: (a)
+    compares LibreOffice-headless vs Word-rendering-service on measured Word-divergence (from 050), licensing (from
+    051), and ops cost; (b) states the licensing path (permissive-only; separate-process sidecar out of the BFF
+    publish); (c) gives a clear SHIP-IN-R4.5 vs FAST-FOLLOW recommendation with rationale; and (d) fixes the honest
+    layout-numbering claim (no page/line "100%" beyond the chosen engine's guarantee). If the recommendation is
+    ship-in-R4.5, the record also carries the §6 scope-expansion escalation.
+  </goal>
+
+  <context>
+    <background>
+      WS-5's committed deliverable is a spike + decision, not implementation (owner clarification; spec FR-19). Task
+      050 measured the LibreOffice-headless divergence from Word; task 051 evaluated the Word-rendering-service path
+      and the NFR-03 licensing. This task synthesizes both into the go/defer decision. The hard constraints carry
+      through: LibreOffice only out-of-process, no commercial/AGPL linked into the BFF (NFR-03 / T-1), and any
+      pagination engine is an out-of-BFF-publish sidecar (NFR-04). The honesty rule (F-5) is central: the product
+      may not claim page/line "100%" beyond what the chosen engine actually guarantees — only Word's own layout is
+      Word-identical. Because R4.5 committed to spike-only, a "ship in R4.5" recommendation is a scope expansion
+      that must be surfaced to the human (root §6) before any implementation task is added.
+    </background>
+    <relevant-files>
+      <file role="new">projects/spaarkeai-compose-fidelity-r4.5/notes/ws5-pagination-decision.md — the decision record (comparison + licensing path + ship/defer recommendation + honest-claim statement)</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-fidelity-r4.5/notes/ws5-libreoffice-spike.md — task 050 output: measured LibreOffice Word-divergence</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-fidelity-r4.5/notes/ws5-word-service-eval.md — task 051 output: Word-service evaluation + NFR-03 licensing analysis</file>
+      <file role="spec">projects/spaarkeai-compose-fidelity-r4.5/spec.md — FR-19(d) (ship-in-R4.5 vs fast-follow recommendation), NFR-03 (permissive-only), NFR-04 (sidecar out of publish), Success Criterion 5 (page/line honest)</file>
+      <file role="design">projects/spaarkeai-compose-fidelity-r4.5/design.md §5.5 (fidelity ceiling; deliver-now vs follow-on), §9 T-1 (licensing path A)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Supplies the measured LibreOffice-headless Word-divergence on the corpus.</dependency>
+      <dependency task="051" status="pending">Supplies the Word-rendering-service evaluation + NFR-03 licensing analysis.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-19">The decision record MUST contain the four FR-19 elements synthesized: LibreOffice prototype/divergence, Word-service evaluation, NFR-03 licensing analysis, and an explicit ship-in-R4.5 vs fast-follow recommendation. Scope: this task authors the synthesis + recommendation; it does not implement pagination.</constraint>
+    <constraint source="F-5 / Success Criterion 5">The record MUST fix the honest layout-numbering claim — the product makes NO page/line "100%" claim beyond what the chosen engine guarantees. Scope: only Word's own layout is Word-identical; state the ceiling of any open-engine path explicitly.</constraint>
+    <constraint source="NFR-03 / NFR-04 / T-1">Any recommended engine MUST be permissive-licensed and run as a separate-process sidecar with its own size/ops budget — never linked into the BFF, never added to the BFF publish. Scope: no commercial (Aspose/GemBox/Syncfusion) or AGPL paginator, LibreOffice out-of-process only.</constraint>
+    <constraint source="CLAUDE.md §6">If the recommendation is "ship in R4.5", that EXPANDS scope beyond the committed spike — the record MUST STOP and escalate to the human (scope expansion) before any implementation task is created. Scope: a ship recommendation does not itself authorize implementation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Go/defer decision synthesis; page/line fidelity ceiling (Word-identical only via Word layout); NFR-03/NFR-04 permissive-only + out-of-publish-sidecar boundary; CLAUDE.md §6 scope-expansion escalation</topic>
+    <files>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Honest fidelity claim" location="projects/spaarkeai-compose-fidelity-r4.5/design.md §5.5">
+        Never promise page/line 100% until the engine is chosen and only to the extent it guarantees; open engines paginate closely but diverge. The decision record fixes the exact claim the product may make.
+      </pattern>
+      <pattern name="Sidecar, out of BFF publish" location="projects/spaarkeai-compose-fidelity-r4.5/design.md §7 / NFR-04">
+        If shipped, the pagination engine is a separate-process sidecar/container with its own size + ops budget, never linked into or added to the BFF publish.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: STANDARD / 📋 REASON: decision synthesis, notes output / 📖 PROTOCOL STEPS). Confirm tasks 050 and 051 are complete (gate); load their notes + spec FR-19 + NFR-03/04.</step>
+    <step order="1" name="Compare the two paths">Synthesize 050's measured LibreOffice divergence and 051's Word-service + licensing evaluation into a side-by-side comparison (fidelity/divergence, licensing, ops cost).</step>
+    <step order="2" name="Fix the licensing path">State the licensing path: permissive-only; LibreOffice out-of-process; separate-process sidecar out of the BFF publish; no commercial/AGPL linked.</step>
+    <step order="3" name="Fix the honest claim">State the exact page/line claim the product may make — no "100%" beyond the chosen engine's guarantee (F-5).</step>
+    <step order="4" name="Recommend ship vs fast-follow">Give a clear SHIP-IN-R4.5 vs FAST-FOLLOW recommendation with rationale. If SHIP → include the §6 scope-expansion escalation (a ship decision expands beyond the spike and requires human sign-off before any implementation task is added).</step>
+    <step order="5" name="Write the decision record">Author `notes/ws5-pagination-decision.md` capturing steps 1-4.</step>
+    <step order="6" name="Update TASK-INDEX">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 052 status to ✅.</step>
+    <step order="7" name="Record deviations">Document any deviation (esp. a fired scope-expansion escalation) in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the decision is "ship in R4.5", that EXPANDS project scope beyond the committed spike — STOP and escalate to the human per CLAUDE.md §6 (scope expansion) before adding any pagination implementation task. A ship recommendation is a decision to escalate, not a license to implement.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No WS-5 decision record exists; the go/defer question is explicitly deferred to this synthesis (spec FR-19, owner clarification "spike + decision only"). Verified from the spec's WS-5 requirement + Owner Clarifications.</existing>
+    <extension>No — this is a decision document synthesizing two prior spike notes; it extends nothing in `Services/Compose/` and implements no pagination.</extension>
+    <cost-of-doing-nothing>Without the decision record, WS-5 has no resolution — Success Criterion 5 (page/line honest) is unmet, the ship-vs-defer question stays open, and the product has no sanctioned statement of what page/line fidelity it may claim.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-fidelity-r4.5/notes/ws5-pagination-decision.md (comparison + licensing path + ship/defer recommendation + honest-claim statement)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The record synthesizes 050's measured LibreOffice divergence and 051's Word-service + licensing evaluation into a side-by-side comparison (fidelity, licensing, ops cost).</criterion>
+    <criterion testable="true">The record states the licensing path: permissive-only; LibreOffice out-of-process; separate-process sidecar out of the BFF publish; no commercial/AGPL linked.</criterion>
+    <criterion testable="true">The record fixes the honest page/line claim — no "100%" beyond the chosen engine's guarantee (F-5 / Success Criterion 5).</criterion>
+    <criterion testable="true">The record gives a clear SHIP-IN-R4.5 vs FAST-FOLLOW recommendation with rationale.</criterion>
+    <criterion testable="true">Negative: if the recommendation is "ship in R4.5", the record STOPS and escalates the scope expansion to the human (§6) rather than adding an implementation task — no pagination code/engine is added to the BFF publish by this task under any outcome.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 052 as ✅ and any deviation/escalation is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Closes WS-5 as a decision, per the owner's "spike + decision only" clarification. The critical guardrails: honest
+    fidelity claim (F-5), permissive-only + out-of-publish sidecar (NFR-03/04), and the §6 escalation if the
+    recommendation is to ship (which would move R4.5 beyond its committed spike scope). Depends on both 050 and 051
+    being complete. TASK-INDEX.md and current-task.md are owned by the main session (sub-agent write boundary).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

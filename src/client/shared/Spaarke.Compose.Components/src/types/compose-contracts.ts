@@ -237,6 +237,16 @@ export interface ComposeActionHistoryEntry {
  * on the server, which flattens table-cell + nested-table paragraphs); `paraId`
  * is the 8-hex `w14:paraId` (`ST_LongHexNumber`, `0 < x < 0x80000000`); `isMinted`
  * is true when the server minted the id (the source `.docx` paragraph had none).
+ *
+ * WS-3/WS-4 fields (ai-advanced-capabilities-agreements-r1 task 011 — client mirror of
+ * `Sprk.Bff.Api.Services.Compose.ParaIdMapEntry`'s additive fields, spaarkeai-compose-fidelity-r4.5
+ * tasks 031/040): populated ONLY on a Load response built from the projection `Build()` path (the
+ * server doc comment: "Only populated on the projection Build() path; the Load-side ParaIdPreParser
+ * leaves it null"), so every field below is optional and `undefined`-safe for older callers/fixtures
+ * that predate WS-4. `computedNumber`/`listPath` are what `composeCitationResolver.ts` (task 011)
+ * reads to resolve a review finding's `sectionRef` ("Section 4.2" / "4.2(b)(iii)" / "Sections 4–7")
+ * deterministically to a paraId — see that module for the citation-resolution semantics, mirrored
+ * from `Services/Compose/CitationResolver.cs`.
  */
 export interface ParaIdMapEntry {
   /** Paragraph position in document order (server `body.Descendants<Paragraph>()` order). */
@@ -245,6 +255,57 @@ export interface ParaIdMapEntry {
   paraId: string;
   /** True when the server minted this id (source paragraph had no `w14:paraId`). */
   isMinted: boolean;
+  /** The exact Word-computed legal number label (e.g. `"4.2"`, `"a)"`, `"•"` for a bullet glyph), or
+   *  `undefined` for a non-numbered paragraph / a pre-WS-4 response. */
+  computedNumber?: string;
+  /** The paragraph's raw `w:ilvl` (0-based numbering level), or `undefined` alongside `computedNumber`. */
+  numberingLevel?: number;
+  /** The per-level ordinal counter chain (e.g. `[4, 2]` for label `"4.2"`) — the exact matching key
+   *  `composeCitationResolver.ts` uses; `undefined` alongside `computedNumber`. */
+  listPath?: readonly number[];
+  /** The paragraph's style-derived outline level (independent of numbering), or `undefined`. */
+  headingLevel?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Phase-1 mammoth removal — server DOCX→editor projection (design
+// notes/design-server-side-docx-html-conversion.md)
+// ---------------------------------------------------------------------------
+//
+// Client mirror of `Sprk.Bff.Api.Services.Compose.ComposeDocxProjection` (via the wire
+// `LoadComposeDocumentResponse.projection`). The server's single-walk `ComposeDocxProjectionBuilder`
+// assigns each paragraph's `w14:paraId` and emits its editor block from the SAME paragraph instance, so
+// the editor mounts `html` DIRECTLY (the paraId extension parses `data-paraid`) instead of running the
+// client mammoth convert + position-based `stampParaIds` — eliminating the two-engine drift that caused
+// the recurring save-abort bug class.
+//
+// Privacy: `html` carries document content (Tier 3) — in-memory to the editor render only, never logged.
+
+/** Server DOCX→editor projection status — `success` (fully projected), `partial` (fidelity warnings), `failed` (could not project). */
+export type ComposeProjectionStatus = 'success' | 'partial' | 'failed';
+
+/**
+ * The server DOCX→editor projection. When present the editor mounts {@link html} directly; when
+ * {@link canEdit} is false (or {@link status} is `failed`) the editor fails closed to a read-only /
+ * "Open in Word" state rather than mounting a blank editable doc over a non-empty baseline.
+ */
+export interface ComposeServerProjection {
+  /** `success` | `partial` | `failed`. */
+  status: ComposeProjectionStatus;
+  /** False ⇒ mount read-only / "Open in Word" (fail-closed), never a blank editable doc. */
+  canEdit: boolean;
+  /** paraId-tagged TipTap HTML (`data-paraid` per block). Tier 3 — never logged. Empty when `status === 'failed'`. */
+  html: string;
+  /** Machine-readable fidelity warnings — codes + counts only (no document content). */
+  warnings: readonly ComposeProjectionWarning[];
+  /** Projection contract version (Phase 1: `compose-html-v1`). */
+  schemaVersion: string;
+}
+
+/** A single projection fidelity warning — a stable `code` and its occurrence `count` (Tier 1 safe). */
+export interface ComposeProjectionWarning {
+  code: string;
+  count: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -338,33 +399,46 @@ export interface ImportedComment {
 }
 
 // ---------------------------------------------------------------------------
-// R3 FR-01 / FR-01a — the client content-model save contract (task 027)
+// G1 (FR-01, task 020) — the durable cross-session authored-vs-imported origin marker
 // ---------------------------------------------------------------------------
 //
-// Mirror of the server save DTOs (`Sprk.Bff.Api.Services.Compose.ComposeEditedParagraph` +
-// `ComposeContentModel`, task 022/026). The client STOPS authoring `.docx` bytes: a dirty save of a
-// loaded doc sends the paraId-keyed changed paragraphs (`ComposeEditedParagraph[]`) and the server
-// synthesizes the tracked-change delta onto the retained original; a born-in-editor save sends the full
-// `ComposeContentModel` and the server RENDERS the high-fidelity `.docx`. Field names are camelCase; the
-// BFF deserializes case-insensitively and `kind`/`alignment` map to the server enums (string values).
+// Client mirror of the server `ComposeOrigin` enum (`Sprk.Bff.Api.Services.Compose`), wire-serialized
+// via `CamelCaseStringEnumConverter` as `"authored"` | `"imported"`. Persisted on `sprk_document.
+// sprk_composeorigin` at create-on-save; returned by both Load (`LoadComposeDocumentResponse.origin`,
+// Path A only) and Save (`SaveComposeDocumentResponse.origin`, every save). Routes a REOPENED authored
+// document onto the clean renderer/contentModel save path instead of the op-log/tracked path — the
+// discriminator this replaces (SPE-id presence) was the exact defect G1 exists to fix; NEVER re-derive
+// origin from SPE-id or document content client-side either.
+//
+// BINDING null-handling contract (mirrors the server `ComposeOrigin` remarks): `origin` is `null`/
+// `undefined` for a Path B continuation (no `sprk_document` record yet) OR a legacy pre-existing record
+// that predates this field (no backfill). Every consumer MUST treat a missing value as `'imported'` —
+// NEVER `state.origin === 'authored'` as the ONLY branch; always compare the positive case.
+export type ComposeDocumentOrigin = 'authored' | 'imported';
+
+/**
+ * G7 (FR-06, task 022): the Save split-button choice.
+ *   - `'version'` (default / primary) — **Save Version**: replace the existing `sprk_document` + SPE item in
+ *     place (a transient draft dedups to ONE record via its {@link ComposeDocumentRef.transientKey}).
+ *   - `'new'` — **Save New Document**: a deliberate FORK; mint a fresh transient key + force create-on-save so
+ *     a brand-new `sprk_document` record is created (the server skips transient-key dedup for this call).
+ */
+export type ComposeSaveMode = 'version' | 'new';
+
+// ---------------------------------------------------------------------------
+// R3 FR-01a — the client content-model save contract (task 027)
+// ---------------------------------------------------------------------------
+//
+// Mirror of the server save DTO `ComposeContentModel` (task 022/026). The client STOPS authoring
+// `.docx` bytes: a born-in-editor save sends the full `ComposeContentModel` and the server RENDERS the
+// high-fidelity `.docx`; a dirty save of a LOADED doc sends the ID-anchored task-003 operation log
+// (`stepOperationInterceptor.ts`) that `ComposeShadowPatchEngine` applies — the R3 paragraph-diff
+// contract (`ComposeEditedParagraph[]`) this section originally also mirrored was retired by tasks
+// 023/032. Field names are camelCase; the BFF deserializes case-insensitively and `kind`/`alignment`
+// map to the server enums (string values).
 //
 // Privacy: `text`/`runs[].text` carry document content (Tier 3) — carried in-memory to the Save request
 // only, never on an SSE frame / PaneEventBus payload / log surface (ADR-015).
-
-/**
- * One edited paragraph on a dirty-loaded save (FR-01): its `w14:paraId` (the E2 splice key) + its new
- * REJECT-STATE settled text (accepted edits baked in, pending AI redlines excluded — those ride the
- * `annotations` list). The server rewrites exactly this paragraph in the retained original as native
- * `w:ins`/`w:del`. Only paragraphs that EXISTED at load and whose settled text changed are emitted —
- * a paraId the retained original lacks (a split/insert) is out of E1 delta scope (the server synthesizer
- * fails fast on an unmatched paraId; structural insert/split is a future synthesizer extension).
- */
-export interface ComposeEditedParagraph {
-  /** The paragraph's `w14:paraId` (8-hex; must exist in the retained original). */
-  paraId: string;
-  /** The paragraph's new reject-state settled text. Tier 3 (document content). */
-  text: string;
-}
 
 /**
  * C2 fix (UAT 2026-07-20): one entry of the ordered load-time paraId map the save sends so the server
@@ -470,6 +544,16 @@ export interface ComposeDocumentRef {
    * born-in-editor doc resolves its baseline (UAT 2026-07-19 P2).
    */
   driveId?: string;
+  /**
+   * G7 (FR-06, task 022): the client-minted stable transient-draft key (`crypto.randomUUID()`,
+   * {@link mintTransientKey}). Set ONCE when a TRANSIENT draft is mounted (Browse / assistant-upload /
+   * AI-draft seed / blank / template — every `mountTransient` / `mountDraftHtml` door) and sent on every
+   * create-on-save so repeated calls dedup to ONE `sprk_document` record via the server
+   * `sprk_composetransientkey_uk` alt-key instead of minting duplicates (the 8-duplicate defect).
+   * Undefined for a loaded/promoted document (it already has a real `speDriveItemId`) and for older
+   * mounts that predate G7 (server then skips dedup — unchanged behavior).
+   */
+  transientKey?: string;
 }
 
 /**
@@ -1224,3 +1308,41 @@ export const logFlowEvent: StubReceiver = (flowName, event) => {
     documentRef: event.documentRef,
   });
 };
+
+// ---------------------------------------------------------------------------
+// R4 FR-11 — the shared, versioned OPERATION SCHEMA (spaarkeai-compose-r4 task 003)
+// ---------------------------------------------------------------------------
+//
+// The op-schema spine both the client (ProseMirror step interceptor, task 020) and
+// the server (ComposeShadowPatchEngine, task 030) implement identically. Authored in
+// the sibling module `./compose-operations.ts` and RE-EXPORTED here (project §11:
+// EXTEND the contracts module, do NOT fork/duplicate it) so `compose-contracts.ts`
+// remains the single client contract surface. Server mirror:
+// `Sprk.Bff.Api.Services.Compose.Operations.ComposeOperation`.
+export {
+  COMPOSE_OPERATION_SCHEMA_VERSION,
+  COMPOSE_OPERATION_TYPES,
+  isComposeOperation,
+  isComposeOperationLog,
+} from './compose-operations';
+export type {
+  ComposeOperationType,
+  ComposeRunPoint,
+  ComposeRunRange,
+  ComposeMarkType,
+  ComposeBlockAttr,
+  ComposeParagraphPosition,
+  InsertTextOperation,
+  DeleteRangeOperation,
+  ReplaceRangeOperation,
+  SetMarkOperation,
+  ClearMarkOperation,
+  SplitParagraphOperation,
+  MergeParagraphOperation,
+  InsertParagraphOperation,
+  DeleteParagraphOperation,
+  SetBlockAttrOperation,
+  ComposeOperation,
+  ComposeOperationLog,
+  ComposeAnchoredComment,
+} from './compose-operations';

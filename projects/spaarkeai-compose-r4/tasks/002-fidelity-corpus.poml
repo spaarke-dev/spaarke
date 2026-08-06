@@ -1,0 +1,165 @@
+<task id="002" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Assemble the fidelity corpus as LFS fixtures (sample-docs + owner worst-offenders)</title>
+    <phase>0 Gate</phase>
+    <gate>startable</gate>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New fixture files + a catalog markdown; no `.cs`/`.ts` implementation, no cutover. New-file creation with a defined contract — STANDARD. (Executed with the `testing` tag TEST-MODIFYING override per root CLAUDE.md §8 — Step 9.5 code-review + adr-check ran unconditionally.)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical assembly + cataloguing against a fully-specified feature-coverage matrix; no architectural judgment.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>W0a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps></deps>
+    <tags>testing,fixtures,docx</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started>2026-07-22</started>
+    <completed>2026-07-22</completed>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    Assemble the R4 fidelity corpus as Git-LFS `.docx` fixtures. Copy the three owner sample documents from
+    `projects/spaarkeai-compose-r4/notes/sample-docs/` into a new fixtures directory
+    `tests/fixtures/compose-corpus/` and author a `corpus-manifest.md` cataloguing each document's
+    worst-offender OOXML features and the known defect it exercises. `.docx` is already LFS-tracked via
+    `.gitattributes` (`*.docx filter=lfs diff=lfs merge=lfs -text`) — confirm the copied files land as LFS
+    pointers, not raw binaries.
+
+    THE THREE SAMPLE DOCS TO REGISTER (copy verbatim from `notes/sample-docs/`):
+    (1) `PAT 109270W-1 - CLAIMS track changes vs US12470413 claims(206092900.1).docx` — the CIPO patent
+        letter: THE Phase-0 spike/UAT document. Exercises the known interior-location HTTP 422, empty-paragraph
+        drift (mammoth dropped 9 paragraphs, 48 vs 39), and pre-existing track-changes import.
+    (2) `Engagement Letter.docx` — a formatted legal contract (letterhead, numbered clauses).
+    (3) `01 - Test Matter Create Fields Only.docx` — the fields / content-controls (SDT) case.
+
+    The manifest is a table with columns: filename, feature coverage (track changes / fields / SDT / tables /
+    tabs / multi-level numbering / headers-footers / empty paragraphs / multi-section), and the known-defect
+    it exercises. Include PLACEHOLDER rows for the owner-supplied worst-offenders that arrive during Phase 0
+    (spec Unresolved Question — corpus documents). Do NOT invent owner documents; leave labelled placeholders.
+  </prompt>
+
+  <role>
+    Test-fixtures engineer who understands the R4 acceptance model: the byte-diff harness (task 004) and the
+    hard-replace gate (task 006) both consume this corpus as their acceptance evidence base. Knows Git-LFS
+    pointer semantics and OOXML feature vocabulary (w:ins/w:del, SDT/content controls, w:fldSimple, multi-level
+    numbering, sectPr).
+  </role>
+
+  <goal>
+    A new `tests/fixtures/compose-corpus/` directory containing the three owner sample documents registered as
+    Git-LFS `.docx` fixtures (LFS pointers, verified via `git lfs ls-files`), plus a `corpus-manifest.md`
+    cataloguing each document's worst-offender feature coverage and the known defect it exercises, with clearly
+    labelled placeholder rows for the owner-supplied worst-offenders that arrive later in Phase 0. The CIPO
+    patent letter is flagged as THE Phase-0 spike/UAT document.
+  </goal>
+
+  <context>
+    <background>
+      R4 is a hard-replace cutover with no A/B parallel-run; the Phase 0 proof gate (task 006) is the safety
+      net, and the byte-diff harness (task 004) is its acceptance evidence — both need a fixed, versioned
+      corpus (spec NFR-08, design §6 Phase 0). The three owner sample docs already exist under
+      `notes/sample-docs/`; this task promotes them to first-class LFS fixtures under a stable test path and
+      catalogues what each one stresses. The owner will supply additional redacted worst-offenders during
+      Phase 0 (spec Unresolved Question: "Corpus documents — owner to supply the worst-offender set"), so the
+      manifest carries placeholder rows now. `.docx` is already LFS-tracked in `.gitattributes`.
+    </background>
+    <relevant-files>
+      <file role="new">tests/fixtures/compose-corpus/PAT 109270W-1 - CLAIMS track changes vs US12470413 claims(206092900.1).docx — the CIPO patent letter (copy from notes/sample-docs/); THE Phase-0 spike/UAT doc</file>
+      <file role="new">tests/fixtures/compose-corpus/Engagement Letter.docx — formatted legal contract (copy from notes/sample-docs/)</file>
+      <file role="new">tests/fixtures/compose-corpus/01 - Test Matter Create Fields Only.docx — fields / content-controls case (copy from notes/sample-docs/)</file>
+      <file role="new">tests/fixtures/compose-corpus/corpus-manifest.md — the feature-coverage + known-defect catalog with owner-placeholder rows</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r4/notes/sample-docs/ — source of the three documents to copy verbatim</file>
+      <file role="design">projects/spaarkeai-compose-r4/notes/as-built-inventory.md — the known R3 UAT failure surfaces (interior-location 422, empty-paragraph drift) each corpus doc must exercise</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-01, NFR-01, NFR-08, Unresolved Questions (corpus)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">No task dependencies — startable Phase-0 gate task; tasks 004 and 005 depend on THIS.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">The three named sample documents MUST be copied verbatim from `notes/sample-docs/` into `tests/fixtures/compose-corpus/` and land as Git-LFS pointers (not raw binaries). Scope: verify with `git lfs ls-files` / `git check-attr filter`.</constraint>
+    <constraint source="spec / FR-01 / NFR-01">The manifest MUST catalog each doc's feature coverage across at least: track changes, fields, SDT/content controls, tables, tabs, multi-level numbering, headers/footers, empty paragraphs, multi-section — and name the known defect each exercises. Scope: the CIPO doc is flagged as the interior-location-422 + empty-paragraph-drift case and THE Phase-0 spike/UAT doc.</constraint>
+    <constraint source="spec / Unresolved Question">The manifest MUST include labelled placeholder rows for owner-supplied worst-offenders arriving during Phase 0. Scope: do NOT fabricate owner documents — placeholders only.</constraint>
+    <constraint source="project">Do NOT bloat the repo with un-LFS'd binaries. Scope: confirm `.gitattributes` `*.docx filter=lfs` applies to the new path before committing.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Git-LFS fixture registration; OOXML worst-offender feature vocabulary; R4 corpus acceptance model; R3 known UAT failure surfaces</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r4/notes/as-built-inventory.md</file>
+      <file>projects/spaarkeai-compose-r4/spec.md</file>
+      <file>projects/spaarkeai-compose-r4/design.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="LFS-tracked docx fixtures" location=".gitattributes">
+        `*.docx filter=lfs diff=lfs merge=lfs -text` — copying a `.docx` under a tracked path auto-registers it as an LFS pointer; verify with `git lfs ls-files`.
+      </pattern>
+      <pattern name="Known failure surfaces as acceptance targets" location="projects/spaarkeai-compose-r4/notes/as-built-inventory.md">
+        The R3 UAT failure surfaces (interior-location 422 via text-search, empty-paragraph drift 48→39, eTag-mismatch) — map each corpus doc to the defect(s) it exercises so the harness has a target.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: STANDARD / 📋 REASON / 📖 PROTOCOL STEPS). Load spec §FR-01/NFR-01/NFR-08 + as-built-inventory known-failure surfaces.</step>
+    <step order="1" name="Create the fixtures directory">Create `tests/fixtures/compose-corpus/`. Confirm `.gitattributes` `*.docx filter=lfs` covers this path (`git check-attr filter tests/fixtures/compose-corpus/x.docx`).</step>
+    <step order="2" name="Copy the three sample docs">Copy the three named documents verbatim from `notes/sample-docs/` into the fixtures directory (preserve filenames exactly, including spaces + parentheses).</step>
+    <step order="3" name="Verify LFS registration">Run `git add` + `git lfs ls-files` (or `git lfs status`) to confirm all three land as LFS pointers, not raw binaries.</step>
+    <step order="4" name="Author the manifest">Write `corpus-manifest.md` with the feature-coverage + known-defect table for the three docs (CIPO flagged as THE Phase-0 spike/UAT doc), plus labelled placeholder rows for owner worst-offenders.</step>
+    <step order="5" name="Close out">Update `projects/spaarkeai-compose-r4/tasks/TASK-INDEX.md`: set task 002 status to ✅. Record any deviation (e.g., an LFS-tracking surprise) in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>A copied `.docx` does NOT land as an LFS pointer (raw binary staged) — STOP before committing; a mis-tracked multi-MB binary in git history is expensive to reverse. Surface the `.gitattributes` gap.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No corpus fixtures dir exists; the sample docs live only under `notes/sample-docs/` (not a test-consumable path). Verified via Glob of `tests/fixtures/`.</existing>
+    <extension>Cannot extend an existing fixtures set — none targets Compose corpus round-trip. This creates the single canonical corpus path both task 004 (harness) and task 006 (gate) consume.</extension>
+    <cost-of-doing-nothing>Without a fixed, versioned corpus, the NFR-01 byte-diff harness and the hard-replace gate (NFR-08) have no acceptance evidence — the cutover would proceed with no safety net.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="fixture">tests/fixtures/compose-corpus/*.docx (3 LFS-tracked sample documents)</output>
+    <output type="doc">tests/fixtures/compose-corpus/corpus-manifest.md (feature-coverage + known-defect catalog with owner-placeholder rows)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">`tests/fixtures/compose-corpus/` contains the three named sample documents copied verbatim from `notes/sample-docs/`.</criterion>
+    <criterion testable="true">`git lfs ls-files` shows all three `.docx` files as LFS pointers (no raw binary staged).</criterion>
+    <criterion testable="true">`corpus-manifest.md` catalogs each doc across the required feature columns (track changes / fields / SDT / tables / tabs / multi-level numbering / headers-footers / empty paragraphs / multi-section) and names the known defect each exercises.</criterion>
+    <criterion testable="true">The CIPO patent letter is flagged in the manifest as THE Phase-0 spike/UAT doc and the interior-location-422 + empty-paragraph-drift case.</criterion>
+    <criterion testable="true">The manifest includes clearly labelled placeholder rows for owner-supplied worst-offenders (none fabricated).</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 002 as ✅ and any deviation is recorded in projects/spaarkeai-compose-r4/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Owner supplies additional redacted worst-offenders during Phase 0 (spec Unresolved Question). The manifest's
+    placeholder rows are the intake slots. Blocks the final NFR-01 acceptance bar, NOT Phase-0 start — the three
+    seed docs are enough to stand up the harness (task 004) and the applier spike (task 005).
+
+    COMPLETION SUMMARY (2026-07-22): All three sample docs copied verbatim from `notes/sample-docs/` into
+    `tests/fixtures/compose-corpus/` (byte-identical, `diff -q` confirmed) and staged; `git lfs ls-files` +
+    `git show :<path>` confirm all three land as LFS pointers (not raw binaries) — the escalation trigger
+    did NOT fire. `corpus-manifest.md` authored with the required feature-coverage table (verified by direct
+    OOXML inspection, not narrative assumption) + 5 labelled owner-intake placeholder rows (§2) + a consumers
+    section (§3). CIPO doc flagged as THE Phase-0 spike/UAT doc + interior-location-422 + empty-paragraph-drift
+    case per constraint. DEVIATION recorded in `projects/spaarkeai-compose-r4/notes/task-002-corpus-deviations.md`:
+    empirical OOXML inspection found the CIPO doc's current saved copy carries no live `w:ins`/`w:del` markup
+    (track-changes-clean as staged, despite filename/design-doc framing), `Engagement Letter.docx` has no
+    numbered clauses, and `01 - Test Matter Create Fields Only.docx` has no OOXML `w:sdt`/`w:fldSimple` (its
+    "fields" are semantic/business data fields in prose, not Word field codes). All three files were still
+    copied verbatim per the task's explicit instruction; the manifest documents both the task's narrative
+    framing and the verified findings side by side so tasks 004/006 work from ground truth. TASK-INDEX.md
+    and current-task.md were NOT touched (sub-agent write boundary — owned by the main session per dispatch
+    instructions).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

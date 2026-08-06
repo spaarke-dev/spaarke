@@ -3,7 +3,10 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Models.Memory;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Memory;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
@@ -44,6 +47,8 @@ public sealed class ContextBinder : IContextBinder
     private readonly IUserOrgContextReader _userOrgContextReader;
     private readonly IHttpContextAccessor? _httpContextAccessor;
     private readonly IMemoryItemStore? _memoryItemStore;
+    private readonly IPinnedContextRepository? _pinnedContextRepository;
+    private readonly PinnedContextRecallOptions _pinnedContextRecallOptions;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ContextBinder> _logger;
 
@@ -123,6 +128,24 @@ public sealed class ContextBinder : IContextBinder
     /// no-op) so the org block stays absent rather than throwing. ADR-039: preference-only — this is context
     /// that biases the one turn's prompt; it never feeds AgentToolFilterContext / grounding / dispatch.
     /// </param>
+    /// <param name="pinnedContextRepository">
+    /// User-curated pinned-context repository (R6 Pillar 7, task 065). Optional — when the DI container
+    /// has no registration (or a caller constructs <see cref="ContextBinder"/> directly, e.g. existing
+    /// tests) the Binder self-produces NO pinned-context block. When present AND a MATTER host is supplied,
+    /// the Binder reads the matter's pinned facts (<see cref="IPinnedContextRepository.GetByMatterAsync"/>)
+    /// and folds a deterministic, TopK-capped "Pinned context" block into the record-memory fragment
+    /// (memory-activation Move 1: pins were written but never recalled into any prompt). Registered
+    /// unconditionally (AnalysisServicesModule) so DI injects it in production. ADR-015: pins are BY DESIGN
+    /// user-curated content — the user explicitly chose to remember them; this recall path never edits or
+    /// classifies them. A repo read failure soft-fails to no block (a bind is never taken down by pins).
+    /// </param>
+    /// <param name="pinnedContextRecallOptions">
+    /// Options for the pinned-context recall (kill switch <c>Enabled</c> + <c>TopK</c> cap). Optional —
+    /// defaults to a fresh <see cref="PinnedContextRecallOptions"/> (Enabled=true, TopK=5) when unregistered.
+    /// The Binder uses only <c>Enabled</c> (short-circuit) + <c>TopK</c> (deterministic cap); the embedding
+    /// ranker (<see cref="PinnedContextRecallService"/>) is NOT invoked here — matter pins are user-curated
+    /// and few, so this path injects ALL of them (capped), byte-stable across turns for the budget/fingerprint.
+    /// </param>
     public ContextBinder(
         ChatSessionManager sessionManager,
         ILogger<ContextBinder> logger,
@@ -133,7 +156,9 @@ public sealed class ContextBinder : IContextBinder
         TimeProvider? timeProvider = null,
         ICallerSystemUserResolver? callerSystemUserResolver = null,
         IStatedProfileReader? statedProfileReader = null,
-        IUserOrgContextReader? userOrgContextReader = null)
+        IUserOrgContextReader? userOrgContextReader = null,
+        IPinnedContextRepository? pinnedContextRepository = null,
+        IOptions<PinnedContextRecallOptions>? pinnedContextRecallOptions = null)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -144,6 +169,8 @@ public sealed class ContextBinder : IContextBinder
         _userOrgContextReader = userOrgContextReader ?? NullUserOrgContextReader.Instance;
         _httpContextAccessor = httpContextAccessor;
         _memoryItemStore = memoryItemStore;
+        _pinnedContextRepository = pinnedContextRepository;
+        _pinnedContextRecallOptions = pinnedContextRecallOptions?.Value ?? new PinnedContextRecallOptions();
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -455,6 +482,30 @@ public sealed class ContextBinder : IContextBinder
                 request.HostEntityType!, request.HostEntityId!, ct).ConfigureAwait(false);
         }
 
+        // Pinned-context PROMPT BLOCK (memory-activation Move 1): the pins-recall integrity fix — pins were
+        // written (manage-pinned-context tool + Q7 UI) but NEVER recalled into any prompt (the only reader
+        // was the dark MemoryCompositionService). Sourced from the SEPARATE pinned-context repository (its own
+        // Cosmos container), so this is independent of the record-memory store above and runs even when
+        // _memoryItemStore is null. Matter-scoped only (pins bind to a matter via GetByMatterAsync), gated on
+        // a resolvable tenant partition key, deterministic order + TopK cap (byte-stable → safe for the
+        // RecordMemory budget + fingerprint), soft-fail. Appended to recordMemoryFragment so it rides the SAME
+        // budget + prompt-append sites (v1 minimal-surface; a sibling BoundInputs field is the future cleanup).
+        if (hasHost
+            && _pinnedContextRepository is not null
+            && _pinnedContextRecallOptions.Enabled
+            && string.Equals(request.HostEntityType, ParentEntityContext.EntityTypes.Matter, StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(request.TenantId))
+        {
+            var pinnedContextFragment = await ResolvePinnedContextFragmentAsync(
+                request.TenantId!, request.HostEntityId!, ct).ConfigureAwait(false);
+            if (pinnedContextFragment is not null)
+            {
+                recordMemoryFragment = string.IsNullOrEmpty(recordMemoryFragment)
+                    ? pinnedContextFragment
+                    : recordMemoryFragment + "\n\n" + pinnedContextFragment;
+            }
+        }
+
         var envelope = ContextEnvelopeReferenceProducer.Assemble(
             userFragment: userFragment,
             workspaceFragment: workspaceFragment,
@@ -667,6 +718,75 @@ public sealed class ContextBinder : IContextBinder
                 hostEntityType, hostEntityId);
             return null;
         }
+    }
+
+    // ── Pinned-context PROMPT BLOCK (memory-activation Move 1): read the matter's user-curated pinned
+    //    facts and render a deterministic, TopK-capped block. Soft-fails to null so a repo outage never
+    //    takes down the bind (same posture as ResolveRecordMemoryFragmentAsync). ADR-039: pins are
+    //    preference/context that biases the one turn's PROMPT — they never feed grounding / dispatch. ────
+
+    private async Task<string?> ResolvePinnedContextFragmentAsync(
+        string tenantId, string matterId, CancellationToken ct)
+    {
+        try
+        {
+            var pins = await _pinnedContextRepository!
+                .GetByMatterAsync(tenantId, matterId, ct)
+                .ConfigureAwait(false);
+            return RenderPinnedContextBlock(pins, _pinnedContextRecallOptions.TopK);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "ContextBinder: pinned-context read failed for matter {MatterId} — the pinned-context prompt " +
+                "block degrades to absent (soft-fail; a bind is never taken down by pins). NFR-07.",
+                matterId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Renders the matter's pinned facts into a single deterministic prompt block, or <c>null</c> when there
+    /// is nothing to render. DETERMINISTIC ORDER (<see cref="PinnedContextItem.CreatedAt"/> then ordinal
+    /// <see cref="PinnedContextItem.Id"/>) so the block is byte-stable across turns — the record-memory
+    /// fragment it is appended to carries determinism/byte-pin contract tests. Empty-content pins are skipped;
+    /// at most <paramref name="topK"/> pins are rendered (the same NFR-10 budget bound the recall service uses).
+    /// </summary>
+    internal static string? RenderPinnedContextBlock(IReadOnlyList<PinnedContextItem> pins, int topK)
+    {
+        if (pins is null || pins.Count == 0)
+        {
+            return null;
+        }
+
+        var cap = topK > 0 ? topK : pins.Count;
+        var ordered = pins
+            .Where(p => !string.IsNullOrWhiteSpace(p.Content))
+            .OrderBy(p => p.CreatedAt)
+            .ThenBy(p => p.Id, StringComparer.Ordinal)
+            .Take(cap)
+            .ToList();
+
+        if (ordered.Count == 0)
+        {
+            return null;
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("### Pinned Context (user-curated)");
+        sb.AppendLine("The user has pinned these facts for this matter. Treat them as authoritative context for this conversation:");
+        foreach (var pin in ordered)
+        {
+            var title = pin.Title?.Trim();
+            var content = pin.Content.Trim();
+            sb.AppendLine(string.IsNullOrEmpty(title) ? $"- {content}" : $"- {title} — {content}");
+        }
+
+        return sb.ToString().TrimEnd();
     }
 
     // ── Record-memory references (task 053, FR-B-04): read the host record's structured memory and

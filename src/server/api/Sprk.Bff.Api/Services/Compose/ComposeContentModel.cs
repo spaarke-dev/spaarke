@@ -131,6 +131,14 @@ public sealed record ComposeInlineRun
 
     /// <summary>Single underline (<c>w:u val="single"</c>).</summary>
     public bool Underline { get; init; }
+
+    /// <summary>
+    /// G5 (FR-05, task 033): optional hyperlink target. When non-null/non-empty the renderer wraps this
+    /// run in a clean <c>w:hyperlink</c> pointing at an EXTERNAL relationship (added to the
+    /// MainDocumentPart's <c>.rels</c> with <c>TargetMode="External"</c>) — the authored (clean) path's
+    /// hyperlink representation (mirrors the TipTap <c>link</c> mark's <c>href</c>). Null for a plain run.
+    /// </summary>
+    public string? Href { get; init; }
 }
 
 /// <summary>A native table (<c>w:tbl</c>): an ordered list of rows.</summary>

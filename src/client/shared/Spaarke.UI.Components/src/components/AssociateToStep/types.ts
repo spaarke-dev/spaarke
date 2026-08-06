@@ -310,4 +310,20 @@ export interface AssociateToStepProps {
    * its header (there is nothing to lock).
    */
   locked?: boolean;
+
+  /**
+   * Header presentation variant.
+   *
+   * - `'default'` (wizard use) — a prominent `size=500` "Associate To" heading
+   *   with the "Link this record…" subtitle and the "You can always link records
+   *   later." skip hint. This is the standalone wizard-step look.
+   * - `'compact'` — the "Associate To" heading renders at field-label size
+   *   (`size=300`), matching a sibling `<Field>` label, and BOTH the subtitle and
+   *   the skip hint are suppressed. Used when the step is embedded as one field
+   *   among others inside a denser surface (e.g. the New-conversation modal, R3
+   *   UAT 2026-07-23 round 5), where the wizard chrome reads as visual noise.
+   *
+   * @default 'default'
+   */
+  variant?: 'default' | 'compact';
 }

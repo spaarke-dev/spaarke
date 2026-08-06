@@ -35,7 +35,15 @@ export interface UseThreadPollOptions {
   sinceCursorRef: React.MutableRefObject<string | undefined>;
   /** Current last-seen watermark — read fresh each tick, same reasoning. */
   unreadSinceRef: React.MutableRefObject<string | undefined>;
-  onMessages: (messages: TimelineMessage[]) => void;
+  /**
+   * Hands the polled messages back. `isInitialLoad` is `true` for the full,
+   * cursor-less load that fires on mount AND whenever `threadId` changes — the
+   * consumer MUST treat that batch as the AUTHORITATIVE set for the new thread
+   * (replace, not merge), otherwise switching threads unions the new thread's
+   * messages into the previous thread's (RB R3 UAT 2026-07-28). Delta ticks
+   * (`false`) carry only messages newer than the cursor and are merged.
+   */
+  onMessages: (messages: TimelineMessage[], isInitialLoad: boolean) => void;
   onUnread: (unreadCount: number) => void;
   onError?: (error: unknown) => void;
   /** Set false to suspend polling entirely (e.g. missing threadId). Default true. */
@@ -43,8 +51,18 @@ export interface UseThreadPollOptions {
 }
 
 export interface UseThreadPollResult {
-  /** Triggers an out-of-band poll immediately (used after a send, for optimistic-then-reconcile refresh). */
+  /**
+   * Triggers an out-of-band DELTA poll immediately (fetches only messages newer than the cursor and MERGES them).
+   * Use after a send, where the goal is to surface the just-sent message. A delta poll canNOT remove a message that
+   * the server has stopped returning (e.g. a soft-deleted one), because merge never deletes — use {@link refresh} for that.
+   */
   pollNow: () => void;
+  /**
+   * Triggers a FULL reload immediately (fetches the whole thread with no `since` cursor and REPLACES the message list).
+   * Use for the manual Refresh control and after a soft-delete, so rows the server no longer returns actually drop out
+   * (round-8.4 UAT items 1/4/10 — a delta `pollNow` left deleted messages visible).
+   */
+  refresh: () => void;
 }
 
 export function useThreadPoll(options: UseThreadPollOptions): UseThreadPollResult {
@@ -76,7 +94,7 @@ export function useThreadPoll(options: UseThreadPollOptions): UseThreadPollResul
           getUnreadCount(threadId, { since: unreadSinceRef.current }, { authenticatedFetch, bffBaseUrl }),
         ]);
 
-        onMessages(threadResult.messages.map(mapThreadMessageDtoToTimelineMessage));
+        onMessages(threadResult.messages.map(mapThreadMessageDtoToTimelineMessage), isInitialLoad);
         onUnread(unreadResult.unreadCount);
       } catch (err) {
         onError?.(err);
@@ -127,5 +145,10 @@ export function useThreadPoll(options: UseThreadPollOptions): UseThreadPollResul
     void poll(false);
   }, [poll]);
 
-  return { pollNow };
+  // Full reload (isInitialLoad=true → onMessages replaces, not merges). Removes soft-deleted rows the delta poll can't.
+  const refresh = React.useCallback(() => {
+    void poll(true);
+  }, [poll]);
+
+  return { pollNow, refresh };
 }

@@ -55,6 +55,20 @@ export interface CodePageAuthInitConfig {
    */
   proactiveRefresh?: boolean;
   /**
+   * If true, involuntary (background / per-fetch) token acquisitions that
+   * exhaust the silent paths (`acquireTokenSilent` → `ssoSilent`) return an
+   * EMPTY token instead of surfacing an interactive `acquireTokenPopup`.
+   * Default `false`.
+   *
+   * Set `true` for MDA-embedded Code Pages that must NEVER pop an involuntary
+   * sign-in window on load (ADR-028 INV-5 — a popup may only fire from an
+   * explicit user auth action, not a tab/widget mount). The user is already
+   * authenticated in the host MDA session, so `ssoSilent` normally succeeds;
+   * on the cold-cache edge the fetch degrades to a retryable error rather than
+   * an out-of-context popup. Precedent: `WorkspaceLayoutWizard`.
+   */
+  requireSilentOnly?: boolean;
+  /**
    * Label included in `console.info` / `console.warn` lines. Surfaces caller
    * identity in production logs. Required (no default) so each consumer's
    * log lines remain attributable post-consolidation.
@@ -137,7 +151,16 @@ export interface CodePageAuthInitializer {
  * ```
  */
 export function createCodePageAuthInitializer(config: CodePageAuthInitConfig): CodePageAuthInitializer {
-  const { clientId, bffBaseUrl, bffApiScope, tenantId, proactiveRefresh = true, logLabel, beforeInit } = config;
+  const {
+    clientId,
+    bffBaseUrl,
+    bffApiScope,
+    tenantId,
+    proactiveRefresh = true,
+    requireSilentOnly = false,
+    logLabel,
+    beforeInit,
+  } = config;
 
   let _initPromise: Promise<void> | null = null;
 
@@ -156,6 +179,7 @@ export function createCodePageAuthInitializer(config: CodePageAuthInitConfig): C
             // "omit and let resolveDefaultAuthority fall back to Xrm" behavior.
             ...(tenantId ? { tenantId } : {}),
             proactiveRefresh,
+            requireSilentOnly,
           });
           console.info(`[${logLabel}] @spaarke/auth initialized successfully`);
         } catch (err) {

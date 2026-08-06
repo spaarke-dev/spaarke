@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="058" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>r5 coordination contract — record R2 ownership of states D/E/F + Exceptions Queue (FR-E6)</title>
+    <phase>5 Pillar E — Reconciliation UI</phase>
+    <gate>startable (documentation; run alongside/after the Pillar E build)</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation update to a coordination note; no code, no new surface; MINIMAL per §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prose coordination edit; low ambiguity — sonnet default, medium effort.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>P5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits a shared coordination artifact owned by the active email-communication-solution-r5 worktree; serialize main-session to avoid clobbering concurrent r5 edits.</parallel-reason>
+    <deps>none</deps>
+    <tags>docs, coordination, pillar-e</tags>
+    <estimated-effort>1 hour</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Update the r1↔r5 coordination contract to record that R2 owns the Pillar E reconciliation surfaces — states D/E/F
+    plus the Exceptions Queue (r5 deferred them) — built in the shared `Spaarke.Communication.Components` lib. State the
+    ownership boundary so r5 does NOT duplicate-build the reconciliation grid + reconcile modals, and require
+    `/conflict-check` before EVERY shared-lib PR (including `dataset-grid-framework-r2` for the DataGrid enhancement).
+  </prompt>
+  <role>SPAARKE platform developer. Cross-project coordination documentation. Follow ADRs strictly.</role>
+  <goal>The r5 coordination note reflects R2 ownership of states D/E/F + Exceptions Queue and the conflict-check-before-every-shared-lib-PR obligation; no duplicate r5 build of the same surfaces.</goal>
+
+  <context>
+    <background>
+      FR-E6 (spec §106): R2's Pillar E supersedes r5's deferred states D/E/F + Exceptions Queue, built in the shared
+      `Spaarke.Communication.Components`. Update `projects/email-communication-solution-r5/notes/email-intelligence-r1-coordination.md`
+      to record R2 ownership + the conflict-check obligation for every shared-lib PR (DataGrid included).
+    </background>
+    <relevant-files>
+      <file role="modify">projects/email-communication-solution-r5/notes/email-intelligence-r1-coordination.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Documentation task; the Pillar E build tasks (050-057) inform the ownership statement but do not block this edit.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: the coordination note only. Record R2 ownership of states D/E/F + Exceptions Queue + the /conflict-check-before-every-shared-lib-PR rule; do NOT restructure the whole note or change r5's other content.</constraint>
+    <constraint source="ADR-045">SCOPE: framing. The ownership statement reflects extend-never-fork: one shared component set, R2 owns the reconciliation surfaces, r5 does not rebuild them.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>r1↔r5 coordination contract</topic>
+    <files>
+      <file>projects/email-communication-solution-r5/notes/email-intelligence-r1-coordination.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare RIGOR: MINIMAL. Read the existing coordination note to find the states D/E/F + Exceptions Queue section.</step>
+    <step order="1">Add/update a section recording R2 ownership of states D/E/F + the Exceptions Queue (shared Spaarke.Communication.Components), superseding r5's deferral.</step>
+    <step order="2">State the /conflict-check-before-every-shared-lib-PR obligation (incl. dataset-grid-framework-r2 for the DataGrid enhancement).</step>
+    <step order="3">Update TASK-INDEX.md: set 058 status to ✅.</step>
+    <step order="4">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <outputs>
+    <output type="doc">projects/email-communication-solution-r5/notes/email-intelligence-r1-coordination.md (R2 ownership recorded)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The coordination note states R2 owns states D/E/F + the Exceptions Queue (shared Spaarke.Communication.Components), superseding r5's deferral.</criterion>
+    <criterion testable="true">The note records the /conflict-check-before-every-shared-lib-PR obligation including dataset-grid-framework-r2.</criterion>
+    <criterion testable="true">No duplicate r5 build of the reconciliation grid + reconcile modals is implied by the note (ownership is unambiguous).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-E6 (§106). Pure coordination doc; keep the edit scoped.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

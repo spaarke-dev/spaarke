@@ -306,6 +306,35 @@ public class AssociationMappingTests
 
     #endregion
 
+    #region Entity Type: sprk_reportcard
+
+    [Fact]
+    public async Task SendAsync_WithReportCardAssociation_SetsRegardingReportCardLookup()
+    {
+        // Arrange - report card is the 7th core record type (task 010 / FR-02);
+        // sprk_reportcard maps to the sprk_regardingreportcard lookup (verified live in task 001).
+        var reportCardId = Guid.NewGuid();
+        var service = CreateService();
+        var request = CreateRequestWithAssociations(new CommunicationAssociation
+        {
+            EntityType = "sprk_reportcard",
+            EntityId = reportCardId,
+            EntityName = "Q3 Report Card"
+        });
+
+        // Act
+        await service.SendAsync(request);
+
+        // Assert
+        _capturedEntity.Should().NotBeNull();
+        var entityRef = _capturedEntity!["sprk_regardingreportcard"] as EntityReference;
+        entityRef.Should().NotBeNull("sprk_reportcard maps to sprk_regardingreportcard lookup");
+        entityRef!.LogicalName.Should().Be("sprk_reportcard");
+        entityRef.Id.Should().Be(reportCardId);
+    }
+
+    #endregion
+
     #region Entity Type: sprk_invoice
 
     [Fact]
@@ -371,6 +400,7 @@ public class AssociationMappingTests
     [InlineData("sprk_project", "sprk_regardingproject")]
     [InlineData("sprk_analysis", "sprk_regardinganalysis")]
     [InlineData("sprk_budget", "sprk_regardingbudget")]
+    [InlineData("sprk_reportcard", "sprk_regardingreportcard")]
     [InlineData("sprk_invoice", "sprk_regardinginvoice")]
     [InlineData("sprk_workassignment", "sprk_regardingworkassignment")]
     public async Task SendAsync_WithEntityType_SetsCorrectLookupField(string entityType, string expectedLookupField)
@@ -727,6 +757,150 @@ public class AssociationMappingTests
 
         // Denormalized fields should reflect primary association
         _capturedEntity["sprk_regardingrecordname"].Should().Be("Primary Matter");
+    }
+
+    #endregion
+
+    #region Reply / Forward Regarding Inheritance (task 124 — UAT R4 D12-1)
+
+    /// <summary>Stubs the source (parent) communication read the inheritance copy performs.</summary>
+    private void SetupSourceCommunication(Guid sourceId, DataverseEntity source) =>
+        _genericEntityServiceMock
+            .Setup(ds => ds.RetrieveAsync(
+                "sprk_communication", sourceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(source);
+
+    private static SendCommunicationRequest CreateInheritingRequest(Guid sourceId) => new()
+    {
+        To = new[] { "recipient@example.com" },
+        Subject = "Re: Test Subject",
+        Body = "<p>Reply body</p>",
+        BodyFormat = BodyFormat.HTML,
+        CommunicationType = CommunicationType.Email,
+        InheritRegardingFromCommunicationId = sourceId,
+        CorrelationId = "inherit-test-001"
+    };
+
+    [Fact]
+    public async Task SendAsync_WithInheritRegarding_CopiesAllPopulatedRegardingLookupsFromSource()
+    {
+        // Arrange — source (parent) carries THREE populated regarding lookups + denormalized pointer.
+        var sourceId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        var orgId = Guid.NewGuid();
+        var contactId = Guid.NewGuid();
+        var source = new DataverseEntity("sprk_communication", sourceId)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId),
+            ["sprk_regardingorganization"] = new EntityReference("sprk_organization", orgId),
+            ["sprk_regardingperson"] = new EntityReference("contact", contactId),
+            ["sprk_regardingrecordname"] = "Smith v. Jones",
+            ["sprk_regardingrecordid"] = matterId.ToString(),
+            ["sprk_regardingrecordtype"] = "sprk_matter",
+            ["sprk_associationcount"] = 3,
+        };
+        SetupSourceCommunication(sourceId, source);
+        var service = CreateService();
+
+        // Act
+        await service.SendAsync(CreateInheritingRequest(sourceId));
+
+        // Assert — the reply draft carries the SAME N (=3) regarding lookups (true inheritance / direct copy).
+        _capturedEntity.Should().NotBeNull();
+        (_capturedEntity!["sprk_regardingmatter"] as EntityReference)!.Id.Should().Be(matterId);
+        (_capturedEntity["sprk_regardingorganization"] as EntityReference)!.Id.Should().Be(orgId);
+        (_capturedEntity["sprk_regardingperson"] as EntityReference)!.Id.Should().Be(contactId);
+        // Denormalized pointer + count mirror the parent.
+        _capturedEntity["sprk_regardingrecordname"].Should().Be("Smith v. Jones");
+        _capturedEntity["sprk_regardingrecordtype"].Should().Be("sprk_matter");
+        _capturedEntity["sprk_associationcount"].Should().Be(3);
+    }
+
+    [Fact]
+    public async Task SendAsync_WithInheritRegarding_IsAdditive_DoesNotSetUnpopulatedSiblings()
+    {
+        // Arrange — source has ONLY a matter regarding; siblings must NOT be invented.
+        var sourceId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        var source = new DataverseEntity("sprk_communication", sourceId)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId),
+        };
+        SetupSourceCommunication(sourceId, source);
+        var service = CreateService();
+
+        // Act
+        await service.SendAsync(CreateInheritingRequest(sourceId));
+
+        // Assert — matter copied; no sibling regarding field fabricated.
+        _capturedEntity.Should().NotBeNull();
+        (_capturedEntity!["sprk_regardingmatter"] as EntityReference)!.Id.Should().Be(matterId);
+        _capturedEntity.Attributes.ContainsKey("sprk_regardingorganization").Should().BeFalse();
+        _capturedEntity.Attributes.ContainsKey("sprk_regardingperson").Should().BeFalse();
+        _capturedEntity.Attributes.ContainsKey("sprk_regardingproject").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SendAsync_WithInheritRegarding_ExplicitAssociationWins_OverInheritedSibling()
+    {
+        // Arrange — source has a matter; the caller ALSO supplies an explicit matter association.
+        // The explicit value must win (inheritance never overwrites an already-set field).
+        var sourceId = Guid.NewGuid();
+        var sourceMatterId = Guid.NewGuid();
+        var explicitMatterId = Guid.NewGuid();
+        var source = new DataverseEntity("sprk_communication", sourceId)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", sourceMatterId),
+        };
+        SetupSourceCommunication(sourceId, source);
+        var service = CreateService();
+        var request = new SendCommunicationRequest
+        {
+            To = new[] { "recipient@example.com" },
+            Subject = "Re: Test",
+            Body = "<p>b</p>",
+            BodyFormat = BodyFormat.HTML,
+            CommunicationType = CommunicationType.Email,
+            InheritRegardingFromCommunicationId = sourceId,
+            Associations = new[]
+            {
+                new CommunicationAssociation { EntityType = "sprk_matter", EntityId = explicitMatterId, EntityName = "Explicit Matter" },
+            },
+            CorrelationId = "inherit-test-002"
+        };
+
+        // Act
+        await service.SendAsync(request);
+
+        // Assert — explicit association wins on the matter lookup.
+        _capturedEntity.Should().NotBeNull();
+        (_capturedEntity!["sprk_regardingmatter"] as EntityReference)!.Id.Should().Be(explicitMatterId);
+    }
+
+    [Fact]
+    public async Task SendAsync_WithoutInheritRegarding_DoesNotReadSourceOrCopyRegarding()
+    {
+        // Arrange — no InheritRegardingFromCommunicationId → existing behavior (no inheritance read).
+        var service = CreateService();
+        var request = new SendCommunicationRequest
+        {
+            To = new[] { "recipient@example.com" },
+            Subject = "New",
+            Body = "<p>b</p>",
+            BodyFormat = BodyFormat.HTML,
+            CommunicationType = CommunicationType.Email,
+            CorrelationId = "no-inherit-test"
+        };
+
+        // Act
+        await service.SendAsync(request);
+
+        // Assert — no regarding fields set (no associations, no inheritance).
+        _capturedEntity.Should().NotBeNull();
+        _capturedEntity!.Attributes.ContainsKey("sprk_regardingmatter").Should().BeFalse();
+        _genericEntityServiceMock.Verify(
+            ds => ds.RetrieveAsync("sprk_communication", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     #endregion

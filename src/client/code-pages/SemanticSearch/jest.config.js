@@ -25,6 +25,17 @@ module.exports = {
     // Map @spaarke/document-operations to source so jest resolves the
     // canonical hook moved by task 031 (spaarkeai-compose-r1).
     '^@spaarke/document-operations$': '<rootDir>/../../shared/Spaarke.DocumentOperations/src/index',
+    // Map the oobModalSizes deep import (mirrors the webpack.config.js
+    // barrel alias, but scoped to this one file) so jest can resolve
+    // EntityRecordDialog.ts's OOB_MODAL_SIZES import. Added by
+    // spaarke-modal-system P7 task 090. Deliberately NOT a blanket
+    // '^@spaarke/ui-components$' mapping: the full barrel pulls in
+    // useForceSimulation's `d3-force` (ESM-only), which ts-jest cannot
+    // transform without additional transformIgnorePatterns config — out of
+    // scope for this task. oobModalSizes.ts has zero other dependencies, so
+    // a file-scoped mapping resolves cleanly.
+    '^@spaarke/ui-components/utils/adapters/oobModalSizes$':
+      '<rootDir>/../../shared/Spaarke.UI.Components/src/utils/adapters/oobModalSizes',
     // Force a single React instance — mirror webpack.config.js. Without this,
     // jest resolves a second react copy from the shared lib's node_modules
     // and React-19 hooks throw "Cannot read properties of null (reading 'useState')".

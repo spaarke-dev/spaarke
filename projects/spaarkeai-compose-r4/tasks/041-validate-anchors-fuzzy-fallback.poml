@@ -1,0 +1,219 @@
+<task id="041" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Validate returned anchors before apply; fuzzy-as-comment last resort (FR-07, apply)</title>
+    <phase>4 AI anchoring</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend + BFF implementation on the AI apply path modifying .ts/.tsx/.cs; correctness-critical anchor validation (never silently place); tags include frontend + bff-api + docx.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Extends the fully-specified generate/apply path from 040 against a defined validation contract; the reusable fuzzy layer (AnnotationReanchorService) already exists, so this is disciplined wiring rather than architectural invention.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Extends the generate/apply path from 040 — shares the AI toolbar / apply surface and editor state.</parallel-reason>
+    <deps>040</deps>
+    <tags>frontend,bff-api,docx</tags>
+    <estimated-effort>2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-07 apply-side. Before applying ANY AI-returned operation, validate EVERY returned
+    paraId/offset against the LIVE document (the current editor/projection state, post-concurrent-edit).
+    An operation whose anchor is unvalidatable — unknown paraId, out-of-range offset, or a range that no
+    longer exists — MUST surface as a REVIEW COMMENT, never be silently placed. The last resort is fuzzy
+    re-anchor via `Services/Compose/AnnotationReanchorService.cs` bands (AUTO / REVIEW / ORPHAN with the
+    ambiguity guard): a confident fuzzy match may re-anchor; an ambiguous or below-threshold match hits the
+    ambiguity guard and surfaces as a comment rather than auto-placing. NO text-search placement anywhere
+    (invariant I-7) — fuzzy content-match survives ONLY as the below-threshold surface-as-comment last resort.
+
+    Reuse `AnnotationReanchorService.cs` (a KEEP asset) as the fuzzy layer — do NOT reimplement bands. This
+    is envelope-only: engine FROZEN (ADR-039, no new dispatch endpoint), AI dispatch via
+    `Services/Ai/PublicContracts/` only (ADR-013, no fork, no AI-internal injection). Client fetches via
+    `@spaarke/auth` (ADR-028).
+  </prompt>
+
+  <role>
+    Senior full-stack engineer: React/TypeScript (the client AI apply path built in 040) + .NET 8
+    (`AnnotationReanchorService` bands + ambiguity guard). Understands the R4 rule that a returned anchor is
+    a claim to be VALIDATED against the live doc, and that an unvalidatable op is surfaced for human review —
+    never text-searched into place, never silently dropped.
+  </role>
+
+  <goal>
+    An AI apply path where every returned operation's paraId/offset is validated against the live document
+    before apply: a valid anchor applies cleanly; an out-of-range/unknown anchor is REFUSED and surfaced as a
+    review comment; a confident fuzzy match (via `AnnotationReanchorService` AUTO band) may re-anchor while an
+    ambiguous match hits the ambiguity guard and surfaces rather than auto-placing. No text-search placement
+    remains anywhere in the apply path.
+  </goal>
+
+  <context>
+    <background>
+      Design §5 (AI paragraph): "on return, rebase the bookmark to its current position, validate every
+      returned paraId/offset against the live doc, then apply. Unvalidatable ops surface as a review comment
+      (fuzzy last resort), never silently placed." Invariant I-7: no text-search anchoring in the write path;
+      fuzzy content-match survives ONLY as a below-threshold surface-as-comment last resort. This task
+      consumes the resolved bookmark + returned operations from task 040 (the capture half) and adds the
+      validation + fuzzy-fallback gate before apply. `AnnotationReanchorService` already implements the
+      AUTO/REVIEW/ORPHAN bands + ambiguity guard + "never silently drop" — reuse it.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx — the apply step: gate each returned operation through validation before applying; surface unvalidatable ops as review comments</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useAiGenerateBookmark.ts — extend (from 040) with the validate-before-apply gate consuming the resolved bookmark + returned operations</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs — KEEP asset: fuzzy re-anchor bands (AUTO/REVIEW/ORPHAN) + ambiguity guard + never-silently-drop; the last-resort fuzzy layer — REUSE, do not reimplement</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/widgets/paraIdExtension.ts — resolve/validate a returned paraId against the live editor state</file>
+      <file role="dependency-output">src/client/shared/Spaarke.Compose.Components/src/ — task 040 resolved bookmark + returned JSON operations (the input to this gate)</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ — the AI facade seam (envelope-only; no new endpoint, no fork)</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §5 (AI paragraph — validate then apply; fuzzy last resort)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-07, NFR-02</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">Generate-window bookmark + resolve-on-return + returned JSON operations — the capture half this apply gate consumes.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-07">Before applying any AI-returned operation, MUST validate every returned paraId/offset against the LIVE document; unvalidatable ops (unknown paraId / out-of-range offset / vanished range) MUST surface as a review comment, NEVER be silently placed.</constraint>
+    <constraint source="spec / NFR-02 / project I-7">ZERO text-search in the write path. Fuzzy content-match via `AnnotationReanchorService` survives ONLY as the below-threshold surface-as-comment last resort; an ambiguous match MUST hit the ambiguity guard and surface, never auto-place.</constraint>
+    <constraint source="project / KEEP asset">REUSE `AnnotationReanchorService.cs` (AUTO/REVIEW/ORPHAN bands + ambiguity guard) as the fuzzy layer — MUST NOT reimplement or fork the band logic.</constraint>
+    <constraint source="ADR-039 / project">Engine FROZEN — no new AI dispatch endpoint, no AI catalog change; envelope-only.</constraint>
+    <constraint source="ADR-013 / NFR-05">AI dispatch via `Services/Ai/PublicContracts/` only — no fork of `Services/Ai/`; no `IOpenAiClient`/executor/routing injection into `Services/Compose/` or the client.</constraint>
+    <constraint source="ADR-028 / project">Client apply-path fetches use `@spaarke/auth`; no hand-rolled token handling.</constraint>
+    <constraint source="ADR-021 / project">Any surfaced review-comment / apply UI is Fluent UI v9 and MUST render correctly in dark mode (theme tokens; no hard-coded colors).</constraint>
+    <constraint source="ADR-038 / NFR-06">Client component/unit tests exercise real editor state; if the BFF apply/validate path changes, add/update a seam slice in `tests/integration/seam/Compose/`. NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Anchor validation against live doc; AnnotationReanchorService fuzzy bands + ambiguity guard; AI facade envelope contract; BFF hygiene; Fluent v9 dark mode</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fuzzy re-anchor bands + ambiguity guard" location="src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs">
+        AUTO applies a confident match; REVIEW/ORPHAN surface; the ambiguity guard refuses to auto-place an ambiguous match and never silently drops — reuse as the last-resort fuzzy layer for unvalidatable AI anchors.
+      </pattern>
+      <pattern name="paraId validation" location="src/client/shared/Spaarke.Compose.Components/src/widgets/paraIdExtension.ts">
+        Resolve a returned paraId against the live editor state to decide validated / needs-fuzzy / surface-as-comment.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor (frontend + bff-api + docx; xhigh; sonnet). Load the knowledge files + design §5. Read `AnnotationReanchorService.cs` bands + ambiguity guard and the task 040 apply hook. State the Placement Justification (validation/apply is pure; AI dispatch stays behind PublicContracts).</step>
+    <step order="1" name="Validate returned anchors">For each returned operation, validate its paraId + offset/range against the LIVE document. Classify: VALID (apply), or UNVALIDATABLE (unknown paraId / out-of-range / vanished range → fuzzy fallback).</step>
+    <step order="2" name="Fuzzy fallback via reanchor bands">For unvalidatable ops, run the `AnnotationReanchorService` fuzzy layer: an AUTO-band confident match may re-anchor; a REVIEW/ORPHAN or ambiguity-guard hit surfaces as a review comment. NEVER auto-place an ambiguous match; NEVER text-search a placement.</step>
+    <step order="3" name="Apply validated + surface the rest">Apply the validated (and AUTO-re-anchored) operations at their anchors; render the surfaced ops as review comments in the editor. Ensure NO path silently places an unvalidatable op (fire the escalation trigger if one is found).</step>
+    <step order="4" name="Tests">Author component/unit tests (real editor state): valid anchor applies cleanly; out-of-range/unknown anchor is refused + surfaced; ambiguous fuzzy match hits the ambiguity guard and surfaces. If the BFF apply/validate path changed, add/update the `tests/integration/seam/Compose/` slice. Include an ADR-021 dark-mode check on any surfaced-comment UI.</step>
+    <step order="5" name="Verify + index">`npm run build:prod` the shared lib (+ `dotnet build` if BFF touched); run tests + Tier-1 NetArchTest. Update TASK-INDEX.md: set this task's status to ✅. Document any deviation in projects/spaarkeai-compose-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Any code path that would SILENTLY PLACE an unvalidatable operation (unknown paraId, out-of-range offset, or an ambiguous fuzzy match) instead of surfacing it for review — STOP and escalate per root §6. Silent placement violates FR-07 / NFR-02 / I-7 and is a §6 escalation, not a judgment call to make locally.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useAiGenerateBookmark.ts (validate-before-apply gate + fuzzy fallback wiring)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx (apply gated by validation; surfaced review comments)</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useAiApplyValidation.test.ts</output>
+    <output type="test">tests/integration/seam/Compose/ (seam slice if the BFF apply/validate path changed)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Every AI-returned operation's paraId/offset is validated against the LIVE document before apply; a valid anchor applies cleanly at its intended location.</criterion>
+    <criterion testable="true">An out-of-range or unknown anchor is REFUSED and surfaced as a review comment (via the `AnnotationReanchorService` REVIEW/ORPHAN path) — it is NOT mis-placed.</criterion>
+    <criterion testable="true">NEGATIVE: an ambiguous fuzzy match hits the `AnnotationReanchorService` ambiguity guard and surfaces as a comment rather than auto-placing; no unvalidatable op is ever silently placed or silently dropped.</criterion>
+    <criterion testable="true">Zero text-search placement remains in the apply path (NFR-02 / I-7); fuzzy content-match is used only as the below-threshold surface-as-comment last resort; `AnnotationReanchorService` is reused (not reimplemented).</criterion>
+    <criterion testable="true">AI dispatch routes through `Services/Ai/PublicContracts/` only — no new endpoint, no AI catalog change (ADR-039), no fork / AI-internal injection (ADR-013); Tier-1 NetArchTest green if BFF touched.</criterion>
+    <criterion testable="true">Surfaced review-comment UI renders correctly in Fluent v9 dark mode (ADR-021); client tests + any `tests/integration/seam/Compose/` slice pass; builds green.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <ui-test name="Valid anchor applies cleanly">
+      <steps>AI returns an operation whose paraId/offset resolves in the live doc; apply it.</steps>
+      <expected>The operation lands at the intended paraId+offset; no comment is surfaced.</expected>
+    </ui-test>
+    <ui-test name="Out-of-range anchor is refused + surfaced">
+      <steps>AI returns an operation referencing an unknown paraId (or an out-of-range offset).</steps>
+      <expected>The operation is NOT applied; it surfaces as a review comment (REVIEW/ORPHAN band); the document text is unchanged at that location.</expected>
+    </ui-test>
+    <ui-test name="Ambiguous fuzzy match hits the ambiguity guard">
+      <steps>AI returns an operation whose anchor only fuzzy-matches ambiguously (multiple candidate spans).</steps>
+      <expected>The ambiguity guard refuses to auto-place; the op surfaces as a review comment rather than landing on a guessed span.</expected>
+    </ui-test>
+    <ui-test name="Dark-mode render (ADR-021)">
+      <steps>Render the surfaced review-comment affordance under the Fluent v9 dark theme provider.</steps>
+      <expected>The comment/review UI uses theme tokens and is legible in dark mode; no hard-coded light colors.</expected>
+    </ui-test>
+  </ui-tests>
+
+  <notes>
+    Apply half of FR-07; the capture half (bookmark + resolve-on-return) is task 040. Success Criterion 3
+    (AI drift-proof; bad anchors refused) is proven by task 042's automated ProseMirror test. Run
+    `/conflict-check` before any BFF-touching PR.
+
+    ── COMPLETION (2026-07-22) ──
+    NO BFF/server files touched — client-only, envelope-only. The fuzzy last resort REUSES the shipped
+    `AnnotationReanchorService` via its EXISTING route (`POST /api/compose/document/{id}/reanchor-annotations`,
+    the SAME `useComposeReanchor().reanchor` function shape) — injected into the new hook, not reimplemented,
+    not a new endpoint. No AI dispatch endpoint added (ADR-039); no `Services/Ai/` fork (ADR-013).
+
+    Files:
+      - NEW  src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useAiApplyValidation.ts
+             (`validateComposeOperationAnchor` — pure structural anchor check against the LIVE doc: paraId
+              existence, run/offset bounds via the reused `runsOfBlock`, opaque-atom-interior refusal
+              mirroring FR-02; `applyValidatedComposeOperation` — applies a structurally-valid INLINE op
+              (insertText/deleteRange/replaceRange/setMark/clearMark) via a normal TipTap transaction, which
+              the EXISTING `RebasedOperationLog`/step-interceptor plugin on the same editor instance captures
+              automatically (no second capture path); `useAiApplyValidation` — the controller: validate→apply
+              or validate-fail/apply-fail→surface, running the injected fuzzy-reanchor lookup for a confidence
+              hint. SCOPE DECISION (documented in the file header, not an ADR conflict — a literal reading of
+              NFR-02/I-7): the four paragraph-structural op types (split/merge/insert/deleteParagraph) are
+              anchor-validated but NEVER applied by this task — always surfaced, MORE conservative than
+              required. A SECOND, stronger decision: even an AUTO-band fuzzy match NEVER auto-applies — the
+              reanchor endpoint returns a paragraph INDEX+preview (a summary datum), not a client-resolvable
+              run-local anchor, so there is no safe non-guessing way to place it; AUTO only upgrades the
+              surfaced item's confidence hint. This means the §6 escalation trigger — "any code path that
+              would silently place an unvalidatable op" — has NO satisfying code path in this module by
+              construction. Verified directly by a dedicated test asserting an AUTO-band hint still surfaces.)
+      - NEW  .../src/widgets/hooks/useAiApplyValidation.test.ts (24 tests: pure validator incl. atom-interior
+             + unknown-target-paraId; applier incl. structural-op-never-applied; hook incl. AUTO/REVIEW/ORPHAN
+             fuzzy hints ALL surfacing never auto-placing, reanchor-failure still surfaces, dismissReview,
+             no-editor-mounted).
+      - EDIT .../src/widgets/ComposeAiToolbar.tsx (ADDITIVE opt-in `aiApplyValidation` prop: an 'operations'
+             `resolveOnReturn` result is handed to `validateAndApply`; a new dark-mode-correct review banner
+             (colorStatusWarning* tokens — the SAME warning tokens ComposeEditor's existing redline/reanchor
+             surfaces use) renders surfaced items with a Dismiss action, independent of selection state so it
+             survives a selection change. Absent controller ⇒ unchanged from 040.)
+      - EDIT .../src/widgets/hooks/useAiGenerateBookmark.ts (doc-only: cross-reference to the now-implemented
+             041 apply path — no functional change).
+      - EDIT .../src/widgets/hooks/useAiGenerateBookmark.test.tsx (4 new tests: an 'operations' resolution
+             reaches `validateAndApply`; a 'refused' resolution does NOT; dark-mode render of a hand-built
+             review item; dismiss wiring.)
+      - EDIT .../src/index.ts (additive exports: `useAiApplyValidation` + its public types).
+
+    Escalation: NONE fired. No code path silently places an unvalidatable operation (verified structurally by
+    construction + by a dedicated AUTO-band test) and none silently drops one (every validation/apply failure
+    surfaces via `AiApplyReviewItem`, including a fuzzy-lookup network failure).
+
+    Verify: client `npm run typecheck` — R4 files clean (only pre-existing `@spaarke/*` sibling-dist +
+    ComposeWorkspace.tsx:1768 implicit-any errors remain, both pre-existing/environmental per 040's own notes).
+    `npx jest useAiApplyValidation useAiGenerateBookmark stepOperationInterceptor opaqueAtomNode` → 71/71 pass
+    (pre-fix debugging surfaced + corrected an unrelated latent bug: `runsOfBlock`'s leaf-run `markKey` sentinel
+    is NOT a literal space as the source's visual rendering suggests — `isAtomRun` now does a robust `.includes
+    ('leaf:')` substring check instead of assuming the exact sentinel byte). No BFF touched — no publish-size /
+    CVE report required.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

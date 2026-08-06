@@ -27,7 +27,7 @@ if (typeof (global as any).TextEncoder === 'undefined') (global as any).TextEnco
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 if (typeof (global as any).TextDecoder === 'undefined') (global as any).TextDecoder = NodeTextDecoder;
 import React, { act } from 'react';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 import { PaneEventBus, PaneEventBusProvider } from '@spaarke/ai-widgets';
@@ -47,6 +47,9 @@ const BFF = 'https://test-bff.example.com';
 /** Messages the (stubbed) SprkChat appended via injectLocalMessage, in order. */
 const injectedMessages: IChatMessage[] = [];
 
+/** Captured SprkChat callbacks for driving chip-carrier events from a test (additive; pre-existing tests ignore it). */
+const captured: { onContextEvent?: (e: unknown) => void } = {};
+
 const authenticatedFetchMock = jest.fn(async (url: string) => {
   if (url.includes('/documents')) {
     return { ok: true, status: 200, json: async () => ({ documentId: SESSION_FILE_ID }) } as unknown as Response;
@@ -63,6 +66,9 @@ jest.mock('@spaarke/ui-components', () => {
   return {
     ...actual,
     SprkChat: (props: ISprkChatProps) => {
+      // Capture the chip-carrier callback so a test can deliver post-classify consumer_chips.
+      captured.onContextEvent = (props as ISprkChatProps & { onContextEvent?: (e: unknown) => void })
+        .onContextEvent;
       // Simulate the real SprkChat one-shot injection contract: on identity change of
       // injectLocalMessage, append + acknowledge — this drives the host injection-queue drain.
       const lastInjectedRef = ReactActual.useRef<IChatMessage | null>(null);
@@ -159,6 +165,13 @@ function renderPane() {
 const contents = () => injectedMessages.map((m) => m.content);
 const uploadCalls = () => authenticatedFetchMock.mock.calls.filter(([u]) => String(u).includes('/documents'));
 
+// UAT 2026-07-24: the PROSE "added to our conversation" affordance leads the ceremony so the user
+// knows the Compose-uploaded file is now available in the Assistant (mirror of the reverse-direction
+// "opened in Compose" message). Kept in sync with buildComposeAttachedToAssistantMessage.
+const PROSE_FOR_BRIEF =
+  "I've added **browse-brief.docx** to our conversation. You can now ask me to summarize, " +
+  "review, or answer questions about it here — or keep editing it in the Compose tab.";
+
 beforeEach(() => {
   injectedMessages.length = 0;
   authenticatedFetchMock.mockClear();
@@ -166,6 +179,57 @@ beforeEach(() => {
   // Keep the stream "open" (never settles) so handler-driven assertions are timing-isolated.
   runEventSpy.mockImplementation(() => new Promise<void>(() => undefined));
   bridgeRef.current = null;
+  captured.onContextEvent = undefined;
+});
+
+// UAT 2026-08-03: the follow-on cards ("Summarize this file" / "Draft a response" / "Review an NDA"
+// — all `requiresAttachments`) greyed out after picking a file in the Compose tab, even though the
+// Assistant clearly had the file. Root cause: a Compose-registered file lands only in
+// `activeSourceDocRef` (+ the `sourceDocReadyToken` bump), NOT in the composer chips / promoted-chip
+// ids that `useAttachments.sessionAttachmentCount` counts — so the attachment gate read 0. The fix
+// folds the registered active source doc into the gate count (`composeSourceDocCount`). These pin it.
+describe('post-Compose-register: requiresAttachments follow-on cards are enabled (UAT 2026-08-03)', () => {
+  function deliverRequiresAttachmentChip(): void {
+    // A post-classify server chip that REQUIRES an attachment (mirrors the real "Summarize this file").
+    act(() => {
+      captured.onContextEvent?.({
+        contextEventType: 'consumer_chips',
+        contextChips: [
+          { target_binding_id: 'b-summarize', chip_label: 'Summarize this file', requires_attachments: true },
+        ],
+      });
+    });
+  }
+
+  it('enables a requiresAttachments chip once a Compose file has registered', async () => {
+    renderPane();
+
+    // Register a file the way the Compose tab does (the path that previously left the gate at 0).
+    await act(async () => {
+      await bridgeRef.current!.registerActiveDocument({
+        docxBytes: new Uint8Array([1, 2, 3, 4]).buffer,
+        fileName: 'browse-brief.docx',
+        documentSessionId: DOC_SESSION,
+      });
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+
+    deliverRequiresAttachmentChip();
+
+    const chip = await screen.findByTestId('consumer-chip-b-summarize');
+    // The fix: the registered source doc satisfies the attachment gate → the card is actionable.
+    expect(chip).not.toBeDisabled();
+  });
+
+  it('NEGATIVE control: the same requiresAttachments chip is DISABLED with no file registered', async () => {
+    renderPane();
+
+    // No registerActiveDocument — the gate must still block a requiresAttachments card (fix is specific).
+    deliverRequiresAttachmentChip();
+
+    const chip = await screen.findByTestId('consumer-chip-b-summarize');
+    expect(chip).toBeDisabled();
+  });
 });
 
 describe('manual Browse ingest ceremony — first register brings the file to Assistant parity', () => {
@@ -188,6 +252,13 @@ describe('manual Browse ingest ceremony — first register brings the file to As
 
     // The bytes were uploaded as a ChatSessionFile (context-only upload).
     expect(uploadCalls()).toHaveLength(1);
+
+    // (0) UAT 2026-07-24: the PROSE "added to our conversation" affordance is injected, and LEADS
+    //     the two collapsed status entries so the user sees a clear "it's in the Assistant now" line.
+    expect(contents()).toContain(PROSE_FOR_BRIEF);
+    expect(contents().indexOf(PROSE_FOR_BRIEF)).toBeLessThan(
+      contents().indexOf('I have your file: browse-brief.docx')
+    );
 
     // (1) The "I have your file" loaded message was injected.
     expect(contents()).toContain('I have your file: browse-brief.docx');
@@ -238,6 +309,7 @@ describe('manual Browse ingest ceremony — idempotency (once per newly-loaded f
 
     // The upload deduped (one ChatSessionFile), and so did the ceremony.
     expect(uploadCalls()).toHaveLength(1);
+    expect(contents().filter((c) => c === PROSE_FOR_BRIEF)).toHaveLength(1);
     expect(contents().filter((c) => c === 'I have your file: browse-brief.docx')).toHaveLength(1);
     expect(runEventSpy).toHaveBeenCalledTimes(1);
   });
@@ -256,6 +328,7 @@ describe('manual Browse ingest ceremony — idempotency (once per newly-loaded f
     });
 
     expect(contents()).not.toContain('I have your file: withdrawn.docx');
+    expect(contents().some((c) => c.includes('added **withdrawn.docx**'))).toBe(false);
     expect(runEventSpy).not.toHaveBeenCalled();
   });
 });

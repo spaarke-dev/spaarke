@@ -51,6 +51,27 @@ export interface ComposeCommentRange {
   to: number;
 }
 
+/**
+ * task 032 (right-gutter comment layout) — optional NDA/agreement-REVIEW advisory metadata a
+ * caller may attach at thread-creation time (currently only `ComposeEditor.placeAdvisoryComments`).
+ * Stored verbatim on the resulting {@link ComposeCommentThreadModel} for the right-rail gutter card
+ * to render a risk badge + citation, AND (task 052, FR-15) for the Word-comment export mapping to
+ * compose the structured "Flagged clause / Assessment says / Standard" text — see that type's own
+ * field docs for the current UI-only vs exported split per field.
+ */
+export interface ComposeCommentThreadMetadata {
+  riskLevel?: string;
+  sectionRef?: string;
+  standardRef?: string;
+  /** Grounded-fact prose (task 002 discrete field) — see `ComposeCommentThreadModel.flaggedClause`. */
+  flaggedClause?: string;
+  /** Reasoned-judgment prose (task 002 discrete field) — see `ComposeCommentThreadModel.assessment`. */
+  assessment?: string;
+  /** Full resolved standard-clause text, when the caller has it — see
+   *  `ComposeCommentThreadModel.standardText`. */
+  standardText?: string;
+}
+
 export interface UseComposeCommentThreadsResult {
   /** All threads, in creation order. */
   threads: ComposeCommentThreadModel[];
@@ -59,8 +80,12 @@ export interface UseComposeCommentThreadsResult {
    * omitted). Applies a fresh `commentAnchor` mark to the resolved span. Returns the new thread id,
    * or `null` when there is no editor, no non-collapsed range to anchor to, or `text` is empty/
    * whitespace-only (no mutation occurs in that case).
+   *
+   * `metadata` (task 032) is optional passthrough — the session Comments panel never supplies it;
+   * `ComposeEditor.placeAdvisoryComments` does, so its threads carry `riskLevel`/`sectionRef`/
+   * `standardRef` for the right-gutter card.
    */
-  createThread: (text: string, range?: ComposeCommentRange) => string | null;
+  createThread: (text: string, range?: ComposeCommentRange, metadata?: ComposeCommentThreadMetadata) => string | null;
   /** Append a reply to `threadId`, in order. No-op for empty/whitespace-only text or an unknown id. */
   reply: (threadId: string, text: string) => void;
   /** Mark `threadId` resolved (UI-only — see `ComposeCommentThreadModel.resolved`). No-op if unknown. */
@@ -87,7 +112,7 @@ export function useComposeCommentThreads(
   );
 
   const createThread = React.useCallback(
-    (text: string, range?: ComposeCommentRange): string | null => {
+    (text: string, range?: ComposeCommentRange, metadata?: ComposeCommentThreadMetadata): string | null => {
       const trimmed = text.trim();
       if (!editor || trimmed.length === 0) return null;
 
@@ -104,7 +129,24 @@ export function useComposeCommentThreads(
       editor.view.dispatch(tr);
 
       const timestamp = new Date().toISOString();
-      setThreads(prev => [...prev, { id, author, timestamp, text: trimmed, anchorText, resolved: false, replies: [] }]);
+      setThreads(prev => [
+        ...prev,
+        {
+          id,
+          author,
+          timestamp,
+          text: trimmed,
+          anchorText,
+          resolved: false,
+          replies: [],
+          riskLevel: metadata?.riskLevel,
+          sectionRef: metadata?.sectionRef,
+          standardRef: metadata?.standardRef,
+          flaggedClause: metadata?.flaggedClause,
+          assessment: metadata?.assessment,
+          standardText: metadata?.standardText,
+        },
+      ]);
       return id;
     },
     [editor, author]

@@ -4,7 +4,11 @@
  * Rendered ONLY in `dialog` + `page` mounts — returns `null` on `inline`
  * (the wizard frame owns Send/Cancel navigation; task 020 constraint).
  *
- * Compose/reply/forward/draft modes: Send / Save Draft / Cancel.
+ * Compose/reply/forward/draft modes: Cancel / Save Draft / Send. The Send button
+ * is a SplitButton whose caret menu carries the "send from" choice (Spaarke shared
+ * mailbox vs the user's mailbox) — folding the former standalone SendModeRadio into
+ * the primary action per the owner UAT mockup (2026-07-22). When the host fixes
+ * `sendMode` (no choice offered), Send renders as a plain primary Button.
  * View mode: Edit (only when the record is a Draft) / Reply / Forward / Close
  * (design §5.6.7).
  */
@@ -15,12 +19,11 @@ import type { EmailComposerMode, EmailComposerMount } from '../EmailComposer.typ
 export interface IComposerActionBarProps {
   mount: EmailComposerMount;
   mode: EmailComposerMode;
+  /** Drives the busy state that disables Cancel / Save Draft while a send is in flight. */
   isSending: boolean;
   isSavingDraft: boolean;
-  canSend: boolean;
   /** View mode only — whether the underlying record is still a Draft (enables Edit). */
   isDraftRecord?: boolean;
-  onSend: () => void;
   onSaveDraft: () => void;
   onCancel: () => void;
   onEdit?: () => void;
@@ -29,15 +32,21 @@ export interface IComposerActionBarProps {
 }
 
 const useStyles = makeStyles({
+  // Cancel on the LEFT, Save Draft + Send on the RIGHT (owner UAT 2026-07-22 #7).
   bar: {
     display: 'flex',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalM,
     borderTopWidth: tokens.strokeWidthThin,
     borderTopStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke2,
+  },
+  rightGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
   },
   spinnerRow: {
     display: 'flex',
@@ -51,9 +60,7 @@ export const ComposerActionBar: React.FC<IComposerActionBarProps> = ({
   mode,
   isSending,
   isSavingDraft,
-  canSend,
   isDraftRecord,
-  onSend,
   onSaveDraft,
   onCancel,
   onEdit,
@@ -66,13 +73,13 @@ export const ComposerActionBar: React.FC<IComposerActionBarProps> = ({
 
   const busy = isSending || isSavingDraft;
 
-  return (
-    <div className={styles.bar} role="region" aria-label="Composer actions">
-      {mode === 'view' ? (
-        <>
-          <Button appearance="secondary" onClick={onCancel}>
-            Close
-          </Button>
+  if (mode === 'view') {
+    return (
+      <div className={styles.bar} role="region" aria-label="Composer actions">
+        <Button appearance="secondary" onClick={onCancel}>
+          Close
+        </Button>
+        <div className={styles.rightGroup}>
           {onReply && (
             <Button appearance="secondary" onClick={onReply}>
               Reply
@@ -88,34 +95,30 @@ export const ComposerActionBar: React.FC<IComposerActionBarProps> = ({
               Edit
             </Button>
           )}
-        </>
-      ) : (
-        <>
-          <Button appearance="secondary" onClick={onCancel} disabled={busy}>
-            Cancel
-          </Button>
-          <Button appearance="secondary" onClick={onSaveDraft} disabled={busy}>
-            {isSavingDraft ? (
-              <span className={styles.spinnerRow}>
-                <Spinner size="tiny" />
-                Saving...
-              </span>
-            ) : (
-              'Save Draft'
-            )}
-          </Button>
-          <Button appearance="primary" onClick={onSend} disabled={busy || !canSend}>
-            {isSending ? (
-              <span className={styles.spinnerRow}>
-                <Spinner size="tiny" />
-                Sending...
-              </span>
-            ) : (
-              'Send'
-            )}
-          </Button>
-        </>
-      )}
+        </div>
+      </div>
+    );
+  }
+
+  // Send moved to the compose header's From row (owner UAT 2026-08-03 item 1 —
+  // `ComposerSendButton`). This bar now owns Cancel (left) + Save Draft (right) only.
+  return (
+    <div className={styles.bar} role="region" aria-label="Composer actions">
+      <Button appearance="secondary" onClick={onCancel} disabled={busy}>
+        Cancel
+      </Button>
+      <div className={styles.rightGroup}>
+        <Button appearance="secondary" onClick={onSaveDraft} disabled={busy}>
+          {isSavingDraft ? (
+            <span className={styles.spinnerRow}>
+              <Spinner size="tiny" />
+              Saving...
+            </span>
+          ) : (
+            'Save Draft'
+          )}
+        </Button>
+      </div>
     </div>
   );
 };

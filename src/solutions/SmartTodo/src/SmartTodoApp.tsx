@@ -32,7 +32,7 @@
 
 import * as React from "react";
 import { makeStyles, tokens } from "@fluentui/react-components";
-import { CreateTodoWizard } from "@spaarke/ui-components";
+import { CreateTodoWizard, OOB_MODAL_SIZES } from "@spaarke/ui-components";
 import type { Orientation, ToolbarAction } from "@spaarke/ui-components";
 import {
   createXrmDataService,
@@ -80,14 +80,16 @@ function openSprkTodoAsLayout1(todoId: string): void {
     return;
   }
   const cleanId = todoId.replace(/[{}]/g, "");
+  // `record` OOB size (85%×85%) — sourced from oobModalSizes.ts (spec
+  // FR-11/FR-18, task 090); was an independent 85%×85% literal.
   void Promise.resolve(
     xrm.Navigation.navigateTo(
       { pageType: "entityrecord", entityName: "sprk_todo", entityId: cleanId },
       {
         target: 2,
         position: 1,
-        width: { value: 85, unit: "%" },
-        height: { value: 85, unit: "%" },
+        width: OOB_MODAL_SIZES.record.width,
+        height: OOB_MODAL_SIZES.record.height,
       },
     ),
   ).catch((err: unknown) => {

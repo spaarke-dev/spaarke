@@ -42,13 +42,22 @@ describe('surfaceLaunchRegistry (surface-launch-mechanism §3)', () => {
   });
 
   it('registry covers the cataloged create intents', () => {
-    // create-matter/-task/-todo (R1) + create-project (UAT #1) + create-work-assignment (R5-8).
+    // create-matter/-task/-todo (R1) + create-project (UAT #1) + create-work-assignment /
+    // summarize-files / find-similar (R5-8 Quick Start file legs) + list-tasks (task 050,
+    // 2026-07-22 — pre-existing, this legacy duplicate test had drifted) + nda-review
+    // (ai-advanced-capabilities-nda-r1 task 022 — the "Review an NDA" card's surface entry;
+    // see the canonical surfaceHandoff/__tests__/surfaceLaunchRegistry.test.ts for the
+    // dedicated resolution assertion).
     expect(Object.keys(SURFACE_LAUNCH_REGISTRY).sort()).toEqual([
       'create-matter',
       'create-project',
       'create-task',
       'create-todo',
       'create-work-assignment',
+      'find-similar',
+      'list-tasks',
+      'nda-review',
+      'summarize-files',
     ]);
   });
 });

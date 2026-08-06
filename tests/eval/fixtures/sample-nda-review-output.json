@@ -1,0 +1,30 @@
+{
+  "$comment": "Fixture AGREEMENT-REVIEW-shaped output (FR-05 split: flaggedClause + assessment replace the single explanation blob) graded against tests/eval/cases/nda-02-narrow-ci-oneway.md — the shipped NDA exemplar. Deliberately mixed: finding[0] is a CORRECT, verbatim, real-clause citation (should PASS citation_accuracy); finding[1] has a FABRICATED quotedText not present anywhere in the source NDA (should FAIL on quote_verbatim); finding[2] has a verbatim quote but an INVENTED standardRef that is not a real B1-B16 clause (should FAIL on standard_ref_valid). Used by tests/eval/fixtures/test_citation_accuracy_offline.py to prove metrics/citation_accuracy.py runs and correctly discriminates pass/fail without a live Azure OpenAI call, AND that every finding carries the discrete flaggedClause/assessment fields (no legacy 'explanation' blob, no 'grounded fact'/'judgment' inline markers).",
+  "overallRisk": "High",
+  "flaggedSections": [
+    {
+      "sectionRef": "Section 1 (p. 1)",
+      "quotedText": "\"Confidential Information\" means any information disclosed by Discloser to Recipient that is marked \"Confidential\" in writing at the time of disclosure, or, if disclosed orally, is summarized in a writing marked \"Confidential\" delivered to Recipient within ten (10) days of the oral disclosure.",
+      "riskLevel": "High",
+      "flaggedClause": "The clause defines Confidential Information only as information marked \"Confidential\" in writing at the time of disclosure, or oral information summarized in a writing marked \"Confidential\" and delivered within ten days.",
+      "assessment": "This is materially narrower than the Spaarke standard, which requires a definition broad enough to cover oral, visual, written, electronic, and derived information regardless of marking. Helios (the disclosing party) risks losing protection for information it discloses informally or forgets to mark.",
+      "standardRef": "B3 - Definition of Confidential Information"
+    },
+    {
+      "sectionRef": "Section 3 (p. 1)",
+      "quotedText": "Recipient agrees to extend Discloser most-favored-nation pricing on all future engagements for the life of this Agreement.",
+      "riskLevel": "High",
+      "flaggedClause": "FABRICATED FOR OFFLINE TEST: this quotedText sentence does not appear anywhere in nda-02-narrow-ci-oneway.md.",
+      "assessment": "citation_accuracy.py must flag this finding as quote_verbatim=False (the quote is not a verbatim excerpt of the source documentText).",
+      "standardRef": "B2 - Purpose"
+    },
+    {
+      "sectionRef": "Section 5 (p. 2)",
+      "quotedText": "This Agreement shall remain in effect for one (1) year from the Effective Date, and Recipient's confidentiality obligations shall survive for three (3) years following termination or expiration, provided that trade secrets remain protected for so long as they remain trade secrets under applicable law.",
+      "riskLevel": "Medium",
+      "flaggedClause": "The Agreement runs one year from the Effective Date; confidentiality obligations survive three years after termination or expiration, with trade secrets protected for as long as they remain trade secrets under applicable law.",
+      "assessment": "FABRICATED STANDARD REF FOR OFFLINE TEST: the quotedText IS verbatim from the source NDA, but the standardRef 'Appendix A, Section 7(a)' is not a real clause of the Spaarke NDA standard (B1-B16). citation_accuracy.py must flag this finding as standard_ref_valid=False.",
+      "standardRef": "Appendix A, Section 7(a)"
+    }
+  ]
+}

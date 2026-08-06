@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>agreement-review Action — generalize nda-review + FR-05 schema split + eval update</title>
+    <phase>0 Foundation</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Core JPS/prompt artifact every downstream consumer depends on; Action output-schema change carries the ADR-039 eval obligation; TEST-MODIFYING (eval suites).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Type-agnostic advisory prompt authoring is the quality lever (same reasoning as nda-r1 task 020); high-judgment design incl. the taxonomy de-embedding and rename blast-radius decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>ai, jps, azure-openai, testing, eval</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Generalize the NDA-specific nda-review Action into ONE type-agnostic agreement-review Action, and split the output
+    schema's explanation into discrete flaggedClause + assessment fields (standardRef already exists). The method prompt
+    keeps role + advisory grounding rules + "compare against the retrieved standard"; the B1–B16 clause taxonomy/rubric
+    move OUT of the prompt (into the NDA knowledge pack — task 003). Update the eval suites (ADR-039 obligation).
+  </prompt>
+  <role>SPAARKE AI capability author. JPS Actions, advisory-tier prompting, Azure OpenAI structured outputs, eval authoring.</role>
+  <goal>
+    A validated agreement-review Action (Reasoning tier, advisory determinism) emits
+    {overallRisk, flaggedSections[{sectionRef, quotedText, riskLevel, flaggedClause, assessment, standardRef}]} for ANY
+    agreement type given retrieved grounding; nda-review consumers migrate or alias cleanly; eval suites green.
+  </goal>
+
+  <context>
+    <background>
+      infra/dataverse/actions/nda-review.action.json is the seed: its systemPrompt embeds the B1–B16 NDA taxonomy
+      (labels only — positions already de-embedded to RAG per its $comment-deembed) and an NDA-specific scope guard.
+      Generalization = (a) prompt refers to "the retrieved standard's clause taxonomy" instead of embedding B1–B16;
+      (b) scope guard becomes "is this an agreement" (typed decline stays for non-agreements); (c) output schema splits
+      explanation → flaggedClause (grounded fact: what the clause does) + assessment (reasoned judgment) so neither the
+      memo (FR-13) nor Word export (FR-15) nor the FR-16 findings materializer string-parses markers. RENAME DECISION:
+      nda-review actionCode is referenced by Bindings + consumerType chips + eval cases — choose generalize-in-place
+      (rename actionCode with migration of binding rows) vs new agreement-review row + deprecate nda-review; grep-verify
+      all consumers BEFORE choosing; document the choice.
+    </background>
+    <relevant-files>
+      <file role="modify">infra/dataverse/actions/nda-review.action.json (→ agreement-review)</file>
+      <file role="modify">infra/dataverse/outputschemas/nda-review.schema.json</file>
+      <file role="modify">infra/dataverse/sprk_playbookconsumer-rows.json</file>
+      <file role="modify">tests/integration/contract/Eval/nda-review-eval-cases.json (+ NdaReviewEvalTests family)</file>
+      <file role="canonical-reference">docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+    </relevant-files>
+    <dependencies>none (Wave 0). Task 003 consumes the de-embedded taxonomy decision.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">The Action stays inside grounded-execution invariant (a): prompt-controlled + schema-validated + source-cited; advisory determinism mode per the nda-r1 amendment (inherited — do NOT author a new amendment). Scope: the generalized prompt + schema.</constraint>
+    <constraint source="ADR-039">Golden-utterance / output-schema eval coverage MUST be updated in the same task — dispatch regressions block merge. Scope: eval cases referencing nda-review's output shape.</constraint>
+    <constraint source="ADR-016">modelTier stays Reasoning; catalog stores intent (tier), not deployment name. Scope: the Action row fields.</constraint>
+    <constraint source="ADR-043">If the Binding row changes (actionCode/consumer), keep disposition routability single-sourced — do NOT flip disposition here (that is task 030). Scope: sprk_playbookconsumer-rows.json edits.</constraint>
+    <constraint source="project">CLOSED output contract: exactly {overallRisk, flaggedSections[{sectionRef, quotedText, riskLevel, flaggedClause, assessment, standardRef}]} — additionalProperties false; property-level boolean 'required' is FORBIDDEN (see the seed's $comment-required).</constraint>
+    <constraint source="project">Keep quotedText VERBATIM-from-document semantics and the decline-if-ungrounded rules verbatim in spirit; do not weaken citation discipline while generalizing.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>JPS Action authoring + advisory tier + evals</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+      <file>tests/eval/README.md</file>
+    </files>
+    <patterns>
+      <pattern name="nda-review Action" location="infra/dataverse/actions/nda-review.action.json">The seed to generalize — preserve its $comment discipline (determinism, disclaimer, de-embed rationale) while widening scope.</pattern>
+      <pattern name="Action deploy" location="scripts/seed-data/Deploy-Actions.ps1">Seed-JSON → Dataverse row deploy vehicle; scripts/Verify-OutputSchemaField.ps1 verifies the deployed schema.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; load knowledge; grep ALL nda-review consumers (actionCode, consumerType, eval cases, chips, bindings) and record the blast radius.</step>
+    <step order="1">Decide generalize-in-place vs new-row+deprecate based on the grep; document in notes/ + the Action $comment.</step>
+    <step order="2">Author the generalized systemPrompt: agreement-scope guard, retrieved-taxonomy reference (no embedded B1–B16), flaggedClause/assessment output instructions with the grounded-fact vs reasoned-judgment split made explicit.</step>
+    <step order="3">Split the output schema; run jps-validate until clean; deploy via Deploy-Actions.ps1 + Verify-OutputSchemaField.ps1.</step>
+    <step order="4">Update Binding/consumer rows per the rename decision (Seed-PlaybookConsumers.ps1 -DiffOnly to verify).</step>
+    <step order="5">Update eval suites: rename/extend cases for the new fields; add a non-agreement negative (decline) and a generalization case (non-NDA agreement produces findings when grounding is supplied); dotnet test green.</step>
+    <step order="6">Sanity-run against a sample NDA + one non-NDA agreement; confirm citations + discrete fields.</step>
+    <step order="7">Update TASK-INDEX.md: 002 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the consumer grep shows nda-review actionCode is load-bearing in ways a rename/migration cannot cover atomically (e.g., server-side hardcoded consumerType branches), STOP and escalate the migration plan rather than leaving dual Actions silently diverging.</trigger>
+  </escalation>
+
+  <tools><tool name="terminal">jps-validate, Deploy-Actions.ps1, dotnet test</tool><tool name="dataverse-mcp">row verification</tool></tools>
+
+  <outputs>
+    <output type="config">infra/dataverse/actions/agreement-review.action.json (+ outputschemas/agreement-review.schema.json)</output>
+    <output type="test">tests/integration/contract/Eval/* (updated cases)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">jps-validate passes; deployed row's outputschemajson verified via Verify-OutputSchemaField.ps1.</criterion>
+    <criterion testable="true">Given a sample NDA + NDA grounding, output conforms to the split schema; flaggedClause contains grounded-fact prose and assessment contains judgment prose (no "Grounded fact —" markers to parse).</criterion>
+    <criterion testable="true">Given a NON-NDA agreement + its (stub/general) grounding, the Action reviews it — no NDA-specific scope decline fires (FR-01).</criterion>
+    <criterion testable="true">Negative: a non-agreement document (e.g., invoice) yields the typed decline/empty findings, not fabricated review.</criterion>
+    <criterion testable="true">Eval suites (contract/Eval + output-quality where applicable) green; no dispatch regressions.</criterion>
+    <criterion testable="true">Every nda-review consumer found in step 0 is migrated or explicitly aliased — zero dangling references (grep clean).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-01/FR-05/FR-06 core. Design Lens 3(c)/(d). The findings-materializer branch (task 030) consumes exactly these discrete fields — coordinate the shape (already spec'd in FR-16).
+
+COMPLETED 2026-07-31 (opus/high, FULL rigor). Full execution record: notes/002-execution-notes.md.
+DECISION: generalize-in-place — actionCode renamed nda-review -> agreement-review by UPDATING the existing sprk_analysisaction row 34c9ecf2-cb10-f111-8342-7ced8d1dc988 IN PLACE (GUID preserved, Binding sprk_action lookup unbroken, no orphan). consumerType STAYS 'nda-review' (client dispatch key; its rename is FR-01/010/020, off-limits client+surface files). Escalation NOT triggered (no server-side consumerType/actionCode branch; grep src/**/*.cs = doc comments only).
+DELIVERED: infra/dataverse/actions/agreement-review.action.json (generalized prompt, B1-B16 de-embedded, flaggedClause/assessment split explicit + marker-free) + outputschemas/agreement-review.schema.json (mirror-verbatim) + inputschemas/agreement-review.input.schema.json; old nda-review.* deleted; Binding actionCode migrated; eval suite updated (split fixture + FR-05 offline assertion + 2 new cases neg-04-invoice/agr-01-employment + config retarget) + NEW C# contract test AgreementReviewOutputSchemaContractTests.
+DEPLOYED to spaarkedev1 (in-place row update) + verified (Verify-OutputSchemaField PASS; MCP readback PASS; Binding lookup intact).
+TESTS: dotnet 71 passed/0 failed/0 skipped (new contract test + dispatch-eval + schema-contract regressions); offline Python eval + config validator GREEN. Live output-quality grading env-blocked (no Reasoning-tier Azure OpenAI, task 013).
+TASK-003 HAND-OFF: the B1-B16 NDA clause taxonomy (names) de-embedded from the prompt is recorded verbatim in notes/002-execution-notes.md for the NDA knowledge pack.
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

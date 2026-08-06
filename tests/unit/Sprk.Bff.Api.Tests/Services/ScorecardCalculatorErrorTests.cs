@@ -141,7 +141,8 @@ public class ScorecardCalculatorErrorTests
                 It.IsAny<string>(),
                 It.IsAny<Guid>(),
                 It.IsAny<Dictionary<string, object?>>(),
-                It.IsAny<CancellationToken>()))
+                It.IsAny<CancellationToken>(),
+                It.IsAny<Guid?>()))
             .ThrowsAsync(new HttpRequestException("Dataverse update failed"));
 
         // Act & Assert - the service currently propagates the update exception.
@@ -165,7 +166,8 @@ public class ScorecardCalculatorErrorTests
                 It.IsAny<string>(),
                 It.IsAny<Guid>(),
                 It.IsAny<Dictionary<string, object?>>(),
-                It.IsAny<CancellationToken>()))
+                It.IsAny<CancellationToken>(),
+                It.IsAny<Guid?>()))
             .ThrowsAsync(new HttpRequestException("Update failed"));
 
         // Act - ignore the exception to verify queries executed
@@ -415,9 +417,10 @@ public class ScorecardCalculatorErrorTests
                 "sprk_matter",
                 matterId,
                 It.IsAny<Dictionary<string, object?>>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken>(
-                (_, _, fields, _) => capturedFields = fields)
+                It.IsAny<CancellationToken>(),
+                It.IsAny<Guid?>()))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>(
+                (_, _, fields, _, _) => capturedFields = fields)
             .Returns(Task.CompletedTask);
 
         // Act

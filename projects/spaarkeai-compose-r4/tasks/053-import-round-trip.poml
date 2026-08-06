@@ -1,0 +1,225 @@
+<task id="053" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Import round-trip — pre-existing Word revisions/comments render as first-class tracked changes/threads (FR-10)</title>
+    <phase>5 Concurrency + save</phase>
+    <gate>open</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend + BFF implementation modifying .ts/.tsx/.cs; a new editor mount surface for imported revisions/comments; tags include frontend + bff-api + docx.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The reader exists (`DocxAnnotationReader`) and the editor track-change marks + opaque-atom model (021) exist to reuse; the mount is well-scoped projection-into-TipTap work, not architectural invention.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W5c</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>021,030</deps>
+    <tags>frontend,bff-api,docx</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-10 (import round-trip). Pre-existing Word `w:ins`/`w:del`/`w:comment` in an IMPORTED document
+    MUST render IN THE EDITOR as first-class tracked changes + comment threads that are accept/reject-able —
+    not flattened, not read-only. The READER already exists (`Services/Compose/DocxAnnotationReader.cs` reads
+    the revisions/comments out of the OOXML); the EDITOR MOUNT is the work: project the imported revisions +
+    comments into the TipTap model — REUSE the task 021 opaque-atom node + the existing track-change marks
+    (`InsertionMark`/`DeletionMark`/`CommentAnchorMark`) — keyed by `paraId` so imported anchors SURVIVE a
+    save (they patch back through the unified Patch Engine at their paraId).
+
+    An imported revision on an UNRESOLVABLE paraId must SURFACE (surfaced for review), never be dropped.
+    Client fetches via `@spaarke/auth` (ADR-028); no new AI dispatch endpoint (ADR-039); `Services/Compose/`
+    stays pure (ADR-013) and no `Microsoft.Graph` type above `SpeFileStore` (ADR-007). Every load/projection
+    change carries a through-the-wire seam slice (ADR-038; the seam slice is task 054).
+  </prompt>
+
+  <role>
+    Senior full-stack engineer: React/TypeScript (TipTap track-change marks + the 021 opaque-atom node) + .NET 8
+    (the `DocxAnnotationReader` projection into the editor model). Understands the reader is done and the gap is
+    MOUNTING imported revisions/comments into the editor as accept/reject-able, paraId-keyed so they survive save.
+  </role>
+
+  <goal>
+    An imported document with pre-existing Word revisions/comments that opens in the editor with those revisions
+    (as `InsertionMark`/`DeletionMark`) and comments (as threads) visible and accept/reject-able; the imported
+    anchors are paraId-keyed and survive a save (patch back through the unified Patch Engine); and an imported
+    revision on an unresolvable paraId surfaces for review rather than being dropped.
+  </goal>
+
+  <context>
+    <background>
+      Design §4 F4: "Open a doc that already has Word revisions/comments and see them as first-class tracked
+      changes/comment threads (import round-trip; reader exists, mount is the work)." Spec FR-10 acceptance:
+      "a doc redlined externally in Word opens with those revisions/comments visible and accept/reject-able
+      (reader exists; the editor mount is the work)." The CIPO doc has track changes — it is the acceptance
+      fixture. The reader (`DocxAnnotationReader.cs`) reads `w:ins`/`w:del`/`w:comment`; this task projects
+      that into the TipTap model reusing the 021 opaque-atom node + the existing track-change marks, keyed by
+      paraId so anchors survive save through the 030 unified Patch Engine.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — mount imported revisions (as InsertionMark/DeletionMark) + comments (as threads) into the editor on import; accept/reject-able</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationReader.cs — the EXISTING reader of pre-existing `w:ins`/`w:del`/`w:comment`; project its output into the editor model (do not reimplement the read)</file>
+      <file role="dependency-output">src/client/shared/Spaarke.Compose.Components/src/widgets/ — task 021 opaque-atom node (reuse for non-renderable imported constructs) + the existing track-change marks (`InsertionMark`/`DeletionMark`/`CommentAnchorMark`)</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs — task 030 unified Patch Engine (imported anchors patch back through it at their paraId on save)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/widgets/paraIdExtension.ts — key imported anchors by paraId so they survive save</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §4 F4, §5 (import round-trip)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-10, Success Criterion 6</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="021" status="pending">Opaque-atom node (client schema) — reused for non-renderable imported constructs.</dependency>
+      <dependency task="030" status="pending">Unified `ComposeShadowPatchEngine` — imported anchors patch back through it at their paraId on save.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-10">Pre-existing Word `w:ins`/`w:del`/`w:comment` in an imported doc MUST render IN THE EDITOR as first-class tracked changes + comment threads that are accept/reject-able — not flattened, not read-only. Imported anchors MUST be paraId-keyed and survive a save.</constraint>
+    <constraint source="spec / FR-10 negative / I-7">An imported revision on an UNRESOLVABLE paraId MUST surface for review — NEVER silently dropped. No text-search placement.</constraint>
+    <constraint source="project / reuse">REUSE the task 021 opaque-atom node + the existing track-change marks (`InsertionMark`/`DeletionMark`/`CommentAnchorMark`) and the existing `DocxAnnotationReader` — MUST NOT reimplement the OOXML read or add a parallel mark system.</constraint>
+    <constraint source="ADR-028 / project">Client import/load fetches use `@spaarke/auth`; no hand-rolled token handling.</constraint>
+    <constraint source="ADR-021 / project">All new/modified UI (imported comment threads, revision affordances) is Fluent UI v9 and MUST render correctly in dark mode (theme tokens; no hard-coded colors).</constraint>
+    <constraint source="ADR-007 / ADR-013 / NFR-05">`Services/Compose/` stays pure (no AI internals, Tier-1 NetArchTest green); no `Microsoft.Graph` type above `SpeFileStore`; no new AI dispatch endpoint (ADR-039).</constraint>
+    <constraint source="ADR-038 / NFR-06">Through-the-wire seam slice required for this load/projection change (authored as the task 054 seam slice). NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests.</constraint>
+    <constraint source="CLAUDE.md §10 / §11">New editor-mount surface — provide the `&lt;justification&gt;`. State the Placement Justification (mount reuses reader + 021 atom + existing marks). Verify BFF publish size ≤60 MB (delta vs ~49.63 MB); no new HIGH CVE; run `/conflict-check` before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Projecting imported OOXML revisions/comments into TipTap track-change marks + opaque atoms; paraId-keyed anchors survive save; Fluent v9 dark mode; BFF hygiene</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing revision/comment reader" location="src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationReader.cs">
+        Already reads pre-existing `w:ins`/`w:del`/`w:comment` out of the OOXML — project ITS output into the editor model; do not reimplement the read.
+      </pattern>
+      <pattern name="Track-change marks + opaque atom (reuse)" location="src/client/shared/Spaarke.Compose.Components/src/widgets/">
+        Reuse `InsertionMark`/`DeletionMark`/`CommentAnchorMark` + the task 021 opaque-atom node to mount imported revisions/comments as first-class, accept/reject-able, paraId-keyed.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor (frontend + bff-api + docx; xhigh; sonnet). Load the knowledge files + design §4 F4/§5. Read `DocxAnnotationReader.cs`, the 021 opaque-atom node, and the track-change marks. State the Placement Justification. Run `/conflict-check`.</step>
+    <step order="1" name="Project reader output to editor model">Project the `DocxAnnotationReader` output (imported `w:ins`/`w:del`/`w:comment`) into the TipTap model as `InsertionMark`/`DeletionMark` + comment threads, reusing the 021 opaque-atom node for non-renderable imported constructs. Key every imported anchor by paraId.</step>
+    <step order="2" name="Mount into the editor, accept/reject-able">Mount the imported revisions + comment threads in `ComposeEditor.tsx` so they are visible and accept/reject-able (they participate in the existing track-change accept/reject flow). Fluent v9, dark-mode-safe.</step>
+    <step order="3" name="Survive save + surface unresolvable">Ensure imported anchors are paraId-keyed and survive a save (patch back through the 030 unified Patch Engine at their paraId). An imported revision on an unresolvable paraId surfaces for review (never dropped) — fire the escalation trigger if a drop would be needed.</step>
+    <step order="4" name="Tests">Author client component tests (real editor state): imported revisions render as accept/reject-able marks; imported comments render as threads; unresolvable-paraId revision surfaces. If the BFF projection changed, add/update the `tests/integration/seam/Compose/` slice. Include an ADR-021 dark-mode check.</step>
+    <step order="5" name="Verify + size/CVE report">`npm run build:prod` the shared lib + `dotnet build`; run tests + Tier-1 NetArchTest. Publish; report absolute size + delta vs ~49.63 MB; `dotnet list package --vulnerable`. Update TASK-INDEX.md: set this task's status to ✅. Document any deviation in projects/spaarkeai-compose-r4/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>The READER (`DocxAnnotationReader.cs`) reads pre-existing `w:ins`/`w:del`/`w:comment` out of the OOXML, but nothing MOUNTS imported revisions/comments into the editor — an imported redlined doc opens without its revisions visible or editable.</existing>
+    <extension>Partial reuse: the reader is reused (not reimplemented), the 021 opaque-atom node + the existing track-change marks are reused for the render; the NEW surface is the projection-into-TipTap MOUNT that keys imported anchors by paraId so they survive save. It cannot fold into the reader (server read, no editor model) nor into the marks (which render our own edits, not imported ones from the reader).</extension>
+    <cost-of-doing-nothing>Without the mount, an externally-redlined document (e.g. the CIPO doc, which has track changes) opens WITHOUT its revisions/comments visible or accept/reject-able — the reader's output is stranded. Concrete failing contract: FR-10 / Success Criterion 6 "a doc redlined externally in Word opens with those revisions/comments visible and accept/reject-able" cannot be met.</cost-of-doing-nothing>
+  </justification>
+
+  <escalation>
+    <trigger>An imported revision/comment whose paraId is UNRESOLVABLE in the current projection (Word regenerated or stripped the paraId on an external save) that cannot be surfaced for review without dropping it — STOP and escalate per root §6 rather than silently dropping an imported revision. Silent drop violates FR-10 / I-7.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (imported revisions/comments mounted, accept/reject-able, paraId-keyed)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ (imported-revision projection into track-change marks + opaque atoms)</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/importRoundTrip.test.tsx</output>
+    <output type="test">tests/integration/seam/Compose/ (seam slice if the BFF projection changed)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A doc redlined externally in Word (e.g. the CIPO doc, which has track changes) opens with those revisions (as `InsertionMark`/`DeletionMark`) and comments (as threads) VISIBLE and accept/reject-able in the editor.</criterion>
+    <criterion testable="true">Imported anchors are paraId-keyed and SURVIVE a save — they patch back through the unified Patch Engine at their paraId (reusing the existing `DocxAnnotationReader` + 021 opaque-atom + track-change marks, not a parallel system).</criterion>
+    <criterion testable="true">NEGATIVE: an imported revision on an unresolvable paraId SURFACES for review — it is not silently dropped (and not text-searched into place, I-7).</criterion>
+    <criterion testable="true">Client fetches use `@spaarke/auth`; `Services/Compose/` injects no AI internals (Tier-1 NetArchTest green); no `Microsoft.Graph` above `SpeFileStore` (ADR-007); no new AI dispatch endpoint (ADR-039).</criterion>
+    <criterion testable="true">Imported comment threads + revision affordances render correctly in Fluent v9 dark mode (ADR-021); publish size ≤60 MB (delta vs ~49.63 MB); no new HIGH CVE; client + BFF builds green.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <ui-test name="Imported revisions render accept/reject-able">
+      <steps>Import a doc containing pre-existing `w:ins`/`w:del` (the CIPO doc). Open it in the editor.</steps>
+      <expected>The revisions render as `InsertionMark`/`DeletionMark` and can be accepted/rejected in the existing track-change flow.</expected>
+    </ui-test>
+    <ui-test name="Imported comments render as threads">
+      <steps>Import a doc containing pre-existing `w:comment` threads.</steps>
+      <expected>The comments render as comment threads anchored at their paraId; they are visible and interactable.</expected>
+    </ui-test>
+    <ui-test name="Imported anchors survive a save">
+      <steps>Import a redlined doc, make no change, save, reload.</steps>
+      <expected>The imported revisions/comments remain at their paraId anchors after the round-trip (paraId-keyed patch-back).</expected>
+    </ui-test>
+    <ui-test name="Unresolvable-paraId revision surfaces">
+      <steps>Import a doc whose imported revision references a paraId not present in the current projection.</steps>
+      <expected>The revision surfaces for review rather than being dropped; no silent loss.</expected>
+    </ui-test>
+    <ui-test name="Dark-mode render (ADR-021)">
+      <steps>Render the imported revisions + comment threads under the Fluent v9 dark theme provider.</steps>
+      <expected>Marks, threads, and affordances use theme tokens and are legible in dark mode; no hard-coded light colors.</expected>
+    </ui-test>
+  </ui-tests>
+
+  <notes>
+    The through-the-wire proof (imported revisions/comments accept/reject-able and survive save) is authored as
+    the task 054 seam slice under `tests/integration/seam/Compose/`. Import mount is a separate surface from the
+    050/051/052 save path (parallel-safe true). Run `/conflict-check` before the BFF PR.
+
+    COMPLETED 2026-07-22. Step 0 context load found the R3 base this branch extends already shipped the FULL
+    mount (not just the reader): `importedRevisions.ts`/`importedComments.ts` (R3 tasks 050/051) already project
+    `ImportedRevision[]`/`ImportedComment[]` onto `InsertionMark`/`DeletionMark`/`CommentAnchorMark`, paraId-primary
+    anchored; `ComposeEditor.tsx` already wires both into BOTH mount paths (server-projection + mammoth fallback);
+    `ComposeService.LoadAsync` already runs the existing `DocxAnnotationReader` and projects the result onto Load
+    (no `ComposeDocxProjectionBuilder.cs` change needed — deviation from the POML's suggested step 1, server work
+    had already landed); `usePendingRedline.accept`/`.reject` already scan the live document by ledgerRef
+    (not gated on hook `pending` state), so the SAME per-change popover already accept/reject-s an imported
+    revision's `imported:{id}` ledgerRef unmodified.
+
+    The GAP actually closed: invariant I-7 ("surfaces for review, never silently dropped") was already satisfied
+    for COMMENTS (`groupImportedComments` is pure, always seeds the FR-23 panel regardless of anchor resolution)
+    but NOT for REVISIONS — `applyImportedRevisions` computed an `unresolved` count that `ComposeEditor.tsx`
+    discarded at both call sites, so an unresolvable revision rendered nothing and surfaced nowhere. Fixed:
+    `applyImportedRevisions` now returns `unresolvedItems: ImportedRevision[]`; new
+    `renderUnresolvedRevisionPlaceholders` (same file) REUSES the task-021 opaque-atom node (`composeInlineAtom`,
+    zero new schema) to surface each unresolved revision as a review marker APPENDED at the document end (never
+    a guessed in-place position — I-7 bans text-search placement), run as a separate pass after the main
+    resolution loop so an earlier placeholder never pollutes a later revision's fuzzy search. Wired into
+    `ComposeEditor.tsx` at both mount sites, before the paraId snapshot/op-log reset (same load-time-baseline
+    contract every other import-mark helper follows) + folded into the existing `onImportWarnings` banner as a
+    privacy-safe count. Dark mode (ADR-021): zero new CSS — reuses the `.compose-atom`/`.compose-atom-inline`
+    rules `ComposeEditor.opaqueAtomTheme.test.ts` already proves token-based.
+
+    Escalation trigger did NOT fire — the placeholder mechanism surfaces every unresolved revision without ever
+    needing to drop one; no schema change required.
+
+    Save survival: no new save-path code needed. The unified Patch Engine only touches edited paraIds (I-4);
+    resolved imports patch back at their real paraId (pre-existing); the review placeholder carries no paraId
+    and is wiped by the same `opLogRef.reset()` every import-mark mount already relies on, so it never reaches
+    save. Proven client-side (re-mount from the identical Load-response data reproduces byte-identical
+    HTML/marks) in the new `importRoundTrip.test.tsx`; the through-the-wire half is task 054's seam slice.
+
+    Files changed (client only — NO `.cs` files; server-side FR-10 support was already complete, so BFF publish
+    size is UNCHANGED by this task): `importedRevisions.ts` (unresolvedItems + renderUnresolvedRevisionPlaceholders),
+    `importedRevisions.test.ts` (updated + new coverage), `ComposeEditor.tsx` (wiring at both mount sites),
+    `importRoundTrip.test.tsx` (new — FR-10 acceptance suite: render, accept/reject-able incl. deletion-accept
+    actually removing text, negative unresolvable-revision-surfaces + unresolvable-comment-parity, save/reload
+    determinism). Placement Justification: no new server surface; client-only editor-mount work per the task's
+    own `<justification>`.
+
+    Verification: `npx jest importedRevisions importedComments importRoundTrip opaqueAtomTheme` — 4 suites, 30
+    tests green. `npm run typecheck` A/B-verified via `git stash` against baseline — byte-identical pre-existing
+    error set (8 `@spaarke/ai-widgets`/`@spaarke/document-operations` sibling-dist errors, environmental per root
+    CLAUDE.md); zero new errors introduced. Full-mount `ComposeEditor`/`ComposeWorkspace` React-render tests
+    could not run in this worktree (pre-existing environmental gap — `@spaarke/ui-components` has no installed
+    `node_modules`/built `dist/` here; confirmed via the same `git stash` A/B, already documented by task 024's
+    `ComposeEditor.opaqueAtomTheme.test.ts`); `importRoundTrip.test.tsx` exercises the same production code
+    paths via `usePendingRedline` (imported `type`-only from `ComposeEditor.tsx`, erased at compile time) over
+    a headless editor built from ComposeEditor's own extension set. Full decision record:
+    `projects/spaarkeai-compose-r4/notes/task-053-import-round-trip-decisions.md`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

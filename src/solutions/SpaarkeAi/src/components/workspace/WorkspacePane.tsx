@@ -27,22 +27,31 @@
  * @see ADR-022 — React 19, functional components
  */
 
-import * as React from "react";
-import { makeStyles, tokens, Spinner } from "@fluentui/react-components";
-import { AppsListRegular } from "@fluentui/react-icons";
-import { PaneHeader } from "@spaarke/ui-components";
+import * as React from 'react';
+import { makeStyles, tokens, Spinner } from '@fluentui/react-components';
+import { AppsListRegular } from '@fluentui/react-icons';
+import {
+  PaneHeader,
+  createXrmDataService,
+  createXrmNavigationService,
+  searchUsersAndContacts,
+  ANALYSIS_REGARDING_TARGETS,
+  resolveAnalysisFilePreview,
+} from "@spaarke/ui-components";
+import type { AssociationResult } from "@spaarke/ui-components";
 import {
   usePaneEvent,
   useDispatchPaneEvent,
   resolveWorkspaceWidget,
   getWorkspaceWidgetMetadata,
   useAiSession,
-} from "@spaarke/ai-widgets";
+  CreateAnalysisWizardWidget,
+} from '@spaarke/ai-widgets';
 import type {
   WorkspacePaneEvent,
   ConversationPaneEvent,
-  WorkspaceWidgetComponent,
-} from "@spaarke/ai-widgets";
+  CreateAnalysisWizardData,
+} from '@spaarke/ai-widgets';
 // R6 Hotfix Wave B-G9c2 (2026-06-10): the previously-eager Summary tab
 // auto-install (R5 task 038) was removed. Each summarize invocation now
 // dispatches its own `workspace.widget_load` carrying the structured-
@@ -50,44 +59,63 @@ import type {
 // Those symbols are no longer needed at this site; capability dispatchers
 // (the shared dispatchConsumer helper via its `workspaceTarget` arg +
 // FilePreviewContextWidget.dispatchSummarizeOnly) own them now.
-import { buildBffApiUrl } from "@spaarke/auth";
-import { usePaneCollapseContext, useComposeLaunch } from "../shell/ThreePaneShell";
+import { buildBffApiUrl } from '@spaarke/auth';
+import { usePaneCollapseContext, useComposeLaunch, useAnalysisLaunch } from '../shell/ThreePaneShell';
 // R3 ("Visible to assistant") — deep-import the cross-pane bridge hook (not the
 // `@spaarke/compose-components` barrel) so this workspace-pane module does NOT transitively pull the
 // TipTap editor widgets — mirrors ConversationPane's deep-import rationale. Resolves in Vite + jest.
-import { useComposeVisibility } from "@spaarke/compose-components/context/composeActionBridge";
-import { WorkspaceTabManager } from "./WorkspaceTabManager";
+import { useComposeVisibility } from '@spaarke/compose-components/context/composeActionBridge';
+import { WorkspaceTabManager } from './WorkspaceTabManager';
 import type {
   ActiveTabSnapshot,
   WorkspaceTabManagerState,
   WorkspaceTabPersistenceSnapshot,
-} from "./WorkspaceTabManager";
-import { WorkspaceTabManagerComponent } from "./WorkspaceTabManagerComponent";
-import { WorkspacePaneMenu } from "./WorkspacePaneMenu";
-// FIX #10b — STUB email widget rendered when the Compose "Email" affordance
-// (or the chat "email" chip) dispatches a `widget_load` with widgetType 'email'.
-// Statically imported so the email branch resolves the component synchronously
-// (no WorkspaceWidgetRegistry round-trip).
-import { EmailStubWidget } from "./EmailStubWidget";
+} from './WorkspaceTabManager';
+import { WorkspaceTabManagerComponent } from './WorkspaceTabManagerComponent';
+import { WorkspacePaneMenu } from './WorkspacePaneMenu';
 // spaarkeai-compose-r2 UNIFY — the DIRECT 'compose' widget's seed shape. Used to
 // build the ribbon composeMode=editor launch seed (stored-doc pointer) that the
 // workspace handler's 'compose' branch consumes.
-import type { ComposeWidgetSeed } from "./composeWidgetData";
+import type { ComposeWidgetSeed } from './composeWidgetData';
 import {
   logTelemetryError,
   TELEMETRY_TAB_RESTORE_LOAD_FAILURE,
   TELEMETRY_TAB_RESTORE_SAVE_FAILURE,
   TELEMETRY_UI_ACTION_ACK_FAILURE,
-} from "../../telemetry/errorTelemetry";
-import {
-  getPinnedWorkspaces,
-  prunePinnedToKnown,
-} from "../../services/pinnedWorkspaces";
+} from '../../telemetry/errorTelemetry';
+import { getPinnedWorkspaces, prunePinnedToKnown } from '../../services/pinnedWorkspaces';
+// ai-advanced-capabilities-analysis-hub-r1: headless analysis open (grid row-click →
+// openSpaarkeAi target:2). Owns the code-page modal primitive (ADR-039 code-routing).
+import { openSpaarkeAi } from '../../utils/launch-resolver';
 // Wave 2b (task 109): the cold-load default tab is now driven by
 // useWorkspaceLayouts().activeLayout (the BFF's discovered default — Daily
 // Briefing in dev) instead of a hard-coded Home tab. See the auto-install
 // effect below for the dispatch path.
-import { useWorkspaceLayouts } from "../../hooks/useWorkspaceLayouts";
+import { useWorkspaceLayouts } from '../../hooks/useWorkspaceLayouts';
+// UAT round-5 item #13 (workspace-tab persistence + resume): durable localStorage
+// persistence for the UNBOUND home-surface Compose tab(s) + their in-flight review
+// runs — the one surface `tabAnchorKeyForContext` (entityContext-keyed) and the
+// BFF `/tabs` store (chatSessionId-keyed) both decline to cover. See the module
+// header for the exact gap + design.
+import {
+  readComposeRunState,
+  writeComposeRunState,
+  upsertPersistedComposeTab,
+  removePersistedComposeTab,
+  clearRunInFlight,
+  clearRunInFlightBySession,
+  isRunResumable,
+  hasFindings,
+  findLatestFindingsPayload,
+  withComposeSessionId,
+  COMPOSE_RUN_IN_FLIGHT_MAX_MS,
+  type ComposeLedgerOutputLike,
+} from './composeRunPersistence';
+// UAT round-5 item #13 (resume poll): reuse the SHIPPED live-completion projection
+// (conversation/**) so a polled compose-outputs ledger entry materializes findings
+// through the EXACT same `compose_advisory_comments` receiver the live path uses —
+// no re-implemented projection (§11 reuse).
+import { projectFlaggedSectionsToAdvisoryComments } from '../conversation/useNdaReviewAdvisoryCommentsBridge';
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -95,11 +123,11 @@ import { useWorkspaceLayouts } from "../../hooks/useWorkspaceLayouts";
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    width: "100%",
-    overflow: "hidden",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    width: '100%',
+    overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground2,
   },
 
@@ -110,11 +138,73 @@ const useStyles = makeStyles({
   //    sees an empty pane and can pick from the Workspaces dropdown.
   firstPaintPlaceholder: {
     flex: 1,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
+
+// ---------------------------------------------------------------------------
+// Analysis-anchored tab persistence (task 025 / spec FR-09)
+// ---------------------------------------------------------------------------
+//
+// Tab persistence (NFR-09, task 065) was previously gated entirely on
+// `chatSessionId`: the save effect no-op'd and the restore effect settled
+// immediately whenever no chat session existed yet. A pre-session tab (e.g.
+// the ribbon "compose" launch, which opens a workspace tab before the user
+// has sent a first chat message) therefore had NO durable store to persist
+// against and was silently lost on refresh — a data-loss bug (task 025
+// negative acceptance criterion).
+//
+// `entityContext` (the Analysis record this ThreePaneShell/WorkspacePane
+// instance is bound to) is known at mount — well before any chat session is
+// minted. Anchoring a fast, always-available localStorage cache on it closes
+// the gap without a new BFF endpoint or server contract change (§11
+// Component Justification: extends the SAME per-host-context localStorage
+// keying convention `AiSessionProvider.chatSessionKeyForContext` already
+// established for `chatSessionId`/`playbookId`). The BFF per-session
+// PATCH/GET remains the durable, cross-device store once a session exists;
+// this is an additive client-only fallback layer, not a replacement.
+const TAB_ANCHOR_KEY_PREFIX = 'sprk_ai2_workspaceTabs';
+
+interface TabAnchorEntityContext {
+  entityType?: string;
+  entityId?: string;
+}
+
+/**
+ * Derive the localStorage key anchoring this Analysis (or other host entity)
+ * record's workspace-tab snapshot. Returns null when no entity context is
+ * bound (e.g. the unbound home surface) — there is no stable anchor to key
+ * on in that case, and the existing chatSessionId-gated BFF path is the only
+ * persistence available.
+ */
+export function tabAnchorKeyForContext(entityContext: TabAnchorEntityContext | null | undefined): string | null {
+  if (!entityContext?.entityType || !entityContext?.entityId) return null;
+  return `${TAB_ANCHOR_KEY_PREFIX}__${entityContext.entityType.toLowerCase()}:${entityContext.entityId.toLowerCase()}`;
+}
+
+/** Safe localStorage read — returns null on parse failure or unavailable storage. */
+function readLocalTabSnapshot(key: string): WorkspaceTabPersistenceSnapshot | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as WorkspaceTabPersistenceSnapshot;
+    if (!parsed || !Array.isArray(parsed.tabs)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Safe localStorage write — silently swallows quota/security errors (best-effort). */
+function writeLocalTabSnapshot(key: string, snapshot: WorkspaceTabPersistenceSnapshot): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(snapshot));
+  } catch {
+    /* localStorage may be unavailable (quota / private mode) — best-effort only. */
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Compose instance-key derivation (spaarkeai-compose-r2 — multi-Compose-tab)
@@ -143,9 +233,9 @@ const useStyles = makeStyles({
  * Works for tabs restored from persistence, which never carried a stored key.
  */
 export function deriveComposeInstanceKey(widgetData: unknown): string | undefined {
-  if (widgetData === null || typeof widgetData !== "object") return undefined;
+  if (widgetData === null || typeof widgetData !== 'object') return undefined;
   const compose = (widgetData as { compose?: unknown }).compose;
-  if (compose === null || typeof compose !== "object") return undefined;
+  if (compose === null || typeof compose !== 'object') return undefined;
   const c = compose as {
     draft?: { ledgerRef?: string; fileName?: string; html?: string };
     upload?: { sessionFileId?: string; fileName?: string };
@@ -154,21 +244,21 @@ export function deriveComposeInstanceKey(widgetData: unknown): string | undefine
     fileName?: string;
   };
 
-  if (typeof c.draft?.ledgerRef === "string" && c.draft.ledgerRef.length > 0) {
+  if (typeof c.draft?.ledgerRef === 'string' && c.draft.ledgerRef.length > 0) {
     // `<bindingId>@t<turn>` → strip the per-turn suffix so re-drafts of the SAME binding reuse.
-    return `draft:${c.draft.ledgerRef.replace(/@t\d+$/i, "")}`;
+    return `draft:${c.draft.ledgerRef.replace(/@t\d+$/i, '')}`;
   }
-  if (typeof c.upload?.sessionFileId === "string" && c.upload.sessionFileId.length > 0) {
+  if (typeof c.upload?.sessionFileId === 'string' && c.upload.sessionFileId.length > 0) {
     return `upload:${c.upload.sessionFileId}`;
   }
-  if (typeof c.speDriveItemId === "string" && c.speDriveItemId.length > 0) {
+  if (typeof c.speDriveItemId === 'string' && c.speDriveItemId.length > 0) {
     return `stored:${c.speDriveItemId}`;
   }
-  if (typeof c.sprkDocumentId === "string" && c.sprkDocumentId.length > 0) {
+  if (typeof c.sprkDocumentId === 'string' && c.sprkDocumentId.length > 0) {
     return `stored:${c.sprkDocumentId}`;
   }
   const fn = c.upload?.fileName ?? c.draft?.fileName ?? c.fileName;
-  if (typeof fn === "string" && fn.length > 0) {
+  if (typeof fn === 'string' && fn.length > 0) {
     return `name:${fn}`;
   }
   // A compose object with no durable identity (Part-B inline html, or an empty seed) → no key.
@@ -210,8 +300,99 @@ export function WorkspacePane(): React.JSX.Element {
   // session and we can no-op cleanly when no session id is set yet.
   // ---------------------------------------------------------------------------
 
-  const { bffBaseUrl, authenticatedFetch, chatSessionId, isAuthenticated } =
-    useAiSession();
+  const { bffBaseUrl, authenticatedFetch, chatSessionId, isAuthenticated, entityContext } = useAiSession();
+
+  // ---------------------------------------------------------------------------
+  // Analysis entry-matrix launch (task 050 — spec §12 / FR-14)
+  //
+  // Published by ThreePaneShell from the URL params (openSpaarkeAi analysis
+  // deep-link, ADR-039 CODE path — NOT surfaceLaunchRegistry). Null unless the
+  // app was launched into an analysis entry mode. Drives the analysis
+  // auto-install effect below (hub for 'new'; existing analysis for 'existing').
+  // ---------------------------------------------------------------------------
+  const analysisLaunch = useAnalysisLaunch();
+
+  // ---------------------------------------------------------------------------
+  // Host-coupled Dataverse services for the Analysis creation wizard (task 050
+  // thread 1 — spec FR-12/FR-14).
+  //
+  // `create-analysis-wizard` (@spaarke/ai-widgets, task 040) is context-agnostic
+  // by design (ADR-012): it accepts `dataService`/`navigationService`/`searchUsers`
+  // as injected props and MUST NOT construct Xrm-coupled services itself. The
+  // SpaarkeAi SOLUTION is the correct layer to resolve them from the Xrm host
+  // context — the SAME `createXrmDataService()` / `createXrmNavigationService()` /
+  // `searchUsersAndContacts()` factories ConversationPane already uses (per
+  // DATA-ACCESS-DECISION-CRITERIA: host-context Xrm.WebApi, no BFF/OBO). Injected
+  // into the wizard's `widgetData` in the workspace `widget_load` handler below, so
+  // EVERY dispatcher of that type (the hub Agreement Review card in 2a, the
+  // record-driven modal in 2b) gets a fully-wired wizard — closing the interim
+  // "Connecting to workspace services…" gap task 030 deferred here.
+  // ---------------------------------------------------------------------------
+  const analysisWizardDataService = React.useMemo(() => createXrmDataService(), []);
+  const analysisWizardNavigationService = React.useMemo(() => createXrmNavigationService(), []);
+  const analysisWizardSearchUsers = React.useCallback(
+    (query: string) => searchUsersAndContacts(analysisWizardDataService, query),
+    [analysisWizardDataService]
+  );
+
+  // SPE container resolver for the Analysis wizard's file upload (UAT #7 fix,
+  // 2026-07-30). The wizard's `onFinish` throws "No storage container is configured
+  // for your business unit" when `speContainerId` is empty — the root cause was that
+  // the modal host never supplied a `resolveSpeContainerId`. This is the SAME
+  // current-user → business-unit → `sprk_containerid` chain every shipped Create
+  // wizard uses (useWizardPageBootstrap.ts / the Create* code pages). Pure Dataverse
+  // Web API via the Xrm host global (no BFF/OBO); the GUID-strip on userId is required.
+  const resolveAnalysisSpeContainerId = React.useCallback(async (): Promise<string> => {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const xrm: any =
+      (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+    /* eslint-enable @typescript-eslint/no-explicit-any */
+    if (!xrm?.WebApi?.retrieveRecord) throw new Error("Xrm.WebApi not available");
+    const userId: string = xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "");
+    const user = await xrm.WebApi.retrieveRecord("systemuser", userId, "?$select=_businessunitid_value");
+    const buId = user["_businessunitid_value"] as string;
+    if (!buId) throw new Error("Could not resolve business unit");
+    const bu = await xrm.WebApi.retrieveRecord("businessunit", buId, "?$select=sprk_containerid");
+    return (bu["sprk_containerid"] as string) || "";
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Create Analysis wizard MODAL host (ai-advanced-capabilities-analysis-hub-r1
+  // tabbed Quick Start). The Quick Start "Agreement Review" card dispatches
+  // `open_create_analysis_wizard`; we host `CreateAnalysisWizardWidget` here as a
+  // MODAL (`embedded: false`) — it does NOT take a workspace tab, and on finish it
+  // opens its result tab exactly as today. WorkspacePane already injects the
+  // wizard's Xrm services (above) and is where the result tab lands, so it is the
+  // correct host.
+  // ---------------------------------------------------------------------------
+  const [createAnalysisModal, setCreateAnalysisModal] = React.useState<{
+    open: boolean;
+    workTypeValue?: number;
+    workTypeLabel?: string;
+  }>({ open: false });
+
+  // Regarding pre-set: resolve from the host entityContext (the record the
+  // SpaarkeAi surface was launched in — e.g. a Matter/Project modal). Mirrors the
+  // logic the retired AnalysisHub cards used; only the supported ADR-024 targets
+  // (Matter/Project/Document) force a regarding. Absent/unsupported host → no
+  // forced regarding (the wizard opens with an empty, user-editable lookup).
+  const analysisInitialAssociation = React.useMemo<AssociationResult | undefined>(() => {
+    const entityType = entityContext?.entityType;
+    const recordId = entityContext?.entityId;
+    if (!entityType || !recordId) return undefined;
+    const supported = ANALYSIS_REGARDING_TARGETS.some(t => t.entityType === entityType);
+    if (!supported) return undefined;
+    return { entityType, recordId, recordName: recordId };
+  }, [entityContext?.entityType, entityContext?.entityId]);
+
+  // Task 025 (FR-09): the Analysis-record anchor tab persistence keys on — see the
+  // module-scope block above. Memoized on the entity identity fields (entityContext
+  // itself is a fresh object per AiSessionProvider render).
+  const tabAnchorKey = React.useMemo(
+    () => tabAnchorKeyForContext(entityContext),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [entityContext?.entityType, entityContext?.entityId]
+  );
 
   // ---------------------------------------------------------------------------
   // Tab manager — single instance per WorkspacePane mount
@@ -221,16 +402,12 @@ export function WorkspacePane(): React.JSX.Element {
   // on every mutation. The actual `persistTabs` function below is rebuilt with
   // useCallback (it captures sessionId/bffBaseUrl) and assigned into the ref
   // on each render — so the manager always calls the latest persistTabs.
-  const persistTabsRef = React.useRef<
-    ((snapshot: WorkspaceTabPersistenceSnapshot) => void) | null
-  >(null);
+  const persistTabsRef = React.useRef<((snapshot: WorkspaceTabPersistenceSnapshot) => void) | null>(null);
 
   // Round 4 Fix 4: Forwarding ref for the active-tab-change signal. Same
   // pattern as persistTabsRef — keeps the manager construction stable while
   // letting the dispatch closure capture the latest `dispatch` reference.
-  const activeTabChangeRef = React.useRef<
-    ((snapshot: ActiveTabSnapshot) => void) | null
-  >(null);
+  const activeTabChangeRef = React.useRef<((snapshot: ActiveTabSnapshot) => void) | null>(null);
 
   // Stable manager reference — never recreated across re-renders.
   // The onPersistChange / onActiveTabChange callbacks are themselves stable;
@@ -238,19 +415,25 @@ export function WorkspacePane(): React.JSX.Element {
   // refresh cleanly without re-instantiating the manager).
   const managerRef = React.useRef<WorkspaceTabManager>(
     new WorkspaceTabManager({
-      onPersistChange: (snapshot) => {
+      onPersistChange: snapshot => {
         persistTabsRef.current?.(snapshot);
       },
-      onActiveTabChange: (snapshot) => {
+      onActiveTabChange: snapshot => {
         activeTabChangeRef.current?.(snapshot);
       },
-    }),
+    })
   );
 
   // React state mirrors the manager's snapshot; triggers re-renders.
-  const [tabState, setTabState] = React.useState<WorkspaceTabManagerState>(() =>
-    managerRef.current.getSnapshot()
-  );
+  const [tabState, setTabState] = React.useState<WorkspaceTabManagerState>(() => managerRef.current.getSnapshot());
+
+  // UAT round-4 (item #10a): true while a review whose progress modal was dismissed ("Continue working
+  // in background") is STILL running server-side. Fed purely by the additive
+  // `nda_review_background_run` broadcast (useNdaReviewRunProgress, Assistant pane); drives the tiny
+  // circular progress indicator on the running Compose tab header (WorkspaceTabManagerComponent). Goes
+  // false when the run reaches a terminal state - completion then flows through the existing
+  // ReviewCompleteToast rules, unchanged.
+  const [composeReviewRunningInBackground, setComposeReviewRunningInBackground] = React.useState(false);
 
   /** Sync React state with the current manager snapshot. */
   const syncState = React.useCallback((): void => {
@@ -267,8 +450,7 @@ export function WorkspacePane(): React.JSX.Element {
   // (in-memory state remains correct, restore on next mount may be stale).
   // ---------------------------------------------------------------------------
 
-  const pendingSnapshotRef =
-    React.useRef<WorkspaceTabPersistenceSnapshot | null>(null);
+  const pendingSnapshotRef = React.useRef<WorkspaceTabPersistenceSnapshot | null>(null);
   const persistTimerRef = React.useRef<number | null>(null);
 
   const persistTabs = React.useCallback(
@@ -282,18 +464,24 @@ export function WorkspacePane(): React.JSX.Element {
         const snap = pendingSnapshotRef.current;
         pendingSnapshotRef.current = null;
         if (!snap) return;
+
+        // Task 025 (FR-09): anchor persistence on the Analysis record — NOT gated on
+        // chatSessionId — so a pre-session/ribbon-compose tab survives a refresh. Always
+        // write the local anchor-keyed cache; the BFF PATCH below remains additive once a
+        // durable session exists (cross-device store-of-record for that session).
+        if (tabAnchorKey) {
+          writeLocalTabSnapshot(tabAnchorKey, snap);
+        }
+
         if (!chatSessionId || !bffBaseUrl || !isAuthenticated) return;
 
         try {
-          const url = buildBffApiUrl(
-            bffBaseUrl,
-            `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs`,
-          );
+          const url = buildBffApiUrl(bffBaseUrl, `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs`);
           const response = await authenticatedFetch(url, {
-            method: "PATCH",
+            method: 'PATCH',
             headers: {
-              "Content-Type": "application/json",
-              Accept: "application/json",
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
             },
             body: JSON.stringify(snap),
           });
@@ -311,7 +499,7 @@ export function WorkspacePane(): React.JSX.Element {
         }
       }, 200);
     },
-    [chatSessionId, bffBaseUrl, isAuthenticated, authenticatedFetch],
+    [chatSessionId, tabAnchorKey, bffBaseUrl, isAuthenticated, authenticatedFetch]
   );
 
   // Update the forwarding ref every render so the manager calls the latest
@@ -337,25 +525,22 @@ export function WorkspacePane(): React.JSX.Element {
     (frameId: string): void => {
       if (!chatSessionId || !bffBaseUrl || !isAuthenticated) return;
 
-      const ackUrl = buildBffApiUrl(
-        bffBaseUrl,
-        `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/ack`,
-      );
+      const ackUrl = buildBffApiUrl(bffBaseUrl, `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/ack`);
       void authenticatedFetch(ackUrl, {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
         },
         body: JSON.stringify({ frameId }),
-      }).catch((err) => {
+      }).catch(err => {
         logTelemetryError(TELEMETRY_UI_ACTION_ACK_FAILURE, {
           sessionId: chatSessionId,
           message: err instanceof Error ? err.message : String(err),
         });
       });
     },
-    [chatSessionId, bffBaseUrl, isAuthenticated, authenticatedFetch],
+    [chatSessionId, bffBaseUrl, isAuthenticated, authenticatedFetch]
   );
 
   // ---------------------------------------------------------------------------
@@ -397,15 +582,15 @@ export function WorkspacePane(): React.JSX.Element {
       // `tabs_clear` event when needed.
       if (!snapshot.tabId || !snapshot.widgetType) return;
 
-      dispatch("workspace", {
-        type: "active_widget_changed",
+      dispatch('workspace', {
+        type: 'active_widget_changed',
         widgetType: snapshot.widgetType,
         widgetData: snapshot.widgetData,
         tabId: snapshot.tabId,
         displayName: snapshot.displayName ?? snapshot.widgetType,
       });
     },
-    [dispatch],
+    [dispatch]
   );
 
   React.useEffect(() => {
@@ -450,61 +635,89 @@ export function WorkspacePane(): React.JSX.Element {
 
   const [tabRestoreSettled, setTabRestoreSettled] = React.useState(false);
 
+  // Task 025 (FR-09): the BFF (chatSessionId-keyed) restore remains the durable,
+  // cross-device path once a session exists — UNCHANGED below. It is no longer the
+  // ONLY restore path: when there is no session yet (pre-session/ribbon-compose tab)
+  // OR the BFF has no tabs for this session (404 — e.g. a session freshly promoted
+  // from a pre-session tab whose saves only ever reached localStorage so far), this
+  // effect falls back to the Analysis-anchored local snapshot (tabAnchorKey) instead
+  // of leaving the workspace silently Home-only.
   React.useEffect(() => {
     if (!bffBaseUrl || !isAuthenticated) return;
-    if (!chatSessionId) {
-      // No chat session ⇒ nothing was ever persisted for it — unblock the
-      // auto-install/pin effects instead of deadlocking them. If a session id
-      // appears later this effect re-runs and restore proceeds (its manager-
-      // level guard still protects any tabs opened in the meantime).
+
+    // Focused analysis open (headless modal / entry 2c–2d "open existing analysis"): show an
+    // INDEPENDENT session with ONLY this analysis loaded — do NOT restore the accumulated
+    // workspace tab set (neither the server-session tabs nor the per-Analysis localStorage
+    // anchor). The existing-analysis effect below mounts JUST the Compose document; the
+    // Assistant pane restores the bound session's conversation via session_switch. Settle
+    // immediately so that (tabRestoreSettled-gated) effect can proceed. (Owner UAT 2026-07-31:
+    // the headless analysis modal must open independent, not reopen the full workspace tabs.)
+    if (analysisLaunch?.mode === 'existing') {
       setTabRestoreSettled(true);
       return;
     }
 
     let cancelled = false;
     (async () => {
-      try {
-        const url = buildBffApiUrl(
-          bffBaseUrl,
-          `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs`,
-        );
-        const response = await authenticatedFetch(url, {
-          method: "GET",
-          headers: { Accept: "application/json" },
-        });
-        if (cancelled) return;
-        if (response.status === 404) return; // no tabs to restore — benign
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      let restoredFromServer = false;
 
-        const snapshot =
-          (await response.json()) as WorkspaceTabPersistenceSnapshot;
-        if (cancelled) return;
+      if (chatSessionId) {
+        try {
+          const url = buildBffApiUrl(bffBaseUrl, `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs`);
+          const response = await authenticatedFetch(url, {
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+          });
+          if (cancelled) return;
 
-        await managerRef.current.restoreFromPersistence(
-          snapshot,
-          resolveWorkspaceWidget,
-        );
-        if (cancelled) return;
+          if (response.ok) {
+            const snapshot = (await response.json()) as WorkspaceTabPersistenceSnapshot;
+            if (cancelled) return;
+
+            await managerRef.current.restoreFromPersistence(snapshot, resolveWorkspaceWidget);
+            if (cancelled) return;
+
+            // restoreFromPersistence no-ops if a non-Home tab already exists (e.g.
+            // the user opened a tab during the restore window) — treat that as a
+            // successful server restore too, since a widget tab is present either way.
+            restoredFromServer = managerRef.current.getSnapshot().tabs.some(t => t.kind === 'widget');
+          } else if (response.status !== 404) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          // 404 falls through to the local anchor-keyed fallback below (benign —
+          // no tabs known to the BFF for this session yet).
+        } catch (err) {
+          if (cancelled) return;
+          logTelemetryError(TELEMETRY_TAB_RESTORE_LOAD_FAILURE, {
+            sessionId: chatSessionId,
+            message: err instanceof Error ? err.message : String(err),
+          });
+          // Degrade gracefully — fall through to the local anchor-keyed fallback below.
+        }
+      }
+
+      if (!cancelled && !restoredFromServer && tabAnchorKey) {
+        const localSnapshot = readLocalTabSnapshot(tabAnchorKey);
+        if (localSnapshot) {
+          await managerRef.current.restoreFromPersistence(localSnapshot, resolveWorkspaceWidget);
+        }
+      }
+
+      if (!cancelled) {
         syncState();
 
         // Notify ShellStageManager about the restored tab count so it can
         // advance to the appropriate stage (Stage 3 / Stage 4).
         const snap = managerRef.current.getSnapshot();
-        dispatch("workspace", {
-          type: "tab_count_change",
+        dispatch('workspace', {
+          type: 'tab_count_change',
           tabCount: snap.tabs.length,
         });
-      } catch (err) {
-        if (cancelled) return;
-        logTelemetryError(TELEMETRY_TAB_RESTORE_LOAD_FAILURE, {
-          sessionId: chatSessionId,
-          message: err instanceof Error ? err.message : String(err),
-        });
-        // Degrade gracefully — workspace continues with Home-only state.
-      } finally {
-        // R3-3: settle on EVERY terminal path (success, 404, error) so the
-        // auto-install-default + pin auto-open effects below can proceed.
-        if (!cancelled) setTabRestoreSettled(true);
+
+        // R3-3: settle on EVERY terminal path (server success, local fallback,
+        // no anchor at all, or error) so the auto-install-default + pin
+        // auto-open effects below can proceed.
+        setTabRestoreSettled(true);
       }
     })();
 
@@ -515,7 +728,7 @@ export function WorkspacePane(): React.JSX.Element {
     // (returned by useAiSession() but identical reference across renders).
     // Including it in deps would re-fire the effect needlessly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatSessionId, bffBaseUrl, isAuthenticated]);
+  }, [chatSessionId, tabAnchorKey, bffBaseUrl, isAuthenticated, analysisLaunch?.mode]);
 
   // ---------------------------------------------------------------------------
   // Auto-install default workspace tab — Wave 2b (task 109)
@@ -572,7 +785,7 @@ export function WorkspacePane(): React.JSX.Element {
   // transient/Browse doc survives). Non-compose default layouts (Daily
   // Briefing, dashboards, …) still flow through the 'workspace' LAYOUT door.
   const composeLaunch = useComposeLaunch();
-  const isComposeLaunch = composeLaunch?.composeMode === "editor";
+  const isComposeLaunch = composeLaunch?.composeMode === 'editor';
 
   // Build the DIRECT-widget seed from the launch context's stored document.
   // main.tsx parses the ribbon URL params (sprkDocumentId / speDriveItemId /
@@ -583,7 +796,7 @@ export function WorkspacePane(): React.JSX.Element {
   const composeLaunchSeed = React.useMemo<ComposeWidgetSeed>(() => {
     if (!isComposeLaunch) return {};
     const doc = composeLaunch?.document ?? null;
-    const driveId = composeLaunch?.driveId ?? "";
+    const driveId = composeLaunch?.driveId ?? '';
     const seed: ComposeWidgetSeed = {};
     if (doc?.speDriveItemId) seed.speDriveItemId = doc.speDriveItemId;
     if (doc?.sprkDocumentId) seed.sprkDocumentId = doc.sprkDocumentId;
@@ -606,6 +819,11 @@ export function WorkspacePane(): React.JSX.Element {
     // auto-install entirely so we don't ALSO open the BFF default layout behind
     // the Compose tab (the ribbon user must land ONLY on the editor).
     if (isComposeLaunch) return;
+    // task 050 (spec §12 / FR-14): in an analysis entry mode the dedicated
+    // analysis auto-install effect below owns the cold-load tab (the hub for
+    // 'new', the existing analysis for 'existing') — skip the BFF default layout
+    // so the analysis user lands ONLY on the analysis surface.
+    if (analysisLaunch) return;
     // R3-3 (2026-07-07): wait for the NFR-09 tab restore to settle so the
     // `alreadyOpen` check below sees the RESTORED tabs. Without this gate the
     // default-tab addTab raced restore, no-op'd it (hasNonHomeTab guard) and
@@ -623,20 +841,16 @@ export function WorkspacePane(): React.JSX.Element {
 
     // Skip if this layout is already open (e.g. NFR-09 tab restore brought
     // it back from the last session). Match by widgetData.layoutId.
-    const existingTab = manager
-      .getSnapshot()
-      .tabs.find((t) => {
-        if (t.widgetType !== "workspace") return false;
-        const data = t.widgetData as { layoutId?: string } | null;
-        return data?.layoutId === layoutForAutoInstall.id;
-      });
+    const existingTab = manager.getSnapshot().tabs.find(t => {
+      if (t.widgetType !== 'workspace') return false;
+      const data = t.widgetData as { layoutId?: string } | null;
+      return data?.layoutId === layoutForAutoInstall.id;
+    });
     if (existingTab) return;
 
     // Skip if the default is in the pinned list — the pin auto-open effect
     // below will open it; we don't want to double-dispatch.
-    const isPinned = getPinnedWorkspaces().some(
-      (p) => p.layoutId === layoutForAutoInstall.id,
-    );
+    const isPinned = getPinnedWorkspaces().some(p => p.layoutId === layoutForAutoInstall.id);
     if (isPinned) return;
 
     // Defer to a macrotask so usePaneEvent's subscription effect (declared
@@ -646,11 +860,11 @@ export function WorkspacePane(): React.JSX.Element {
     const timerId = window.setTimeout(() => {
       // eslint-disable-next-line no-console
       console.info(
-        `[WorkspacePane] Auto-installing default workspace: ${layoutForAutoInstall.name} (${layoutForAutoInstall.id})`,
+        `[WorkspacePane] Auto-installing default workspace: ${layoutForAutoInstall.name} (${layoutForAutoInstall.id})`
       );
-      dispatch("workspace", {
-        type: "widget_load",
-        widgetType: "workspace",
+      dispatch('workspace', {
+        type: 'widget_load',
+        widgetType: 'workspace',
         widgetData: {
           layoutId: layoutForAutoInstall.id,
           layoutName: layoutForAutoInstall.name,
@@ -666,7 +880,7 @@ export function WorkspacePane(): React.JSX.Element {
     // ready; the ref guard prevents re-runs on subsequent dependency changes
     // (e.g. refetch).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, isComposeLaunch, tabRestoreSettled, layoutForAutoInstall]);
+  }, [isAuthenticated, isComposeLaunch, analysisLaunch, tabRestoreSettled, layoutForAutoInstall]);
 
   // ---------------------------------------------------------------------------
   // spaarkeai-compose-r2 UNIFY — compose-launch auto-install (DIRECT 'compose')
@@ -694,12 +908,12 @@ export function WorkspacePane(): React.JSX.Element {
 
     const timerId = window.setTimeout(() => {
       // eslint-disable-next-line no-console
-      console.info("[WorkspacePane] Auto-installing compose (direct widget)");
-      dispatch("workspace", {
-        type: "widget_load",
-        widgetType: "compose",
+      console.info('[WorkspacePane] Auto-installing compose (direct widget)');
+      dispatch('workspace', {
+        type: 'widget_load',
+        widgetType: 'compose',
         widgetData: { compose: composeLaunchSeed },
-        displayName: "Compose",
+        displayName: 'Compose',
       });
     }, 0);
 
@@ -710,6 +924,470 @@ export function WorkspacePane(): React.JSX.Element {
     // this once per mount; the seed is stable for the life of a compose launch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isComposeLaunch, isAuthenticated, tabRestoreSettled]);
+
+  // ===========================================================================
+  // UAT round-5 item #13 — home-surface Compose-tab persistence + resume
+  //
+  // Extends (does NOT replace) the two shipped tab-persistence mechanisms for the
+  // one surface they both decline to cover: the UNBOUND "home" surface (Daily
+  // Briefing → direct-Compose door), where `tabAnchorKeyForContext` returns null
+  // (no entityContext) AND the BFF `/tabs` store has no `chatSessionId` at
+  // tab-open time. See `composeRunPersistence.ts` for the exact gap + the storage
+  // choice (localStorage, following the existing `sprk_ai2_*` convention + the
+  // owner's conditional; reliable across the code-page iframe teardown).
+  //
+  // "Home surface" = no bound host record (no local anchor), not an analysis
+  // deep-link, and not a ribbon compose-launch (each of those owns its own cold
+  // mount). When bound, the shipped anchors already restore the Compose tab.
+  // ===========================================================================
+  const isHomeSurface = !tabAnchorKey && !analysisLaunch && !isComposeLaunch;
+
+  // Refs mirror the values the (inline) PaneEventBus handler + the callbacks below
+  // read, so they never go stale regardless of the subscription's closure vintage.
+  const isHomeSurfaceRef = React.useRef(isHomeSurface);
+  const chatSessionIdRef = React.useRef<string | null>(chatSessionId ?? null);
+  React.useEffect(() => {
+    isHomeSurfaceRef.current = isHomeSurface;
+  }, [isHomeSurface]);
+  React.useEffect(() => {
+    chatSessionIdRef.current = chatSessionId ?? null;
+  }, [chatSessionId]);
+
+  // Persist-on-open + capture-session-when-available. Runs whenever the open
+  // Compose tab set OR chatSessionId changes: read-modify-writes the durable
+  // localStorage snapshot (never in-memory-only, so it can't drop a tab it did
+  // not itself open), upserting every currently-open Compose tab. Upsert MERGES
+  // (preserves any prior `run`/`sessionId`), so this never wipes an in-flight
+  // flag captured by the background-run handler. It NEVER removes — removal is
+  // explicit-close only (agency; see handleTabClose). No-op off the home surface.
+  React.useEffect(() => {
+    if (!isHomeSurface) return;
+    const composeTabs = tabState.tabs.filter(t => t.widgetType === 'compose');
+    if (composeTabs.length === 0) return;
+    const now = Date.now();
+    let snap = readComposeRunState(now);
+    let changed = false;
+    for (const t of composeTabs) {
+      const instanceKey = composeTabInstanceKey(t);
+      if (!instanceKey) continue; // no durable document identity → cannot reliably restore; skip
+      snap = upsertPersistedComposeTab(snap, {
+        instanceKey,
+        widgetType: 'compose',
+        widgetData: t.widgetData,
+        displayName: t.displayName,
+        savedAt: now,
+        sessionId: chatSessionId ?? undefined,
+      });
+      changed = true;
+    }
+    if (changed) writeComposeRunState(snap);
+  }, [tabState.tabs, chatSessionId, isHomeSurface]);
+
+  // Background-run capture (round-4 dismiss signal): `nda_review_background_run` fires true when a
+  // review whose progress modal was dismissed ("Continue working in background") is still executing.
+  //
+  // UAT round-6 (item #15a): this signal is now PURELY a UI concern — it drives the in-page tab
+  // spinner ONLY. It NO LONGER stamps the persisted run-in-flight flag. The owner's repro proved the
+  // gap: they navigated away WITHOUT ever dismissing the modal, so this signal never fired and nothing
+  // persisted. The persistence flag is now stamped at DISPATCH time instead (see the
+  // `nda_review_dispatch_active` handler below), which fires for EVERY review path regardless of
+  // whether the modal is later dismissed.
+  const handleBackgroundRunChange = React.useCallback((active: boolean): void => {
+    setComposeReviewRunningInBackground(active);
+  }, []);
+
+  // Dispatch-time run capture (UAT round-6 item #15a): `nda_review_dispatch_active` fires true the
+  // instant a review binding is dispatched from the Assistant (the ONE `runBindingDispatch`
+  // chokepoint — chip/typed/gate/wizard/rerun all funnel through it), and false when that dispatch
+  // settles WITHOUT completing (failure). On the home surface we stamp the ACTIVE Compose tab's
+  // persisted entry with `run:{inFlight,dispatchedAt}` + the current session so a navigate-away-and-
+  // return trip resumes the spinner + poll — INDEPENDENT of the round-4 dismiss signal (the exact gap
+  // the owner hit). Clearing on COMPLETION rides `compose_advisory_comments` (keyed by session — see
+  // below); this false branch is the failure clear.
+  const handleReviewDispatchActive = React.useCallback((active: boolean): void => {
+    if (!isHomeSurfaceRef.current) return;
+    const activeTab = managerRef.current.getActiveTab();
+    if (!activeTab || activeTab.widgetType !== 'compose') return;
+    const instanceKey = composeTabInstanceKey(activeTab);
+    if (!instanceKey) return;
+    const now = Date.now();
+    const current = readComposeRunState(now);
+    if (active) {
+      // Upsert-with-run guarantees the entry exists even if persist-on-open has not
+      // flushed yet (races the same tab-open), capturing the session to poll on.
+      writeComposeRunState(
+        upsertPersistedComposeTab(current, {
+          instanceKey,
+          widgetType: 'compose',
+          widgetData: activeTab.widgetData,
+          displayName: activeTab.displayName,
+          savedAt: now,
+          sessionId: chatSessionIdRef.current ?? undefined,
+          run: { inFlight: true, dispatchedAt: now },
+        })
+      );
+    } else {
+      // Dispatch failed — clear the active tab's flag so a return trip doesn't resume a dead run.
+      writeComposeRunState(clearRunInFlight(current, instanceKey));
+    }
+  }, []);
+
+  // Completion clear (UAT round-6 item #15a): a review completion — including a zero-findings clean
+  // review, which now dispatches unconditionally (see useNdaReviewAdvisoryCommentsBridge) — arrives as
+  // `compose_advisory_comments` carrying the completing `sessionId`. Clear the persisted in-flight flag
+  // for the tab bound to THAT session (keyed by session, not the active tab, because a dismissed run can
+  // complete while the user has switched to a different workspace tab). Idempotent no-op when nothing
+  // matches (e.g. the run was never stamped, or already cleared, or the completion is the resume poll's
+  // own re-dispatch on restore, which already cleared via `finish()`).
+  const handleReviewCompletionForSession = React.useCallback((sessionId: string | undefined): void => {
+    if (!isHomeSurfaceRef.current) return;
+    if (!sessionId) return;
+    writeComposeRunState(clearRunInFlightBySession(readComposeRunState(Date.now()), sessionId));
+  }, []);
+
+  // Resume poll (still-running case): show the tab spinner (reusing round-4's
+  // `composeReviewRunning` slot) and poll compose-outputs until the review's
+  // findings land, then materialize them through the SAME `compose_advisory_comments`
+  // receiver the live path uses (+ the completion-toast rules run for free). A
+  // `sawEmpty` guard makes this fire ONLY when findings arrive AFTER we observed an
+  // empty ledger — so it never double-places with the reopened tab's own FR-16
+  // mount-materialize (which handles the already-complete case). Bounded by the
+  // young-run ceiling; a single shared boolean drives the spinner (round-4 parity).
+  const [composeReviewResuming, setComposeReviewResuming] = React.useState(false);
+  const resumeActiveCountRef = React.useRef(0);
+  const resumePollCleanupsRef = React.useRef<Array<() => void>>([]);
+  React.useEffect(() => {
+    return () => {
+      resumePollCleanupsRef.current.forEach(fn => fn());
+      resumePollCleanupsRef.current = [];
+    };
+  }, []);
+
+  const runResumePoll = React.useCallback(
+    (instanceKey: string, sessionId: string): void => {
+      if (!sessionId || !bffBaseUrl || !isAuthenticated) return;
+      resumeActiveCountRef.current += 1;
+      setComposeReviewResuming(resumeActiveCountRef.current > 0);
+
+      let sawEmpty = false;
+      let cancelled = false;
+      let timerId: number | null = null;
+      const startedAt = Date.now();
+      const POLL_INTERVAL_MS = 5000;
+
+      const finish = (): void => {
+        if (cancelled) return;
+        cancelled = true;
+        if (timerId !== null) {
+          window.clearInterval(timerId);
+          timerId = null;
+        }
+        resumeActiveCountRef.current = Math.max(0, resumeActiveCountRef.current - 1);
+        setComposeReviewResuming(resumeActiveCountRef.current > 0);
+        // Clear the in-flight flag durably (the run is now resolved/timed-out for us);
+        // the seed + session stay persisted so a later open still recalls findings.
+        writeComposeRunState(clearRunInFlight(readComposeRunState(Date.now()), instanceKey));
+      };
+
+      const poll = async (): Promise<void> => {
+        if (cancelled) return;
+        if (Date.now() - startedAt > COMPOSE_RUN_IN_FLIGHT_MAX_MS) {
+          finish();
+          return;
+        }
+        try {
+          const url = buildBffApiUrl(
+            bffBaseUrl,
+            `/ai/chat/sessions/${encodeURIComponent(sessionId)}/compose-outputs`
+          );
+          const resp = await authenticatedFetch(url, {
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+          });
+          if (cancelled) return;
+          if (!resp.ok) return; // transient; keep polling until the deadline
+          const outputs = (await resp.json()) as ComposeLedgerOutputLike[];
+          if (cancelled) return;
+          const present = hasFindings(outputs);
+          if (present && sawEmpty) {
+            // Findings arrived AFTER an empty observation → the reopened tab's own
+            // mount-materialize already ran empty and will NOT re-fire. Place them
+            // via the live event (dispatched ONCE), then stop.
+            const payload = findLatestFindingsPayload(outputs);
+            if (payload) {
+              dispatch('workspace', {
+                type: 'compose_advisory_comments',
+                advisoryComments: projectFlaggedSectionsToAdvisoryComments(
+                  payload.flaggedSections as Parameters<typeof projectFlaggedSectionsToAdvisoryComments>[0]
+                ),
+                overallRisk: payload.overallRisk,
+                sessionId,
+                timestamp: new Date().toISOString(),
+              });
+            }
+            finish();
+            return;
+          }
+          if (present && !sawEmpty) {
+            // Findings already present on the FIRST check → the reopened tab's own
+            // FR-16 mount-materialize is placing them from the SAME ledger; defer to
+            // it (no dispatch → no double-placement).
+            finish();
+            return;
+          }
+          sawEmpty = true;
+        } catch {
+          /* network/parse transient — keep polling until the deadline */
+        }
+      };
+
+      timerId = window.setInterval(() => {
+        void poll();
+      }, POLL_INTERVAL_MS);
+      resumePollCleanupsRef.current.push(finish);
+      void poll(); // immediate first check
+    },
+    [bffBaseUrl, isAuthenticated, authenticatedFetch, dispatch]
+  );
+
+  // Cold-load restore (home surface): once the shipped restore has settled, reopen
+  // any FRESH persisted Compose tab that is not already open — via the EXACT same
+  // `widget_load{ compose }` door a normal open uses (so ComposeDirectWidget →
+  // ComposeWorkspace resumes the document via the threaded `composeSessionId` and
+  // FR-16 recall re-materializes completed findings on mount). For a still-young
+  // in-flight run, start the resume poll (spinner + findings-on-arrival).
+  const composeRunRestoreRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!isAuthenticated) return;
+    if (!tabRestoreSettled) return;
+    if (!isHomeSurface) return;
+    if (composeRunRestoreRef.current) return;
+    composeRunRestoreRef.current = true;
+
+    const now = Date.now();
+    const snapshot = readComposeRunState(now);
+    if (!snapshot || snapshot.tabs.length === 0) return;
+
+    const manager = managerRef.current;
+    const openKeys = new Set(
+      manager
+        .getSnapshot()
+        .tabs.filter(t => t.widgetType === 'compose')
+        .map(t => composeTabInstanceKey(t))
+        .filter((k): k is string => !!k)
+    );
+    const toRestore = snapshot.tabs.filter(t => !openKeys.has(t.instanceKey));
+    if (toRestore.length === 0) return;
+
+    // Macrotask deferral — same subscription-race guard as the auto-install effects:
+    // usePaneEvent's 'workspace' subscription (declared later) must be live when we
+    // dispatch, or the widget_load lands on a zero-subscriber channel.
+    const timerId = window.setTimeout(() => {
+      for (const t of toRestore) {
+        const seed = withComposeSessionId(t.widgetData, t.sessionId);
+        // eslint-disable-next-line no-console
+        console.info(
+          `[WorkspacePane] Restoring home-surface Compose tab: ${t.displayName} (${t.instanceKey})` +
+            (isRunResumable(t.run, Date.now()) ? ' [review in-flight → resuming]' : '')
+        );
+        dispatch('workspace', {
+          type: 'widget_load',
+          widgetType: 'compose',
+          widgetData: seed,
+          displayName: t.displayName,
+        });
+        if (t.sessionId && isRunResumable(t.run, Date.now())) {
+          runResumePoll(t.instanceKey, t.sessionId);
+        }
+      }
+    }, 0);
+    return () => window.clearTimeout(timerId);
+  }, [isAuthenticated, tabRestoreSettled, isHomeSurface, dispatch, runResumePoll]);
+
+  // ---------------------------------------------------------------------------
+  // Analysis entry-matrix auto-install (task 050 — spec §12 / FR-14)
+  //
+  // When the app is launched into an analysis entry mode (analysisLaunch != null),
+  // this effect owns the cold-load surface (the layout + pin auto-installs above
+  // early-return on `analysisLaunch`):
+  //   - mode='new'      → open the Analysis hub tab ('analysis-hub'). The hub
+  //                       renders the "Create new" work-type cards; when a record
+  //                       context is present (entityContext, threaded by the 052
+  //                       ribbon's entityLogicalName/entityId) the hub's card
+  //                       dispatch pre-sets regarding=parent (2b). With no record
+  //                       context the hub opens unforced (2a).
+  //   - mode='existing' → resolve the analysis's bound session via the task-031
+  //                       `GET /ai/chat/sessions/by-analysis/{id}` endpoint and
+  //                       dispatch `conversation.session_switch` so the modal
+  //                       opens on the existing analysis's transcript (2d/2c),
+  //                       with NO hub cards. A 404 (no session ever bound) is a
+  //                       graceful no-op — never mints an empty session (mirrors
+  //                       the hub's own reopen escalation contract, task 031).
+  //
+  // Same macrotask deferral + tabRestoreSettled gate + run-once ref guard as the
+  // layout/compose auto-install effects above (subscription-race + restore
+  // sequencing). ADR-039 / §13.3: this is the deterministic CODE routing path,
+  // not the reactive in-chat surface-launch registry.
+  // ---------------------------------------------------------------------------
+  const autoInstalledAnalysisRef = React.useRef<boolean>(false);
+  React.useEffect(() => {
+    if (!analysisLaunch) return;
+    if (!isAuthenticated) return;
+    if (!tabRestoreSettled) return;
+    if (autoInstalledAnalysisRef.current) return; // run once per mount
+    autoInstalledAnalysisRef.current = true;
+
+    if (analysisLaunch.mode === 'new') {
+      const timerId = window.setTimeout(() => {
+        // eslint-disable-next-line no-console
+        console.info('[WorkspacePane] Auto-installing Analysis hub (entry matrix 2a/2b)');
+        dispatch('workspace', {
+          type: 'widget_load',
+          widgetType: 'analysis-hub',
+          widgetData: null,
+          displayName: 'Analysis',
+        });
+      }, 0);
+      return () => window.clearTimeout(timerId);
+    }
+
+    // mode === 'existing' — load the analysis's latest conversation history (if a
+    // session is bound) AND surface the analysis's document. UAT round 4: for an
+    // analysis with no bound session yet (e.g. freshly created), the modal must still
+    // SHOW the analysis (its linked document) rather than an empty workspace.
+    const analysisId = analysisLaunch.analysisId;
+    if (!analysisId || !bffBaseUrl) return;
+    let cancelled = false;
+    const timerId = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const lookupUrl = buildBffApiUrl(
+            bffBaseUrl,
+            `/ai/chat/sessions/by-analysis/${encodeURIComponent(analysisId)}`
+          );
+          const response = await authenticatedFetch(lookupUrl, {
+            headers: { Accept: 'application/json' },
+          });
+          if (cancelled) return;
+          // 404 (no session ever bound) / any non-OK → fall through to the
+          // document-only surface below; never mint an empty session (task 031).
+          if (response.ok) {
+            const session = (await response.json()) as { sessionId?: string };
+            if (!cancelled && session.sessionId) {
+              // Restores the transcript (Assistant history) + session-keyed
+              // review/findings widgets. The Compose document is mounted separately
+              // below so it survives a cross-browser reopen (no localStorage tab).
+              dispatch("conversation", {
+                type: "session_switch",
+                sessionId: session.sessionId,
+              });
+            }
+          }
+        } catch {
+          // Network/parse failure — fall through to the document-only surface.
+        }
+
+        // Surface the analysis's linked document in the EDITABLE Compose/TipTap
+        // surface (Phase 1, UAT round 5): the analysis surface IS the review surface,
+        // not a read-only preview. Resolve the SPE pointer from the linked
+        // sprk_document (`sprk_graphitemid` = drive-item, `sprk_graphdriveid` = drive
+        // — BOTH required by ComposeEditor; mirrors DocumentComposeLaunch). Falls back
+        // to the read-only document-viewer if the pointer is incomplete.
+        //
+        // Cross-browser reopen MUST-HAVE (durable Compose + history together): mount
+        // the document even when a session was restored above. `session_switch`
+        // restores the CONVERSATION transcript (server-backed by-analysis lookup), but
+        // the Compose WORKSPACE tab only restores from the per-Analysis localStorage
+        // snapshot — absent in a fresh browser / cleared storage. Without this,
+        // cross-browser reopen lands on chat history with NO editor. Guard against
+        // double-mount in the same-browser case where restoreFromPersistence already
+        // rehydrated a compose tab from localStorage (tabRestoreSettled gate above
+        // guarantees restore has completed, so this snapshot is authoritative).
+        if (cancelled) return;
+        const hasComposeTab =
+          managerRef.current?.getSnapshot().tabs.some((t) => t.widgetType === "compose") ?? false;
+        if (hasComposeTab) return;
+        try {
+          // task 022 (spec FR-09; hub A3 deferred deep-threading leg — open-existing door):
+          // $expand the persisted `sprk_agreementtype` lookup (attribute logical name confirmed
+          // via Dataverse MCP describe against `sprk_analysis`, 2026-07-31 — NOT
+          // `sprk_agreementtypeid`, which is the reference table's own PK) so a reopened
+          // Analysis's sub-domain rides into the Compose envelope alongside `activeWorkType`.
+          const rec = (await analysisWizardDataService.retrieveRecord(
+            "sprk_analysis",
+            analysisId,
+            "?$select=sprk_name,sprk_worktype,_sprk_documentid_value,_sprk_agreementtype_value" +
+              "&$expand=sprk_documentid($select=sprk_filename,sprk_graphitemid,sprk_graphdriveid)," +
+              "sprk_agreementtype($select=sprk_key)",
+          )) as Record<string, unknown>;
+          if (cancelled) return;
+          const doc = (rec["sprk_documentid"] ?? {}) as Record<string, unknown>;
+          const speDriveItemId = doc["sprk_graphitemid"] as string | undefined;
+          const speDriveId = doc["sprk_graphdriveid"] as string | undefined;
+          const documentId = rec["_sprk_documentid_value"] as string | undefined;
+          const fileName =
+            (doc["sprk_filename"] as string | undefined) ?? (rec["sprk_name"] as string | undefined) ?? "Document";
+          // Agreement/NDA work-type (100000000) scopes the Compose AI toolbar tools.
+          const activeWorkType = rec["sprk_worktype"] === 100000000 ? "agreement-analysis" : undefined;
+          // task 022: ONE envelope contract — an EXPLICIT subDomain from the cold-load deep-link
+          // door (`analysisLaunch.subDomain`, task 022's other leg) is authoritative; the
+          // open-existing derivation (the expanded lookup's `sprk_key`) fills it only when the
+          // explicit value is absent. Neither present → field stays absent (no fabricated
+          // default; the classifier, task 021, owns filling it later during the review dispatch).
+          const agreementType = (rec["sprk_agreementtype"] ?? {}) as Record<string, unknown>;
+          const derivedSubDomain = agreementType["sprk_key"] as string | undefined;
+          const subDomain = analysisLaunch.subDomain ?? derivedSubDomain;
+
+          if (speDriveItemId && speDriveId) {
+            dispatch("workspace", {
+              type: "widget_load",
+              widgetType: "compose",
+              widgetData: {
+                compose: {
+                  speDriveItemId,
+                  speDriveId,
+                  ...(documentId ? { sprkDocumentId: documentId } : {}),
+                  fileName,
+                  ...(activeWorkType ? { activeWorkType } : {}),
+                  ...(subDomain ? { subDomain } : {}),
+                },
+              },
+              displayName: fileName,
+            });
+            return;
+          }
+
+          // Incomplete SPE pointer → read-only preview fallback (ADR-007 hop).
+          const preview = resolveAnalysisFilePreview(
+            rec as Parameters<typeof resolveAnalysisFilePreview>[0],
+            { bffBaseUrl, authenticatedFetch },
+          );
+          if (preview.status !== "resolved") return;
+          dispatch("workspace", {
+            type: "widget_load",
+            widgetType: "document-viewer",
+            widgetData: {
+              filename: preview.documentName,
+              contentType: "application/octet-stream",
+              textContent: "",
+              documentId: preview.documentId,
+              fetchPreviewUrl: preview.fetchPreviewUrl,
+            },
+            displayName: preview.documentName,
+          });
+        } catch {
+          // Could not resolve the document — leave the workspace to the default surface.
+        }
+      })();
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timerId);
+    };
+    // Run once per mount when auth + restore are ready; the ref guard prevents
+    // re-runs. authenticatedFetch + analysisWizardDataService are stable refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisLaunch, isAuthenticated, tabRestoreSettled, bffBaseUrl, analysisWizardDataService]);
 
   // ---------------------------------------------------------------------------
   // Auto-open pinned workspaces — task 092 / round 5 / task 101 fix
@@ -765,7 +1443,7 @@ export function WorkspacePane(): React.JSX.Element {
     // Workspaces drawer deleted the layout). Persists the cleaned list back
     // to localStorage in the same call. Returns the live (cleaned) list so we
     // do not dispatch widget_load for non-existent layouts.
-    const knownLayoutIds = new Set(layouts.map((l) => l.id));
+    const knownLayoutIds = new Set(layouts.map(l => l.id));
     const pinned = prunePinnedToKnown(knownLayoutIds);
     if (pinned.length === 0) return;
 
@@ -773,19 +1451,17 @@ export function WorkspacePane(): React.JSX.Element {
     const openLayoutIds = new Set<string>(
       manager
         .getSnapshot()
-        .tabs.filter((t) => t.widgetType === "workspace")
-        .map((t) => {
+        .tabs.filter(t => t.widgetType === 'workspace')
+        .map(t => {
           const data = t.widgetData as { layoutId?: string } | null;
-          return data?.layoutId ?? "";
+          return data?.layoutId ?? '';
         })
-        .filter((id): id is string => id.length > 0),
+        .filter((id): id is string => id.length > 0)
     );
 
     // Filter to the pins that actually need opening so we can log + skip
     // cleanly if there's nothing to do.
-    const pinsToOpen = pinned.filter(
-      (pin) => !openLayoutIds.has(pin.layoutId),
-    );
+    const pinsToOpen = pinned.filter(pin => !openLayoutIds.has(pin.layoutId));
     if (pinsToOpen.length === 0) return;
 
     // Defer dispatch to a macrotask so usePaneEvent's subscription effect
@@ -794,14 +1470,11 @@ export function WorkspacePane(): React.JSX.Element {
     // channel and are silently dropped — see block comment above.
     const timerId = window.setTimeout(() => {
       // eslint-disable-next-line no-console
-      console.info(
-        `[WorkspacePane] Auto-opening ${pinsToOpen.length} pinned workspace(s):`,
-        pinsToOpen,
-      );
+      console.info(`[WorkspacePane] Auto-opening ${pinsToOpen.length} pinned workspace(s):`, pinsToOpen);
       for (const pin of pinsToOpen) {
-        dispatch("workspace", {
-          type: "widget_load",
-          widgetType: "workspace",
+        dispatch('workspace', {
+          type: 'widget_load',
+          widgetType: 'workspace',
           widgetData: { layoutId: pin.layoutId, layoutName: pin.layoutName },
           displayName: pin.layoutName,
         });
@@ -876,8 +1549,63 @@ export function WorkspacePane(): React.JSX.Element {
   // PaneEventBus subscription — 'workspace' channel
   // ---------------------------------------------------------------------------
 
-  usePaneEvent("workspace", (event: WorkspacePaneEvent): void => {
+  usePaneEvent('workspace', (event: WorkspacePaneEvent): void => {
     const manager = managerRef.current;
+
+    // ai-advanced-capabilities-analysis-hub-r1 (tabbed Quick Start): open the
+    // Create Analysis wizard AS A MODAL (not a tab). Just flip state; the modal
+    // render below injects the Xrm services + regarding and, on finish, the wizard
+    // opens its own result tab (document-viewer) exactly as before.
+    if (event.type === 'open_create_analysis_wizard') {
+      setCreateAnalysisModal({
+        open: true,
+        workTypeValue: event.analysisWorkType,
+        workTypeLabel: event.analysisWorkTypeLabel,
+      });
+      return;
+    }
+
+    // ai-advanced-capabilities-analysis-hub-r1 (headless analysis open): the Analysis
+    // hub grid row-click opens the picked analysis as a HEADLESS SpaarkeAi code-page
+    // modal (`openSpaarkeAi` target:2 — no OOB `sprk_analysis` form chrome), instead of
+    // the OOB form. A fresh SpaarkeAi instance mounts on `analysisId` → the existing-
+    // analysis effect restores Compose + history (cross-browser durable recall).
+    if (event.type === 'open_analysis_headless') {
+      if (event.analysisId) {
+        openSpaarkeAi({ analysisId: event.analysisId }, 2);
+      }
+      return;
+    }
+
+    // UAT round-4 (item #10a): a backgrounded review run's liveness lives on the Compose tab now.
+    // Track the latest state so the tab strip can show/hide the tiny circular progress indicator; the
+    // dismissed progress card itself is fully unmounted (useNdaReviewRunProgress `visible=false` →
+    // NdaReviewProgressModal returns null), so this signal is the ONLY remaining liveness surface.
+    if (event.type === 'nda_review_background_run') {
+      // Round-4 dismiss signal — drives the in-page tab spinner ONLY. UAT round-6 (item #15a): it no
+      // longer stamps the persisted run flag; dispatch-time stamping does that (see below).
+      handleBackgroundRunChange(event.backgroundRunActive === true);
+      return;
+    }
+
+    // UAT round-6 (item #15a): stamp / clear the persisted run-in-flight flag at DISPATCH time (true)
+    // and on dispatch failure (false). This fires for EVERY review path (chip/typed/gate/wizard/rerun)
+    // because they all funnel through the ONE `runBindingDispatch` chokepoint — so the flag is now
+    // captured whether or not the user ever dismisses the progress modal (the owner's navigate-away
+    // repro never dismissed it).
+    if (event.type === 'nda_review_dispatch_active') {
+      handleReviewDispatchActive(event.dispatchActive === true);
+      return;
+    }
+
+    // UAT round-6 (item #15a): a review COMPLETION (incl. a zero-findings clean review) arrives as
+    // `compose_advisory_comments`. Clear the persisted in-flight flag for the completing session so a
+    // later navigate-away doesn't resurrect a stale spinner. (This runs alongside ComposeWorkspace's
+    // own advisory-comments receiver — the bus is broadcast; both subscribers act independently.)
+    if (event.type === 'compose_advisory_comments') {
+      handleReviewCompletionForSession(event.sessionId);
+      return;
+    }
 
     // FR-34 D-F3 (task 071): the deferred CONTENT-render ack. ComposeWorkspace emits
     // `compose_content_rendered` once a seeded draft actually renders in the editor.
@@ -885,7 +1613,7 @@ export function WorkspacePane(): React.JSX.Element {
     // frame, fire it NOW (the genuine "content is on screen" confirmation) — mirroring
     // the tab-open ack, only later + honest. No pending entry ⇒ no-op (a client-
     // originated open, or a render we never gated on).
-    if (event.type === "compose_content_rendered") {
+    if (event.type === 'compose_content_rendered') {
       const ledgerRef = event.ledgerRef;
       if (ledgerRef) {
         const frameId = pendingRenderAcksRef.current.get(ledgerRef);
@@ -897,47 +1625,17 @@ export function WorkspacePane(): React.JSX.Element {
       return;
     }
 
-    if (event.type === "widget_load" && !event.tabId) {
+    if (event.type === 'widget_load' && !event.tabId) {
       // Guard: ignore our own re-dispatched widget_load confirmations (which carry tabId).
       // Only the server-initiated events (no tabId) should open a new tab.
-      const widgetType = event.widgetType ?? "unknown";
+      const widgetType = event.widgetType ?? 'unknown';
       const widgetData = event.widgetData ?? null;
 
-      // ── FIX #10b — STUB email tab ──────────────────────────────────────────
-      // The Compose "Email" affordance (ComposeAiToolbar → handleEmailAction) and
-      // the chat "email" chip dispatch widgetType 'email' (layoutName 'Email').
-      // Resolve EmailStubWidget SYNCHRONOUSLY (statically imported — no registry
-      // round-trip) and open a tab. Same addTab → confirm-dispatch pattern as the
-      // generic path below; auto-activates via addTab.
-      const emailData = widgetData as { layoutName?: string } | null;
-      if (widgetType === "email" || emailData?.layoutName === "Email") {
-        const emailDisplayName = event.displayName ?? "Email";
-        const emailTabId = manager.addTab("email", widgetData, emailDisplayName);
-        // Cast to the registry's WorkspaceWidgetComponent (matches the 'compose'
-        // registry path) — EmailStubWidget takes WorkspaceWidgetProps<EmailWidgetData>.
-        manager.resolveTabComponent(
-          emailTabId,
-          EmailStubWidget as unknown as WorkspaceWidgetComponent,
-          emailDisplayName,
-        );
-        syncState();
-        const emailSnapshot = manager.getSnapshot();
-        dispatch("workspace", {
-          type: "widget_load",
-          widgetType: "email",
-          tabId: emailTabId,
-          ...(emailSnapshot.tabs.length > 0 ? { tabCount: emailSnapshot.tabs.length } : {}),
-        });
-        dispatch("workspace", {
-          type: "tab_count_change",
-          tabCount: emailSnapshot.tabs.length,
-        });
-        // D-F3 truthfulness parity with the generic path — ack a server frame if present.
-        if (event.frameId) {
-          sendUiActionAck(event.frameId);
-        }
-        return;
-      }
+      // NOTE: All 'email' widget_load events now fall through to the generic registry
+      // path below (→ resolveWorkspaceWidget('email') → the REAL EmailWorkspaceWidget).
+      // The former "Email — coming soon" stub intercept (FIX #10b) was removed once the
+      // full email widget shipped (email-communication-solution-r5); nothing dispatches
+      // the compose-draft hand-off payload (mode/bodyText/attachmentFileName) any more.
 
       // Resolve the tab display name with this precedence:
       //   1. Event payload `displayName` (Round 4 Fix 4: lets the menu set the
@@ -946,8 +1644,7 @@ export function WorkspacePane(): React.JSX.Element {
       //   2. Registry metadata `displayName`.
       //   3. The raw widgetType string as last resort.
       const meta = getWorkspaceWidgetMetadata(widgetType);
-      const displayName =
-        event.displayName ?? meta?.displayName ?? widgetType;
+      const displayName = event.displayName ?? meta?.displayName ?? widgetType;
 
       // ── spaarkeai-compose-r2 UNIFY — "Compose" layout → Direct 'compose' ────
       // A "Compose" workspace-LAYOUT load — the WorkspacePaneMenu "Compose"
@@ -960,11 +1657,9 @@ export function WorkspacePane(): React.JSX.Element {
       // LAYOUT door and flow through the generic addTab path below, unchanged.
       // The menu selection carries no document → empty Compose editor.
       const isComposeLayoutLoad =
-        widgetType === "workspace" &&
-        ((widgetData as { layoutName?: string } | null)?.layoutName ===
-          "Compose" ||
-          event.displayName === "Compose");
-      const effectiveWidgetType = isComposeLayoutLoad ? "compose" : widgetType;
+        widgetType === 'workspace' &&
+        ((widgetData as { layoutName?: string } | null)?.layoutName === 'Compose' || event.displayName === 'Compose');
+      const effectiveWidgetType = isComposeLayoutLoad ? 'compose' : widgetType;
 
       // ── Compose DIRECT widget — single-tab reuse (spaarkeai-compose-r2) ─────
       // Compose is a first-class DIRECT workspace widget (widgetType 'compose' →
@@ -977,17 +1672,15 @@ export function WorkspacePane(): React.JSX.Element {
       // of stacking duplicates. Other layouts (Daily Briefing, Documents, …)
       // keep the 'workspace' LAYOUT door and flow through the generic addTab
       // path below, unchanged.
-      if (effectiveWidgetType === "compose") {
+      if (effectiveWidgetType === 'compose') {
         // FR-34 D-F3 (task 071): a CONTENT-bearing open carries a full-document
         // draft SEED (widgetData.compose.draft.ledgerRef — DEF-08 Part A). When
         // present, the ack is DEFERRED until ComposeWorkspace signals the draft
         // actually rendered (compose_content_rendered), keyed by this ledgerRef.
         // Absent for upload/stored/empty opens, which ack on tab-open as before.
-        const composeData = widgetData as
-          | { compose?: { draft?: { ledgerRef?: string } } }
-          | null;
+        const composeData = widgetData as { compose?: { draft?: { ledgerRef?: string } } } | null;
         const composeDraftLedgerRef =
-          composeData?.compose && typeof composeData.compose === "object"
+          composeData?.compose && typeof composeData.compose === 'object'
             ? composeData.compose.draft?.ledgerRef
             : undefined;
 
@@ -997,16 +1690,14 @@ export function WorkspacePane(): React.JSX.Element {
         // draft) or an already-hoisted top-level value. When a re-seed carries none (e.g. an
         // add-to-DMS re-activation with only a `source` marker), the existing tab's filename is
         // preserved rather than clobbered with undefined.
-        const composeSeed = widgetData as
-          | {
-              filename?: string;
-              compose?: {
-                fileName?: string;
-                upload?: { fileName?: string };
-                draft?: { fileName?: string };
-              };
-            }
-          | null;
+        const composeSeed = widgetData as {
+          filename?: string;
+          compose?: {
+            fileName?: string;
+            upload?: { fileName?: string };
+            draft?: { fileName?: string };
+          };
+        } | null;
         const seedFilename =
           composeSeed?.compose?.upload?.fileName ??
           composeSeed?.compose?.draft?.fileName ??
@@ -1041,21 +1732,33 @@ export function WorkspacePane(): React.JSX.Element {
         const instanceKey = deriveComposeInstanceKey(widgetData);
         const hasComposeSeed =
           widgetData != null &&
-          typeof widgetData === "object" &&
-          typeof (widgetData as { compose?: unknown }).compose === "object" &&
+          typeof widgetData === 'object' &&
+          typeof (widgetData as { compose?: unknown }).compose === 'object' &&
           (widgetData as { compose?: unknown }).compose !== null;
+        // UAT (tab independence): the seedless-reuse-active branch below must fire ONLY for the
+        // KNOWN source-only re-activation flows (add-to-DMS / reporting-email / welcome-compose),
+        // which carry an explicit `widgetData.source` marker and legitimately act on the CURRENT
+        // compose doc's tab. WITHOUT this gate, ANY seedless compose open adopted whatever compose
+        // tab was active and OVERWROTE it — e.g. opening a new file clobbered an open NDA analysis.
+        // A seedless open with no `source` marker is an ambiguous/new open → mint a NEW tab (below),
+        // keeping every analysis tab independent.
+        const hasSourceReactivationMarker =
+          widgetData != null &&
+          typeof widgetData === 'object' &&
+          typeof (widgetData as { source?: unknown }).source === 'string' &&
+          ((widgetData as { source?: string }).source ?? '').length > 0;
 
         const snapshot0 = manager.getSnapshot();
-        const composeTabs = snapshot0.tabs.filter((t) => t.widgetType === "compose");
+        const composeTabs = snapshot0.tabs.filter(t => t.widgetType === 'compose');
         let reuseTab: (typeof composeTabs)[number] | undefined;
         if (instanceKey) {
-          reuseTab = composeTabs.find((t) => composeTabInstanceKey(t) === instanceKey);
-        } else if (!hasComposeSeed && !isComposeLayoutLoad) {
-          // Seedless source-only re-activation — reuse the ACTIVE compose tab, else the first open
-          // one. Never mints a duplicate (source-only opens carry no new document). A blank menu
-          // "Compose" open (isComposeLayoutLoad) is EXCLUDED here so it mints a new tab below.
-          reuseTab =
-            composeTabs.find((t) => t.id === snapshot0.activeTabId) ?? composeTabs[0];
+          reuseTab = composeTabs.find(t => composeTabInstanceKey(t) === instanceKey);
+        } else if (!hasComposeSeed && !isComposeLayoutLoad && hasSourceReactivationMarker) {
+          // Source-only re-activation (explicit `widgetData.source`) — reuse the ACTIVE compose tab,
+          // else the first open one. Never mints a duplicate (source-only opens carry no new
+          // document + intentionally target the current doc). A blank menu "Compose" open
+          // (isComposeLayoutLoad) and any UN-marked seedless open both fall through to a NEW tab.
+          reuseTab = composeTabs.find(t => t.id === snapshot0.activeTabId) ?? composeTabs[0];
         }
 
         if (reuseTab) {
@@ -1087,8 +1790,8 @@ export function WorkspacePane(): React.JSX.Element {
           syncState();
           ackComposeFrame();
           window.setTimeout(() => {
-            dispatch("workspace", {
-              type: "tab_change",
+            dispatch('workspace', {
+              type: 'tab_change',
               tabId: existingComposeTab.id,
               widgetType: existingComposeTab.widgetType,
               widgetData: reuseWidgetData,
@@ -1102,10 +1805,8 @@ export function WorkspacePane(): React.JSX.Element {
         // seed's filename to a top-level `filename` (R3 server-readable contract).
         // The tab's stable identity is re-derived from its seed on later reuse
         // decisions, so nothing extra is stamped onto widgetData.
-        const composeWidgetData = seedFilename
-          ? { ...(widgetData ?? {}), filename: seedFilename }
-          : widgetData;
-        const composeTabId = manager.addTab("compose", composeWidgetData, displayName);
+        const composeWidgetData = seedFilename ? { ...(widgetData ?? {}), filename: seedFilename } : widgetData;
+        const composeTabId = manager.addTab('compose', composeWidgetData, displayName);
         syncState();
         // UC-5 truthfulness (task 020 / FR-C1): a NEW compose tab's widget has
         // NOT resolved yet — only the empty shell exists. Acking here would
@@ -1117,12 +1818,12 @@ export function WorkspacePane(): React.JSX.Element {
         if (event.frameId && composeDraftLedgerRef) {
           pendingRenderAcksRef.current.set(composeDraftLedgerRef, event.frameId);
         }
-        resolveWorkspaceWidget("compose").then((Component) => {
-          const resolvedMeta = getWorkspaceWidgetMetadata("compose");
+        resolveWorkspaceWidget('compose').then(Component => {
+          const resolvedMeta = getWorkspaceWidgetMetadata('compose');
           manager.resolveTabComponent(
             composeTabId,
             Component,
-            event.displayName ? undefined : resolvedMeta?.displayName,
+            event.displayName ? undefined : resolvedMeta?.displayName
           );
           syncState();
           // UC-5 (task 020): the compose widget has now resolved + attached — a
@@ -1135,36 +1836,54 @@ export function WorkspacePane(): React.JSX.Element {
           }
           const snapshot = manager.getSnapshot();
           const currentTabCount = snapshot.tabs.length;
-          dispatch("workspace", {
-            type: "widget_load",
-            widgetType: "compose",
+          dispatch('workspace', {
+            type: 'widget_load',
+            widgetType: 'compose',
             tabId: composeTabId,
             ...(currentTabCount > 0 ? { tabCount: currentTabCount } : {}),
           });
-          dispatch("workspace", {
-            type: "tab_count_change",
+          dispatch('workspace', {
+            type: 'tab_count_change',
             tabCount: currentTabCount,
           });
         });
         return;
       }
 
+      // ── Analysis wizard host-service injection (task 050 thread 1) ──────────
+      // The context-agnostic `create-analysis-wizard` needs Xrm-coupled Dataverse
+      // services the shared-lib widget MUST NOT construct itself (ADR-012). The
+      // SpaarkeAi solution injects them here from the Xrm host context, merging
+      // OVER the dispatcher-supplied widgetData (e.g. the hub card's workTypeValue
+      // + 2b initialAssociation) so pre-set context is preserved. Every other
+      // widgetType flows through unchanged.
+      const effectiveWidgetData =
+        widgetType === 'create-analysis-wizard'
+          ? {
+              ...((widgetData as Record<string, unknown> | null) ?? {}),
+              dataService: analysisWizardDataService,
+              navigationService: analysisWizardNavigationService,
+              searchUsers: analysisWizardSearchUsers,
+              searchAssignees: analysisWizardSearchUsers,
+              resolveSpeContainerId: resolveAnalysisSpeContainerId,
+              authenticatedFetch,
+              bffBaseUrl,
+              ...(chatSessionId ? { sessionId: chatSessionId } : {}),
+            }
+          : widgetData;
+
       // Add the tab — this enforces MAX_WORKSPACE_TABS eviction internally.
-      const tabId = manager.addTab(widgetType, widgetData, displayName);
+      const tabId = manager.addTab(widgetType, effectiveWidgetData, displayName);
       syncState();
 
       // Lazy-resolve the widget component; update the tab once resolved.
-      resolveWorkspaceWidget(widgetType).then((Component) => {
+      resolveWorkspaceWidget(widgetType).then(Component => {
         const resolvedMeta = getWorkspaceWidgetMetadata(widgetType);
         // Round 4 Fix 4: preserve a per-instance displayName from the event
         // payload (e.g. "Corporate Workspace") over the registry's generic
         // label (e.g. "Workspace"). Pass `undefined` for displayName when the
         // event carried one so resolveTabComponent does not overwrite it.
-        manager.resolveTabComponent(
-          tabId,
-          Component,
-          event.displayName ? undefined : resolvedMeta?.displayName,
-        );
+        manager.resolveTabComponent(tabId, Component, event.displayName ? undefined : resolvedMeta?.displayName);
         syncState();
 
         // UC-5 truthfulness (task 020 / FR-C1) — MOVED here from tab-shell
@@ -1190,25 +1909,25 @@ export function WorkspacePane(): React.JSX.Element {
         // Dispatch widget_load WITH tabId so ShellStageManager reacts to it
         // (server-initiated events carry no tabId; this is the confirmation).
         // tabCount is included so ShellStageManager can also derive Stage 4.
-        dispatch("workspace", {
-          type: "widget_load",
+        dispatch('workspace', {
+          type: 'widget_load',
           widgetType,
           tabId,
           ...(currentTabCount > 0 ? { tabCount: currentTabCount } : {}),
         });
 
         // Dispatch tab_count_change so ShellStageManager can drive Stage 3↔4.
-        dispatch("workspace", {
-          type: "tab_count_change",
+        dispatch('workspace', {
+          type: 'tab_count_change',
           tabCount: currentTabCount,
         });
       });
-    } else if (event.type === "widget_update") {
+    } else if (event.type === 'widget_update') {
       if (event.tabId) {
         manager.updateTab(event.tabId, event.widgetData ?? null);
         syncState();
       }
-    } else if (event.type === "widget_action") {
+    } else if (event.type === 'widget_action') {
       // Forward widget_action events are handled by the widget itself via
       // the bus — WorkspacePane is a transparent router here.
       // No tab-manager state change needed.
@@ -1230,8 +1949,8 @@ export function WorkspacePane(): React.JSX.Element {
   // used by server-initiated widget_load events, ensuring identical tab lifecycle.
   // ---------------------------------------------------------------------------
 
-  usePaneEvent("conversation", (event: ConversationPaneEvent): void => {
-    if (event.type !== "playbook-selected") return;
+  usePaneEvent('conversation', (event: ConversationPaneEvent): void => {
+    if (event.type !== 'playbook-selected') return;
 
     const manager = managerRef.current;
     const defaultWidgets = event.defaultWidgets ?? [];
@@ -1245,10 +1964,10 @@ export function WorkspacePane(): React.JSX.Element {
     // (the editor holds an unsaved draft/document — losing it was the UC-4
     // regression). Preserve 'compose' work-product tabs across the clear.
     if (isExclusive && manager.getSnapshot().tabs.length > 0) {
-      manager.clearAllTabs({ preserveWidgetTypes: ["compose"] });
+      manager.clearAllTabs({ preserveWidgetTypes: ['compose'] });
       syncState();
       // Emit tabs_clear so subscribers (e.g. ContextPaneController) can reset.
-      dispatch("workspace", { type: "tabs_clear" });
+      dispatch('workspace', { type: 'tabs_clear' });
     }
 
     // Seed each default widget as a new tab.
@@ -1263,13 +1982,13 @@ export function WorkspacePane(): React.JSX.Element {
       syncState();
 
       // Lazy-resolve the widget component — same pattern as workspace channel.
-      resolveWorkspaceWidget(widgetType).then((Component) => {
+      resolveWorkspaceWidget(widgetType).then(Component => {
         const resolvedMeta = getWorkspaceWidgetMetadata(widgetType);
         manager.resolveTabComponent(tabId, Component, resolvedMeta?.displayName);
         syncState();
 
         // Dispatch widget_load (with tabId) so ShellStageManager can advance stage.
-        dispatch("workspace", { type: "widget_load", widgetType, tabId });
+        dispatch('workspace', { type: 'widget_load', widgetType, tabId });
       });
     }
   });
@@ -1288,8 +2007,8 @@ export function WorkspacePane(): React.JSX.Element {
       const activeTab = manager.getActiveTab();
 
       // Dispatch tab_change so ContextPaneController can adapt its view.
-      dispatch("workspace", {
-        type: "tab_change",
+      dispatch('workspace', {
+        type: 'tab_change',
         tabId,
         widgetType: activeTab?.widgetType,
         widgetData: activeTab?.widgetData,
@@ -1329,7 +2048,7 @@ export function WorkspacePane(): React.JSX.Element {
   // ---------------------------------------------------------------------------
   React.useEffect(() => {
     const activeTab = managerRef.current.getActiveTab();
-    composeVisibility?.(activeTab?.widgetType === "compose");
+    composeVisibility?.(activeTab?.widgetType === 'compose');
     // tabState.activeTabId drives every activation path (click, compose reuse,
     // close-restore, restore-from-persistence, auto-install); composeVisibility
     // re-runs the sync when the editor's handler registers/unregisters.
@@ -1338,6 +2057,21 @@ export function WorkspacePane(): React.JSX.Element {
   const handleTabClose = React.useCallback(
     (tabId: string): void => {
       const manager = managerRef.current;
+
+      // UAT round-5 (item #13): an EXPLICIT close is an agency signal — do not
+      // resurrect this Compose tab on return. Capture its instance key BEFORE the
+      // close removes it, then drop it from the home-surface persisted snapshot.
+      // (Navigation teardown never calls closeTab, so those tabs are retained.)
+      if (isHomeSurfaceRef.current) {
+        const closingTab = manager.getSnapshot().tabs.find(t => t.id === tabId);
+        if (closingTab?.widgetType === 'compose') {
+          const instanceKey = composeTabInstanceKey(closingTab);
+          if (instanceKey) {
+            writeComposeRunState(removePersistedComposeTab(readComposeRunState(Date.now()), instanceKey));
+          }
+        }
+      }
+
       const newActiveId = manager.closeTab(tabId);
       syncState();
 
@@ -1346,8 +2080,8 @@ export function WorkspacePane(): React.JSX.Element {
 
       // Dispatch tab_count_change so ShellStageManager can revert Stage 4 → Stage 3
       // when the user closes tabs down to one, or Stage 3 → Stage 1 when all tabs close.
-      dispatch("workspace", {
-        type: "tab_count_change",
+      dispatch('workspace', {
+        type: 'tab_count_change',
         tabCount: currentTabCount,
       });
 
@@ -1355,8 +2089,8 @@ export function WorkspacePane(): React.JSX.Element {
       // ContextPaneController can adapt its view to the new active widget.
       if (newActiveId !== null) {
         const newActive = manager.getActiveTab();
-        dispatch("workspace", {
-          type: "tab_change",
+        dispatch('workspace', {
+          type: 'tab_change',
           tabId: newActiveId,
           widgetType: newActive?.widgetType,
           widgetData: newActive?.widgetData,
@@ -1364,6 +2098,37 @@ export function WorkspacePane(): React.JSX.Element {
       }
     },
     [dispatch, syncState]
+  );
+
+  // ---------------------------------------------------------------------------
+  // Tab data-change handler — task 025 (FR-09) live edit-state persistence
+  //
+  // A widget (e.g. AnalysisEditorWidget) reports a data patch via its `onDataChange`
+  // prop when the user is mid-edit. The patch is MERGED onto the tab's current
+  // widgetData (updateTab replaces wholesale, so the merge happens here — the widget
+  // only needs to report what changed) and pushed through
+  // WorkspaceTabManager.updateTab, which now fires the same persist-change signal
+  // every other mutation does (see WorkspaceTabManager.updateTab fix). This is what
+  // makes a live edit survive a tab close/reopen or page refresh instead of being
+  // silently lost (task 025 negative acceptance criterion).
+  // ---------------------------------------------------------------------------
+
+  const handleTabDataChange = React.useCallback(
+    (tabId: string, patch: unknown): void => {
+      const manager = managerRef.current;
+      const current = manager.getSnapshot().tabs.find(t => t.id === tabId);
+      if (!current) return;
+
+      const currentData =
+        current.widgetData !== null && typeof current.widgetData === 'object'
+          ? (current.widgetData as Record<string, unknown>)
+          : {};
+      const patchData = patch !== null && typeof patch === 'object' ? (patch as Record<string, unknown>) : {};
+
+      manager.updateTab(tabId, { ...currentData, ...patchData });
+      syncState();
+    },
+    [syncState]
   );
 
   // ---------------------------------------------------------------------------
@@ -1400,9 +2165,9 @@ export function WorkspacePane(): React.JSX.Element {
   // dropdown menu doesn't bubble its click up to the header.
   const paneCollapse = usePaneCollapseContext();
   const handleHeaderCollapse = React.useCallback(() => {
-    paneCollapse?.toggle("workspace");
+    paneCollapse?.toggle('workspace');
   }, [paneCollapse]);
-  const isWorkspaceExpanded = !(paneCollapse?.isCollapsed("workspace") ?? false);
+  const isWorkspaceExpanded = !(paneCollapse?.isCollapsed('workspace') ?? false);
 
   // spaarkeai-compose-r1 task 100 (Phase 10 polish, FR-S7):
   //
@@ -1461,11 +2226,44 @@ export function WorkspacePane(): React.JSX.Element {
         activeTabId={activeTabId}
         onTabChange={handleTabChange}
         onTabClose={handleTabClose}
+        onTabDataChange={handleTabDataChange}
+        // UAT round-4 (item #10a): a dismissed-but-still-running review shows a tiny circular
+        // progress indicator on the running Compose tab header until completion.
+        // UAT round-5 (item #13): the SAME slot shows while a restored Compose tab's
+        // in-flight review is being resumed (poll until findings land).
+        composeReviewRunning={composeReviewRunningInBackground || composeReviewResuming}
         // spaarkeai-compose-r1 task 100 — suppress the tab strip in compose
         // mode; the Compose widget renders full-pane. See the block comment
         // above the header definition for rationale + widget-add contract.
         hideTabBar={isComposeLaunchMode}
       />
+
+      {/* ai-advanced-capabilities-analysis-hub-r1 (tabbed Quick Start): the Create
+          Analysis wizard hosted AS A MODAL. Mounted only while open; `embedded:false`
+          makes CreateRecordWizard render its own Fluent Dialog (portal). On close/finish
+          `onRequestClose` unmounts it; on finish the wizard also opens its result tab. */}
+      {createAnalysisModal.open && (
+        <CreateAnalysisWizardWidget
+          widgetType="create-analysis-wizard"
+          data={
+            {
+              embedded: false,
+              workTypeValue: createAnalysisModal.workTypeValue,
+              workTypeLabel: createAnalysisModal.workTypeLabel,
+              dataService: analysisWizardDataService,
+              navigationService: analysisWizardNavigationService,
+              searchUsers: analysisWizardSearchUsers,
+              searchAssignees: analysisWizardSearchUsers,
+              resolveSpeContainerId: resolveAnalysisSpeContainerId,
+              authenticatedFetch,
+              bffBaseUrl,
+              ...(chatSessionId ? { sessionId: chatSessionId } : {}),
+              ...(analysisInitialAssociation ? { initialAssociation: analysisInitialAssociation } : {}),
+              onRequestClose: () => setCreateAnalysisModal({ open: false }),
+            } as CreateAnalysisWizardData
+          }
+        />
+      )}
     </div>
   );
 }

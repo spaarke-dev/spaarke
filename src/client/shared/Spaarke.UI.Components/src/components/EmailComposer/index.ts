@@ -25,6 +25,25 @@ export type { ISendEmailDialogProps } from './wrappers/SendEmailDialog';
 export { SendEmailPage } from './wrappers/SendEmailPage';
 export type { ISendEmailPageProps } from './wrappers/SendEmailPage';
 
+// Xrm-backed compose-lookup handler factory (shared by the Email code page +
+// the SpaarkeAi `email` widget mounts — see file docblock). The engine stays
+// context-agnostic; hosts inject these callbacks.
+export {
+  createXrmEmailComposeHandlers,
+  resolveCurrentUserEmail,
+  EMAIL_RECORD_LOOKUP_CATALOG,
+} from './createXrmEmailComposeHandlers';
+export type { XrmEmailComposeHandlers } from './createXrmEmailComposeHandlers';
+
+// Pattern B launcher — opens the standalone Email code page (`sprk_emailpage`)
+// as a centered modal dialog for a specific `sprk_communication` record.
+// Callers (e.g. a Messages "open email" icon) invoke this instead of
+// `Xrm.Navigation.openForm`.
+export { openEmailRecord, EMAIL_PAGE_WEBRESOURCE_NAME } from './openEmailRecord';
+export type { OpenEmailRecordOptions } from './openEmailRecord';
+export { openEmailCompose } from './openEmailCompose';
+export type { OpenEmailComposeOptions, OpenEmailComposeMode } from './openEmailCompose';
+
 // Sub-components (exported for advanced/direct composition + task 023 unit tests)
 export { RecipientField } from './subcomponents/RecipientField';
 export type { IRecipientFieldProps } from './subcomponents/RecipientField';
@@ -61,6 +80,7 @@ export {
   ATTACHMENT_MAX_TOTAL_BYTES,
   ATTACHMENT_WARN_TOTAL_BYTES,
   DEFAULT_MAX_RECIPIENTS,
+  validateLocalAttachmentFile,
 } from './EmailComposer.reducer';
 export type { IValidateOptions } from './EmailComposer.reducer';
 
@@ -72,6 +92,13 @@ export type {
   EmailAttachmentSourceKind,
   IComposerAttachmentSource,
   IAttachmentItem,
+  IRecordLookupTarget,
+  IPickedRecord,
+  IEmailTemplateSummary,
+  IEmailTemplateRenderResult,
+  IEmailAiDraftAction,
+  IEmailAiDraftRequest,
+  IEmailAiDraftResult,
   IWizardContext,
   IRecipient,
   ValidationErrorCode,

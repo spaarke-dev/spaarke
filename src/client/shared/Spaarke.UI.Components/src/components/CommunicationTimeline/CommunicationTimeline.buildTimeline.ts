@@ -27,6 +27,8 @@ import type { IRegardingReadResultDto, IThreadMessageDto } from '../../services/
 import {
   BODY_FORMAT_PLAIN_TEXT,
   COMMUNICATION_TYPE_MESSAGE,
+  DIRECTION_INCOMING,
+  DIRECTION_OUTGOING,
   type RegardingThreadGroup,
   type TimelineMessage,
 } from './CommunicationTimeline.types';
@@ -42,12 +44,29 @@ export function mapThreadMessageDtoToTimelineMessage(dto: IThreadMessageDto): Ti
     channelType: dto.communicationType === COMMUNICATION_TYPE_MESSAGE ? 'message' : 'email',
     channelTypeRaw: dto.communicationType,
     sender: dto.from,
+    // R3 task 002/011 (FR-18/FR-02) — sender-identity enrichment, additive
+    // pass-through (no derivation/lookup here, mirrors every other field in
+    // this mapper). `senderSystemUserId` is the canonical alignment signal
+    // for ConversationView's mine/others bubbles; `sender` (email string)
+    // remains unchanged for existing MessageRow consumers.
+    senderSystemUserId: dto.sentBy,
+    senderName: dto.sentByName,
+    // R3 task 021 (FR-04) — email-in-flow block fields, additive pass-through.
+    subject: dto.subject,
+    to: dto.to ?? [],
+    direction:
+      dto.direction === DIRECTION_INCOMING ? 'incoming' : dto.direction === DIRECTION_OUTGOING ? 'outgoing' : null,
     sentOn: dto.sentAt ?? dto.createdOn,
     createdOn: dto.createdOn,
     body: dto.body,
     bodyFormat: dto.bodyFormat === BODY_FORMAT_PLAIN_TEXT ? 'text' : 'html',
     inReplyTo: dto.inReplyTo,
     privilege: dto.privilege,
+    // R3 task 043 (FR-21) — privilege/privacy markers, additive pass-through (no derivation here, mirrors every
+    // other field). These ride the SAME access-filtered row the BFF returned; the client renders exactly what the
+    // server permitted — no client-side access inference.
+    isInternalOnly: dto.isInternalOnly ?? false,
+    isPrivate: dto.isPrivate ?? false,
     attachments: dto.attachments.map(a => ({
       id: a.communicationAttachmentId,
       documentId: a.documentId ?? undefined,

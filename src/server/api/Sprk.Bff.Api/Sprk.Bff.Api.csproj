@@ -59,6 +59,13 @@
          chat token rooted in the DI-injected central TokenCredential via the identity plane (ADR-028 /
          NFR-05) — NEVER a connection-string key. -->
     <PackageReference Include="Azure.Communication.Chat" Version="1.4.0" />
+    <!-- Microsoft.Azure.SignalR.Management 1.33.1 — Layer-C notification-spine delivery (Serverless/publish-only
+         mode) added by spaarke-notification-spine-r1 FR-01 spike (task 001). GO decision: send-only spine
+         topology structurally favors Serverless (no hosted hub); measured +0.30 MB compressed publish delta,
+         0 new HIGH CVE. See projects/spaarke-notification-spine-r1/notes/spikes/fr-01-signalr-footprint.md.
+         NOTE: reference is intentionally unwired here — task 020 adds the negotiate endpoint + DI (ADR-032
+         null-object) + Placement Justification (CLAUDE.md §10) and runs /conflict-check before its BFF PR. -->
+    <PackageReference Include="Microsoft.Azure.SignalR.Management" Version="1.33.1" />
     <!-- Cosmos DB SDK v3 — AI persistence (AIPU2-030: SessionPersistenceService, AIPU2-033: AuditLogService) -->
     <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.47.0" />
     <PackageReference Include="Azure.AI.DocumentIntelligence" Version="1.0.0" />
@@ -100,6 +107,14 @@
     <!-- MimeKit 4.15.1: fixes CVE-2026-30227 (CRLF injection in SMTP envelope address) -->
     <PackageReference Include="MimeKit" Version="4.15.1" />
     <PackageReference Include="MsgReader" Version="6.0.6" />
+    <!-- HtmlSanitizer (namespace Ganss.Xss) 9.1.973 — the AUTHORITATIVE server-side XSS boundary for the
+         .eml -> sanitized-HTML reading-pane render (email-communication-solution-r5 task 010 / spec NFR-03).
+         Owner-approved Path-A exception (CLAUDE.md §6.5): the BFF had no HTML sanitizer (direct or transitive)
+         and regex-sanitizing an XSS boundary is a known-unsafe anti-pattern, so a purpose-built allow-list
+         sanitizer is required. Consumed only by EmlToHtmlRenderer. Pulls AngleSharp (maintained HTML parser)
+         as its sole notable transitive; publish-size delta measured + reported in the task notes
+         (well under the +5 MB single-task line and the 60 MB ceiling — CLAUDE.md §10 / NFR-01). -->
+    <PackageReference Include="HtmlSanitizer" Version="9.1.973" />
 
     <!-- Observability -->
     <PackageReference Include="OpenTelemetry" Version="1.15.0" />
@@ -123,10 +138,13 @@
 
     <!-- Security: Override vulnerable transitive dependency -->
     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
-    <!-- FR-B1 (task 044): patch System.Security.Cryptography.Xml transitive 8.0.1 -> 8.0.3 to fix
-         GHSA-37gx-xxp4-5rgx + GHSA-w3x6-4m5h-cxqf (both HIGH). Pulled in transitively via
-         Microsoft.IdentityModel.Tokens (JWT validation stack); same-major bump per Phase 2 MEDIUM-1. -->
-    <PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.3" />
+    <!-- Security: patch the vulnerable transitive System.Security.Cryptography.Xml to the latest 8.0.x
+         servicing. History: 8.0.1 -> 8.0.3 (FR-B1 / task 044: GHSA-37gx-xxp4-5rgx + GHSA-w3x6-4m5h-cxqf).
+         2026-08-05 (email-communication-intelligence-r2): 8.0.3 -> 8.0.4 — 8.0.3 itself carries HIGH
+         advisories GHSA-g8r8-53c2-pm3f + GHSA-8q5v-6pqq-x66h + GHSA-cvvh-rhrc-wg4q. Pulled transitively via
+         Microsoft.Identity.Web (DataProtection/TokenCache) AND the Dataverse client (ServiceModel.Primitives).
+         In-band 8.0.x servicing bump — net8.0 target, no major-version change. -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.4" />
     <!-- R4 task 080 (2026-05-27): patch OpenMcdf transitive 3.1.0 -> 3.1.4 to fix two CVEs:
          (1) CVE-2026-41511 / GHSA-jxpf-xq2m-q525 (Moderate, DoS via crafted CFB infinite-loop
              in directory traversal); fixed in 3.1.3.

@@ -1,0 +1,158 @@
+<task id="022" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Rebased operation log per dirty session (FR-03) — ProseMirror Mapping</title>
+    <phase>2 Frontend capture</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Extends the capture core (`.ts`, tags include frontend); position-mapping correctness across concurrent edits is load-bearing for every downstream patch. FULL per root §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Extends task 020's module against the well-specified ProseMirror `Mapping` primitive; default sonnet tier suffices. Effort raised to xhigh for position-mapping correctness (not a tier change).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W2b</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Extends the interceptor from task 020 — same file/module; cannot run concurrently with 020.</parallel-reason>
+    <deps>020</deps>
+    <tags>frontend,docx</tags>
+    <estimated-effort>2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Maintain an ordered, rebased operation log for each dirty editing session (design §5, "Capture" →
+    "Maintain an ordered, rebased operation log per dirty session; ProseMirror position-mapping rebases as
+    the user keeps editing"). As the user keeps editing, use ProseMirror `Mapping` (from `prosemirror-transform`,
+    `notes/bridge-prior-art.md` §1) to rebase the positions of already-captured operations so the log stays
+    internally consistent; on save, the client sends the ORDERED rebased log + the base version. This EXTENDS
+    task 020's interceptor module (`widgets/stepOperationInterceptor.ts`) — it is not a new surface. An
+    operation whose anchor falls inside content deleted by a later edit MUST be flagged (via `Mapping.mapResult`'s
+    deleted signal), never silently dropped (mirrors `AnnotationReanchorService`'s "never silently drop"
+    discipline). MIT ProseMirror base only — NO `@tiptap-pro/*` (NFR-03). This task maintains the log; it does
+    NOT wire the actual save fetch (that is the Phase 5 save-path work) — but it produces the serialized log
+    shape the save will send.
+  </prompt>
+
+  <role>
+    Senior React/TypeScript editor engineer fluent in ProseMirror position mapping (`Mapping`, `StepMap`,
+    `mapResult`, bias, deleted-range detection). Understands D2 (anchors re-derive on apply) and I-7 (no
+    text-search — rebasing is position-mapping, not content-match).
+  </role>
+
+  <goal>
+    A per-session operation log that stays consistent as editing continues: after edit A then a later edit B
+    that lands earlier in the same paragraph, A's anchor is rebased so it still resolves to A's intended
+    position; the log serializes in document order together with a base version; an operation whose anchor
+    falls inside content deleted by a later edit is flagged for review, not silently dropped. The serialized
+    `{orderedOps, baseVersion}` shape is what the save path (Phase 5) will transmit.
+  </goal>
+
+  <context>
+    <background>
+      Design §5 "Capture (frontend)": the op log is ordered + rebased per dirty session; ProseMirror
+      position-mapping rebases as the user keeps editing; the client sends the ordered rebased log + base
+      version on save. `notes/bridge-prior-art.md` §1 documents `Mapping.map(pos,bias)` / `mapResult` — which
+      rebases any saved position forward through concurrent local edits and REPORTS if the position is inside
+      deleted content. §4 is the "anchor survives concurrent edits" theory. This task extends the task-020
+      interceptor (same module). "Base version" pairs with the server's version stamp (SPE eTag + projection
+      schema version) that Phase 5 (task 050) asserts on save — this task just carries it in the log.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts — EXTEND (task 020's module): add the ordered rebased op-log store + `Mapping`-based rebasing + `{orderedOps, baseVersion}` serialization</file>
+      <file role="dependency-output">projects/spaarkeai-compose-r4/tasks/020-step-operation-interceptor.poml output — the per-transaction operations this log accumulates and rebases</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs — the "never silently drop / surface for review" discipline to mirror for deleted-content ops</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §5 (Capture — rebased op log), §5.0</file>
+      <file role="design">projects/spaarkeai-compose-r4/notes/bridge-prior-art.md §1 (Mapping/mapResult), §4 (anchor drift)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-03, FR-11, NFR-02, NFR-03</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">Step→operation interceptor — produces the per-transaction operations this task accumulates, rebases, and orders. This task extends its module.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-03">The client MUST maintain an ordered, rebased operation log per dirty session and send the ordered rebased log + base version on save. Rebasing MUST use ProseMirror position-mapping, not re-diffing. Scope: the op-log store in the interceptor module.</constraint>
+    <constraint source="project / I-7, D2">Rebasing is POSITION-mapping (`Mapping`), never a text-search or content-match; anchors re-derive on apply. Scope: the rebase function.</constraint>
+    <constraint source="project / never silently drop">An operation whose anchor falls inside later-deleted content MUST be flagged (surfaced for review), NOT silently dropped — mirroring `AnnotationReanchorService`. Scope: the deleted-range handling in the rebase step.</constraint>
+    <constraint source="spec / NFR-03">MIT ProseMirror base only. MUST NOT add `@tiptap-pro/*`, AGPL, or commercial packages; no EigenPal runtime dependency. Scope: this task's imports.</constraint>
+    <constraint source="ADR-028">This task does not wire the save fetch; if the log's transmit is stubbed it MUST route through `@spaarke/auth` when Phase 5 wires it. Flagged so no ad-hoc token handling is introduced.</constraint>
+    <constraint source="ADR-038 / NFR-06">Rebasing correctness covered by colocated Vitest (full suite task 024). NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests. Scope: tests under `src/`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ProseMirror Mapping/mapResult position rebasing; ordered op-log maintenance; base-version carry; never-silently-drop discipline; licensing</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r4/notes/bridge-prior-art.md</file>
+      <file>projects/spaarkeai-compose-r4/design.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Mapping.mapResult" location="notes/bridge-prior-art.md §1">
+        `Mapping.map(pos,bias)` / `mapResult` rebases a saved position forward through concurrent local edits and reports if it is inside deleted content — the exact primitive for keeping the op log consistent.
+      </pattern>
+      <pattern name="Never silently drop" location="src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs">
+        AUTO/REVIEW/ORPHAN bands with an ambiguity guard that surfaces rather than drops — mirror this for ops whose anchor lands in deleted content.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (root §8). Load the knowledge files + `notes/bridge-prior-art.md` §1/§4. Confirm task 020 is complete (its module + per-transaction ops exist to accumulate). Note: this maintains the log; it does not wire the save fetch.</step>
+    <step order="1" name="Op-log store">Extend `stepOperationInterceptor.ts` with an ordered per-session op-log store: append each captured operation in document order; retain a base version handle (SPE eTag + projection schema version, carried opaquely from load).</step>
+    <step order="2" name="Rebase on continued editing">On each subsequent transaction, rebase the anchors of already-captured ops through the transaction's `Mapping` so the log stays consistent (an earlier same-paragraph edit shifts a later op's resolved position correctly).</step>
+    <step order="3" name="Deleted-content flagging">When `mapResult` reports an op's anchor is inside deleted content, FLAG it (mark for review / surface), do NOT drop it. Checkpoint (context-handoff) per root §5 after this third step.</step>
+    <step order="4" name="Serialize for save">Serialize the log as `{orderedOps, baseVersion}` in document order — the shape Phase 5's save transmits. Do NOT wire the actual fetch here.</step>
+    <step order="5" name="Local tests + build">Add colocated Vitest tests: rebase-across-concurrent-edits (A then earlier B), document-order serialization, deleted-content flagging. Run `npm run build:prod` (NOT `npm run build`); confirm no `@tiptap-pro/*`.</step>
+    <step order="6" name="Close-out">Update `tasks/TASK-INDEX.md`: set this task's status to ✅. Document any deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <ui-tests>
+    <ui-test name="Rebase keeps an earlier op consistent">
+      <steps>In one paragraph, type text (edit A), then type more text at an earlier position in the same paragraph (edit B).</steps>
+      <expected>A's logged anchor is rebased so it still resolves to A's intended location; the ordered log reflects both ops without corruption.</expected>
+    </ui-test>
+    <ui-test name="Log serializes in document order with a base version">
+      <steps>Make edits in paragraphs 3, then 1, then 2; inspect the serialized log.</steps>
+      <expected>Ops serialize in document order (para 1, 2, 3) with a single base version handle attached.</expected>
+    </ui-test>
+    <ui-test name="Op inside deleted content is flagged, not dropped">
+      <steps>Type an insertion, then delete the surrounding range that contains that op's anchor.</steps>
+      <expected>The affected op is flagged for review (surfaced), not silently removed from the log.</expected>
+    </ui-test>
+    <ui-test name="Dark-mode render (ADR-021)">
+      <steps>Render the editor and any op-log / flagged-op affordance under the Fluent v9 dark theme provider.</steps>
+      <expected>Any surfaced flag/affordance uses theme tokens and is legible in dark mode; rebasing behavior is theme-independent; no hard-coded light colors.</expected>
+    </ui-test>
+  </ui-tests>
+
+  <escalation>
+    <trigger>If rebasing cannot disambiguate two operations that resolve to the same position after mapping (a genuine ordering ambiguity), STOP and surface it (root §6 / §6.5) rather than guessing an order — a wrong order silently corrupts the patch.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts (extended: ordered rebased op-log + `{orderedOps, baseVersion}` serialization)</output>
+    <output type="test">Colocated Vitest tests for rebasing/order/deleted-content flagging (extended in task 024)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">After edit A then a later edit B earlier in the same paragraph, A's anchor is rebased correctly and still resolves to its intended position.</criterion>
+    <criterion testable="true">The log serializes in document order with a single base version handle.</criterion>
+    <criterion testable="true">An op whose anchor falls inside later-deleted content is flagged, not silently dropped (negative case).</criterion>
+    <criterion testable="true">Rebasing uses ProseMirror `Mapping` position-mapping only — no text-search / content-match (I-7).</criterion>
+    <criterion testable="true">No `@tiptap-pro/*` / AGPL / EigenPal runtime dependency; `npm run build:prod` for the shared lib is green (NFR-03).</criterion>
+    <criterion testable="true">The dark-mode render (ADR-021) is legible with theme tokens.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Extends task 020's module (hence `parallel-safe:false`, same file). Maintains the log only — the actual
+    save transmit is Phase 5 (task 050 version-stamp / re-anchor), which will send this `{orderedOps, baseVersion}`
+    shape via `@spaarke/auth`. Client task (no BFF surface) — no publish-size / CVE gate.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

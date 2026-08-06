@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>UAT #9 — surface the Refresh-Profile button once the doc has a record id (relax gate)</title>
+    <phase>5 UAT remediation</phase>
+    <gate>dep:042</gate>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Tiny client-only gate change on an existing, fully-wired button; no server/engine change. STANDARD, but runs the Step 9.5 gates because it edits the contended .tsx alongside 050/052/053.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-condition visibility relax on an already-wired button; trivial.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ComposeWorkspace.tsx shared with 050/052/053. Serialize (run last).</parallel-reason>
+    <deps>042</deps>
+    <tags>compose, frontend, pcf, react</tags>
+    <estimated-effort>S (&lt;0.5d)</estimated-effort>
+  </metadata>
+
+  <prompt>UAT #9: user can't find the manual Refresh-Profile button. Root cause (verified): the button is gated until the doc has a sprk_document id — onRefreshProfile is only passed when state.documentRef?.sprkDocumentId is truthy (ComposeWorkspace.tsx:2648), and the toolbar renders it only if onRefreshProfile exists (ComposeFormatToolbar.tsx:843). Transient mounts (Browse/Upload/AI-draft before first Save) have no record id → button hidden. All other legs (service/endpoint/toolbar) are correctly wired. FIX (client-only): make the button appear once the doc has a record id (i.e., after first Save when sprkDocumentId exists), so promoted docs always show it; optionally add a lightweight "profiling…" status when the auto re-trigger fires.</prompt>
+
+  <role>Fluent UI v9 React developer familiar with the Compose toolbar wiring (onRefreshProfile threading) and the transient-vs-promoted document lifecycle.</role>
+
+  <goal>The Refresh-Profile button is visible for any promoted Compose doc (one with a sprk_document id), including after a transient doc's first Save promotes it, so a UAT user can find and use it. The gate is not widened to transient/unpromoted docs that legitimately have no profile target (avoid a no-op button). Optionally a brief "profiling…" indicator surfaces when the load-time auto re-trigger fires. UI tests cover visibility (promoted shows / unpromoted hidden) and dark mode.</goal>
+
+  <context>
+    <background>Gate: ComposeWorkspace.tsx:2648 onRefreshProfile={state.documentRef?.sprkDocumentId ? () => void triggerRefreshProfile() : undefined}; toolbar render ComposeFormatToolbar.tsx:843 {onRefreshProfile ? button : null}. sprkDocumentId comes from payload.documentRecordId (ComposeWorkspace.tsx:808, sent only when the launch supplied it :708). Service RefreshProfileAsync (ComposeService.cs:1353), endpoint POST /documents/{id}/refresh-profile (ComposeEndpoints.cs:652), triggerRefreshProfile (ComposeWorkspace.tsx:1357) all work. Ensure sprkDocumentId is populated after first Save (create-on-save) so the button appears once the doc is promoted.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx</file>
+    </relevant-files>
+    <dependencies>042 (deployed build baseline). Best run after 053 to avoid toolbar-edit collisions.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Client-only — no server/engine change (the profile legs already work). Do NOT show a no-op button for transient/unpromoted docs with no profile target; gate on record-id presence (post-Save promotion), not always-on.</constraint>
+    <constraint source="project">Verify sprkDocumentId is set on state.documentRef after a transient doc's first Save (create-on-save) so the button appears without a reload; if it is not, populate it from the save response.</constraint>
+    <constraint source="ADR-021">Button + any "profiling…" status render correctly in light + dark mode.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r5/notes/uat-remediation-r5.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern name="Refresh-Profile gate" location="ComposeWorkspace.tsx:2648 + ComposeFormatToolbar.tsx:843">The gate to relax; button/endpoint/service already wired.</pattern>
+      <pattern name="Create-on-save promotion" location="ComposeWorkspace.tsx save handler (:808 documentRecordId)">Where sprkDocumentId should be populated post first-Save.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm whether state.documentRef.sprkDocumentId is populated after a transient doc's first Save (create-on-save). If not, populate it from the save response so the button appears without a manual reload.</step>
+    <step order="2">Relax the gate so the Refresh-Profile button renders for any doc with a record id (promoted), including immediately after first Save; keep it hidden for transient/unpromoted docs with no profile target.</step>
+    <step order="3">(Optional) surface a lightweight "profiling…" status when the load-time auto re-trigger dispatches, so the automatic behavior is visible.</step>
+    <step order="4">UI tests: promoted doc shows the button (light+dark), unpromoted hides it, first-Save promotion reveals it; button triggers refresh-profile.</step>
+    <step order="5">Build client + tests green.</step>
+    <step order="6">Update TASK-INDEX.md (✅); write notes/task-054-deviations.md.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Client build + UI tests.</tool>
+    <tool name="terminal">Inspect the gate + save handler.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a promoted Compose doc (has a sprk_document id), when the toolbar renders, then the Refresh-Profile button is visible — asserted by a UI test.</criterion>
+    <criterion testable="true">Given a transient doc, when it is first Saved (promoted), then the Refresh-Profile button becomes visible without a manual reload.</criterion>
+    <criterion testable="true">Given a transient/unpromoted doc with no profile target, the button is NOT shown (no no-op button).</criterion>
+    <criterion testable="true">Given light + dark mode, the button (and optional "profiling…" status) render correctly (ADR-021).</criterion>
+  </acceptance-criteria>
+
+  <notes>UAT #9. Smallest fix — a visibility gate relax on an already-working button. Root cause in notes/uat-remediation-r5.md. Run last to avoid toolbar-edit collisions with 053.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

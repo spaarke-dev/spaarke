@@ -1,0 +1,185 @@
+<task id="005" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Applier spike on the CIPO doc + Patch-engine A/B (Docxodus vs OpenXML-SDK) (FR-04/FR-11 choice)</title>
+    <phase>0 Gate</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>The hardest R4 surface (offset→run split + w:ins/w:del at an interior paraId+offset) proven before the Phase-3 commit; decides the FR-04/FR-11 implementation engine and evaluates a candidate new dependency. High blast radius.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The hardest surface (offset→run split + native w:ins/w:del on a real worst-offender doc) must be proven before commit; the A/B recommendation decides the FR-04 implementation. Deep OOXML judgment.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W0b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Throwaway spike code in an isolated spike location; no overlap with task 004 (harness). Both run in wave W0b.</parallel-reason>
+    <deps>002,003</deps>
+    <tags>bff-api,docx,spike</tags>
+    <estimated-effort>3-4 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    THROWAWAY SPIKE to de-risk the hardest R4 surface before committing Phase 3. Apply a small operation set
+    (built from the task-003 schema) to the CIPO corpus document (`PAT 109270W-1 - CLAIMS track changes …
+    .docx`, task 002) via BOTH candidate patch engines, and produce a decision recommendation for
+    FR-04/FR-11:
+    - CANDIDATE A: **Docxodus** (MIT, active .NET redline engine) — does it already do split-run + w:ins/w:del
+      at an offset?
+    - CANDIDATE B: **build on the Open XML SDK** directly — match `w:p` by `w14:paraId` → walk runs
+      accumulating text length until the offset lands in run R → `Run.Clone()`-split R preserving
+      `RunProperties` → wrap inserts in `InsertedRun`(w:ins) / deletes in `DeletedRun`(w:del) with
+      Author/Date/Id. Paragraph-mark deletion (merge) = `w:del` on the para-mark glyph in `w:pPr/w:rPr`.
+
+    Prior art: `notes/bridge-prior-art.md` finding #6 (the canonical split-run recipe — mutate the OpenXml DOM,
+    NEVER string-edit `document.xml`). The spike MUST land at least one INTERIOR edit at the correct
+    `paraId + offset` on the CIPO doc via each engine and compare fidelity, fit, and (for Docxodus) publish-size
+    delta (NFR-04). Write the recommendation to `notes/patch-engine-ab-decision.md`. This is throwaway code —
+    do NOT wire it into the production save path; the real engine is task 030.
+
+    Escalation: if NEITHER engine can land an interior edit at the correct paraId+offset on the CIPO doc, STOP
+    and escalate — the Phase-0 gate cannot pass on that evidence.
+  </prompt>
+
+  <role>
+    Senior .NET engineer deep in the Open XML SDK object model (WordprocessingDocument, Run/RunProperties,
+    InsertedRun/DeletedRun, w:pPr/w:rPr para-mark, revision ids) and comfortable evaluating a third-party MIT
+    library (Docxodus) against a build-your-own baseline. Understands `byte[]`-in/`byte[]`-out purity
+    (ADR-007) and the no-AI-internals rule (ADR-013), and that this spike's recommendation decides the FR-04
+    engine.
+  </role>
+
+  <goal>
+    A throwaway spike that applies a small task-003 operation set to the CIPO corpus doc via BOTH Docxodus and
+    build-on-OpenXML-SDK, lands at least one interior edit at the correct `paraId + offset` via each (or
+    records that it could not), and produces `notes/patch-engine-ab-decision.md` recommending the FR-04/FR-11
+    engine on fidelity-on-CIPO + fit + (if Docxodus) publish-size delta. The spike mutates the OpenXml DOM
+    (never string-edits document.xml), stays `byte[]`-in/out, and injects no AI internals.
+  </goal>
+
+  <context>
+    <background>
+      Design §5.0/§5.6 frame the bridge as the real engineering, and the offset→run mapping + native
+      w:ins/w:del at an interior location as its hardest piece — front-loaded and spiked on the CIPO doc
+      BEFORE Phase 3 (design §6). The A/B is a genuine Phase-0 evaluation (spec Assumptions: "no assumption of
+      which wins"): Docxodus (MIT, active) is "the one surviving real vendor option" (plan.md), vs building on
+      Open-XML-SDK. Prior art finding #6 gives the canonical recipe (match paraId → walk runs → Run.Clone()
+      split at offset → wrap in InsertedRun/DeletedRun; para-mark deletion via w:pPr/w:rPr/w:del; mutate the
+      DOM, never string-edit). The CIPO doc is the known interior-location-422 + empty-paragraph + pre-existing
+      track-changes case (task 002 manifest). This spike consumes the task-003 operation schema (the op set it
+      applies) and the task-002 CIPO fixture. It is throwaway — the production engine is task 030.
+    </background>
+    <relevant-files>
+      <file role="new">a throwaway spike project/location (e.g. under a `spike/` or a `tests/spikes/Compose/` scratch area) exercising BOTH engines — NOT wired into the production save path; deleted or archived after the decision</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs — the task-003 op schema the spike builds its op set from</file>
+      <file role="dependency-output">tests/fixtures/compose-corpus/PAT 109270W-1 - CLAIMS track changes vs US12470413 claims(206092900.1).docx — the CIPO fixture (task 002)</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r4/notes/bridge-prior-art.md finding #6 (canonical split-run + w:ins/w:del recipe; DOM-mutation-not-string-edit; para-mark deletion via w:pPr/w:rPr/w:del)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationWriter.cs — EDGE-1…4 native-OOXML revision/comment wisdom to inform the OpenXML-SDK candidate (study only; the class is retired later)</file>
+      <file role="new">projects/spaarkeai-compose-r4/notes/patch-engine-ab-decision.md — the A/B decision + recommendation for FR-04/FR-11</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §5.0, §5.6, §6</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-04, FR-11, NFR-04, Assumptions/Unresolved Questions (Docxodus adoption)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">Fidelity corpus — supplies the CIPO fixture the spike applies edits to.</dependency>
+      <dependency task="003" status="pending">Operation schema — the op set the spike builds and applies.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-04 / FR-11">The spike MUST apply a small task-003 operation set to the CIPO doc via BOTH engines and land at least one INTERIOR edit at the correct `paraId + offset` (or record that an engine could not). Scope: interior-location placement is the acceptance target; zero write-path text-search.</constraint>
+    <constraint source="project / bridge-prior-art #6">MUST mutate the OpenXml DOM, NEVER string-edit `document.xml`; split runs at the offset preserving `RunProperties`; wrap in InsertedRun/DeletedRun with Author/Date/Id; para-mark deletion via `w:pPr/w:rPr/w:del`. Scope: applies to the OpenXML-SDK candidate and is the yardstick for judging Docxodus.</constraint>
+    <constraint source="ADR-007">The applier is `byte[]`-in/`byte[]`-out; NO `Microsoft.Graph` type in the spike. Scope: SPE hop is not part of the spike.</constraint>
+    <constraint source="ADR-013 / NFR-05">The spike injects NO AI internals; the op set is hand-built or read from a fixture, not produced by an AI dispatch call. Scope: pure OOXML applier evaluation.</constraint>
+    <constraint source="spec / NFR-04">If Docxodus is recommended, the decision doc MUST report its BFF publish-size delta vs the ~49.63 MB baseline (zero new runtime package is the default expectation). Scope: size is a decision input, not an afterthought.</constraint>
+    <constraint source="project">This is THROWAWAY spike code — it MUST NOT be wired into the production save path. Scope: the production engine is task 030; the spike is deleted/archived after the decision.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Open XML SDK surgical patch (split-run + w:ins/w:del); Docxodus evaluation; para-mark deletion edge; byte[]-in/out purity; publish-size delta</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r4/notes/bridge-prior-art.md</file>
+      <file>projects/spaarkeai-compose-r4/notes/as-built-inventory.md</file>
+    </files>
+    <patterns>
+      <pattern name="Canonical split-run recipe" location="projects/spaarkeai-compose-r4/notes/bridge-prior-art.md finding #6">
+        Match w:p by w14:paraId → walk runs accumulating text length until offset lands in run R → Run.Clone()-split R preserving RunProperties → wrap inserts in InsertedRun(w:ins) / deletes in DeletedRun(w:del) with Author/Date/Id. Mutate the DOM, never string-edit document.xml.
+      </pattern>
+      <pattern name="Para-mark deletion (merge) edge" location="projects/spaarkeai-compose-r4/notes/bridge-prior-art.md finding #6">
+        Paragraph-mark deletion = w:del on the para-mark glyph in w:pPr/w:rPr — flagged as the hardest edge; probe it in the spike so task 031 has evidence.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL). Load bridge-prior-art finding #6, spec §FR-04/FR-11/NFR-04, and confirm the task-002 CIPO fixture + task-003 schema are available. State the Placement Justification + run `/conflict-check`.</step>
+    <step order="1" name="Build the op set">From the task-003 schema, construct a small operation set targeting interior locations in the CIPO doc (at least one interior insertText/replaceRange at a specific paraId+offset; include a para-mark-deletion probe if feasible).</step>
+    <step order="2" name="Candidate A — Docxodus">Evaluate Docxodus: can it apply split-run + w:ins/w:del at an offset for the op set? Land the interior edit (or record the gap). Measure its publish-size delta if adopted.</step>
+    <step order="3" name="Candidate B — OpenXML-SDK build">Implement the finding-#6 recipe directly on the Open XML SDK: match paraId → split run at offset → InsertedRun/DeletedRun. Land the same interior edit; probe para-mark deletion.</step>
+    <step order="4" name="Compare + decide">Compare fidelity on CIPO (open the outputs in Word / verify tracked changes land correctly), fit (effort, control, edge coverage), and size (Docxodus delta). Write `notes/patch-engine-ab-decision.md` with a clear FR-04/FR-11 recommendation.</step>
+    <step order="5" name="Gate-evidence + escalation check">Confirm at least one engine landed an interior edit at the correct paraId+offset. If NEITHER did, STOP and escalate (Phase-0 gate cannot pass). Ensure the spike is not wired into production.</step>
+    <step order="6" name="Close out">Update `projects/spaarkeai-compose-r4/tasks/TASK-INDEX.md`: set task 005 status to ✅. Record the decision + any deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>NEITHER Docxodus nor build-on-OpenXML-SDK can land an interior edit at the correct `paraId + offset` on the CIPO doc — STOP and escalate per CLAUDE.md §6: the Phase-0 gate (task 006) cannot pass, and the whole cutover half is blocked on this evidence.</trigger>
+    <trigger>Docxodus is otherwise preferred but its publish-size delta pushes the BFF toward the ≤60 MB ceiling (≥+5 MB single-task delta per root §10) — surface the size/fidelity tradeoff for an explicit decision rather than silently adopting it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No patch applier exists yet; the retired `DocxAnnotationWriter` text-search path is the thing being replaced. Docxodus is a candidate NEW dependency under evaluation.</existing>
+    <extension>The spike itself is throwaway (not new production surface); it exists to decide whether the FR-04 engine EXTENDS the Open XML SDK we already ship or vendors Docxodus. It evaluates, it does not add permanent surface.</extension>
+    <cost-of-doing-nothing>Without proving the offset→run split + native w:ins/w:del on the real CIPO worst-offender before Phase 3, the hard-replace commits to an unproven engine — the exact failure mode the Phase-0 gate exists to prevent.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="spike-code">throwaway spike exercising Docxodus + OpenXML-SDK candidates on the CIPO doc (not wired into production; archived/deleted after decision)</output>
+    <output type="doc">projects/spaarkeai-compose-r4/notes/patch-engine-ab-decision.md — the FR-04/FR-11 engine recommendation (fidelity + fit + size)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A small task-003 operation set is applied to the CIPO corpus doc via BOTH candidate engines (Docxodus and build-on-OpenXML-SDK).</criterion>
+    <criterion testable="true">At least one engine lands an INTERIOR edit at the correct `paraId + offset` on the CIPO doc with ZERO write-path text-search (or the failure is recorded and escalated).</criterion>
+    <criterion testable="true">The OpenXML-SDK candidate mutates the OpenXml DOM (never string-edits document.xml) and probes para-mark deletion via `w:pPr/w:rPr/w:del`.</criterion>
+    <criterion testable="true">`notes/patch-engine-ab-decision.md` states a clear FR-04/FR-11 engine recommendation weighing fidelity-on-CIPO + fit + (if Docxodus) publish-size delta vs ~49.63 MB.</criterion>
+    <criterion testable="true">NEGATIVE: the spike injects no AI internals, uses no `Microsoft.Graph` type, and is NOT wired into the production save path.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 005 as ✅ and the decision + any deviation are recorded in projects/spaarkeai-compose-r4/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Critical path: 003 → 005 → 006. This spike + task 003 + task 004 are the three green lights the Phase-0
+    gate (task 006) checks. The recommendation directly seeds task 030 (the production ComposeShadowPatchEngine).
+    Keep the spike code isolated and clearly throwaway.
+
+    --- COMPLETION (2026-07-22) ---
+    RESULT: success. RECOMMENDATION = build-on-OpenXML-SDK (reject Docxodus).
+    Candidate B (build on DocumentFormat.OpenXml 3.5.1, already a BFF dep — ZERO new package) landed all three
+    interior edits on the CIPO doc by w14:paraId + runIndex + run-local offset with ZERO write-path text-search,
+    at 0 OpenXmlValidator (Office2019) errors:
+      - insertText " AMENDED" -> native w:ins, run split exactly at paraId 712269E5 run[0] offset 16
+      - deleteRange "asset information " -> native w:del/w:delText at paraId 410C9E5F run[2] [1,19)
+      - para-mark deletion probe -> w:pPr/w:rPr/w:del on paraId 5D98777E
+    Candidate A (Docxodus) REJECTED on FIT first, size second: its only redline surface is WmlComparer
+    (Compare/Consolidate/GetRevisions) — a WHOLE-DOCUMENT differ, not an offset applier; it has no
+    (paraId,runIndex,offset) surface to drive; R3's NFR-09 gate already proved WmlComparer STRIPS w14:paraId +
+    DROPS tables (BFF csproj lines 153-159), destroying invariant I-3. Size: isolated linux-x64 publish measured
+    +12.9 MB uncompressed (8.4 -> 22 MB), dominated by SkiaSharp native libSkiaSharp.so (11.15 MB linux-x64 /
+    18.4 MB musl) — the same native packages R3 removed; would threaten the 60 MB HARD STOP. Also 7.1.0 is
+    net10-ONLY; only 6.4.0 is net8-compatible.
+    Escalation: NONE fired as a blocker — Candidate B passes, so the "neither engine lands an interior edit" gate
+    (task 006 prerequisite) is CLEAR.
+    Decision doc: projects/spaarkeai-compose-r4/notes/patch-engine-ab-decision.md
+    Throwaway spike (NOT in Spaarke.sln, NOT wired to any save path; seeds task 030):
+    projects/spaarkeai-compose-r4/spike/ComposeApplierSpike/ (SpikeOpenXmlApplier.cs is the production nucleus).
+    Findings for task 030: intra-paragraph op drift needs anchor rebasing (ProseMirror Mapping); multi-run
+    deleteRange sweep still to implement; w:delText (EDGE-4) mandatory inside w:del.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

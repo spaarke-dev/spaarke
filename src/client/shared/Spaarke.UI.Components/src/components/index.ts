@@ -38,14 +38,12 @@ export * from './DiffCompareView';
 // LookupField - Reusable search-as-you-type lookup
 export * from './LookupField';
 
-// SendEmailDialog - Reusable email composition dialog
-export * from './SendEmailDialog';
-
 // AiSummaryPopover - Reusable AI summary popover with lazy fetch and copy
 export * from './AiSummaryPopover';
 
-// FindSimilarDialog - Reusable iframe dialog for DocumentRelationshipViewer
-export * from './FindSimilarDialog';
+// FindSimilarViewerDialog - Reusable iframe dialog for DocumentRelationshipViewer
+// (#714: renamed from FindSimilarDialog to end the name collision with the FindSimilar wizard family)
+export * from './FindSimilarViewer';
 
 // RelationshipCountCard - Document relationship count with drill-through
 export * from './RelationshipCountCard';
@@ -120,6 +118,10 @@ export * from './TodoDetail';
 
 // ThemeToggle - Sun/moon toggle button for dark mode switching
 export * from './ThemeToggle';
+
+// DisplaySizeMenu - App-shell "Display size" (Default/Large/Extra-large) menu
+// driving the P0.5 uiScale control (spec FR-06 / design §6.9)
+export * from './DisplaySizeMenu';
 
 // RecordCardShell - Shared card shell for all entity record cards (Documents, Matters, Todos, etc.)
 export * from './RecordCardShell';
@@ -200,6 +202,9 @@ export * from './WizardFollowOns';
 // send-email implementations.
 export * from './EmailComposer';
 
+// (#713, 2026-08-03: the LEGACY components/SendEmailDialog is DELETED — the
+// explicit re-export below is now the sole SendEmailDialog source, kept for
+// import-shape stability alongside the EmailComposer star.)
 // Name-collision disambiguation (task 021): the NEW canonical dialog wrapper
 // (`EmailComposer/wrappers/SendEmailDialog`, mount='dialog', onSent/onClose API)
 // wins the `SendEmailDialog` / `ISendEmailDialogProps` names on the main barrel
@@ -219,3 +224,58 @@ export { SendEmailDialog, type ISendEmailDialogProps } from './EmailComposer';
 // indicator, and polls the BFF thread-read + unread-count endpoints
 // (task 050) on a configurable ~5s interval. NO client-side ACS SDK (NFR-04).
 export * from './CommunicationTimeline';
+
+// ConversationView - Teams-style chat-bubble renderer keyed on SENDER IDENTITY
+// (systemuserid, from FR-18), not email-string (task 011, FR-02/03). New
+// presentation over the CommunicationTimeline core (reducer/poll/buildTimeline
+// reused, not forked): mine-right/others-left alignment, day dividers, and
+// per-message status on own bubbles.
+export * from './ConversationView';
+
+// ConversationWorkspace - Mount-agnostic two-pane shell: thread list (name +
+// unread + word-filter + create-＋) beside a conversation, optional `regarding`
+// filter (task 012, FR-01/10/16). Right pane wired via the `renderConversation`
+// seam - Phase-4 hosts (PCF/widget/code-page) inject ConversationView + the
+// current user's systemuserid. All-mode -> FR-16 list; record-mode -> existing
+// by-regarding read (CLAUDE.md §6.5 Path A exception, both server-access-filtered).
+export * from './ConversationWorkspace';
+
+// MessageQuickView - Fluent v9 Popover: 200-char message preview (email shows
+// to/from/date/subject) + an open→pin action that calls the host-wired `onPin`,
+// which drives ConversationView's new `scrollToMessage(id)` imperative handle
+// (forwardRef) to scroll + transiently highlight the bubble (task 023, FR-05).
+export * from './MessageQuickView';
+
+// NewThreadModal - Fluent v9 modal to start (find-or-create) a 1:1 direct thread
+// via POST /threads/direct; reuses RecipientField/BodyEditor/AssociationChips
+// (no dup impl). Optional regarding (read-only AssociationChips) + optional body
+// (posted as the first Message via the existing send engine). name/description
+// omitted — the shipped endpoint persists neither (§6.5 Path A, see task-024 notes).
+export * from './NewThreadModal';
+
+// ModalWindowControls - the standard Spaarke modal window-controls cluster
+// (maximize/restore + close ×), right-aligned in a dialog header. Shared so all
+// modals standardize on the same chrome (owner UAT 2026-07-31 item 4).
+export * from './ModalWindowControls';
+
+// TrackingFieldTrio - Entity-agnostic Monitor/High-Priority/Access-Permission
+// flag trio, lifted from the TrackingFieldTrio PCF (task 023, FR-14). Options
+// (segments + field labels) are injected via props — no `sprk_communication`
+// hardcoding in the shared core. Consumed by the PCF (deep `dist` import) and
+// the Phase-3 reading-pane tracking view (task 035).
+export * from './TrackingFieldTrio';
+
+// SprkModal - the canonical Spaarke modal system (spaarke-modal-system, FR-01):
+// the Fluent v9 Dialog-envelope shell + six presets (Confirm/Choice/Form/Preview/
+// Browse/Wizard), all thin configs sharing one size scale, standard header/footer,
+// and dismiss semantics. No name collisions with existing exports (verified task
+// 009) -> a plain `export *`; see docs/standards/MODAL-DESIGN-SYSTEM.md + ADR-050.
+export * from './SprkModal';
+
+// AccessGrantModal - the person-icon access-grant modal opened from
+// TrackingFieldTrio's onOpenGrantModal (task 040 → 041, teams-app-r1). Built
+// directly on the SprkModal base shell (Family 2 per MODAL-DECISION-CRITERIA);
+// writes sprk_externalrecordaccess exclusively through the built BFF endpoints
+// (/grant, /invite-and-grant, /revoke) — context-agnostic (ADR-012), no Xrm
+// dependency in the shared core.
+export * from './AccessGrantModal';

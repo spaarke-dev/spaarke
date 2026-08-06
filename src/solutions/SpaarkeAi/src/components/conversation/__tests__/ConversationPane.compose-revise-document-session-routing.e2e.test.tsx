@@ -126,7 +126,7 @@ beforeAll(() => {
             { target_text: 'termination clause', new_text: EDIT_TEXTS[1], match_mode: 'strict' },
             { target_text: 'governing law clause', new_text: EDIT_TEXTS[2], match_mode: 'strict' },
           ],
-          rationale: 'Improved clarity across three clauses.',
+          rationale: REVISE_RATIONALE,
           sources: [],
         },
       };
@@ -224,6 +224,15 @@ jest.mock('../../shell/ThreePaneShell', () => ({
 // Import AFTER mocks.
 import { ConversationPane, COMPOSE_WHOLE_DOCUMENT_EDIT_CONFIRMATION, COMPOSE_EDIT_CONFIRMATION } from '../ConversationPane';
 
+// UAT round-8 #7 (ConversationPane.tsx dispatchComposeAction) appends a
+// "**What I changed:**" explanation line — sourced from the dispatched ledger
+// payload's `rationale` field (set below) — onto the base whole-document
+// confirmation copy. This is the current, correct, reviewer-approved contract;
+// the confirmation is no longer a bare COMPOSE_WHOLE_DOCUMENT_EDIT_CONFIRMATION
+// string when an explanation is present.
+const REVISE_RATIONALE = 'Improved clarity across three clauses.';
+const EXPECTED_WHOLE_DOCUMENT_CONFIRMATION = `${COMPOSE_WHOLE_DOCUMENT_EDIT_CONFIRMATION}\n\n**What I changed:** ${REVISE_RATIONALE}`;
+
 // ---------------------------------------------------------------------------
 // Harness — REAL bus + REAL bridge + REAL workspace receiver (the shipped Flow-5
 // receiver, editor stubbed via spy) co-mounted with the REAL ConversationPane,
@@ -319,13 +328,14 @@ describe('DEF-11: Compose whole-document revise routes to the DOCUMENT session (
     expect(flow5.sessionId).toBe(DOC_SESSION);
 
     // (3) The Assistant got the DEF-11 WHOLE-DOCUMENT confirmation copy (not DEF-09's selection
-    // copy), carrying the composeEdit controls (ledgerRef/bindingId) — never the proposed text.
+    // copy) plus the UAT round-8 #7 "What I changed" explanation from the ledger's `rationale`,
+    // carrying the composeEdit controls (ledgerRef/bindingId) — never the proposed redline text.
     const contents = injectedMessages.map((m) => m.content);
-    expect(contents).toContain(COMPOSE_WHOLE_DOCUMENT_EDIT_CONFIRMATION);
+    expect(contents).toContain(EXPECTED_WHOLE_DOCUMENT_CONFIRMATION);
     expect(contents).not.toContain(COMPOSE_EDIT_CONFIRMATION);
     expect(contents.every((c) => !EDIT_TEXTS.some((t) => c.includes(t)))).toBe(true);
     expect(injectedMessages.every((m) => m.role === 'Assistant')).toBe(true);
-    const controlsMessage = injectedMessages.find((m) => m.content === COMPOSE_WHOLE_DOCUMENT_EDIT_CONFIRMATION);
+    const controlsMessage = injectedMessages.find((m) => m.content === EXPECTED_WHOLE_DOCUMENT_CONFIRMATION);
     expect(controlsMessage?.metadata?.composeEdit).toMatchObject({
       ledgerRef: REVISE_LEDGER_REF,
       bindingId: REVISE_BINDING,

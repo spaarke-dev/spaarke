@@ -1,0 +1,67 @@
+{
+  "$comment": "ai-advanced-capabilities-nda-r1 (Contextual AI Tool Library phase 3) — compose-make-concise Action SEED (systemPrompt home). ACTION-ONLY, no playbook: per ADR-039 a capability is an Action row + Binding row, and the Compose engine is frozen (NO new sprk_analysisplaybook records). Mirror-first author surface for the sprk_analysisaction row (sprk_actioncode=compose-make-concise) carrying the JPS systemPrompt + Azure-OpenAI-Structured-Outputs output schema. Deploy via scripts/Deploy-AnalysisAction.ps1 (action-only; upsert by sprk_actioncode) OR Dataverse MCP create_record from this mirror. The Binding that routes to it is in sprk_playbookconsumer-rows.json and DECLARES the core `compose` disposition (BindingDisposition.Compose = 100000006). The input/output schema mirrors under infra/dataverse/inputschemas|outputschemas are the CI-validated projections of this row. Owner hygiene: actionCode carries NO version suffix.",
+  "$comment-disposition": "EDIT-producing capability (like compose-draft-alternative): the LLM emits a STRUCTURED-EDIT PAYLOAD (target_text/new_text/match_mode/rationale/sources), NOT free-form markup. The payload is written to the session ledger as a SessionOutput under the `compose` disposition BEFORE any render (ADR-040 storage-precedes-rendering); the Workspace materializes a pending track-change addressable as {bindingId}@t{n}. The disposition lives on the Binding row (sprk_disposition), not here.",
+  "$comment-justification": "CLAUDE.md §11 — Existing: compose-draft-alternative also emits a structured clause edit, but its intent is 'propose a BETTER alternative grounded in playbook/precedent'. Extension: a separate, single-purpose intent 'make this shorter without changing legal meaning' is a distinct, high-frequency user ask (round-8 UAT #4, Word-Copilot parity) that a general 'draft alternative' does not reliably satisfy (it tends to substantively rewrite, not condense). Cost-of-doing-nothing: users have no one-click 'make more concise' edit; they must free-text-describe it every time. Shares the output schema + redline materialization path with draft-alternative (reuse), differing ONLY in prompt intent.",
+  "actionCode": "compose-make-concise",
+  "name": "Compose — Make More Concise",
+  "description": "Condense a selected contract clause — remove redundancy and verbosity while preserving its exact legal meaning and obligations — for the Compose inline AI toolbar and each Review Note's tools menu (Contextual AI Tool Library). An edit-producing Compose capability: it emits a structured edit payload (target_text/new_text/match_mode/rationale/sources) written to the session ledger under the `compose` disposition before render, so the Workspace materializes a pending track-change the attorney can accept, replace, or undo.",
+  "actionType": 0,
+  "$comment-actionType": "ExecutorType.AiAnalysis = 0 — handled by the existing AiAnalysisNodeExecutor / prompt-driven executor. No new executor (ADR-039 reuse).",
+  "temperature": 0.2,
+  "$comment-temperature": "Low temperature — condensing must preserve legal substance faithfully; there is little creative latitude. Lower than draft-alternative (0.3) because the task is reductive, not generative.",
+  "systemPrompt": "ROLE: You are the Spaarke Compose make-concise assistant. A user has selected a clause (or clause fragment) in a contract they are drafting and asked you to make it MORE CONCISE. You produce a STRUCTURED EDIT PAYLOAD that a track-change surface will materialize — you never emit free-form markup, diff text, or prose containing the rewrite.\n\nINPUT: a selectionText field carrying the exact selected clause, plus optional surrounding-document and matter/firm playbook/precedent context provided by the retrieval layer.\n\nINSTRUCTIONS:\n  1. Rewrite the selected clause to be as concise as possible WHILE PRESERVING ITS EXACT LEGAL MEANING, obligations, rights, conditions, defined-term usage, and party references. Remove redundancy, wordiness, legalese padding, and repetition; tighten sentence structure. Do NOT drop, weaken, or add any substantive term, obligation, carve-out, or qualifier — concision must be MEANING-PRESERVING, never a substantive rewrite.\n  2. Emit a JSON object matching the output schema EXACTLY. additionalProperties is false; do not add fields.\n  3. target_text: the EXACT substring of the current clause the edit replaces. Copy it VERBATIM from selectionText (character-for-character, including punctuation and casing) so the editor can locate it. When condensing the whole selection, target_text is the entire selectionText.\n  4. new_text: the concise replacement clause language. Self-contained, drafting-ready contract prose (no placeholders, no commentary, no markup). This is the text inserted as a pending track-change.\n  5. match_mode: how the editor should locate target_text — 'strict' (target_text is the full selection; replace it as a whole — DEFAULT), 'first', or 'all'. Use 'strict' unless target_text is a shorter fragment.\n  6. rationale: a concise plain-language note on WHAT was condensed and the confirmation that legal meaning is unchanged (≤1 short paragraph, ≤1500 chars) — e.g. 'Removed redundant recital language and collapsed two parallel obligations into one sentence; rights and obligations unchanged.'\n  7. sources: grounding for the edit — each entry { type, id, snippet } from the retrieval layer. Empty array when the retrieval layer supplied no grounding — do NOT invent sources. (Concision is usually ungrounded; an empty array is normal here.)\n\nCONSTRAINTS:\n  - Do NOT change legal meaning. If the selection is already maximally concise, or is too short/garbled to condense faithfully, set new_text equal to target_text (a no-op edit), state in rationale that no meaning-preserving condensation is available, and return an empty sources array.\n  - target_text MUST be a verbatim substring of selectionText — never paraphrase it, or the edit will fail to locate and apply.\n  - Emit ONE payload (one target_text/new_text pair). Do not propose multiple disjoint edits.\n  - Do NOT echo secrets, tokens, or content outside the supplied clause + context.",
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["target_text", "new_text", "match_mode", "rationale", "sources"],
+    "$comment-required": "Object-level required array (ALL five fields required). Property-level boolean 'required' is FORBIDDEN (invalid JSON Schema; 400-fails the request) — OpenAiFunctionSchemaValidator enforces this. match_mode is a CLOSED SET expressed via the OpenAI-subset `enum` keyword.",
+    "properties": {
+      "target_text": {
+        "type": "string",
+        "description": "The exact substring of the current clause the edit replaces — copied VERBATIM from selectionText so the editor can locate it. The whole selection when condensing it as a unit.",
+        "maxLength": 16000
+      },
+      "new_text": {
+        "type": "string",
+        "description": "The concise replacement clause language — self-contained, drafting-ready contract prose (no placeholders, no commentary, no markup), meaning-preserving. Inserted as a pending track-change.",
+        "maxLength": 16000
+      },
+      "match_mode": {
+        "type": "string",
+        "description": "How the editor locates target_text: 'strict' (replace the whole selection — default), 'first' (first occurrence of a fragment), or 'all' (every occurrence).",
+        "enum": ["strict", "first", "all"]
+      },
+      "rationale": {
+        "type": "string",
+        "description": "Concise note on WHAT was condensed plus confirmation legal meaning is unchanged (≤1 short paragraph, ≤1500 chars).",
+        "maxLength": 1500
+      },
+      "sources": {
+        "type": "array",
+        "description": "Grounding for the edit. Empty array when the retrieval layer supplied no grounding — never fabricated. Usually empty for concision.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "id", "snippet"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "description": "The source kind (e.g. 'playbook', 'precedent', 'clause').",
+              "maxLength": 80
+            },
+            "id": {
+              "type": "string",
+              "description": "The retrieval-layer identifier for the source — never fabricated."
+            },
+            "snippet": {
+              "type": "string",
+              "description": "A SHORT supporting excerpt from the source.",
+              "maxLength": 1000
+            }
+          }
+        }
+      }
+    }
+  }
+}

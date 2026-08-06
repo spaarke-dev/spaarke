@@ -5,6 +5,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Communication.Threads;
 using Xunit;
@@ -193,9 +194,7 @@ public class ThreadResolverTests
         var request = Request(CommunicationType.Email, subject: "Contract review");
         var matterId = Guid.NewGuid();
         var communication = new DataverseEntity("sprk_communication") { Id = request.CommunicationId };
-        communication["sprk_regardingrecordid"] = matterId.ToString();
-        communication["sprk_regardingrecordtype"] = "sprk_matter";
-        communication["sprk_regardingrecordname"] = "Acme v Widgets";
+        SetMessageRegarding(communication, "sprk_matter", matterId, "Acme v Widgets");
         SetupRegardingRead(request.CommunicationId, communication);
         var newThreadId = SetupThreadCreateCapture(out var created);
         var strategy = new StubThreadKeyStrategy(CommunicationType.Email, ThreadKeyResolution.CreateNew);
@@ -210,7 +209,9 @@ public class ThreadResolverTests
         thread.GetAttributeValue<OptionSetValue>("sprk_privacystate").Value.Should().Be(PrivacyStateOpen);
         thread.GetAttributeValue<string>("sprk_name").Should().Be("Contract review");
         thread.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(matterId.ToString());
-        thread.GetAttributeValue<string>("sprk_regardingrecordtype").Should().Be("sprk_matter");
+        // Typed ADR-024 lookup (what the by-regarding read filters on) — NOT a 'sprk_regardingrecordtype' text attr.
+        thread.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(matterId);
+        thread.Contains("sprk_regardingrecordtype").Should().BeFalse();
         // A Tier-1 CREATE is NOT a default/master thread.
         thread.Contains("sprk_isdefaultthread").Should().BeFalse();
         strategy.OnThreadCreatedCalls.Should().Be(1);
@@ -274,9 +275,7 @@ public class ThreadResolverTests
         var request = Request(CommunicationType.Message, acsThreadId: null); // Message + no ACS id → SKIP
         var matterId = Guid.NewGuid();
         var communication = new DataverseEntity("sprk_communication") { Id = request.CommunicationId };
-        communication["sprk_regardingrecordid"] = matterId.ToString();
-        communication["sprk_regardingrecordtype"] = "sprk_matter";
-        communication["sprk_regardingrecordname"] = "Acme v Widgets";
+        SetMessageRegarding(communication, "sprk_matter", matterId, "Acme v Widgets");
         SetupRegardingRead(request.CommunicationId, communication);
         SetupNoExistingDefaultThread();
         var newThreadId = SetupThreadCreateCapture(out var created);
@@ -290,7 +289,9 @@ public class ThreadResolverTests
         var thread = created[0];
         thread.GetAttributeValue<bool>("sprk_isdefaultthread").Should().BeTrue();
         thread.GetAttributeValue<OptionSetValue>("sprk_threadtype").Value.Should().Be(ThreadTypeRecordAnchored);
-        thread.GetAttributeValue<string>("sprk_regardingrecordtype").Should().Be("sprk_matter");
+        // Tier-2 default now carries the typed lookup so it appears in the record's by-regarding list.
+        thread.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(matterId);
+        thread.Contains("sprk_regardingrecordtype").Should().BeFalse();
         thread.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(matterId.ToString());
         thread.GetAttributeValue<string>("sprk_name").Should().Be("Acme v Widgets");
         VerifyAssigned(request.CommunicationId, newThreadId, Times.Once());
@@ -306,8 +307,7 @@ public class ThreadResolverTests
         var request = Request(CommunicationType.Message, acsThreadId: null);
         var matterId = Guid.NewGuid();
         var communication = new DataverseEntity("sprk_communication") { Id = request.CommunicationId };
-        communication["sprk_regardingrecordid"] = matterId.ToString();
-        communication["sprk_regardingrecordtype"] = "sprk_matter";
+        SetMessageRegarding(communication, "sprk_matter", matterId);
         SetupRegardingRead(request.CommunicationId, communication);
         var existingDefault = Guid.NewGuid();
         SetupExistingDefaultThread(existingDefault);
@@ -342,8 +342,10 @@ public class ThreadResolverTests
         var thread = created[0];
         thread.GetAttributeValue<bool>("sprk_isdefaultthread").Should().BeTrue();
         thread.GetAttributeValue<OptionSetValue>("sprk_threadtype").Value.Should().Be(ThreadTypeDirect);
-        thread.GetAttributeValue<string>("sprk_regardingrecordtype").Should().Be("systemuser");
+        // Master is keyed on the owning-user GUID via sprk_regardingrecordid (globally unique). "systemuser" is
+        // NOT an ADR-024 family, so NO typed regarding lookup is set, and there is no text type attr.
         thread.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(ownerId.ToString());
+        thread.Contains("sprk_regardingrecordtype").Should().BeFalse();
         VerifyAssigned(request.CommunicationId, newThreadId, Times.Once());
     }
 
@@ -377,8 +379,7 @@ public class ThreadResolverTests
         // With regarding → Tier 2.
         var reqA = Request(CommunicationType.Message, acsThreadId: null);
         var commA = new DataverseEntity("sprk_communication") { Id = reqA.CommunicationId };
-        commA["sprk_regardingrecordid"] = Guid.NewGuid().ToString();
-        commA["sprk_regardingrecordtype"] = "sprk_project";
+        SetMessageRegarding(commA, "sprk_project", Guid.NewGuid());
         SetupRegardingRead(reqA.CommunicationId, commA);
         // No regarding → Tier 3.
         var reqB = Request(CommunicationType.Message, acsThreadId: null);
@@ -399,8 +400,7 @@ public class ThreadResolverTests
         // send/capture path never sees the exception; the message simply persists without a thread.
         var request = Request(CommunicationType.Message, acsThreadId: null);
         var communication = new DataverseEntity("sprk_communication") { Id = request.CommunicationId };
-        communication["sprk_regardingrecordid"] = Guid.NewGuid().ToString();
-        communication["sprk_regardingrecordtype"] = "sprk_matter";
+        SetMessageRegarding(communication, "sprk_matter", Guid.NewGuid());
         SetupRegardingRead(request.CommunicationId, communication);
         SetupNoExistingDefaultThread();
         _entity
@@ -420,27 +420,45 @@ public class ThreadResolverTests
 
     private const string NameIsAutoDerivedField = "sprk_nameisautoderived";
 
-    /// <summary>Sets up the thread retrieve for <c>ReDeriveThreadNameAsync</c> (columns include the marker + denormalized regarding quartet).</summary>
+    /// <summary>Sets up the thread retrieve for <c>ReDeriveThreadNameAsync</c> (columns include the marker + threadtype + typed regarding lookups).</summary>
     private void SetupThreadRead(Guid threadId, DataverseEntity thread) =>
         _entity
             .Setup(e => e.RetrieveAsync(
                 "sprk_communicationthread",
                 threadId,
-                It.Is<string[]>(c => c.Contains(NameIsAutoDerivedField) && c.Contains("sprk_regardingrecordtype")),
+                It.Is<string[]>(c => c.Contains(NameIsAutoDerivedField) && c.Contains("sprk_threadtype")),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(thread);
 
+    /// <summary>
+    /// Builds a thread row. <paramref name="regardingType"/> is an ADR-024 entity logical name — the TYPED
+    /// regarding lookup (via <see cref="RegardingFieldMap"/>) is set, mirroring production (there is no
+    /// 'sprk_regardingrecordtype' text attribute on the thread). A master thread is <paramref name="isDefault"/>
+    /// + threadtype Direct.
+    /// </summary>
     private static DataverseEntity Thread(
         Guid id, string? name = null, bool? nameIsAutoDerived = null,
-        string? regardingType = null, string? regardingId = null, string? regardingName = null)
+        string? regardingType = null, string? regardingId = null, string? regardingName = null,
+        bool isDefault = false, int? threadType = null)
     {
         var thread = new DataverseEntity("sprk_communicationthread") { Id = id };
         if (name is not null) thread["sprk_name"] = name;
         if (nameIsAutoDerived is { } marker) thread[NameIsAutoDerivedField] = marker;
-        if (regardingType is not null) thread["sprk_regardingrecordtype"] = regardingType;
-        if (regardingId is not null) thread["sprk_regardingrecordid"] = regardingId;
+        if (regardingType is not null && regardingId is not null && RegardingFieldMap.FieldFor(regardingType) is { } field)
+            thread[field] = new EntityReference(regardingType, Guid.Parse(regardingId));
         if (regardingName is not null) thread["sprk_regardingrecordname"] = regardingName;
+        if (isDefault) thread["sprk_isdefaultthread"] = true;
+        if (threadType is { } tt) thread["sprk_threadtype"] = new OptionSetValue(tt);
         return thread;
+    }
+
+    /// <summary>Stamps a message's TYPED ADR-024 regarding lookup (the field the resolver reads for the anchor).</summary>
+    private static void SetMessageRegarding(DataverseEntity message, string entityType, Guid recordId, string? recordName = null)
+    {
+        if (RegardingFieldMap.FieldFor(entityType) is { } field)
+            message[field] = new EntityReference(entityType, recordId);
+        message["sprk_regardingrecordid"] = recordId.ToString();
+        if (recordName is not null) message["sprk_regardingrecordname"] = recordName;
     }
 
     [Fact]
@@ -502,13 +520,12 @@ public class ThreadResolverTests
     [Fact]
     public async Task ReDeriveThreadNameAsync_WhenMasterThread_DoesNotAttemptRegardingResolution()
     {
-        // The Tier-3 per-user master ("Messages") is keyed (systemuser, ownerId) — "systemuser" is NOT a
-        // resolvable regarding entity and MUST NEVER be treated as one, regardless of the marker.
+        // The Tier-3 per-user master ("Messages") is a DEFAULT thread of type Direct — detected via the marker +
+        // threadtype (no 'sprk_regardingrecordtype' text attr). Its name MUST NEVER re-derive, regardless of marker.
         var threadId = Guid.NewGuid();
-        var ownerId = Guid.NewGuid();
         SetupThreadRead(threadId, Thread(
             threadId, name: "Messages", nameIsAutoDerived: true,
-            regardingType: "systemuser", regardingId: ownerId.ToString()));
+            isDefault: true, threadType: ThreadTypeDirect));
         var sut = CreateSut();
 
         await sut.ReDeriveThreadNameAsync(threadId, CancellationToken.None);
@@ -584,5 +601,226 @@ public class ThreadResolverTests
 
         created.Should().ContainSingle();
         created[0].GetAttributeValue<bool>(NameIsAutoDerivedField).Should().BeTrue();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // NEW — FR-17 (task 004): participant roll-up for a RECORD-LESS thread + BFF rename
+    // (sprk_name + Edited marker in ONE update) + edit-preserve on a later re-derive.
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private const string ParticipantEntity = "sprk_communicationparticipant";
+
+    /// <summary>Sets up the thread's message scan (RetrieveMultiple on sprk_communication by thread lookup).</summary>
+    private void SetupThreadMessages(params Guid[] messageIds) =>
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_communication"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                var c = new EntityCollection();
+                foreach (var id in messageIds)
+                    c.Entities.Add(new DataverseEntity("sprk_communication") { Id = id });
+                return c;
+            });
+
+    /// <summary>Sets up the participant scan (RetrieveMultiple on sprk_communicationparticipant across the messages).</summary>
+    private void SetupParticipants(params DataverseEntity[] participants) =>
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == ParticipantEntity),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(participants.ToList<DataverseEntity>()));
+
+    /// <summary>One junction row: a resolved systemuser/contact (display name via EntityReference.Name) OR a raw address.</summary>
+    private static DataverseEntity Participant(string? systemUserName = null, string? contactName = null, string? address = null)
+    {
+        var p = new DataverseEntity(ParticipantEntity) { Id = Guid.NewGuid() };
+        if (systemUserName is not null)
+            p["sprk_systemuser"] = new EntityReference("systemuser", Guid.NewGuid()) { Name = systemUserName };
+        if (contactName is not null)
+            p["sprk_contact"] = new EntityReference("contact", Guid.NewGuid()) { Name = contactName };
+        if (address is not null)
+            p["sprk_addresstext"] = address;
+        return p;
+    }
+
+    [Fact]
+    public async Task ReDeriveThreadNameAsync_WhenRecordLessThreadWithParticipants_DerivesRollupName()
+    {
+        // FR-17: a record-less thread (marker Auto, NO regarding anchor) is named from its participants
+        // ("Alice, Bob") rather than the generic "Conversation".
+        var threadId = Guid.NewGuid();
+        SetupThreadRead(threadId, Thread(threadId, name: "Conversation", nameIsAutoDerived: true)); // no regarding
+        SetupThreadMessages(Guid.NewGuid(), Guid.NewGuid());
+        SetupParticipants(
+            Participant(systemUserName: "Bob"),
+            Participant(contactName: "Alice"),
+            Participant(systemUserName: "Bob")); // duplicate → deduped
+        var sut = CreateSut();
+
+        await sut.ReDeriveThreadNameAsync(threadId, CancellationToken.None);
+
+        // Deterministic ordinal order → "Alice, Bob" regardless of the query order above.
+        _entity.Verify(e => e.UpdateAsync(
+            "sprk_communicationthread",
+            threadId,
+            It.Is<Dictionary<string, object>>(d => (string)d["sprk_name"] == "Alice, Bob"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ReDeriveThreadNameAsync_WhenRecordLessThreadWithManyParticipants_TruncatesWithPlusCount()
+    {
+        // More than the shown cap (3) → "Alice, Bob, Carol, +N".
+        var threadId = Guid.NewGuid();
+        SetupThreadRead(threadId, Thread(threadId, name: "Conversation", nameIsAutoDerived: true));
+        SetupThreadMessages(Guid.NewGuid());
+        SetupParticipants(
+            Participant(systemUserName: "Alice"),
+            Participant(systemUserName: "Bob"),
+            Participant(systemUserName: "Carol"),
+            Participant(systemUserName: "Dave"),
+            Participant(address: "erin@example.com"));
+        var sut = CreateSut();
+
+        await sut.ReDeriveThreadNameAsync(threadId, CancellationToken.None);
+
+        _entity.Verify(e => e.UpdateAsync(
+            "sprk_communicationthread",
+            threadId,
+            It.Is<Dictionary<string, object>>(d => (string)d["sprk_name"] == "Alice, Bob, Carol, +2"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ReDeriveThreadNameAsync_WhenRecordLessThreadHasNoMessages_FallsBackToConversation()
+    {
+        // No messages → no participants to roll up → keep the generic "Conversation" fallback.
+        var threadId = Guid.NewGuid();
+        SetupThreadRead(threadId, Thread(threadId, name: "Old", nameIsAutoDerived: true));
+        SetupThreadMessages(/* none */);
+        var sut = CreateSut();
+
+        await sut.ReDeriveThreadNameAsync(threadId, CancellationToken.None);
+
+        _entity.Verify(e => e.UpdateAsync(
+            "sprk_communicationthread",
+            threadId,
+            It.Is<Dictionary<string, object>>(d => (string)d["sprk_name"] == "Conversation"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RenameThreadAsync_SetsNameAndFlipsMarkerToEditedInOneUpdate()
+    {
+        // FR-17 rename: sprk_name + sprk_nameisautoderived=false (Edited) written ATOMICALLY in ONE UpdateAsync.
+        var threadId = Guid.NewGuid();
+        Dictionary<string, object>? written = null;
+        _entity
+            .Setup(e => e.UpdateAsync(
+                "sprk_communicationthread", threadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, f, _) => written = f)
+            .Returns(Task.CompletedTask);
+        var sut = CreateSut();
+
+        var persisted = await sut.RenameThreadAsync(threadId, "  Case strategy  ", CancellationToken.None);
+
+        persisted.Should().Be("Case strategy"); // trimmed
+        written.Should().NotBeNull();
+        ((string)written!["sprk_name"]).Should().Be("Case strategy");
+        ((bool)written[NameIsAutoDerivedField]).Should().BeFalse("rename flips the marker to Edited");
+        // ONE update only (name + marker together) — not two writes.
+        _entity.Verify(e => e.UpdateAsync(
+            "sprk_communicationthread", threadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task RenameThreadAsync_WhenNameBlank_ThrowsAndDoesNotWrite()
+    {
+        var sut = CreateSut();
+
+        var act = async () => await sut.RenameThreadAsync(Guid.NewGuid(), "   ", CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        _entity.Verify(e => e.UpdateAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    // FR-24 pin field name (task 040 schema) — a local literal (not a production-internal reference), mirroring
+    // the NameIsAutoDerivedField convention above.
+    private const string PinnedField = "sprk_ispinned";
+
+    [Fact]
+    public async Task SetPinnedAsync_WithTrue_SetsIsPinnedTrueInOneUpdate()
+    {
+        // FR-24 pin: sprk_ispinned=true written in ONE UpdateAsync (mirrors RenameThreadAsync's atomic-write shape).
+        var threadId = Guid.NewGuid();
+        Dictionary<string, object>? written = null;
+        _entity
+            .Setup(e => e.UpdateAsync(
+                "sprk_communicationthread", threadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, f, _) => written = f)
+            .Returns(Task.CompletedTask);
+        var sut = CreateSut();
+
+        var persisted = await sut.SetPinnedAsync(threadId, true, CancellationToken.None);
+
+        persisted.Should().BeTrue();
+        written.Should().NotBeNull();
+        ((bool)written![PinnedField]).Should().BeTrue();
+        _entity.Verify(e => e.UpdateAsync(
+            "sprk_communicationthread", threadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SetPinnedAsync_WithFalse_SetsIsPinnedFalse()
+    {
+        // Unpin: sprk_ispinned=false written explicitly (never relies on the Dataverse column default).
+        var threadId = Guid.NewGuid();
+        Dictionary<string, object>? written = null;
+        _entity
+            .Setup(e => e.UpdateAsync(
+                "sprk_communicationthread", threadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, f, _) => written = f)
+            .Returns(Task.CompletedTask);
+        var sut = CreateSut();
+
+        var persisted = await sut.SetPinnedAsync(threadId, false, CancellationToken.None);
+
+        persisted.Should().BeFalse();
+        written.Should().NotBeNull();
+        ((bool)written![PinnedField]).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RenameThenReDerive_OnEditedThread_IsNoOp_NamePreserved()
+    {
+        // End-to-end edit-preserve: rename flips the marker to Edited; a SUBSEQUENT re-derive reads that Edited
+        // marker and MUST NOT overwrite the user's name (the marker gate short-circuits — no participant/anchor
+        // roll-up is even attempted).
+        var threadId = Guid.NewGuid();
+        _entity
+            .Setup(e => e.UpdateAsync(
+                "sprk_communicationthread", threadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var sut = CreateSut();
+
+        await sut.RenameThreadAsync(threadId, "User's Custom Name", CancellationToken.None);
+
+        // Now the thread reads back as Edited (marker=false) — mirror what the rename persisted.
+        SetupThreadRead(threadId, Thread(
+            threadId, name: "User's Custom Name", nameIsAutoDerived: false,
+            regardingType: "sprk_matter", regardingId: Guid.NewGuid().ToString(), regardingName: "Some New Regarding"));
+
+        await sut.ReDeriveThreadNameAsync(threadId, CancellationToken.None);
+
+        // The rename wrote once; the re-derive wrote NOTHING (edit-preserve).
+        _entity.Verify(e => e.UpdateAsync(
+            "sprk_communicationthread", threadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 }

@@ -1,0 +1,62 @@
+<task id="121" project="email-communication-solution-r4">
+  <metadata>
+    <title>CommunicationConnections PCF — title top/bottom padding, number/name spacing, restyle matched-reason (UAT R4 A)</title>
+    <phase>Wave 12 — UAT round 4 refinements</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>112</dependencies>
+    <blocks>—</blocks>
+    <tags>pcf, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies a shipped PCF (.tsx) styling; PCF build+pack. Code-review + adr-check.</rigor-reason>
+    <parallel-group>W12</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-17</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    UAT round 4 (`notes/UAT-ROUND4-FEEDBACK.md` section A) styling refinements to the `CommunicationConnections` PCF
+    (`src/client/pcf/CommunicationConnections/`). Four items:
+
+    A12-1 — reduce the padding ABOVE the section title so the title sits closer to the top of the section boundary.
+    A12-2 — increase the padding BELOW the title so there is more space before the first related-record line.
+    A12-3 — add MORE horizontal space between the record NUMBER and the record NAME (W11 task 112 bumped it to
+      `spacingHorizontalS`; increase further — e.g. `spacingHorizontalM` or a fixed gap — so they are clearly separated).
+    A12-4 — the on-form collapsed-card "matched by/because …" reason line (kept in W11): INCREASE its font size (from
+      the current small size to ~`fontSizeBase200`→`fontSizeBase300` range, matching the row text scale) and REMOVE
+      the italic styling. Do NOT remove the line — just restyle it (larger, non-italic).
+
+    Apply the refined title padding via Fluent tokens (ADR-021). Since this asymmetric title padding (small top /
+    larger bottom) is now the Spaarke convention, ALSO update `docs/standards/UI-DESIGN-STANDARDS.md` to record it
+    (title: reduced top padding, increased bottom padding — name the tokens used).
+  </prompt>
+
+  <goal>
+    The RELATED RECORDS title sits close to the section top with clear breathing room below it before the first row;
+    record number and name are clearly spaced; the matched-reason line is larger and non-italic. Data contract +
+    behavior unchanged; the design standard reflects the refined title padding.
+  </goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">Title has reduced top padding (closer to the section top) and increased bottom padding (more space before the first row), via Fluent tokens — no hardcoded px beyond permitted layout dimensions.</criterion>
+    <criterion testable="true">Record number and record name have clearly increased spacing between them vs W11.</criterion>
+    <criterion testable="true">The matched-reason line is larger (row-text scale) and NON-italic; it is still present (not removed).</criterion>
+    <criterion testable="true">`docs/standards/UI-DESIGN-STANDARDS.md` updated with the refined asymmetric title padding convention (token names).</criterion>
+    <criterion testable="true">Data-read (provenance) + task-042 write contract unchanged (styling-only).</criterion>
+    <criterion testable="true">`npm run build:prod` clean; jest green (existing + any adjusted); version bump all 5 locations (1.4.0 → 1.5.0); ZIP repacked + validated (type-66, apostrophe-free; pack.ps1 stays `$PSScriptRoot`-hardened).</criterion>
+  </acceptance-criteria>
+
+  <constraints>
+    <constraint>Styling/presentation only — do NOT change the provenance read or the task-042 additive write path.</constraint>
+    <constraint>ADR-021 Fluent v9 tokens; ADR-022 platform libs; ADR-028 auth (`context.webAPI`).</constraint>
+    <constraint>Manifest description-keys generic + apostrophe-free; type-66 solution; follow /pcf-deploy. Stay within `src/client/pcf/CommunicationConnections/**` + the shared standard doc. Do NOT modify `@spaarke/ui-components`.</constraint>
+  </constraints>
+
+  <notes>
+    Read `ConnectionsEditor.tsx` + `CommunicationConnectionsApp.tsx` (W11 task 112 touched both). The matched-reason
+    render is `candidateMatchReason`/the on-form card reason row. Leave changes UNCOMMITTED; do NOT touch
+    TASK-INDEX/current-task/project CLAUDE.md. Deploy remainder (import) = owner.
+  </notes>
+</task>

@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>UI tests — review panel, gutter comments, Review-NDA card, dark mode</title>
+    <phase>6 Deploy &amp; Wrap-up</phase>
+    <gate>done</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Browser UI test execution across deployed surfaces; verifies frontend behavior + ADR-021 dark mode.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>UI test execution via the ui-test skill against deployed surfaces; no code authoring.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Runs against the deployed environment; after 060.</parallel-reason>
+    <deps>060</deps>
+    <tags>e2e-test, pcf, frontend, fluent-ui</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Run the browser UI tests end-to-end against the deployed environment: the "Review an NDA" card, Compose open,
+    the review-summary panel, right-gutter comments, Draft Alternative, and ADR-021 dark-mode compliance across all
+    new surfaces.
+  </prompt>
+
+  <role>
+    SPAARKE QA engineer using the ui-test skill (Chrome integration). Expert in the SpaarkeAi + Compose surfaces.
+  </role>
+
+  <goal>
+    All UI tests defined in the frontend tasks (011/022/030/031/032/033) pass against the deployed environment,
+    including dark-mode checks and console-error checks.
+  </goal>
+
+  <context>
+    <background>
+      Frontend tasks each ship &lt;ui-tests&gt;; this task runs them together end-to-end on the deployed build to
+      catch integration + theming regressions.
+    </background>
+    <relevant-files>
+      <file>projects/ai-advanced-capabilities-nda-r1/tasks/030-review-summary-docked-panel.poml</file>
+      <file>projects/ai-advanced-capabilities-nda-r1/tasks/031-advisory-comments-event-receiver.poml</file>
+      <file>projects/ai-advanced-capabilities-nda-r1/tasks/032-right-gutter-comment-layout.poml</file>
+    </relevant-files>
+    <dependencies>060 (deployed environment).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Every new surface passes the dark-mode check (semantic tokens, no white/black hardcodes).</constraint>
+    <constraint source="project">Every new PCF/client surface passes a console-error check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run the ui-test suite from tasks 011/022/030/031/032/033 against the deployed env.</step>
+    <step order="2">Execute the full flow: NDA upload → card → Compose → summary panel → gutter comments → Draft Alternative.</step>
+    <step order="3">Run dark-mode + console-error checks on each new surface.</step>
+    <step order="4">Record results; file any regressions as notes/ issues; update TASK-INDEX.md: mark 061 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run the ui-test skill (Chrome).</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-advanced-capabilities-nda-r1/notes/ (UI test results)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The full flow (upload → card → Compose → summary panel → gutter comments → Draft Alternative) passes end-to-end on the deployed env.</criterion>
+    <criterion testable="true">Every new surface passes the ADR-021 dark-mode check.</criterion>
+    <criterion testable="true">No console errors on any new surface.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="End-to-end NDA advisory flow">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=webresource&amp;webresourceName=sprk_SpaarkeAi</url>
+      <steps>
+        <step>Upload an NDA; click "Review an NDA"; verify Compose opens</step>
+        <step>Verify summary panel, gutter comments, and Draft Alternative work</step>
+        <step>Toggle dark mode; verify all surfaces adapt; check console</step>
+      </steps>
+      <expected>Full flow works; dark mode compliant; no console errors.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Final experiential gate before wrap-up.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute Step 9.7 ui-test.</protocol>
+  </execution>
+</task>

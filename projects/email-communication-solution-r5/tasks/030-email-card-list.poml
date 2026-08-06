@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="email-communication-solution-r5">
+  <metadata>
+    <title>FR-03 / FR-19: EmailCardList — flat left-pane card list of Email-type sprk_communication records (from/subject/preview/date/unread) + loading/empty states</title>
+    <phase>3 Layer-2 views</phase>
+    <gate>after:001</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Net-new React 19 presentation surface (new file) in the shared @spaarke/communication-components lib; modifies .tsx; the negative case (a non-Email sprk_communication MUST NEVER render as a card) is a correctness invariant, not cosmetic. NFR-05 React-version-cast prohibition applies. FULL gate per CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified net-new presentational component with an exact prop/data contract and a clear reference neighbor (ThreadList.tsx); no cross-surface access-model or security reasoning. Sonnet default.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New component file under a new EmailCardList/ folder; shares the barrel index.ts with 031 only for an export line (coordinate the export edit). Independent of the reading-pane shell internals.</parallel-reason>
+    <deps>001</deps>
+    <tags>frontend, fluent-ui</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build `EmailCardList` — a net-new React 19 presentational component in `@spaarke/communication-components` that renders one card per `sprk_communication` row filtered to `sprk_communicationtype = 100000000` (Email). Each card shows from / subject / preview / date / unread indicator. Render skeleton cards while loading and a "No emails in this view" empty state. It is a pure presentational list: the host supplies the already-fetched, already-Email-filtered rows plus loading/selection state; the component NEVER fetches Dataverse itself. Non-Email types (Teams/SMS/ACS) MUST NEVER render as a card even if an unfiltered array is passed — the component defends the invariant.</prompt>
+  <role>SPAARKE platform developer. Expert in React 19 + Fluent UI v9 presentational components in the shared component libraries. Follow ADRs strictly (ADR-012 shared-lib home, ADR-021 Fluent v9 + dark mode, ADR-022 slim-first).</role>
+  <goal>A new `EmailCardList` component at `src/client/shared/Spaarke.Communication.Components/src/components/EmailCardList/EmailCardList.tsx` (+ `EmailCardList.types.ts`, barrel export) that: (1) accepts `items: ReadonlyArray&lt;EmailCardItem&gt;` (id, from, subject, preview, date, isUnread, communicationType), `selectedId`, `isLoading`, and `onSelect(id)`; (2) renders one clickable card per Email-type item showing from/subject/preview/date and an unread visual (bold + dot); (3) filters/guards so any item whose `communicationType !== 100000000` is skipped and never rendered; (4) renders N skeleton cards when `isLoading`; (5) renders the "No emails in this view" empty state when not loading and zero Email items; (6) marks the selected card as active. Uses Fluent v9 tokens only (no hardcoded colors) so it themes light/dark via the host FluentProvider.</goal>
+
+  <context>
+    <background>Spec FR-03 (flat left card list) + FR-19 (surface states: loading skeletons, empty "No emails in this view"). Design Lens 2 walk-through: the left pane renders `sprk_communication` Email rows as FLAT CARDS (from/subject/preview/date/unread) — one card per email, no conversation grouping. Per design Lens 4 this is BUILD (net-new): `ThreadList.tsx` is thread-oriented and cannot be reused as-is; the DataGrid body is tabular. This component is the left pane of the reading-pane shell (task 032) and is fed by the view selector (task 031). Selection is owned by the host/shell — `EmailCardList` only emits `onSelect(id)`.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/EmailCardList/EmailCardList.tsx</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/EmailCardList/EmailCardList.types.ts</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/index.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/ConversationWorkspace/subcomponents/ThreadList.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/ViewSelector.tsx</file>
+      <file role="reference">docs/data-model/sprk_communication.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Shared hardened `sanitizeEmailHtml` in `@spaarke/ui-components` — the card `preview` is plain text (Graph `bodyPreview`), but if a preview is ever derived from HTML it MUST pass through the shared sanitizer, not `dangerouslySetInnerHTML` raw.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">NON-EMAIL EXCLUSION (correctness invariant, FR-03): `EmailCardList` MUST skip and never render any item whose `communicationType !== 100000000` (Email). This is enforced in the component regardless of whether the host pre-filtered, so a Teams/SMS/ACS row can never appear as a card.</constraint>
+    <constraint source="project">Presentational-only (ADR-012 / Lens 2): the component MUST NOT call `Xrm.WebApi`, BFF, or `IDataverseClient` directly. It receives `items`, `isLoading`, `selectedId` and emits `onSelect(id)`. The host (shell/view-selector wiring) owns the fetch, the Email filter at query time, and selection state.</constraint>
+    <constraint source="ADR-021">Fluent v9 only; use theme tokens (`tokens.*`) for all colors/spacing — NO hardcoded hex. Component MUST render correctly in dark mode via the host `FluentProvider` (no self-provided theme except for a Storybook/test harness).</constraint>
+    <constraint source="ADR-022,NFR-05">This is code-page-tier React 19 UI. Do NOT introduce an `as React.ComponentType` cast anywhere on this new work. Keep the component free of PCF-platform assumptions; it is a Layer-2 (React 19) view, not shared across the PCF boundary.</constraint>
+    <constraint source="project">Card body preview text MUST be treated as plain text; if any preview ever originates from HTML it MUST be routed through the shared `sanitizeEmailHtml` from task 001 — never rendered via unsanitized `dangerouslySetInnerHTML`.</constraint>
+    <constraint source="project">Add the component to the `@spaarke/communication-components` barrel (`src/index.ts`) so tasks 032/040 can import it; coordinate the export line with 031 (shared barrel edit).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>React 19 Fluent v9 presentational list components in shared libs</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+    <patterns>
+      <pattern name="Selectable row list" location="src/client/shared/Spaarke.UI.Components/src/components/ConversationWorkspace/subcomponents/ThreadList.tsx">Reference for a clickable, selected-state row list with Fluent tokens; adapt from thread rows to email cards (from/subject/preview/date/unread) — do NOT reuse thread grouping.</pattern>
+      <pattern name="Presentational contract (host owns data)" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/ViewSelector.tsx">Reference for the "component does NOT call Dataverse; host fetches and passes down" contract; mirror that boundary for EmailCardList.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML + project CLAUDE.md + spec FR-03/FR-19 + design Lens 2. Declare RIGOR LEVEL: FULL with reason. Confirm the `@spaarke/communication-components` folder + barrel exist.</step>
+    <step order="1">Define `EmailCardItem` + `EmailCardListProps` in `EmailCardList.types.ts`: `EmailCardItem = { id: string; from: string; subject: string; preview: string; date: string | Date; isUnread: boolean; communicationType: number }`; `EmailCardListProps = { items: ReadonlyArray&lt;EmailCardItem&gt;; selectedId?: string; isLoading?: boolean; skeletonCount?: number; onSelect: (id: string) =&gt; void }`.</step>
+    <step order="2">Implement `EmailCardList.tsx`: compute the rendered set as `items.filter(i =&gt; i.communicationType === 100000000)` (the non-Email guard). Render one card per Email item: from (emphasized), subject, single-line truncated preview, formatted date, and an unread visual (bold text + an unread dot) when `isUnread`. Mark `selectedId` as active/selected. Wire click + keyboard activation to `onSelect(id)`.</step>
+    <step order="3">Add the loading branch: when `isLoading`, render `skeletonCount` (default e.g. 6) Fluent `Skeleton` cards instead of the list.</step>
+    <step order="4">Add the empty branch: when not loading and the filtered Email set is empty, render the "No emails in this view" empty state.</step>
+    <step order="5">Use `makeStyles` with `tokens.*` only; verify dark-mode correctness (no hardcoded colors). Export `EmailCardList` + types from the component folder and add the export to `src/index.ts` (coordinate with 031).</step>
+    <step order="6">Add a unit/RTL test that proves the closed acceptance set, including the negative case: an array containing a non-Email item (e.g. `communicationType = 100000003`) renders zero cards for that item.</step>
+    <step order="7">Run `npm run build` + tests for `@spaarke/communication-components`.</step>
+    <step order="8">Update `projects/email-communication-solution-r5/tasks/TASK-INDEX.md`: set task 030 status to ✅.</step>
+    <step order="9">Document any deviation (prop-shape changes, preview-source decisions) in `projects/email-communication-solution-r5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the left list is required to fetch or Email-filter data itself (i.e. the host cannot supply pre-filtered Email rows), STOP and escalate per root CLAUDE.md §6 — do NOT add a Dataverse/BFF call inside this presentational component; that boundary is owned by 031/032.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`ConversationWorkspace/subcomponents/ThreadList.tsx` (thread-row list, thread-oriented) and the `DataGrid` body (tabular). Grep: no flat email-card list component exists in either shared lib.</existing>
+    <extension>No — `ThreadList` is structured around threads/conversations (grouping, thread metadata) and the DataGrid renders tabular rows; producing an Outlook-style mail card column from either would require a fork of its render model, not a prop tweak.</extension>
+    <cost-of-doing-nothing>Without `EmailCardList` there is no Outlook-style flat mail column — the Email surface would degrade to a chat/thread list or a data grid, which fails FR-03 (one card per Email row: from/subject/preview/date/unread) and the "as-Outlook" left pane in design Lens 2.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Email-only rendering (negative invariant)">
+      <steps>
+        <step>Render `EmailCardList` with a mixed `items` array containing 3 Email items (`communicationType = 100000000`) and 1 Teams/SMS item (`communicationType = 100000003`).</step>
+      </steps>
+      <expected>Exactly 3 cards render; the non-Email item produces no card. No console error.</expected>
+    </test>
+    <test name="Loading and empty states">
+      <steps>
+        <step>Render with `isLoading = true` → observe skeleton cards.</step>
+        <step>Render with `isLoading = false` and `items = []` → observe empty state.</step>
+      </steps>
+      <expected>Loading shows `skeletonCount` skeleton cards; empty shows "No emails in this view"; the two states are mutually exclusive.</expected>
+    </test>
+    <test name="Selection + unread visuals">
+      <steps>
+        <step>Render with one item `isUnread = true` and `selectedId` set to another item; click a card.</step>
+      </steps>
+      <expected>Unread card is visually distinct (bold + dot); the `selectedId` card is marked active; clicking a card fires `onSelect` with that id.</expected>
+    </test>
+    <test name="Dark-mode theming (ADR-021)">
+      <steps>
+        <step>Wrap the component in a `FluentProvider` using `webDarkTheme` and render a populated list.</step>
+      </steps>
+      <expected>Cards, text, unread dot, and selected highlight use theme tokens and are legible in dark mode; no hardcoded colors leak.</expected>
+    </test>
+  </ui-tests>
+
+  <tools><tool name="npm">Build/test shared-lib (npm run build; NOT build:prod — this is a non-PCF package)</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/EmailCardList/EmailCardList.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/EmailCardList/EmailCardList.types.ts</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/components/EmailCardList/__tests__/EmailCardList.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an `items` array of Email-type rows for the active view, when `EmailCardList` renders, then one card per row shows from / subject / preview / date, and unread rows are visually distinct.</criterion>
+    <criterion testable="true">Negative (invariant): Given an `items` array that includes a non-Email `sprk_communication` (e.g. `communicationType = 100000003` Teams/SMS), when the list renders, then that row produces NO card — non-Email types never appear.</criterion>
+    <criterion testable="true">Given `isLoading = true`, when the list renders, then it shows `skeletonCount` skeleton cards and no real cards.</criterion>
+    <criterion testable="true">Given `isLoading = false` and zero Email items, when the list renders, then it shows the "No emails in this view" empty state (no error, no skeletons).</criterion>
+    <criterion testable="true">Given a `selectedId`, when the list renders, then that card is marked active; when a card is clicked/keyboard-activated, then `onSelect(id)` fires with that card's id.</criterion>
+    <criterion testable="true">Given a host `FluentProvider` in dark theme, when the list renders, then all colors derive from tokens and remain legible (ADR-021 dark mode); no `as React.ComponentType` cast is introduced (NFR-05).</criterion>
+    <criterion testable="true">The component performs no Dataverse/BFF/`Xrm` call (presentational-only); all data arrives via props.</criterion>
+    <criterion testable="true">`npm run build` for `@spaarke/communication-components` is green and all new tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference spec FR-03 + FR-19 and design Lens 2 (flat cards, no conversation grouping) + Lens 4 (BUILD verdict — `ThreadList` is thread-oriented). Email option-set value `sprk_communicationtype = 100000000`. The host (task 031 view wiring → 032 shell) pre-filters to Email at query time via the saved-view FetchXML; this component's in-component guard is defense-in-depth for the FR-03 invariant.
+
+**Completion summary (2026-07-28)**: Built `EmailCardList` + `EmailCardList.types.ts` + barrel export + RTL test suite (8 tests) per the acceptance criteria. `npm run build` (tsc) green; package-wide jest green (18/18, 3 suites). Step 9.5 gates: `code-review` clean (1 warning found + fixed inline — locale-dependent date formatting; 2 non-blocking suggestions), `adr-check` clean (0 violations across ADR-012/021/022). Full detail: `projects/email-communication-solution-r5/notes/task-030-email-card-list.md`.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute.</protocol></execution>
+</task>

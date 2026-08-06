@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="ai-advanced-capabilities-agreements-r1">
+  <metadata>
+    <title>#4 Separated, location-labelled Assistant confirmations</title>
+    <phase>4 Review-Depth UX</phase>
+    <gate>deps 041 satisfied (041 complete)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>.tsx change on the conversation surface (auto-FULL), though small.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small formatting change with exact seam named.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>041</deps>
+    <tags>spaarkeai, frontend, fluent-ui</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Each "What I changed" confirmation entry gets a BOLD location indicator in its header (the clause location label
+    from clauseLocation.ts) + clear whitespace separation between entries — so a batch of confirmations (041 emits many)
+    reads as distinct per-clause outcomes instead of a run-together wall.
+  </prompt>
+  <role>SPAARKE platform developer. ConversationPane confirmation rendering, Fluent v9 typography.</role>
+  <goal>Confirmations are visually distinct entries, each led by a bold clause-location header.</goal>
+
+  <context>
+    <background>
+      Seam: makeComposeEditControlsMessage / COMPOSE_EDIT_CONFIRMATION rendering in ConversationPane (~L163/L941 per
+      nda-r1 notes — re-locate). Thread the section location (computed clause label, from the note/finding metadata)
+      into the header, bold via Fluent tokens; add inter-entry spacing. Sequenced after 041 (same file; hot-file rule).
+    </background>
+    <relevant-files>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (confirmation rendering)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="041" status="pending">batch emits many confirmations; same-file order</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Bold/emphasis + spacing via Fluent v9 tokens (no hardcoded px/weights outside token scale); dark mode intact. Scope: the formatting.</constraint>
+    <constraint source="ADR-041">Formatting-only — the confirmation CONTENT/semantics (store-before-render, controls) unchanged. Scope: this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Confirmation rendering</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-041-judgment-confirmation-completion-policy.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="confirmation seam" location="src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (COMPOSE_EDIT_CONFIRMATION)">Extend the existing renderer.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor; locate the current confirmation renderer + where location metadata is available.</step>
+    <step order="1">Thread the location label into a bold header; add inter-entry spacing.</step>
+    <step order="2">Verify with a 041 batch (many entries) + a single run; snapshot/unit tests updated.</step>
+    <step order="3">Update TASK-INDEX.md: 042 ✅.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Batch readability"><steps><step>Run a 3-note batch (041)</step></steps><expected>Three visually distinct entries, each with a bold location header.</expected></test>
+    <test name="Dark mode"><steps><step>Toggle dark mode</step></steps><expected>Headers/spacing render via tokens.</expected></test>
+  </ui-tests>
+
+  <tools><tool name="npm">SpaarkeAi build + tests</tool></tools>
+  <outputs><output type="code">confirmation renderer formatting</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each confirmation shows a bold clause-location header; entries clearly separated (spacing token).</criterion>
+    <criterion testable="true">A finding with no resolvable location renders a graceful generic header (no "undefined").</criterion>
+    <criterion testable="true">Negative: confirmation semantics/controls unchanged (existing tests pass untouched).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-12; design Lens 2 #4. COMPLETED 2026-07-31. Renderer seam: `dispatchComposeAction` in
+    ConversationPane.tsx (confirmed unmoved since baseline f0e1c8144 — 021/031/041 all landed
+    elsewhere; 041's own notes confirm ConversationPane.tsx untouched). Added
+    `extractComposeEditLocationLabel` + `withComposeEditLocationHeader` (bold `### {label}` markdown
+    header via SprkChat's existing tokenized `.sprk-markdown h3` CSS, ADR-021-compliant, zero new
+    styling surface). WIRING FINDING: no shipped caller of `enqueueComposeAction` currently populates a
+    location field on the request/result reaching this pane (ComposeEditor.tsx/ComposeCommentGutter.tsx
+    compute `deriveClauseLocationLabel` but never thread it into the dispatch — and those files are
+    read-only for this task). Implementation is forward-compatible (checks `locationLabel`/`sectionRef`/
+    `location` on both request slots and result payload) and gracefully omits the header today (proven
+    byte-identical to pre-042 via the existing locked `ConversationPane.compose-edit-controls.test.tsx`,
+    left untouched). Recommend a fast-follow task to add ONE field to `ComposeEditor.tsx`'s
+    `dispatchNoteToolRequest` slots — see notes/042-execution-notes.md for full detail + escalation.
+    New tests: `ConversationPane.compose-edit-location-header.test.tsx` (6 cases). Full suite: 91
+    suites/838 tests green (baseline 90/832 + this task's 6). Build green.
+  </notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="teams-app-r1">
+  <metadata>
+    <title>Org-catalog distribution + Publisher Attestation prep</title>
+    <phase>7 Teams Package &amp; Deploy</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Packaging/documentation task — no code changes, no new src/ surface; CLAUDE.md §8 rigor table MINIMAL row (documentation, inventory, simple updates).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Packaging + documentation of the enterprise distribution posture.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>070</deps>
+    <tags>deploy, docs</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Package task 070's Teams app for org-catalog distribution under App Centric Management (admin upload/approval, ACM group assignment, app-setup-policy pinning) and document the Publisher Attestation posture: Publisher Attestation as the minimum bar for a legal customer's security review, with M365 Certified noted as an ideal parallel commercial workstream — not a R1 gate. Reference the published privacy policy and Terms of Use.
+  </prompt>
+
+  <role>SPAARKE platform developer + enterprise deployment steward. Expert in Teams org app catalog distribution, App Centric Management (ACM), and Microsoft 365 app trust/attestation programs. Follow ADRs strictly.</role>
+
+  <goal>
+    A documented, verifiable org-catalog distribution path for the Teams app package (task 070's artifact): the app installs from the org catalog in a customer tenant via admin consent (not sideloading, not the public Teams Store for V1), with a written Publisher Attestation checklist covering the minimum bar for a legal customer's security review, and an explicit note that M365 Certified is a separate, later, parallel commercial workstream — not an R1 blocker.
+  </goal>
+
+  <context>
+    <background>
+      Per design.md §8 (Enterprise posture) and spec NFR-03, distribution for regulated legal customers is via the org app catalog under App Centric Management — legacy app-permission-policies were deprecated April 2025. Trust posture is Publisher Attestation (minimum) with M365 Certified as an ideal parallel commercial track; privacy policy + ToU must be published and referenced. This task turns that design-time posture into a concrete, checkable distribution + attestation record for R1 go-live.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/teams-app-r1/design.md</file>
+      <file role="output">projects/teams-app-r1/notes/org-catalog-distribution-and-attestation.md</file>
+      <file role="canonical-reference">src/client/external-spa/appPackage/manifest.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">NFR-03 — distribution MUST be org-catalog under App Centric Management (admin upload or submission-API + admin approval, ACM group assignment, app-setup-policy pinning); the app MUST NOT be distributed via sideloading or the public Teams Store for V1.</constraint>
+    <constraint source="project">Publisher Attestation is the MINIMUM trust bar to document for V1 (sufficient for a legal customer's security review); M365 Certified is documented as a parallel, later, commercial workstream — do NOT treat M365 Certified as an R1 gating requirement or block on it.</constraint>
+    <constraint source="project">Reference the published privacy policy and Terms of Use URLs (as already declared in the manifest's `developer` block from task 070) in the distribution/attestation documentation — do not restate or fork separate policy text here.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Org-catalog distribution + Publisher Attestation</topic>
+    <files>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Enterprise distribution posture" location="projects/teams-app-r1/design.md">§8 already states the full posture (ACM distribution, admin consent, Publisher Attestation → M365 Certified as parallel commercial track, privacy policy + ToU) — this task operationalizes it into a checklist + verification record, it does not re-derive the posture.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Read design.md §8 and spec.md NFR-03 to confirm the exact distribution + trust posture already decided (do not re-litigate).</step>
+    <step order="2">Write `projects/teams-app-r1/notes/org-catalog-distribution-and-attestation.md` documenting: (a) the org-catalog admin-upload/submission-API steps, (b) ACM group assignment + app-setup-policy pinning steps, (c) an explicit statement that sideloading and the public Teams Store are NOT used for V1.</step>
+    <step order="3">In the same file, add a Publisher Attestation checklist covering the minimum items a legal customer's security review would expect (data handling, auth model summary referencing ADR-028, privacy policy + ToU links from the manifest, support/contact info) and note M365 Certified as a separate, later, parallel commercial workstream (not gating).</step>
+    <step order="4">Verify the manifest's `developer.privacyUrl` and `developer.termsOfUseUrl` (from task 070) are populated and reference them by value in the checklist (do not hardcode a second copy that could drift).</step>
+    <step order="5">Perform (or document the steps for) an admin upload of the task-070 package to a test/dev org's app catalog, ACM group assignment, and confirm the app installs for a test user via admin consent in that tenant.</step>
+    <step order="6">Record the verification result (which tenant, which admin action, outcome) in the same notes file.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run any Teams admin-center/PowerShell verification commands available</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/teams-app-r1/notes/org-catalog-distribution-and-attestation.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The app installs from the org catalog in a test/customer tenant via admin consent, verified and recorded with the specific tenant/admin action used.</criterion>
+    <criterion testable="true">A Publisher-Attestation checklist is documented in `notes/org-catalog-distribution-and-attestation.md`, covering the minimum items for a legal customer's security review, with M365 Certified explicitly noted as a separate parallel commercial workstream (not gating R1).</criterion>
+    <criterion testable="true">The documented posture references the manifest's published privacy policy and ToU URLs rather than restating them separately.</criterion>
+    <criterion testable="false">Negative: the documentation explicitly states the app is NOT distributed via sideloading and NOT via the public Teams Store for V1 — verified by the absence of any sideload/Store-submission step in the recorded distribution path.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task documents and verifies the distribution mechanism; it does not perform the customer-facing legal/commercial work of pursuing M365 Certified (explicitly out of scope, noted as a parallel workstream per design.md §8). Depends on task 070's package artifact; independent of task 071's CI automation (a manual upload is sufficient to satisfy this task's acceptance criteria).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. MINIMAL rigor — code-review/adr-check skipped by default at Step 9.5.</protocol>
+  </execution>
+</task>

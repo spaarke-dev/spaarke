@@ -24,6 +24,7 @@ import {
   DismissRegular,
   SearchRegular,
 } from "@fluentui/react-icons";
+import { OOB_MODAL_SIZES } from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -33,6 +34,17 @@ export interface IFindSimilarAppProps {
   apiBaseUrl: string;
   tenantId: string;
   authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>;
+  /**
+   * Assistant hand-off FILE references (UAT R5-8). When launched from the Assistant "Find Similar"
+   * Quick Start card via the surface-launch envelope, `main.tsx` passes the session file refs; Find
+   * Similar takes a SINGLE document, so the FIRST session file's binary is fetched and pre-selected
+   * on the content (Path B) input. `undefined`/no sessionId → opens empty as before.
+   */
+  initialFileRefs?: {
+    readonly sessionId?: string;
+    readonly fileIds: ReadonlyArray<string>;
+    readonly fileNames?: ReadonlyArray<string>;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +212,35 @@ export function FindSimilarApp(props: IFindSimilarAppProps) {
     setError(null);
   }, []);
 
+  // R5-8: pre-select the session's first attached file (Find Similar is single-document). Fetch its
+  // binary from the session document-content endpoint and run it through the same validated
+  // handleFileSelected path. Fail-soft: a failed fetch just leaves the input empty.
+  const { initialFileRefs } = props;
+  React.useEffect(() => {
+    const sessionId = initialFileRefs?.sessionId;
+    const fileIds = initialFileRefs?.fileIds;
+    if (!sessionId || !fileIds || fileIds.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const fileId = fileIds[0];
+        const res = await authenticatedFetch(
+          `${apiBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/documents/${encodeURIComponent(fileId)}/content`
+        );
+        if (!res.ok) return;
+        const blob = await res.blob();
+        const name = initialFileRefs?.fileNames?.[0] ?? "document";
+        const file = new File([blob], name, { type: blob.type || "application/octet-stream" });
+        if (!cancelled) handleFileSelected(file);
+      } catch {
+        // Non-fatal: session binary unavailable — the user can pick a file/record manually.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialFileRefs, apiBaseUrl, authenticatedFetch, handleFileSelected]);
+
   // Xrm Lookup dialog for selecting a Document record
   const handleOpenLookup = React.useCallback(async () => {
     try {
@@ -338,8 +379,10 @@ export function FindSimilarApp(props: IFindSimilarAppProps) {
           },
           {
             target: 2,
-            width: { value: 85, unit: "%" },
-            height: { value: 85, unit: "%" },
+            // `record` OOB size (85%×85%) — already matched; sourced from
+            // oobModalSizes.ts so it can't drift (spec FR-11/FR-18, task 090).
+            width: OOB_MODAL_SIZES.record.width,
+            height: OOB_MODAL_SIZES.record.height,
           }
         );
       } else {

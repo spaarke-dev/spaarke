@@ -83,6 +83,33 @@ export interface ComposeFlowSelection {
   contextLabel?: string;
 }
 
+/**
+ * One advisory comment to materialize in the Compose editor, carried by the
+ * `compose_advisory_comments` discriminant (ai-advanced-capabilities-nda-r1 task 031). A
+ * CLIENT-DERIVED projection of one `flaggedSections[]` entry from the ledgered NDA-REVIEW result
+ * (ADR-040) — NOT a second server disposition, NOT a new model call. Structural mirror of the
+ * NDA-REVIEW Action output contract's flagged-section shape (task 020).
+ */
+export interface ComposeAdvisoryCommentItem {
+  /** Verbatim quoted NDA clause excerpt — the `resolveTargetSpans('strict')` anchor target. Tier-3. */
+  targetText: string;
+  /** The AI's advisory explanation for this flag — becomes the comment thread's text. Tier-3.
+   *  Post the agreements-r1 task-002 schema split the Action emits `flaggedClause`/`assessment`
+   *  instead; dispatchers then compose this from those fields (legacy-degrade source for the
+   *  thread's `text`) and ALSO carry the discrete fields below. */
+  explanation: string;
+  /** Section/clause reference from the review output (e.g. "3.2"). Tier-1 safe identifier. */
+  sectionRef?: string;
+  /** Coarse qualitative risk signal (NEVER a numeric score, per ADR-039). Tier-1 safe enum-like string. */
+  riskLevel?: string;
+  /** Optional standard/playbook reference the flag cites. Tier-1 safe identifier. */
+  standardRef?: string;
+  /** Grounded-fact prose (agreements-r1 task-002 split: what the clause does). Tier-3. */
+  flaggedClause?: string;
+  /** Reasoned-judgment prose (agreements-r1 task-002 split: why it is a risk/deviation). Tier-3. */
+  assessment?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Workspace channel
 // ---------------------------------------------------------------------------
@@ -182,6 +209,39 @@ export interface WorkspacePaneEvent {
    *                              adapt their view to the new active context (Round 4 Fix 4 signal
    *                              infrastructure — no consumers yet, just the foundation for future
    *                              pane coordination)
+   * - `nda_review_progress_visibility` — the Assistant's center-screen agreement/NDA-review progress
+   *                              modal changed visibility (opened / dismissed / auto-closed); carries
+   *                              `progressVisible`. Added so ReviewCompleteToast (shell layer) can
+   *                              avoid a double-notification while the modal is still on screen, now
+   *                              that the modal is non-blocking (`modalType="non-modal"`) and the user
+   *                              can switch workspace tabs while it is still open (UAT round-3 item
+   *                              #8, ai-advanced-capabilities-agreements-r1). Same "signal
+   *                              infrastructure" shape as `active_widget_changed` above.
+   * - `nda_review_background_run` — a review run's liveness moved to the WORKSPACE tab strip: the user
+   *                              clicked "Continue working in background" on the progress modal (so the
+   *                              modal is now dismissed) WHILE the run is still executing server-side.
+   *                              Carries `backgroundRunActive` (true = a dismissed-but-running review is
+   *                              live; false = it completed / failed / was never backgrounded).
+   *                              WorkspacePane consumes it to show a tiny circular progress indicator on
+   *                              the running Compose tab header until the run completes, so the dismissed
+   *                              progress card leaves NO visible-yet-unmounted remnant (UAT round-4 item
+   *                              #10a, ai-advanced-capabilities-agreements-r1). Same "signal
+   *                              infrastructure" shape as `nda_review_progress_visibility` above.
+   * - `nda_review_dispatch_active` — a review run's in-flight state stamped at DISPATCH time, for
+   *                              cross-navigation resume persistence (UAT round-6 item #15a,
+   *                              ai-advanced-capabilities-agreements-r1). Carries `dispatchActive`
+   *                              (true = a review binding was just dispatched from the Assistant, for
+   *                              EVERY review path — chip/typed/gate/wizard/rerun — since they all funnel
+   *                              through the ONE `runBindingDispatch` chokepoint; false = the dispatch
+   *                              settled WITHOUT completing, i.e. failed). WorkspacePane consumes it to
+   *                              stamp / clear the ACTIVE home-surface Compose tab's persisted
+   *                              `run:{inFlight,dispatchedAt}` so a navigate-away-and-return trip resumes
+   *                              the spinner + poll — INDEPENDENT of whether the user ever dismissed the
+   *                              progress modal (the round-4 `nda_review_background_run` dismiss signal is
+   *                              now purely a UI-spinner concern, no longer the persistence trigger).
+   *                              Completion clearing rides the EXISTING `compose_advisory_comments`
+   *                              (fires even for a zero-findings clean review). Same "signal
+   *                              infrastructure" shape as `nda_review_background_run` above.
    * - `streaming_started`      — a structured-output streaming run has begun; downstream widgets
    *                              (e.g. StructuredOutputStreamWidget, R5 task 017 / D2-07) mount and
    *                              prepare to receive section events. Carries `streamId` so multiple
@@ -282,6 +342,9 @@ export interface WorkspacePaneEvent {
     | 'entity_resolved'
     | 'session_reset'
     | 'active_widget_changed'
+    | 'nda_review_progress_visibility'
+    | 'nda_review_background_run'
+    | 'nda_review_dispatch_active'
     | 'streaming_started'
     | 'streaming_complete'
     | 'section_started'
@@ -309,6 +372,20 @@ export interface WorkspacePaneEvent {
     //    span. Additive discriminant; see the qaSourceText/qaSectionLabel
     //    field block below.
     | 'compose_qa_highlight'
+    // ── Compose advisory comments (ai-advanced-capabilities-nda-r1 task 031) ──
+    //    Assistant → Workspace. A CLIENT-DERIVED projection of the SAME ledgered
+    //    NDA-REVIEW result the review-summary panel renders (ADR-040 — no second
+    //    server disposition, no new model call): one entry per flagged clause.
+    //    The Workspace receiver (`useComposeWorkspaceReceivers`) resolves each
+    //    `targetText` via `resolveTargetSpans('strict')` and, on a unique match,
+    //    creates a PERSISTENT comment thread (`useComposeCommentThreads.createThread`)
+    //    carrying `explanation` as the thread text — reusing the SAME anchoring
+    //    primitives `compose_qa_highlight` uses for its ephemeral highlight, applied
+    //    here as a durable `commentAnchor` mark instead. Ranges that fail strict
+    //    resolution are reported (never silently dropped, per the FR-19 "do not
+    //    guess" rule). Additive discriminant; see the `advisoryComments` field block
+    //    below.
+    | 'compose_advisory_comments'
     // ── Compose D-F3 content-render ack signal (spaarkeai-compose-r2 task 071,
     //    FR-34) ── Workspace(ComposeWorkspace) → Workspace(WorkspacePane). The
     //    honest-UI-ack refinement for CONTENT-bearing Compose opens: a
@@ -326,7 +403,23 @@ export interface WorkspacePaneEvent {
     //    Reuses the existing `ledgerRef` + `sessionId` fields (identifiers only,
     //    Tier-1 safe — ADR-015); additive discriminant (ADR-030), no new channel,
     //    no `any`. See ComposeWorkspace.tsx (emitter) + WorkspacePane.tsx (ack site).
-    | 'compose_content_rendered';
+    | 'compose_content_rendered'
+    // ── Tabbed Quick Start → Create Analysis wizard modal
+    //    (ai-advanced-capabilities-analysis-hub-r1) ── Conversation → Workspace.
+    //    The Quick Start "Agreement Review" card asks WorkspacePane to host the
+    //    Create Analysis wizard AS A MODAL (`CreateRecordWizard embedded={false}`),
+    //    injecting the Xrm-coupled services + regarding from the host context. On
+    //    finish the wizard opens its result tab exactly as today. Additive
+    //    discriminant (ADR-030); carries `analysisWorkType` + `analysisWorkTypeLabel`
+    //    only (a Choice integer + display string — Tier-1 safe, ADR-015).
+    | 'open_create_analysis_wizard'
+    // ── Analysis grid row-click → open the analysis HEADLESS
+    //    (ai-advanced-capabilities-analysis-hub-r1) ── Workspace channel. The Analysis
+    //    hub grid asks the host to open the picked analysis as a HEADLESS SpaarkeAi
+    //    code-page modal (`openSpaarkeAi` target:2 — no OOB `sprk_analysis` form chrome)
+    //    instead of the OOB form. Carries `analysisId` only (a record GUID — Tier-1 safe,
+    //    ADR-015). Handled by WorkspacePane (owns `openSpaarkeAi`). Additive (ADR-030).
+    | 'open_analysis_headless';
 
   /** Identifies the widget kind (e.g. `"document-summary"`, `"clause-list"`). */
   widgetType?: string;
@@ -383,6 +476,47 @@ export interface WorkspacePaneEvent {
    * Workspace" without re-querying the tab manager.
    */
   displayName?: string;
+
+  /**
+   * Whether the Assistant's center-screen agreement/NDA-review progress modal is CURRENTLY visible
+   * (shown, not dismissed, not idle). Required when `type === 'nda_review_progress_visibility'`.
+   *
+   * Consumer: `ReviewCompleteToast` (shell layer) tracks the latest value in a ref, alongside the
+   * existing `active_widget_changed` tab-visibility ref, and suppresses its own completion toast
+   * whenever this is `true` — the progress modal itself is already showing the outcome, so a toast at
+   * the same moment would be a double notification (UAT round-3 item #8).
+   *
+   * ADR-015 binding: a plain boolean UI-visibility flag (Tier 1 safe). Not a user-content surface.
+   */
+  progressVisible?: boolean;
+
+  /**
+   * Whether a review run whose progress modal has been DISMISSED ("Continue working in background") is
+   * still executing server-side. Required when `type === 'nda_review_background_run'`.
+   *
+   * Consumer: `WorkspacePane` tracks the latest value and, while true, renders a tiny circular progress
+   * indicator (Fluent Spinner) on the running Compose tab header — the run's liveness after the modal is
+   * dismissed. Goes false when the run reaches a terminal state (completion then flows through the
+   * existing `ReviewCompleteToast` rules) or a fresh run begins visible again (UAT round-4 item #10a).
+   *
+   * ADR-015 binding: a plain boolean UI-liveness flag (Tier 1 safe). Not a user-content surface.
+   */
+  backgroundRunActive?: boolean;
+
+  /**
+   * Whether a review binding was just DISPATCHED (true) or the dispatch settled without completing —
+   * i.e. failed (false). Required when `type === 'nda_review_dispatch_active'`.
+   *
+   * Consumer: `WorkspacePane` stamps (true) / clears (false) the ACTIVE home-surface Compose tab's
+   * persisted `run:{inFlight,dispatchedAt}` so a navigate-away-and-return trip resumes the review's
+   * spinner + poll regardless of whether the progress modal was ever dismissed. Emitted at the ONE
+   * `runBindingDispatch` chokepoint (all review paths — chip/typed/gate/wizard/rerun) so the flag is
+   * captured for every entry path (UAT round-6 item #15a). Completion clearing rides the separate
+   * `compose_advisory_comments` event (fires even for a zero-findings clean review).
+   *
+   * ADR-015 binding: a plain boolean UI-liveness flag (Tier 1 safe). Not a user-content surface.
+   */
+  dispatchActive?: boolean;
 
   // ── selection_changed fields ──────────────────────────────────────────────
 
@@ -840,6 +974,59 @@ export interface WorkspacePaneEvent {
    * `type === 'compose_qa_highlight'`. Tier-1 safe.
    */
   qaSectionLabel?: string;
+
+  // ── Compose advisory comments fields (task 031) ────────────────────────────
+  //
+  // Carried by the `compose_advisory_comments` discriminant ONLY. One entry per
+  // `flaggedSections[]` item from the ledgered NDA-REVIEW result. `sessionId` +
+  // `timestamp` (declared above) are reused. `ledgerRef` (declared above, Flow 5
+  // block) MAY additionally be set for provenance/dedupe — optional, since the
+  // advisory-comments materialization does not itself re-read the ledger (the
+  // dispatcher already holds the terminal chunk's payload verbatim).
+
+  /**
+   * The flagged-section advisory comments to materialize, present when
+   * `type === 'compose_advisory_comments'`. Tier-3 (each item carries the AI's
+   * quoted excerpt + explanation) — see {@link ComposeAdvisoryCommentItem}.
+   */
+  advisoryComments?: ComposeAdvisoryCommentItem[];
+
+  /**
+   * task 032 (right-gutter comment layout) — the NDA-REVIEW Action's own top-level `overallRisk`
+   * string (the ledgered result's `{overallRisk, flaggedSections[]}` contract, task 020), carried
+   * verbatim alongside `advisoryComments` when `type === 'compose_advisory_comments'`. Coarse
+   * qualitative signal only (NEVER a numeric score, per ADR-039). Optional — an older emitter that
+   * hasn't wired this field simply omits it; the review-summary panel falls back to deriving it from
+   * `advisoryComments[].riskLevel` in that case (see `NdaReviewSummaryPanel.tsx`).
+   */
+  overallRisk?: string;
+
+  // ── Tabbed Quick Start → Create Analysis wizard modal fields ──────────────
+  //
+  // Carried by the `open_create_analysis_wizard` discriminant ONLY. Both are
+  // configuration metadata (a Choice integer + its display string) — Tier-1
+  // safe under ADR-015. `regarding` is intentionally NOT carried: WorkspacePane
+  // resolves it from the host `entityContext` it already holds (the record the
+  // SpaarkeAi surface was launched in), so no user-content identity crosses the
+  // bus.
+
+  /**
+   * Analysis record GUID for `type === 'open_analysis_headless'` — the analysis to open
+   * as a headless SpaarkeAi modal. A record identifier only (Tier-1 safe, ADR-015).
+   */
+  analysisId?: string;
+
+  /**
+   * `sprk_worktype` Choice integer for `type === 'open_create_analysis_wizard'`.
+   * Optional — WorkspacePane defaults to Agreement Review when absent. Tier-1 safe.
+   */
+  analysisWorkType?: number;
+
+  /**
+   * Display label for the analysis work type (`type === 'open_create_analysis_wizard'`),
+   * used in the wizard title. Optional. Tier-1 safe.
+   */
+  analysisWorkTypeLabel?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1352,6 +1539,16 @@ export interface ConversationPaneEvent {
    * - `first_message`     — user sent or selected their first message (Welcome → Stage 2)
    *                         Dispatched by ConversationPane on prompt button click.
    *                         ShellStageManager marks hasSession=true on receipt.
+   * - `session_switch`    — (ai-advanced-capabilities-analysis-hub-r1 task 031, FR-11) a
+   *                         DIFFERENT pane (e.g. `AnalysisHubWidget`'s grid-row reopen) asks
+   *                         ConversationPane to adopt an EXISTING `sessionId` and restore its
+   *                         transcript — the same effect as the user picking an entry from the
+   *                         History menu. Carries `sessionId` (reused field, declared below in
+   *                         the Compose field block). ConversationPane's receiver reuses its
+   *                         existing `handleSelectHistorySession`-equivalent behavior
+   *                         (`setChatSessionId` + SprkChat remount); no new restore mechanism
+   *                         is introduced. Additive discriminant per ADR-030 — existing
+   *                         subscribers ignore it.
    */
   type:
     | 'suggestion'
@@ -1367,7 +1564,15 @@ export interface ConversationPaneEvent {
     //   compose field block below + `@spaarke/compose-components`
     //   `ComposeWorkspaceToAssistantFlow` / `ComposeContextToAssistantFlow`.
     | 'compose_selection_offer'
-    | 'compose_context_offer';
+    | 'compose_context_offer'
+    // ── Session switch (ai-advanced-capabilities-analysis-hub-r1 task 031, FR-11) ──
+    | 'session_switch'
+    // ── Tabbed Quick Start (ai-advanced-capabilities-analysis-hub-r1) ──
+    // The Analysis grid's `+ New` toolbar (`AnalysisHubWidget`, WORKSPACE pane)
+    // asks ConversationPane — which owns the single `QuickStartModal` — to open
+    // that modal on a specified tab (`create` | `analysis`). Additive
+    // discriminant per ADR-030; existing subscribers ignore it.
+    | 'open_quick_start';
 
   /** Human-readable suggestion text when `type === 'suggestion'`. */
   suggestionText?: string;
@@ -1407,6 +1612,13 @@ export interface ConversationPaneEvent {
 
   /** Structured refinement instruction payload for `refine_request`. */
   refineData?: unknown;
+
+  /**
+   * Which Quick Start tab to open when `type === 'open_quick_start'`:
+   * `'create'` (the 7 GetStarted cards) | `'analysis'` (the analysis cards).
+   * Absent → the host defaults to `'create'`. Tier-1 safe.
+   */
+  quickStartTab?: 'create' | 'analysis';
 
   // ── Compose flow fields (spaarkeai-compose-r2 task 104) ───────────────────
   //

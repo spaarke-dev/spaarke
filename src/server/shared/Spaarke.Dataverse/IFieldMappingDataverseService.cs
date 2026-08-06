@@ -30,11 +30,18 @@ public interface IFieldMappingDataverseService
         Guid parentRecordId,
         CancellationToken ct = default);
 
+    /// <param name="impersonateSystemUserId">
+    /// OPTIONAL Dataverse <c>systemuserid</c> to run the write AS (via <c>MSCRMCallerID</c> impersonation —
+    /// effective privileges = intersection of the app user and the impersonated user; honest <c>modifiedby</c>).
+    /// Null/empty = app-only (existing callers byte-unchanged). Added for the Job B apply path (task 031); the
+    /// confirming user's identity is threaded here so the field update is attributed to and gated by them.
+    /// </param>
     Task UpdateRecordFieldsAsync(
         string entityLogicalName,
         Guid recordId,
         Dictionary<string, object?> fields,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        Guid? impersonateSystemUserId = null);
 
     Task<FieldMappingProfileEntity?> GetFieldMappingProfileWithRulesAsync(
         string sourceEntity,

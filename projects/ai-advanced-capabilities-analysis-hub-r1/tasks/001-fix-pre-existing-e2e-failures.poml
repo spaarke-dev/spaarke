@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Fix 12 pre-existing e2e failures (green baseline)</title>
+    <phase>0 Foundation</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Brownfield debug of `.tsx` e2e suites on the three-pane foundation; touches `.ts`/`.tsx`; the green baseline gates every Phase 2+ task, so a wrong "fix" (masking a regression) has high blast radius.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Root-cause brownfield debugging across three coupled test suites — Sonnet-5 @ high effort with xhigh escalation for the deep-trace work; no architectural authoring.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Green-baseline GATE (W0). Nothing else in the project starts until these 12 tests pass; running concurrent three-pane work over a red baseline defeats the purpose of the gate.</parallel-reason>
+    <deps>none</deps>
+    <tags>testing, e2e, frontend</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Fix the 12 pre-existing end-to-end test failures that exist on master (in the compose-session-routing,
+    edit-controls, and three-pane-coordination suites) so the project branch has a green e2e baseline BEFORE any
+    Phase 2+ task builds on the three-pane foundation. These failures are independent of this project's new work —
+    confirm that, fix them as test/test-infra issues, and record the green baseline. Do NOT introduce new product
+    behavior; this is a remediation task, not a feature task.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the SpaarkeAi three-pane React surface, Jest/Testing-Library e2e specs,
+    and ConversationPane compose-routing test harnesses. Follow ADR-038 testing strategy strictly.
+  </role>
+
+  <goal>
+    The 12 named e2e tests in the compose-session-routing, edit-controls, and three-pane-coordination suites pass on
+    the project branch; each failure is confirmed independent of this project's new work; a green-baseline record
+    (suite names, before/after counts, root-cause-per-failure) exists in `projects/ai-advanced-capabilities-analysis-hub-r1/notes/`.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-01 / PLAN Phase 0, 12 e2e tests fail on master across three suites. They pre-date this project and
+      are unrelated to the Analysis-hub work, but the project builds directly on the three-pane surface, so the spec
+      makes fixing them a Phase-0 gate (green baseline) that must complete before any three-pane task runs. The
+      failures cluster in compose-session-routing (`ConversationPane.compose-*-session-routing.e2e.test.tsx`),
+      edit-controls (`ConversationPane.compose-edit-controls.test.tsx`), and three-pane-coordination
+      (`shell/__tests__/three-pane-compose-coordination.e2e.test.tsx`).
+    </background>
+    <relevant-files>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/conversation/__tests__/ConversationPane.compose-revise-document-session-routing.e2e.test.tsx</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/conversation/__tests__/ConversationPane.compose-draft-alternative-session-routing.e2e.test.tsx</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/conversation/__tests__/ConversationPane.compose-edit-controls.test.tsx</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/shell/__tests__/three-pane-compose-coordination.e2e.test.tsx</file>
+      <file role="canonical-reference">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file role="canonical-reference">docs/adr/ADR-038-testing-strategy.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite tasks; this is the entry gate.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">SCOPE = these 3 suites only. Fixes MUST respect the integration-heavy pyramid + the 7 KEEP categories; do NOT delete a failing MAINTAIN-class test to make the suite green, and do NOT introduce banned mock shapes (`Mock&lt;HttpMessageHandler&gt;`, DI-registration or ctor-null-check tests).</constraint>
+    <constraint source="project">SCOPE = test / test-infra remediation. Do NOT add or alter product behavior in `ConversationPane.tsx` or the three-pane shell to force a pass; if a test fails because product code is genuinely wrong, that is a regression (see escalation), not a fix target for this task.</constraint>
+    <constraint source="project">SCOPE = confirm independence. For each of the 12 failures, establish (and record) that the failure reproduces on master independent of this project's not-yet-written new work before treating it as pre-existing debt.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend e2e test remediation</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+    <patterns>
+      <pattern name="three-pane compose e2e harness" location="src/solutions/SpaarkeAi/src/components/shell/__tests__/three-pane-compose-coordination.e2e.test.tsx">
+        The coordination harness that mounts the full three-pane surface; use its setup as the reference for how the other two suites wire ConversationPane + WorkspacePane.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor + reason. Load ADR-038 + TEST-ARCHITECTURE. Run the 3 suites, capture the exact 12 failing test names + error output as the "before" record.</step>
+    <step order="1">For each failure, hand-trace root cause: distinguish (a) test-infra/harness drift, (b) stale assertion vs current product contract, (c) genuine product regression. Record the classification per failure.</step>
+    <step order="2">For (a) and (b) failures, fix the test/harness so the assertion matches the current, correct product contract. Keep MAINTAIN-class tests at their KEEP path (do not delete).</step>
+    <step order="3">If any failure classifies as (c) genuine product regression, STOP and escalate (see escalation) — do NOT mask it by weakening the test.</step>
+    <step order="4">Re-run the 3 suites; confirm all 12 (and no previously-green tests) pass. Capture the "after" record.</step>
+    <step order="5">Write the green-baseline record to `projects/ai-advanced-capabilities-analysis-hub-r1/notes/green-baseline.md` (suite names, before/after counts, root-cause-per-failure, independence confirmation).</step>
+    <step order="6">Update TASK-INDEX.md: set task 001 status to ✅.</step>
+    <step order="7">Document any deviation in `projects/ai-advanced-capabilities-analysis-hub-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of the 12 failures traces to a genuine product regression (not test/test-infra drift), STOP and escalate per CLAUDE.md §6 — do NOT weaken/skip the test or alter product code to mask it. The green baseline must reflect real correctness, not a silenced regression.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Run the SpaarkeAi Jest e2e suites (test only — no product build changes).</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">src/solutions/SpaarkeAi/src/components/conversation/__tests__/ (fixed compose-session-routing + edit-controls suites)</output>
+    <output type="test">src/solutions/SpaarkeAi/src/components/shell/__tests__/three-pane-compose-coordination.e2e.test.tsx</output>
+    <output type="doc">projects/ai-advanced-capabilities-analysis-hub-r1/notes/green-baseline.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the project branch, when the compose-session-routing, edit-controls, and three-pane-coordination suites run, then all 12 previously-failing tests pass.</criterion>
+    <criterion testable="true">No previously-green test in the three suites (or their files) regresses to failing.</criterion>
+    <criterion testable="true">Each of the 12 failures is documented in notes/green-baseline.md with its root-cause classification and confirmation it is independent of this project's new work.</criterion>
+    <criterion testable="true">Negative: no failure was made to pass by deleting/skipping a MAINTAIN-class test or by altering product behavior in ConversationPane/three-pane shell (verify by diff — only test/harness files changed unless a regression escalation was raised and resolved).</criterion>
+    <criterion testable="true">Negative: if a failure was a genuine product regression, it was escalated (not masked), and the escalation + resolution is recorded in notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    ui-tests are intentionally NOT included: this task's deliverable IS the e2e tests. spec §10 / FR-01 / PLAN Phase 0.
+    Green baseline gates all Phase 2+ three-pane work (W0 in TASK-INDEX).
+
+    COMPLETED 2026-07-28. All 12 failures traced to test-infra drift, NOT a genuine product regression —
+    no escalation raised. Cluster A (3 tests, ConversationPane.compose-*-session-routing.e2e.test.tsx +
+    compose-edit-controls.test.tsx): stale assertions predating a deliberate, reviewer-approved UAT
+    round-8 #7 feature (ConversationPane.tsx dispatchComposeAction appends a "What I changed" explanation
+    line to the compose-edit confirmation; independently covered by composeResultFormat.test.ts). Cluster B
+    (9 tests, three-pane-compose-coordination.e2e.test.tsx): harness was missing an AiSessionProvider mock
+    after decision-1 (2026-07-19, ContextPaneController.tsx) made `execution-trace`
+    (&lt;ComposeTraceHost/&gt;, which calls useAiSession()) the Context pane's default view — the real shell
+    (ThreePaneShell.tsx) always supplies AiSessionProvider; the test harness did not. Fix: added the same
+    `useAiSession`-override jest.mock pattern already used by 3 sibling suites (`...actual` keeps
+    PaneEventBus/PaneEventBusProvider real). Only 4 test files touched; no product code changed. Before:
+    4 suites failed / 12 of 15 tests failed. After: 4 suites / 15 tests pass; full SpaarkeAi Jest portfolio
+    (76 suites / 673 tests) green, no regressions. Quality gates (code-review + adr-check, unconditional
+    per TEST-MODIFYING override): 0 Critical / 0 Warning. Evidence: notes/green-baseline.md.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL rigor; TEST-MODIFYING override applies — code-review + adr-check run unconditionally).</protocol>
+  </execution>
+</task>

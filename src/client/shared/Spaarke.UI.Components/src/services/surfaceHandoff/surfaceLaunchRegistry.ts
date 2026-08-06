@@ -28,29 +28,58 @@ import type { SurfaceKind } from './types';
  */
 export const EVENT_SUBTYPE_TASK_GUID = '124f5fc9-98ff-f011-8406-7c1e525abd8b';
 
-/** One registry entry: how to launch a given consumertype's create surface. */
+/** One registry entry: how to launch a given consumertype's surface. */
 export interface SurfaceLaunchRegistryEntry {
   /** Launch-adapter discriminator (design §3). */
   readonly kind: SurfaceKind;
   /**
-   * The concrete surface id — a web-resource name (`wizard`) or an entity
-   * logical name (`oob-form`).
+   * The concrete surface id, interpreted per `kind`:
+   *  - `wizard`        → a web-resource name (e.g. `sprk_creatematterwizard`).
+   *  - `oob-form`      → an entity logical name (e.g. `sprk_todo`).
+   *  - `workspace-tab` → a registered workspace **widget type**
+   *                      (e.g. `my-tasks-list`) opened via the PaneEventBus.
+   *  - `layout`        → a workspace layout id.
+   * Client-side only per BFF hygiene §10 — the server catalog names the
+   * capability (`sprk_consumertype`); the concrete surface is a deployment
+   * concern that lives HERE, in code (not maker-authored data).
    */
   readonly surface: string;
-  /** Modal dialog / form title. */
+  /** Modal dialog / form title, or the workspace-tab display name. */
   readonly title: string;
   /**
    * Static preset values merged into `draftValues` AUTHORITATIVELY (they win
    * over drafted values on key conflict) — e.g. the Event Task-subtype GUID.
+   * Applies to the sessionStorage-hand-off kinds (`wizard` / `oob-form`).
    * Absent when the surface needs no preset.
    */
   readonly preset?: Record<string, unknown>;
+  /**
+   * Optional `widgetData` for the event-bus kinds (`workspace-tab` / `layout`):
+   * the payload forwarded to the workspace widget on `widget_load` (e.g. a
+   * `configId` for a generic grid widget). Absent = `{}` (the widget carries its
+   * own defaults, e.g. `my-tasks-list` bakes its `sprk_gridconfiguration` id).
+   */
+  readonly widgetData?: Record<string, unknown>;
 }
 
 /**
- * The R1 create-intent routing table (surface-launch-mechanism §3). Keyed by
- * `sprk_consumertype`. Adding a new create intent = one entry here + (for a new
- * wizard kind) one launcher in `wizardLaunchers.ts`.
+ * The consumertype → surface routing table (surface-launch-mechanism §3). Keyed
+ * by `sprk_consumertype`. This is the SINGLE, traceable source of truth for
+ * "which surface does this capability's Binding push to" — a developer reading
+ * this table sees exactly what every `surface_launch` bundle opens.
+ *
+ * Adding a new surface-bearing capability = ONE entry here:
+ *  - `wizard`        → also add a launcher in `wizardLaunchers.ts` for a genuinely
+ *                      new web-resource transport (existing wizards reuse the shared one).
+ *  - `oob-form`      → set `surface` to the entity logical name.
+ *  - `workspace-tab` → set `surface` to a registered workspace widget type; the
+ *                      client dispatches it on the PaneEventBus `widget_load` channel
+ *                      (no sessionStorage hand-off). This is how grids/widgets open.
+ *
+ * Surface identity stays in CODE by design (BFF hygiene §10 / ADR-039): the
+ * server catalog carries only the capability (`consumerType`); makers enhance
+ * Actions/tool-descriptions in data, never surfaces. `handleSurfaceLaunch`
+ * branches purely on the resolved entry's `kind` — no per-consumerType literals.
  */
 export const SURFACE_LAUNCH_REGISTRY: Readonly<Record<string, SurfaceLaunchRegistryEntry>> = {
   'create-matter': {
@@ -73,7 +102,11 @@ export const SURFACE_LAUNCH_REGISTRY: Readonly<Record<string, SurfaceLaunchRegis
     title: 'Create New Event',
     // Task-flavored Event subtype preset (authoritative — the capability is
     // specifically "create a task", so the Event wizard opens on the Task subtype).
-    preset: { sprk_eventtype_ref: EVENT_SUBTYPE_TASK_GUID },
+    // D-013-03: carry the fixed display NAME alongside the GUID so the wizard's
+    // event-type LOOKUP renders "Task" instead of a blank label (the lookup shows
+    // `eventTypeName`, not a value resolved from the id). "Task" is the system
+    // subtype record's `sprk_name` (verified in dev).
+    preset: { sprk_eventtype_ref: EVENT_SUBTYPE_TASK_GUID, sprk_eventtype_ref_name: 'Task' },
   },
   'create-todo': {
     kind: 'oob-form',
@@ -87,6 +120,50 @@ export const SURFACE_LAUNCH_REGISTRY: Readonly<Record<string, SurfaceLaunchRegis
     kind: 'wizard',
     surface: 'sprk_createworkassignmentwizard',
     title: 'Create Work Assignment',
+  },
+  // UAT R5-8 (2026-07-20): Quick Start "Summarize Files" launches through the hand-off envelope so
+  // the session's attached file(s) pre-seed the upload step (fetched from session bytes, not the
+  // old file-less documentIds URL param).
+  'summarize-files': {
+    kind: 'wizard',
+    surface: 'sprk_summarizefileswizard',
+    title: 'Summarize Files',
+  },
+  // UAT R5-8 (2026-07-20): Quick Start "Find Similar" launches through the hand-off envelope so the
+  // session's first attached file pre-selects on the content input (Find Similar is single-document).
+  'find-similar': {
+    kind: 'wizard',
+    surface: 'sprk_findsimilar',
+    title: 'Find Similar Documents',
+  },
+  // task 050 (2026-07-22): the `list-tasks` capability opens a WORKSPACE GRID TAB
+  // (the shared DataverseEntityViewWidget "My Tasks" — membership-scoped via the
+  // grid config's behavior.membershipFilter). A grid tab is a Class-2a event-bus
+  // open (PaneEventBus `widget_load`), NOT a wizard/OOB sessionStorage hand-off —
+  // hence `kind: 'workspace-tab'`, `surface` = the registered widget type. This
+  // registry entry REPLACES the former hardcoded `if consumerType === 'list-tasks'`
+  // branch in ConversationPane.handleSurfaceLaunch, so any future grid/widget
+  // surface is one entry here — no code branch.
+  'list-tasks': {
+    kind: 'workspace-tab',
+    surface: 'my-tasks-list',
+    title: 'My Tasks',
+  },
+  // ai-advanced-capabilities-nda-r1 task 022: the `nda-review` capability's surface identity —
+  // opens the registered `compose` workspace widget (the SAME widget type every other
+  // Compose-tab open in SpaarkeAi already dispatches, e.g. ConversationPane.mountFileInCompose /
+  // handleWelcomeCompose). The `nda-review` Binding is Informational (not SurfaceLaunch — task
+  // 023's fan-out design keeps the review a single-run/two-view capability), so the CLICK-path
+  // "Review an NDA" card does not route through this registry today (it needs a per-click
+  // DYNAMIC file id, which the registry's static `widgetData` cannot carry — it calls
+  // `mountFileInCompose` directly instead). This entry is still authored here — "ready either
+  // way" per the `create-matter`/`create-task` precedent above — so a FUTURE TEXT/agent-path
+  // `surface_launch` dispatch for `nda-review` resolves the SAME "compose" surface identity from
+  // this ONE place (ADR-039 §2 — surface identity stays in code, never duplicated).
+  'nda-review': {
+    kind: 'workspace-tab',
+    surface: 'compose',
+    title: 'Compose',
   },
 };
 

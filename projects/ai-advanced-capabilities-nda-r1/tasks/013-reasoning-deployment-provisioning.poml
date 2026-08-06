@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>Provision + configure the Reasoning Azure OpenAI deployment</title>
+    <phase>1 Platform Enablers</phase>
+    <gate>done</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Infrastructure/config; appsettings + Azure deployment; may involve an external provisioning step.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Configuration + deployment coordination against a known contract; no code authoring.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Config/infra only; independent of 011/012.</parallel-reason>
+    <deps>010</deps>
+    <tags>azure, azure-ai, config, deploy</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Ensure a suitable Reasoning-tier Azure OpenAI deployment exists (most capable model per the north star) and
+    is referenced by the StandardModel/ReasoningModel config keys added in task 010. Coordinate with whoever owns
+    Azure provisioning if the deployment does not yet exist.
+  </prompt>
+
+  <role>
+    SPAARKE platform engineer. Familiar with the Azure AI resources for Spaarke (see docs/architecture/auth-azure-resources.md) and appsettings binding.
+  </role>
+
+  <goal>
+    The Reasoning deployment name is provisioned and set in appsettings/config so the task-010 resolver returns a
+    live deployment; a smoke call to the Reasoning tier succeeds.
+  </goal>
+
+  <context>
+    <background>
+      Task 010 introduces StandardModel/ReasoningModel config keys but leaves the actual deployment values to
+      infra. The north star requires a genuinely more capable model for advisory reasoning. This task closes that
+      loop. It may be partly external (Azure portal / IaC) — coordinate rather than block.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </relevant-files>
+    <dependencies>010 (config keys must exist to point at the deployment).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="security">Deployment names/keys go through config/Key Vault; never commit secrets (CLAUDE.md §9).</constraint>
+    <constraint source="project">Pick the most capable available reasoning-class deployment consistent with the north star and cost posture; record the choice in notes/.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>knowledge/azure-ai-search/</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Check whether a reasoning-class Azure OpenAI deployment already exists for the Spaarke AI resource.</step>
+    <step order="2">If missing, coordinate provisioning (or provision via the standard IaC path); record the deployment name.</step>
+    <step order="3">Set ReasoningModel (and StandardModel/Fast) config values; keep secrets in Key Vault.</step>
+    <step order="4">Smoke-test: a Reasoning-tier Action returns a completion from the reasoning deployment.</step>
+    <step order="5">Update TASK-INDEX.md: mark 013 ✅ (or blocked-external with owner + ETA if provisioning is out of band).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If provisioning requires spend approval or an Azure change outside this repo's control, mark blocked-external and escalate to the owner rather than stalling dependent tasks.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Azure CLI / config.</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/server/api/Sprk.Bff.Api/appsettings.json (Reasoning deployment reference)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The task-010 resolver returns a live, reachable Reasoning deployment name from config.</criterion>
+    <criterion testable="true">A smoke call on the Reasoning tier returns a valid completion.</criterion>
+    <criterion testable="true">No secret is committed; deployment reference is in config/Key Vault.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This can run alongside 011/012. If external provisioning lags, downstream tasks can develop against the
+    Standard deployment and switch on merge.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute checklist.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,132 @@
+<task id="063" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Flagship gate G — all 8 success criteria green (final judgment gate)</title>
+    <phase>6 Hardening + cutover</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Final human-judgment gate authorizing project completion of a mission-critical hard-replace; maps all 8 spec Success Criteria to their verifying artifacts. Gate/review task at FULL rigor.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Final judgment gate — synthesizes evidence across the whole project (harness runs, seam slices, UAT, grep, publish reports) into a GREEN/RED verdict that authorizes or blocks completion. High-stakes cross-cutting judgment requires opus.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final judgment gate; main-session — synthesizes all prior evidence and authorizes completion. Cannot be parallelized.</parallel-reason>
+    <deps>062</deps>
+    <tags>gate,review</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Flagship gate G — the final judgment gate. Verify that ALL 8 spec Success Criteria are GREEN and record
+    the verdict in `notes/flagship-gate-decision.md`. Map EACH criterion to its verifying artifact:
+    (1) Byte-preserving → the corpus byte-diff harness run (034/061).
+    (2) Placement determinism → corpus + code audit + seam tests (zero write-path text-search).
+    (3) AI drift-proof → the concurrent-edit ProseMirror test (042) + the CIPO UAT (062).
+    (4) Concurrency → the stale-base re-anchor + 423 seam slices (054) + the CIPO UAT (062).
+    (5) Structural edits → the split/merge/insert/delete corpus round-trip (031/034).
+    (6) Word-native output → the CIPO UAT open-in-Word-for-web (062).
+    (7) Hard-replace complete → the grep-audit (060) + the publish-size report (061) + CI green.
+    (8) Phase-0-gate-passed-before-cutover → the commit/PR ordering showing 006 green PRIOR to any old-path
+        deletion (023/032/060).
+    Give each criterion a GREEN or RED verdict citing the exact artifact. Project completion is authorized
+    ONLY if all 8 are GREEN. If ANY criterion is RED, BLOCK project completion (task 090) and escalate per
+    root §6. This is a GATE task — no new surface, no `&lt;justification&gt;`.
+  </prompt>
+
+  <role>
+    Senior engineer / release gatekeeper performing the final go/no-go on a mission-critical hard-replace.
+    Fluent in the R4 spec Success Criteria, the evidence artifacts each depends on, and the root §6/§6.5
+    escalation protocol. Renders a defensible GREEN/RED verdict that authorizes or blocks project completion.
+  </role>
+
+  <goal>
+    A recorded flagship-gate decision (`notes/flagship-gate-decision.md`) mapping each of the 8 spec Success
+    Criteria to its verifying artifact (harness run, seam slice, UAT, grep, publish report) with a GREEN or
+    RED verdict per criterion. Project completion (task 090) is authorized ONLY on an all-green verdict; any
+    red criterion blocks completion and is escalated.
+  </goal>
+
+  <context>
+    <background>
+      Design §10 (Success Criteria — graduation) and spec §Success Criteria (the 8 criteria, verbatim):
+      1 byte-preserving, 2 placement determinism, 3 AI drift-proof, 4 concurrency, 5 structural edits,
+      6 Word-native output, 7 hard-replace complete, 8 Phase-0-gate-passed-before-cutover. This is the
+      terminal quality gate before wrap-up (090). It does not produce code — it audits the accumulated
+      evidence from the whole project (Phase 0 gate 006, patch-engine corpus proof 034, corpus re-run 061,
+      structural ops 031, AI concurrent-edit test 042, concurrency seam slices 054, hard-replace grep 060,
+      CIPO UAT 062) and renders a verdict. The commit/PR ordering evidence for criterion 8 (006 green before
+      any deletion in 023/032/060) is verifiable from git history.
+    </background>
+    <relevant-files>
+      <file role="new">projects/spaarkeai-compose-r4/notes/flagship-gate-decision.md — the recorded verdict (each of the 8 criteria → verifying artifact → GREEN/RED)</file>
+      <file role="dependency-output">tests/integration/seam/Compose/ — the corpus byte-diff + concurrency + import seam evidence (criteria 1/2/4/5)</file>
+      <file role="dependency-output">projects/spaarkeai-compose-r4/notes/ — the corpus-proof (034/061), UAT (062), grep-audit (060), publish-size (061) reports</file>
+      <file role="dependency-output">git history — the commit/PR ordering showing task 006 green PRIOR to any old-path deletion (criterion 8)</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §10 (Success Criteria)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md §Success Criteria (all 8)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="062" status="blocked">Deploy full R4 + CIPO operator UAT — supplies the UAT evidence for criteria 3/4/6; the last task before the gate.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / Success Criteria 1-8">Scope: verify ALL 8 criteria. Each MUST map to a concrete verifying artifact and receive a GREEN or RED verdict. Completion is authorized ONLY on all-green.</constraint>
+    <constraint source="spec / Success Criterion 8 / NFR-08">Verify the commit/PR ordering shows task 006 (Phase 0 gate) GREEN before ANY old-path deletion (023/032/060). If the ordering is violated, criterion 8 is RED.</constraint>
+    <constraint source="project / CLAUDE.md §6">If ANY criterion is RED, the project cannot close — BLOCK task 090 and escalate per root §6; do NOT record an all-green verdict on partial evidence.</constraint>
+    <constraint source="project / CLAUDE.md §6.5">Any ADR tension surfaced during the audit is resolved via Path A/B/C, not silently — cite the resolution in the decision doc.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Flagship gate judgment; Success-Criteria-to-artifact mapping; go/no-go verdict recording; root §6 escalation</topic>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Criterion → artifact → verdict" location="projects/spaarkeai-compose-r4/spec.md §Success Criteria">
+        For each of the 8 criteria, cite the exact verifying artifact (harness run, seam slice, UAT, grep,
+        publish report, git ordering) and mark GREEN/RED. All-green authorizes completion; any red blocks it.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (reason: final judgment gate, gate/review tags). Confirm task 062 (deploy + UAT) is DONE. Load the spec Success Criteria + the evidence artifacts.</step>
+    <step order="1" name="Map + verdict criteria 1-2">Verify byte-preserving (corpus byte-diff harness 034/061) and placement determinism (corpus + code audit + seam tests; zero write-path text-search). Record artifact + GREEN/RED for each.</step>
+    <step order="2" name="Map + verdict criteria 3-5">Verify AI drift-proof (concurrent-edit ProseMirror test 042 + CIPO UAT 062), concurrency (stale-base re-anchor + 423 seam 054 + UAT 062), and structural edits (split/merge/insert/delete corpus round-trip 031/034). Record artifact + verdict.</step>
+    <step order="3" name="Map + verdict criteria 6-8">Verify Word-native output (CIPO UAT open-in-Word-for-web 062), hard-replace complete (grep 060 + publish size 061 + CI green), and Phase-0-gate-before-cutover (git commit/PR ordering: 006 green before 023/032/060 deletions). Record artifact + verdict.</step>
+    <step order="4" name="Render verdict + finalize">Write `notes/flagship-gate-decision.md` with the full 8-criterion mapping and an overall verdict. If all-green, authorize task 090; if any red, BLOCK 090 and escalate per root §6. Update `projects/spaarkeai-compose-r4/tasks/TASK-INDEX.md`: set this task's status to ✅ (only if the gate rendered; record the verdict either way). Document any deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <justification>
+    <existing>No consolidated verdict artifact exists mapping the 8 success criteria to evidence.</existing>
+    <extension>N/A — produces a decision doc, not a code component.</extension>
+    <cost-of-doing-nothing>The project could be marked complete with a red criterion unnoticed.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="report">projects/spaarkeai-compose-r4/notes/flagship-gate-decision.md — the 8-criterion mapping (criterion → verifying artifact → GREEN/RED) + overall verdict</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">`notes/flagship-gate-decision.md` exists and maps each of the 8 spec Success Criteria to a concrete verifying artifact (harness run, seam slice, UAT, grep, publish report, git ordering) with a GREEN or RED verdict.</criterion>
+    <criterion testable="true">Criterion 8 (Phase-0-gate-passed-before-cutover) is verified against git commit/PR ordering showing task 006 green BEFORE any old-path deletion (023/032/060).</criterion>
+    <criterion testable="true">Project completion (task 090) is authorized ONLY if all 8 criteria are GREEN.</criterion>
+    <criterion testable="true">Negative: if any criterion is RED, task 090 is BLOCKED and the situation is escalated per root §6 — no all-green verdict is recorded on partial evidence.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Any RED criterion blocks task 090 and escalates per root §6 — the project cannot close on a partial or forced-green verdict. If an ADR tension surfaces during the audit, resolve via §6.5 Path A/B/C and cite it in the decision doc; do not silently comply or violate.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -66,6 +66,7 @@ public sealed class BindingCapabilityTool : AIFunction
     private readonly string _sessionId;
     private readonly ILogger _logger;
     private readonly Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? _sseWriter;
+    private readonly AiModelTier? _modelTierOverride;
     private readonly string _name;
     private readonly string _description;
     private readonly JsonElement _schema;
@@ -82,15 +83,23 @@ public sealed class BindingCapabilityTool : AIFunction
     /// capture then degrades to loop elicitation (logged). Does not perturb the
     /// projected name/description/schema (NFR-04 cache stability).
     /// </param>
+    /// <param name="modelTierOverride">
+    /// ai-advanced-capabilities-nda-r1 task 011: the Assistant's runtime tier-picker selection for THIS
+    /// turn (captured at tool-construction time, same as <paramref name="sseWriter"/>). Forwarded verbatim
+    /// on <see cref="SessionDispatchRequest.ModelTierOverride"/> at invoke time; null (the default) is a
+    /// no-op — the dispatched Binding's own tier composition governs unchanged.
+    /// </param>
     public BindingCapabilityTool(
         Binding binding,
         IServiceProvider rootServices,
         string tenantId,
         string sessionId,
         ILogger logger,
-        Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? sseWriter = null)
+        Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? sseWriter = null,
+        AiModelTier? modelTierOverride = null)
     {
         _sseWriter = sseWriter;
+        _modelTierOverride = modelTierOverride;
         _binding = binding ?? throw new ArgumentNullException(nameof(binding));
         _rootServices = rootServices ?? throw new ArgumentNullException(nameof(rootServices));
         _tenantId = !string.IsNullOrWhiteSpace(tenantId) ? tenantId : throw new ArgumentException("tenantId required", nameof(tenantId));
@@ -271,7 +280,8 @@ public sealed class BindingCapabilityTool : AIFunction
         // DispatchUncertain = false (its record default). This is the honest single-turn-derived signal;
         // no second scorer/classifier exists (a firing numeric/multi-call producer is a documented
         // follow-on that sets this flag without any dispatch-spine change).
-        var request = new SessionDispatchRequest(_tenantId, dispatchSessionId, _binding.BindingId, args);
+        var request = new SessionDispatchRequest(
+            _tenantId, dispatchSessionId, _binding.BindingId, args, ModelTierOverride: _modelTierOverride);
 
         try
         {

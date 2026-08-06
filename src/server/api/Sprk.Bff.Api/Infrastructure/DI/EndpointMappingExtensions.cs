@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Api.Insights;
 using Sprk.Bff.Api.Api.Membership;
+using Sprk.Bff.Api.Api.Notifications;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Workspace;
@@ -153,6 +154,11 @@ public static class EndpointMappingExtensions
             app.Configuration.GetValue<bool>("Analysis:Enabled", true))
         {
             app.MapAnalysisEndpoints();
+            // FR-13 (ai-advanced-capabilities-agreements-r1 task 050) — Review Summary Memo
+            // assembly + persistence. Mapped INSIDE this SAME compound gate (bff-extensions.md
+            // §F.1 asymmetric-registration rule): AnalysisResultPersistence (this endpoint's
+            // dependency) is registered only when this gate is ON (AnalysisServicesModule.cs).
+            app.MapReviewMemoEndpoints();
             app.MapPlaybookEndpoints();
             // MapAiPlaybookBuilderEndpoints removed 2026-07-07 (redesign-r1 task 050, FR-P4-04 server
             // leg): /api/ai/playbook-builder/* had zero client callers after task 053 deleted the
@@ -166,6 +172,8 @@ public static class EndpointMappingExtensions
 
         app.MapRagEndpoints();
         app.MapKnowledgeBaseEndpoints();
+        // UAT round-3 D3: NDA-standard clause text by ref (KNW-011 Part B) for the review comment hover.
+        app.MapNdaStandardEndpoints();
         // AIPU2-035: Prompt Library — Personal, Team, Org, System template CRUD + render
         app.MapPromptLibraryEndpoints();
         // AIPU2-036: Feedback — per-response thumbs up/down submit + aggregation by playbook/capability
@@ -263,6 +271,22 @@ public static class EndpointMappingExtensions
         app.MapFinanceEndpoints();
         app.MapFinanceRollupEndpoints();
         app.MapCommunicationEndpoints();
+
+        // Email composer "insert template" render surface (email-communication-solution-r5). Thin,
+        // additive endpoint that reuses IEmailTemplateService for fetch + {!entity.field} merge; app-only
+        // Dataverse read (IGenericEntityService) + central TokenCredential — no new Dataverse client.
+        app.MapCommunicationTemplateEndpoints();
+
+        // Email composer AI "sparkle" drafting surface (email-communication-solution-r5 Wave E). Thin,
+        // additive endpoint that consumes the IEmailDraftAi PublicContracts facade (ADR-013/§10) — always
+        // resolvable via the ADR-032 Null-Object mirror, so mapping is unconditional.
+        app.MapCommunicationDraftEndpoints();
+
+        // Notification spine Layer-C negotiate endpoint (spaarke-notification-spine-r1 task 020 /
+        // FR-04). Mapped UNCONDITIONALLY — its handler resolves SignalRDeliveryService, which is
+        // registered unconditionally (real or Null-Object) by AddNotificationsModule, so metadata
+        // generation succeeds at startup with SignalR OFF (ADR-032 — no asymmetric registration).
+        app.MapNotificationsEndpoints();
 
         // ACS Event Grid inbound ingress (messaging-communication-app-r1 task 030 / FR-02). Public webhook
         // (AllowAnonymous — Event Grid presents no OAuth token); authenticity enforced inside the ingress

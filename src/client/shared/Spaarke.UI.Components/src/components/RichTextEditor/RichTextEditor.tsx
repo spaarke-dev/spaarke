@@ -75,11 +75,30 @@ export interface IRichTextEditorProps {
   minHeight?: number;
   /** Maximum height in pixels (scrolls beyond) */
   maxHeight?: number;
+  /**
+   * Optional host controls rendered at the trailing end of the formatting toolbar,
+   * after a divider (context-agnostic — the editor just renders the node). Ignored
+   * when `hideToolbar` is set.
+   */
+  toolbarSlot?: React.ReactNode;
 }
 
 export interface RichTextEditorRef {
-  /** Focus the editor */
-  focus: () => void;
+  /**
+   * Focus the editor. Pass `'start'` to place the caret at the very top of the
+   * document (root start) or `'end'` for the document end (the Lexical default
+   * when no position is given). Used by hosts that want the caret ready at the
+   * top on open (e.g. the email composer — the user types immediately).
+   */
+  focus: (position?: 'start' | 'end') => void;
+  /**
+   * Read the currently-selected plain text (empty string when the selection is
+   * collapsed / absent). Lexical retains its selection in editor state across
+   * focus loss, so this stays accurate even after a popover/menu steals DOM
+   * focus — enabling selection-scoped actions (e.g. "make the selected text
+   * concise") to gate on whether the user has a live text selection.
+   */
+  getSelectedText: () => string;
   /** Get current HTML content */
   getHtml: () => string;
   /** Set HTML content programmatically */
@@ -270,22 +289,44 @@ interface InitialContentPluginProps {
   html: string;
 }
 
+// Treat editors that serialize to nothing (or a single empty paragraph) as empty,
+// so an empty incoming value and a freshly-cleared editor compare equal and we don't
+// ping-pong on empty content.
+function isEffectivelyEmptyHtml(html: string): boolean {
+  const t = (html || '').replace(/\s+/g, '').toLowerCase();
+  return t === '' || /^<p[^>]*>(<br\/?>)?<\/p>$/.test(t);
+}
+
 function InitialContentPlugin({ html }: InitialContentPluginProps): null {
   const [editor] = useLexicalComposerContext();
-  const hasInitialized = React.useRef(false);
 
+  // Controlled sync: apply the incoming `html` whenever it differs from what the editor
+  // currently holds. This covers BOTH (a) the initial (possibly async-loaded) content and
+  // (b) EXTERNAL programmatic edits after mount — e.g. EmailComposer appending a record link
+  // to a forwarded body. Echoes of the editor's OWN onChange serialize back identically, so
+  // user typing compares equal and is skipped (no cursor reset / no re-insert).
+  //
+  // Previously this initialized exactly once (first non-empty value). That silently dropped
+  // any later external change once the editor had content — the forward-mode "add record"
+  // bug: a reply starts empty so the appended link WAS the first non-empty value (worked),
+  // but a forward starts prefilled so it was already initialized (the link never appeared).
   useEffect(() => {
-    if (html && !hasInitialized.current) {
-      hasInitialized.current = true;
-      editor.update(() => {
-        const parser = new DOMParser();
-        const dom = parser.parseFromString(html, 'text/html');
-        const nodes = $generateNodesFromDOM(editor, dom);
-        const root = $getRoot();
-        root.clear();
-        $insertNodes(nodes);
-      });
-    }
+    let current = '';
+    editor.getEditorState().read(() => {
+      current = $generateHtmlFromNodes(editor);
+    });
+    const incoming = html || '';
+    if (current === incoming) return;
+    if (isEffectivelyEmptyHtml(current) && isEffectivelyEmptyHtml(incoming)) return;
+
+    editor.update(() => {
+      const parser = new DOMParser();
+      const dom = parser.parseFromString(incoming, 'text/html');
+      const nodes = $generateNodesFromDOM(editor, dom);
+      const root = $getRoot();
+      root.clear();
+      $insertNodes(nodes);
+    });
   }, [editor, html]);
 
   return null;
@@ -319,6 +360,7 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, IRichTextEditorProps
     hideToolbar = false,
     minHeight = 200,
     maxHeight,
+    toolbarSlot,
   } = props;
 
   const styles = useStyles();
@@ -354,8 +396,24 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, IRichTextEditorProps
   useImperativeHandle(
     ref,
     () => ({
-      focus: () => {
-        editorRef.current?.focus();
+      focus: (position?: 'start' | 'end') => {
+        // Lexical's focus() takes an optional defaultSelection; 'rootStart' puts
+        // the caret at the top (owner UAT — email composer opens ready to type).
+        editorRef.current?.focus(undefined, {
+          defaultSelection: position === 'start' ? 'rootStart' : 'rootEnd',
+        });
+      },
+      getSelectedText: () => {
+        let text = '';
+        if (editorRef.current) {
+          editorRef.current.getEditorState().read(() => {
+            const selection = $getSelection();
+            if ($isRangeSelection(selection)) {
+              text = selection.getTextContent();
+            }
+          });
+        }
+        return text;
       },
       getHtml: () => {
         let html = '';
@@ -492,7 +550,7 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, IRichTextEditorProps
   return (
     <div className={containerClass}>
       <LexicalComposer initialConfig={initialConfig}>
-        {!hideToolbar && <ToolbarPlugin isDarkMode={isDarkMode} />}
+        {!hideToolbar && <ToolbarPlugin isDarkMode={isDarkMode} toolbarSlot={toolbarSlot} />}
         <div className={styles.editorContainer} style={editorStyle}>
           <RichTextPlugin
             contentEditable={<ContentEditable className={styles.contentEditable} />}

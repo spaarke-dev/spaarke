@@ -1,0 +1,163 @@
+<task id="033" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Born-in-editor unification — one operation/patch model (FR-09)</title>
+    <phase>3 Patch Engine</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <amendment date="2026-07-22" by="orchestrator (table-op schema gap, §6.5)">
+      DEFERRED behind new task 037. The pre-implementation representability check found born-in-editor docs can
+      contain native OOXML tables (live `insertTable`; tested `ComposeContentModel.Table`/`ComposeDocumentRenderer`),
+      but the closed task-003 op schema has NO table-authoring op and the engine only refuses-across tables — so
+      "insert-everything op set onto an empty shadow package" cannot express a table (FR-09 unspecified this).
+      Rather than build a throwaway interim split, FR-09 is completed in task 037 (op-schema table-authoring
+      extension, owner Path B vs C) which this task now depends on. Born-in-editor stays on `ComposeDocumentRenderer`
+      (working, no regression) in the interim — a documented §6.5 Path-A exception. Analysis:
+      notes/task-033-table-operation-gap.md. When 037 lands, FR-09/033 completes (or folds into 037).
+    </amendment>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the BFF save path (`.cs`) + the client bridge (`.ts`); consolidates a parallel export path onto the unified model. FULL per root §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified consolidation onto the existing unified model; the hard patch-engine work is already done in 030/031 — this reuses it.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W3b</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the `ComposeService` save path + client `docxBridge.buildContentModel`; sequential vs task 032 (shared save surface).</parallel-reason>
+    <deps>030</deps>
+    <tags>bff-api,frontend,docx</tags>
+    <estimated-effort>2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Unify the born-in-editor path (FR-09). Documents drafted from scratch (no source `.docx`) MUST feed
+    the SAME operation/patch model: their initial content becomes an INSERT-EVERYTHING operation set
+    applied onto an EMPTY shadow package by `ComposeShadowPatchEngine` — so NO parallel full-render
+    export path remains. Modify the BFF save path
+    (`src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs`) to route born-in-editor saves
+    through the Patch Engine, and reconcile/remove the client full-render path
+    `buildContentModel` in `src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts:397+`
+    so the client emits the same operation log for born-in-editor as for edit-existing. Client fetches
+    use `@spaarke/auth` (ADR-028). This is a MODIFY consolidating a parallel path into the unified model,
+    not new surface. If any born-in-editor formatting cannot be expressed as an operation set, surface it
+    rather than silently keeping a second render path.
+  </prompt>
+
+  <role>
+    Full-stack developer: .NET 8 (`ComposeService` save path, empty-package construction) + React/TS
+    (`Spaarke.Compose.Components` client bridge). Understands the unification goal — one operation/patch
+    model for both edit-existing and born-in-editor, so there is exactly one byte-author (D5) and no
+    parallel full-render export.
+  </role>
+
+  <goal>
+    A born-in-editor document saves via the Patch Engine as an insert-everything operation set onto an
+    empty shadow package; the client `buildContentModel` full-render export path is reconciled/removed so
+    both born-in-editor and edit-existing emit the same operation log; no separate full-render export
+    path remains; and an empty born-in-editor doc saves as a valid empty shadow package, not a crash.
+  </goal>
+
+  <context>
+    <background>
+      Design §5 (unify born-in-editor into the operation/patch model), owner clarification Q5 ("New docs
+      = insert-everything op set onto an empty shadow package; no parallel full-render path"). Spec
+      FR-09. As-built inventory: `buildContentModel` full-render export at `docxBridge.ts:397+` is the
+      born-in-editor path that "stays, but must feed the SAME operation/patch model, not a parallel
+      path." Task 030 built the Patch Engine (the insert path the empty-package op set applies through);
+      this task points born-in-editor at it and retires the parallel render export.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — born-in-editor save path: construct an empty shadow package and apply the insert-everything operation set via `ComposeShadowPatchEngine`</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts:397+ — `buildContentModel` full-render path: reconcile so born-in-editor emits the same operation log as edit-existing; remove the parallel export</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs — task 030 core (the insert path the op set applies through)</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §5, Owner Clarification Q5</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-09</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">`ComposeShadowPatchEngine` core — provides the insert path the empty-package insert-everything op set applies through.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-09">Born-in-editor documents MUST feed the SAME operation/patch model — initial content = an insert-everything op set onto an empty shadow package. NO separate full-render export path may remain.</constraint>
+    <constraint source="project / invariants I-1/I-2/I-5">One authoritative model, server-authoritative byte-authoring, one byte-author — the born-in-editor path MUST NOT introduce a second byte-author or a client-side `.docx` build.</constraint>
+    <constraint source="ADR-028">Client save/generate fetches use `@spaarke/auth` (`useAuth`/`authenticatedFetch`); no custom token props on the editor.</constraint>
+    <constraint source="ADR-007 / ADR-013 / NFR-05">The save stays behind `SpeFileStore` (no `Microsoft.Graph` in `Services/Compose/`) and injects no AI internals (Tier-1 NetArchTest green).</constraint>
+    <constraint source="ADR-038 / NFR-06">The born-in-editor save carries a through-the-wire seam slice (authored/extended in task 034); NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests.</constraint>
+    <constraint source="project / §10 Placement Justification">State the Placement Justification in the PR and cite `.claude/constraints/bff-extensions.md`. Run `/conflict-check` before the PR. Report publish size delta vs ~49.63 MB (≤60 MB) + no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Born-in-editor unification onto the operation/patch model; empty-shadow-package construction; client bridge full-render removal; Spaarke auth client contract; BFF hygiene</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-r4/notes/as-built-inventory.md</file>
+    </files>
+    <patterns>
+      <pattern name="Insert-everything onto empty package" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs">
+        A born-in-editor doc = an empty shadow OOXML package + an insert-everything operation set applied by `ComposeShadowPatchEngine` — the same code path as edit-existing, so there is one byte-author.
+      </pattern>
+      <pattern name="One client capture path" location="src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts:397+">
+        `buildContentModel` (full render) is reconciled so born-in-editor emits the same operation log as edit-existing; the parallel export is removed.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration. Confirm task 030 is complete (the engine + insert path exist). Load knowledge files + `bff-extensions.md`; state the Placement Justification for the PR.</step>
+    <step order="1" name="Server: empty-package insert-everything save">In `ComposeService.cs`, add the born-in-editor save: construct an empty shadow OOXML package and apply the insert-everything operation set via `ComposeShadowPatchEngine`, then persist via the existing SPE write. No client-authored `.docx` bytes.</step>
+    <step order="2" name="Client: unify capture, remove full-render export">Reconcile `docxBridge.ts:397+` `buildContentModel` so a born-in-editor session emits the same operation log as an edit-existing session; remove the parallel full-render export. Fetches via `@spaarke/auth`. Build the shared lib (`npm run build:prod`).</step>
+    <step order="3" name="Empty-doc + build">Verify an empty born-in-editor doc saves as a valid empty shadow package (not a crash). Build the BFF; run the Tier-1 NetArchTest; run the Compose suite (no regression). The through-the-wire proof lands in task 034.</step>
+    <step order="4" name="Size/CVE + index + deviations">Publish; report absolute size + delta vs ~49.63 MB (≤60 MB); `dotnet list package --vulnerable --include-transitive`. Run `/conflict-check`. Update TASK-INDEX.md: set this task's status to ✅. Document any deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (born-in-editor save via empty-package insert-everything op set)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts (buildContentModel reconciled; parallel full-render export removed)</output>
+    <output type="report">Publish-size delta vs ~49.63 MB; CVE scan; Placement Justification; /conflict-check result for the PR</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Born-in-editor doc saves + reopens">
+      <steps>
+        <step>Create a new doc from scratch in the editor.</step>
+        <step>Type content, save, then reopen the doc.</step>
+      </steps>
+      <expected>Content persists via the Patch Engine (insert-everything op set) with no full-render export path.</expected>
+    </test>
+    <test name="Dark mode compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode.</step>
+        <step>Verify the born-in-editor surface adapts.</step>
+      </steps>
+      <expected>All colors use semantic tokens per ADR-021.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A born-in-editor document saves via the Patch Engine as an insert-everything operation set onto an empty shadow package (no client-authored `.docx` bytes).</criterion>
+    <criterion testable="true">The client emits the same operation log for born-in-editor as for edit-existing; no separate full-render export path remains (`buildContentModel` reconciled/removed).</criterion>
+    <criterion testable="true">NEGATIVE: an empty born-in-editor doc saves as a valid empty shadow package, NOT a crash.</criterion>
+    <criterion testable="true">`Services/Compose/` injects no AI-internal type (Tier-1 NetArchTest green); no `Microsoft.Graph` in `Services/Compose/`; client fetches via `@spaarke/auth`.</criterion>
+    <criterion testable="true">Publish size reported delta vs ~49.63 MB, ≤60 MB; no new HIGH CVE; BFF + shared-lib builds green; `/conflict-check` run before the PR.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Any born-in-editor formatting or construct cannot be expressed as an operation set onto an empty shadow package (forcing a fallback full-render path). STOP and surface per root §6 / §6.5 rather than silently retaining a second render/byte-author path — that would reintroduce the two-path defect R4 removes.</trigger>
+  </escalation>
+
+  <notes>
+    No `&lt;justification&gt;` — this consolidates an existing parallel path into the unified model (no new surface). The unified model is the whole point of D5/FR-09: one byte-author, one capture path, whether or not a source `.docx` exists.
+
+    **BLOCKED 2026-07-22** at Step 0/1 (pre-implementation representability check) — the task's own `&lt;escalation&gt;` trigger fired. Task 030 (Patch Engine core) and 031 (structural ops) are both complete, so this is NOT a sequencing gap. It is a CLOSED-SCHEMA representability gap: born-in-editor documents can legitimately contain native OOXML tables today (`ComposeFormatToolbar.tsx`'s live `insertTable` command, `ComposeContentModel.Table`/`buildContentModel`/`ComposeDocumentRenderer` — all tested, shipped behavior), but the task-003 operation schema (`Services/Compose/Operations/ComposeOperation.cs`) is a CLOSED 10-member discriminated union (insertText/deleteRange/replaceRange/setMark/clearMark/splitParagraph/mergeParagraph/insertParagraph/deleteParagraph/setBlockAttr) with NO table-authoring primitive, and `ComposeShadowPatchEngine` treats tables strictly as pre-existing structure it refuses to cross — never as something it can author from an empty package. A born-in-editor doc containing a table therefore has no way to be expressed as an insert-everything op set. Full evidence + 3 resolution paths (A: implement the non-table majority case now + keep a documented, scoped ContentModel exception for table-containing born-in-editor saves [recommended]; B: extend the FR-11 op schema with a table-authoring op family, own task; C: remove table-insert from the born-in-editor surface, product decision) in `projects/spaarkeai-compose-r4/notes/task-033-table-operation-gap.md`. No code was changed under this task — `ComposeService.cs`, `docxBridge.ts`, `ComposeEditor.tsx`, `ComposeWorkspace.tsx`, and `compose-contracts.ts` are all untouched.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

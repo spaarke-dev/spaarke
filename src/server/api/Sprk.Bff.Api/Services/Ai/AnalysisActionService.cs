@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -40,7 +41,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
         // AnalysisAction record carries the canonical {SystemPrompt + OutputSchema + Temperature}
         // triple — consumed unconditionally by AiCompletionNodeExecutor; ignored by executors
         // that do not need a structured-output schema.
-        var url = $"sprk_analysisactions({actionId})?$select=sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_outputschemajson";
+        var url = $"sprk_analysisactions({actionId})?$select=sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_modeltier,sprk_allowsknowledge,sprk_outputschemajson";
         var response = await Http.GetAsync(url, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -79,6 +80,13 @@ public class AnalysisActionService : DataverseHttpServiceBase
             // Wave B-G9c1 (B6): per-action temperature override. Null = deterministic 0.0
             // (matches sibling structured methods' hardcoded Temperature=0 behavior).
             Temperature = entity.Temperature,
+            // ai-advanced-capabilities-nda-r1 task 010: per-action model-tier default. Mirrors the
+            // Temperature plumbing above — explicit int→enum cast (established pattern, see
+            // NodeService.cs sprk_executortype) rather than relying on implicit STJ enum-number binding.
+            ModelTier = entity.ModelTier.HasValue ? (AiModelTier)entity.ModelTier.Value : null,
+            // ai-advanced-capabilities-nda-r1 follow-up: knowledge-retrieval opt-in (sprk_allowsknowledge).
+            // When true, ActionRunner retrieves grounding references (KNW-011 etc.) before the completion.
+            AllowsKnowledge = entity.AllowsKnowledge ?? false,
             // R7 task 002 / FR-12: structured-outputs JSON schema for prompt-driven executors.
             OutputSchemaJson = entity.OutputSchemaJson
         };
@@ -115,7 +123,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
         // OData filter (URL-encoded single quotes around the literal). Top=1 because
         // sprk_actioncode is unique by design even when not enforced as an alternate key.
         var encoded = Uri.EscapeDataString(actionCode);
-        var url = $"sprk_analysisactions?$select=sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_outputschemajson&$filter=sprk_actioncode eq '{encoded}'&$top=1";
+        var url = $"sprk_analysisactions?$select=sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_modeltier,sprk_allowsknowledge,sprk_outputschemajson&$filter=sprk_actioncode eq '{encoded}'&$top=1";
         var response = await Http.GetAsync(url, cancellationToken);
 
         await EnsureSuccessWithDiagnosticsAsync(response, $"GetActionByCodeAsync({actionCode})", cancellationToken);
@@ -139,6 +147,10 @@ public class AnalysisActionService : DataverseHttpServiceBase
             OwnerType = ScopeOwnerType.System,
             IsImmutable = false,
             Temperature = entity.Temperature,
+            ModelTier = entity.ModelTier.HasValue ? (AiModelTier)entity.ModelTier.Value : null,
+            // ai-advanced-capabilities-nda-r1 follow-up: knowledge-retrieval opt-in (sprk_allowsknowledge).
+            // When true, ActionRunner retrieves grounding references (KNW-011 etc.) before the completion.
+            AllowsKnowledge = entity.AllowsKnowledge ?? false,
             OutputSchemaJson = entity.OutputSchemaJson
         };
 
@@ -171,7 +183,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
         // See GetActionAsync above for the full rationale and Wave 4 task 046 follow-up.
         var query = BuildODataQuery(
             options,
-            selectFields: "sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_outputschemajson",
+            selectFields: "sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_modeltier,sprk_allowsknowledge,sprk_outputschemajson",
             expandClause: null,
             nameFieldPath: "sprk_name",
             categoryFieldPath: null,
@@ -208,6 +220,11 @@ public class AnalysisActionService : DataverseHttpServiceBase
             IsImmutable = false,
             // Wave B-G9c1 (B6): per-action temperature override.
             Temperature = entity.Temperature,
+            // ai-advanced-capabilities-nda-r1 task 010: per-action model-tier default.
+            ModelTier = entity.ModelTier.HasValue ? (AiModelTier)entity.ModelTier.Value : null,
+            // ai-advanced-capabilities-nda-r1 follow-up: knowledge-retrieval opt-in (sprk_allowsknowledge).
+            // When true, ActionRunner retrieves grounding references (KNW-011 etc.) before the completion.
+            AllowsKnowledge = entity.AllowsKnowledge ?? false,
             // R7 task 002 / FR-12: structured-outputs JSON schema for prompt-driven executors.
             OutputSchemaJson = entity.OutputSchemaJson
         }).ToArray();
@@ -463,6 +480,16 @@ public class AnalysisActionService : DataverseHttpServiceBase
         public decimal? Temperature { get; set; }
 
         /// <summary>
+        /// Per-action model-tier default (sprk_modeltier, Choice: Fast=100000000, Standard=100000001,
+        /// Reasoning=100000002). Read as the raw int (established pattern — see NodeService.cs
+        /// sprk_executortype) and cast to <see cref="AiModelTier"/> at the mapping site. Null = platform
+        /// default (Standard tier).
+        /// Added ai-advanced-capabilities-nda-r1 task 010 (model-tier last-mile).
+        /// </summary>
+        [JsonPropertyName("sprk_modeltier")]
+        public int? ModelTier { get; set; }
+
+        /// <summary>
         /// Structured-Outputs JSON Schema for the action (sprk_outputschemajson, multiline text).
         /// Consumed by prompt-driven executors (AiCompletion per R7 FR-12 — task 002) as the
         /// constrained-decoding schema arg to <c>IOpenAiClient.GetStructuredCompletionRawAsync</c>.
@@ -470,6 +497,14 @@ public class AnalysisActionService : DataverseHttpServiceBase
         /// </summary>
         [JsonPropertyName("sprk_outputschemajson")]
         public string? OutputSchemaJson { get; set; }
+
+        /// <summary>
+        /// Knowledge-retrieval opt-in (<c>sprk_allowsknowledge</c>). When true, the linear
+        /// <c>ActionRunner</c> path retrieves grounding references from <c>spaarke-rag-references</c>
+        /// (e.g. the firm NDA standard KNW-011) and injects them before the completion. Null → false.
+        /// </summary>
+        [JsonPropertyName("sprk_allowsknowledge")]
+        public bool? AllowsKnowledge { get; set; }
     }
 
     #endregion

@@ -99,6 +99,7 @@ import {
   OpenRegular,
   DocumentRegular,
 } from '@fluentui/react-icons';
+import { OOB_MODAL_SIZES } from '@spaarke/ui-components';
 import type { NotificationItem } from '../types/notifications';
 import { formatDueDate } from '../utils/formatDueDate';
 import { SubRow } from './SubRow';
@@ -406,13 +407,15 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
     if (!entityType || !entityId) return;
     const xrm = resolveXrm();
     if (!xrm?.Navigation?.navigateTo) return;
+    // `record` OOB size (85%×85%) — record-modal-selection.md invariant
+    // (spec FR-11/FR-18, task 090); was an ad-hoc 80%×80% literal.
     xrm.Navigation.navigateTo(
       {
         pageType: 'entityrecord',
         entityName: entityType,
         entityId: entityId,
       },
-      { target: 2, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } }
+      { target: 2, width: OOB_MODAL_SIZES.record.width, height: OOB_MODAL_SIZES.record.height }
     ).catch(() => {
       /* user closed dialog */
     });

@@ -1,0 +1,225 @@
+<task id="023" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Delete the paragraph-diff export path from the client (FR-06, client half) — GATED on 006</title>
+    <phase>2 Frontend capture</phase>
+    <gate>passed</gate>
+    <status>completed</status>
+    <amendment date="2026-07-22" by="orchestrator (Phase-2 coverage-gate finding, Path A)">
+      RE-SEQUENCED. The Phase-2 attempt hit this task's own Step-1 coverage check: `collectEditedParagraphs`
+      captures whole-paragraph delete/merge via the `{paraId,text:''}` sentinel (docxBridge.ts:360-368 — the
+      UAT-round-4 "vanished paragraph" corruption guard), but the task-020/022 step interceptor DEFERS all
+      structural steps to `onStructuralStep` (unwired) → deleting the old path now would silently regress
+      structural delete/merge until structural capture exists. Per BLOCKED analysis Path A (matches design §Q3
+      "structural ops in core, sequenced last within the applier"), deps now include **031**. When this task
+      runs (after 031 wires client structural-op emission), FIRST confirm whole-paragraph delete/merge is
+      captured as a `deleteParagraph`/`mergeParagraph` operation, THEN delete `collectEditedParagraphs`.
+      Analysis: `notes/task-023-coverage-gap.md`.
+    </amendment>
+    <rigor>FULL</rigor>
+    <rigor-reason>Irreversible deletion in the save path (tags include deletion, frontend); a wrong deletion loses coverage the step interceptor may not yet supply. FULL per root §8; gated on the Phase 0 gate.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scoped deletion + grep verification against a known line range; default sonnet tier suffices under prescriptive steps.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Removes shared `docxBridge.ts` export paths other client tasks reference; must run sequentially after capture (020/022) proves coverage.</parallel-reason>
+    <deps>022,006,031</deps>
+    <tags>frontend,docx,deletion</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Delete the retired paragraph-diff export from the client now that step-level capture (tasks 020 + 022)
+    supersedes it. Remove `collectEditedParagraphs` and its `{paraId,text}` export (`utils/docxBridge.ts:330-395`)
+    so no dirty save routes through paragraph-diff capture. This is an IRREVERSIBLE deletion and is HARD-GATED
+    on the Phase 0 gate (task 006 green) per spec FR-12 / NFR-08 — the executor MUST confirm 006 is green
+    BEFORE deleting. Verify by grep that no call sites of the paragraph-diff export remain in the save path;
+    dirty-save capture must route ONLY through the step interceptor. Do NOT delete the born-in-editor
+    `buildContentModel` full-render path (`docxBridge.ts:397+`) here — that is reconciled into the unified
+    operation model in task 033; leave it. Execute the steps in order (prescriptive).
+  </prompt>
+
+  <role>
+    Senior React/TypeScript developer performing a gated, irreversible save-path deletion. Understands FR-06
+    (retire the legacy capture paths), FR-12 / NFR-08 (hard-replace deletion is gated on the Phase 0 proof),
+    and invariant I-6 (capture routes through operations only).
+  </role>
+
+  <goal>
+    `collectEditedParagraphs` / the `{paraId,text}` export removed from `docxBridge.ts`; grep shows no
+    remaining call sites of the paragraph-diff export in the save path; the dirty-save capture routes only
+    through the step interceptor (020/022); the shared-lib `build:prod` is green; a dirty save with no
+    captured ops is a no-op (not an empty-doc export). The born-in-editor `buildContentModel` path is left
+    intact for task 033.
+  </goal>
+
+  <context>
+    <background>
+      `notes/as-built-inventory.md` RIP list: `collectEditedParagraphs` / paragraph `{paraId,text}` export
+      (`docxBridge.ts:330-395`) is superseded by step-level operation capture. Design §5 "Capture": DELETE the
+      `getHTML`/paragraph-diff export path. Spec FR-06 (retire the legacy paths) + FR-12 / NFR-08 (deletion is
+      gated on the Phase 0 proof gate — hard-replace has no A/B safety net). The Phase 0 gate is task 006
+      (project CLAUDE.md: "No old-path deletion (tasks 023, 032, 060) may proceed until task 006 is green").
+      The born-in-editor full-render path (`buildContentModel`, `docxBridge.ts:397+`) is a SEPARATE deletion —
+      it is reconciled into the unified model by task 033, NOT removed here.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts:330-395 — DELETE `collectEditedParagraphs` / the `{paraId,text}` export; leave `buildContentModel` (:397+) for task 033</file>
+      <file role="dependency-output">src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts — tasks 020/022 output: the step interceptor + rebased op log that now carry all dirty-save capture</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx — remove any remaining save-path call site of the paragraph-diff export (route capture through the interceptor only)</file>
+      <file role="dependency-output">projects/spaarkeai-compose-r4/tasks/006-phase0-gate.poml — the HARD go/no-go gate that must be green before this deletion</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r4/notes/as-built-inventory.md (RIP list) — the exact surface being removed</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-06, FR-12, NFR-08</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="022" status="pending">Rebased op log (+ task 020 interceptor) — the step-level capture that supersedes the paragraph-diff export. Deletion is safe only once this covers the dirty-save path.</dependency>
+      <dependency task="006" status="pending">Phase 0 GATE (go/no-go). HARD prerequisite — this irreversible deletion MUST NOT proceed until 006 is green (FR-12 / NFR-08).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-06">All dirty-save capture MUST route through the step interceptor; `collectEditedParagraphs` / the `{paraId,text}` export is deleted. Scope: `docxBridge.ts:330-395` + its call sites.</constraint>
+    <constraint source="spec / FR-12 / NFR-08">This deletion is HARD-GATED on the Phase 0 gate (task 006 green). The executor MUST confirm 006 is green before deleting; a not-green gate is a STOP. Scope: the gate check at step 0.</constraint>
+    <constraint source="project / scope boundary">Do NOT delete the born-in-editor `buildContentModel` full-render path (`docxBridge.ts:397+`) — it is reconciled in task 033. Scope: leave lines 397+ untouched here.</constraint>
+    <constraint source="project / I-6">Post-deletion the client emits operations only; a dirty save with no captured ops MUST be a no-op, never an empty-doc export. Scope: the save-path guard.</constraint>
+    <constraint source="ADR-028">The save path continues to fetch via `@spaarke/auth`; deleting the export MUST NOT introduce ad-hoc token handling. Scope: `ComposeWorkspace.tsx` save path.</constraint>
+    <constraint source="ADR-038 / NFR-06">The no-op / interceptor-only routing is confirmed by the Vitest suite (task 024) + the save/load seam slice. NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests. Scope: verification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Gated irreversible save-path deletion; step-interceptor supersession; grep call-site verification; scope boundary vs born-in-editor path</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r4/notes/as-built-inventory.md</file>
+      <file>projects/spaarkeai-compose-r4/design.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Gated hard-replace deletion" location="projects/spaarkeai-compose-r4/CLAUDE.md (Phase 0 gate)">
+        Old-path deletion (023, 032, 060) proceeds only after task 006 is green — the hard-replace safety net (NFR-08). Silent bypass is a §6 escalation.
+      </pattern>
+      <pattern name="RIP list line ranges" location="notes/as-built-inventory.md">
+        `collectEditedParagraphs` = `docxBridge.ts:330-395`; `buildContentModel` = `:397+` (leave for 033). Delete only the former.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Gate + context + rigor declaration">Output the FULL rigor-level declaration (root §8). CONFIRM task 006 (Phase 0 gate) is green — if not, STOP and escalate (do not delete). Confirm tasks 020 + 022 are complete and the interceptor covers the dirty-save capture. Load the RIP list + knowledge files.</step>
+    <step order="1" name="Coverage check before deletion">Verify the step interceptor (020/022) covers every case the paragraph-diff export handled (interior edits, multi-run, structural). If a case is NOT covered, STOP and escalate per §6 — do NOT delete.</step>
+    <step order="2" name="Delete the export">Remove `collectEditedParagraphs` and the `{paraId,text}` export (`docxBridge.ts:330-395`). Leave `buildContentModel` (:397+) untouched (task 033).</step>
+    <step order="3" name="Remove call sites">Remove any remaining save-path call site (`ComposeWorkspace.tsx` + elsewhere) so dirty-save capture routes only through the interceptor. Add the no-captured-ops → no-op guard. Checkpoint (context-handoff) per root §5.</step>
+    <step order="4" name="Grep verify + build">Grep the client for `collectEditedParagraphs` / the `{paraId,text}` export — confirm zero remaining call sites in the save path. Run `npm run build:prod` (NOT `npm run build`); confirm green.</step>
+    <step order="5" name="Close-out">Update `tasks/TASK-INDEX.md`: set this task's status to ✅. Document the deletion + any deviation in `projects/spaarkeai-compose-r4/notes/`; cite the FR-06 client-half removal + the 006-gate confirmation in the PR.</step>
+  </steps>
+
+  <ui-tests>
+    <ui-test name="Dirty save routes through the interceptor only">
+      <steps>Edit a paragraph and save; observe the capture path.</steps>
+      <expected>The save transmits the interceptor's operation log; no `collectEditedParagraphs` / `{paraId,text}` payload is produced.</expected>
+    </ui-test>
+    <ui-test name="No-captured-ops save is a no-op">
+      <steps>Open a doc, make no edits (or edits that net to nothing), and trigger save.</steps>
+      <expected>The save is a no-op — no empty-doc export, no paragraph-diff payload; the document is unchanged.</expected>
+    </ui-test>
+    <ui-test name="Born-in-editor path still present">
+      <steps>Confirm `buildContentModel` (docxBridge.ts:397+) still exists after the deletion.</steps>
+      <expected>The born-in-editor full-render path is untouched (reserved for task 033).</expected>
+    </ui-test>
+    <ui-test name="Dark-mode render (ADR-021)">
+      <steps>Render the editor + save affordance under the Fluent v9 dark theme provider and perform a save.</steps>
+      <expected>Save UI uses theme tokens and is legible in dark mode; capture routing is theme-independent; no hard-coded light colors.</expected>
+    </ui-test>
+  </ui-tests>
+
+  <escalation>
+    <trigger>If the op-log capture (020/022) does NOT cover a case the paragraph-diff export did, STOP and escalate per root §6 rather than deleting — coverage loss on an irreversible deletion is a hard stop.</trigger>
+    <trigger>If task 006 (Phase 0 gate) is not green, STOP — this deletion is hard-gated (FR-12 / NFR-08); a silent bypass is a §6 escalation.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts (`collectEditedParagraphs` / `{paraId,text}` export removed; `buildContentModel` retained)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx (paragraph-diff call sites removed; no-op guard added)</output>
+    <output type="report">Grep evidence of zero remaining paragraph-diff export call sites + the 006-gate confirmation for the PR</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Grep shows no `collectEditedParagraphs` / `{paraId,text}` export call sites in the save path.</criterion>
+    <criterion testable="true">Dirty-save capture routes only through the step interceptor (020/022).</criterion>
+    <criterion testable="true">A dirty save with no captured ops is a no-op — not an empty-doc export (negative case).</criterion>
+    <criterion testable="true">The born-in-editor `buildContentModel` path (docxBridge.ts:397+) is left intact for task 033.</criterion>
+    <criterion testable="true">Task 006 (Phase 0 gate) was confirmed green before deletion (FR-12 / NFR-08); the PR cites it.</criterion>
+    <criterion testable="true">`npm run build:prod` for the shared lib is green; the dark-mode render (ADR-021) is legible with theme tokens.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Client half of FR-06 (the server-side writer retirement is task 032, also 006-gated). Prescriptive +
+    gated because it is an irreversible save-path deletion with no A/B safety net (NFR-08). Do NOT delete
+    `buildContentModel` — that is task 033's reconciliation. Client task (no BFF surface) — no publish-size /
+    CVE gate.
+
+    **BLOCKED 2026-07-22** at Step 1 (coverage check) — the 006 Phase-0 gate is confirmed GREEN, but
+    `collectEditedParagraphs`'s whole-paragraph delete/merge sentinel (`docxBridge.ts:360-368`, emits
+    `{paraId,text:''}` so the server synthesizer strikes a vanished paragraph — the UAT-round-4
+    "vanished paragraph" corruption fix) has NO equivalent in the task-020/022 step interceptor today:
+    `classifyStep` explicitly defers every structural step (split/merge/insert/delete paragraph) to
+    task 031 (`🔲 not-started`, `blocked` in TASK-INDEX, deps on 030 which is also not-started), and
+    `onStructuralStep` has zero wired handlers in production (`ComposeEditor.tsx`/`ComposeWorkspace.tsx`
+    register the interceptor bare). Deleting `collectEditedParagraphs` now would silently and
+    permanently drop this case (no flag, no signal — not even the "captured but deferred" seam is wired).
+    Full analysis + 3 resolution options (A: re-sequence dep on 031 [recommended]; B: documented interim
+    exception per root §6.5; C: pull forward minimal structural capture) in
+    `projects/spaarkeai-compose-r4/BLOCKED.md`. No code was changed under this task — `docxBridge.ts`,
+    `ComposeWorkspace.tsx`, `ComposeEditor.tsx`, `index.ts` are untouched.
+
+    **COMPLETED 2026-07-22** (re-run per Path A re-sequencing). Task 031 (structural ops + client wiring,
+    ✅) and task 032 (SAVE→engine cutover, ✅) closed the earlier coverage gap: the interceptor's op-log
+    now covers structural delete/merge via `ApplyDeleteParagraph`/step-level ops, and `ComposeWorkspace.
+    triggerSave` sends only the op-log (no `collectEditedParagraphs` call site existed in the save path —
+    it had already been superseded by task 032's op-log wiring; only the dead export + its ONLY exposure
+    point — the `ComposeEditor` imperative-handle method — remained).
+
+    Removed: `collectEditedParagraphs` + its now-dead-only helpers `acceptStateText`/`isImportedRef` from
+    `docxBridge.ts`; the `ComposeEditedParagraph` type from `types/compose-contracts.ts` (zero remaining
+    client usages); the `collectEditedParagraphs` export from `index.ts`; the import, type import,
+    `ComposeEditorHandle.collectEditedParagraphs()` interface method, and its implementation from
+    `ComposeEditor.tsx`. `buildContentModel` (docxBridge.ts, born-in-editor full-render path) is UNTOUCHED
+    per scope boundary — reserved for task 033.
+
+    Updated stale documentation (comments only, no logic change) in files that described
+    `collectEditedParagraphs` / the now-retired `ComposeParagraphRedlineSynthesizer` as the CURRENT
+    persistence mechanism (they were already stale post-task-032; task 023 fixed the reference while
+    already touching the surface): `ComposeWorkspace.tsx` (redline-annotation save-path comments),
+    `TrackChangesExtension.ts` + `trackChangesDiff.ts` (production, decoration-vs-mark design rationale),
+    and doc-only mentions in `TrackChangesExtension.test.ts` / `redlineDocxAnnotations.test.ts`.
+
+    Rewrote `docxBridge.contentModel.test.ts`'s `collectEditedParagraphs` describe block (5 tests,
+    compile-breaking after the deletion) into direct `captureParaIdSnapshot` reject-state-semantics tests
+    (3 tests: document-order capture, pending-insertion exclusion, pending-deletion retention) — same
+    reject-state reduction logic, now tested at its actual (surviving) call site instead of indirectly
+    through the removed diff function.
+
+    Verification: grep zero `collectEditedParagraphs` call sites (only historical "removed in task 023" /
+    "retired" doc comments remain, in-scope + out-of-scope files); `npm run typecheck` shows only the
+    known pre-existing `@spaarke/ai-widgets` / `@spaarke/document-operations` sibling-module-resolution
+    errors (unrelated, present on baseline); affected jest suites (`docxBridge.contentModel.test.ts`,
+    `TrackChangesExtension.test.ts`, `redlineDocxAnnotations.test.ts`) 22/22 pass; the broader
+    `ComposeEditor`/`ComposeWorkspace` jest run shows the same pre-existing 17-suite `@fluentui/react-icons`
+    unbuilt-dist failure documented in task 032's completion notes (not this change) — the 3 suites that
+    resolve show 17/17 tests passing. No `.claude/` writes. `TASK-INDEX.md` / `current-task.md` left for
+    the orchestrator per the calling instructions.
+
+    Quality gates (Step 9.5): code-review = clean (0 critical/warning; 1 non-blocking suggestion re:
+    documented coverage-owner pointer). adr-check = clean (ADR-028 client-auth-contract grep-verified
+    unaffected; ADR-021/ADR-010/ADR-038/NFR-03 all N/A or compliant; no ADR violations, no exceptions
+    needed).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

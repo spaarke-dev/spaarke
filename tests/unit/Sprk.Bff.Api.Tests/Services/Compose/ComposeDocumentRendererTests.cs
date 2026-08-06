@@ -7,12 +7,12 @@
 //   - real Heading1..6 styles (mammoth maps "heading N" style → hN on the next Load), inline w:b/w:i/w:u, native w:tbl
 //   - every emitted w:p (incl. table-cell paragraphs) carries a unique OOXML-valid w14:paraId (E2 substrate)
 //   - the rendered doc re-opens + round-trips through ParaIdPreParser (the load-time E2 pre-parse)
-//   - a subsequent tracked-change edit (ComposeParagraphRedlineSynthesizer) does NOT corrupt the numbering
+//   - a subsequent tracked-change edit (ComposeShadowPatchEngine) does NOT corrupt the numbering
 //   - a golden-file assertion pins the numbering.xml SHAPE (the single largest net-new authoring surface)
 //
 // Pure engine (ComposeContentModel in / byte[] out) — real .docx assertions via the Open XML SDK, no transport
 // mocks (ADR-038 B1), no DI/ctor tests (B3/B4). Domain-logic tests co-located with the sibling Compose
-// component tests (ParaIdPreParserTests, ComposeParagraphRedlineSynthesizerTests).
+// component tests (ParaIdPreParserTests, ComposeShadowPatchEngineTests).
 
 using System;
 using System.Collections.Generic;
@@ -24,6 +24,7 @@ using DocumentFormat.OpenXml.Validation;
 using DocumentFormat.OpenXml.Wordprocessing;
 using FluentAssertions;
 using Sprk.Bff.Api.Services.Compose;
+using Sprk.Bff.Api.Services.Compose.Operations;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Compose;
@@ -201,6 +202,70 @@ public sealed class ComposeDocumentRendererTests
     }
 
     [Fact]
+    public void SynthesizeDocument_RunWithHref_EmitsCleanHyperlinkWithExternalRelationship()
+    {
+        // G5 (FR-05, task 033): a run carrying an href renders as a clean w:hyperlink pointing at an
+        // EXTERNAL relationship — the authored (clean) path's hyperlink representation, zero tracked markup.
+        var model = new ComposeContentModel
+        {
+            Blocks = new[]
+            {
+                new ComposeBlock
+                {
+                    Kind = ComposeBlockKind.Paragraph,
+                    Runs = new[]
+                    {
+                        new ComposeInlineRun { Text = "Visit " },
+                        new ComposeInlineRun { Text = "our site", Href = "https://example.com/" },
+                    },
+                },
+            },
+        };
+
+        var bytes = Renderer().SynthesizeDocument(model, "author");
+
+        using var doc = Open(bytes);
+        var mainPart = doc.MainDocumentPart!;
+        var para = Paragraphs(doc).Single();
+
+        var hyperlink = para.Descendants<Hyperlink>().Single();
+        string.Concat(hyperlink.Descendants<Text>().Select(t => t.Text)).Should().Be("our site",
+            "only the href run is wrapped in the w:hyperlink");
+        para.Descendants<InsertedRun>().Should().BeEmpty("the authored path is CLEAN — no tracked insertions");
+        para.Descendants<DeletedRun>().Should().BeEmpty("the authored path is CLEAN — no tracked deletions");
+
+        var rel = mainPart.HyperlinkRelationships.Single(r => r.Id == hyperlink.Id!.Value);
+        rel.IsExternal.Should().BeTrue("a Compose hyperlink is an external target (TargetMode=External)");
+        rel.Uri.ToString().Should().Be("https://example.com/");
+    }
+
+    [Fact]
+    public void SynthesizeDocument_RunWithRelativeHref_KeepsTextDropsBrokenLink()
+    {
+        // A non-absolute href cannot form a valid external relationship — the renderer keeps the run TEXT
+        // (no silent loss of content) and drops only the link, never emitting a broken relationship.
+        var model = new ComposeContentModel
+        {
+            Blocks = new[]
+            {
+                new ComposeBlock
+                {
+                    Kind = ComposeBlockKind.Paragraph,
+                    Runs = new[] { new ComposeInlineRun { Text = "bad link", Href = "not-a-url" } },
+                },
+            },
+        };
+
+        var bytes = Renderer().SynthesizeDocument(model, "author");
+
+        using var doc = Open(bytes);
+        var para = Paragraphs(doc).Single();
+        para.Descendants<Hyperlink>().Should().BeEmpty("a non-absolute href yields no hyperlink");
+        string.Concat(para.Descendants<Text>().Select(t => t.Text)).Should().Be("bad link",
+            "the run text survives even when the link target is unrepresentable (no silent loss)");
+    }
+
+    [Fact]
     public void SynthesizeDocument_Table_RendersNativeTblWithCellParagraphs()
     {
         var model = new ComposeContentModel
@@ -358,18 +423,29 @@ public sealed class ComposeDocumentRendererTests
         var rendered = Renderer().SynthesizeDocument(ClauseTree(), "Jordan Avery");
         var numberingBefore = PartXml(rendered, d => d.MainDocumentPart!.NumberingDefinitionsPart!);
 
-        // Edit the middle heading's text in place (task 022 synthesizer), keyed by its paraId.
+        // Edit the middle heading's text in place (task 032 ComposeShadowPatchEngine), keyed by its paraId.
         string editedParaId;
         using (var doc = Open(rendered))
         {
             editedParaId = Paragraphs(doc)[1].ParagraphId!.Value!;
         }
 
-        var edited = new ComposeParagraphRedlineSynthesizer().SynthesizeRedline(
+        var edited = new ComposeShadowPatchEngine().Apply(
             rendered,
-            new[] { new ComposeEditedParagraph(editedParaId, "Confidential Information and Trade Secrets") },
-            "Jordan Avery",
-            DateTimeOffset.UtcNow);
+            new ComposeOperationLog
+            {
+                Operations = new ComposeOperation[]
+                {
+                    new InsertTextOperation
+                    {
+                        ParaId = editedParaId,
+                        At = new ComposeRunPoint(0, 0),
+                        Text = "Amended ",
+                    },
+                },
+            },
+            author: "Jordan Avery",
+            timestamp: DateTimeOffset.UtcNow);
 
         var numberingAfter = PartXml(edited, d => d.MainDocumentPart!.NumberingDefinitionsPart!);
         numberingAfter.Should().Be(numberingBefore, "the tracked-change edit rewrites run content only — numbering is instance-clean + style-linked at birth, so it is untouched");

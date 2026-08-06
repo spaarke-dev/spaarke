@@ -45,7 +45,8 @@ const DOCUMENTS_CONFIG_ID = "1cdd19d2-3964-f111-ab0c-7ced8ddc4cc6";
 
 export const documentsRegistration: SectionRegistration = {
   id: "documents",
-  label: "My Documents",
+  // UAT 2026-07-21: dropped the "My " prefix — section title reads "Documents".
+  label: "Documents",
   description: "Your documents",
   icon: DocumentRegular,
   category: "data",
@@ -67,7 +68,10 @@ export const documentsRegistration: SectionRegistration = {
     return {
       id: "documents",
       type: "content",
-      title: "My Documents",
+      title: "Documents",
+      // Grid-backed section: the DataGrid renders its own elevated header, so
+      // suppress the redundant SectionPanel title (round-8.2 per operator).
+      hideTitle: true,
       style: { overflow: "hidden" },
       renderContent: () =>
         React.createElement(DataverseEntityViewWidget, {

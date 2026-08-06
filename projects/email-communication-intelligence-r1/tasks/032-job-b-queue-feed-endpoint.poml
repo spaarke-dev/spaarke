@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>Job B queue-feed endpoint — ranked exceptions feed for r5 (feed only; r1 builds NO UI, C-3)</title>
+    <phase>P3 — Job B record currency</phase>
+    <gate>after:030</gate>
+    <status>completed</status>
+    <tags>bff-api, communication</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a NEW read endpoint on the shared `Api/CommunicationEndpoints.cs` family that is the sole feed for r5's Exceptions Queue surface. It composes ranked exceptions (unresolved associations + pending Job B proposals + Suggested/Ambiguous items) and MUST apply the same access posture as the rest of the communication read surface — no over-disclosure. BFF-touching: publish-size + CVE + Placement Justification; code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A read/feed endpoint composing already-produced data (proposals from 030 + association statuses) into a ranked list; no design judgment beyond ranking + access posture; well-specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Extends the shared `Api/CommunicationEndpoints.cs` family (same file as 031); serialize after 030 and never concurrent with other shared `Services/Communication/` writers. `/conflict-check` before the PR.</parallel-reason>
+    <dependencies>030</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the **queue-feed** endpoint (FR-17): a surface-agnostic read endpoint that returns the **ranked exceptions** for a scope (e.g. matter / user / tenant) — the items needing human attention: unresolved / `Suggested` / `Ambiguous` associations plus pending Job B proposals (from 030). **r1 supplies the feed ONLY; r5 builds the Exceptions Queue surface (C-3).** r1 builds no UI.
+
+    Add the route to the EXISTING `Api/CommunicationEndpoints.cs` communication group (extend the `suggest-associations` family — no new group). The feed contract MUST be consumable by BOTH r5 surfaces (Code Page + SpaarkeAi widget) without a fork (D-10). Rank by attention-worthiness (e.g. RI-confidence / priority / recency — reuse the triage priority + RI-confidence already computed on `sprk_communication`; do NOT invent a second scoring scheme).
+
+    Apply the same access posture as the rest of the communication read surface (caller resolved server-side; no over-disclosure). Read-only — this endpoint mutates nothing.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication domain, authoritative on `Api/CommunicationEndpoints.cs` reads, the Job B pending-proposal shape (030), the association status model (`Suggested`/`Ambiguous`), the triage priority + RI-confidence fields on `sprk_communication`, ADR-008 (endpoint filters), ADR-019 (ProblemDetails), and the r5 feed coordination contract (C-3, D-10).
+  </role>
+
+  <goal>
+    A read endpoint on the existing `/api/communications` group returns a ranked exceptions feed for a scope — unresolved/Suggested/Ambiguous associations + pending Job B proposals — in a shape both r5 surfaces render without a fork. Ranking reuses the existing triage priority + RI-confidence (no second scoring scheme). The endpoint applies the communication read access posture (no over-disclosure), carries the ADR-008 filter + ADR-019 ProblemDetails, is registered unconditionally, and is read-only. Build clean; unit + seam tests pass; publish-size + CVE + Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      C-3 resolved: r5 builds the Exceptions Queue *surface*; r1 supplies the *feed*. This endpoint is that feed — the ranked list of items a reviewer acts on. It composes what the spine already produced: association outcomes (020/021 — unresolved / `Suggested` / `Ambiguous`) and pending Job B proposals (030). It does NOT re-run triage or re-score; it reads the priority + RI-confidence already on `sprk_communication` (024/025) and the stored proposals (030), then ranks.
+
+      D-10: both r5 surfaces (Code Page + SpaarkeAi widget) consume the same feed — the contract must be dual-use, no fork. The coordination doc pins the feed shape. r1 builds no UI (Success Criterion coordination, not a task).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs (ADD the queue-feed route to the existing `/api/communications` group — no new group)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ (REFERENCE — association status model + the read/query services the feed reuses)</file>
+      <file>sprk_communication (Dataverse — triage priority + RI-confidence fields to rank by; association status)</file>
+      <file>projects/email-communication-intelligence-r1/notes/email-intelligence-r1-coordination.md (r5 feed contract — the dual-use ranked-exceptions shape both r5 surfaces render, C-3 / D-10)</file>
+    </relevant-files>
+    <dependencies>030 (pending Job B proposals are part of the ranked feed).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-17 / C-3">Scope: expose a surface-agnostic queue-feed returning ranked exceptions (unresolved/Suggested/Ambiguous associations + pending Job B proposals); r1 supplies the FEED only — r5 builds the surface. r1 builds no UI.</constraint>
+    <constraint source="D-10">Scope: the feed contract MUST be consumable by BOTH r5 surfaces (Code Page + SpaarkeAi widget) without a fork; pin the shape to the coordination doc.</constraint>
+    <constraint source="D-08 / project">Scope: rank by reusing the existing email-specific triage priority + RI-confidence already computed on `sprk_communication`; do NOT invent a second scoring/priority scheme (no Workspace/Portfolio scoring reuse).</constraint>
+    <constraint source="ADR-008 / ADR-019">Scope: the route carries the communication authorization endpoint filter + RFC 7807 ProblemDetails on error; caller resolved server-side; register unconditionally (ADR-032/ADR-010); read-only (mutates nothing).</constraint>
+    <constraint source="project §10">Scope: BFF Hygiene — load `.claude/constraints/bff-extensions.md`; state Placement Justification (extends the `suggest-associations` family; thin minimal-API; no new group); publish-size delta vs ~49.63 MB (expected ≈0); no new HIGH CVE; update tests in `tests/unit/Sprk.Bff.Api.Tests/`.</constraint>
+    <constraint source="project §11">Scope: Component Justification — the queue-feed is new only because r5 has no ranked-exceptions read; state the concrete FR-17 failure mode prevented (r5 has no exceptions queue data) with grep evidence that no existing route returns a ranked exceptions feed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>projects/email-communication-intelligence-r1/notes/email-intelligence-r1-coordination.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-045-communication-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Extend the suggest-associations family" location="src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs">
+        Add the queue-feed to the existing `/api/communications` group; ADR-008 filter; ADR-019 ProblemDetails; unconditional mapping; read-only.
+      </pattern>
+      <pattern name="Reuse existing ranking signals" location="sprk_communication (Dataverse)">
+        Rank by the triage priority + RI-confidence already computed (024/025); do not re-score or introduce a second priority scheme.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `.claude/constraints/bff-extensions.md`, the coordination doc (dual-use feed shape), and `DATA-ACCESS-DECISION-CRITERIA.md`.</step>
+    <step order="2">Read `CommunicationEndpoints.cs` (the `suggest-associations` family + auth filter) + the association status model + the triage priority / RI-confidence fields. Grep to confirm no existing ranked-exceptions feed route (§11 evidence).</step>
+    <step order="3">Design the dual-use ranked-exceptions DTO (per coordination doc): item ref, kind (unresolved-association / Suggested / Ambiguous / pending-proposal), rank score (from existing priority + RI-confidence), and enough for r5 to render both surfaces. Keep it minimal + fork-free.</step>
+    <step order="4">Implement the feed: read unresolved/Suggested/Ambiguous association outcomes + pending Job B proposals (030) for the scope; rank by the existing priority + RI-confidence; apply the communication read access posture (caller server-side; no over-disclosure); page deterministically.</step>
+    <step order="5">Add the queue-feed route to the existing `/api/communications` group: bind scope + paging, apply the ADR-008 filter + ADR-019 ProblemDetails; register unconditionally (ADR-032/ADR-010); read-only.</step>
+    <step order="6">Write unit + seam tests: (a) the feed returns ranked exceptions for a scope including a pending proposal + a Suggested/Ambiguous association; (b) ranking reuses the existing priority + RI-confidence (no second scheme); (c) NEGATIVE — an item the caller may not see is absent (no over-disclosure); (d) the DTO is dual-use (one shape, no surface fork). ADR-038 boundary mocks only.</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` + targeted `dotnet test`; publish-size (report absolute + delta vs ~49.63 MB) + CVE scan.</step>
+    <step order="9.5">FULL-rigor gates: `code-review` (focus no-over-disclosure, no second scoring scheme, dual-use no-fork, read-only); `adr-check` against ADR-045 + spec FR-17 / D-08 / D-10. Address Critical findings; cite Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (shared `Services/Communication/` + endpoint family; coordinate with 031 on the same file).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (032 ✅) + `current-task.md`; record decisions (feed DTO shape, ranking inputs, access posture) for the r5 handoff.</step>
+  </steps>
+
+  <justification>
+    <existing>The `suggest-associations` endpoint family returns per-message association suggestions; there is no route that returns a ranked exceptions queue across a scope, and no store of pending Job B proposals existed before 030.</existing>
+    <extension>Yes — this is one additive read route + a composition over already-produced data (association outcomes + 030 proposals), reusing the existing priority + RI-confidence signals + the communication read access posture; no new service, no new scoring scheme.</extension>
+    <cost-of-doing-nothing>Without the queue-feed, r5's Exceptions Queue surface has no data source — the reviewer has no single ranked list of items needing attention (FR-17 fails; Success Criterion coordination with r5 breaks).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="read">Inspect the endpoint family, association status model, triage/RI fields, coordination doc</tool>
+    <tool name="grep">Confirm no existing ranked-exceptions feed route (§11); confirm no second scoring scheme introduced</tool>
+    <tool name="edit">Add the queue-feed route + feed composition</tool>
+    <tool name="bash">Build, unit/seam tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs (UPDATED — ranked queue-feed route on the existing group; access-posture-applied; unconditional; read-only)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ (UPDATED — ranked-exceptions composition reusing existing priority + RI-confidence)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ + tests/integration/seam/ — ranked-feed + reuse-ranking + no-over-disclosure + dual-use-no-fork</output>
+    <output type="docs">PR description with §11 Component Justification + bff-extensions Placement Justification + publish-size delta + CVE result; feed DTO handoff note for r5</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The queue-feed returns ranked exceptions for a scope, including pending Job B proposals (030) and Suggested/Ambiguous associations, in a single dual-use DTO both r5 surfaces render without a fork.</criterion>
+    <criterion testable="true">Ranking reuses the existing email-specific triage priority + RI-confidence on `sprk_communication`; no second scoring/priority scheme is introduced (grep-verifiable).</criterion>
+    <criterion testable="true">NEGATIVE: an item the caller may not see is absent from the feed (no over-disclosure); the caller is resolved server-side.</criterion>
+    <criterion testable="true">The endpoint is read-only (mutates nothing), carries the ADR-008 filter + ADR-019 ProblemDetails, and is registered unconditionally.</criterion>
+    <criterion testable="true">r1 builds no UI — this task delivers the feed contract only (C-3).</criterion>
+    <criterion testable="true">`dotnet build` clean; tests pass; publish-size delta ≈0 vs ~49.63 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    r1 supplies the feed; r5 builds the surface (C-3). The feed must be dual-use (Code Page + widget) without a fork (D-10). Reuse the existing priority + RI-confidence for ranking — do not invent a second scheme (D-08). Coordinate the DTO shape with the r5 coordination doc. Run `/conflict-check` before the PR (shares `CommunicationEndpoints.cs` with 031).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files. Apply FULL rigor — Step 9.5 gates REQUIRED. Per §10 + §11: publish-size delta (baseline ~49.63 MB) + CVE + Placement + Component Justification in the PR. `/conflict-check` before the PR. Model tier `sonnet` @ effort `high`.</protocol>
+  </execution>
+</task>

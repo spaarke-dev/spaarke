@@ -126,6 +126,23 @@ public static class DispatchSessionEndpoint
         ILogger<DispatchSessionRequest> logger)
     {
         var cancellationToken = httpContext.RequestAborted;
+        // UAT round-4 #10b (ai-advanced-capabilities-agreements-r1): the review EXECUTION + its
+        // ADR-040 store-before-render ledger write MUST survive a client disconnect. The owner's repro:
+        // start an agreement review on the chip/Click path, then navigate away from the SpaarkeAi code
+        // page entirely (full SPA teardown) WHILE the long Reasoning-tier review is still running.
+        // Before this fix the orchestrator ran under `httpContext.RequestAborted`, so the disconnect
+        // cancelled BOTH the executor (SessionDispatchOrchestrator → ActionRunner.RunAsync) AND the
+        // OutputRouter ledger write — leaving NOTHING ledgered. The analysis was genuinely LOST, not
+        // merely un-rendered: ADR-040 "store precedes render" only holds WITHIN a completed request,
+        // because the store itself was gated on the request-tied token. Decouple the execution+ledger
+        // from the response lifetime by running the orchestrator under a token that does NOT cancel on
+        // disconnect. This mirrors the ToolChain ledger write in ChatEndpoints.FlushToolChainLedgerAsync,
+        // which deliberately uses CancellationToken.None with the comment "ledger write completes even if
+        // the client disconnects mid-render". The SSE WRITES below stay bound to `cancellationToken`
+        // (RequestAborted), so streaming remains cancellable — we just stop writing to a dead socket;
+        // only the durable work (the review + its ledger write) is decoupled. The request scope (DI /
+        // OBO) stays alive for the run's duration, so nothing the executor needs is torn down early.
+        var executionToken = CancellationToken.None;
         var response = httpContext.Response;
         var correlationId = httpContext.TraceIdentifier;
 
@@ -240,8 +257,12 @@ public static class DispatchSessionEndpoint
 
         try
         {
-            enumerator = orchestrator.DispatchAsync(request, cancellationToken)
-                .GetAsyncEnumerator(cancellationToken);
+            // UAT round-4 #10b: run the orchestrator (execution + ADR-040 ledger write) under the
+            // disconnect-decoupled `executionToken`, NOT `cancellationToken`. The first MoveNextAsync
+            // below drives the whole review and yields the terminal chunk only AFTER OutputRouter
+            // stored the SessionOutput — so a mid-run disconnect can no longer abort the ledger write.
+            enumerator = orchestrator.DispatchAsync(request, executionToken)
+                .GetAsyncEnumerator(executionToken);
             hasFirst = await enumerator.MoveNextAsync().ConfigureAwait(false);
             if (hasFirst)
             {
@@ -376,6 +397,17 @@ public static class DispatchSessionEndpoint
                 if (!moveNext) break;
                 await SummarizeSessionEndpoint.WriteSseChunkAsync(response, enumerator.Current, cancellationToken);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // UAT round-4 #10b: the client disconnected mid-stream (navigated away). Because the
+            // orchestrator ran under `executionToken` (not `cancellationToken`), the review execution +
+            // ADR-040 ledger write already completed BEFORE the first chunk was yielded — the analysis is
+            // durably stored and recoverable on reopen (durable recall / FR-16). A cancelled SSE write to
+            // the dead socket is expected here; swallow it cleanly rather than surfacing a 5xx.
+            logger.LogInformation(
+                "[DISPATCH-SESSION] Client disconnected mid-stream; execution + ledger already completed durably. tenant={TenantId} session={SessionId} bindingId={BindingId}",
+                tenantId, sessionId, bindingId);
         }
         finally
         {
