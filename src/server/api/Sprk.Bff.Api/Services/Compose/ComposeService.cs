@@ -693,11 +693,11 @@ public class ComposeService : IComposeService
         var hasOperations = request.OperationLog is { Operations.Count: > 0 };
         var hasComments = request.Comments is { Count: > 0 };
 
-        // G1 (FR-01, task 020): the durable origin discriminator — mirrors the SAME ContentModel-presence
-        // signal the born-in-editor render branch above already keys off (ResolveSaveBaselineAsync's "(a0)
-        // BORN-IN-EDITOR" check). ContentModel present → the renderer authors the whole document from the
-        // client's content model (Authored, no retained baseline to delta onto); ContentModel absent → the
-        // save carries retained SPE bytes, whether a delta (op-log) or a byte-identical replace (Imported).
+        // G1 (FR-01, task 020): the durable origin discriminator — mirrors the SAME baseline-source
+        // signal ResolveSaveBaselineAsync's routing keys off. ContentModel present WITHOUT any baseline
+        // source → born-in-editor render (a0, Authored); ContentModel WITH a baseline source → imported
+        // render-on-save (a1 carrier render, Imported — task 010); ContentModel absent → the save carries
+        // retained SPE bytes, whether a delta (op-log) or a byte-identical replace (Imported).
         // Resolved ONLY from this server-side discriminant — NEVER from SPE-id presence or a content/text
         // match (NFR-02, I-7). Computed on every save (not only create-on-save) so it can ride the returned
         // SaveComposeDocumentResult for immediate client/consumer use (e.g. task 021's clean-apply engine
@@ -720,12 +720,20 @@ public class ComposeService : IComposeService
             : ComposeOrigin.Imported;
 
         // Task 010: on the render-on-save path an op-log cannot apply (the model IS the document state);
-        // a client that sends both is on a mixed contract — the ops are ignored LOUDLY, never half-applied.
+        // a client that sends both is on a mixed contract — the ops are ignored LOUDLY, never
+        // half-applied: logged server-side AND surfaced on the wire as an `op-log-ignored` degradation
+        // warning (Step-9.5 F1 — observable to clients/tests, not just operators).
         if (request.ContentModel is not null && hasOperations)
         {
             _logger.LogWarning(
                 "Compose save: request carries BOTH a ContentModel and an operation log ({OpCount} op(s)) — the render-on-save path ignores the op-log (the model is the authoritative document state). session={SessionId}",
                 request.OperationLog!.Operations.Count, request.SessionId);
+            var combinedWarnings = new List<ComposeProjectionWarning>(
+                renderDegradationWarnings ?? (IReadOnlyList<ComposeProjectionWarning>)Array.Empty<ComposeProjectionWarning>())
+            {
+                new("op-log-ignored", request.OperationLog!.Operations.Count),
+            };
+            renderDegradationWarnings = combinedWarnings;
         }
 
         // G2 (FR-02, task 021 / R5-D2 Candidate A): the CLEAN-APPLY decision for the op-log/engine path.
@@ -1233,7 +1241,14 @@ public class ComposeService : IComposeService
             //      byte-patch and NO count-gate on this path — the anchor-reconciliation 422 class
             //      (the NDA) is unreachable by construction. Hard-tier constructs accept-flattened at
             //      projection (026) render as degraded prose; the prior version stays retrievable via
-            //      SPE version history (FR-07 safety net).
+            //      SPE version history (FR-07 safety net). Two boundary notes: (1) a born-in-editor doc
+            //      must keep OMITTING baselineVersionId on its re-saves (its retained versionId is the
+            //      drive-ITEM id, not a real SPE version — echoing it here would 404 the fetch; the
+            //      client's bornInEditor branch sends contentModel only); (2) the FR-08 stale-base
+            //      re-anchor deliberately does not run on this path — the model is full document state,
+            //      so a concurrent out-of-band writer resolves last-writer-wins with version history as
+            //      the net (design-accepted; the eTag stamp still updates post-save for the next op-log
+            //      save's assert).
             if (!request.Content.IsEmpty)
             {
                 var carrierRendered = _documentRenderer.RenderIntoCarrier(

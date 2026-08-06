@@ -37,6 +37,7 @@ using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Compose;
+using Sprk.Bff.Api.Services.Compose.Operations;
 using Sprk.Bff.Api.Tests.Seam.Compose;
 using Xunit;
 
@@ -286,6 +287,38 @@ public sealed class ComposeServiceImportedRenderSaveTests
         result.DegradationWarnings.Should().NotBeNull("render drops surface as success-with-warnings, never silently");
         result.DegradationWarnings!.Should().ContainSingle(w => w.Code == "comment-anchor-dropped")
             .Which.Count.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ContentModelWithOpLog_IgnoresOpsLoudly_ModelIsAuthoritative()
+    {
+        // Step-9.5 F1: a mixed-contract request (model + op-log) renders from the MODEL; the ops are
+        // never half-applied, and the drop is observable ON THE WIRE (op-log-ignored), not just logged.
+        ArrangeReplaceExisting(out var capturedBytes);
+        var sut = CreateSut();
+
+        var request = ReplaceRequest(EditedModel(), content: BuildCarrierBytes());
+        request = request with
+        {
+            OperationLog = new ComposeOperationLog
+            {
+                Operations = new List<ComposeOperation>
+                {
+                    new InsertTextOperation { ParaId = "7B00AA01", At = new ComposeRunPoint(0, 0), Text = "OP-INSERTED-TEXT" },
+                },
+            },
+        };
+
+        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+
+        result.DegradationWarnings.Should().NotBeNull();
+        result.DegradationWarnings!.Should().ContainSingle(w => w.Code == "op-log-ignored")
+            .Which.Count.Should().Be(1);
+
+        using var doc = WordprocessingDocument.Open(new MemoryStream(capturedBytes(), writable: false), isEditable: false);
+        var text = doc.MainDocumentPart!.Document!.Body!.InnerText;
+        text.Should().Contain("Edited body text.", "the model is the authoritative document state");
+        text.Should().NotContain("OP-INSERTED-TEXT", "the op-log must never half-apply on the render path");
     }
 
     [Fact]
