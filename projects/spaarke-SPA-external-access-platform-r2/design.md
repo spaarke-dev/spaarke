@@ -67,9 +67,13 @@ The module-host is assembled from **two donor sources + net-new**, verified agai
 | **Theme** | `@spaarke/ui-components` `useTheme`/`ThemeToggle` | **Reuse as-is** | Fluent v9 light/dark; host owns one `FluentProvider`. |
 | **Auth base** | `@spaarke/auth` `AuthStrategy` | **Extend** | Pluggable strategy + config-driven authority; today workforce-only → add CIAM + per-user/per-context plane selection. |
 | **Embedded-mode discipline** (host owns chrome/theme/auth; content owns itself) | `LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` | **Reuse discipline only** | Sound split for module-in-shell and shell-in-Teams. NOT the `Xrm.WebApi` contract — external/Teams hosts have no Xrm. |
-| **Access-gated module visibility** | — | **NET-NEW** | No entitlement/permission gating exists anywhere today (visibility = layout config + localStorage). The access table + `/me` entitlement endpoint + card-gating is the core new surface. |
+| **Principal-agnostic BFF endpoints (FR-22)** — `CallerPrincipalResolver` + 2 strategies + `CallerPrincipal` + `CallerPrincipalAuthorizationFilter` + `ExternalCollaboration` dual-scheme policy | ✅ **DELIVERED by teams-app-r1 (task 025)** — `Infrastructure/ExternalAccess/CallerPrincipalResolver.cs` etc. | **Reuse as-is + generalize** | The core BFF pattern for one-endpoint-set-per-module across planes is BUILT + tested (9761 green, CIAM preserved). R2 generalizes it into the module framework; third-plane seam ready. |
+| **Workforce record-scope** — `IWorkforcePrincipalResolver` (t020) + `IAccessibleRecordSetService.ComposeAsync` (t022) | ✅ **DELIVERED by teams-app-r1** | **Reuse as-is** | The workforce Tier-2 predicate: **ADR-034** membership (systemuser) ∪ `sprk_externalrecordaccess` ∪ `sprk_standinggrant` (contact). NOT all-projects. Canonical NFR-08 worked example. |
+| **Access-gated module visibility** (Tier-1 entitlement: App Role / Contact-entitlement + `/me` modules + card-gating) | — | **NET-NEW** | No *module-entitlement* gating exists today. (Record-scope Tier-2 is delivered above; module-entitlement Tier-1 is the core new surface.) |
 
 **Do NOT fork `LegalWorkspaceApp`** (the "dashboard engine") — it hard-requires `Xrm.WebApi` + a Dataverse user GUID and cannot serve external users. It is a component/pattern donor, not a shell to adopt.
+
+> **FR-22 status (2026-08-06)**: teams-app-r1 shipped the principal-agnostic collaboration endpoints (Option A) built to R2's guardrails — see `notes/r2-coordination-response.md`. R2 no longer *builds* FR-22; it **lifts + generalizes** it into the module framework. Open R2 follow-ups from the delivery: graded workforce per-project levels (D1, F3/F5 decision), and cleanup of the transitional `/api/v1/collab` + inert `ExternalCallerAuthorizationFilter` (D2). Operator-gated: BFF redeploy + live Teams E2E.
 
 ---
 
