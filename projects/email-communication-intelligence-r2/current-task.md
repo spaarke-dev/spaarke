@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-06 (context-handoff)
+> **Last Updated**: 2026-08-06 (context-handoff — end of R-1/R-2/R-3 + 021-drift + 022 session)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -13,7 +13,7 @@
 | **Task** | **022 (FR-C2 context-merge on duplicate) ✅ code-complete (2026-08-06).** Owner-directed correct solution: two additive set-union memo columns. Prior this session: R-2 (83f2496d9), R-3 (ed62571d8), R-1 (9d69d2ca2), 021-drift (0e1ba86d3) — committed + pushed (fd899c668). |
 | **Step** | 022 DONE (uncommitted — commit pending). `DeliveryContextMerge` (pure set-union + non-fatal MergeAsync) + inbound merge (3 sites, fail-open + contract-first) + office uploader merge. 14 tests; 1127 Communication+Office green; CVE clean. **GATED tail = task 028** (`sprk_deliveredmailboxes` + `sprk_savedbyusers` memo columns; operator). Note: `notes/022-context-merge-on-duplicate-complete.md`. |
 | **Status** | **R-2 ✅ (code)**: editable Compose save that is byte-identical to a canonical is recorded as a hash-linked COPY (`sprk_canonicaldocument` set + notified), NOT suppressed (no data loss / session cross-wiring); GRADUATES to its own canonical on content divergence (link cleared via a new `DBNull` clear-sentinel on `IGenericEntityService.UpdateAsync`). `FindCanonicalByHashAsync` excludes linked copies. N+1 avoided (alt-key lookup widened). Build 0-err/0-warn; **854 Compose+ContentDedup green** (18 new); publish 48.30 MB (+0.01); CVE clean; ADR/code-review/conflict-check clean. Notes: `notes/R-2-compose-content-dedup-graduate-complete.md`. **GATED tail = task 027** (`sprk_canonicaldocument` self-lookup schema — operator go-ahead; code ships safely behind it, non-fatal until column exists). Prior session: **021 ✅** (84912c9cd), **016 ✅** (2bd7d905e), **024 ✅** (7bd7c2108). |
-| **Next Action** | Remediation plan **fully executed**. Notes: `R-2-…`, `R-3-…`, `R-1-affinity-confirmation-write-complete.md`, `021-inbound-integration-test-drift-fix.md`. **Push** (branch is 4 commits ahead of the last push). Then pending code tasks: **010 HMAC signer** (KV `footer-hmac-key` ready → 012/013), **034 Job C**. **Gated (operator):** task 027 (`sprk_canonicaldocument` schema — R-2's enablement). **Follow-ons tracked (not blocking):** FR-C2 context-merge on dup = **task 022** (additive on R-3). Owner correction saved to memory: compose-r5 + email-communication-solution-r5 are CLOSED (edit directly, don't defer). |
+| **Next Action** | **PUSH first** — branch is **1 commit ahead of origin** (022 `6b1a194a6`; the R-1/R-2/R-3/021-drift set already pushed at `fd899c668`). Then next **non-gated code task**: **034 Job C apply endpoint** (opus·high) or **025 cross-path reconciliation** (deps 021 ✅). **Gated (operator go-ahead):** **task 027** (`sprk_canonicaldocument` — enables R-2) + **task 028** (`sprk_deliveredmailboxes`/`sprk_savedbyusers` memo — enables 022). **010 HMAC signer** also operator-gated (KV). Session done: R-1/R-2/R-3 + 021-drift + 022 all committed; suites green (Communication 962→1127 across the touched filters). Memory: `closed-r5-projects-editable.md` (compose-r5 + email-communication-solution-r5 CLOSED — edit directly). |
 
 ### Completed this session (all committed)
 - **Task 003 ✅** — `notes/fixtures/r1-golden-emails.md`.
