@@ -1808,16 +1808,26 @@ public sealed class ComposeDocxProjectionBuilder
         }
     }
 
-    /// <summary>Per-container ordered-list continuity: <see cref="ComposeBlock.StartsNewList"/> is set on
-    /// the first item of each DISTINCT ordered list (numId change), so the renderer allocates a fresh
-    /// restart-at-1 num instance per source list rather than fusing all ordered items into one sequence.
-    /// Intervening non-list paragraphs do NOT reset continuity (same numId ⇒ same list — the interrupted-
-    /// run behavior the NumberingComputationEngine fixed on the read side). Table cells get a fresh
+    /// <summary>Per-container ordered-list continuity state. <see cref="ComposeBlock.StartsNewList"/> is set
+    /// whenever the immediately-preceding emitted block was NOT an ordered item of the same numId — which is
+    /// exactly when <c>ComposeDocumentRenderer.RenderBlocks</c> allocates a fresh restart-at-1 num instance
+    /// (the renderer clears its current-list state on EVERY non-ordered block, so an interrupted or
+    /// interleaved ordered run RESTARTS on render regardless of this flag — review finding 020-R1). Because
+    /// the SOURCE may have continued numbering across the interruption (Word's per-numId counters, the exact
+    /// behavior the read-side NumberingComputationEngine replays), that restart is a COUNTED fidelity loss:
+    /// <c>ordered-list-continuity-lost</c> fires when an ordered numId re-appears after an interruption or
+    /// interleave. Renderer-side same-numId continuation is task 021's scope. Table cells get a fresh
     /// instance (a list never continues across a cell boundary — mirrors the read walk's CloseOpenList at
-    /// cell edges); transparent SDT recursion shares the parent's (its paragraphs continue the flow).</summary>
+    /// cell edges); transparent SDT/customXml recursion shares the parent's (paragraphs continue the flow).</summary>
     private sealed class ListContinuity
     {
-        public int? LastOrderedNumId;
+        /// <summary>numId of the immediately-preceding emitted block IF it was an ordered list item; null
+        /// after any other block (mirrors the renderer's clear-on-every-non-ordered-block behavior).</summary>
+        public int? PrevOrderedNumId;
+
+        /// <summary>Every ordered numId already seen in this container — a re-appearance after an
+        /// interruption/interleave means the source continued a list the render will restart.</summary>
+        public readonly HashSet<int> SeenOrderedNumIds = new();
     }
 
     private void ProjectBlockChildren(OpenXmlElement container, List<ComposeBlock> sink, ListContinuity lists, ModelWalkContext ctx)
@@ -1831,7 +1841,14 @@ public sealed class ComposeDocxProjectionBuilder
                     sink.Add(ProjectParagraph(p, lists, ctx));
                     break;
                 case Table t:
-                    sink.Add(ProjectTable(t, ctx));
+                    lists.PrevOrderedNumId = null; // renderer clears its list state at a table boundary
+                    var tableBlock = ProjectTable(t, ctx);
+                    if (tableBlock is not null) sink.Add(tableBlock);
+                    break;
+                case CustomXmlBlock cxb:
+                    // w:customXml block wrapper: transparent — its paragraphs are ordinary editable prose;
+                    // recursing keeps the text (review finding 020-R10; dropping would be a silent loss).
+                    ProjectBlockChildren(cxb, sink, lists, ctx);
                     break;
                 case SdtBlock sdt:
                     if (IsSpecialSdtControl(sdt.SdtProperties))
@@ -1847,6 +1864,7 @@ public sealed class ComposeDocxProjectionBuilder
                                 Kind = ComposeBlockKind.Paragraph,
                                 Runs = new[] { new ComposeInlineRun { Text = ctx.ClampText(text) } },
                             });
+                            lists.PrevOrderedNumId = null;
                         }
                         ctx.AddWarning("hard-tier-sdt-flattened", 1);
                     }
@@ -1884,11 +1902,25 @@ public sealed class ComposeDocxProjectionBuilder
         var paraId = p.ParagraphId?.Value?.ToUpperInvariant(); // renderer dedups/mints (AssignParaIds)
         var alignment = MapAlignment(p);
 
+        // Uncounted-flatten closures (review finding 020-R3): the model has no indentation field (the read
+        // walk renders w:ind via AppendIndentDeclarations — re-lost on save until a widening task carries
+        // it), and a paragraph whose MARK is deleted (pPr/rPr/w:del) is kept as a separate settled block
+        // (rejecting the mark deletion — no merge; task 025 models revisions first-class, finding 020-R11).
+        if (p.ParagraphProperties?.Indentation is not null) ctx.AddWarning("indentation-dropped", 1);
+        if (p.ParagraphProperties?.ParagraphMarkRunProperties?.Deleted is not null) ctx.AddWarning("tracked-paragraph-mark-flattened", 1);
+
         // Classification mirrors RenderParagraph exactly: heading style wins; then a DIRECT paragraph
         // w:numPr makes a list item (style-linked heading numbering is a heading, not a list).
         var headingLevel = HeadingLevel(p);
+        var numPr = p.ParagraphProperties?.NumberingProperties;
+        var numId = numPr?.NumberingId?.Val;
+
         if (headingLevel is int lvl)
         {
+            // A heading carrying a DIRECT w:numPr: heading wins (read-walk rule) and the direct numbering
+            // is flattened — counted, never silent (review finding 020-R3).
+            if (numId is not null) ctx.AddWarning("heading-direct-numbering-dropped", 1);
+            lists.PrevOrderedNumId = null; // renderer clears its list state on any non-ordered block
             return new ComposeBlock
             {
                 Kind = ComposeBlockKind.Heading,
@@ -1899,8 +1931,6 @@ public sealed class ComposeDocxProjectionBuilder
             };
         }
 
-        var numPr = p.ParagraphProperties?.NumberingProperties;
-        var numId = numPr?.NumberingId?.Val;
         if (numId is not null)
         {
             var ilvl = numPr!.NumberingLevelReference?.Val?.Value ?? 0;
@@ -1908,8 +1938,20 @@ public sealed class ComposeDocxProjectionBuilder
             var startsNew = false;
             if (ordered)
             {
-                startsNew = lists.LastOrderedNumId != numId.Value;
-                lists.LastOrderedNumId = numId.Value;
+                startsNew = lists.PrevOrderedNumId != numId.Value;
+                if (startsNew && lists.SeenOrderedNumIds.Contains(numId.Value))
+                {
+                    // The source CONTINUED this numId across an interruption/interleave (Word's per-numId
+                    // counter), but the renderer restarts a fresh instance at 1 — counted fidelity loss
+                    // (review findings 020-R1/R2); renderer-side continuation is task 021's scope.
+                    ctx.AddWarning("ordered-list-continuity-lost", 1);
+                }
+                lists.SeenOrderedNumIds.Add(numId.Value);
+                lists.PrevOrderedNumId = numId.Value;
+            }
+            else
+            {
+                lists.PrevOrderedNumId = null; // a bullet item interrupts an ordered run on render
             }
             return new ComposeBlock
             {
@@ -1923,6 +1965,15 @@ public sealed class ComposeDocxProjectionBuilder
             };
         }
 
+        // Style-linked numbering on a NON-Heading style (FR-12 — e.g. a firm template's "ClauseL1"): the
+        // thin model cannot carry the style identity, so the number is lost on this path — counted, never
+        // silent (review finding 020-R7); projecting it faithfully is task 021's scope.
+        if (ResolveParagraphNumbering(p, ctx.Numbering) is { StyleLinked: true })
+        {
+            ctx.AddWarning("style-linked-numbering-dropped", 1);
+        }
+
+        lists.PrevOrderedNumId = null; // plain paragraph interrupts an ordered run on render
         return new ComposeBlock
         {
             Kind = ComposeBlockKind.Paragraph,
@@ -1934,12 +1985,18 @@ public sealed class ComposeDocxProjectionBuilder
 
     /// <summary>Ordered-vs-bullet from the R4.5 <see cref="NumberingModel"/> (override-aware via
     /// <see cref="NumberingModel.ResolveLevel"/>), with <see cref="ResolveOrdered"/>'s tolerant posture:
-    /// an unresolvable numId warns and defaults to ordered. Falls back to the nearest defined lower level
-    /// when the exact ilvl is undefined (same tolerance as the read walk's first-level fallback).</summary>
+    /// an unresolvable numId warns and defaults to ordered. When the exact ilvl is undefined, probes the
+    /// nearest LOWER defined level first, then any HIGHER one — so a doc defining only a higher level (the
+    /// read walk's FirstOrDefault fallback territory, review finding 020-R8) still classifies from a real
+    /// numFmt instead of warning + defaulting, keeping the two walks from disagreeing on the same paragraph.</summary>
     private static bool ResolveOrderedFromModel(int numId, int ilvl, ModelWalkContext ctx)
     {
         var def = ctx.Numbering.ResolveLevel(numId, ilvl);
         for (var probe = ilvl - 1; def is null && probe >= 0; probe--)
+        {
+            def = ctx.Numbering.ResolveLevel(numId, probe);
+        }
+        for (var probe = ilvl + 1; def is null && probe <= 8; probe++)
         {
             def = ctx.Numbering.ResolveLevel(numId, probe);
         }
@@ -1951,7 +2008,7 @@ public sealed class ComposeDocxProjectionBuilder
         return def.NumFmt is null || def.NumFmt.Value != NumberFormatValues.Bullet;
     }
 
-    private ComposeBlock ProjectTable(Table table, ModelWalkContext ctx)
+    private ComposeBlock? ProjectTable(Table table, ModelWalkContext ctx)
     {
         var rows = new List<ComposeTableRow>();
         foreach (var row in table.Elements<TableRow>())
@@ -1966,6 +2023,14 @@ public sealed class ComposeDocxProjectionBuilder
                 cells.Add(new ComposeTableCell { Blocks = cellBlocks });
             }
             rows.Add(new ComposeTableRow { Cells = cells });
+        }
+        if (rows.Count == 0)
+        {
+            // Schema-degenerate w:tbl with no rows: the RENDERER skips zero-row tables (Word requires ≥1
+            // row), so emitting a Table block would break the model→docx→model fixed point (review finding
+            // 020-R12) — dropped, counted.
+            ctx.AddWarning("empty-table-dropped", 1);
+            return null;
         }
         return new ComposeBlock
         {
@@ -2046,10 +2111,25 @@ public sealed class ComposeDocxProjectionBuilder
                     // paragraphs surface via the unrendered-paragraphs guard. Task 026 widens this surface.
                     ctx.AddWarning("complex-object-dropped", 1);
                     break;
+                case CustomXmlRun cxr:
+                    // w:customXml inline wrapper: transparent — nested runs are ordinary editable prose;
+                    // recursing keeps the text (review finding 020-R10).
+                    ProjectInline(cxr, sink, href, ctx);
+                    break;
                 default:
                     // ParagraphProperties, bookmarks, proofErr, etc. — no inline content.
                     break;
             }
+        }
+
+        if (field.Depth > 0)
+        {
+            // Unterminated / container-spanning field (a w:fldChar begin with no end in this container —
+            // FieldScanState's documented per-container simplification): flush the accumulated RESULT text
+            // rather than discarding it, and count the anomaly (review finding 020-R6 — this walk's
+            // never-silent contract is stronger than the read walk's).
+            AddPlainRun(sink, ExtractRunsDisplayText(field.ResultRuns), href, ctx);
+            ctx.AddWarning("field-unterminated", 1);
         }
     }
 
@@ -2073,7 +2153,10 @@ public sealed class ComposeDocxProjectionBuilder
                     break;
                 case TabChar:
                 case PositionalTab:
-                    sb.Append(' '); // atom-display-text convention (ExtractRunsDisplayText)
+                    // The model has no tab (the read walk renders a non-collapsing compose-tab span):
+                    // flatten to a space with a counted warning — never silently (review finding 020-R3).
+                    sb.Append(' ');
+                    ctx.AddWarning("tab-flattened", 1);
                     break;
                 case Break:
                 case CarriageReturn:
@@ -2146,12 +2229,14 @@ public sealed class ComposeDocxProjectionBuilder
 
     /// <summary>Per-call state for the canonical-model walk: the main part (hyperlink relationships), the
     /// R4.5 numbering model, counted warnings (codes only — Tier-1 safe), and the output-text budget
-    /// (mirrors <see cref="MaxOutputChars"/>; once exhausted, further text is dropped with ONE
-    /// resource-limit warning rather than aborting the whole projection).</summary>
+    /// (mirrors <see cref="MaxOutputChars"/>; once exhausted, further text is dropped with exactly ONE
+    /// <c>resource-limit-output</c> warning — <c>Count</c> stays 1, review finding 020-R13 — rather than
+    /// aborting the whole projection).</summary>
     private sealed class ModelWalkContext
     {
         private readonly Dictionary<string, int> _warnings = new(StringComparer.Ordinal);
         private int _textBudget = MaxOutputChars;
+        private bool _outputWarned;
 
         public ModelWalkContext(MainDocumentPart mainPart, NumberingModel numbering, CancellationToken cancellationToken)
         {
@@ -2183,7 +2268,7 @@ public sealed class ComposeDocxProjectionBuilder
         {
             if (_textBudget <= 0)
             {
-                AddWarning("resource-limit-output", 1);
+                WarnOutputLimitOnce();
                 return string.Empty;
             }
             if (text.Length <= _textBudget)
@@ -2191,10 +2276,22 @@ public sealed class ComposeDocxProjectionBuilder
                 _textBudget -= text.Length;
                 return text;
             }
-            var clipped = text[.._textBudget];
+            var clip = _textBudget;
+            // Never split a surrogate pair at the clip boundary — a lone high surrogate would survive the
+            // renderer's control-char sanitizer and make the rendered package unserializable (review
+            // finding 020-R14).
+            if (char.IsHighSurrogate(text[clip - 1])) clip--;
+            var clipped = text[..clip];
             _textBudget = 0;
-            AddWarning("resource-limit-output", 1);
+            WarnOutputLimitOnce();
             return clipped;
+        }
+
+        private void WarnOutputLimitOnce()
+        {
+            if (_outputWarned) return;
+            _outputWarned = true;
+            AddWarning("resource-limit-output", 1);
         }
     }
 

@@ -88,6 +88,37 @@
 
 **Step-4 scoping (directional deviation, per the re-sequence):** 020 does NOT flip `SaveAsync`'s Imported branch — that is the 010 cutover (gated on 011 carrier-render + 026 hard-tier). 020's POML criterion "NDA saves no-422" is satisfied at the component seam (unique-paraId + no-refusal proofs above); the through-the-wire save proof lands at 010/013 as re-sequenced. Remaining 020 work: model-shape seams for 021–025 (only as needed), publish-size gate, Step 9.5.
 
+## 9. Gate results (2026-08-05, post-Step-3 commit `f3179b819`)
+
+| Gate | Result | Evidence |
+|---|---|---|
+| **Publish size (§10.4 / NFR-01)** | ✅ **46.88 MB compressed incl. PDBs** (145.14 MB uncompressed; PDBs 2.13 MB) — **−1.37 MB vs task-003 baseline 48.25 MB**, 13.12 MB headroom to the 60 MB ceiling. Delta is measurement-noise/master-drift, not growth — this diff adds only code to an existing assembly. | `dotnet publish -c Release` → `deploy/api-publish/`, zip-deflate measure |
+| **No new HIGH CVE (§10.5)** | ✅ Only the pre-existing task-003 baseline: `System.Security.Cryptography.Xml` 8.0.3 (5 High, transitive). **No NEW entries.** | `dotnet list package --vulnerable --include-transitive` |
+| **Tier-1 ArchTests** | ✅ for this task: **ADR-013 "no AI internals in Services/Compose" PASSES** (among 24 green). ⚠️ 4 fails are **PRE-EXISTING from master** (ADR-007 Graph types in `Services.Communication.*`/Office errors; ADR-010 1:1-interface ceiling 76→146; options-pattern) — none of the violating types are in this diff (commit touches only Compose + tests + notes; Communication types last touched by email-r5 merge `e26b66c2f`). Flagged for repo-level follow-up, out of 020 scope. | `dotnet test tests/Spaarke.ArchTests/` 24/28 |
+| **Conflict-check (re-run)** | ✅ CLEAN — no open PR touches the changed files; compose-r5 / fidelity-r4.5 / fix-compose-launch-and-viz / agreements-r1 / analysis-hub-r1 all have zero unmerged commits on `Services/Compose/` or `seam/Compose/`. | PR file-list scan + per-branch `git log origin/master..origin/{b}` |
+| **Step 9.5 code-review + adr-check** | ✅ **adr-check: PASS** (9/9 compliant, 0 violations, 3 Low/Info warnings — all closed: publish-size evidence is this table; docxBridge.ts path is `src/utils/` not `src/widgets/`; seam-category fit by established precedent). ✅ **code-review: APPROVE-WITH-MINORS** — triage + fixes below. | two independent read-only audit agents on `f3179b819`; fixes in the follow-up commit |
+
+### Step 9.5 code-review triage (24 findings → fixed / routed / accepted)
+
+**Fixed in the follow-up commit (10):**
+- **R1/R2 (Major)** — `ListContinuity` doc claimed interrupted ordered runs keep continuity; the renderer demonstrably restarts them. Rewrote the semantics honestly (`PrevOrderedNumId` mirrors the renderer's clear-on-every-non-ordered-block) + added counted `ordered-list-continuity-lost` when a numId re-appears after an interruption/interleave. Renderer-side continuation → **task 021**.
+- **R3 (Major, partial)** — uncounted flattens now counted: `tab-flattened`, `indentation-dropped`, `heading-direct-numbering-dropped`. (Run-formatting beyond b/i/u — color/size/fonts — remains uncounted: routed to **021–025** widening; accepted for the 020 baseline.)
+- **R6 (Major)** — unterminated/container-spanning field no longer silently discards its result text: flushed as plain run + `field-unterminated`.
+- **R7 (Major)** — style-linked numbering on non-Heading styles (FR-12 firm templates): now counted `style-linked-numbering-dropped`; faithful projection → **task 021**.
+- **R8 (Minor)** — ilvl fallback now probes lower THEN higher levels, closing the walk-disagreement window vs the read walk's FirstOrDefault.
+- **R10 (Minor, partial)** — `w:customXml` block + inline wrappers now recurse transparently (text kept). (`w:smartTag`/`w:dir`/`w:bdo` remain default-skipped — read-walk parity, rare legacy; routed to **026** inventory.)
+- **R11 (Minor)** — deleted paragraph mark now counted `tracked-paragraph-mark-flattened`.
+- **R12 (Minor)** — zero-row `w:tbl` no longer emitted (renderer skips them → would break the fixed point): dropped + `empty-table-dropped`.
+- **R13/R14 (Minor/Major-low)** — `ClampText`: warn-once flag (Count stays 1) + surrogate-pair backoff at the clip boundary (a lone high surrogate would make the rendered package unserializable).
+- **R15/R16 (Minor)** — `Warnings` doc contradiction fixed; corpus theory hardened with `Blocks.NotBeEmpty()` (no vacuous pass).
+
+**Routed for operator sign-off (2 flatten-tier decisions):**
+- **R4 (Major)** — ins+del replacement pairs flatten to BOTH texts ("bar"+"foo" → "barfoo"): each half individually defensible (insert kept; deletion rejected = no-text-loss), combined output is neither accepted nor rejected. Both warnings fire. **→ task 025 scope note: model revisions first-class; until then imported docs with pending replacements stay on the surgical path (they do today — the 010 cutover gate).**
+- **R5 (Major)** — unmapped `w:sym` persists U+FFFD into saved bytes (destructive vs the read path's display-only placeholder). Warned (`unmapped-symbol-char`). **→ task 026 hard-tier decision: extend `KnownSymbolGlyphMap` per corpus, or refuse-flatten for unmapped syms.**
+- (Also for R4/R5 context: the model path has NO production caller yet — R23 — so neither behavior ships to users before 010/011 wire it, by which time 025/026 land first per the re-sequenced critical path.)
+
+**Accepted as-is (documented):** R9 row/cell-level wrappers (pre-existing shape parity with `RenderTable`; caught by unrendered-paragraphs guard) → 026 inventory · R17 kind-only stability assertion (Ordered/Level/interior = 021/027 oracles) · R18 comment framing · R19/R20/R21/R22 clean · R23 staged dead code until 010/011 · R24 pre-existing disposal pattern (harmless).
+
 ---
 
-*Steps 1–3 artifact. Checkpoint in `current-task.md`.*
+*Steps 1–3 artifact + gates. Checkpoint in `current-task.md`.*

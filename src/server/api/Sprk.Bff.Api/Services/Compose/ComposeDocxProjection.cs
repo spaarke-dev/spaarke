@@ -150,7 +150,8 @@ public sealed record ComposeCanonicalModelProjection
     public ComposeContentModel Model { get; init; } = new();
 
     /// <summary>Counted flatten/degradation warnings (codes + counts only — Tier-1 safe, no document
-    /// text). Non-empty ⇒ <see cref="Status"/> is <see cref="ComposeProjectionStatus.Partial"/>.</summary>
+    /// text). On a COMPLETED walk, non-empty warnings ⇒ <see cref="ComposeProjectionStatus.Partial"/>;
+    /// a <see cref="Failed"/> envelope also carries its diagnostic code here (review finding 020-R15).</summary>
     public IReadOnlyList<ComposeProjectionWarning> Warnings { get; init; } = Array.Empty<ComposeProjectionWarning>();
 
     /// <summary>Fail-closed factory — mirrors <see cref="ComposeDocxProjection.Failed"/>.</summary>

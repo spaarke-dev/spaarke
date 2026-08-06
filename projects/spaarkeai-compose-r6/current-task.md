@@ -2,12 +2,14 @@
 
 > Active-task tracker for context recovery. Reset per root `CLAUDE.md` §7 as tasks complete.
 
-## Status: Phase 0 ✅ · RE-SEQUENCED (model-first) ✅ · Active task → **020 IN PROGRESS** (Steps 0–3 ✅ · projector SHIPPED, 12/12 seam green · next: remaining 020 gates)
+## Status: Phase 0 ✅ · RE-SEQUENCED (model-first) ✅ · Active task → **020 GATES COMPLETE** (Steps 0–3 + all gates + Step 9.5 ✅ · review fixes applied · next: decide 020-done vs. 021-seam extras)
 
 - **Project**: `spaarkeai-compose-r6`
 - **Branch**: `work/spaarkeai-compose-r6` (pushed; 0 behind master as of 2026-08-05)
-- **Active task**: **020** — Canonical document model hub (generalize ComposeContentModel/projection; build docx→canonical-model projection + render-out wiring). FULL, **opus**/high. deps 001, 004 (both ✅).
-- **Status**: 020 STARTED. Steps 0–2 complete: rigor declared (FULL/opus/high), /conflict-check CLEAN (re-run before BFF PR), code map + design done. **Design = [notes/020-canonical-hub-design.md](notes/020-canonical-hub-design.md)** (READ FIRST on resume). Next: **Step 3 — implement the `docx→ComposeContentModel` projector** (lenient/total; reuse existing traversal + `NumberingComputationEngine:1357`).
+- **Active task**: **020** — Canonical document model hub. FULL, **opus**/high (executed on Fable 5). deps 001, 004 (both ✅).
+- **Status**: projector shipped (`f3179b819`) + **ALL GATES PASSED** + **Step 9.5 DONE** (adr-check PASS 0-violations; code-review APPROVE-WITH-MINORS → 10 findings FIXED in follow-up commit, 2 routed for operator sign-off to 025/026, rest accepted/documented). **Design + gates + triage = [notes/020-canonical-hub-design.md](notes/020-canonical-hub-design.md) §8-§9** (READ FIRST on resume).
+- **Gates**: publish 46.88 MB (−1.37 vs baseline, ≤60 ✅) · no NEW HIGH CVE ✅ · ADR-013 ArchTest PASSES (4 pre-existing master fails documented) · conflict-check CLEAN ✅.
+- **⚠️ Operator sign-off pending (flatten-tier decisions, no user impact until 010/011 wire the caller):** R4 ins+del→"barfoo" (→025) · R5 U+FFFD persisted for unmapped w:sym (→026).
 
 ### 🧭 Task 020 design (locked this session — key decisions)
 - **Hub = `ComposeContentModel` (body, widened by 021–025) + server-retained source package ("carrier" = styles/numbering/hdr-ftr/theme/sectPr).** EXTENSION, not a parallel model → does NOT trip escalation trigger #1.

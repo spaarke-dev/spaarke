@@ -58,6 +58,8 @@ public sealed class ComposeCanonicalModelRoundTripSeamTests
         projection.Status.Should().NotBe(ComposeProjectionStatus.Failed,
             $"'{docName}' is a valid corpus doc — the canonical-model projection is TOTAL and must not fail-close on it " +
             $"(warnings: {string.Join(", ", projection.Warnings.Select(w => $"{w.Code}×{w.Count}"))})");
+        projection.Model.Blocks.Should().NotBeEmpty(
+            $"'{docName}' contains prose — a zero-block projection would make the rest of this round-trip vacuous (review finding 020-R16)");
 
         // 2. model → docx: the renderer authors a valid, openable package from the projected model.
         var rendered = new ComposeDocumentRenderer().SynthesizeDocument(projection.Model, author: "seam-test");
