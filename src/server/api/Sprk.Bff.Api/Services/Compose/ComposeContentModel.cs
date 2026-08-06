@@ -102,6 +102,11 @@ public sealed record ComposeBlock
     /// non-list blocks (task 021 / review 020-R1: the renderer keeps the current ordered instance open until
     /// a <c>StartsNewList</c> item or a table-cell boundary, mirroring Word's per-<c>numId</c> counters).
     /// Ignored when <see cref="NumId"/> is set (source identity is authoritative) and for other kinds.
+    /// NOTE (Step-9.5 F6): when set by the SERVER projection this flag is scoped PER CONTAINER ("first
+    /// appearance of the numId in this body/cell walk") while <see cref="NumId"/> continuity is
+    /// DOCUMENT-scoped — a numId seen in the body and again inside a table cell is flagged
+    /// <c>StartsNewList=true</c> in the cell yet renders as (and Word displays) a CONTINUATION of the same
+    /// instance. Consumers must key continuity decisions on <see cref="NumId"/>, not this flag.
     /// </summary>
     public bool StartsNewList { get; init; }
 

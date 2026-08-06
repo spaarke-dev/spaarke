@@ -89,11 +89,12 @@ public sealed class ComposeNumberingCanonicalModelSeamTests
         Runs = new[] { new ComposeInlineRun { Text = text } },
     };
 
-    private static ComposeBlock BulletItem(string text, int level = 0) => new()
+    private static ComposeBlock BulletItem(string text, int level = 0, int? numId = null) => new()
     {
         Kind = ComposeBlockKind.ListItem,
         Level = level,
         Ordered = false,
+        NumId = numId,
         Runs = new[] { new ComposeInlineRun { Text = text } },
     };
 
@@ -287,5 +288,110 @@ public sealed class ComposeNumberingCanonicalModelSeamTests
         labels[0].Should().Be("1.");
         labels[2].Should().Be("2.", "the nested bullet must not break the parent ordered run");
         labels[3].Should().Be("3.", "StartsNewList=false continues the run across intervening prose (020-R1 contract)");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 7. Step-9.5 fix F1 — the nested-SIBLING shapes the flattened TipTap model conveys only through
+    //    LEVEL transitions (the live mapper never flags nested lists StartsNewList).
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void SynthesizeDocument_NestedSiblingOrderedListsUnderBullets_EachRestartsAtOne()
+    {
+        // TipTap: bulletList > [item(+nested ol×2), item(+nested ol×2)] — flattened, the two nested
+        // ordered lists are separated only by the parent bullet. Each must render as a DISTINCT list
+        // restarting at 1 (matching the editor display) — under a naive no-clear contract the second
+        // would continue the first's counter ("3., 4.").
+        var model = new ComposeContentModel
+        {
+            Blocks = new[]
+            {
+                BulletItem("Parent A"),
+                OrderedItem("A sub one", level: 1),
+                OrderedItem("A sub two", level: 1),
+                BulletItem("Parent B"),
+                OrderedItem("B sub one", level: 1),
+                OrderedItem("B sub two", level: 1),
+            },
+        };
+
+        var labels = ComputedLabelSequence(_renderer.SynthesizeDocument(model, author: "seam-test"));
+
+        labels.Should().HaveCount(6);
+        labels[1].Should().Be("1.");
+        labels[2].Should().Be("2.");
+        labels[4].Should().Be("1.", "a parent bullet closes the nested ordered run — the second nested list restarts");
+        labels[5].Should().Be("2.");
+    }
+
+    [Fact]
+    public void SynthesizeDocument_NestedOrderedInsideOrderedList_SharesParentInstanceAndResetsOnParentIncrement()
+    {
+        // TipTap: orderedList > [item(+nested ol), item(+nested ol)] — the nested items inherit the
+        // parent's instance at a deeper ilvl (Word's multi-level idiom), so the parent CONTINUES after
+        // the nested list ("2.") and the re-entered nested list restarts by Word's own deeper-level
+        // reset ("1.") — no explicit boundary flag needed.
+        var model = new ComposeContentModel
+        {
+            Blocks = new[]
+            {
+                OrderedItem("Parent one", startsNewList: true),
+                OrderedItem("Sub a", level: 1),
+                OrderedItem("Sub b", level: 1),
+                OrderedItem("Parent two"),
+                OrderedItem("Sub c", level: 1),
+            },
+        };
+
+        var labels = ComputedLabelSequence(_renderer.SynthesizeDocument(model, author: "seam-test"));
+
+        labels.Should().Equal(new[] { "1.", "1.", "2.", "2.", "1." },
+            "nested ordered items share the parent instance at deeper ilvl; the parent increment resets the deeper counter");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 8. Step-9.5 fix F2 — foreign-carrier kind guard: a source NumId that coincidentally exists in the
+    //    carrier but classifies as the WRONG KIND at the item's level must fall back to allocation, not
+    //    bind the item to a scheme that would render a glyph where the source showed a number (or vice
+    //    versa).
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void RenderIntoCarrier_CoincidentNumIdOfWrongKind_FallsBackToAllocationInsteadOfBindingTheWrongScheme()
+    {
+        // multilevel-1-1-1.docx's single instance is ORDERED (decimal at every level). A BULLET item
+        // carrying that same numId is a kind mismatch — it must NOT reference the carrier instance.
+        var carrier = LoadExemplar("multilevel-1-1-1.docx");
+        int carrierNumId;
+        using (var doc = WordprocessingDocument.Open(new MemoryStream(carrier, writable: false), isEditable: false))
+        {
+            carrierNumId = doc.MainDocumentPart!.NumberingDefinitionsPart!.Numbering!
+                .Elements<DocumentFormat.OpenXml.Wordprocessing.NumberingInstance>()
+                .First().NumberID!.Value;
+        }
+
+        var model = new ComposeContentModel
+        {
+            Blocks = new[]
+            {
+                BulletItem("wrong-kind bullet", numId: carrierNumId),
+                OrderedItem("right-kind ordered", numId: carrierNumId),
+            },
+        };
+
+        var rendered = _renderer.RenderIntoCarrier(carrier, model, author: "seam-test");
+
+        using var renderedDoc = WordprocessingDocument.Open(new MemoryStream(rendered, writable: false), isEditable: false);
+        var renderedNumIds = renderedDoc.MainDocumentPart!.Document!.Body!
+            .Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>()
+            .Select(p => p.ParagraphProperties?.NumberingProperties?.NumberingId?.Val?.Value)
+            .Where(id => id is not null)
+            .ToList();
+
+        renderedNumIds.Should().HaveCount(2);
+        renderedNumIds[0].Should().NotBe(carrierNumId,
+            "a bullet item must not bind an ordered carrier scheme — the kind guard falls back to the renderer's bullet instance");
+        renderedNumIds[0].Should().BeGreaterThan(carrierNumId, "fallback instances allocate above the carrier's max numId");
+        renderedNumIds[1].Should().Be(carrierNumId, "the kind-compatible ordered item still references the carrier instance directly");
     }
 }

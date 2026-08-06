@@ -236,8 +236,22 @@ public sealed partial class ComposeDocumentRenderer
             // Deliberately NOT a new w:sectPr (see remarks).
             body.AppendChild(new Paragraph(new Run(new Break { Type = BreakValues.Page })));
 
+            // Defensive list path (Step-9.5 fix F5): mirror RenderIntoCarrier's collision-safe scan — the
+            // old blank-package plan allocated from FirstListNumInstanceId regardless of the target's own
+            // numbering, so an appended list could capture (or dangle against) an existing target instance.
+            // Gated on list presence like RenderIntoCarrier (011-T2: list-free appends never touch the part).
             var plan = new NumberingPlan();
-            RenderBlocks(body, blocks, new ListRenderState(plan));
+            var state = new ListRenderState(plan);
+            var maxExistingAbstractId = 0;
+            if (ModelContainsListItem(blocks))
+            {
+                var targetNumbering = ScanCarrierNumbering(docxBytes);
+                maxExistingAbstractId = targetNumbering.MaxAbstractNumId;
+                plan = new NumberingPlan(Math.Max(FirstListNumInstanceId, targetNumbering.MaxNumId + 1));
+                state = new ListRenderState(plan, targetNumbering);
+            }
+
+            RenderBlocks(body, blocks, state);
 
             // G5 (FR-05, task 033): resolve any href-sentinels in the appended section too (parity with
             // SynthesizeDocument; the Summary Page generator emits none today, so this is a no-op there).
@@ -245,15 +259,27 @@ public sealed partial class ComposeDocumentRenderer
 
             // Defensive: only exercised if a future caller passes Heading/ListItem/Table blocks (the Summary
             // Page generator does not). Adds the required part ONLY when the target doesn't already carry
-            // one — never a second StyleDefinitionsPart/NumberingDefinitionsPart (Word would not merge two).
+            // one — never a second StyleDefinitionsPart/NumberingDefinitionsPart (Word would not merge two;
+            // an EXISTING part gets the same collision-safe merge as RenderIntoCarrier, F5).
             if (mainPart.StyleDefinitionsPart is null && blocks.Any(b => b.Kind == ComposeBlockKind.Heading))
             {
                 AddStyleDefinitions(mainPart);
             }
 
-            if (mainPart.NumberingDefinitionsPart is null && (plan.OrderedInstanceIds.Count > 0 || plan.BulletInstanceId is not null))
+            if (plan.OrderedInstanceIds.Count > 0 || plan.BulletInstanceId is not null)
             {
-                AddNumberingDefinitions(mainPart, plan);
+                if (mainPart.NumberingDefinitionsPart is null)
+                {
+                    AddNumberingDefinitions(mainPart, plan);
+                }
+                else
+                {
+                    MergeNumberingDefinitions(
+                        mainPart.NumberingDefinitionsPart,
+                        plan,
+                        orderedAbstractId: maxExistingAbstractId + 1,
+                        bulletAbstractId: maxExistingAbstractId + 2);
+                }
             }
 
             if (trailingSectPr is not null)
@@ -406,7 +432,7 @@ public sealed partial class ComposeDocumentRenderer
                 var carrierNumbering = ScanCarrierNumbering(carrierBytes);
                 maxExistingAbstractId = carrierNumbering.MaxAbstractNumId;
                 plan = new NumberingPlan(Math.Max(FirstListNumInstanceId, carrierNumbering.MaxNumId + 1));
-                state = new ListRenderState(plan, carrierNumbering.NumIds);
+                state = new ListRenderState(plan, carrierNumbering);
             }
 
             RenderBlocks(body, model.Blocks, state);
@@ -554,49 +580,84 @@ public sealed partial class ComposeDocumentRenderer
 
     private void RenderBlocks(OpenXmlElement container, IReadOnlyList<ComposeBlock> blocks, ListRenderState state)
     {
-        // Ordered-list continuity (task 021, review 020-R1): the model contract — not block adjacency —
-        // governs instance selection. An item carrying a source NumId resolves through ListRenderState
-        // (carrier-direct or per-source-id mapped), so same source numId ⇒ same rendered instance and an
-        // interrupted run CONTINUES exactly as Word's per-numId counters do. A NumId-less (born-in-editor)
-        // item continues the CURRENT ordered instance unless it flags StartsNewList — intervening
-        // non-list blocks no longer break the run (the live client mapper flags every distinct top-level
-        // ordered list StartsNewList=true, so restarts remain explicit). currentOrderedNumId is local per
-        // container: a table-cell boundary still starts fresh (a list never continues across cells).
-        int? currentOrderedNumId = null;
+        // Ordered-list continuity (task 021, review 020-R1 + Step-9.5 fix F1): the model contract — not
+        // block adjacency — governs instance selection. An item carrying a source NumId resolves through
+        // ListRenderState (carrier-direct or per-source-id mapped), so same source numId ⇒ same rendered
+        // instance and an interrupted run CONTINUES exactly as Word's per-numId counters do.
+        //
+        // NumId-less (born-in-editor) items use PER-LEVEL run state, mirroring the TipTap nesting the
+        // client mapper flattens from (docxBridge.buildContentModel: startsNewList=true only on a
+        // top-level list's first item; nested lists are never flagged — their boundaries are conveyed by
+        // LEVEL transitions):
+        //   - an ordered item at level L continues the run AT ITS LEVEL; with no run at L it inherits the
+        //     NEAREST SHALLOWER active ordered instance (Word's one-instance-deeper-ilvl idiom — a nested
+        //     ordered list inside an ordered list is the same w:num, and Word's deeper-level reset makes a
+        //     re-entered nested list restart at 1 by itself);
+        //   - ANY list item closes runs DEEPER than its level, and a bullet also closes the run AT its
+        //     level (in the flattened TipTap shape a same-level bullet means that ordered list node
+        //     ended — so two nested ordered lists separated by a parent bullet get DISTINCT instances and
+        //     each restarts at 1, matching the editor display);
+        //   - a non-list block closes NESTED runs (level ≥ 1) but leaves the level-0 run continuable —
+        //     StartsNewList=false continues across intervening prose (the 020-R1 contract; the live
+        //     mapper flags every distinct top-level ordered list StartsNewList=true, so top-level
+        //     restarts remain explicit);
+        //   - StartsNewList=true always allocates a fresh restart-at-1 instance.
+        // State is local per container: a table-cell boundary starts fresh (a NumId-less list never
+        // continues across cells).
+        var orderedRunByLevel = new Dictionary<int, int>();
+
+        void CloseRunsDeeperThan(int level)
+        {
+            foreach (var key in orderedRunByLevel.Keys.Where(k => k > level).ToList())
+            {
+                orderedRunByLevel.Remove(key);
+            }
+        }
 
         foreach (var block in blocks)
         {
             switch (block.Kind)
             {
                 case ComposeBlockKind.Heading:
+                    CloseRunsDeeperThan(0);
                     container.AppendChild(BuildHeading(block));
                     break;
 
                 case ComposeBlockKind.ListItem when block.Ordered:
+                    var level = Math.Clamp(block.Level, 0, 8);
                     int effectiveNumId;
                     if (block.NumId is int sourceNumId)
                     {
-                        effectiveNumId = state.ResolveOrdered(sourceNumId);
+                        effectiveNumId = state.ResolveOrdered(sourceNumId, level);
                     }
-                    else if (currentOrderedNumId is null || block.StartsNewList)
+                    else if (!block.StartsNewList && orderedRunByLevel.TryGetValue(level, out var currentRun))
                     {
-                        effectiveNumId = state.Plan.NewOrderedInstance();
+                        effectiveNumId = currentRun;
+                    }
+                    else if (!block.StartsNewList && TryNearestShallowerRun(orderedRunByLevel, level, out var inherited))
+                    {
+                        effectiveNumId = inherited;
                     }
                     else
                     {
-                        effectiveNumId = currentOrderedNumId.Value;
+                        effectiveNumId = state.Plan.NewOrderedInstance();
                     }
-                    // A following NumId-less continuation item joins THIS list (natural editing: the user
-                    // adds an item to an imported list and it numbers with it).
-                    currentOrderedNumId = effectiveNumId;
+                    // A following NumId-less continuation item at this level joins THIS list (natural
+                    // editing: the user adds an item to an imported list and it numbers with it).
+                    orderedRunByLevel[level] = effectiveNumId;
+                    CloseRunsDeeperThan(level);
                     container.AppendChild(BuildListItem(block, effectiveNumId));
                     break;
 
                 case ComposeBlockKind.ListItem: // bullet
-                    container.AppendChild(BuildListItem(block, state.ResolveBullet(block.NumId)));
+                    var bulletLevel = Math.Clamp(block.Level, 0, 8);
+                    orderedRunByLevel.Remove(bulletLevel);
+                    CloseRunsDeeperThan(bulletLevel);
+                    container.AppendChild(BuildListItem(block, state.ResolveBullet(block.NumId, bulletLevel)));
                     break;
 
                 case ComposeBlockKind.Table:
+                    CloseRunsDeeperThan(0);
                     if (block.Table is { Rows.Count: > 0 })
                     {
                         container.AppendChild(BuildTable(block.Table, state));
@@ -605,10 +666,26 @@ public sealed partial class ComposeDocumentRenderer
 
                 case ComposeBlockKind.Paragraph:
                 default:
+                    CloseRunsDeeperThan(0);
                     container.AppendChild(BuildParagraph(block));
                     break;
             }
         }
+    }
+
+    /// <summary>The nearest ACTIVE ordered run shallower than <paramref name="level"/> (a NumId-less
+    /// nested ordered item joins its parent's instance at a deeper ilvl — Word's multi-level idiom).</summary>
+    private static bool TryNearestShallowerRun(Dictionary<int, int> orderedRunByLevel, int level, out int numId)
+    {
+        for (var probe = level - 1; probe >= 0; probe--)
+        {
+            if (orderedRunByLevel.TryGetValue(probe, out numId))
+            {
+                return true;
+            }
+        }
+        numId = 0;
+        return false;
     }
 
     private static Paragraph BuildParagraph(ComposeBlock block)
@@ -1185,22 +1262,25 @@ public sealed partial class ComposeDocumentRenderer
     /// </summary>
     private sealed class ListRenderState
     {
-        private static readonly IReadOnlySet<int> Empty = new HashSet<int>();
-        private readonly IReadOnlySet<int> _carrierNumIds;
+        private readonly CarrierNumberingScan? _carrier;
         private readonly Dictionary<int, int> _orderedBySourceId = new();
 
-        public ListRenderState(NumberingPlan plan, IReadOnlySet<int>? carrierNumIds = null)
+        public ListRenderState(NumberingPlan plan, CarrierNumberingScan? carrier = null)
         {
             Plan = plan;
-            _carrierNumIds = carrierNumIds ?? Empty;
+            _carrier = carrier;
         }
 
         public NumberingPlan Plan { get; }
 
-        /// <summary>Effective instance id for an ordered item carrying <paramref name="sourceNumId"/>.</summary>
-        public int ResolveOrdered(int sourceNumId)
+        /// <summary>Effective instance id for an ordered item carrying <paramref name="sourceNumId"/> at
+        /// <paramref name="level"/>: carrier-direct when the id exists there AND its level classifies as
+        /// ordered (Step-9.5 fix F2 — a coincident id in a FOREIGN carrier whose scheme is a bullet at
+        /// this level would render a glyph where the source showed a number); else per-source-id mapped.</summary>
+        public int ResolveOrdered(int sourceNumId, int level)
         {
-            if (_carrierNumIds.Contains(sourceNumId))
+            if (_carrier is not null && _carrier.ContainsNumId(sourceNumId)
+                && _carrier.IsKindCompatible(sourceNumId, level, ordered: true))
             {
                 return sourceNumId;
             }
@@ -1213,52 +1293,156 @@ public sealed partial class ComposeDocumentRenderer
         }
 
         /// <summary>Effective instance id for a bullet item: carrier-direct when the source id exists there
-        /// (preserves the carrier's bullet glyph scheme); otherwise the shared renderer bullet instance (the
-        /// glyph scheme is not model data — all fallback bullets share one instance).</summary>
-        public int ResolveBullet(int? sourceNumId) =>
-            sourceNumId is int src && _carrierNumIds.Contains(src) ? src : Plan.BulletInstance();
+        /// AND classifies as a bullet at <paramref name="level"/> (preserves the carrier's glyph scheme);
+        /// otherwise the shared renderer bullet instance (the glyph scheme is not model data — all fallback
+        /// bullets share one instance).</summary>
+        public int ResolveBullet(int? sourceNumId, int level) =>
+            sourceNumId is int src && _carrier is not null && _carrier.ContainsNumId(src)
+                && _carrier.IsKindCompatible(src, level, ordered: false)
+                ? src
+                : Plan.BulletInstance();
     }
 
-    /// <summary>The carrier numbering facts <see cref="RenderIntoCarrier"/> needs BEFORE rendering.</summary>
-    private readonly record struct CarrierNumberingScan(IReadOnlySet<int> NumIds, int MaxNumId, int MaxAbstractNumId);
+    /// <summary>
+    /// The carrier numbering facts <see cref="RenderIntoCarrier"/> needs BEFORE rendering: the referencable
+    /// <c>w:num</c> id set, the collision-safe allocation base (max instance/abstract ids), and a
+    /// per-(instance, level) ordered-vs-bullet classification for the F2 kind guard.
+    /// </summary>
+    private sealed class CarrierNumberingScan
+    {
+        private readonly HashSet<int> _numIds = new();
+        private readonly Dictionary<int, int> _abstractByNumId = new();
+        private readonly Dictionary<(int AbstractId, int Level), bool> _bulletByAbstractLevel = new();
+        private readonly Dictionary<(int NumId, int Level), bool> _bulletByInstanceOverride = new();
+
+        public int MaxNumId { get; private set; }
+        public int MaxAbstractNumId { get; private set; }
+
+        public bool ContainsNumId(int numId) => _numIds.Contains(numId);
+
+        /// <summary>
+        /// Whether the carrier instance's scheme at <paramref name="level"/> matches the item's kind.
+        /// Tolerant probe (exact level, then nearer-lower, then higher — mirroring the projector's
+        /// <c>ResolveOrderedFromModel</c> posture); an UNCLASSIFIABLE id/level returns compatible — the
+        /// designed same-source carrier always matches, so unknown defaults to direct reference.
+        /// </summary>
+        public bool IsKindCompatible(int numId, int level, bool ordered)
+        {
+            var isBullet = ResolveBulletness(numId, level);
+            return isBullet is null || isBullet.Value != ordered;
+        }
+
+        private bool? ResolveBulletness(int numId, int level)
+        {
+            if (_bulletByInstanceOverride.TryGetValue((numId, level), out var overridden))
+            {
+                return overridden;
+            }
+            if (!_abstractByNumId.TryGetValue(numId, out var abstractId))
+            {
+                return null;
+            }
+            if (_bulletByAbstractLevel.TryGetValue((abstractId, level), out var exact))
+            {
+                return exact;
+            }
+            for (var probe = level - 1; probe >= 0; probe--)
+            {
+                if (_bulletByAbstractLevel.TryGetValue((abstractId, probe), out var lower))
+                {
+                    return lower;
+                }
+            }
+            for (var probe = level + 1; probe <= 8; probe++)
+            {
+                if (_bulletByAbstractLevel.TryGetValue((abstractId, probe), out var higher))
+                {
+                    return higher;
+                }
+            }
+            return null;
+        }
+
+        public void RecordAbstract(AbstractNum abstractNum)
+        {
+            if (abstractNum.AbstractNumberId?.Value is not int abstractId)
+            {
+                return;
+            }
+            MaxAbstractNumId = Math.Max(MaxAbstractNumId, abstractId);
+            foreach (var level in abstractNum.Elements<Level>())
+            {
+                if (level.LevelIndex?.Value is int ilvl && level.NumberingFormat?.Val is { } fmt)
+                {
+                    _bulletByAbstractLevel[(abstractId, ilvl)] = fmt.Value == NumberFormatValues.Bullet;
+                }
+            }
+        }
+
+        public void RecordInstance(NumberingInstance instance)
+        {
+            if (instance.NumberID?.Value is not int numId)
+            {
+                return;
+            }
+            _numIds.Add(numId);
+            MaxNumId = Math.Max(MaxNumId, numId);
+            if (instance.AbstractNumId?.Val?.Value is int abstractId)
+            {
+                _abstractByNumId[numId] = abstractId;
+            }
+            // A w:lvlOverride carrying a FULL w:lvl redefinition can change the level's numFmt for this
+            // instance only — record it so the kind guard sees the instance-effective classification.
+            foreach (var levelOverride in instance.Elements<LevelOverride>())
+            {
+                if (levelOverride.LevelIndex?.Value is int ilvl
+                    && levelOverride.GetFirstChild<Level>()?.NumberingFormat?.Val is { } fmt)
+                {
+                    _bulletByInstanceOverride[(numId, ilvl)] = fmt.Value == NumberFormatValues.Bullet;
+                }
+            }
+        }
+    }
 
     /// <summary>
     /// Task 021: inspects the carrier's numbering part via a SEPARATE READ-ONLY open of the carrier bytes —
     /// never the editable package, whose Numbering DOM would be marked for autoSave re-serialization by the
-    /// mere read (the 011-T2 preserve-parts hazard). Returns the carrier's <c>w:num</c> id set (for direct
-    /// reference) and max instance/abstract ids (the collision-safe allocation base).
+    /// mere read (the 011-T2 preserve-parts hazard). Returns the carrier's <c>w:num</c> id set + kind
+    /// classification (for direct reference) and max instance/abstract ids (the collision-safe allocation
+    /// base). A malformed numbering part surfaces as <see cref="ComposePatchException"/> (Step-9.5 fix F4 —
+    /// the package-level open is lazy, so bytes that passed the editable open can still fail the part parse
+    /// here).
     /// </summary>
     private static CarrierNumberingScan ScanCarrierNumbering(byte[] carrierBytes)
     {
-        using var stream = new MemoryStream(carrierBytes, writable: false);
-        using var doc = WordprocessingDocument.Open(stream, isEditable: false);
-        var numbering = doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
-        if (numbering is null)
+        try
         {
-            return new CarrierNumberingScan(new HashSet<int>(), 0, 0);
-        }
-
-        var numIds = new HashSet<int>();
-        var maxNumId = 0;
-        foreach (var instance in numbering.Elements<NumberingInstance>())
-        {
-            if (instance.NumberID?.Value is int id)
+            using var stream = new MemoryStream(carrierBytes, writable: false);
+            using var doc = WordprocessingDocument.Open(stream, isEditable: false);
+            var scan = new CarrierNumberingScan();
+            var numbering = doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
+            if (numbering is null)
             {
-                numIds.Add(id);
-                maxNumId = Math.Max(maxNumId, id);
+                return scan;
             }
-        }
 
-        var maxAbstractId = 0;
-        foreach (var abstractNum in numbering.Elements<AbstractNum>())
-        {
-            if (abstractNum.AbstractNumberId?.Value is int id)
+            foreach (var abstractNum in numbering.Elements<AbstractNum>())
             {
-                maxAbstractId = Math.Max(maxAbstractId, id);
+                scan.RecordAbstract(abstractNum);
             }
+            foreach (var instance in numbering.Elements<NumberingInstance>())
+            {
+                scan.RecordInstance(instance);
+            }
+            return scan;
         }
-
-        return new CarrierNumberingScan(numIds, maxNumId, maxAbstractId);
+        catch (Exception ex) when (ex is not ComposePatchException and not OutOfMemoryException)
+        {
+            throw new ComposePatchException(
+                ComposePatchErrorKind.MalformedDocument,
+                "The carrier .docx numbering part is not readable.",
+                ex);
+        }
     }
 
     /// <summary>

@@ -211,4 +211,44 @@ references).
 
 ---
 
+### §11.1 Task 021 Step 9.5 triage (2026-08-06, commit `cc9ac812b` + fix commit)
+
+**adr-check: PASS 8/8** (independent re-run of the ADR-013 facade arch test included; test-replacement
+question resolved — old restart scenario preserved verbatim by the explicit-restart companion, coverage
+widened not narrowed).
+
+**code-review: REQUEST-CHANGES → all findings resolved:**
+- **F1 (Major, live-path) FIXED** — nested sibling ordered lists merged under the scalar no-clear
+  contract (the mapper flags only TOP-level lists; nested boundaries are conveyed by LEVEL transitions).
+  Fix: `RenderBlocks` per-level run state — a list item closes deeper runs; a bullet also closes the run
+  AT its level; non-list blocks close nested runs but keep level 0 continuable (020-R1 contract); a
+  NumId-less nested ordered item INHERITS the nearest shallower active instance (Word's
+  one-instance-deeper-ilvl idiom → parent continues after the nested list; re-entered nested list
+  restarts via Word's own deeper-level reset). Seam: nested-sibling restart + ordered-in-ordered facts.
+- **F2 (Major, forward-looking / task-030 foreign carriers) FIXED** — coincident carrier numId of the
+  WRONG KIND no longer binds: `CarrierNumberingScan` now classifies (instance, level) ordered-vs-bullet
+  (abstract levels + w:lvlOverride full-lvl redefinitions; tolerant lower-then-higher probe mirroring
+  `ResolveOrderedFromModel`); unknown classification defaults to compatible (same-source trust). Seam:
+  wrong-kind fallback fact on multilevel-1-1-1 as carrier.
+- **F3 (Minor, documented deferral)** — client numId carry-through on edit-and-repost stays routed to
+  010/012 (contract comment already instructs preservation). No action here.
+- **F4 (Minor) FIXED** — `ScanCarrierNumbering` wraps part-parse failures in
+  `ComposePatchException(MalformedDocument)` (lazy package open meant bytes passing the editable open
+  could still fail the DOM parse unwrapped).
+- **F5 (Minor) FIXED** — `AppendSection`'s defensive list path now mirrors `RenderIntoCarrier`:
+  gated target scan, allocation above target max, Add-or-Merge (was: blank-package ids + add-only →
+  latent dangle/capture on targets with an existing numbering part).
+- **F6 (Minor) FIXED** — `StartsNewList` doc now states per-container scoping vs document-scoped NumId
+  continuity (consumers must key continuity on NumId).
+
+**Post-fix gates:** Compose seam+unit 691/694 (same 3 pre-existing reds). Build 0 errors.
+**Publish-size note (measurement honesty):** clean-worktree fresh publish of this task's commit =
+**46.89 MB incl. PDBs** vs parent commit 46.89 MB — single-task delta **+0.01 MB** (DLL +4 KB). The
+main local worktree's fresh publish reports 50.92 MB solely because its `Sprk.Bff.Api.pdb` comes out
+6.3 MB vs 2.1 MB in a clean checkout — a LOCAL environment artifact (verified per-file diff: pdb is
+the entire delta), not commit payload; CI/deploy build from clean checkouts. Baseline comparison:
+−1.36 MB vs the 48.25 MB task-003 baseline; ≤60 ceiling ✓.
+
+---
+
 *Steps 1–3 artifact + gates + tasks 020/011/021 records. Checkpoint in `current-task.md`.*
