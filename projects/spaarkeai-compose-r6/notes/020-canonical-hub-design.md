@@ -821,4 +821,42 @@ tsc at the 28-error pre-existing baseline (sibling dist), zero new.
 
 ---
 
-*Steps 1–3 artifact + gates + tasks 020/011/021/022/023/024/025/026/010/012 records. Checkpoint in `current-task.md`.*
+## 19. Task 013 — NDA no-422 seam + regression proof; zero-red suite floor (2026-08-06)
+
+**Spec FR-01/FR-02/NFR-05 + the five 012-routed obligations.** The production 422 is now a permanent CI
+regression, and the suite floor is ZERO expected reds.
+
+- **RenderOnSaveSeamTests** (seam KEEP path): the full wire round-trip — NDA load (contentModel non-null)
+  → JsonNode edit (Inserted-revision run, author omitted → server attributes) → save 200 (explicit
+  not-422), versionId non-empty, ONE ReplaceFileContent (append-only SPE version per task 002) → OpenXML
+  oracles on persisted bytes (InsertedRun marker · unique paraIds · "For: Appligent, Inc.") → REOPEN
+  round-trip shows the edit. MAINTAIN-class.
+- **NdaSaveNo422RegressionTests** (regression KEEP path): (1) post-cutover shape + HOSTILE count-mismatched
+  paraIdMap → 200 never 422 (the exact count-gate mismatch class that started the production chain);
+  (2) mixed contract with op-log → 200, op-log-ignored on the wire, reanchorSummary AND partialApply null
+  (engine-path markers absent — behavioral no-surgical-execution proof), op text absent from EVERY
+  decompressed OPC part. MAINTAIN-class.
+- **The 3 pre-existing NDA reds RE-BASELINED green** (each documents a design contract, not test-shopping):
+  TextExactness skips w:txbxContent interiors + unchosen mc:Fallback branches (026 accept-flatten — the
+  host-level presence is pinned by ComposeHardTierDegradationSeamTests); AppendSection byte-identity
+  exempts paragraphs whose subtree carries SOURCE-duplicated paraIds (the E2 dedup re-mints those ids —
+  ids-stripped comparison proves nothing ELSE changed); MintAndPersist asserts NO NEW duplicates
+  (fill-gaps-only safety contract preserves source duplicates; render-side AssignParaIds dedups at save).
+- **F6 (012-review)**: `ScanCarrierComments` (id → joined text, projection-parity join) + the
+  `comment-id-collision` warn when a model comment id matches a carrier comment whose text differs
+  (prefix-tolerant for the clamp) — the anchor-binds-to-wrong-comment case is now wire-visible.
+- **F7 (012-review)**: `contentModelWarnings` additive on ALL mount doors (load/upload/project wire +
+  LoadComposeDocumentResult + ComposeMountProjection) — the canonical projection's flatten warnings; the
+  CLIENT retains them (`loadedContentModelWarnings`, same lifecycle as the model) and folds them into the
+  FIRST model-path save's degradation banner (variadic merge, per-code sums), cleared on model adoption
+  (saveSucceeded.contentModel invariant); op-log saves never fold (loss doesn't materialize there).
+
+**Suites**: server 985/985 (Compose filter + new files — ZERO reds); client renderOnSave 11/11 +
+reducer 14/14 + BannerStack 24/24 + saveBaseline 6/6 + importedModel 22/22; tsc 28-error pre-existing
+baseline. Remaining 013-routed residuals for 014/027: R4.5 T-2 narrative refresh (/project mint+echo);
+transitional-telemetry dashboards note; post-save re-projection perf watch; 027's multi-author redlined
+corpus fixture (025-F6).
+
+---
+
+*Steps 1–3 artifact + gates + tasks 020/011/021/022/023/024/025/026/010/012/013 records. Checkpoint in `current-task.md`.*

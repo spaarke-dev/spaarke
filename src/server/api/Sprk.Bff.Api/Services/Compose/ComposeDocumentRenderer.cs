@@ -476,10 +476,31 @@ public sealed partial class ComposeDocumentRenderer
             // part at all, EnsureCommentsPart authors it from the model (every model comment is "new").
             // Unmatched/out-of-range anchors still drop rather than dangle as corrupting references.
             var renderBlocks = model.Blocks;
-            var carrierCommentIds = model.Comments.Count > 0 || ModelContainsCommentAnchor(renderBlocks)
-                ? ScanCarrierCommentIds(carrierBytes)
-                : new HashSet<int>();
+            var carrierComments = model.Comments.Count > 0 || ModelContainsCommentAnchor(renderBlocks)
+                ? ScanCarrierComments(carrierBytes)
+                : new Dictionary<int, string>();
+            var carrierCommentIds = new HashSet<int>(carrierComments.Keys);
             var newComments = model.Comments.Where(c => !carrierCommentIds.Contains(c.Id)).ToList();
+
+            // Task 013 (012-review F6): a model comment whose id the carrier ALREADY holds is treated as
+            // the loaded round-trip of that carrier comment (not appended). If its text does not match
+            // the carrier's (the projection's clamp means the model text may be a PREFIX), the id was
+            // client-allocated onto a carrier comment the loaded model never carried (e.g. one the
+            // projection flattened) - the anchor would bind to the WRONG comment. Warn LOUDLY; the
+            // anchor still renders against the carrier comment (behavior unchanged), but the collision
+            // is wire-visible instead of silent.
+            foreach (var modelComment in model.Comments)
+            {
+                if (carrierComments.TryGetValue(modelComment.Id, out var carrierText))
+                {
+                    var modelText = modelComment.Text.Trim();
+                    var knownText = carrierText.Trim();
+                    if (modelText.Length > 0 && !knownText.StartsWith(modelText, StringComparison.Ordinal))
+                    {
+                        state.Warn("comment-id-collision");
+                    }
+                }
+            }
             if (ModelContainsCommentAnchor(renderBlocks))
             {
                 var validCommentIds = new HashSet<int>(carrierCommentIds);
@@ -672,29 +693,38 @@ public sealed partial class ComposeDocumentRenderer
     /// PARSED value (OOXML <c>w:id</c> is ST_DecimalNumber — integer value semantics; "01" == "1").
     /// </summary>
     private static HashSet<int> ScanCarrierCommentIds(byte[] carrierBytes)
+        => new(ScanCarrierComments(carrierBytes).Keys);
+
+    /// <summary>Task 013 (012-review F6): the carrier comments scan also carries each comment's plain
+    /// text (paragraphs joined by <c>\n</c> - the SAME join the projection uses for
+    /// <c>ComposeComment.Text</c>) so the collision check can compare a model comment against the
+    /// carrier comment its id points at. First-wins on duplicate ids (mirrors the anchor semantics).
+    /// Unreadable part degrades to empty (anchors drop rather than dangle - unchanged posture).</summary>
+    private static Dictionary<int, string> ScanCarrierComments(byte[] carrierBytes)
     {
         try
         {
             return ScanCarrierBytes(carrierBytes, doc =>
             {
-                var ids = new HashSet<int>();
+                var byId = new Dictionary<int, string>();
                 var comments = doc.MainDocumentPart?.WordprocessingCommentsPart?.Comments;
                 if (comments is not null)
                 {
                     foreach (var comment in comments.Elements<Comment>())
                     {
-                        if (int.TryParse(comment.Id?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
+                        if (int.TryParse(comment.Id?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id)
+                            && !byId.ContainsKey(id))
                         {
-                            ids.Add(id);
+                            byId[id] = string.Join("\n", comment.Elements<Paragraph>().Select(p => p.InnerText));
                         }
                     }
                 }
-                return ids;
+                return byId;
             });
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            return new HashSet<int>(); // unreadable part → no anchorable ids; anchors drop rather than dangle
+            return new Dictionary<int, string>();
         }
     }
 

@@ -1037,7 +1037,9 @@ public static class ComposeEndpoints
                 CorrelationId: httpContext.TraceIdentifier,
                 // Task 012: the retained canonical model for the imported-save mapper (see
                 // LoadComposeDocumentResponse.ContentModel). Built from the SAME minted Content above.
-                ContentModel: mount.ContentModel));
+                ContentModel: mount.ContentModel,
+                // Task 013 (012-review F7): canonical-projection flatten warnings for the client fold.
+                ContentModelWarnings: MapWarningResponses(mount.ContentModelWarnings)));
         }
         catch (Exception ex)
         {
@@ -1105,7 +1107,9 @@ public static class ComposeEndpoints
             // Task 012: the retained canonical model + (only when minting mutated the bytes) the
             // minted content echo — see the handler comment above. Still stateless: nothing persisted.
             ContentModel: mount.ContentModel,
-            Content: mount.Minted ? mount.Content.ToArray() : null));
+            Content: mount.Minted ? mount.Content.ToArray() : null,
+            // Task 013 (012-review F7): canonical-projection flatten warnings for the client fold.
+            ContentModelWarnings: MapWarningResponses(mount.ContentModelWarnings)));
     }
 
     /// <summary>
@@ -1141,6 +1145,12 @@ public static class ComposeEndpoints
 
     /// <summary>
     /// Maps a <see cref="ComposeDocxProjection"/> (the service-level shape both <c>LoadAsync</c> and
+    /// <summary>Task 013 (012-review F7): maps service-layer projection warnings onto the wire DTO
+    /// (code + count only - the Detail never crosses the wire). Null-propagating.</summary>
+    private static IReadOnlyList<ComposeProjectionWarningResponse>? MapWarningResponses(
+        IReadOnlyList<ComposeProjectionWarning>? warnings)
+        => warnings?.Select(w => new ComposeProjectionWarningResponse(w.Code, w.Count)).ToList();
+
     /// <c>ProjectDocument</c> return) onto its wire DTO. FR-01 (task 010, spaarkeai-compose-fidelity-r4.5):
     /// extracted from the Load response construction so the Upload endpoint reuses the IDENTICAL
     /// mapping — one wire shape for every entry path (F-2 one reader), not a forked projection type.
@@ -1274,7 +1284,10 @@ public static class ComposeEndpoints
                 // re-posts (merged with editor state) on an imported dirty save — the render-on-save
                 // (a1) request shape. Null when the canonical projection failed (client falls back to
                 // the transitional op-log shape). Additive, camelCase (ADR-040).
-                ContentModel: result.ContentModel));
+                ContentModel: result.ContentModel,
+                // Task 013 (012-review F7): the canonical projection's flatten warnings - the client
+                // folds them into the FIRST model-path save's degradation banner. Additive.
+                ContentModelWarnings: MapWarningResponses(result.ContentModelWarnings)));
         }
         catch (ArgumentException ex)
         {
@@ -2038,7 +2051,9 @@ public sealed record ComposeUploadResponse(
     [property: JsonPropertyName("correlationId")] string CorrelationId,
     // Task 012 (the client cutover): retained canonical model for the imported-save mapper — built
     // from the SAME minted Content this response returns. Null when the canonical projection failed.
-    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null);
+    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null,
+    // Task 013 (012-review F7): canonical-projection flatten warnings for the client fold.
+    [property: JsonPropertyName("contentModelWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? ContentModelWarnings = null);
 
 /// <summary>
 /// Request body for <c>POST /api/compose/project</c> (FR-03 task 011, spaarkeai-compose-fidelity-r4.5,
@@ -2070,7 +2085,9 @@ public sealed record ComposeProjectResponse(
     // the caller's own bytes are already identical, so no payload growth on the common path. The door
     // remains stateless — nothing is persisted server-side.
     [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null,
-    [property: JsonPropertyName("content")] byte[]? Content = null);
+    [property: JsonPropertyName("content")] byte[]? Content = null,
+    // Task 013 (012-review F7): canonical-projection flatten warnings for the client fold.
+    [property: JsonPropertyName("contentModelWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? ContentModelWarnings = null);
 
 /// <summary>
 /// Request body for <c>POST /api/compose/active-document</c> (task 113 / UAT defects 4/5).
@@ -2225,7 +2242,10 @@ public sealed record LoadComposeDocumentResponse(
     // the HTML projection (paraIds agree). The client retains it and re-posts it — merged with editor
     // state, every server-set field preserved — as the imported dirty save's `contentModel` (+ a
     // baseline source). Null when the canonical projection failed. Optional/trailing (ADR-040 additive).
-    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null);
+    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null,
+    // Task 013 (012-review F7): flatten warnings of the canonical-model projection (codes + counts) -
+    // folded by the client into the FIRST model-path save's degradation banner. Optional/trailing.
+    [property: JsonPropertyName("contentModelWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? ContentModelWarnings = null);
 
 /// <summary>Wire shape of the server DOCX→editor projection (design §3.3). <c>status</c> is
 /// <c>"success" | "partial" | "failed"</c>; the client mounts <c>html</c> only when <c>canEdit</c>, else it

@@ -185,6 +185,18 @@ export interface ComposeWorkspaceState {
    */
   loadedContentModel: ComposeContentModel | null;
   /**
+   * task 013 (r6, review F7): the canonical-model projection's FLATTEN warnings from the SAME mount
+   * response that carried `loadedContentModel` (`contentModelWarnings` on the load / upload /
+   * project payloads — e.g. `text-box-flattened`, `complex-object-dropped`; previously
+   * server-log-only). The loss they describe MATERIALIZES on the FIRST model-path save (the
+   * byte-identical passthrough / op-log shapes never render from the flatten-tier model), so
+   * `triggerSave` folds them into the `saveDegradationWarnings` it dispatches there — and they are
+   * CLEARED via the `saveSucceeded.contentModel` adoption (the post-save adopted model already
+   * reflects the loss) so subsequent saves do not repeat them. Same set/clear lifecycle as
+   * `loadedContentModel`; null = none surfaced / older BFF.
+   */
+  loadedContentModelWarnings: Array<{ code: string; count: number }> | null;
+  /**
    * 026-F5 (task 012, r6): SAVE-time degradation warnings — content the server (and/or the client
    * imported-model mapper) simplified/dropped while authoring the LAST successful save. A SEPARATE
    * warning family from `importWarnings` (load-time import fidelity): the workspace suppresses the
@@ -275,6 +287,10 @@ export type ComposeWorkspaceAction =
       // 70be80006). Undefined/null (older BFF, or projection failure) → null → the save falls back
       // to the transitional op-log shape. Set atomically with `projection`.
       contentModel?: ComposeContentModel | null;
+      // task 013 (r6, review F7): the canonical-model projection's flatten warnings from the same
+      // response — folded into saveDegradationWarnings on the first model-path save. Undefined/null
+      // (older BFF / no loss) → null.
+      contentModelWarnings?: Array<{ code: string; count: number }> | null;
     }
   | { kind: 'loadFailed'; errorMessage: string }
   // ── FR-03 (task 012): transient upload-mount (no SPE pointer, create-on-save) ──
@@ -309,6 +325,9 @@ export type ComposeWorkspaceAction =
       // additive field as `loadSucceeded.contentModel`). Undefined/null normalizes to null → op-log
       // fallback save shape. Set atomically with `projection`.
       contentModel?: ComposeContentModel | null;
+      // task 013 (r6, review F7): the projection's flatten warnings from the same response — same
+      // lifecycle as `contentModel` (see the loadSucceeded field above).
+      contentModelWarnings?: Array<{ code: string; count: number }> | null;
       // G7 (FR-06, task 022): the client-minted stable transient-draft dedup key
       // (mintTransientKey). Carried onto documentRef.transientKey so every create-on-save sends it →
       // repeated saves dedup to ONE record. Omitted by an older caller → no dedup (unchanged behavior).
@@ -399,6 +418,7 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   importedComments: [],
   projection: null,
   loadedContentModel: null,
+  loadedContentModelWarnings: null,
   saveDegradationWarnings: null,
   errorMessage: null,
   saveErrorIsLock: false,
@@ -448,6 +468,8 @@ export function composeWorkspaceReducer(
         // task 012 (r6): the canonical content model — set ATOMICALLY with projection (same source
         // response). Omitted (older BFF / failed canonical projection) → null → op-log fallback save.
         loadedContentModel: action.contentModel ?? null,
+        // task 013 (r6, F7): the projection's flatten warnings — same atomic set/clear as the model.
+        loadedContentModelWarnings: action.contentModelWarnings ?? null,
         // G1 (FR-01, task 020): normalize an omitted/undefined field (Path B continuation, or an
         // older BFF) to `null` — the BINDING null-handling contract treats null as 'imported'.
         origin: action.origin ?? null,
@@ -524,6 +546,8 @@ export function composeWorkspaceReducer(
         // task 012 (r6): set atomically with projection — SAME clear-rather-than-inherit discipline
         // (a new transient mount over a prior loaded doc must never keep the prior doc's model).
         loadedContentModel: action.contentModel ?? null,
+        // task 013 (r6, F7): same lifecycle as the model — set from this mount's response or cleared.
+        loadedContentModelWarnings: action.contentModelWarnings ?? null,
         // 026-F5 (task 012, r6): a fresh mount has no save history — clear any stale save-warning
         // banner from a prior document mounted in this same tab.
         saveDegradationWarnings: null,
@@ -568,6 +592,8 @@ export function composeWorkspaceReducer(
         // task 012 (r6): a born-in-editor seed has no loaded/imported baseline model — its saves
         // author the whole document via `buildContentModel()`, never the imported-model merge path.
         loadedContentModel: null,
+        // task 013 (r6, F7): no projection ran for this mount — nothing was flattened.
+        loadedContentModelWarnings: null,
         // 026-F5 (task 012, r6): clear any stale save-warning banner from a prior mount (same
         // clear-rather-than-inherit rationale as mountTransient).
         saveDegradationWarnings: null,
@@ -607,6 +633,12 @@ export function composeWorkspaceReducer(
         // base. Omitted (op-log / born-in-editor save, or a caller without one) → keep the existing
         // base — NEVER regress a known model to null on success.
         loadedContentModel: action.contentModel ?? state.loadedContentModel,
+        // task 013 (r6, F7): model adoption ⇔ a model-path save just materialized the projection's
+        // flatten loss (triggerSave folded these into that save's saveDegradationWarnings dispatch)
+        // — CLEAR them so subsequent saves do not repeat them (the adopted post-save model already
+        // reflects the loss). An op-log / born-in-editor save (no `action.contentModel`) keeps them:
+        // the loss has NOT materialized on the byte-identical path yet.
+        loadedContentModelWarnings: action.contentModel ? null : state.loadedContentModelWarnings,
         documentRef: state.documentRef
           ? {
               ...state.documentRef,

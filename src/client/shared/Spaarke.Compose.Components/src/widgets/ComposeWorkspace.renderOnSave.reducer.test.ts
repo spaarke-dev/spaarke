@@ -11,6 +11,9 @@
  *   2. `saveDegradationWarnings` (026-F5) — the SAVE-time warning family, REPLACED wholesale by the
  *      `saveDegradationWarnings` action (null = a clean save clears the banner) and cleared by every
  *      fresh mount.
+ *   3. `loadedContentModelWarnings` (task 013, review F7) — the mount-time projection flatten
+ *      warnings: same set/clear lifecycle as the model, and cleared by `saveSucceeded` ONLY when the
+ *      action adopted a model (a model-path save materialized the loss); an op-log save keeps them.
  */
 
 import { composeWorkspaceReducer, INITIAL_STATE, type ComposeWorkspaceState } from './ComposeWorkspace.types';
@@ -173,5 +176,100 @@ describe('composeWorkspaceReducer — saveDegradationWarnings family (026-F5, ta
         sessionId: 's9',
       }).saveDegradationWarnings
     ).toBeNull();
+  });
+});
+
+describe('composeWorkspaceReducer — loadedContentModelWarnings lifecycle (task 013, review F7)', () => {
+  const FLATTEN_WARNINGS = [
+    { code: 'text-box-flattened', count: 2 },
+    { code: 'complex-object-dropped', count: 1 },
+  ];
+
+  function loadedStateWithWarnings(): ComposeWorkspaceState {
+    let state = composeWorkspaceReducer(INITIAL_STATE, {
+      kind: 'requestLoad',
+      documentRef: { speDriveItemId: 'spe-1', sprkDocumentId: 'doc-1', fileName: 'contract.docx' },
+      sessionId: 'session-1',
+    });
+    state = composeWorkspaceReducer(state, {
+      kind: 'loadSucceeded',
+      docxBytes: bytes(),
+      etag: 'etag-1',
+      versionId: 'v-load',
+      sessionId: 'session-1',
+      contentModel: LOADED_MODEL,
+      contentModelWarnings: FLATTEN_WARNINGS,
+    });
+    return state;
+  }
+
+  it('loadSucceeded retains the flatten warnings alongside the model; omitted (older BFF) → null', () => {
+    expect(loadedStateWithWarnings().loadedContentModelWarnings).toEqual(FLATTEN_WARNINGS);
+    // Omitted → null (the existing loadedState helper omits the field).
+    expect(loadedState().loadedContentModelWarnings).toBeNull();
+  });
+
+  it('mountTransient retains them from Upload/Project and CLEARS a prior mount set when omitted', () => {
+    let state = loadedStateWithWarnings();
+    // A follow-on transient mount WITHOUT warnings must not inherit the prior document's set.
+    state = composeWorkspaceReducer(state, {
+      kind: 'mountTransient',
+      docxBytes: bytes(),
+      fileName: 'local.docx',
+      sessionId: 'browse-1',
+    });
+    expect(state.loadedContentModelWarnings).toBeNull();
+
+    state = composeWorkspaceReducer(state, {
+      kind: 'mountTransient',
+      docxBytes: bytes(),
+      fileName: 'local2.docx',
+      sessionId: 'browse-2',
+      contentModel: LOADED_MODEL,
+      contentModelWarnings: FLATTEN_WARNINGS,
+    });
+    expect(state.loadedContentModelWarnings).toEqual(FLATTEN_WARNINGS);
+  });
+
+  it('mountDraftHtml + INITIAL_STATE spreads clear them', () => {
+    const base = loadedStateWithWarnings();
+    expect(
+      composeWorkspaceReducer(base, { kind: 'mountDraftHtml', html: '<p></p>', sessionId: 'd1' })
+        .loadedContentModelWarnings
+    ).toBeNull();
+    expect(
+      composeWorkspaceReducer(base, { kind: 'requestUploadMount', sessionId: 's3' }).loadedContentModelWarnings
+    ).toBeNull();
+    expect(composeWorkspaceReducer(base, { kind: 'reset' }).loadedContentModelWarnings).toBeNull();
+  });
+
+  it('a MODEL-PATH saveSucceeded (action carries contentModel) CLEARS them — the loss materialized once', () => {
+    let state = loadedStateWithWarnings();
+    state = composeWorkspaceReducer(state, {
+      kind: 'saveSucceeded',
+      documentSpeId: 'spe-1',
+      etag: 'etag-2',
+      contentModel: SAVED_MODEL,
+    });
+    expect(state.loadedContentModelWarnings).toBeNull();
+    // And they stay cleared on the next model save (no repeat source).
+    state = composeWorkspaceReducer(state, {
+      kind: 'saveSucceeded',
+      documentSpeId: 'spe-1',
+      etag: 'etag-3',
+      contentModel: SAVED_MODEL,
+    });
+    expect(state.loadedContentModelWarnings).toBeNull();
+  });
+
+  it('an OP-LOG-path saveSucceeded (no contentModel on the action) KEEPS them — the loss has not materialized', () => {
+    let state = loadedStateWithWarnings();
+    state = composeWorkspaceReducer(state, {
+      kind: 'saveSucceeded',
+      documentSpeId: 'spe-1',
+      etag: 'etag-2',
+      // no contentModel — byte-identical / op-log save
+    });
+    expect(state.loadedContentModelWarnings).toEqual(FLATTEN_WARNINGS);
   });
 });

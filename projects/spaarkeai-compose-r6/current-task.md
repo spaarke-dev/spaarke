@@ -7,10 +7,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | NONE ACTIVE — clean boundary. **012 COMPLETE**: the surgical save path is retired end-to-end (server + THE CLIENT CUTOVER). Post-cutover clients never reach ComposeShadowPatchEngine or the count-gate on ANY save. |
-| **Next task** | **013 — Seam + regression tests: NDA saves (no 422), edits land, new version** (`tasks/013-*.poml`; deps 004 ✅ + 012 ✅ satisfied). 027 (fidelity corpus seams) also unblocked but SERIAL — 013 first (critical path 013 → 014 deploy/UAT). |
-| **Status** | 012 closed at `7e4cd1822` (+ this close-out commit); working tree to be pushed |
-| **Next Action** | On "continue": invoke task-execute for task 013 — FULL rigor, sonnet/high. Read the 013 OBLIGATIONS below FIRST (routed from 012's Step 9.5). |
+| **Task** | **013 — Seam + regression tests: NDA no-422, edits land, new version** (`tasks/013-render-on-save-tests.poml`) — IN PROGRESS |
+| **Status** | Implemented so far (UNCOMMITTED): F6 comment-id-collision warn (renderer ScanCarrierComments) + F7 server (contentModelWarnings on load/upload/project responses + ComposeMountProjection) + THE 3 PRE-EXISTING NDA REDS RE-BASELINED GREEN (TextExactness skips txbxContent/Fallback interiors per 026 contract; AppendSection exempts source-duplicated-id subtrees, ids-stripped comparison; MintAndPersist asserts no-NEW-duplicates per fill-gaps-only contract). Suite floor now ZERO expected reds. |
+| **Agents in flight** | tests-013 (RenderOnSaveSeamTests + NdaSaveNo422RegressionTests, through-the-wire via ComposeFidelitySeamFixture) · routing-agent resumed (client F7 fold: loadedContentModelWarnings → first model-save degradation banner) |
+| **Next Action** | On agent completion: integrate (server suite + client suites + tsc), commit, Step 9.5 two-agent review on the committed SHA + clean-worktree publish + CVE, close out |
 
 ### Critical Context (3 sentences)
 012 commits: 70be80006 (canonical model on all mount doors, one-mint-two-walks id agreement) ·

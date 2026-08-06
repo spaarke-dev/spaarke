@@ -251,12 +251,15 @@ public class ComposeService : IComposeService
         var projection = _projectionBuilder.Build(bytes, cancellationToken);
         var canonical = _projectionBuilder.BuildContentModel(bytes, cancellationToken);
 
+        var mountModel = canonical.Status == ComposeProjectionStatus.Failed ? null : canonical.Model;
         return new ComposeMountProjection
         {
             Content = bytes,
             Minted = stamp.Mutated,
             Projection = projection,
-            ContentModel = canonical.Status == ComposeProjectionStatus.Failed ? null : canonical.Model,
+            ContentModel = mountModel,
+            // Task 013 (012-review F7): flatten warnings ride to the client with the model.
+            ContentModelWarnings = mountModel is not null && canonical.Warnings.Count > 0 ? canonical.Warnings : null,
         };
     }
 
@@ -346,6 +349,11 @@ public class ComposeService : IComposeService
         var contentModel = canonicalProjection.Status == ComposeProjectionStatus.Failed
             ? null
             : canonicalProjection.Model;
+        // Task 013 (012-review F7): surface the flatten warnings to the client (folded into the FIRST
+        // model-path save's degradation banner - the save is when the loss materializes).
+        var contentModelWarnings = contentModel is not null && canonicalProjection.Warnings.Count > 0
+            ? canonicalProjection.Warnings
+            : null;
         if (canonicalProjection.Status == ComposeProjectionStatus.Failed)
         {
             _logger.LogWarning(
@@ -549,6 +557,7 @@ public class ComposeService : IComposeService
             ImportedRevisions = importedRevisions,
             ImportedComments = importedComments,
             ContentModel = contentModel,
+            ContentModelWarnings = contentModelWarnings,
             Origin = origin,
         };
     }

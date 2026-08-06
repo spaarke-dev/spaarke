@@ -500,6 +500,13 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
     /// </summary>
     public ComposeContentModel? ContentModel { get; init; }
 
+    /// <summary>Task 013 (012-review F7): the canonical-model projection's counted flatten warnings
+    /// (codes + counts, Tier-1 safe) for THIS load - what the thin model could not carry (text boxes,
+    /// drawings, ...). Previously server-log-only, so the save that MATERIALIZES the loss showed the
+    /// user nothing; the client folds these into the FIRST model-path save's degradation banner.
+    /// Null when the projection was clean or failed.</summary>
+    public IReadOnlyList<ComposeProjectionWarning>? ContentModelWarnings { get; init; }
+
     /// <summary>
     /// G1 (FR-01, task 020): the persisted <see cref="ComposeOrigin"/> marker for Path A loads (an
     /// existing <c>sprk_document</c> record — <see cref="ComposeDocumentResult.DocumentRecordId"/> is
@@ -582,6 +589,10 @@ public sealed record ComposeMountProjection
     /// the retention/re-post contract). Null when the canonical projection failed — the client falls back
     /// to the transitional op-log save shape.</summary>
     public ComposeContentModel? ContentModel { get; init; }
+
+    /// <summary>Task 013 (012-review F7): the canonical projection's flatten warnings - see
+    /// <see cref="LoadComposeDocumentResult.ContentModelWarnings"/>. Null when clean or failed.</summary>
+    public IReadOnlyList<ComposeProjectionWarning>? ContentModelWarnings { get; init; }
 }
 
 /// <summary>Save request payload.</summary>

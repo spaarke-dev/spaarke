@@ -62,6 +62,8 @@ const BUILT_SNAPSHOT = { AAAA0001: 'Loaded clause.' };
 // ── Mutable per-test config the fetch mock + editor stub read ──
 const config: {
   loadContentModel: unknown; // undefined = older BFF (field omitted)
+  /** task 013 (review F7): the mount door's canonical-model projection flatten warnings. */
+  loadContentModelWarnings: Array<{ code: string; count: number }> | undefined;
   loadOrigin: 'authored' | 'imported' | undefined;
   saveDegradationWarnings: Array<{ code: string; count: number }> | undefined;
   saveContentModel: unknown;
@@ -73,6 +75,7 @@ const config: {
   exposeAdoptBaseline: boolean;
 } = {
   loadContentModel: undefined,
+  loadContentModelWarnings: undefined,
   loadOrigin: undefined,
   saveDegradationWarnings: undefined,
   saveContentModel: undefined,
@@ -118,6 +121,7 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
         fileName: 'uploaded.docx',
         projection: { status: 'success', canEdit: true, html: '<p data-paraid="AAAA0001">Loaded clause.</p>' },
         contentModel: config.loadContentModel,
+        contentModelWarnings: config.loadContentModelWarnings,
       }),
     } as unknown as Response;
   }
@@ -141,6 +145,7 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
         actionHistory: [],
         projection: { status: 'success', canEdit: true, html: '<p data-paraid="AAAA0001">Loaded clause.</p>' },
         contentModel: config.loadContentModel,
+        contentModelWarnings: config.loadContentModelWarnings,
         origin: config.loadOrigin,
       }),
     } as unknown as Response;
@@ -309,6 +314,7 @@ beforeEach(() => {
   saveRequests.length = 0;
   editorProps.current = {};
   config.loadContentModel = undefined;
+  config.loadContentModelWarnings = undefined;
   config.loadOrigin = undefined;
   config.saveDegradationWarnings = undefined;
   config.saveContentModel = undefined;
@@ -451,6 +457,53 @@ describe('ComposeWorkspace — imported save-routing flip (task 012)', () => {
     await waitFor(() =>
       expect(screen.queryByTestId('compose-workspace-save-degradation-banner')).not.toBeInTheDocument()
     );
+  });
+
+  it('task 013 (F7): the FIRST model-path save folds the mount-time projection flatten warnings — and a second model save does not repeat them', async () => {
+    config.loadContentModel = LOADED_MODEL;
+    // The mount door surfaced projection flatten warnings (previously server-log-only): the loss
+    // they describe materializes on the first save that renders from the flatten-tier model.
+    config.loadContentModelWarnings = [
+      { code: 'text-box-flattened', count: 2 },
+      { code: 'complex-object-dropped', count: 1 },
+    ];
+    // The mapper adds one more text-box occurrence — counts must SUM per code (2 + 1 = 3).
+    config.builtResult = { model: BUILT_MODEL, warnings: [{ code: 'text-box-flattened', count: 1 }] };
+    renderStoredDoc();
+    await waitForEditor();
+
+    await clickSave();
+    await waitFor(() => expect(saveRequests).toHaveLength(1));
+
+    const banner = await screen.findByTestId('compose-workspace-save-degradation-banner');
+    expect(banner.textContent).toContain('A text box was converted to regular text. (×3)');
+    expect(banner.textContent).toContain('A drawing or embedded object could not be carried over.');
+
+    // SECOND model-path save (still dirty, no new mapper/server warnings): the mount warnings were
+    // CLEARED by the first model save's adoption — the loss materialized once, it is not repeated.
+    config.builtResult = { model: BUILT_MODEL, warnings: [] };
+    await clickSave();
+    await waitFor(() => expect(saveRequests).toHaveLength(2));
+    await waitFor(() =>
+      expect(screen.queryByTestId('compose-workspace-save-degradation-banner')).not.toBeInTheDocument()
+    );
+  });
+
+  it('task 013 (F7): an OP-LOG-path save does NOT fold the projection flatten warnings (the loss does not materialize on the byte-identical path)', async () => {
+    config.loadContentModel = LOADED_MODEL;
+    config.loadContentModelWarnings = [{ code: 'text-box-flattened', count: 2 }];
+    // Mapper unavailable → op-log fallback shape (byte-identical baseline + ops; nothing flattened).
+    config.builtResult = null;
+    renderStoredDoc();
+    await waitForEditor();
+
+    await clickSave();
+    await waitFor(() => expect(saveRequests).toHaveLength(1));
+    expect(saveRequests[0].body.contentModel).toBeUndefined(); // op-log shape confirmed
+
+    // No banner: the retained flatten warnings were NOT folded (and stay retained for a later
+    // model-path save, per the reducer lifecycle guarded in the reducer suite).
+    expect(screen.queryByTestId('compose-workspace-save-degradation-banner')).not.toBeInTheDocument();
   });
 
   it('falls back to the op-log shape when the mapper returns null (editor unavailable)', async () => {

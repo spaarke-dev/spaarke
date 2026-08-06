@@ -287,20 +287,23 @@ interface ComposeEditorImportedModelHandle {
 }
 
 /**
- * 026-F5 (task 012, r6): merge the SERVER's render-side `degradationWarnings` with the client
- * mapper's own warnings (`buildImportedContentModel(...).warnings`) into ONE save-warning set,
- * summing counts on duplicate codes. Defensive against malformed entries (skipped, never thrown);
- * a missing/non-finite count contributes 1.
+ * 026-F5 (task 012, r6) / F7 (task 013): merge the save's degradation-warning SOURCES into ONE
+ * save-warning set, summing counts on duplicate codes. Sources (variadic): the SERVER's render-side
+ * `degradationWarnings`, the client mapper's own warnings (`buildImportedContentModel(...).warnings`),
+ * and — on the FIRST model-path save only — the mount-time canonical-model projection flatten
+ * warnings (`state.loadedContentModelWarnings`, task 013 F7). Defensive against malformed entries
+ * (skipped, never thrown); a missing/non-finite count contributes 1.
  */
 function mergeDegradationWarnings(
-  serverWarnings: ReadonlyArray<{ code: string; count: number }>,
-  mapperWarnings: ReadonlyArray<{ code: string; count: number }>
+  ...sources: ReadonlyArray<ReadonlyArray<{ code: string; count: number }>>
 ): Array<{ code: string; count: number }> {
   const byCode = new Map<string, number>();
-  for (const w of [...serverWarnings, ...mapperWarnings]) {
-    if (!w || typeof w.code !== 'string' || w.code.length === 0) continue;
-    const count = typeof w.count === 'number' && Number.isFinite(w.count) && w.count > 0 ? w.count : 1;
-    byCode.set(w.code, (byCode.get(w.code) ?? 0) + count);
+  for (const source of sources) {
+    for (const w of source) {
+      if (!w || typeof w.code !== 'string' || w.code.length === 0) continue;
+      const count = typeof w.count === 'number' && Number.isFinite(w.count) && w.count > 0 ? w.count : 1;
+      byCode.set(w.code, (byCode.get(w.code) ?? 0) + count);
+    }
   }
   return Array.from(byCode.entries()).map(([code, count]) => ({ code, count }));
 }
@@ -1040,6 +1043,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // Typed loosely + parsed defensively — undefined/null (older BFF, or a failed canonical
           // projection) → null → the save falls back to the transitional op-log shape.
           contentModel?: ComposeContentModel | null;
+          // task 013 (r6, review F7): the canonical-model projection's flatten warnings (previously
+          // server-log-only) — retained and folded into saveDegradationWarnings on the FIRST
+          // model-path save, where the loss they describe materializes.
+          contentModelWarnings?: Array<{ code: string; count: number }> | null;
         };
 
         // Decode base64 -> bytes. atob() returns a binary string (one char per byte).
@@ -1082,6 +1089,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           projection: hydratedProjection,
           // task 012 (r6): retain the canonical model atomically with the projection (same response).
           contentModel: payload.contentModel ?? null,
+          // task 013 (r6, F7): the projection's flatten warnings — same defensive-parse convention
+          // as the collections above (omitted/malformed → null).
+          contentModelWarnings: Array.isArray(payload.contentModelWarnings) ? payload.contentModelWarnings : null,
           // G1 (FR-01, task 020): normalize undefined (older BFF / Path B continuation) to `null`.
           origin: payload.origin ?? null,
         });
@@ -1721,9 +1731,18 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // (the workspace passes `hideImportWarnings` to the banner stack per UAT round-7 #8). Merge the
         // server's render-side warnings with the imported-model mapper's own (summing counts on duplicate
         // codes) and REPLACE; a clean save dispatches null so a stale banner CLEARS (026-F5 second half).
+        //
+        // task 013 (r6, review F7): a MODEL-PATH save additionally folds in the mount-time canonical-model
+        // projection flatten warnings (`state.loadedContentModelWarnings` — e.g. text-box-flattened,
+        // complex-object-dropped): the loss they describe MATERIALIZES exactly here, on the first save that
+        // renders from the flatten-tier model. The `saveSucceeded` dispatch above (which carried
+        // `contentModel`) already CLEARED them in the reducer, so a subsequent model save does not repeat
+        // them — the adopted post-save model reflects the loss. An op-log / byte-identical save does NOT
+        // fold them (nothing was flattened on that path) and keeps them retained for a later model save.
         const mergedSaveWarnings = mergeDegradationWarnings(
           payload.degradationWarnings ?? [],
-          usedModelPath && importedBuilt ? importedBuilt.warnings : []
+          usedModelPath && importedBuilt ? importedBuilt.warnings : [],
+          usedModelPath ? (state.loadedContentModelWarnings ?? []) : []
         );
         dispatch({
           kind: 'saveDegradationWarnings',
@@ -1792,6 +1811,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // task 012 (r6): the model-path probe reads the retained canonical model, the origin marker
       // (trackChanges), and the load-time versionId (the model shape's baseline fallback).
       state.loadedContentModel,
+      // task 013 (r6, F7): folded into the model-path save's degradation-warning dispatch.
+      state.loadedContentModelWarnings,
       state.origin,
       state.versionId,
       bffBaseUrl,
@@ -2674,6 +2695,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         void (async () => {
           let projection: ComposeServerProjection | null = null;
           let projectContentModel: ComposeContentModel | null = null;
+          let projectContentModelWarnings: Array<{ code: string; count: number }> | null = null;
           // task 012 (r6): the retained mount bytes. Default = the local file bytes; REPLACED by the
           // server's `content` byte echo when present — `/project` returns it ONLY when server-side
           // paraId minting mutated the caller's bytes, and adopting the echo keeps editor/model/
@@ -2692,9 +2714,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                   // task 012 (r6): canonical model + optional minted-byte echo (commit 70be80006).
                   contentModel?: ComposeContentModel | null;
                   content?: string | null;
+                  // task 013 (r6, F7): the projection's flatten warnings.
+                  contentModelWarnings?: Array<{ code: string; count: number }> | null;
                 };
                 projection = normalizeProjection(payload.projection);
                 projectContentModel = payload.contentModel ?? null;
+                projectContentModelWarnings = Array.isArray(payload.contentModelWarnings)
+                  ? payload.contentModelWarnings
+                  : null;
                 if (typeof payload.content === 'string' && payload.content.length > 0) {
                   retainedBytes = base64ToArrayBuffer(payload.content);
                 }
@@ -2705,6 +2732,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               // error/unavailable state rather than a degraded render — there is no fallback reader.
               projection = null;
               projectContentModel = null;
+              projectContentModelWarnings = null;
               retainedBytes = result;
             }
           }
@@ -2720,6 +2748,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             projection,
             // task 012 (r6): retain the canonical model atomically with the projection.
             contentModel: projectContentModel,
+            // task 013 (r6, F7): the projection's flatten warnings — same lifecycle as the model.
+            contentModelWarnings: projectContentModelWarnings,
             // G7 (task 022): mint the transient dedup key once for this Browse mount → every create-on-save
             // sends it so repeated saves target ONE record (no duplicate mint).
             transientKey: mintTransientKey(),
@@ -3016,6 +3046,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // task 012 (r6): the canonical ComposeContentModel (additive on the upload response since
           // commit 70be80006). Undefined/null → null → op-log fallback save shape.
           contentModel?: ComposeContentModel | null;
+          // task 013 (r6, F7): the projection's flatten warnings.
+          contentModelWarnings?: Array<{ code: string; count: number }> | null;
         };
 
         // ASP.NET Core serializes byte[] as a base64 string (NOT a JSON number
@@ -3044,6 +3076,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           projection: hydratedUploadProjection,
           // task 012 (r6): retain the canonical model atomically with the projection (same response).
           contentModel: payload.contentModel ?? null,
+          // task 013 (r6, F7): the projection's flatten warnings — same lifecycle as the model.
+          contentModelWarnings: Array.isArray(payload.contentModelWarnings) ? payload.contentModelWarnings : null,
           // G7 (task 022): transient dedup key for this assistant-upload mount.
           transientKey: mintTransientKey(),
         });
