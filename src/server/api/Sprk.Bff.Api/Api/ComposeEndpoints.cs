@@ -999,13 +999,19 @@ public static class ComposeEndpoints
             };
 
             // FR-01 (task 010, spaarkeai-compose-fidelity-r4.5, WS-1 "one reader everywhere"): run the
-            // retained bytes through the SAME projection builder LoadAsync uses (via
-            // IComposeService.ProjectDocument) so the assistant-upload door renders through the one
-            // reader (F-2) instead of the client mammoth fallback. Fail-closed + best-effort — a
-            // non-.docx upload (e.g. a retained .pdf/.txt) or an unreadable source yields
-            // Status=Failed/CanEdit=false (never throws); the client keys off Status/CanEdit, not
+            // retained bytes through the SAME projection builder LoadAsync uses so the assistant-upload
+            // door renders through the one reader (F-2) instead of the client mammoth fallback.
+            // Task 012 (the client cutover): upgraded ProjectDocument → ProjectForMount — the bytes are
+            // paraId-minted FIRST (in-memory, fail-open) and BOTH the HTML projection and the canonical
+            // content model are built from the same minted bytes, so the editor's node ids and the
+            // retained model's block ids agree; the minted bytes are what this response returns as
+            // Content (the client's retained mount baseline). Fail-closed + best-effort — a non-.docx
+            // upload (e.g. a retained .pdf/.txt) or an unreadable source yields Status=Failed/
+            // CanEdit=false + a null model (never throws); the client keys off Status/CanEdit, not
             // Html.Length, so this never fails the upload-mount itself (mirrors Load's own contract).
-            var projection = composeService.ProjectDocument(binary, ct);
+            var mount = composeService.ProjectForMount(binary, ct);
+            var projection = mount.Projection;
+            binary = mount.Content.ToArray();
             if (projection.Status == ComposeProjectionStatus.Failed)
             {
                 logger.LogWarning(
@@ -1028,7 +1034,10 @@ public static class ComposeEndpoints
                 Content: binary,
                 Size: binary.Length,
                 Projection: MapProjectionResponse(projection),
-                CorrelationId: httpContext.TraceIdentifier));
+                CorrelationId: httpContext.TraceIdentifier,
+                // Task 012: the retained canonical model for the imported-save mapper (see
+                // LoadComposeDocumentResponse.ContentModel). Built from the SAME minted Content above.
+                ContentModel: mount.ContentModel));
         }
         catch (Exception ex)
         {
@@ -1069,7 +1078,14 @@ public static class ComposeEndpoints
 
         // Pure, synchronous, no I/O (ADR-007/ADR-013) — the SAME builder instance LoadAsync/Upload
         // use, so Browse renders through the one reader (F-2), not a forked projection path.
-        var projection = composeService.ProjectDocument(body.Content, ct);
+        // Task 012 (the client cutover): upgraded ProjectDocument → ProjectForMount — mint paraIds
+        // FIRST (in-memory; this door still persists NOTHING), then build the HTML projection AND the
+        // canonical content model from the same minted bytes so their ids agree. When minting mutated
+        // the bytes, the response echoes them (`content`) so the client adopts the id-carrying copy as
+        // its retained mount baseline; when nothing needed minting the echo is omitted (the caller's
+        // own bytes are already identical — no payload growth).
+        var mount = composeService.ProjectForMount(body.Content, ct);
+        var projection = mount.Projection;
         if (projection.Status == ComposeProjectionStatus.Failed)
         {
             logger.LogWarning(
@@ -1085,7 +1101,11 @@ public static class ComposeEndpoints
 
         return Results.Ok(new ComposeProjectResponse(
             Projection: MapProjectionResponse(projection),
-            CorrelationId: httpContext.TraceIdentifier));
+            CorrelationId: httpContext.TraceIdentifier,
+            // Task 012: the retained canonical model + (only when minting mutated the bytes) the
+            // minted content echo — see the handler comment above. Still stateless: nothing persisted.
+            ContentModel: mount.ContentModel,
+            Content: mount.Minted ? mount.Content.ToArray() : null));
     }
 
     /// <summary>
@@ -1249,7 +1269,12 @@ public static class ComposeEndpoints
                 Projection: MapProjectionResponse(result.Projection),
                 CorrelationId: httpContext.TraceIdentifier,
                 // G1 (FR-01, task 020): the persisted authored-vs-imported origin marker (Path A only).
-                Origin: result.Origin));
+                Origin: result.Origin,
+                // Task 012 (the client cutover): the canonical content model the client RETAINS and
+                // re-posts (merged with editor state) on an imported dirty save — the render-on-save
+                // (a1) request shape. Null when the canonical projection failed (client falls back to
+                // the transitional op-log shape). Additive, camelCase (ADR-040).
+                ContentModel: result.ContentModel));
         }
         catch (ArgumentException ex)
         {
@@ -2007,7 +2032,10 @@ public sealed record ComposeUploadResponse(
     // this into `mountTransient` so the editor mounts via the SAME projection branch as a
     // stored-document Load, instead of the client mammoth fallback (F-2 one reader).
     [property: JsonPropertyName("projection")] ComposeProjectionResponse Projection,
-    [property: JsonPropertyName("correlationId")] string CorrelationId);
+    [property: JsonPropertyName("correlationId")] string CorrelationId,
+    // Task 012 (the client cutover): retained canonical model for the imported-save mapper — built
+    // from the SAME minted Content this response returns. Null when the canonical projection failed.
+    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null);
 
 /// <summary>
 /// Request body for <c>POST /api/compose/project</c> (FR-03 task 011, spaarkeai-compose-fidelity-r4.5,
@@ -2031,7 +2059,15 @@ public sealed record ComposeProjectRequest(
 /// </summary>
 public sealed record ComposeProjectResponse(
     [property: JsonPropertyName("projection")] ComposeProjectionResponse Projection,
-    [property: JsonPropertyName("correlationId")] string CorrelationId);
+    [property: JsonPropertyName("correlationId")] string CorrelationId,
+    // Task 012 (the client cutover): the retained canonical model (null when projection failed) and —
+    // ONLY when server-side paraId minting mutated the caller's bytes — the minted content echo the
+    // client MUST adopt as its retained mount baseline (so editor node ids, retained-model block ids,
+    // and the save-time carrier stay one id universe). Omitted (null) when nothing needed minting:
+    // the caller's own bytes are already identical, so no payload growth on the common path. The door
+    // remains stateless — nothing is persisted server-side.
+    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null,
+    [property: JsonPropertyName("content")] byte[]? Content = null);
 
 /// <summary>
 /// Request body for <c>POST /api/compose/active-document</c> (task 113 / UAT defects 4/5).
@@ -2181,7 +2217,12 @@ public sealed record LoadComposeDocumentResponse(
     // null the SAME as "imported" (never strict-equal null to "authored"), per the BINDING null-handling
     // contract (ComposeOrigin remarks). Optional/trailing so existing callers deserializing this response
     // are unaffected.
-    [property: JsonPropertyName("origin")] ComposeOrigin? Origin = null);
+    [property: JsonPropertyName("origin")] ComposeOrigin? Origin = null,
+    // Task 012 (the client cutover): the canonical content model, built from the SAME minted bytes as
+    // the HTML projection (paraIds agree). The client retains it and re-posts it — merged with editor
+    // state, every server-set field preserved — as the imported dirty save's `contentModel` (+ a
+    // baseline source). Null when the canonical projection failed. Optional/trailing (ADR-040 additive).
+    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null);
 
 /// <summary>Wire shape of the server DOCX→editor projection (design §3.3). <c>status</c> is
 /// <c>"success" | "partial" | "failed"</c>; the client mounts <c>html</c> only when <c>canEdit</c>, else it

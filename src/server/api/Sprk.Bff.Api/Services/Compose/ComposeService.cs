@@ -236,6 +236,31 @@ public class ComposeService : IComposeService
         => _projectionBuilder.Build(content, cancellationToken);
 
     /// <inheritdoc />
+    // Task 012 (the client cutover): mint FIRST, then build BOTH projections from the SAME minted
+    // bytes. The builder mints ids for id-less paragraphs from a cryptographic RNG per walk, so two
+    // independent walks over unminted bytes would DISAGREE on those paragraphs' ids — the retained
+    // model's block ids must match the editor's node ids or the client's imported-save merge mapper
+    // (keyed by paraId) cannot pair them. MintAndPersist is the ingest-time stamp (fill-gaps-only,
+    // idempotent, fail-open — NOT the save-path count-gate this project retires), the same pass
+    // LoadAsync applies before its own projection build.
+    public ComposeMountProjection ProjectForMount(ReadOnlyMemory<byte> content, CancellationToken cancellationToken = default)
+    {
+        var stamp = _baselineParaIdStamper.MintAndPersist(content);
+        var bytes = stamp.Mutated ? stamp.Bytes : content;
+
+        var projection = _projectionBuilder.Build(bytes, cancellationToken);
+        var canonical = _projectionBuilder.BuildContentModel(bytes, cancellationToken);
+
+        return new ComposeMountProjection
+        {
+            Content = bytes,
+            Minted = stamp.Mutated,
+            Projection = projection,
+            ContentModel = canonical.Status == ComposeProjectionStatus.Failed ? null : canonical.Model,
+        };
+    }
+
+    /// <inheritdoc />
     public async Task<LoadComposeDocumentResult> LoadAsync(
         LoadComposeDocumentRequest request,
         HttpContext httpContext,
@@ -310,6 +335,30 @@ public class ComposeService : IComposeService
         // supersedes the ParaIdPreParser single-pass on the Load path (one paragraph-enumeration authority).
         var projection = _projectionBuilder.Build(content, cancellationToken);
         IReadOnlyList<ParaIdMapEntry> paraIdMap = projection.ParaIdMap;
+
+        // Task 012 (the client cutover): the CANONICAL content model, built from the SAME minted bytes
+        // the HTML projection above walks (ids already persisted by MintAndPersist — the two walks agree
+        // by construction). The client retains it as the loaded model and re-posts it (merged with editor
+        // state, every server-set field preserved) on an imported dirty save — the render-on-save (a1)
+        // shape. Best-effort: a Failed canonical projection degrades to null (the client falls back to
+        // the transitional op-log shape); never fails Load. Counts-only logging (privacy — no text).
+        var canonicalProjection = _projectionBuilder.BuildContentModel(content, cancellationToken);
+        var contentModel = canonicalProjection.Status == ComposeProjectionStatus.Failed
+            ? null
+            : canonicalProjection.Model;
+        if (canonicalProjection.Status == ComposeProjectionStatus.Failed)
+        {
+            _logger.LogWarning(
+                "Compose load: canonical-model projection failed for drive={DriveId} item={DocumentSpeId} (code={Code}); imported saves will use the transitional op-log shape",
+                request.DriveId, request.DocumentSpeId, canonicalProjection.Warnings.FirstOrDefault()?.Code);
+        }
+        else if (canonicalProjection.Warnings.Count > 0)
+        {
+            _logger.LogInformation(
+                "Compose load: canonical-model projection partial for drive={DriveId} item={DocumentSpeId}; warnings={Warnings}",
+                request.DriveId, request.DocumentSpeId,
+                string.Join(",", canonicalProjection.Warnings.Select(w => $"{w.Code}:{w.Count}")));
+        }
         if (projection.Status == ComposeProjectionStatus.Failed)
         {
             _logger.LogWarning(
@@ -499,6 +548,7 @@ public class ComposeService : IComposeService
             Projection = projection,
             ImportedRevisions = importedRevisions,
             ImportedComments = importedComments,
+            ContentModel = contentModel,
             Origin = origin,
         };
     }
