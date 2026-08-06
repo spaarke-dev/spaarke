@@ -133,7 +133,11 @@ public sealed record ComposeBlock
 
     /// <summary>Task 023: <c>w:pPr/w:pageBreakBefore</c> — the paragraph starts on a new page. Carried for
     /// Paragraph / Heading / ListItem; captured by the server projection (mirrors Word's paragraph-level
-    /// page-break idiom, distinct from the run-level <see cref="ComposeInlineRun.IsPageBreak"/>).</summary>
+    /// page-break idiom, distinct from the run-level <see cref="ComposeInlineRun.IsPageBreak"/>).
+    /// ACCEPTED DEGRADATION (review 023-F2): an EXPLICIT <c>w:val="false"</c> override — turning OFF a
+    /// carrier STYLE's page-break-before on one paragraph — collapses to absent here (bool, not tri-state),
+    /// so such a paragraph regains the style's break on save; consistent with the model's bold/italic
+    /// OnOff collapse, rare in practice, widening is 026-shaped if it surfaces.</summary>
     public bool PageBreakBefore { get; init; }
 
     /// <summary><see cref="ComposeBlockKind.Table"/> only: the table's rows/cells. Null for other kinds.</summary>

@@ -619,6 +619,9 @@ public sealed class ComposeDocxProjectionBuilder
                 {
                     case Text t: sb.Append(t.Text); break;
                     case DeletedText dt: sb.Append(dt.Text); break;
+                    // Review 023-F3: this is FLATTENED DISPLAY TEXT for a field result / SDT atom — a page
+                    // break inside it stays a space (covered by that construct's own field-flattened-to-text
+                    // / hard-tier warning), deliberately NOT an IsPageBreak model run; 026 owns that surface.
                     case Break or TabChar or NoBreakHyphen or CarriageReturn or PositionalTab: sb.Append(' '); break;
                     case Ruby ruby:
                         // Task 022 WS-2 construct audit: mirrors RenderRun's Ruby case — the base text is
@@ -1906,7 +1909,14 @@ public sealed class ComposeDocxProjectionBuilder
         // model data; on render its content joins the FINAL section's page setup — a real pagination/
         // header-scope change, counted LOUDLY. Full multi-section modeling is a follow-up (the trailing
         // body-level sectPr is preserved by RenderIntoCarrier and is not this warning's subject).
-        if (p.ParagraphProperties?.SectionProperties is not null) ctx.AddWarning("section-break-flattened", 1);
+        // EXCEPTION (review 023-F1): the 011-P1 promotion shape — the FINAL section's sectPr parked in the
+        // LAST body paragraph's pPr with NO body-level sectPr (third-party generators) — loses NOTHING:
+        // RenderIntoCarrier promotes a clone to body level, so warning would be a false loss report (and a
+        // spurious Partial status). The predicate mirrors the renderer's promotion condition exactly.
+        if (p.ParagraphProperties?.SectionProperties is not null && !IsPromotedTrailingSectPr(p))
+        {
+            ctx.AddWarning("section-break-flattened", 1);
+        }
 
         // Task 023: paragraph-level page break — model data (w:pPr/w:pageBreakBefore, OnOff semantics).
         var pageBreakBefore = IsOn(p.ParagraphProperties?.PageBreakBefore);
@@ -1989,6 +1999,14 @@ public sealed class ComposeDocxProjectionBuilder
             PageBreakBefore = pageBreakBefore,
         };
     }
+
+    /// <summary>Review 023-F1: whether <paramref name="p"/> is the LAST direct body paragraph of a body
+    /// with NO body-level <c>sectPr</c> — the 011-P1 shape whose pPr-nested <c>sectPr</c> the renderer
+    /// PROMOTES to body level (nothing flattens; mirrors <c>RenderIntoCarrier</c>'s promotion predicate).</summary>
+    private static bool IsPromotedTrailingSectPr(Paragraph p) =>
+        p.Parent is Body body
+        && !body.Elements<SectionProperties>().Any()
+        && ReferenceEquals(body.Elements<Paragraph>().LastOrDefault(), p);
 
     /// <summary>Ordered-vs-bullet from the R4.5 <see cref="NumberingModel"/> (override-aware via
     /// <see cref="NumberingModel.ResolveLevel"/>), with <see cref="ResolveOrdered"/>'s tolerant posture:
@@ -2382,9 +2400,14 @@ public sealed class ComposeDocxProjectionBuilder
                     break;
                 case Break pageBreak when pageBreak.Type is not null && pageBreak.Type.Value == BreakValues.Page:
                     // Task 023: a MANUAL PAGE BREAK is model data (ComposeInlineRun.IsPageBreak) — emitted
-                    // at its exact inline position, no longer a line-break-flattened space.
+                    // at its exact inline position, no longer a line-break-flattened space. Once the output
+                    // budget is exhausted the break is dropped with the (already-counted) resource-limit
+                    // degradation — a clipped projection must not trail blank pages (review 023-F4).
                     FlushText();
-                    sink.Add(new ComposeInlineRun { IsPageBreak = true });
+                    if (ctx.HasOutputBudget)
+                    {
+                        sink.Add(new ComposeInlineRun { IsPageBreak = true });
+                    }
                     break;
                 case Break:
                 case CarriageReturn:
@@ -2480,6 +2503,10 @@ public sealed class ComposeDocxProjectionBuilder
             _warnings.TryGetValue(code, out var existing);
             _warnings[code] = existing + count;
         }
+
+        /// <summary>Review 023-F4: whether the output-text budget still has room — page-break runs stop
+        /// being emitted once it is exhausted (a clipped projection must not trail blank pages).</summary>
+        public bool HasOutputBudget => _textBudget > 0;
 
         public string ClampText(string text)
         {

@@ -368,4 +368,32 @@ preceding clause — visible structural corruption).
 
 ---
 
+### §13.1 Task 023 Step 9.5 triage (2026-08-06, commit `5951f173b` + fix commit)
+
+**adr-check: PASS 8/8** (incl. confirmation the FULL-rigor escalation over the POML's authored STANDARD is
+the correct Step 0.5 protocol reading; re-ran ADR-013 + the seam class independently).
+
+**code-review: APPROVE-WITH-MINORS → applied:**
+- **F1 (Medium) FIXED** — `section-break-flattened` falsely fired on the 011-P1 promotion shape (final
+  sectPr parked in the LAST body paragraph, no body-level sectPr — the renderer PROMOTES it, nothing
+  flattens). Fix: `IsPromotedTrailingSectPr` predicate mirrors the renderer's promotion condition; new
+  seam fact proves no-warn + actual promotion.
+- **F2 (Low, documented)** — explicit `w:pageBreakBefore w:val="false"` style-override-off collapses to
+  absent (bool, not tri-state) → paragraph regains a carrier style's break; accepted degradation noted on
+  the model field (026-shaped if it surfaces).
+- **F3 (Low) FIXED (comment)** — a page break inside a FIELD result / SDT atom display text stays a space
+  under that construct's own warning (deliberately not IsPageBreak; 026 owns the surface).
+- **F4 (Low) FIXED** — page-break runs are no longer emitted once the output-text budget is exhausted
+  (`ModelWalkContext.HasOutputBudget`) — a clipped projection must not trail blank pages.
+- **F5-F8 (Info, recorded)** — a mid-hyperlink break splits the hyperlink into two wrappers on re-render
+  (semantically equivalent; hyperlink identity not model data); `{isPageBreak + text/href}` client posts
+  collapse to a bare break by documented contract; TS preservation obligation remains 010/012's (with
+  021-F3/022-F12); the corpus break-count theory proves model→rendered equality (source-side losses in
+  dropped constructs are covered by those constructs' own warnings).
+
+**Post-fix:** suite 719/722 (same 3 pre-existing). Publish clean-worktree: **46.89 MB incl PDBs, task
+delta 0.00**.
+
+---
+
 *Steps 1–3 artifact + gates + tasks 020/011/021/022/023 records. Checkpoint in `current-task.md`.*

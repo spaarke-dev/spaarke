@@ -226,6 +226,44 @@ public sealed class ComposeHeaderFooterPageBreakSeamTests
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 4b. Review 023-F1 — the 011-P1 PROMOTION shape (final sectPr parked in the LAST paragraph's pPr,
+    //     NO body-level sectPr) loses NOTHING (the renderer promotes it), so it must NOT warn.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void BuildContentModel_TrailingPPrNestedSectPr_DoesNotWarnBecauseTheRendererPromotesIt()
+    {
+        byte[] source;
+        using (var stream = new MemoryStream())
+        {
+            using (var doc = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document))
+            {
+                var main = doc.AddMainDocumentPart();
+                main.Document = new Document(new Body(
+                    new Paragraph(new Run(new Text("Body prose."))),
+                    new Paragraph(
+                        // The P-1 shape: the FINAL section's setup nested in the LAST paragraph, no
+                        // body-level sectPr (third-party generator idiom — UAT #1A).
+                        new ParagraphProperties(new SectionProperties(new PageSize { Width = 12240, Height = 15840 })),
+                        new Run(new Text("Last paragraph.")))));
+                main.Document.Save();
+            }
+            source = stream.ToArray();
+        }
+
+        var projection = _builder.BuildContentModel(source);
+        projection.Warnings.Should().NotContain(w => w.Code == "section-break-flattened",
+            "the trailing pPr-nested sectPr is PROMOTED by RenderIntoCarrier — nothing flattens, so a " +
+            "warning would be a false loss report (023-F1)");
+
+        // And the promotion really happens: the rendered body carries the setup at body level.
+        var rendered = _renderer.RenderIntoCarrier(source, projection.Model, author: "seam-test");
+        using var renderedDoc = WordprocessingDocument.Open(new MemoryStream(rendered, writable: false), isEditable: false);
+        renderedDoc.MainDocumentPart!.Document!.Body!.Elements<SectionProperties>().Single()
+            .GetFirstChild<PageSize>()!.Width!.Value.Should().Be(12240u);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
     // 5. Corpus-wide: header/footer references resolve + page-break counts stable through the round-trip.
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
