@@ -271,7 +271,12 @@ public sealed class IncomingAssociationResolver
              // ContactNameMatch (rung 3.6) is an exact, verified full-name→contact appearance (regex + exact
              // Dataverse lookup, no AI cost), so it belongs in the deterministic pass — even though the mapper
              // keeps it OUT of auto-file eligibility (owner: surface-for-review, never auto-file).
-             or RungKind.ContactNameMatch;
+             or RungKind.ContactNameMatch
+             // Affinity (FR-A4) is deterministic frequency counting over the sprk_affinity store (one query, no
+             // AI cost), so it runs in the deterministic pass to surface a learned suggestion — even though the
+             // mapper keeps it OUT of auto-file AND deterministic-write eligibility (SUGGEST-ONLY, never
+             // auto-file), exactly like RecordNameMatch / ContactNameMatch.
+             or RungKind.Affinity;
 
     // ═════════════════════════════════════════════════════════════════════════════
     // Apply the ladder decision to the communication record

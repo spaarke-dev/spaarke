@@ -413,7 +413,9 @@ public sealed class AssociationStatusMapper
     /// eligible) — kill-switch-governed per ADR-018 via <see cref="Configuration.AutoFileOptions.Rung2And3AutoFileEnabled"/>,
     /// togglable without a redeploy. Deliberately EXCLUDES <see cref="RungKind.RecordNameMatch"/> regardless
     /// of the flag: per owner spec (2026-07-17) a name match is surfaced for review (the user picks the
-    /// primary among matches), never auto-filed.
+    /// primary among matches), never auto-filed. Likewise EXCLUDES <see cref="RungKind.ContactNameMatch"/>
+    /// and <see cref="RungKind.Affinity"/> (FR-A4 SUGGEST-ONLY learning loop) by omission — an affinity /
+    /// name match can raise a communication to at-most Suggested, never Resolved.
     /// </summary>
     private static bool IsAutoFileEligible(RungKind kind, bool includeRung23) =>
         // RecipientAlias (FR-A2) is a per-record intake address — a deliberate, unambiguous routing
@@ -433,8 +435,9 @@ public sealed class AssociationStatusMapper
     /// it does. When an email auto-files, all rung 0–3 associations (incl. participant/structural fallbacks)
     /// are still written — the shipped design keeps fallback matches WRITTEN even though they don't clear the
     /// auto-file bar; r5's review surface displays these denormalized associations. Excludes
-    /// <see cref="RungKind.RecordNameMatch"/> / <see cref="RungKind.ContactNameMatch"/> and AI rungs exactly
-    /// as the deterministic write set always has.
+    /// <see cref="RungKind.RecordNameMatch"/> / <see cref="RungKind.ContactNameMatch"/> /
+    /// <see cref="RungKind.Affinity"/> and AI rungs exactly as the deterministic write set always has (the
+    /// affinity learning loop is SUGGEST-ONLY — FR-A4).
     /// </summary>
     private static bool IsDeterministicWriteEligible(RungKind kind) =>
         kind is RungKind.ExplicitReference or RungKind.ThreadContinuity

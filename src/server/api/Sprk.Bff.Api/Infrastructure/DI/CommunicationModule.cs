@@ -52,6 +52,12 @@ public static class CommunicationModule
         // (email-r4 UAT R2 B1).
         services.Configure<ContactNameMatchOptions>(configuration.GetSection(ContactNameMatchOptions.SectionName));
 
+        // Affinity / deterministic-learning rung (FR-A4) options. Bound from "Communication:Affinity"; the
+        // Enabled flag is a per-tenant operational kill-switch (IOptionsMonitor — no redeploy, ADR-018). The
+        // rung surfaces a learned SUGGEST-ONLY candidate from the per-tenant sprk_affinity store; it never
+        // auto-files (excluded from the mapper's auto-file/deterministic-write sets).
+        services.Configure<AffinityOptions>(configuration.GetSection(AffinityOptions.SectionName));
+
         // Attachment-text match signal (Phase 2) options. Bound from "Communication:AttachmentMatch"; the
         // Enabled flag is an operational kill-switch (no redeploy). The inbound processor extracts bounded
         // attachment text (ITextExtractor) into the envelope before association so records named only in an
@@ -207,6 +213,16 @@ public static class CommunicationModule
         // mapper's auto-file-eligible/deterministic-write sets, so it can only add review candidates, never
         // auto-file. Takes the singleton IGenericEntityService (no captive dependency). Registered unconditionally (ADR-010).
         services.AddSingleton<IAssociationRung, AttachmentDocumentAssociationRung>(); // rung 3.7 — attachment→document
+        // Affinity / deterministic learning loop (FR-A4). Reads the per-tenant sprk_affinity store (human
+        // confirmation frequencies: sender / sender-domain / subject-keyword / participant-set → record) and
+        // surfaces the highest-frequency record for an untagged message's signals as an explainable candidate
+        // citing the confirmation count. SUGGEST-ONLY: RungKind.Affinity is excluded from the mapper's
+        // auto-file/deterministic-write sets, so it can only add a review candidate, never auto-file. Deterministic
+        // frequency counting only (no AI/ML — ADR-013). The store is an ADR-040 Path A exception (distinct from the
+        // ADR-040 session ledger + ADR-048 participant index). Registered unconditionally (ADR-010); self-gated by
+        // Communication:Affinity:Enabled (per-tenant). AffinityStore takes the singleton IGenericEntityService.
+        services.AddSingleton<AffinityStore>();
+        services.AddSingleton<IAssociationRung, AffinityRung>();               // rung 3 (tier) — affinity learning
         // rung 4 — semantic record match (FR-14). AI-tier: the engine evaluates it only when the
         // deterministic pass did not auto-file, and the mapper caps it to Suggested (never auto-files).
         // Consumes the IRecordMatchingAi facade (ADR-013) from a per-evaluation scope (facade is scoped,

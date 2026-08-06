@@ -82,4 +82,19 @@ public enum RungKind
     /// address catalog — see <c>RecipientAliasRung</c>).
     /// </summary>
     RecipientAlias = 9,
+
+    /// <summary>
+    /// Rung (tier 3) — affinity / deterministic learning loop (FR-A4). Reads a per-tenant
+    /// <c>sprk_affinity</c> store of human-confirmation frequencies (sender/sender-domain/subject-keyword/
+    /// participant-set to record) and surfaces the highest-frequency record for an untagged message's signal
+    /// set as an explainable candidate citing the confirmation count. It is <b>SUGGEST-ONLY, never
+    /// auto-file</b>: deliberately EXCLUDED from both
+    /// <see cref="AssociationStatusMapper.IsAutoFileEligible"/> and
+    /// <c>AssociationStatusMapper.IsDeterministicWriteEligible</c> (like <see cref="RecordNameMatch"/> /
+    /// <see cref="ContactNameMatch"/>), so an affinity signal can never push a communication to Resolved —
+    /// only surface it as at-most-Suggested for the reviewer to confirm. Deterministic frequency counting
+    /// only (no ML/AI — ADR-013). The <c>sprk_affinity</c> store is an ADR-040 Path A exception: filing-history
+    /// metadata, distinct from the ADR-040 session ledger and the ADR-048 participant index.
+    /// </summary>
+    Affinity = 10,
 }
