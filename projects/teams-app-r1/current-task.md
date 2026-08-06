@@ -14,7 +14,12 @@
 | **Task** | 🔄 **025 — CODE COMPLETE; deploy + live E2E operator-gated.** Principal-agnostic /external (Option A). FULL rigor, opus@xhigh. |
 | **Step** | ✅ Code + tests GREEN (full BFF suite **9761 pass / 0 fail**, 27 new). ✅ Step 9.5 gates: adr-check PASS (0 violations), code-review PASS (0 Critical). ✅ publish-size 46.90 MB compressed (< 60 MB; ~-2.7 MB vs baseline). ✅ /conflict-check no overlap. ✅ r2-coordination-response.md written. |
 | **Status** | 🟢 Delivered: `CallerPrincipalResolver.cs` (ICallerPrincipalResolver + 2 ICallerPrincipalStrategy CIAM/workforce, plane-selected by issuer/tid) → `CallerPrincipal` via group-level `CallerPrincipalAuthorizationFilter`. `/api/v1/external` = dual-scheme `ExternalCollaboration` policy. Workforce scoped to accessible-record-set (NFR-08, NOT all projects); CIAM byte-for-byte. /collab transitional. |
-| **Next Action (OPERATOR-GATED)** | ⏸ **Awaiting user go for LIVE deploy** to shared `spaarke-bff-dev` (065 mechanism: `scripts/Deploy-BffApi.ps1`). Then operator re-runs live Teams E2E (080). On E2E pass → set 025 ✅ + TASK-INDEX, then 090 wrap-up. |
+| **Next Action (OPERATOR)** | ✅ **BFF DEPLOYED** to `spaarke-bff-dev` (2026-08-06, hash-verified, /healthz 200, /api/v1/external/me → 401 route-live). ▶ **Operator: run the live Teams E2E** (080) — open the Teams tab as a workforce user, confirm the workspace + records load via `/api/v1/external/*`. On pass → set 025 ✅ + TASK-INDEX, then 090 wrap-up. |
+
+### Task 025 BFF deploy (2026-08-06)
+- **Deployed** via `scripts/Deploy-BffApi.ps1` → `spaarke-bff-dev` / `rg-spaarke-dev`. Package 48.27 MB; 4 critical files SHA-256 verified; `/healthz` 200.
+- **Smoke**: `GET /api/v1/external/me` (unauth) → **401** = route registered under the dual-scheme `ExternalCollaboration` policy (expected). A workforce token now authenticates there (was CIAM-only → 401 before).
+- **Live E2E (080) is the last gate**: workforce user in Teams → `/api/v1/external/me` + `/projects` should now return data (scoped to the accessible-record-set), not 401.
 
 ### Task 025 design decisions (locked 2026-08-05)
 - **Plane selection**: CIAM iff token `iss` contains `ciamlogin.com` OR `tid`==Ciam:TenantId; else workforce. Deterministic, config-light.
