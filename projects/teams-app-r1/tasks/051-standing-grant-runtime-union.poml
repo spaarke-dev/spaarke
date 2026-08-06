@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="teams-app-r1">
+  <metadata>
+    <title>Standing-grant runtime union into the accessible-record set</title>
+    <phase>5 Standing Grant</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization composition — security-sensitive runtime access derivation; modifies the accessible-set enforcement path (code-review + adr-check required per CLAUDE.md §8).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Authorization composition — security-sensitive runtime access derivation.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies the accessible-set composition owned by task 022; serialize.</parallel-reason>
+    <deps>022,050</deps>
+    <tags>bff-api, auth, cache</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add the runtime union so a contact holding a standing grant (task 050's `contact.sprk_standinggrant` field) gains LIVE access to all records where they hold an access-conferring (`sprk_assigned*`) role — now and future — WITHOUT materializing per-record `sprk_externalrecordaccess` rows. Enabling the standing grant confers access; disabling it revokes it. This composes into the accessible-record-set enforcement path established by task 022.
+  </prompt>
+
+  <role>SPAARKE platform developer + authorization engineer. Expert in the Spaarke accessible-record-set composition (design.md §5/§5.1), ADR-034 contact-anchored membership, and the Redis-backed `ExternalParticipationService` participation cache (ADR-009). Follow ADRs strictly.</role>
+
+  <goal>
+    `accessible(principal)` for a contact principal is `sprk_externalrecordaccess` grants ∪ standing-grant runtime membership. When `contact.sprk_standinggrant` is true, the contact's accessible set includes every record where the contact holds an access-conferring role (via the contact-anchored membership resolver, role-allowlist-filtered per NFR-05) — computed at read time, never written as `sprk_externalrecordaccess` rows. Toggling the field off immediately narrows the set back. A standing-grant change is reflected promptly (cache invalidated, not left to expire on its own).
+  </goal>
+
+  <context>
+    <background>
+      design.md §5 defines `accessible(principal) = systemuser → ADR-034 membership (auto) ∪ contact → sprk_externalrecordaccess grants ∪ contact → standing-grant runtime membership`. Task 022 builds the composition + enforcement scaffold for the first two terms; task 050 adds the durable `contact.sprk_standinggrant` policy flag. This task adds the third term: a live union computed from the contact-anchored membership resolver (task 021 — reuses `MembershipResolverService.BuildFetchXml`, which already matches `ContactId`), filtered to the access-conferring role allowlist, with NO materialization of `sprk_externalrecordaccess` rows for the standing-grant path. The nearest existing code is `ExternalCallerContext.HasProjectAccess` (today: `Participations.Any(p => p.ProjectId == projectId)`) and `ExternalParticipationService.GetParticipationsAsync` (Redis cache, key `sdap:external:access:{contactId}`, 60-second TTL, explicitly documented as caching per-Contact participation DATA — "not an authorization decision per ADR-009").
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="canonical-reference">projects/teams-app-r1/design.md</file>
+      <file role="canonical-reference">projects/teams-app-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Implement as a RUNTIME UNION only — do NOT materialize per-record `sprk_externalrecordaccess` rows when a contact holds a standing grant. Enabling `contact.sprk_standinggrant` must immediately widen `accessible(principal)`; disabling it must immediately narrow it back (model as revoke, not merely "stop granting new access").</constraint>
+    <constraint source="ADR-034">Reuse the contact-anchored membership resolver (task 021's extension to `MembershipResolverService.BuildFetchXml`, which already matches `ContactId`) as the record source for the union — do NOT build a second membership-computation mechanism.</constraint>
+    <constraint source="project">Filter the union to the access-conferring role allowlist (NFR-05): adverse/informational roles (e.g. opposing counsel, regarding-person) MUST NOT confer access via the standing-grant path either — same allowlist as the grant-modal candidate list.</constraint>
+    <constraint source="project">Invalidate the `ExternalParticipationService` cached entry (key `sdap:external:access:{contactId}`) when a standing grant is toggled, so access reflects promptly rather than waiting out the 60-second TTL. The cache holds per-contact participation DATA, not an authorization decision (per the existing ADR-009 code comment) — extend that data cache's invalidation; do NOT introduce caching of the authorization decision itself (`.claude/constraints/auth.md` MUST NOT rule).</constraint>
+    <constraint source="ADR-029">Measure and report BFF publish size (`dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`) — absolute size + diff vs the ~49.63 MB baseline — per root CLAUDE.md §10 bullet 4.</constraint>
+    <constraint source="project">Run `/conflict-check` before opening the BFF PR (13+ active BFF worktrees touch this surface per projects/INDEX.md).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Standing-grant runtime union (accessible-record-set composition)</topic>
+    <files>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/teams-app-r1/design.md</file>
+      <file>projects/teams-app-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Accessible-set check mirrors HasProjectAccess" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs">`HasProjectAccess` today checks materialized participations only; the standing-grant term extends the underlying set the check evaluates against, without changing the check's shape (record ∈ set).</pattern>
+      <pattern name="Per-contact participation cache, not an authorization-decision cache" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs">`GetParticipationsAsync` caches participation DATA (60s TTL, Redis, key `sdap:external:access:{contactId}`) — extend/invalidate this data cache; never cache the yes/no authorization outcome itself.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Load the knowledge files plus task 022's accessible-set composition entry point and task 050's field-schema note (`projects/teams-app-r1/notes/050-standing-grant-field-schema.md`) to confirm the exact field name/type.</step>
+    <step order="2">Confirm the contact-anchored membership resolver (task 021) and its role-allowlist filter — this is the sole record source for the union; do not re-derive role-conferral logic separately.</step>
+    <step order="3">Add a standing-grant union branch to the accessible-set composition: for a contact principal where `contact.sprk_standinggrant` is true, union in every record the contact-anchored resolver returns (already role-allowlist-filtered) — without writing any `sprk_externalrecordaccess` rows.</step>
+    <step order="4">Extend `ExternalParticipationService` (or the relevant cache layer) to invalidate the per-contact cached entry when the standing-grant field changes, so the union reflects promptly rather than waiting for the 60-second TTL to lapse.</step>
+    <step order="5">Add unit tests: standing-grant-true contact gets union access to allowlisted-role records; standing-grant-false contact does not; a non-allowlisted (adverse) role never confers access via this path; no `sprk_externalrecordaccess` row is created by the standing-grant path.</step>
+    <step order="6">Add/extend a vertical-slice seam test (ADR-038) exercising enable → live access granted and disable → live access revoked end to end, including the cache-invalidation step.</step>
+    <step order="7">Measure BFF publish size and report absolute size + diff vs the ~49.63 MB baseline; confirm no new HIGH-severity CVE via `dotnet list package --vulnerable --include-transitive`.</step>
+    <step order="8">Run `/conflict-check` before opening the BFF PR.</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the union cannot be enforced at runtime without materializing per-record `sprk_externalrecordaccess` rows, STOP and escalate per root CLAUDE.md §6/§6.5 — design.md §5 specifies a runtime union, not materialization, and this would be a design-conflicting deviation requiring explicit resolution before proceeding.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test the BFF; run publish-size verification.</tool>
+    <tool name="terminal">Run shell commands, `/conflict-check`.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs (or the accessible-set composition file established by task 022) — standing-grant union branch</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs — cache invalidation on standing-grant toggle</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/** — standing-grant union unit tests</output>
+    <output type="tests">tests/integration/seam/** — enable/disable end-to-end seam test</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a contact with `sprk_standinggrant` enabled, when the accessible-set is evaluated, then it includes every record where the contact holds an access-conferring (`sprk_assigned*`) role, present and future, without any `sprk_externalrecordaccess` row existing for those records.</criterion>
+    <criterion testable="true">Given a contact with `sprk_standinggrant` disabled, when the accessible-set is evaluated, then the standing-grant union contributes no records (only materialized `sprk_externalrecordaccess` grants, if any, remain).</criterion>
+    <criterion testable="true">Negative: a contact who has NEVER had a standing grant enabled gets no access via this path — only their materialized grants (if any) apply.</criterion>
+    <criterion testable="true">Negative: no `sprk_externalrecordaccess` row is created, updated, or deleted anywhere in the standing-grant union code path.</criterion>
+    <criterion testable="true">Given a standing-grant toggle change, when the per-contact cache entry is invalidated, then a subsequent accessible-set evaluation reflects the new state without waiting for the 60-second TTL to lapse.</criterion>
+    <criterion testable="true">BFF publish size is measured and reported (absolute + diff vs ~49.63 MB baseline) and remains under the 60 MB ceiling; no new HIGH-severity CVE is introduced.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Phase 5 / Stream D (parallel with Streams P/M/E per plan.md), but serialized against task 022 because both touch the accessible-set composition — do not run 022 and 051 concurrently. Depends on task 050 (the field) and task 022 (the composition scaffold + first two union terms). NFR-05 role-allowlist safety and the broker-only/no-materialization invariant are the two security-load-bearing constraints in this task.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist. This is a FULL-rigor task — code-review + adr-check gates apply at Step 9.5.</protocol>
+  </execution>
+</task>

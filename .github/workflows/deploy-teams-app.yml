@@ -1,0 +1,173 @@
+name: Deploy Teams App Package
+
+# Task 071 (teams-app-r1, Phase 7 "Teams Package & Deploy" / Stream M).
+#
+# Builds the external-spa Teams-tab surface as a fail-fast sanity gate, then
+# packages the Teams app manifest produced by task 070
+# (src/client/external-spa/appPackage/: manifest.json + color.png +
+# outline.png) into a distributable zip and publishes it as a durable
+# GitHub Actions artifact.
+#
+# Modeled directly on deploy-external-spa.yml's job/step shape (checkout →
+# setup-node → npm install --legacy-peer-deps → build → stage/package →
+# deploy), split into two jobs joined by `needs:` so the job graph itself
+# (not step ordering) enforces that a build or package failure hard-blocks
+# the deploy job — see the `deploy` job's `needs: build_and_package` below.
+#
+# Toolkit-CLI vs pre-zip-upload (task 071 decision point): this workflow
+# zips appPackage/ directly with the `zip` CLI rather than invoking the
+# M365 Agents Toolkit CLI (`atk`/`teamsapp`). No `m365agents.yml` or Toolkit
+# project scaffolding exists anywhere in the repo — task 070 authored
+# appPackage/ by hand (not via `atk new`) and produced its local
+# `appPackage.dev.zip` the same way. Introducing the Toolkit CLI here would
+# add a net-new CI build dependency with no existing project config to
+# drive it, for no behavioral gain over a plain zip of the
+# already-validated manifest + icons. If a later task adds Toolkit project
+# scaffolding for `atk package`/`atk publish` end-to-end (including
+# Toolkit-driven manifest schema validation), this workflow can be
+# repointed then — see the handoff note in task 070.
+#
+# Deploy target: org-catalog submission under App Centric Management is a
+# manual tenant-admin action (task 072) — there is no programmatic "deploy"
+# endpoint this workflow can call. "Deploy" here means: publish the
+# packaged zip as a long-retention GitHub Actions artifact that task 072's
+# admin downloads and submits to the org app catalog.
+#
+# MANUAL-ONLY for now (workflow_dispatch), matching deploy-external-spa.yml's
+# phase-gated trigger discipline — no push/path trigger until a later task
+# explicitly calls for it.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 1: Build the external-spa Teams surface (sanity/regression gate) and
+  #        package task 070's appPackage/ into a distributable zip.
+  #        A failure at ANY step below stops this job — no later step in
+  #        this job runs, and (via `needs:`) the deploy job never starts.
+  # ──────────────────────────────────────────────────────────────────────────
+  build_and_package:
+    runs-on: ubuntu-latest
+    name: Build external-spa and package Teams app
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      # Vite solution: use npm install --legacy-peer-deps (NOT npm ci) per root CLAUDE.md §12.
+      - name: Install dependencies
+        working-directory: src/client/external-spa
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      # Sanity/regression gate: the Teams tab is the same external-spa bundle
+      # (D10 — extended in place, not a separate build target) already
+      # deployed to Azure Static Web Apps by deploy-external-spa.yml. This
+      # step does not re-deploy that bundle; it exists so a broken build of
+      # the surface the manifest's contentUrl points at fails HERE, before a
+      # Teams app package advertising it is published.
+      - name: Build (Vite production)
+        working-directory: src/client/external-spa
+        env:
+          VITE_BFF_API_URL: https://spaarke-bff-dev.azurewebsites.net
+          VITE_MSAL_AUTHORITY: https://spaarkeextid.ciamlogin.com/7052feba-bfc4-43e0-b09e-65014b429131
+          VITE_MSAL_CLIENT_ID: bd57e54e-b339-4500-b55c-e451009fd907
+          VITE_MSAL_TENANT_ID: 7052feba-bfc4-43e0-b09e-65014b429131
+          VITE_MSAL_BFF_SCOPE: api://4a4d5126-91b0-4865-8e3a-134b7209013e/SDAP.Access
+        run: npm run build
+
+      - name: Validate Teams app manifest (required fields present)
+        working-directory: src/client/external-spa/appPackage
+        run: |
+          echo "Validating manifest.json is well-formed JSON with required fields..."
+          jq -e '.manifestVersion != null and .manifestVersion != ""' manifest.json > /dev/null || { echo "::error::manifest.json missing manifestVersion"; exit 1; }
+          jq -e '.id != null and .id != ""' manifest.json > /dev/null || { echo "::error::manifest.json missing id"; exit 1; }
+          jq -e '.staticTabs != null and (.staticTabs | length) > 0' manifest.json > /dev/null || { echo "::error::manifest.json missing staticTabs"; exit 1; }
+          jq -e '.validDomains != null and (.validDomains | length) > 0' manifest.json > /dev/null || { echo "::error::manifest.json missing validDomains"; exit 1; }
+          jq -e '.webApplicationInfo.id != null and .webApplicationInfo.id != ""' manifest.json > /dev/null || { echo "::error::manifest.json missing webApplicationInfo.id"; exit 1; }
+          jq -e '.webApplicationInfo.resource != null and .webApplicationInfo.resource != ""' manifest.json > /dev/null || { echo "::error::manifest.json missing webApplicationInfo.resource"; exit 1; }
+          echo "Manifest validation passed."
+
+      - name: Verify icon assets exist
+        working-directory: src/client/external-spa/appPackage
+        run: |
+          test -f color.png || { echo "::error::color.png missing (declared in manifest.icons.color)"; exit 1; }
+          test -f outline.png || { echo "::error::outline.png missing (declared in manifest.icons.outline)"; exit 1; }
+
+      # Package: zip manifest.json + icons at the archive root (Teams app
+      # package format — no appPackage/ prefix inside the zip). env.*.json is
+      # a Toolkit environment-variable file, not part of the distributable
+      # package, and is intentionally excluded.
+      - name: Package Teams app
+        working-directory: src/client/external-spa/appPackage
+        run: |
+          mkdir -p build
+          rm -f build/appPackage.zip
+          zip -j build/appPackage.zip manifest.json color.png outline.png
+
+      - name: Verify package contents
+        working-directory: src/client/external-spa/appPackage
+        run: |
+          unzip -l build/appPackage.zip
+          FILE_COUNT=$(unzip -Z1 build/appPackage.zip | wc -l)
+          if [ "$FILE_COUNT" -ne 3 ]; then
+            echo "::error::Expected 3 files in appPackage.zip (manifest.json + 2 icons), found $FILE_COUNT — check for stray dev artifacts"
+            exit 1
+          fi
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: teams-app-package-build
+          path: src/client/external-spa/appPackage/build/appPackage.zip
+          retention-days: 7
+
+      - name: Write build summary
+        run: |
+          echo "## Teams App — Build & Package" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | \`appPackage.zip\` (manifest.json + color.png + outline.png) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 2: Publish the packaged Teams app as the release artifact.
+  #        `needs: build_and_package` is the job-graph mechanism that hard-
+  #        blocks this job when the build/package job fails — GitHub Actions
+  #        skips a job whose `needs:` dependency did not succeed, regardless
+  #        of step ordering within either job.
+  # ──────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Publish Teams app package
+    runs-on: ubuntu-latest
+    needs: build_and_package
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: teams-app-package-build
+          path: dist
+
+      # "Deploy" for a Teams org-catalog app is publishing the durable
+      # artifact an admin will submit — App Centric Management org-catalog
+      # upload/approval is a manual tenant-admin action (task 072), not a
+      # programmatic endpoint this workflow can call.
+      - name: Publish release artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: teams-app-package
+          path: dist/appPackage.zip
+          retention-days: 90
+
+      - name: Write deploy summary
+        run: |
+          echo "## Teams App — Deploy" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Published artifact **teams-app-package** (\`appPackage.zip\`, 90-day retention)." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next step (task 072, manual/admin-gated):** download this artifact and submit it to the org app catalog under App Centric Management for admin approval." >> $GITHUB_STEP_SUMMARY
