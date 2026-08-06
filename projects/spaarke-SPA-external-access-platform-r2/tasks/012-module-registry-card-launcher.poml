@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Module registry (WorkspaceWidgetRegistry pattern) + card launcher + /me-driven visibility</title>
+    <phase>P1 Module-host foundation</phase>
+    <gate>blocked-until:011</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New client surface (registry + launcher + router); modifies .tsx; core P1 centerpiece (F1); tags include frontend/fluent-ui.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified: adopt a named pattern (WorkspaceWidgetRegistry) + reuse ActionCard; closed acceptance set incl. negative routability case.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>After 011 lands, runs in parallel-group B with 014/017; touches new registry/launcher files, not the shared frame that 013 edits.</parallel-reason>
+    <deps>011</deps>
+    <tags>frontend, fluent-ui</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build the code-side module registry (adopting the Spaarke.AI.Widgets WorkspaceWidgetRegistry lazy-factory
+    pattern) and the home card launcher (reusing ActionCard/ActionCardRow) so the shell renders cards for ONLY
+    the modules the current user is entitled to per /me. An unentitled module is neither shown nor routable.
+  </prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Fluent v9 + React 18 SPA specialist; entitlement-honest UI.</role>
+
+  <goal>
+    A module registry that registers each module as { id, title, icon, route, lazyLoader, requiredEntitlement }
+    (WorkspaceWidgetRegistry pattern), a launcher home rendering ActionCardRow/ActionCard for exactly the
+    /me-entitled modules, and a router that refuses direct navigation to an unentitled module route. Adding a
+    module = register a card + a lazy route + a required entitlement.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-01 (module registry), FR-02 (card launcher gated by /me), design.md F1 (the centerpiece), and
+      ux-brief §3 (Home card launcher = ActionCardRow + ActionCard, M365-waffle-style entitlement-gated grid with a
+      graceful empty state). NFR-06/NFR-08: client gating is UX-only; server is the truth — but the client MUST NOT
+      show or route to modules the user lacks (entitlement-honest, ux-brief §1.5). /me endpoint contract is delivered
+      by teams-app-r1 / generalized in P2; P1 consumes the modules list it returns.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ActionCard.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ActionCardRow.tsx</file>
+      <file>src/client/external-spa/src/App.tsx</file>
+      <file>src/client/external-spa/src/pages/WorkspaceHomePage.tsx</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+    </relevant-files>
+    <dependencies>011 (shell scaffold — the launcher mounts in the shell's module outlet + home route).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Reuse the WorkspaceWidgetRegistry lazy-factory PATTERN (register(type, meta, () => import()) / resolve) — do not import PaneEventBus/tab-mount machinery; the launcher/router is the new surface (§11).</constraint>
+    <constraint source="project">Reuse ActionCard/ActionCardRow as-is for cards; no hand-rolled card UI (§11 / ux-brief §1.2).</constraint>
+    <constraint source="NFR-06">Client entitlement gating is UX-only; but an unentitled module MUST be neither rendered as a card NOR reachable by direct route (entitlement-honest).</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; zero hardcoded hex; correct in light/dark/Teams theme; graceful empty-state when no modules entitled.</constraint>
+    <constraint source="ADR-022">React 18 lazy/Suspense for module lazyLoaders.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Lazy-factory registry" location="src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts">register(type, meta, () => import()) / resolve; adopt the shape, drop the mount machinery.</pattern>
+      <pattern name="Card primitives" location="src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ActionCard.tsx">Fluent v9 icon+label cards with hover/focus/keyboard/dark-mode built in.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Author a module registry module in external-spa adopting the WorkspaceWidgetRegistry pattern; descriptor = { id, title, icon, route, lazyLoader, requiredEntitlement }.</step>
+    <step order="2">Build the launcher home (extend WorkspaceHomePage) rendering ActionCardRow/ActionCard for the intersection of registered modules and the /me entitled-module list; render the graceful empty-state when none.</step>
+    <step order="3">Wire lazy routes (React.lazy + Suspense) for each registered module into the shell router; a route whose requiredEntitlement is not in /me returns a denied/redirect result (not the module).</step>
+    <step order="4">Document the "add a module" recipe (register card + lazy route + requiredEntitlement) in notes/ for the FR-01 acceptance walkthrough.</step>
+    <step order="5">Build the SPA (npm install --legacy-peer-deps --no-audit --no-fund; npm run build:prod); verify zero errors.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="7">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TS/React (build:prod)</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/registry/ (module registry)</output>
+    <output type="code">src/client/external-spa/src/pages/WorkspaceHomePage.tsx (launcher)</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/ (add-a-module recipe)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a user entitled to modules {A,B} per /me, when the launcher renders, then exactly cards A and B show and C's card is absent (FR-02).</criterion>
+    <criterion testable="true">Given the same user, when they direct-navigate to module C's route, then they are denied/redirected — C is not routable (negative case, NFR-06/NFR-08).</criterion>
+    <criterion testable="true">Given no entitled modules, when the launcher renders, then a graceful empty-state shows (not a blank/broken page).</criterion>
+    <criterion testable="true">A new module is added by registering { id,title,icon,route,lazyLoader,requiredEntitlement } + a lazy route — no shell edits (FR-01); recipe documented.</criterion>
+    <criterion testable="true">Cards use ActionCard/ActionCardRow (reuse); registry adopts the WorkspaceWidgetRegistry pattern; no hand-rolled equivalents.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts (lazy widget/tab mounting; NOT a home launcher/router). grep: no existing home-launcher or entitlement-gated card grid in external-spa (WorkspaceHomePage renders R1 project list only).</existing>
+    <extension>No — the registry PATTERN is reused, but the launcher + entitlement-gated router are net-new surface; WorkspaceWidgetRegistry mounts widgets into panes/tabs, it does not gate a card home by /me entitlement.</extension>
+    <cost-of-doing-nothing>Without it, each of 3+ apps is a hand-copied SPA that drifts, and there is no access-gated home — an unentitled user could reach a module by URL (FR-02/NFR-08 failure).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Entitlement-gated launcher"><steps><step>Load launcher as a user entitled to {A,B}</step><step>Verify only cards A,B render</step></steps><expected>C absent; no console errors</expected></test>
+    <test name="Unentitled route denied"><steps><step>Direct-navigate to C's route</step></steps><expected>denied/redirect, module C not rendered</expected></test>
+    <test name="Empty state"><steps><step>Load launcher with zero entitled modules</step></steps><expected>graceful empty-state</expected></test>
+    <test name="Dark Mode + Teams theme (ADR-021)"><steps><step>Toggle dark + Teams theme</step><step>Verify cards adapt</step></steps><expected>zero hardcoded hex; adapts</expected></test>
+  </ui-tests>
+
+  <notes>
+    Build target: approved P0 prototype + ux-brief §3 Home card launcher row. The /me modules contract is
+    delivered by teams-app-r1 and generalized in P2; P1 consumes the modules array it returns. Keep the
+    registry code-side (spec: no Dataverse sprk_module catalog in R2).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

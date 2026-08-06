@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Workforce-plane external-app auth policy (alongside CiamExternal/ExternalCollaboration)</title>
+    <phase>P2 Access-control + entitlement</phase>
+    <gate>blocked-until:015</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags `bff-api`, `auth`; new auth policy on a shared surface; modifies `.cs`; security-sensitive — FULL per CLAUDE.md §8 + §6 (auth).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth policy on a shared surface with plane-selection correctness (iss/tid) and no-OBO invariants; high blast radius; security-sensitive reasoning.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared auth surface (`AuthPolicies.cs`, `AuthorizationModule.cs`) coordinated with teams-app-r1; policy changes have broad blast radius. Must land alone.</parallel-reason>
+    <deps>015</deps>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Add a workforce-plane external-app auth policy alongside the existing `CiamExternal` and `ExternalCollaboration` policies, so Legal Front Door (workforce SSO, self-service submitter) modules can authenticate. Plane selection is by validated-token `iss` (ciamlogin.com) / `tid` — spoof-safe. The workforce path is no-OBO (token authenticates to the BFF only).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. BFF auth architect fluent in Microsoft.Identity.Web multi-scheme, ADR-008 route-group policies, and the ADR-028 broker-only/no-OBO invariants.</role>
+  <goal>A new named auth policy (workforce-plane external-app) is registered in `AuthorizationModule.cs` and defined in `AuthPolicies.cs`, accepting the workforce scheme, selecting the plane by validated-token `iss`/`tid`, enforcing no-OBO (BFF-only audience). Front Door endpoint groups (P3) can attach it. Unit + KEEP-path tests prove correct plane selection incl. the wrong-issuer negative.</goal>
+  <context>
+    <background>Spec Scope: "BFF adds a workforce-plane external-app auth policy alongside R1's `CiamExternal`." FR-08/Front Door is workforce SSO. New Components table: "Workforce-plane external-app auth policy — extend the additive-scheme pattern; new policy — without it, Legal Front Door (workforce SSO) can't authenticate." teams-app-r1 shipped `ExternalCollaboration` (dual-scheme `{Ciam, JwtBearerDefaults}`) with plane selection: CIAM iff validated token `iss` contains `ciamlogin.com` OR `tid == Ciam:TenantId`, else workforce (spoof-safe — read from cryptographically-validated token). NFR-01: workforce-SSO modules use the standard workforce path with no OBO, no Power-Apps-license dependency, no elevation. Token audience: the BFF workforce default scheme (`api://1e40baad-…`) accepts the Teams NAA v1 token with no config change.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/AuthPolicies.cs — `CiamExternal` :31 (superseded), `ExternalCollaboration` :42 (dual-scheme, live). Add the new workforce-plane policy here following the `ExternalCollaboration` shape.</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs :258 / :270 — where `CiamExternal`/`ExternalCollaboration` are registered; register the new policy alongside.</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs — `DeterminePlane` (iss/tid) is the plane-selection reference; keep policy plane-selection consistent with the resolver's.</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/WorkforceCallerAuthorizationFilter.cs :28 — currently wired ONLY to `/api/v1/collab` (a delete candidate); reference for the workforce-caller filter shape, but the new Front Door groups use `CallerPrincipalAuthorizationFilter`.</file>
+    </relevant-files>
+    <dependencies>Task 015 (P1 auth scaffold prerequisite). This policy is consumed by P3 Front Door endpoint groups; it is delivered here in P2 so P3 attaches it.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="ADR-028">Preserve broker-only for CIAM and no-OBO for the workforce SPA path — the workforce token authenticates to the BFF ONLY, never exchanged downstream. This is the ADR-028 A2/A3 ratified model; do NOT introduce OBO on this path. Scope: the new workforce-plane policy.</constraint>
+    <constraint source="spec-plane-selection">Plane selection MUST read from the cryptographically-validated token (`iss` contains ciamlogin.com OR `tid == Ciam:TenantId` ⇒ CIAM; else workforce). MUST NOT trust any client-supplied unvalidated hint. Keep consistent with `CallerPrincipalResolver.DeterminePlane`. Scope: policy scheme/plane selection.</constraint>
+    <constraint source="ADR-008">Authorization is a named route-group policy (attached per Front Door group), NOT global middleware. Scope: policy definition + registration.</constraint>
+    <constraint source="ADR-010">Reuse the additive-scheme pattern from `ExternalCollaboration`; do NOT introduce speculative abstractions — this is a new policy, not a new framework. Scope: this task.</constraint>
+    <constraint source="project">Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`); `dotnet publish -c Release` compressed size + delta vs 46.90 MB baseline (≤60 MB); no new HIGH CVE; `/conflict-check` before the PR (teams-app-r1 owns this exact auth surface — high conflict risk).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="additive-scheme-policy" location="src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/AuthPolicies.cs">`ExternalCollaboration` (:42) dual-scheme is the shape to follow for the new workforce-plane policy; register in AuthorizationModule.cs alongside :258/:270.</pattern>
+      <pattern name="plane-selection" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs">`DeterminePlane` iss/tid logic — keep the policy's plane selection consistent with the resolver's.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load spec Scope + FR-08 + NFR-01 + the ADR-028 Tension (A2/A3). Read `AuthPolicies.cs` (`ExternalCollaboration` :42) and `AuthorizationModule.cs` (:258/:270) and `CallerPrincipalResolver.DeterminePlane`.</step>
+    <step order="2">Define the new workforce-plane external-app policy in `AuthPolicies.cs` following the `ExternalCollaboration` additive-scheme shape: accept the workforce scheme (audience `api://{workforce-app}`, v1 issuer), require an authenticated workforce principal.</step>
+    <step order="3">Confirm the BFF workforce default scheme accepts the workforce/NAA token audience + v1 issuer with no config change (per spec resolved item); if a config change is needed, document it and confirm no CIAM regression.</step>
+    <step order="4">Register the policy in `AuthorizationModule.cs` alongside `CiamExternal`/`ExternalCollaboration` (:258/:270).</step>
+    <step order="5">Ensure no-OBO: verify the workforce token is validated for BFF audience only and never exchanged downstream (grep for OBO usage on this path; assert absence).</step>
+    <step order="6">Add unit + KEEP-path tests (ADR-038): a valid workforce token satisfies the policy; a CIAM token is routed to the CIAM plane, not this policy; a wrong-issuer token → 401 (negative); no-OBO invariant asserted (no downstream token exchange on this path).</step>
+    <step order="7">Build + test: `dotnet build` + `dotnet test`. Run `dotnet publish -c Release` and record compressed size + delta.</step>
+    <step order="8">Run `/conflict-check` (teams-app-r1 owns this auth surface); write Placement Justification + publish-size delta into the PR/task notes.</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="10">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/</step>
+  </steps>
+  <escalation>
+    <trigger>If accepting the workforce audience/issuer on the BFF scheme requires ANY change that could relax CIAM validation (cross-plane audience acceptance, shared scheme), STOP — this is a security-sensitive auth change (§6) requiring owner sign-off before proceeding; also confirm no teams-app-r1 conflict via /conflict-check.</trigger>
+  </escalation>
+  <tools>
+    <tool name="dotnet">Build/test/publish .NET</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/AuthPolicies.cs (new workforce-plane policy)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs (policy registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ + KEEP-path test for plane selection + wrong-issuer negative</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a valid workforce (NAA/SSO) token, when a Front Door group guarded by the new policy is called, then the request is authenticated on the workforce plane.</criterion>
+    <criterion testable="true">Given a CIAM token (iss contains ciamlogin.com OR tid == Ciam:TenantId), when plane selection runs, then it is routed to the CIAM plane, not the workforce policy.</criterion>
+    <criterion testable="true">Given a wrong-issuer / spoofed token, when the policy evaluates it, then the request is rejected 401 (negative) — plane read only from the validated token.</criterion>
+    <criterion testable="true">Given the workforce path, when a request is authorized, then NO OBO/downstream token exchange occurs (broker-only/no-OBO invariant asserted).</criterion>
+    <criterion testable="true">Given the CIAM path after this change, when regression-tested, then CIAM validation is byte-for-byte preserved (no cross-plane audience relaxation).</criterion>
+    <criterion testable="true">Given `dotnet publish -c Release`, when measured, then compressed size + delta vs 46.90 MB baseline is reported and ≤60 MB; BFF suite passes; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>`AuthPolicies.CiamExternal` :31 (CIAM only) and `ExternalCollaboration` :42 (dual-scheme collaboration). Grep of `Infrastructure/Authentication/**` shows no standalone workforce-plane external-app policy for Front Door groups.</existing>
+    <extension>Extend the additive-scheme pattern (reuse the `ExternalCollaboration` shape + `DeterminePlane` logic) — but a new named policy is required because Front Door groups need workforce-plane semantics distinct from the CIAM-superseding `ExternalCollaboration` collaboration group.</extension>
+    <cost-of-doing-nothing>Without it, Legal Front Door (workforce SSO, self-service submitter) endpoint groups (P3) have no auth policy to attach and cannot authenticate workforce users — the entire Front Door capability is unreachable.</cost-of-doing-nothing>
+  </justification>
+  <notes>Keep plane selection identical to `CallerPrincipalResolver.DeterminePlane` (iss/tid) so policy + resolver never disagree. Per spec, the workforce audience + v1 issuer should require NO config change (Microsoft.Identity.Web handles v1) — verify empirically. This is the exact surface teams-app-r1 owns; /conflict-check is mandatory before the PR.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge/files before starting; follow task-execute pre-exec checklist; §10 gate at Step 9.5.</protocol>
+  </execution>
+</task>

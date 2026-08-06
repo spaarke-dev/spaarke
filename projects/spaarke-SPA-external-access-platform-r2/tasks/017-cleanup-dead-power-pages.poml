@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Remove dead Power Pages proxy/config (vite.config.ts proxy, powerpages.config.json, stale README)</title>
+    <phase>P1 Module-host foundation</phase>
+    <gate>blocked-until:011</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deletion/cleanup of dead config; not core logic; STANDARD per CLAUDE.md §8 (with a build/deploy-green + zero-refs verification gate).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped deletion against named files with a negative (zero-refs) acceptance criterion — literal execution.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>After 011 lands, runs in parallel-group B with 012/014; touches vite.config.ts / powerpages.config.json / README, not the shared frame or auth bootstrap.</parallel-reason>
+    <deps>011</deps>
+    <tags>frontend, refactoring</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Remove R1's dead Power Pages proxy + config from external-spa: the vite.config.ts proxy for /_api, /_layout,
+    /_services (:157-172) plus the iife workaround (:22/:132), powerpages.config.json, and the stale README.md
+    Power-Pages content. Build + deploy stay green and zero Power Pages references remain.
+  </prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Disciplined at dead-code removal with verification.</role>
+
+  <goal>
+    external-spa's Power Pages residue deleted: vite.config.ts proxy + iife workaround removed, powerpages.config.json
+    deleted, README.md de-Power-Pages'd; npm run build:prod is green; a repo-wide grep for Power Pages references
+    (/_api|/_layout|/_services proxy, powerpages) in external-spa returns zero.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-06 (dead Power Pages proxy/config removed; zero Power Pages references remain) + design.md F4
+      (clean up R1's dead Power Pages proxy/config) + the reuse-kit inventory: vite.config.ts proxy /_api,/_layout,
+      /_services :157-172 + iife workaround :22/:132; powerpages.config.json; stale README.md. R1 migrated OFF Power
+      Pages to SWA — this config is inert. This is opportunistic cleanup done while extending the frame (§11).
+    </background>
+    <relevant-files>
+      <file>src/client/external-spa/vite.config.ts</file>
+      <file>src/client/external-spa/powerpages.config.json</file>
+      <file>src/client/external-spa/README.md</file>
+    </relevant-files>
+    <dependencies>011 (shell scaffold — do the cleanup after the frame extension so the build baseline is the shell).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-06">After removal, npm run build:prod MUST be green and zero Power Pages references remain in external-spa (negative criterion).</constraint>
+    <constraint source="project">Delete only the dead Power Pages proxy/config — do NOT alter the SWA hosting config or the shell frame (§11 scoped cleanup).</constraint>
+    <constraint source="project">Verify the SWA deploy path (deploy-external-spa.yml) still builds the app after removal — no proxy dependency remains.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+      <file>.github/workflows/deploy-external-spa.yml</file>
+    </files>
+    <patterns>
+      <pattern name="Dead-config inventory" location="projects/spaarke-SPA-external-access-platform-r2/notes/">vite.config.ts proxy :157-172 + iife :22/:132; powerpages.config.json; stale README — the exact removal targets.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Remove the Power Pages proxy block (/_api,/_layout,/_services) from vite.config.ts (:157-172) and the associated iife workaround (:22/:132), keeping the rest of the Vite config intact.</step>
+    <step order="2">Delete powerpages.config.json.</step>
+    <step order="3">Remove stale Power Pages content from README.md (or replace with the SWA/module-host description).</step>
+    <step order="4">Grep external-spa for residual Power Pages references (/_api, /_layout, /_services proxy usage, "powerpages", "power pages"); confirm zero remain (or are unrelated legitimate paths).</step>
+    <step order="5">Run npm install --legacy-peer-deps --no-audit --no-fund; npm run build:prod — verify green.</step>
+    <step order="6">Confirm deploy-external-spa.yml still builds the app with no proxy dependency.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TS/React (build:prod)</tool>
+    <tool name="terminal">Shell / grep</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/vite.config.ts (proxy + iife removed)</output>
+    <output type="code">src/client/external-spa/README.md (de-Power-Pages'd)</output>
+    <output type="code">powerpages.config.json (deleted)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the cleanup, when npm run build:prod runs, then it is green with the proxy + iife workaround removed.</criterion>
+    <criterion testable="true">powerpages.config.json no longer exists; README.md has no Power Pages content.</criterion>
+    <criterion testable="true">Negative: a repo-wide grep of external-spa for Power Pages proxy references (/_api,/_layout,/_services proxy, powerpages) returns zero.</criterion>
+    <criterion testable="true">deploy-external-spa.yml still builds the app (no proxy dependency remains).</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="App still renders post-cleanup"><steps><step>Build + load the app after removal</step></steps><expected>shell renders; no console errors; no missing-proxy failures</expected></test>
+  </ui-tests>
+
+  <notes>
+    R1 already migrated off Power Pages to SWA — this config is inert. Scoped cleanup only; do not touch SWA hosting
+    config or the frame. Pairs with FR-06 (shell scaffold + cleanup); the scaffold is task 011.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

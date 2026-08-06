@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>NDA module (review/approval workflow → "ready for signature")</title>
+    <phase>P3 Legal Front Door intake MVP</phase>
+    <gate>blocked-until:031</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs + .tsx (frontend + bff-api tags), implements a stateful workflow with authz-relevant status transitions — FULL per CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified module built on the 031 framework; the request type + status lifecycle are fixed by 030/031 and FR-15 — no open architectural decisions.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>NDA-specific config/form + status timeline; touches NDA-scoped files only, disjoint from 033's P&amp;P files; both build on the stabilized 031 framework.</parallel-reason>
+    <deps>031</deps>
+    <tags>frontend, bff-api</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+  <prompt>Implement the NDA request type on the 031 typed-intake framework: an NDA submission form (WizardModal multi-step), a review/approval workflow that advances status end-to-end, STOPPING at "approved + ready for signature" — e-signature is deferred beyond R2 (FR-15). The submitter sees a read-only status timeline up to that boundary.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Fluent v9 + React 18 on @spaarke/ui-components; ASP.NET Minimal API on the existing Front Door endpoint group.</role>
+  <goal>An employee can submit an NDA request through the framework's WizardModal; it is created as a sprk_servicerequest (requesttype=NDA) and routed for review/approval, reaching the "approved + ready for signature" status; the submitter sees a read-only status timeline up to that state. No new endpoint group and no framework change — NDA is registered as a request type (config + form) per FR-14.</goal>
+  <context>
+    <background>FR-15: NDA submission with review/approval workflow, stopping at "approved + ready for signature"; e-signature integration deferred beyond R2 (owner decision); status tracked end-to-end up to that boundary; signature handled out-of-band. UX brief §3 "NDA workflow status": submitter sees a read-only status timeline up to "approved + ready for signature"; ConfirmModal on submit; §3 typed intake uses WizardModal. FR-21: legal-side review/approval happens in the EXISTING internal MDA — R2 builds no new legal-review surface; this task's obligation is that a submitted NDA request is created + routed so legal sees it in the MDA. The status model + option-set values come from 030; the framework driver + endpoint group come from 031.</background>
+    <relevant-files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md (§3 NDA workflow status row + typed intake row; §5 e-signature explicitly NOT designed)</file>
+      <file>src/client/external-spa/** — the 031 request-type registry + typed-intake driver (register NDA here)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/** — the 031 MapFrontDoorEndpoints group (NDA reuses submit + status; no new group)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/index.ts:273 (WizardModal, ConfirmModal, PreviewModal presets)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md (FR-15, FR-21)</file>
+    </relevant-files>
+    <dependencies>031 (typed-intake framework + endpoint group) must be complete and stable. 030 supplies the NDA status option-set values. Parallel with 033 (P&amp;P) — disjoint files.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">NDA MUST be added as a request type on the 031 framework (registry entry + form/schema) — do NOT create a new endpoint group, a new SPA, or a hand-rolled Dialog. Submit uses WizardModal; the submit-confirm uses ConfirmModal (§11 + ADR-050).</constraint>
+    <constraint source="project">The NDA status workflow MUST terminate at "approved + ready for signature" — do NOT implement e-signature, signature capture, or any post-signature state (FR-15 defers e-signature beyond R2; ux-brief §5).</constraint>
+    <constraint source="project">R2 builds NO new legal-review UI — review/approval by legal happens in the existing MDA (FR-21). This task's server obligation is that a submitted NDA sprk_servicerequest is created + routed so it surfaces to legal in the MDA; the SPA-side is submit + read-only status timeline only.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; the status timeline renders correctly in light, dark, and Teams theme at narrow width; zero hardcoded hex.</constraint>
+    <constraint source="ADR-019">Any NDA-specific BFF handling returns ProblemDetails on error; reuse the Front Door group's filter — no new middleware.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/patterns/ui/modal-shell.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Request-type registration" location="src/client/external-spa (031 registry)">Register NDA = { id:'NDA', mode:'wizard', form/schema } — the framework driver does the rest.</pattern>
+      <pattern name="SprkModal presets" location="docs/standards/MODAL-DESIGN-SYSTEM.md">WizardModal for the multi-step NDA form; ConfirmModal on submit; PreviewModal for any attached doc view.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load FR-15/FR-21, ux-brief §3 (NDA workflow status) + §5, and the 031 framework registry + endpoint group. Confirm the NDA status option-set values from 030.</step>
+    <step order="2">Client: register NDA as a request type (WizardModal multi-step form: NDA-specific fields → review → submit). Add ConfirmModal on submit.</step>
+    <step order="3">Client: build the read-only NDA status timeline showing lifecycle states up to "approved + ready for signature" (Fluent timeline/steps, semantic tokens).</step>
+    <step order="4">BFF: ensure NDA submissions create a sprk_servicerequest (requesttype=NDA) with the correct initial status and are routed so legal sees them in the existing MDA (FR-21) — reuse the 031 submit endpoint; no new group. Verify status transitions stop at "ready for signature".</step>
+    <step order="5">Tests: KEEP-path integration test that an NDA submit creates a routed sprk_servicerequest and that status advances up to "ready for signature" (and NO further). Client test: NDA form renders in WizardModal; timeline renders states. No banned test types (ADR-038).</step>
+    <step order="6">Build: npm run build:prod (client) + dotnet publish -c Release if BFF changed (report size delta vs 46.90 MB). Implement the nine ux-brief §4 states for the NDA surfaces.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF (if changed)</tool>
+    <tool name="npm">Build/test the external-spa client (build:prod)</tool>
+    <tool name="terminal">Shell, /conflict-check if BFF touched</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/external-spa/** — NDA request-type registration (WizardModal form) + read-only status timeline</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/** — NDA-specific submit/status handling on the existing Front Door group (if any)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/** + client tests — NDA submit + status-boundary + form render</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given an employee, when they submit an NDA request via the WizardModal form (with a ConfirmModal confirm), then a sprk_servicerequest with requesttype=NDA is created and routed so it appears in the existing legal MDA (FR-21).</criterion>
+    <criterion testable="true">Given a submitted NDA, when it is reviewed/approved, then the status advances end-to-end and reaches "approved + ready for signature" and the submitter sees each state on a read-only timeline.</criterion>
+    <criterion testable="true">Negative: the NDA workflow has NO e-signature/signature-capture/post-signature state — status terminates at "ready for signature" (FR-15); no such UI exists in the diff.</criterion>
+    <criterion testable="true">Negative: NO new legal-review UI is built — review/approval is the existing MDA (FR-21); the SPA exposes only submit + read-only status.</criterion>
+    <criterion testable="true">Given the NDA surfaces, when rendered in light/dark/Teams theme at narrow width, then semantic tokens adapt with zero hardcoded hex and no console errors.</criterion>
+    <criterion testable="true">Given NDA is added, when reviewing the diff, then it is a registry entry + form/schema on the 031 framework — no new endpoint group and no new SPA (FR-14).</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test name="Renders NDA intake + timeline">
+      <steps><step>Open intake, pick NDA</step><step>Complete the WizardModal form, confirm via ConfirmModal, submit</step><step>Open the submitted request and view the status timeline</step></steps>
+      <expected>Form + timeline render; submit succeeds; timeline shows states up to ready-for-signature; no console errors</expected>
+    </test>
+    <test name="Dark Mode + Teams theme (ADR-021)">
+      <steps><step>Toggle dark mode; load in Teams theme (light/dark/high-contrast)</step><step>Verify the timeline + form tokens adapt</step></steps>
+      <expected>Zero hardcoded hex; adapts; readable at narrow Teams width</expected>
+    </test>
+  </ui-tests>
+  <notes>Spec FR-15 + FR-21. UX brief §3 (NDA workflow status) + §5 (e-signature NOT designed). NDA = config + form on the 031 framework. Legal review is the existing MDA — do not build a reviewer queue. Parallel with 033 (P&amp;P) in group D; keep NDA files disjoint from P&amp;P. If BFF touched, /conflict-check + report publish delta.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; declare rigor; code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

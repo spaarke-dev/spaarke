@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Extend sprk_servicerequest with requester/type/status/document-linkage</title>
+    <phase>P3 Legal Front Door intake MVP</phase>
+    <gate>blocked-until:020</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Dataverse schema change to a shared entity that blocks 031/032/033/034/035; new surface (extends stub) — FULL per CLAUDE.md §8 (architecture/schema, deps on 3+ downstream tasks).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified schema extension over a known stub; no architectural ambiguity once owner signs off the option set + status model.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Schema base that 031, 032, 033, 034, 035 all read; must land before any downstream task and must not race another schema editor.</parallel-reason>
+    <deps>020</deps>
+    <tags>dataverse</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+  <prompt>Extend the existing sprk_servicerequest STUB entity (currently name/statecode/regarding only) with the intake fields the Legal Front Door needs: a requester Contact lookup, an extensible request-type option set (NDA, PolicyProcedures + a stable seam for more), a status workflow, and submitted-document linkage — while preserving the polymorphic regarding per ADR-024. This is the Dataverse data contract every P3 module builds on (FR-13).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Dataverse schema authoring via Web API + PowerShell (dataverse-create-schema); disciplined about option-set integer values and lookup relationship naming.</role>
+  <goal>sprk_servicerequest carries: sprk_requester (Contact lookup), sprk_requesttype (option set incl. NDA + PolicyProcedures with reserved extensible values), a status model (statuscode option-set values covering the NDA + P&amp;P lifecycle up to "ready for signature"), and submitted-document linkage — deployed to dev, with the existing polymorphic regarding untouched. A request record can persist requester + type + status and still resolve its regarding target.</goal>
+  <context>
+    <background>FR-13: Extend sprk_servicerequest (stub today) with requester, request type, status workflow, and submitted-document linkage; polymorphic regarding preserved (ADR-024). The stub has only name/statecode/regarding. This schema is the base for the typed-intake framework (031), the NDA module (032), P&amp;P module (033), submitter authz + upload (034), and my-requests UI (035). Spec Owner Clarifications: request types in R2 = NDA (full) + Policy &amp; Procedures; App Role granularity says "don't foreclose" future per-module — mirror that mindset for request types (extensible option set). NDA status stops at "approved + ready for signature" (FR-15); e-signature deferred.</background>
+    <relevant-files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md (FR-13, FR-14, FR-15, FR-16, ADR-024 constraint, Owner Clarifications: Front Door first cut / NDA depth)</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md (canonical procedure — Web API + PowerShell; PAC CLI cannot create tables/columns)</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md (polymorphic regarding must be preserved)</file>
+      <file>docs/data-model/ (existing entity schemas + ERD — align field naming conventions)</file>
+      <file>Dataverse: existing sprk_servicerequest stub (name/statecode/regarding); Contact entity (sprk_externalobjectid oid field already present)</file>
+    </relevant-files>
+    <dependencies>020 (P2 entitlement primitives) must be complete. Requires owner sign-off on the request-type option set and status model before creating fields — see escalation.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="ADR-024">The polymorphic regarding on sprk_servicerequest MUST remain intact — do NOT drop, replace, or narrow the existing regarding lookup/relationship when adding new fields; new fields are additive only.</constraint>
+    <constraint source="project">The sprk_requesttype option set MUST be authored so a new request type is added by adding an option-set value + a form (config/schema), NOT by schema redesign — reserve integer values and document the numbering convention in the task notes.</constraint>
+    <constraint source="project">sprk_requester MUST be a Contact lookup (not a systemuser lookup) — internal workforce users are attributed via a lazily-created Contact bound by oid (FR-11); the schema must not assume a licensed systemuser requester.</constraint>
+    <constraint source="ADR-038">Do NOT hand-author ctor-null / DI-registration / Mock&lt;HttpMessageHandler&gt; tests for this schema task; schema verification is a deploy-and-query check, not a unit test.</constraint>
+    <constraint source="project">Status model MUST cover the NDA lifecycle up to "approved + ready for signature" and the P&amp;P submit/read lifecycle — do NOT model e-signature or post-signature states (FR-15 defers e-signature beyond R2).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/design.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse schema via Web API" location=".claude/skills/dataverse-create-schema/SKILL.md">Create attributes/option sets/relationships via Web API + PowerShell; PAC CLI has no table/column create. Publish customizations after create.</pattern>
+      <pattern name="Polymorphic regarding" location=".claude/adr/ADR-024-polymorphic-resolver-pattern.md">Preserve the existing polymorphic regarding lookup; do not collapse it to a single-target lookup.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load spec.md FR-13/14/15/16 + ADR-024 + the dataverse-create-schema skill. Inventory the current sprk_servicerequest stub via Web API metadata query (confirm name/statecode/regarding and the exact regarding relationship name).</step>
+    <step order="2">Draft the proposed schema: sprk_requester (Contact lookup + relationship), sprk_requesttype (global-or-local option set with values NDA + PolicyProcedures and a documented reserved-value convention for future types), the status model (statuscode option-set values for NDA lifecycle ending at "ready for signature" + P&amp;P submit/read), and the submitted-document linkage (decide: file column vs related sprk_document — align with how R1 links documents; document the choice in notes).</step>
+    <step order="3">ESCALATE the drafted request-type option set + status model to the owner for sign-off (spec Dependency: "Legal Front Door intake schema sign-off"). Do NOT create fields until confirmed. See &lt;escalation&gt;.</step>
+    <step order="4">After sign-off, create the attributes/option sets/relationship via Web API + PowerShell per the skill. Preserve the existing regarding relationship (additive only).</step>
+    <step order="5">Publish customizations. Verify via a metadata query that all new fields exist with correct types + option-set integer values, and that the polymorphic regarding relationship is intact.</step>
+    <step order="6">Create a test sprk_servicerequest record (Web API) setting requester + requesttype + status + a regarding target; query it back to confirm all fields persist and regarding still resolves.</step>
+    <step order="7">Record the final option-set integer values, the reserved-value numbering convention, and the document-linkage decision in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>The request-type option set values AND the status workflow model require owner sign-off (spec Dependency "Legal Front Door intake schema sign-off"). Before creating any fields, present the drafted option-set values (NDA, PolicyProcedures + reserved seam) and the status lifecycle to the owner via 🔔 Human Input Required (CLAUDE.md §6) and STOP until confirmed — a wrong option-set/status shape ripples into 031–035.</trigger>
+  </escalation>
+  <tools>
+    <tool name="terminal">PowerShell for Dataverse Web API calls + publish</tool>
+    <tool name="dotnet">Not required for this schema task</tool>
+    <tool name="npm">Not required for this schema task</tool>
+  </tools>
+  <outputs>
+    <output type="code">Dataverse schema changes on sprk_servicerequest (sprk_requester, sprk_requesttype, status model, submitted-document linkage) deployed to dev</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/ — option-set integer values, reserved-value convention, document-linkage decision</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the deployed schema, when a sprk_servicerequest is created with requester (Contact), requesttype=NDA, and a status value, then all three persist and query back correctly.</criterion>
+    <criterion testable="true">Given the deployed schema, when the same record sets a polymorphic regarding target, then the regarding still resolves (ADR-024 preserved — the pre-existing relationship is unchanged).</criterion>
+    <criterion testable="true">Given the request-type option set, when a hypothetical new type is needed, then it can be added as a new option-set value + form (config/schema) without redesigning the entity — verified by the documented reserved-value convention.</criterion>
+    <criterion testable="true">Negative: the status model contains NO e-signature or post-signature states — NDA lifecycle terminates at "approved + ready for signature" (FR-15).</criterion>
+    <criterion testable="true">Negative: sprk_requester is a Contact lookup, NOT a systemuser lookup — creating a request does not require a licensed systemuser as requester.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>sprk_servicerequest exists as a STUB (name/statecode/regarding only) per spec Placement table; grep of docs/data-model confirms no intake fields today. Closest neighbor sprk_externalrecordaccess is record-participation-only and cannot express intake/requester/type/status.</existing>
+    <extension>Yes — extend the existing stub entity additively (new attributes + one option set + one lookup relationship). No new entity is introduced.</extension>
+    <cost-of-doing-nothing>Without these fields there is no way to persist who requested what, of which type, at what status — the entire Legal Front Door intake (031–035) has no data contract to write to; a request cannot be created, routed to legal (FR-21), or filtered to its owner (FR-17).</cost-of-doing-nothing>
+  </justification>
+  <notes>Spec FR-13/14/15/16, Owner Clarifications (Front Door first cut = NDA + P&amp;P; NDA depth = stop at ready-for-signature; App Role granularity = don't foreclose — apply same extensibility mindset to request types). Use dataverse-create-schema (NOT PAC CLI — no table/column create). Submitted-document linkage: align with how R1 external-spa links documents (documentId keying, no Graph pointer exposure) — the actual app-only upload is task 034; here just the schema seam. Requester Contact is populated lazily by oid on first submission (FR-11), implemented in 034 — 030 only creates the field.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; declare rigor level; ESCALATE the option-set + status model before creating fields.</protocol>
+  </execution>
+</task>

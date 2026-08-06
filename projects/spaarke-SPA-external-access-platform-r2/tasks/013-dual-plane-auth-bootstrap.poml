@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Dual-plane auth bootstrap (extend @spaarke/auth AuthStrategy: CIAM + realm discovery; adopt Teams path)</title>
+    <phase>P1 Module-host foundation</phase>
+    <gate>blocked-until:011</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-sensitive auth code; edits main.tsx auth bootstrap + @spaarke/auth AuthStrategy; tags include auth; token-audience contract risk.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth-plane / security-sensitive work with cross-plane token-audience contract judgment — opus per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits main.tsx auth bootstrap (shared frame entry) + @spaarke/auth; auth-sensitive; must not run concurrently with other frame-touching tasks.</parallel-reason>
+    <deps>011</deps>
+    <tags>auth, frontend</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Extend @spaarke/auth AuthStrategy for CIAM + per-context authority selection, and wire the shell's
+    bootstrap so ONE deployment selects the authority: in Teams → silent Teams SSO (workforce, adopt the
+    teams-app-r1 NAA path); in browser → home-realm discovery (explicit "My organization / Partner" chooser)
+    → workforce or CIAM authority. Preserve the CIAM sessionStorage per-tab isolation (NFR-05).
+  </prompt>
+
+  <role>SPAARKE platform developer + auth engineer. Follow ADRs strictly. MSAL v5 / Entra CIAM + workforce SSO specialist.</role>
+
+  <goal>
+    @spaarke/auth AuthStrategy extended to support a CIAM strategy + config-driven per-context authority; the
+    shell bootstrap (main.tsx) selects the plane at load — Teams → createNestablePublicClientApplication workforce
+    path (adopt from teams-app-r1); browser → realm chooser → workforce or CIAM. From the SAME URL an external
+    (CIAM) and an internal (workforce) user each sign in and reach their launcher. CIAM sign-in keeps sessionStorage
+    per-tab isolation.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-03 (dual-plane auth bootstrap) + design.md F2 + ux-brief §3 (Sign-in/realm chooser = explicit
+      "My organization / Partner" chooser; Teams = silent SSO, no chooser). The Teams host + MSAL v5 NAA
+      (createNestablePublicClientApplication / createTeamsWorkforceMsalInstance) is already proven live by
+      teams-app-r1 on external-spa — adopt it, do not rebuild. @spaarke/auth AuthStrategy is workforce-only today
+      (Spaarke.Auth/src/index.ts:18) — extend for CIAM + plane selection. NFR-05 (documented ADR-028 exception):
+      keep the CIAM path on sessionStorage per-tab isolation; the workforce/Teams path may use the standard contract
+      where compatible.
+    </background>
+    <relevant-files>
+      <file>src/client/external-spa/src/main.tsx</file>
+      <file>src/client/external-spa/src/auth/msal-config.ts</file>
+      <file>src/client/external-spa/src/auth/msal-auth.ts</file>
+      <file>src/client/external-spa/src/host/TeamsHostAdapter.ts</file>
+      <file>src/client/shared/Spaarke.Auth/src/index.ts</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+    </relevant-files>
+    <dependencies>011 (shell scaffold). 010 authored the ADR-028 A3 rules this bootstrap obeys (dual-plane, broker-only CIAM, no-OBO workforce).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-05">Preserve the external-SPA sessionStorage per-tab isolation for the CIAM sign-in path (documented ADR-028 exception); do NOT switch the CIAM path to localStorage/@spaarke/auth.</constraint>
+    <constraint source="NFR-01">Broker-only for CIAM (external token authenticates ONLY to the BFF; no OBO); the workforce SPA path is no-OBO and has no Power-Apps-license dependency and no elevation.</constraint>
+    <constraint source="project">Adopt the teams-app-r1 Teams host path (createNestablePublicClientApplication NAA) as-is — do not rebuild it; extend @spaarke/auth for the CIAM + realm-selection additions (§11).</constraint>
+    <constraint source="ADR-028">Follow the Amendment A3 rules authored in task 010 (plane selection by iss/tid on the server; client selects authority by realm/Teams host).</constraint>
+    <constraint source="ADR-021">Realm chooser is Fluent v9 (semantic tokens, dark + Teams theme); it never appears inside Teams (silent SSO).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/r2-coordination-response.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Teams NAA workforce path" location="src/client/external-spa/src/auth/msal-auth.ts">createNestablePublicClientApplication / createTeamsWorkforceMsalInstance :259 — adopt as-is for the Teams silent-SSO plane.</pattern>
+      <pattern name="AuthStrategy extension" location="src/client/shared/Spaarke.Auth/src/index.ts">AuthStrategy :18 — extend for CIAM + per-context authority.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the teams-app-r1 Teams host + NAA path (main.tsx detectTeamsHost branch, msal-auth.ts createTeamsWorkforceMsalInstance) and the CIAM standalone path (bootstrapStandalone / createStandaloneMsalInstance).</step>
+    <step order="2">Extend @spaarke/auth AuthStrategy (Spaarke.Auth/src/index.ts) to add a CIAM strategy + config-driven per-context authority selection, without breaking the existing workforce strategy.</step>
+    <step order="3">Implement browser home-realm discovery: an explicit Fluent v9 "My organization / Partner" chooser that maps the choice to workforce vs CIAM authority; skip it entirely inside Teams.</step>
+    <step order="4">Wire main.tsx bootstrap to select: Teams host → silent Teams SSO (workforce NAA); browser → realm chooser → workforce or CIAM. Keep CIAM on sessionStorage per-tab isolation.</step>
+    <step order="5">Verify the CIAM token stays broker-only (no OBO) and the workforce token acquires against api://{workforce-app} (v1) per the teams-app-r1 recipe — confirm audience/authority match before proceeding.</step>
+    <step order="6">Build (npm install --legacy-peer-deps --no-audit --no-fund; npm run build:prod); verify zero errors.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the token audience/authority contract for either plane does not match the teams-app-r1 recipe (e.g., BFF rejects the acquired token, wrong audience/issuer, or CIAM v2 vs workforce v1 conflict), STOP and escalate per CLAUDE.md §6 — do not ship a mismatched auth contract.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build TS/React (build:prod)</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/main.tsx</output>
+    <output type="code">src/client/external-spa/src/auth/ (CIAM + realm-selection)</output>
+    <output type="code">src/client/shared/Spaarke.Auth/src/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the same URL in a browser, when an external user picks "Partner", then they authenticate via CIAM and reach their launcher; when an internal user picks "My organization", they authenticate via workforce and reach theirs (FR-03).</criterion>
+    <criterion testable="true">Given the app opened inside Teams, when it loads, then it silently authenticates via Teams SSO (workforce NAA) with no realm chooser shown.</criterion>
+    <criterion testable="true">CIAM sign-in uses sessionStorage per-tab isolation (NFR-05 preserved); the CIAM token is broker-only (no OBO, NFR-01).</criterion>
+    <criterion testable="true">Negative: an acquired token with a wrong audience/issuer is rejected by the BFF and the escalation trigger fires rather than shipping.</criterion>
+    <criterion testable="true">The existing workforce-only AuthStrategy behavior is not regressed by the CIAM extension.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>@spaarke/auth AuthStrategy (Spaarke.Auth/src/index.ts:18) — workforce-only, single authority. external-spa msal-config.ts already has ciam + workforce-multitenant authority kinds, but no unified per-context selection or realm chooser.</existing>
+    <extension>Yes for AuthStrategy (add a CIAM strategy + per-context authority — ADR-010 seam with ≥2 real impls). The realm chooser is a small net-new UI surface required by FR-03; the Teams NAA path is adopted as-is, not rebuilt.</extension>
+    <cost-of-doing-nothing>Without per-context authority selection + realm discovery, one deployment cannot serve both an external (CIAM) and an internal (workforce) user from the same URL — FR-03 fails and the module-host cannot be single-URL/single-SWA.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Realm chooser (browser)"><steps><step>Load in browser</step><step>Verify "My organization / Partner" chooser renders</step></steps><expected>Fluent v9 chooser; no console errors</expected></test>
+    <test name="Teams silent SSO"><steps><step>Load inside Teams host</step></steps><expected>no chooser; silent workforce SSO</expected></test>
+    <test name="Dark Mode + Teams theme (ADR-021)"><steps><step>Toggle dark + Teams theme on the chooser</step></steps><expected>zero hardcoded hex; adapts</expected></test>
+  </ui-tests>
+
+  <notes>
+    Adopt the teams-app-r1 NAA path (proven live) rather than rebuilding it. Home-realm discovery defaults to an
+    explicit chooser (spec Assumption; email-domain sniffing deferred). The BFF already validates both schemes
+    (workforce default + CIAM); this task is client-side plane selection only.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

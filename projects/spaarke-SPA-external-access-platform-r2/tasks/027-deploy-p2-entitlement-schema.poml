@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Deploy P2 (BFF + entitlement schema)</title>
+    <phase>P2 Access-control + entitlement</phase>
+    <gate>blocked-until:022,023,024,025,026</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment task (deploy + dataverse tags); no new code logic — orchestrates BFF redeploy + schema deploy. STANDARD per CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive deploy sequence using existing skills; no design judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploy task — mutates shared dev infra (`spaarke-bff-dev` + Dataverse); must run alone after all P2 code lands; coordinates with teams-app-r1's operator-gated BFF redeploy.</parallel-reason>
+    <deps>022,023,024,025,026</deps>
+    <tags>deploy, dataverse</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Deploy Phase P2: redeploy the BFF (Sprk.Bff.Api) with the module-entitlement resolver, `/me` endpoint, lazy attribution, workforce-plane auth policy, and role→level grading; and deploy/verify the module-entitlement Dataverse schema. Prescriptive sequence — this mutates shared dev infra.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Release engineer fluent in `bff-deploy` (App Service) + `dataverse-deploy` (PAC CLI) and the shared-infra coordination with teams-app-r1.</role>
+  <goal>The P2 BFF is deployed to `spaarke-bff-dev` and the module-entitlement schema is deployed/verified in the dev Dataverse environment. `/me` returns entitled modules for a workforce and a CIAM test user; grant/revoke round-trips against the deployed BFF. Deployment is recorded in notes/ with the published size and a post-deploy smoke result.</goal>
+  <context>
+    <background>P2 completes the two-tier access model server surface: task 020 (schema), 021 (resolver), 022 (`/me`), 023 (attribution), 024 (workforce policy), 025 (role→level grading), 026 (admin UI). This task deploys the BFF + schema so the P2 surface is live in dev. Coordinates with teams-app-r1's operator-gated BFF redeploy to the SAME `spaarke-bff-dev` (shared infra) — deploy must not clobber or race teams-app-r1's pending redeploy; confirm coordination before pushing.</background>
+    <relevant-files>
+      <file>.claude/skills/bff-deploy/SKILL.md — BFF deploy to Azure App Service (`spaarke-bff-dev`).</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md — solution/schema deploy via PAC CLI.</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/module-entitlement-schema-decision.md — task 020's schema logical names to verify post-deploy.</file>
+      <file>src/server/api/Sprk.Bff.Api/ — the BFF to publish + deploy.</file>
+    </relevant-files>
+    <dependencies>All P2 code tasks (022,023,024,025,026) complete + merged. teams-app-r1 shared-infra coordination.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Publish size ≤60 MB compressed; report the final compressed size + delta vs 46.90 MB baseline (incl PDBs) in the deploy notes. Scope: BFF publish artifact.</constraint>
+    <constraint source="project">Run `/conflict-check` and confirm teams-app-r1's operator-gated `spaarke-bff-dev` redeploy is coordinated (not racing) BEFORE deploying to the shared BFF. Scope: pre-deploy gate.</constraint>
+    <constraint source="spec-NFR03">No plaintext secrets; Key Vault references by name; CIAM provisioner cert stays in KV. Scope: deploy configuration.</constraint>
+    <constraint source="project">Prescriptive sequence — deploy steps run in the exact order below (schema verify → BFF publish/size gate → BFF deploy → smoke). Deployment is irreversible-ish on shared infra. Scope: this task.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="bff-deploy" location=".claude/skills/bff-deploy/SKILL.md">Publish -c Release, verify size gate, deploy to `spaarke-bff-dev`.</pattern>
+      <pattern name="dataverse-deploy" location=".claude/skills/dataverse-deploy/SKILL.md">Deploy/verify schema via PAC CLI against dev.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Run `/conflict-check` and confirm with the operator that teams-app-r1's pending `spaarke-bff-dev` redeploy is coordinated (this P2 deploy either includes or follows it — never races it).</step>
+    <step order="2">Verify the module-entitlement schema (task 020) is present/published in dev via `dataverse-deploy` (or deploy it if not yet applied); confirm logical names match notes/module-entitlement-schema-decision.md.</step>
+    <step order="3">`dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed size; assert ≤60 MB and record delta vs 46.90 MB baseline. HARD STOP if ≥60 MB.</step>
+    <step order="4">Deploy the BFF to `spaarke-bff-dev` via `bff-deploy` (Key Vault references intact; no plaintext secrets).</step>
+    <step order="5">Post-deploy smoke: `GET /me` returns entitled modules for a workforce test user and a CIAM test user; an unentitled module is absent; a grant→revoke round-trips via the admin UI (task 026) against the deployed BFF.</step>
+    <step order="6">Record the deploy (published size, delta, smoke results, timestamp) in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/</step>
+  </steps>
+  <escalation>
+    <trigger>If the published BFF is ≥55 MB (architecture-review threshold) or ≥60 MB (HARD STOP), or if teams-app-r1's redeploy is NOT coordinated, STOP and escalate to the operator (§6 / §10) before deploying to shared infra.</trigger>
+  </escalation>
+  <tools>
+    <tool name="dotnet">Publish .NET</tool>
+    <tool name="terminal">Shell / PAC CLI / az</tool>
+  </tools>
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/ (P2 deploy record: size, delta, smoke results)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the P2 BFF is deployed to `spaarke-bff-dev`, when `GET /me` is called by a workforce test user, then it returns their entitled modules; a CIAM test user returns theirs; an unentitled module is absent (negative).</criterion>
+    <criterion testable="true">Given the deployed schema, when logical names are read back, then they match notes/module-entitlement-schema-decision.md.</criterion>
+    <criterion testable="true">Given the admin UI (task 026) against the deployed BFF, when a grant then revoke is performed, then both round-trip successfully.</criterion>
+    <criterion testable="true">Given the publish artifact, when measured, then compressed size is ≤60 MB and the delta vs 46.90 MB baseline is recorded (HARD STOP if ≥60 MB).</criterion>
+    <criterion testable="true">Given the deploy configuration, when inspected, then no plaintext secrets are present and Key Vault references resolve by name (NFR-03).</criterion>
+  </acceptance-criteria>
+  <notes>Shared-infra deploy: `spaarke-bff-dev` is also targeted by teams-app-r1's operator-gated redeploy — coordination (not racing) is the load-bearing precondition. Prescriptive order is mandatory (schema verify → size gate → deploy → smoke). This is a deploy task: no new code logic — if a smoke test fails, fix belongs in the originating P2 code task, not here.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge/files before starting; follow task-execute pre-exec checklist; invoke bff-deploy + dataverse-deploy skills for the actual deploy steps.</protocol>
+  </execution>
+</task>

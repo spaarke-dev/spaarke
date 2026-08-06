@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Live-E2E: wrong-issuer→401; oid-bound Contact not email-hijacked</title>
+    <phase>P4 Hardening + Front Door depth</phase>
+    <gate>blocked-until:019,027</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Test authoring against a live environment (no production .cs implementation change); tags testing/e2e-test/auth. Per CLAUDE.md §8 TEST-MODIFYING override, code-review + adr-check still run at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified live-test authoring against a delivered auth surface; closed negative-path set, no novel architecture.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Runs against live CIAM + Dataverse (shared infra) and exercises the external-access surface teams-app-r1 also owns; must not race concurrent auth/BFF changes.</parallel-reason>
+    <deps>019,027</deps>
+    <tags>testing, integration-test, auth</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Author LIVE end-to-end tests (DI-030-01) that run against live CIAM + Dataverse (NOT in-process
+    mocks) proving two negative-path auth invariants on the external routes: (1) a wrong-issuer token is
+    rejected with 401, and (2) an oid-bound Contact cannot be hijacked by a token whose email matches but
+    whose oid does not. Place them in tests/integration/seam/ExternalAccess/**.
+  </prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in live-E2E/seam testing of token validation, issuer/tenant plane selection, and the Contact-by-oid external identity model.</role>
+
+  <goal>
+    A seam/live test suite under tests/integration/seam/ExternalAccess/ that, against live CIAM +
+    Dataverse, (a) sends a wrong-issuer token to an /api/v1/external route and asserts 401, and (b)
+    sends a token with a mismatched oid but a matching email to a route resolving an oid-bound Contact
+    and asserts the Contact is NOT hijacked (access denied / no cross-identity resolution). Both are
+    negative-path; neither is satisfiable by an in-process mock.
+  </goal>
+
+  <context>
+    <background>
+      FR-19: Live tests (DI-030-01) — a wrong-issuer token → 401 on external routes; an oid-bound
+      Contact is not hijacked by a mismatched-email token. Acceptance: both pass against live CIAM +
+      Dataverse. Plane selection is spoof-safe: CIAM iff the validated token iss contains ciamlogin.com
+      OR tid == Ciam:TenantId, else workforce (read from a cryptographically-validated token). The live
+      filter is CallerPrincipalAuthorizationFilter (:29) on /api/v1/external; oid resolution is
+      ExternalParticipationService resolve-by-oid (:231). These are live-only properties — an
+      in-process mock cannot prove real issuer validation or real Dataverse oid binding, so mocks would
+      false-green (ADR-038 / NFR-07).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/CallerPrincipalAuthorizationFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/AuthPolicies.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file>tests/integration/seam/ (target root — create ExternalAccess/ subfolder)</file>
+    </relevant-files>
+    <dependencies>Task 019 (external routes / auth plane wired live) and task 027 must be complete — they establish the live external surface and identity fixtures these tests exercise.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">These are LIVE tests, not in-process mocks — MUST NOT use Mock&lt;HttpMessageHandler&gt;, DI-registration, or ctor-null tests; live-only auth properties belong in the seam/live category (KEEP-path). Place under tests/integration/seam/ExternalAccess/** — scope: this suite.</constraint>
+    <constraint source="ADR-028">Assertions rely on spoof-safe plane selection read from a cryptographically-validated token (iss/tid); a wrong-issuer token MUST NOT be accepted; a mismatched-oid token MUST NOT resolve another Contact by email — scope: external-route auth invariants only.</constraint>
+    <constraint source="ADR-008">Tests exercise the group-level route-group filter on /api/v1/external (CallerPrincipalAuthorizationFilter), not any global middleware — scope: external route group.</constraint>
+    <constraint source="project">Gate on live credentials: if live CIAM/Dataverse credentials/fixtures are unavailable, STOP — do NOT downgrade to in-process mocks to force a green (that would false-green a live-only property). See &lt;escalation&gt;.</constraint>
+    <constraint source="project">Run /conflict-check before the PR — the external-access surface is shared with teams-app-r1.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+    </files>
+    <patterns>
+      <pattern name="Vertical-slice-seam test" location="docs/adr/ADR-038-testing-strategy.md">The tests/integration/seam/** category (ADR-038 §, E-40) — DoD for dispatch/auth-spine changes; live, not mocked.</pattern>
+      <pattern name="Plane selection + oid resolution" location="src/server/api/Sprk.Bff.Api/Api/Filters/CallerPrincipalAuthorizationFilter.cs">CIAM iff iss contains ciamlogin.com OR tid == Ciam:TenantId; oid resolution via ExternalParticipationService resolve-by-oid — the exact behaviors these negative tests probe.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm the live seam-test harness exists (or the project's live-E2E entry point) and locate credential/fixture sourcing. If neither live CIAM nor live Dataverse credentials are available, STOP and escalate (see &lt;escalation&gt;) — do not proceed with mocks.</step>
+    <step order="2">Create tests/integration/seam/ExternalAccess/ and add a live test that acquires (or crafts) a wrong-issuer token — a token whose iss is neither the CIAM issuer nor the workforce issuer accepted by the external routes — and calls an /api/v1/external route; assert HTTP 401.</step>
+    <step order="3">Add a live test that provisions/uses an oid-bound Contact in live Dataverse, then presents a token whose email matches that Contact but whose oid does NOT; call a route that resolves the caller Contact and assert the oid-bound Contact is NOT returned/hijacked (access denied or no cross-identity resolution).</step>
+    <step order="4">Ensure both tests are true negative-path assertions (401 / denied), tagged/categorized as live-seam so they are excluded from the in-process unit run and gated on live-credential availability.</step>
+    <step order="5">Run the live suite against the live environment; confirm both pass. Capture evidence (status codes, correlation ids) in the task notes.</step>
+    <step order="6">Run /conflict-check; ensure no in-process mock crept in (grep the new files for Mock&lt;HttpMessageHandler&gt;).</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviations (incl. any credential-gating) in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If live CIAM and/or live Dataverse credentials or fixtures are unavailable, STOP and escalate per §6 — a live-only property MUST NOT be false-greened with in-process mocks. Report the missing credential/fixture and the blocked criteria rather than substituting a mock.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/run live seam tests</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/seam/ExternalAccess/ (wrong-issuer→401 + oid-not-email-hijack live tests)</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/ (live-E2E evidence + any credential-gating)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a token whose issuer is neither CIAM nor the accepted workforce issuer, when it calls an /api/v1/external route against the live BFF, then the response is HTTP 401 (rejected by validated-token plane selection, not by an app-layer guess).</criterion>
+    <criterion testable="true">Given an oid-bound Contact in live Dataverse and a token whose email matches but whose oid does not, when a route resolves the caller Contact, then the oid-bound Contact is NOT returned/hijacked (access denied or no cross-identity resolution) — proving oid, not email, is the identity key.</criterion>
+    <criterion testable="true">Given the live suite, when run, then both negative-path tests execute against live CIAM + Dataverse and pass; no Mock&lt;HttpMessageHandler&gt; / DI-registration / ctor-null test exists in the new files.</criterion>
+    <criterion testable="true">Given live credentials are unavailable, when the task runs, then it STOPS and escalates rather than substituting mocks (no false-green).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    These are API-level live-E2E/seam tests with NO rendered UI surface, so ui-tests are N/A (the
+    e2e-test tag here denotes backend end-to-end, not a frontend render). The whole value is that the
+    invariants (real issuer validation, real oid binding) cannot be proven by an in-process mock — that
+    is exactly why NFR-07 routes them to seam/live. Deps 019/027 provide the live external surface +
+    identity fixtures.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

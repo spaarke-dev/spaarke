@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Deploy P3 (SWA + BFF + schema)</title>
+    <phase>P3 Legal Front Door intake MVP</phase>
+    <gate>blocked-until:032,033,034,035</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment orchestration of already-reviewed artifacts (no new code); prescriptive sequence. Per CLAUDE.md §8 deploy is STANDARD, but the steps are prescriptive/irreversible so ordering binds.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Executes known deploy skills in a fixed order; no design decisions.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploy step — depends on all P3 build tasks; shared-infra (SWA + spaarke-bff-dev + Dataverse dev) operations must serialize.</parallel-reason>
+    <deps>032,033,034,035</deps>
+    <tags>deploy</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Deploy the P3 Legal Front Door increment to dev: the Dataverse schema (030), the BFF Front Door surface (031/034) to spaarke-bff-dev, and the external-spa client (031/032/033/035) to the external-spa SWA. Verify the deployed increment end-to-end: an employee submits a typed request with app-only upload and sees only their own requests.</prompt>
+  <role>SPAARKE platform developer + release operator. Follow ADRs strictly. Deploy via the established skills (dataverse-deploy, bff-deploy, SWA deploy); verify before declaring done.</role>
+  <goal>The P3 increment is live in dev: sprk_servicerequest schema published; BFF Front Door endpoints deployed to spaarke-bff-dev; external-spa client deployed to the SWA via deploy-external-spa.yml. A smoke test confirms the submit → status → own-requests flow works against the deployed stack.</goal>
+  <context>
+    <background>P3 build tasks (030 schema, 031 framework + endpoints, 032 NDA, 033 P&amp;P, 034 authz + upload, 035 my-requests UI) are complete + reviewed. This task deploys the increment to dev. teams-app-r1's operator-gated BFF redeploy to spaarke-bff-dev shares the same environment — coordinate/serialize (CLAUDE.md coordination guardrails). CI: .github/workflows/deploy-external-spa.yml (manual workflow_dispatch; Vite prod build; SWA swa-spaarke-external-spa-dev). §10 BFF: re-verify publish size ≤60 MB (baseline 46.90 MB incl PDBs) at deploy.</background>
+    <relevant-files>
+      <file>.github/workflows/deploy-external-spa.yml (SWA deploy — manual workflow_dispatch)</file>
+      <file>.claude/skills/bff-deploy/SKILL.md (BFF → spaarke-bff-dev)</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md (schema/solution deploy)</file>
+      <file>.claude/skills/office-addins-deploy/SKILL.md (SWA CLI reference for the static app deploy)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md (Prerequisites: teams-app-r1 operator-gated redeploy shares spaarke-bff-dev)</file>
+    </relevant-files>
+    <dependencies>032, 033, 034, 035 (all P3 build tasks) must be complete + reviewed. 030 schema is deployed by/with this task if not already live.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Deploy in dependency order: schema (030) FIRST, then BFF (spaarke-bff-dev), then client (SWA) — an out-of-order deploy (client before schema/BFF) would surface broken flows. This ordering is prescriptive.</constraint>
+    <constraint source="project">Re-verify BFF publish size ≤60 MB compressed (report delta vs 46.90 MB baseline incl PDBs) at deploy; do NOT deploy a BFF build exceeding the ceiling.</constraint>
+    <constraint source="project">Coordinate with teams-app-r1's operator-gated redeploy to spaarke-bff-dev (shared env) — run /conflict-check and confirm no concurrent BFF deploy is in flight before deploying the BFF.</constraint>
+    <constraint source="project">Client build MUST use the Vite prod build path (deploy-external-spa.yml / build:prod), NOT a dev build.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/office-addins-deploy/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="SWA deploy" location=".github/workflows/deploy-external-spa.yml">Manual workflow_dispatch; Vite prod build → swa-spaarke-external-spa-dev.</pattern>
+      <pattern name="BFF deploy" location=".claude/skills/bff-deploy/SKILL.md">Publish + deploy to spaarke-bff-dev; verify publish size at deploy.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Confirm 032/033/034/035 are complete + reviewed. Run /conflict-check for the external-access surface; confirm no teams-app-r1 BFF deploy is concurrently in flight on spaarke-bff-dev.</step>
+    <step order="2">Deploy the Dataverse schema (030) to dev via dataverse-deploy if not already published; verify sprk_servicerequest fields exist in the target env.</step>
+    <step order="3">Publish + deploy the BFF to spaarke-bff-dev via bff-deploy. Re-verify compressed publish size ≤60 MB (report delta vs 46.90 MB baseline).</step>
+    <step order="4">Deploy the external-spa client to the SWA via deploy-external-spa.yml (workflow_dispatch; Vite prod build → swa-spaarke-external-spa-dev).</step>
+    <step order="5">Smoke test against the deployed stack: sign in as a Front Door (workforce) user; submit a typed request (NDA and/or P&amp;P) with a document upload; confirm the request appears in My requests and that a second user does NOT see it.</step>
+    <step order="6">Record deployed versions/URLs, publish size delta, and the smoke-test result in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+  <tools>
+    <tool name="dotnet">Publish the BFF for deploy</tool>
+    <tool name="npm">Vite prod build for the SWA</tool>
+    <tool name="terminal">Shell, PAC CLI, SWA CLI, gh workflow run, /conflict-check</tool>
+  </tools>
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/ — deployed versions/URLs, publish size delta, smoke-test result</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the P3 build tasks are complete, when deployed in order (schema → BFF → client), then all three deploys succeed and the schema/endpoints/client versions are recorded.</criterion>
+    <criterion testable="true">Given the deployed BFF, when publish size is measured at deploy, then it is ≤60 MB compressed with the delta vs 46.90 MB reported.</criterion>
+    <criterion testable="true">Given the deployed stack, when a Front Door user submits a typed request with an upload, then it succeeds and appears in their My requests; a second user does not see it (smoke-test isolation).</criterion>
+    <criterion testable="true">Negative: no BFF deploy proceeds while a teams-app-r1 redeploy is in flight on spaarke-bff-dev (shared env) — /conflict-check confirmed clear before BFF deploy.</criterion>
+  </acceptance-criteria>
+  <notes>Spec Prerequisites (shared spaarke-bff-dev with teams-app-r1). CI: deploy-external-spa.yml. Prescriptive order (schema → BFF → client) because a client deployed ahead of schema/BFF surfaces broken flows. Re-verify publish size at deploy. Coordinate the shared-infra BFF deploy.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; declare rigor; deploy in the prescriptive order; run /conflict-check before the BFF deploy.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>D1: grade workforce within-project rights by ADR-034 role→level via WorkforcePrincipalStrategy</title>
+    <phase>P2 Access-control + entitlement</phase>
+    <gate>blocked-until:024</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags `bff-api`, `auth`; edits the shipped `WorkforcePrincipalStrategy` (Tier-2 grading) on the shared surface; brownfield mapping with security implications — FULL per CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified brownfield mapping: replace flat `Collaborate` with a byRole→level map at a named extension point (:328); the role→level table is given by the owner.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the shipped `WorkforcePrincipalStrategy.cs` (teams-app-r1 file) — direct conflict surface; brownfield root-cause change to Tier-2 grading. Must land alone.</parallel-reason>
+    <deps>024</deps>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+  <prompt>Implement D1: in `WorkforcePrincipalStrategy` (:328), map the ADR-034 membership `byRole` result to a graded access level (owner→FullAccess, collaborator roles→Collaborate, designated view-only role→ViewOnly; default unmapped→Collaborate), replacing P1's flat `Collaborate` — so internal SPA users get per-project rights at parity with CIAM external users. Server-enforced.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. BFF auth engineer fluent in ADR-034 user-record membership, the shipped `CallerPrincipalResolver` workforce strategy, and access-level grading.</role>
+  <goal>`WorkforcePrincipalStrategy` maps ADR-034 `byRole` membership to graded access levels via an explicit role→level table (owner→FullAccess Read+Create+Write+Delete; collaborator roles→Collaborate; view-only role→ViewOnly; default unmapped→Collaborate), replacing the flat `Collaborate`. `CallerPrincipal.GetAccessLevel/GetEffectiveRights` return the graded rights. Server enforces them (negative: view-only member Read-only; owner member can Delete). Unit + KEEP-path tests cover each level incl. negatives.</goal>
+  <context>
+    <background>FR-12 D1 + spec Owner Clarification "Workforce within-project rights (D1)": grade by ADR-034 role→level (owner→FullAccess, collaborator→Collaborate, view-only→ViewOnly) for CIAM parity; role data already exists. FR-22 remaining work: implement D1 in F3/F5 via `WorkforcePrincipalStrategy` mapping the ADR-034 `byRole` result to graded levels instead of flat `Collaborate` — teams-app-r1's named extension point. P1 keeps flat `Collaborate` (plumbing-first); this task lands the grading. Resolved question: mapping = membership role `owner` → FullAccess (Read+Create+Write+Delete); collaborator roles (assignedAttorney, member, …) → Collaborate; a designated view-only role → ViewOnly; default unmapped → Collaborate. Exact role→level table finalized here with the schema work.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs — `WorkforcePrincipalStrategy` :328 is THE edit site (currently returns flat `Collaborate`); `CallerPrincipal` :66 exposes `GetAccessLevel`/`GetEffectiveRights`. Map byRole→level here.</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs — `IAccessibleRecordSetService.ComposeAsync` :45 produces the ADR-034 membership set (with role info) the grading maps over.</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs — `IWorkforcePrincipalResolver` :42 (resolve/deny workforce principal).</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md — the membership model + byRole semantics that define which roles exist.</file>
+    </relevant-files>
+    <dependencies>Task 024 (workforce-plane policy) authenticates the workforce principal this grading applies to. Reuses the shipped `WorkforcePrincipalStrategy` / `IAccessibleRecordSetService` (teams-app-r1).</dependencies>
+  </context>
+  <constraints>
+    <constraint source="spec-D1">The role→level map MUST be: owner→FullAccess (Read+Create+Write+Delete); collaborator roles→Collaborate; designated view-only role→ViewOnly; default unmapped→Collaborate. Replace the flat `Collaborate`. Scope: `WorkforcePrincipalStrategy` grading only — do NOT change the CIAM strategy's grading.</constraint>
+    <constraint source="ADR-034">Derive roles from the ADR-034 `byRole` membership result already produced by `IAccessibleRecordSetService.ComposeAsync`; do NOT introduce a new membership source. Scope: grading input.</constraint>
+    <constraint source="spec-NFR06">The graded rights MUST be server-enforced — a view-only member cannot Write/Delete regardless of client flags; an owner member can Delete. Negative test required. Scope: enforcement of the graded level.</constraint>
+    <constraint source="spec-NFR08">This changes Tier-2 record-scope grading ONLY; it does not touch Tier-1 module entitlement. Scope: Tier-2 grading.</constraint>
+    <constraint source="project">Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`); `dotnet publish -c Release` compressed size + delta vs 46.90 MB baseline (≤60 MB); no new HIGH CVE; `/conflict-check` before the PR (edits the shipped teams-app-r1 `WorkforcePrincipalStrategy` — direct conflict surface).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="workforce-strategy-grading" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs">`WorkforcePrincipalStrategy` (:328) is the teams-app-r1 named extension point — replace the flat `Collaborate` with a byRole→level map; `CallerPrincipal.GetEffectiveRights` returns the graded rights.</pattern>
+      <pattern name="accessible-record-set" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs">`ComposeAsync` (:45) supplies the ADR-034 byRole membership the grading consumes.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load spec FR-12 D1 + the resolved D1 mapping + ADR-034. Read `WorkforcePrincipalStrategy` (:328) + `CallerPrincipal` (:66 GetAccessLevel/GetEffectiveRights) + `AccessibleRecordSetService.ComposeAsync` (:45) to confirm where role info flows.</step>
+    <step order="2">Enumerate the actual ADR-034 membership role values available from `ComposeAsync`'s byRole result (empirical — read the membership model). Finalize the role→level table: owner→FullAccess; collaborator roles (assignedAttorney, member, …)→Collaborate; the designated view-only role→ViewOnly; default unmapped→Collaborate. Document the finalized table in notes/.</step>
+    <step order="3">Implement the mapping in `WorkforcePrincipalStrategy`: for each accessible project, map its byRole to the graded level; populate `CallerPrincipal.ProjectAccess` so `GetAccessLevel`/`GetEffectiveRights` return graded rights (replacing flat `Collaborate`).</step>
+    <step order="4">Verify enforcement points consume the graded level (endpoint/filter authorization uses `GetEffectiveRights`, not a hardcoded level) so server-side enforcement is real.</step>
+    <step order="5">Add unit + KEEP-path tests (ADR-038): owner-role member → FullAccess (can Delete on that project); collaborator-role member → Collaborate; designated view-only-role member → ViewOnly (Read-only; cannot Write/Delete — negative, server-enforced); unmapped role → Collaborate (default); a member of one project gets NO rights on a project they're not a member of (negative).</step>
+    <step order="6">Build + test: `dotnet build` + `dotnet test`. Run `dotnet publish -c Release` and record compressed size + delta.</step>
+    <step order="7">Run `/conflict-check` (edits shipped teams-app-r1 file); write Placement Justification + publish-size delta into the PR/task notes.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/</step>
+  </steps>
+  <escalation>
+    <trigger>If the ADR-034 byRole result does NOT expose a role value that cleanly maps to the "designated view-only role" (i.e. view-only cannot be distinguished from collaborator in the membership data), STOP and confirm the view-only role identity with the owner (§6) before defaulting it to Collaborate — a silent default would grant write to intended read-only users.</trigger>
+  </escalation>
+  <tools>
+    <tool name="dotnet">Build/test/publish .NET</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs (WorkforcePrincipalStrategy byRole→level grading)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ + KEEP-path tests for each graded level incl. view-only negative</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/ (finalized role→level table)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a workforce user with `owner` role on a project, when authorized, then they receive FullAccess (Read+Create+Write+Delete) and can Delete on that project.</criterion>
+    <criterion testable="true">Given a workforce user with a collaborator role, when authorized, then they receive Collaborate.</criterion>
+    <criterion testable="true">Given a workforce user with the designated view-only role, when they attempt Write/Delete, then it is denied server-side (ViewOnly, Read-only — negative case).</criterion>
+    <criterion testable="true">Given a workforce user with an unmapped role, when authorized, then they receive Collaborate (default) — not FullAccess.</criterion>
+    <criterion testable="true">Given a workforce user, when they access a project they are not a member of, then they receive no rights (negative — grading applies only within membership).</criterion>
+    <criterion testable="true">Given `dotnet publish -c Release`, when measured, then compressed size + delta vs 46.90 MB baseline is reported and ≤60 MB; BFF suite passes; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+  <notes>Brownfield: this REPLACES the flat `Collaborate` in the shipped `WorkforcePrincipalStrategy` (teams-app-r1's named extension point) — it is a modification of existing surface, not new surface (no justification block required). Enumerate real byRole values empirically before finalizing the table (§F.3 empirical-reproduction-first). Do NOT hardcode a level in endpoints — enforce via `GetEffectiveRights`. This is the exact file teams-app-r1 owns; /conflict-check is mandatory.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge/files before starting; follow task-execute pre-exec checklist; §10 gate at Step 9.5.</protocol>
+  </execution>
+</task>

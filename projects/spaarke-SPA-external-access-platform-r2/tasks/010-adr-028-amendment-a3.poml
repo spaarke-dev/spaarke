@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Author ADR-028 Amendment A3 (dual-plane module framework + principal-agnostic endpoints)</title>
+    <phase>P1 Module-host foundation</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth-architecture ADR amendment (tags include auth/adr); architecture change that all P1 auth code depends on; post-compaction recoverable.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>ADR-migration / architectural ratification work — high blast radius; per CLAUDE.md §8.5 opus tier for ADR-migration.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .claude/adr/ + docs/adr/ — main-session-only per CLAUDE.md §3 (sub-agents cannot write .claude/); ordered FIRST before P1 auth code.</parallel-reason>
+    <deps>none</deps>
+    <tags>auth, docs, adr</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Author a NEW ADR-028 Amendment A3 that ratifies R2's dual-plane external-app module framework as
+    canonical, WITHOUT overwriting the existing Amendment A2 (teams-app-r1, 2026-08-03). A3 formalizes
+    the shipped principal-agnostic endpoint pattern and the module-framework generalization point so
+    downstream P1 auth code (tasks 013/015) has an authoritative rule set to build against.
+  </prompt>
+
+  <role>SPAARKE platform developer + auth architect. Follow ADRs strictly. Precise at concise ADR authoring (MUST/MUST NOT) and its full-history docs/adr counterpart.</role>
+
+  <goal>
+    A new Amendment A3 section appended to BOTH the concise ADR (.claude/adr/ADR-028-spaarke-auth-architecture.md)
+    and the full ADR (docs/adr/ if a full ADR-028 exists there), ratifying: (1) the dual-plane external-app
+    model (CIAM external + workforce-SSO internal-unlicensed) as canonical; (2) principal-agnostic module
+    endpoints — CallerPrincipalResolver, ExternalCollaboration dual-scheme, plane selection by iss/tid — as
+    the canonical pattern; (3) broker-only preserved for CIAM + no-OBO on the workforce SPA path. Existing
+    Amendment A2 is left intact.
+  </goal>
+
+  <context>
+    <background>
+      Per spec.md ADR Tensions + CLAUDE.md Decisions Made (2026-08-06): R2's dual-plane workforce+CIAM model
+      and principal-agnostic dual-scheme collaboration endpoints were SHIPPED by teams-app-r1 (CallerPrincipalResolver,
+      ExternalCollaboration policy; 9761 tests green, CIAM byte-for-byte preserved). Per CLAUDE.md §6.5 this is a
+      Path B (amendment) — the amendment ratifies shipped reality. A2 already exists (teams-app-r1 Teams host);
+      R2 authors A3 for the module-framework generalization. Spec FR-22 + ADR Tensions row for ADR-028(+A1) are
+      the source content.
+    </background>
+    <relevant-files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ (locate full ADR-028 if present; append A3 there too)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/AuthPolicies.cs</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/r2-coordination-response.md</file>
+    </relevant-files>
+    <dependencies>None. This task runs FIRST in P1 and unblocks 011 and 015.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md-§3">This is a .claude/adr/ + docs/adr/ edit — main-session-only. Sub-agents may audit/read but MUST NOT write these paths; the main session applies edits.</constraint>
+    <constraint source="CLAUDE.md-§6.5">A3 is a Path B (amendment) ratifying shipped reality — it does NOT re-design; it documents the teams-app-r1 implementation as canonical.</constraint>
+    <constraint source="project">Do NOT overwrite or edit the existing Amendment A2 (2026-08-03, teams-app-r1). READ A2 first; A3 is additive.</constraint>
+    <constraint source="ADR-028">Preserve A1's broker-only CIAM rule and the E-3 direct-Office boundary; A3 extends, never contradicts, A1/A2.</constraint>
+    <constraint source="project">Every PR touching an ADR concise file MUST add an entry to .claude/CHANGELOG.md (CLAUDE.md §18).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/design.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/r2-coordination-response.md</file>
+    </files>
+    <patterns>
+      <pattern name="ADR amendment authoring" location=".claude/skills/ai-procedure-maintenance/SKILL.md">Concise + full-version amendment; MUST/MUST NOT rules; reversibility.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">READ the existing ADR-028 concise file end-to-end, especially the current Amendment A2 (2026-08-03). Confirm what A2 already covers before authoring A3 — do NOT duplicate or overwrite it.</step>
+    <step order="2">Assess overlap: if A2 already fully ratifies R2's dual-plane module-framework generalization, STOP and invoke the escalation trigger (propose Path C — cite A2, skip A3).</step>
+    <step order="3">Author Amendment A3 in the concise ADR: dated header, three ratified points (dual-plane external-app model canonical; principal-agnostic module endpoints — CallerPrincipalResolver / ExternalCollaboration dual-scheme / plane selection by iss+tid; broker-only CIAM + no-OBO workforce), each as MUST/MUST NOT rules citing the shipped code file paths.</step>
+    <step order="4">Locate the full ADR-028 in docs/adr/ (if present) and append the matching full-form A3 with rationale; if no full copy exists, note that in the amendment.</step>
+    <step order="5">Add a .claude/CHANGELOG.md entry for the A3 amendment.</step>
+    <step order="6">Update the project CLAUDE.md ADR reference line if needed (A3 now authored).</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the existing Amendment A2 already fully covers R2's dual-plane module-framework generalization, STOP and propose Path C (cite A2, skip A3) per CLAUDE.md §6.5 — do not author a redundant A3.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Shell / grep for existing A2 + full ADR-028</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/adr/ADR-028-spaarke-auth-architecture.md</output>
+    <output type="docs">docs/adr/ADR-028 full version (if present)</output>
+    <output type="docs">.claude/CHANGELOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the ADR-028 concise file, when opened, then Amendment A2 (2026-08-03) is present UNCHANGED and a new Amendment A3 follows it.</criterion>
+    <criterion testable="true">A3 ratifies all three points (dual-plane canonical; principal-agnostic endpoints; broker-only CIAM + no-OBO workforce) as MUST/MUST NOT rules that cite the shipped code paths.</criterion>
+    <criterion testable="true">A3 does NOT contradict A1 (broker-only) or A2; it is strictly additive.</criterion>
+    <criterion testable="true">A .claude/CHANGELOG.md entry exists for the A3 amendment.</criterion>
+    <criterion testable="true">Negative: if A2 already covers the generalization, no A3 is written and a Path C escalation note is recorded instead.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Source content for A3 is the spec.md ADR Tensions row for ADR-028(+A1) and FR-22. This is a Path B
+    amendment ratifying shipped reality — not a new design. Ordered FIRST in P1 so 013 (auth bootstrap) and
+    015 (module-framework generalization) build against an authoritative rule set.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist. Main-session-only writes for .claude/adr paths.</protocol>
+  </execution>
+</task>

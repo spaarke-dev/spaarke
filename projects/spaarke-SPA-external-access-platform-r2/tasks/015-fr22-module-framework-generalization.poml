@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Generalize CallerPrincipalResolver into module framework (register per-module strategy/predicate)</title>
+    <phase>P1 Module-host foundation</phase>
+    <gate>blocked-until:010</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Core external-access BFF surface (tags bff-api/auth); brownfield generalization of shipped auth code; asymmetric-registration + CIAM byte-for-byte preservation risk.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth-plane / architectural generalization of security-critical shipped code with CIAM-preservation constraint — opus per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Core external-access BFF surface shared with teams-app-r1 (Infrastructure/ExternalAccess/**); concurrent edits would collide; /conflict-check required.</parallel-reason>
+    <deps>010</deps>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Generalize the delivered CallerPrincipalResolver into a module framework: introduce a per-module registration
+    seam so each module registers its ICallerPrincipalStrategy (plane) and its Tier-2 record predicate, using the
+    ready third-plane seam (one AddScoped&lt;ICallerPrincipalStrategy&gt; + a DeterminePlane branch). Handlers + the
+    group filter stay untouched; the CIAM path is preserved byte-for-byte.
+  </prompt>
+
+  <role>SPAARKE platform developer + BFF auth engineer. Follow ADRs strictly. Minimal-API DI + endpoint-filter specialist; disciplined at brownfield generalization without regressing shipped behavior.</role>
+
+  <goal>
+    A module-framework registration point in the BFF that lets each module register { plane strategy, Tier-2
+    predicate } over the existing CallerPrincipalResolver / CallerPrincipalAuthorizationFilter / ExternalCollaboration
+    dual-scheme, without touching handlers or the filter. The CIAM path is byte-for-byte preserved; the full BFF
+    suite stays green; publish stays ≤60 MB.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-22 ("R2's remaining work: generalize the resolver into the module framework — register per-module
+      strategies/predicates") + design.md §3 (reuse-as-is + generalize) + NFR-08 (per-module Tier-2 predicate is a
+      pluggable contract). teams-app-r1 shipped CallerPrincipalResolver (ICallerPrincipalStrategy :147, CallerPrincipalResolver
+      :166, CiamContactPrincipalStrategy :244, WorkforcePrincipalStrategy :328) + CallerPrincipalAuthorizationFilter :29 +
+      AuthPolicies.ExternalCollaboration :42, 9761 tests green, CIAM preserved, publish 46.90 MB. The documented third-plane
+      seam is: add one AddScoped&lt;ICallerPrincipalStrategy, XyzStrategy&gt;() + a DeterminePlane branch; handlers + filter
+      untouched. This task turns that seam into a per-module registration framework. D1 (grade workforce rights by ADR-034
+      role→level) lands in F3/F5, NOT here — P1 keeps flat Collaborate.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/CallerPrincipalAuthorizationFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/AuthPolicies.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/</file>
+    </relevant-files>
+    <dependencies>010 (ADR-028 A3 — the canonical rule set for principal-agnostic module endpoints this framework implements).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">§10 BFF Hygiene: state a Placement Justification in the PR for the module-framework registration surface (cite .claude/constraints/bff-extensions.md); run /conflict-check BEFORE the PR (teams-app-r1 shares Infrastructure/ExternalAccess/**); do NOT inject AI-internal types.</constraint>
+    <constraint source="project">Verify publish ≤60 MB compressed: dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/; report absolute size + delta vs 46.90 MB baseline (state PDB convention).</constraint>
+    <constraint source="NFR-01">The CIAM path MUST be preserved byte-for-byte — the generalization MUST NOT alter CiamContactPrincipalStrategy behavior or the CIAM token validation.</constraint>
+    <constraint source="ADR-008">Per-module registration must keep the group-level ADR-008 filter model (route-group policies + endpoint filters); no global middleware.</constraint>
+    <constraint source="ADR-010">Interface seam justified by ≥2 real strategy impls; register concretes; follow the ADR-032 Null-Object / asymmetric-registration discipline for any conditional service (bff-extensions §F.1).</constraint>
+    <constraint source="ADR-038">Add/update tests in tests/unit/Sprk.Bff.Api.Tests/ (+ integration KEEP-path); no Mock&lt;HttpMessageHandler&gt; / DI-registration / ctor-null tests; keep the suite green.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/r2-coordination-response.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Third-plane seam" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs">Add one AddScoped&lt;ICallerPrincipalStrategy&gt;() + a DeterminePlane branch; handlers + filter untouched — the documented generalization point.</pattern>
+      <pattern name="NFR-08 Tier-2 predicate" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs">ComposeAsync(principal, entity) is the pluggable per-module record predicate — the canonical worked example to generalize.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run /conflict-check against teams-app-r1 for Infrastructure/ExternalAccess/** + AuthPolicies/DI before editing; record the result.</step>
+    <step order="2">Read the shipped resolver + strategies + filter + ExternalCollaboration policy; map exactly how DeterminePlane selects a strategy today.</step>
+    <step order="3">Introduce a per-module registration seam: a way for each module to register its plane strategy (ICallerPrincipalStrategy) + its Tier-2 predicate (over AccessibleRecordSetService.ComposeAsync), wired via ExternalAccessModule DI — using the existing third-plane seam shape, not a rewrite.</step>
+    <step order="4">Keep CallerPrincipalAuthorizationFilter + handlers untouched; the framework registers strategies/predicates, it does not change the group filter contract.</step>
+    <step order="5">Add unit + KEEP-path integration tests for the registration seam (per-module strategy resolves; Tier-2 predicate applied; CIAM path unchanged incl. a negative Tier-2 case) in tests/unit/Sprk.Bff.Api.Tests/.</step>
+    <step order="6">Run dotnet build + dotnet test (full BFF suite must stay green); verify no new HIGH CVE (dotnet list package --vulnerable --include-transitive).</step>
+    <step order="7">Run dotnet publish -c Release; record compressed size + delta vs 46.90 MB baseline in notes; escalate if ≥+5 MB single-task delta.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If generalizing would alter the CIAM byte-for-byte path (CiamContactPrincipalStrategy behavior or CIAM token validation), STOP and escalate per CLAUDE.md §6/NFR-01 — the CIAM path must not regress.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish .NET</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ (module-framework registration seam)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (registration seam + Tier-2 tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a module registered with its plane strategy + Tier-2 predicate, when a request hits its endpoint group, then the correct strategy resolves the CallerPrincipal and the module's Tier-2 predicate scopes the record set — handlers + the group filter unchanged.</criterion>
+    <criterion testable="true">Given the CIAM path, when a CIAM caller resolves, then behavior is byte-for-byte identical to the teams-app-r1 baseline (CiamContactPrincipalStrategy unchanged) — regression test green.</criterion>
+    <criterion testable="true">Negative Tier-2: a workforce caller who merely authenticates receives ONLY their composed accessible-record-set (not all records) — negative test green.</criterion>
+    <criterion testable="true">The full BFF suite is green; no new HIGH CVE; publish ≤60 MB compressed with delta vs 46.90 MB reported.</criterion>
+    <criterion testable="true">D1 (role→level grading) is NOT implemented here — P1 keeps flat Collaborate; the framework leaves the grading extension point in place for F3/F5.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>CallerPrincipalResolver.cs (:166) + ICallerPrincipalStrategy (:147) + CallerPrincipalAuthorizationFilter (:29) — delivered by teams-app-r1; a third-plane seam exists but there is no per-module registration framework. grep: no Map{Module}Endpoints registration abstraction wiring strategy+predicate per module.</existing>
+    <extension>Yes — extend the existing resolver via its documented seam into a per-module registration point; reuse-as-is + generalize (design.md §3). The seam itself is the only new surface; strategies/predicates/handlers are reused.</extension>
+    <cost-of-doing-nothing>Without the framework, each new module must hand-wire plane selection + record scope by editing the shared resolver/filter, re-introducing drift and the asymmetric-registration risk §10 exists to prevent; FR-01/FR-22 "add a module = register" fails on the server side.</cost-of-doing-nothing>
+  </justification>
+
+  <notes>
+    §10 BFF-touching task: Placement Justification in PR + /conflict-check (teams-app-r1 shares this surface) + publish
+    ≤60 MB (baseline 46.90 MB incl PDBs). This is the FR-22 generalization point; task 016 registers Assigned Work as
+    the first module over it, and D1 (ADR-034 role→level) is deferred to F3/F5.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist. Run /conflict-check before the BFF PR.</protocol>
+  </execution>
+</task>

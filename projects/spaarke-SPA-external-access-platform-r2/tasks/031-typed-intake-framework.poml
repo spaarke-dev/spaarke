@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Generic typed-intake framework (typed form → submit → status)</title>
+    <phase>P3 Legal Front Door intake MVP</phase>
+    <gate>blocked-until:022,030</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New framework surface spanning client (React/Fluent v9) + BFF (new endpoint group); base others (032/033/035) build on; tags include bff-api + frontend — FULL per CLAUDE.md §8.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architectural: defines the reusable intake framework contract (config-driven request types, form → submit → status pipeline, BFF endpoint-group shape) that must not foreclose future types; high blast radius across P3.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Framework base that 032 (NDA), 033 (P&amp;P), and 035 (my-requests) all extend/consume; must land and stabilize before those; touches the shared external-access BFF surface (conflict-check with teams-app-r1).</parallel-reason>
+    <deps>022,030</deps>
+    <tags>frontend, bff-api, api</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+  <prompt>Build the reusable Legal Front Door typed-intake framework: a config-driven client flow (pick request type → typed form → review → submit → status/confirmation) built ONLY on @spaarke/ui-components WizardModal (multi-step types) / FormModal (single-step types), plus a per-module BFF endpoint group (MapFrontDoorEndpoints) that persists a sprk_servicerequest and returns its status. Adding a new request type must be config/schema + a form, not a new app (FR-14).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Fluent v9 + React 18 on the shared component library; ASP.NET Minimal API endpoint groups with ADR-008 route-group filters and ADR-019 ProblemDetails.</role>
+  <goal>A generic intake framework exists: (1) client — a typed-intake driver that renders a request type's schema through WizardModal/FormModal, submits it, and shows status, wired into the external-spa module-host shell; (2) BFF — a MapFrontDoorEndpoints group under the external-access surface that creates a sprk_servicerequest (requester/type/status from 030) and exposes submit + get-status. NDA (032) and P&amp;P (033) plug in as config + a form with no framework change.</goal>
+  <context>
+    <background>FR-14: A reusable intake module framework the request types plug into (typed form → submit → status); adding a new request type is config/schema + a form, not a new app. UX brief §3 "Legal Front Door — typed intake": WizardModal multi-step (pick type → typed form → review → submit → confirmation); single-step types use FormModal; prototype seed multi-step-dialog-variant-template.tsx. §11 shared-library mandate: no hand-rolled dialogs. FR-13 (030) supplies the sprk_servicerequest intake fields this framework writes. FR-22/teams-app-r1: per-module endpoint groups over CallerPrincipalResolver — this framework's endpoints are the Front Door module group; the requester==caller Tier-2 predicate and app-only upload are added in 034 (this task establishes the group + submit/status; 034 hardens authz + upload).</background>
+    <relevant-files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md (§3 typed intake row + §4 nine required states)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/index.ts:273 (SprkModal presets export: WizardModal, FormModal, ConfirmModal, PreviewModal)</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts (lazy-factory registry pattern to adopt for request-type registration)</file>
+      <file>src/client/external-spa/src/App.tsx, src/client/external-spa/src/pages/WorkspaceHomePage.tsx (module-host shell to mount the intake flow into)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs (/api/v1/external group :56 — reference for MapFrontDoorEndpoints shape)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/CallerPrincipalAuthorizationFilter.cs:29 (group-level ADR-008 filter to reuse)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs (plane-agnostic caller; CallerPrincipal :66)</file>
+      <file>.claude/constraints/bff-extensions.md (binding BFF governance — Placement Justification + publish size)</file>
+    </relevant-files>
+    <dependencies>022 (accessible-record-set / entitlement wiring) and 030 (sprk_servicerequest intake fields) must be complete. 032/033 depend on this; 034 hardens the Tier-2 predicate + upload on this group; 035 renders the list.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">ALL intake dialogs MUST be built from @spaarke/ui-components SprkModal presets — WizardModal for multi-step request types, FormModal for single-step. Do NOT hand-roll a Dialog or fork LegalWorkspaceApp (§11 + ADR-050). The typed-form rendering must be config-driven so a request type = a schema + a form.</constraint>
+    <constraint source="ADR-008">The Front Door BFF endpoints MUST be a single route-group (MapFrontDoorEndpoints) with a group-level authorization filter (reuse CallerPrincipalAuthorizationFilter) — no per-endpoint ad-hoc middleware, no global middleware.</constraint>
+    <constraint source="ADR-019">All BFF error responses MUST use ProblemDetails; no bare status codes or custom error envelopes.</constraint>
+    <constraint source="ADR-010">Introduce an interface only where ≥2 real implementations exist; register concretes otherwise. The request-type registry may be an interface/config seam (multiple request types), but do not add speculative single-impl abstractions.</constraint>
+    <constraint source="project">BFF addition: state the Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); run dotnet publish -c Release and report compressed size + delta vs baseline 46.90 MB incl PDBs (ceiling ≤60 MB); run /conflict-check before the BFF PR (teams-app-r1 shares Api/ExternalAccess/** + Infrastructure/ExternalAccess/**).</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only (makeStyles/tokens); zero hardcoded hex/shadow; verified in light, dark, and Teams theme; the flow must render in a narrow Teams personal-tab width.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/ui/modal-shell.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Lazy registry" location="src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts">Adopt the lazy-factory registry pattern for registering request types { id, title, formSchema/lazyForm }.</pattern>
+      <pattern name="Endpoint group" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs">Mirror the /api/v1/external group :56 to author MapFrontDoorEndpoints with a group-level filter.</pattern>
+      <pattern name="SprkModal presets" location="docs/standards/MODAL-DESIGN-SYSTEM.md">WizardModal for multi-step, FormModal for single-step; Cancel always left; scaled Fluent theme.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load spec.md FR-14/FR-22, ux-brief.md §3/§4, ADR-008/019/050, MODAL-DESIGN-SYSTEM.md, and bff-extensions.md. Run /conflict-check for the external-access BFF surface.</step>
+    <step order="2">Client: define a request-type registry ({ id, title, mode: 'wizard'|'form', form/schema, lazyLoader }) adopting the WorkspaceWidgetRegistry lazy pattern. Register a placeholder type to prove the seam (NDA/P&amp;P land in 032/033).</step>
+    <step order="3">Client: build the typed-intake driver that, given a request-type id, renders its form through WizardModal (multi-step: pick type → typed form → review → submit → confirmation) or FormModal (single-step), submits to the BFF, and shows submit result/status. No hand-rolled Dialog.</step>
+    <step order="4">Client: mount the intake entry point in the external-spa module-host shell (WorkspaceHomePage/App). Implement the nine required states (loading, empty, error, unentitled/denied, dark, Teams theme, keyboard-only, narrow width) per ux-brief §4.</step>
+    <step order="5">BFF: author MapFrontDoorEndpoints as a route-group under the external-access surface with a group-level CallerPrincipalAuthorizationFilter. Endpoints: POST submit (create sprk_servicerequest with requester/type/status from 030) and GET status/by-id. Register services as concretes (ADR-010). ProblemDetails for errors.</step>
+    <step order="6">BFF: resolve the caller via CallerPrincipalResolver and set requester (lazy Contact attribution is fully implemented in 034 — here, wire the resolver + persist the request; leave the requester==caller enforcement + app-only upload as the 034 hardening seam, clearly marked).</step>
+    <step order="7">Tests: add KEEP-path integration tests in tests/unit/Sprk.Bff.Api.Tests/ for submit + get-status (real endpoint-group wiring). NO Mock&lt;HttpMessageHandler&gt; / DI-registration / ctor-null tests (ADR-038). Add client component tests for the driver rendering a type through WizardModal/FormModal.</step>
+    <step order="8">Build: npm run build:prod for the client; dotnet publish -c Release for BFF — report compressed size + delta vs 46.90 MB baseline. State the Placement Justification in the task notes / PR body.</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="10">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF</tool>
+    <tool name="npm">Build/test the external-spa client (build:prod)</tool>
+    <tool name="terminal">Shell, /conflict-check</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/external-spa/** — request-type registry + typed-intake driver (WizardModal/FormModal) mounted in the shell</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/** — MapFrontDoorEndpoints group (submit + get-status) with group-level filter</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/** — KEEP-path integration tests for submit + status; client component tests for the driver</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a registered request type, when a user opens intake, then the typed form renders inside a WizardModal (multi-step) or FormModal (single-step) from @spaarke/ui-components — no hand-rolled Dialog in the diff.</criterion>
+    <criterion testable="true">Given a completed typed form, when the user submits, then POST to MapFrontDoorEndpoints creates a sprk_servicerequest with requester + type + status and returns a status the client renders as a confirmation.</criterion>
+    <criterion testable="true">Given a new (hypothetical) request type, when it is added, then it requires only a registry entry + a form/schema — no change to the framework driver or the endpoint group (FR-14 closed set: config/schema + a form, not a new app).</criterion>
+    <criterion testable="true">Given an unauthenticated/denied caller, when hitting the Front Door endpoints, then the group-level filter returns a ProblemDetails 401/403 — no request is created (negative case).</criterion>
+    <criterion testable="true">Given the BFF build, when dotnet publish -c Release runs, then compressed size is reported with delta vs 46.90 MB and is ≤60 MB.</criterion>
+    <criterion testable="true">Given the intake flow, when rendered in light, dark, and Teams theme at narrow width, then semantic tokens adapt with zero hardcoded hex and no console errors.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>No existing intake framework — grep of src/client/external-spa and src/client/shared finds a widget/tab registry (WorkspaceWidgetRegistry) and modal presets, but no "pick type → typed form → submit → status" driver and no Front Door BFF endpoint group. sprk_servicerequest is a stub extended by 030.</existing>
+    <extension>No — the driver + endpoint group are net-new, but they are COMPOSED from existing surface (WizardModal/FormModal, the WorkspaceWidgetRegistry pattern, CallerPrincipalAuthorizationFilter, the /api/v1/external group shape). We reuse patterns and primitives, not fork them.</extension>
+    <cost-of-doing-nothing>Without the framework, each request type (NDA, P&amp;P, future) would be a hand-copied SPA + a bespoke endpoint — the exact drift the §11 gate forbids; adding a request type would be a new app instead of config + a form (FR-14 fails).</cost-of-doing-nothing>
+  </justification>
+  <ui-tests>
+    <test name="Renders typed intake">
+      <steps><step>Open the intake entry point in the external-spa shell</step><step>Pick the registered request type; step through WizardModal (or FormModal for single-step)</step><step>Submit</step></steps>
+      <expected>Form renders inside the SprkModal preset; submit returns a confirmation/status; no console errors</expected>
+    </test>
+    <test name="Dark Mode + Teams theme (ADR-021)">
+      <steps><step>Toggle dark mode via ThemeToggle</step><step>Load inside a Teams-theme host (light/dark/high-contrast)</step><step>Verify semantic tokens adapt</step></steps>
+      <expected>Zero hardcoded hex; tokens adapt across light/dark/Teams; readable at narrow Teams personal-tab width</expected>
+    </test>
+    <test name="Unentitled/denied state">
+      <steps><step>Simulate a caller without Front Door entitlement</step><step>Attempt to open intake / submit</step></steps>
+      <expected>Denied state shown client-side; server returns ProblemDetails 401/403; no sprk_servicerequest created</expected>
+    </test>
+  </ui-tests>
+  <notes>Spec FR-14 + FR-22. UX brief §3 (typed intake) + §4 (nine states). This task establishes the framework + endpoint group + submit/status; 034 adds the requester==caller Tier-2 predicate + app-only SPE upload; 035 renders my-requests. Prototype seed: multi-step-dialog-variant-template.tsx. §10 BFF: Placement Justification + publish size + conflict-check are mandatory. Use build:prod (NOT build) for the client per CLAUDE.md §12 / AP-1.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; declare rigor; run /conflict-check + code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

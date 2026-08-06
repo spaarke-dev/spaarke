@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Extend prototype seed: sprk_servicerequest + module-entitlement factories + 3-persona preset</title>
+    <phase>P0 UX Design + Prototype</phase>
+    <gate>blocked-until:001</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New factory + preset files in the spaarke-prototype seed system (NOT production code); data-scaffolding with a §11 justification, no ADR-graded blast radius. FULL gates skipped per §8 STANDARD row.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded data-factory authoring using an existing skill mechanism and a named reference factory to copy; no architectural judgment.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the shared _infra/seed system (factories + presets index) that other prototype work and sibling experiments share; concurrent edits to the seed index would collide. Serialize.</parallel-reason>
+    <deps>001</deps>
+    <tags>prototype, dataverse</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Extend the spaarke-prototype seed system with a sprk_servicerequest factory and a module-entitlement (sprk_externalrecordaccess) factory, plus a preset carrying three persona entitlement scenarios (outside-counsel CIAM / internal-employee workforce / admin), so the Front Door prototype screens (task 003) can render realistic data. Reuse the existing sprk_contact factory and _infra/mocks; do NOT rebuild the seed harness.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. spaarke-prototype seed/factory + Dataverse-shape expertise.</role>
+  <goal>New factory files exist under c:/code_files/spaarke-prototype/_infra/seed/factories/ for sprk_servicerequest (requester Contact ref, request type, status) and module-entitlement / sprk_externalrecordaccess; a new preset under _infra/seed/presets/ composes three persona entitlement scenarios (outside-counsel CIAM, internal-employee workforce, admin); all wired into the seed index and consumable by the task-001 experiment harness.</goal>
+  <context>
+    <background>Spec FR-13 extends the sprk_servicerequest stub with requester (Contact lookup), request type (option set incl. NDA, PolicyProcedures), and status workflow; FR-07/FR-09 define a module-entitlement layer alongside sprk_externalrecordaccess record participation. The prototype needs realistic seed data for three personas (ux-brief §2: outside counsel / internal employee / core-user admin) so the Front Door screens (task 003) and the launcher (task 001) render entitlement-honest data.</background>
+    <relevant-files>
+      <file>c:/code_files/spaarke-prototype/_infra/seed/factories/sprk_contact.ts (EXISTING factory to reuse for requester + persona identities — copy its shape/conventions)</file>
+      <file>c:/code_files/spaarke-prototype/_infra/seed/factories/sprk_todo.ts (reference factory shape for a second example)</file>
+      <file>c:/code_files/spaarke-prototype/_infra/seed/presets/smart-todo-default.ts (EXISTING preset shape to copy)</file>
+      <file>c:/code_files/spaarke-prototype/_infra/seed/presets/communication-default.ts (second preset shape reference)</file>
+      <file>c:/code_files/spaarke-prototype/_infra/mocks/dataverseClient.ts (mock Dataverse client the seed feeds — reuse)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md (FR-13 intake schema; FR-07/08/09 entitlement layers; NFR-08 two-tier)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md (§2 personas)</file>
+    </relevant-files>
+    <dependencies>Task 001 established the experiment that consumes this seed. This task ADDs to the shared seed system.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Work in the spaarke-prototype repo (c:/code_files/spaarke-prototype) ONLY; this is prototype seed data, NOT production Dataverse schema. Do NOT create real Dataverse tables or touch production src/.</constraint>
+    <constraint source="project">Use the /prototype-harness-extend skill as the mechanism for adding the entity factory + preset; do NOT hand-wire the seed index bypassing the skill.</constraint>
+    <constraint source="project">REUSE the existing _infra/seed/factories/sprk_contact.ts factory for requester + persona identities and the existing _infra/mocks; do NOT duplicate contact-generation logic.</constraint>
+    <constraint source="project">The sprk_servicerequest factory MUST model requester (Contact reference), request type (option set: at minimum NDA + PolicyProcedures, extensible), and a status value — matching spec FR-13 so task-003 screens bind to realistic fields.</constraint>
+    <constraint source="project">The three-persona preset MUST encode the NFR-08 two-tier distinction in mock data: entitlement (Tier-1) rows separate from record-participation (Tier-2) rows, so the launcher shows only entitled modules and my-requests can filter requester==caller.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+    </files>
+    <patterns>
+      <pattern name="Seed factory" location="c:/code_files/spaarke-prototype/_infra/seed/factories/sprk_contact.ts">Copy the factory signature/return shape; produce deterministic mock records keyed for harness consumption.</pattern>
+      <pattern name="Seed preset" location="c:/code_files/spaarke-prototype/_infra/seed/presets/smart-todo-default.ts">Copy the preset shape; compose factories into a named scenario set (here: 3 personas).</pattern>
+      <pattern name="Harness extend" location=".claude/skills/prototype-harness-extend/SKILL.md">The mechanism for registering a new entity factory + preset in the seed system.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load knowledge files (spec FR-13/FR-07/08/09/NFR-08, ux-brief §2) and read the existing sprk_contact factory + smart-todo-default preset to match conventions.</step>
+    <step order="2">Invoke /prototype-harness-extend to add a sprk_servicerequest entity factory: fields requester (Contact ref via sprk_contact factory), requestType (option set incl. NDA, PolicyProcedures), status.</step>
+    <step order="3">Invoke /prototype-harness-extend (or extend the same run) to add a module-entitlement / sprk_externalrecordaccess factory modeling per-module entitlement rows and record-participation rows distinctly (NFR-08 Tier-1 vs Tier-2).</step>
+    <step order="4">Author a new preset composing THREE persona scenarios: (a) outside-counsel CIAM — entitled to Assigned Work + record participations; (b) internal-employee workforce — entitled to Front Door via role, own service requests, no record participation; (c) admin — grant/revoke capability visible.</step>
+    <step order="5">Wire all new factories + the preset into the seed index so the task-001 experiment harness can load the preset.</step>
+    <step order="6">Verify: load the preset in the experiment; confirm the launcher (task 001) can read entitlement rows and a my-requests view can filter requester==caller from the seeded service requests.</step>
+    <step order="7">Update projects/spaarke-SPA-external-access-platform-r2/tasks/TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviations (e.g., a field shape that diverged from FR-13) in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If the sprk_servicerequest field shape needed by task-003 screens cannot be expressed without a production schema decision (e.g., a status model the spec leaves open), STOP and surface the schema-shape question to the owner rather than inventing a binding production shape in prototype seed.</trigger>
+  </escalation>
+  <tools>
+    <tool name="npm">Run the prototype harness to verify seed loads (npm install --legacy-peer-deps --no-audit --no-fund; dev server)</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+  <outputs>
+    <output type="code">c:/code_files/spaarke-prototype/_infra/seed/factories/sprk_servicerequest.ts</output>
+    <output type="code">c:/code_files/spaarke-prototype/_infra/seed/factories/{module-entitlement / sprk_externalrecordaccess}.ts</output>
+    <output type="code">c:/code_files/spaarke-prototype/_infra/seed/presets/{external-access-r2-personas}.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the harness, when the new preset loads, then it produces the three persona scenarios (outside-counsel CIAM, internal-employee workforce, admin) with distinct entitlement + participation data.</criterion>
+    <criterion testable="true">Given the sprk_servicerequest factory, when a record is generated, then it carries a requester Contact reference (sourced from the existing sprk_contact factory), a requestType (NDA or PolicyProcedures), and a status.</criterion>
+    <criterion testable="true">Given the internal-employee persona, when the launcher reads entitlement rows, then Front Door is entitled with NO record-participation rows (Tier-1 only) — demonstrating NFR-08 tier independence.</criterion>
+    <criterion testable="true">Given the outside-counsel persona, when the launcher reads entitlement rows, then Assigned Work is entitled AND record-participation rows exist (Tier-1 + Tier-2).</criterion>
+    <criterion testable="true">Negative: no new Contact-generation logic is duplicated — the sprk_servicerequest and entitlement factories import/reuse the existing sprk_contact factory (grep confirms reuse, not re-implementation).</criterion>
+    <criterion testable="true">Negative: no production Dataverse table is created and no file under this worktree's src/ is modified.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>Closest neighbor: c:/code_files/spaarke-prototype/_infra/seed/factories/sprk_contact.ts (contact identities only) + sprk_todo.ts. No factory exists for sprk_servicerequest or module-entitlement in the prototype seed (grep of _infra/seed/factories confirms only daily-briefing-render, savedquery, sprk_communication, sprk_contact, sprk_todo).</existing>
+    <extension>Yes — extend the seed system (add factories + a preset via /prototype-harness-extend) and reuse the sprk_contact factory; do not build a new seed harness.</extension>
+    <cost-of-doing-nothing>Without these factories the task-003 intake and my-requests screens have no realistic requester/type/status/entitlement data to bind to, so the launcher cannot demonstrate entitlement-honesty (FR-02) and my-requests cannot demonstrate requester==caller filtering (FR-17) in the prototype.</cost-of-doing-nothing>
+  </justification>
+  <notes>Spec FR-13 (intake schema shape), FR-07/08/09 (entitlement layers), NFR-08 (two-tier). ux-brief §2 personas. This is prototype seed data only — the production Dataverse schema is authored later in P3 (FR-13). Keep field names aligned with spec so task-003 binding transfers cleanly to production.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; use /prototype-harness-extend for the factory + preset additions.</protocol>
+  </execution>
+</task>

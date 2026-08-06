@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Project Wrap-up — quality gates, cleanup, close-out</title>
+    <phase>Wrap-up</phase>
+    <gate>blocked-until:043</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Runs code-review + adr-check across all project code; test-diet reconciliation (test-modifying override + project-close diet gate).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Orchestration of gates + doc updates following a fixed checklist; not novel reasoning.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final serial close-out; depends on every prior task; touches README/plan/TASK-INDEX.</parallel-reason>
+    <deps>all</deps>
+    <tags>testing, docs, deploy</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Close out the External Access Platform R2 project: run final quality gates, reconcile the test
+    suite per ADR-038, run repo cleanup, and update all project documentation to Complete.
+  </prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Disciplined at release close-out + documentation.</role>
+
+  <goal>
+    All tasks marked ✅ in TASK-INDEX.md; code-review + adr-check clean (or remaining items documented
+    as accepted exceptions per §6.5); test-diet reconciliation applied; README/plan set to Complete;
+    lessons-learned recorded; repo cleaned.
+  </goal>
+
+  <context>
+    <background>
+      Mandatory final task for every Spaarke project (task-create Step 3.7). This is the project-close
+      gate: it runs the quality gates over the whole R2 codebase and the project-close test diet
+      (CLAUDE.md §7). Because this project is TEST-MODIFYING and BFF-touching, code-review + adr-check
+      run unconditionally.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/README.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/plan.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/tasks/TASK-INDEX.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/lessons-learned.md</file>
+    </relevant-files>
+    <dependencies>All P0–P4 tasks (001–043) complete.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Run /test-diet BEFORE marking the project complete (CLAUDE.md §7 project-close test diet gate); cite notes/test-diet-report.md in the wrap-up PR.</constraint>
+    <constraint source="ADR-038">Test reconciliation follows the 17-ban build-vs-maintain classifier; SCAFFOLDING-class tests are removed, MAINTAIN-class kept at their KEEP path. The skill is read-only — it emits git rm/mv for reviewer approval.</constraint>
+    <constraint source="project">Any residual ADR conflict must be resolved via CLAUDE.md §6.5 (Path A exception cited in PR, Path B amendment, or Path C comply) — not left as a silent violation.</constraint>
+    <constraint source="project">BFF publish size verified ≤60 MB compressed; report final absolute size + delta vs 46.90 MB baseline in the wrap-up notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Project close-out" location=".claude/skills/task-create/SKILL.md">Step 3.7 wrap-up checklist.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Run /code-review over all project code; fix Critical issues or document accepted exceptions (§6.5).</step>
+    <step order="2">Run /adr-check over all project code; resolve violations via §6.5 (Path A/B/C) — no silent violations.</step>
+    <step order="3">Run /test-diet projects/spaarke-SPA-external-access-platform-r2; review notes/test-diet-report.md; apply the emitted git rm/mv after reviewer approval.</step>
+    <step order="4">Verify BFF publish size: dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/; record compressed size + delta vs 46.90 MB in wrap-up notes.</step>
+    <step order="5">Run /repo-cleanup projects/spaarke-SPA-external-access-platform-r2; approve removals (notes/debug, notes/spikes, notes/drafts); archive handoffs.</step>
+    <step order="6">Update README.md: Status=Complete, Phase=Complete, Progress=100%, Completed Date, check all Graduation Criteria, add Changelog entry.</step>
+    <step order="7">Update plan.md: Status=Complete; mark milestones ✅.</step>
+    <step order="8">Append lessons to notes/lessons-learned.md (both corrections + confirmed non-obvious approaches + why).</step>
+    <step order="9">Verify all tasks ✅ in TASK-INDEX.md; confirm no critical code-review issues remain.</step>
+    <step order="10">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="11">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If code-review/adr-check surfaces a Critical issue that cannot be fixed within wrap-up scope, STOP and escalate (§6) rather than marking the project Complete with an open Critical.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish .NET</tool>
+    <tool name="npm">Build TS/React</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/README.md</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/lessons-learned.md</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/test-diet-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given all P0–P4 tasks complete, when wrap-up runs, then code-review + adr-check are clean or every residual is a documented §6.5 exception cited in the PR.</criterion>
+    <criterion testable="true">/test-diet has run and notes/test-diet-report.md exists; emitted git rm/mv applied after approval.</criterion>
+    <criterion testable="true">BFF publish size ≤60 MB compressed, delta reported.</criterion>
+    <criterion testable="true">README + plan set to Complete; all Graduation Criteria checked; all tasks ✅ in TASK-INDEX.md.</criterion>
+    <criterion testable="true">lessons-learned.md updated.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the CLAUDE.md §7 project-close gate. Skipping /test-diet is a HARD WARNING — the wrap-up
+    PR MUST cite the report or document the skip rationale. Coordinate the final merge with teams-app-r1
+    (shared external-access surface) via /conflict-check.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

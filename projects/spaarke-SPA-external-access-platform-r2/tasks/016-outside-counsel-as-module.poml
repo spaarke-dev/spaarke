@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Refactor Outside Counsel workspace into the first registered module (R1 parity)</title>
+    <phase>P1 Module-host foundation</phase>
+    <gate>blocked-until:012,015</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx + BFF wiring; depends on registry + framework; R1-parity behavior must be preserved (regression risk); tags bff-api/frontend.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified refactor with an R1-parity acceptance target and named registry/framework seams to plug into — literal execution.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on both the client registry (012) and the BFF module framework (015); wires OC across both, so it serializes after them.</parallel-reason>
+    <deps>012,015</deps>
+    <tags>frontend, bff-api</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Refactor R1's Outside Counsel workspace into the first module registered in the shell — "Assigned Work" —
+    plugging its client pages into the module registry (012) and its data endpoints into the BFF module framework
+    (015), with NO loss of R1 behavior. A CIAM outside-counsel Contact uses Assigned Work exactly as in R1.
+  </prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Fluent v9 SPA + BFF endpoint specialist; disciplined at parity-preserving refactors.</role>
+
+  <goal>
+    Outside Counsel registered as the "Assigned Work" module: its R1 pages (WorkspaceHomePage/ProjectPage/
+    DocumentLibrary) mount via the module registry + lazy route, and its data flows through the framework-registered
+    plane strategy (CiamContact) + Tier-2 predicate (sprk_externalrecordaccess participation). R1 parity is verified —
+    a CIAM outside-counsel Contact signs in and uses Assigned Work with no behavior change.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-05 (Outside Counsel as a registered module, no loss of R1 behavior) + design.md table (Assigned Work =
+      R1 Outside Counsel refactored to a module) + ux-brief §3 (Assigned Work reuses R1 WorkspaceHomePage/ProjectPage/
+      DocumentLibrary as-is, R1 parity). The BFF side already has the CiamContact strategy + the sprk_externalrecordaccess
+      Tier-2 predicate (via AccessibleRecordSetService); this task registers OC as a module over the 015 framework and
+      wires the client pages into the 012 registry. Opportunistic cleanup (ux-brief §3.Opportunistic): migrate R1 hand-rolled
+      dialogs — AiToolbar result dialog → PreviewModal, InviteUserDialog → FormModal — while in the code.
+    </background>
+    <relevant-files>
+      <file>src/client/external-spa/src/pages/WorkspaceHomePage.tsx</file>
+      <file>src/client/external-spa/src/pages/ProjectPage.tsx</file>
+      <file>src/client/external-spa/src/components/DocumentLibrary.tsx</file>
+      <file>src/client/external-spa/src/components/AiToolbar.tsx</file>
+      <file>src/client/external-spa/src/components/InviteUserDialog.tsx</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/index.ts (SprkModal presets)</file>
+    </relevant-files>
+    <dependencies>012 (client module registry + launcher). 015 (BFF module-framework registration seam).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-05">R1 parity is mandatory — the Assigned Work module MUST reproduce R1 Outside Counsel behavior exactly for a CIAM Contact; no feature regression.</constraint>
+    <constraint source="project">§10 BFF-touching: state a Placement Justification in the PR for any BFF endpoint-group wiring (cite .claude/constraints/bff-extensions.md); run /conflict-check BEFORE the PR (teams-app-r1 shares Api/ExternalAccess/**); verify publish ≤60 MB, report delta vs 46.90 MB.</constraint>
+    <constraint source="project">Register OC via the 012 registry + 015 framework seams — do NOT fork LegalWorkspaceApp and do NOT hand-copy a parallel SPA (§11).</constraint>
+    <constraint source="project">Opportunistic dialog migration: AiToolbar result dialog → PreviewModal, InviteUserDialog → FormModal (SprkModal presets, ADR-050); no new hand-rolled dialogs.</constraint>
+    <constraint source="NFR-05">Keep the CIAM sessionStorage per-tab isolation for the Assigned Work sign-in path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>.claude/patterns/ui/modal-shell.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="SprkModal presets" location="src/client/shared/Spaarke.UI.Components/src/components/index.ts">PreviewModal / FormModal (exported :273) — migrate AiToolbar/InviteUserDialog to these.</pattern>
+      <pattern name="Module registration" location="src/client/external-spa/src/registry/">Register { id:'assigned-work', title, icon, route, lazyLoader, requiredEntitlement } per task 012's recipe.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run /conflict-check against teams-app-r1 for Api/ExternalAccess/** before BFF edits; record the result.</step>
+    <step order="2">Register OC as the "Assigned Work" module in the client registry (id, title, icon, route, lazyLoader → R1 WorkspaceHomePage/ProjectPage, requiredEntitlement).</step>
+    <step order="3">Register OC's data endpoints as a module over the 015 framework: CiamContact plane strategy + sprk_externalrecordaccess Tier-2 predicate; keep the endpoints on the ExternalCollaboration dual-scheme group.</step>
+    <step order="4">Migrate the R1 hand-rolled dialogs opportunistically: AiToolbar result → PreviewModal; InviteUserDialog → FormModal.</step>
+    <step order="5">Build client (npm run build:prod) + BFF (dotnet build); run dotnet test (suite green); verify publish ≤60 MB and report delta.</step>
+    <step order="6">R1 parity pass: sign in as a CIAM outside-counsel Contact; exercise Assigned Work (workspace list, project page, document library, upload, AI toolbar) and confirm no behavior change vs R1.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TS/React (build:prod)</tool>
+    <tool name="dotnet">Build/test/publish .NET</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/registry/ (Assigned Work registration)</output>
+    <output type="code">src/client/external-spa/src/components/AiToolbar.tsx (→ PreviewModal), InviteUserDialog.tsx (→ FormModal)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/ (OC module registration over the framework)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a CIAM outside-counsel Contact, when they sign in, then they see the Assigned Work card and use the workspace/project/document flows exactly as R1 (R1 parity pass, FR-05).</criterion>
+    <criterion testable="true">Assigned Work's data flows through the framework-registered CiamContact strategy + sprk_externalrecordaccess Tier-2 predicate on the ExternalCollaboration group — no bespoke endpoint fork.</criterion>
+    <criterion testable="true">Negative Tier-2: the Contact sees only projects they have participation grants for, not all projects.</criterion>
+    <criterion testable="true">AiToolbar result dialog uses PreviewModal and InviteUserDialog uses FormModal (no raw Fluent Dialog remains for these).</criterion>
+    <criterion testable="true">BFF suite green; publish ≤60 MB with delta vs 46.90 MB reported; /conflict-check run before the PR.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Assigned Work parity"><steps><step>Sign in as CIAM outside counsel</step><step>Open Assigned Work; exercise project page + document library</step></steps><expected>R1 behavior; no console errors</expected></test>
+    <test name="Migrated dialogs"><steps><step>Open AiToolbar result (PreviewModal) + Invite (FormModal)</step></steps><expected>SprkModal presets render; dismiss/cancel correct</expected></test>
+    <test name="Dark Mode + Teams theme (ADR-021)"><steps><step>Toggle dark + Teams theme in Assigned Work</step></steps><expected>zero hardcoded hex; adapts</expected></test>
+  </ui-tests>
+
+  <notes>
+    §10 BFF-touching (endpoint-group wiring) — Placement Justification + /conflict-check + ≤60 MB. This proves the
+    "add a module = register" recipe end-to-end (client + server) using R1 Outside Counsel as the first module.
+    D1 (workforce role→level grading) is NOT in scope here — Assigned Work's CIAM path is unaffected.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist. Run /conflict-check before the BFF PR.</protocol>
+  </execution>
+</task>

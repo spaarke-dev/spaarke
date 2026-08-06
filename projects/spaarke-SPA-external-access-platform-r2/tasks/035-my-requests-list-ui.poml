@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>My-requests list + status UI (own requests only)</title>
+    <phase>P3 Legal Front Door intake MVP</phase>
+    <gate>blocked-until:031,034</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx; renders authorization-scoped data (server-side requester==caller) with a two-user isolation requirement; tags include frontend + fluent-ui — FULL per CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified list/detail UI on shared components with a fixed server contract from 034; no open architectural decisions.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 034's server-side requester==caller authz + the 031 status endpoint; renders after both land.</parallel-reason>
+    <deps>031,034</deps>
+    <tags>frontend, fluent-ui</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+  <prompt>Build the "My requests" surface in the external-spa module-host shell: a Fluent v9 list of the caller's own Front Door requests (filtered SERVER-side to requester==caller per 034 — the client never filters), each with a status Badge/chip, opening a detail view; submitted documents open via PreviewModal. Reuse Fluent DataGrid/list + Badge; no hand-rolled UI (§11).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Fluent v9 + React 18 on @spaarke/ui-components; consumes the BFF Front Door status endpoints.</role>
+  <goal>An employee opens "My requests" and sees a list of ONLY their own requests (server-filtered), each with a status chip, can open a request's detail/status, and can preview a submitted document via PreviewModal. The list renders correctly in light/dark/Teams theme at narrow width, with all nine ux-brief §4 states.</goal>
+  <context>
+    <background>FR-17 (submitter sees only their own requests) + UX brief §3 "My requests": List + status chips → detail; filtered server-side to requester==caller (Tier-2); Fluent DataGrid/list + status Badge; PreviewModal for submitted docs. NFR-06/08: server-enforced authz; the client shows only what the server returns — it must NOT implement its own visibility filter and must NOT assume it can see others' rows. 034 provides the server-side requester==caller enforcement + the get/list endpoint; 031 provides the status contract.</background>
+    <relevant-files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md (§3 My requests row; §4 nine states)</file>
+      <file>src/client/external-spa/src/pages/WorkspaceHomePage.tsx, src/client/external-spa/src/App.tsx (module-host shell to mount My requests into)</file>
+      <file>src/client/external-spa/src/components/DocumentLibrary.tsx (R1 list pattern to reuse)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/index.ts:273 (PreviewModal preset)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/** — Front Door get/list/status endpoints (031 + 034)</file>
+    </relevant-files>
+    <dependencies>031 (status endpoint + framework) and 034 (server-side requester==caller + list endpoint) must be complete.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="NFR-06">The list MUST render only what the server returns; the client MUST NOT implement its own requester filter and MUST NOT assume access to other users' rows — server-side requester==caller (034) is the sole authority. Client flags are UX-only.</constraint>
+    <constraint source="project">Build on Fluent v9 DataGrid/list + Badge and @spaarke/ui-components PreviewModal for document viewing — no hand-rolled Dialog, no forked LegalWorkspaceApp (§11 + ADR-050).</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; status chips + list render in light, dark, and Teams theme at narrow Teams personal-tab width; zero hardcoded hex.</constraint>
+    <constraint source="project">Do NOT expose or request Graph pointers for submitted documents — PreviewModal opens documents keyed on documentId via the BFF (ADR-007 boundary held by 034).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/patterns/ui/modal-shell.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="R1 list surface" location="src/client/external-spa/src/components/DocumentLibrary.tsx">Reuse the R1 list layout pattern for My requests.</pattern>
+      <pattern name="PreviewModal" location="docs/standards/MODAL-DESIGN-SYSTEM.md">Open submitted docs via PreviewModal keyed on documentId; no Graph pointer.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load FR-17 + NFR-06/08, ux-brief §3 (My requests) + §4, and the 034 get/list endpoint contract.</step>
+    <step order="2">Build the My requests list (Fluent DataGrid/list) bound to the server list endpoint; render a status Badge per row; no client-side requester filter.</step>
+    <step order="3">Build the request detail/status view; wire PreviewModal to open a submitted document keyed on documentId (via BFF).</step>
+    <step order="4">Mount My requests in the module-host shell (WorkspaceHomePage/App). Implement all nine ux-brief §4 states (loading, empty, error, unentitled/denied, dark, Teams theme, keyboard-only, narrow width).</step>
+    <step order="5">Tests (client): (a) renders the caller's rows from a mocked server response with no console errors; (b) dark + Teams theme adapt; (c) two-user isolation demonstrated via mock — when the mocked server returns only user A's rows, user B's rows never appear (the client relies on server scoping, does not fabricate access).</step>
+    <step order="6">Build: npm run build:prod (client).</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+  <tools>
+    <tool name="npm">Build/test the external-spa client (build:prod)</tool>
+    <tool name="terminal">Shell</tool>
+    <tool name="dotnet">Not required (client task; server is 034)</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/external-spa/** — My requests list (Fluent DataGrid/list + status Badge) + detail/status view + PreviewModal for submitted docs, mounted in the shell</output>
+    <output type="test">client tests — renders, dark+Teams theme, two-user isolation via mock</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a signed-in employee, when they open My requests, then the list shows only their own requests (from the server-scoped list endpoint) each with a status chip; opening a row shows its detail/status.</criterion>
+    <criterion testable="true">Given a submitted document, when the user opens it, then it renders via PreviewModal keyed on documentId — no Graph pointer is requested or exposed.</criterion>
+    <criterion testable="true">Negative (two-user isolation via mock): when the mocked server returns only user A's rows, then user B's rows never appear; the client does NOT implement its own filter or fabricate access (NFR-06 — server is the authority).</criterion>
+    <criterion testable="true">Given the My requests surfaces, when rendered in light/dark/Teams theme at narrow Teams width, then semantic tokens adapt with zero hardcoded hex and no console errors; empty + error + unentitled states render per ux-brief §4.</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test name="Renders own requests">
+      <steps><step>Sign in; open My requests</step><step>Verify list rows + status chips from the mocked server response</step><step>Open a row detail; open a submitted doc via PreviewModal</step></steps>
+      <expected>Only the caller's rows render; detail + PreviewModal open; no console errors</expected>
+    </test>
+    <test name="Dark Mode + Teams theme (ADR-021)">
+      <steps><step>Toggle dark mode; load in Teams theme (light/dark/high-contrast)</step><step>Verify list + chips tokens adapt</step></steps>
+      <expected>Zero hardcoded hex; adapts; readable at narrow Teams width</expected>
+    </test>
+    <test name="Two-user isolation (mock)">
+      <steps><step>Mock the server list endpoint to return only user A's rows</step><step>Render as user B</step></steps>
+      <expected>No user-A rows leak via any client path; the client shows only server-returned rows (relies on 034 server scoping)</expected>
+    </test>
+  </ui-tests>
+  <notes>Spec FR-17 + NFR-06/08. UX brief §3 (My requests) + §4. Server-side requester==caller is enforced in 034 — this task consumes it and MUST NOT re-implement or bypass it. Reuse R1 DocumentLibrary list pattern + PreviewModal. build:prod (NOT build).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; declare rigor; code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

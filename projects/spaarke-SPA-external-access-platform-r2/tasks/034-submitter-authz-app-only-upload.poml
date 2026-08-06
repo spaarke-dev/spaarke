@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Self-service submitter authz (Tier-2 requester==caller) + app-only SPE upload</title>
+    <phase>P3 Legal Front Door intake MVP</phase>
+    <gate>blocked-until:030,031</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-sensitive: authorization predicate + app-only SPE broker upload; tags include auth + bff-api; modifies .cs on the shared external-access surface — FULL per CLAUDE.md §8 (auth tag, security-sensitive).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security + shared-surface: Tier-2 authorization predicate (NFR-08) + app-only SPE broker path (ADR-007, no OBO) with a hard escalation boundary; high blast radius on the external-access surface shared with teams-app-r1.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Auth + SPE on the shared external-access BFF surface; must serialize with other BFF external-access work; 035 depends on this authz.</parallel-reason>
+    <deps>030,031</deps>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+  <prompt>Enforce the Legal Front Door Tier-2 record-scope predicate — requester == caller (a submitter sees/acts on ONLY their own requests, NFR-08) — server-side on the Front Door endpoint group, and implement document upload as an app-only SPE stream via the SpeFileStore broker (ADR-007): no OBO, no Graph-pointer exposure, keyed on documentId, with authorization-before-stream (403 → zero bytes, no Graph call). Also implement lazy Contact attribution (bind workforce oid → requester Contact) on first submission (FR-11).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Security-sensitive: server-enforced authorization, app-only broker patterns, SPE integration. No client-trusted authz.</role>
+  <goal>The Front Door group enforces requester==caller for every read/get/upload (user A cannot see or touch user B's requests or documents); document upload streams app-only through SpeFileStore keyed on documentId with authz-before-stream; an internal user's first submission lazily resolves-or-creates their Contact by oid and sets it as requester. All decisions are server-side; negative cases return ProblemDetails 403 with no bytes and no Graph call.</goal>
+  <context>
+    <background>FR-17: A Front Door user (workforce SSO) can create and see only their own requests (Tier-2 predicate requester==caller, one instance of NFR-08's per-module record-scope); document upload streams app-only via the SPE broker (no OBO, no pointer exposure). FR-11: on an internal user's first attributed action, resolve-or-create a Contact by workforce oid (reuse R1 ResolveOrCreateContact + bind-oid to sprk_externalobjectid) and record as requester; no Contact created merely by having access. NFR-01: external CIAM broker-only; workforce SPA path no-OBO. NFR-06/08: server-enforced; negative Tier-2 test required per module. teams-app-r1 shipped CallerPrincipalResolver + CallerPrincipal (GetAccessibleProjectIds/GetAccessLevel) and IAccessibleRecordSetService as the canonical NFR-08 worked example — Front Door's predicate is the simpler requester==caller variant on the resolved CallerPrincipal. ADR-007: SpeFileStore facade for all SPE ops.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs (CallerPrincipal :66, resolver — the resolved caller identity to compare against requester)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/CallerPrincipalAuthorizationFilter.cs:29 (group-level filter setting CallerPrincipal on HttpContext.Items)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/** — the 031 MapFrontDoorEndpoints group (add the requester==caller predicate + upload here)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteExternalUserEndpoint.cs (ResolveOrCreateContactAsync :172; oid → sprk_externalobjectid :139 — reuse for lazy attribution)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs (resolve-by-oid :231 / bind-oid :323 — reuse)</file>
+      <file>.claude/adr/ADR-007-spefilestore.md + .claude/skills/spe-integration/SKILL.md (SpeFileStore app-only upload; authz-before-stream)</file>
+      <file>.claude/constraints/bff-extensions.md (binding BFF governance)</file>
+    </relevant-files>
+    <dependencies>030 (sprk_servicerequest.requester + submitted-document linkage) and 031 (Front Door endpoint group) must be complete. 035 (my-requests UI) depends on this server-side authz.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="NFR-08">The Front Door Tier-2 predicate MUST be requester==caller enforced SERVER-side on every read/get/list/upload in the group — module entitlement (Tier 1) MUST NOT grant visibility to another user's requests. A negative test (user A cannot access user B's request/document) is REQUIRED.</constraint>
+    <constraint source="ADR-007">All document upload MUST go through the SpeFileStore facade as an APP-ONLY stream — no OBO, no direct Graph client in the endpoint, no SPE pointer/driveItem URL returned to the SPA; endpoints key on documentId only.</constraint>
+    <constraint source="project">Authorization-before-stream: the requester==caller (and document ownership) check MUST run BEFORE any Graph/SPE call — an unauthorized upload/download returns ProblemDetails 403 with ZERO bytes streamed and NO Graph call made (verified by test).</constraint>
+    <constraint source="NFR-01">The CIAM path stays broker-only and the workforce SPA path stays no-OBO — do NOT introduce token exchange or OBO to satisfy the app-only upload. (See escalation.)</constraint>
+    <constraint source="FR-11">Lazy Contact attribution MUST reuse R1 ResolveOrCreateContactAsync + bind-oid to sprk_externalobjectid; create/link exactly ONE Contact on first submission; subsequent submissions reuse it; NO Contact is created merely by having module access.</constraint>
+    <constraint source="project">BFF addition: state Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); dotnet publish -c Release, report compressed size + delta vs 46.90 MB baseline (≤60 MB); no new HIGH CVE; /conflict-check before the BFF PR (teams-app-r1 shares this surface).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/skills/spe-integration/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Plane-agnostic caller" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs">Resolve CallerPrincipal from the group filter; Front Door predicate compares requester == resolved caller (oid/ContactId).</pattern>
+      <pattern name="Lazy Contact by oid" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteExternalUserEndpoint.cs">Reuse ResolveOrCreateContactAsync :172 + oid → sprk_externalobjectid :139.</pattern>
+      <pattern name="App-only SPE" location=".claude/skills/spe-integration/SKILL.md">SpeFileStore facade, app-only, documentId-keyed; authz before stream; never return Graph pointers.</pattern>
+      <pattern name="NFR-08 predicate" location="spec.md NFR-08">teams-app-r1 IAccessibleRecordSetService is the participation-grant variant; Front Door is the simpler submitter-owned (requester==caller) variant.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load FR-11/FR-17, NFR-01/06/08, ADR-007/028, spe-integration skill, and the 031 Front Door group. Run /conflict-check for the external-access surface.</step>
+    <step order="2">Confirm the app-only SPE upload path is achievable through SpeFileStore without OBO. If it is NOT (e.g., app-only broker cannot satisfy the upload without an OBO token), STOP and escalate per &lt;escalation&gt; — do NOT introduce OBO.</step>
+    <step order="3">Implement lazy Contact attribution on submit: resolve-or-create the caller's Contact by workforce oid (reuse ResolveOrCreateContactAsync + bind-oid), set as sprk_servicerequest.requester; ensure exactly one Contact per user and none created without a submission.</step>
+    <step order="4">Implement the requester==caller Tier-2 predicate: gate every Front Door read/get/list so a caller only sees requests where requester == resolved CallerPrincipal; deny others with ProblemDetails 403 (server-side, not client-filtered).</step>
+    <step order="5">Implement document upload: authz-before-stream (verify requester==caller + document ownership), then stream app-only through SpeFileStore keyed on documentId; never return a Graph pointer/driveItem URL. Persist the submitted-document linkage (030 schema).</step>
+    <step order="6">Tests (ADR-038 KEEP-path, tests/unit/Sprk.Bff.Api.Tests/): (a) user A cannot GET/list user B's request → 403; (b) unauthorized upload → 403 with zero bytes AND no Graph call (assert the SPE/Graph client was not invoked); (c) first submission creates exactly one Contact bound by oid; second reuses it; (d) no Contact created by access alone. NO Mock&lt;HttpMessageHandler&gt; / DI-registration / ctor-null tests.</step>
+    <step order="7">Build: dotnet publish -c Release; report compressed size + delta vs 46.90 MB (≤60 MB); dotnet list package --vulnerable (no new HIGH). State Placement Justification in notes/PR.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If the app-only SPE upload path CANNOT be satisfied through the SpeFileStore broker without introducing OBO or a downstream token exchange, STOP and escalate via 🔔 Human Input Required (CLAUDE.md §6 + NFR-01): app-only broker-only is a hard security invariant. Do NOT silently add OBO to make the upload work — present the blocker + options and wait for owner direction.</trigger>
+  </escalation>
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF</tool>
+    <tool name="terminal">Shell, /conflict-check, dotnet list package --vulnerable</tool>
+    <tool name="npm">Not required (server task; client upload UX is 031/035)</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/** — requester==caller Tier-2 predicate on the Front Door group + app-only SpeFileStore upload (documentId-keyed) + lazy Contact attribution</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/** — two-user isolation (403), unauthorized-upload (403/no-bytes/no-Graph), one-Contact-on-first-submission, no-Contact-by-access-alone</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given user A's request, when user B (entitled to the Front Door module) GETs/lists it, then the server returns ProblemDetails 403 and B never receives A's data — enforced server-side, not client-filtered (negative Tier-2 test, NFR-08).</criterion>
+    <criterion testable="true">Given an unauthorized upload attempt, when it hits the upload endpoint, then authz runs before any stream → ProblemDetails 403 with ZERO bytes streamed and NO Graph/SPE call made (asserted in test).</criterion>
+    <criterion testable="true">Given an authorized submitter, when they upload a document, then it streams app-only through SpeFileStore keyed on documentId; the response returns NO Graph pointer/driveItem URL (NFR-01, MUST-NOT expose Graph pointers).</criterion>
+    <criterion testable="true">Given an internal user's first submission, when it is processed, then exactly one Contact is resolved-or-created by workforce oid (bound to sprk_externalobjectid) and set as requester; a second submission reuses it (FR-11).</criterion>
+    <criterion testable="true">Negative: merely having Front Door module entitlement (Tier 1) creates NO Contact and grants NO visibility to other users' requests (Tier 1 ≠ Tier 2).</criterion>
+    <criterion testable="true">Given the BFF build, when dotnet publish -c Release runs, then compressed size is reported with delta vs 46.90 MB, is ≤60 MB, and dotnet list package --vulnerable shows no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+  <notes>Spec FR-11/FR-17, NFR-01/06/08, ADR-007/028/034. teams-app-r1 IAccessibleRecordSetService is the participation variant of NFR-08; Front Door is the simpler requester==caller variant on the resolved CallerPrincipal — reuse the resolver + filter, do NOT rebuild. Reuse ResolveOrCreateContactAsync + bind-oid for lazy attribution. Hard invariant: app-only, no OBO, no Graph pointers, authz-before-stream — escalate rather than violate. §10 BFF: Placement Justification + publish delta + CVE + /conflict-check mandatory.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; declare rigor; run /conflict-check + code-review + adr-check at Step 9.5; honor the app-only/no-OBO escalation trigger.</protocol>
+  </execution>
+</task>

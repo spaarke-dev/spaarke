@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Extract module-host shell scaffold from external-spa (multi-module + Teams-aware chrome)</title>
+    <phase>P1 Module-host foundation</phase>
+    <gate>blocked-until:004,010</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx frame code that 012/013/014/016/017 all build on; architecture change (shell base); tags include frontend.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified extend-existing-frame work with a named reference impl (external-spa App.tsx) and approved P0 prototype target — literal execution.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shell base that 012/013/014/016/017 build on; must land before its dependents; edits shared frame files (App.tsx, AppHeader, NavigationBar).</parallel-reason>
+    <deps>004,010</deps>
+    <tags>frontend, refactoring</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Extend R1's src/client/external-spa frame (App.tsx, AppHeader, NavigationBar) into a reusable
+    module-host shell that hosts multiple lazy modules and renders Teams-aware chrome, built to the
+    approved P0 prototype (dep 004) and ux-brief §3. Do NOT fork LegalWorkspaceApp; extend the existing
+    external-spa frame in place.
+  </prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Fluent v9 + React 18 SPA specialist; disciplined at extend-not-rebuild refactoring.</role>
+
+  <goal>
+    src/client/external-spa reworked so App.tsx hosts a module outlet + shell chrome (header with logo,
+    ThemeToggle, user menu; light nav) that adapts when Teams-embedded (redundant chrome hidden). The shell
+    compiles, R1 behavior is preserved behind the new frame, and CIAM sessionStorage per-tab isolation is
+    untouched. Registry/launcher wiring (012), auth bootstrap (013), and Teams packaging (014) plug into
+    this scaffold without re-touching the frame.
+  </goal>
+
+  <context>
+    <background>
+      Per design.md §3 (reuse baseline) + §4 F4 + spec FR-06: the R1 external-spa is the closest existing
+      standalone MSAL SPA frame — extend it into the module-host shell (SWA config, BrowserRouter/deep-link,
+      theme, BFF client) rather than hand-copy a new SPA. ux-brief §3 maps Shell chrome to "extend R1 AppHeader /
+      NavigationBar; ThemeToggle / useTheme" and specifies "Teams-embedded hides redundant chrome". NFR-05 requires
+      preserving the external-SPA sessionStorage per-tab isolation for CIAM.
+    </background>
+    <relevant-files>
+      <file>src/client/external-spa/src/App.tsx</file>
+      <file>src/client/external-spa/src/components/AppHeader.tsx</file>
+      <file>src/client/external-spa/src/components/NavigationBar.tsx</file>
+      <file>src/client/external-spa/src/main.tsx</file>
+      <file>src/client/external-spa/src/host/TeamsHostAdapter.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+    </relevant-files>
+    <dependencies>004 (approved P0 prototype — the build target). 010 (ADR-028 A3 — authoritative auth rules the shell obeys).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Do NOT fork LegalWorkspaceApp (Xrm-bound; cannot serve external users) — extend the external-spa frame in place (§11 / spec MUST NOT).</constraint>
+    <constraint source="NFR-05">Preserve the external-SPA sessionStorage per-tab isolation for CIAM sign-in (documented ADR-028 exception); do NOT switch to localStorage / @spaarke/auth on the CIAM path.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only (makeStyles/tokens) in all shell chrome; zero hardcoded hex/RGB/shadow; correct in light, dark, and Teams theme.</constraint>
+    <constraint source="ADR-022">React 18 + Fluent v9; host owns exactly one FluentProvider.</constraint>
+    <constraint source="project">Build on @spaarke/ui-components primitives (ActionCard/Row, useTheme, ThemeToggle); no hand-rolled chrome (§11 / ux-brief §1.2).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Embedded-mode discipline" location="docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md">Host owns chrome/theme/auth; content owns itself — apply the discipline (NOT the Xrm.WebApi contract) for module-in-shell and shell-in-Teams.</pattern>
+      <pattern name="Fluent v9 component" location=".claude/skills/fluent-v9-component/SKILL.md">Semantic-token styling conventions for external-spa surfaces.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the approved P0 prototype (dep 004) + ux-brief §3 Shell chrome row; enumerate the exact chrome elements (logo, ThemeToggle, user menu, light nav) and the Teams-embedded reduced-chrome variant.</step>
+    <step order="2">Refactor App.tsx into a shell: a module outlet region (routes rendered lazily) + persistent chrome; keep BrowserRouter + deep-link + AuthGuard behavior intact.</step>
+    <step order="3">Extend AppHeader.tsx to the shell header (logo + ThemeToggle + user menu) using @spaarke/ui-components; extend NavigationBar.tsx into the light shell nav.</step>
+    <step order="4">Wire a Teams-awareness signal (reuse TeamsHostAdapter.detectTeamsHost) so the shell hides redundant chrome when embedded; keep it a no-op outside Teams.</step>
+    <step order="5">Confirm the CIAM sessionStorage isolation path (main.tsx bootstrapStandalone) is untouched by the refactor.</step>
+    <step order="6">Build the SPA: npm install --legacy-peer-deps --no-audit --no-fund then npm run build:prod; verify zero type/build errors.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TS/React (build:prod)</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/App.tsx</output>
+    <output type="code">src/client/external-spa/src/components/AppHeader.tsx</output>
+    <output type="code">src/client/external-spa/src/components/NavigationBar.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the shell, when built with npm run build:prod, then it compiles with zero type/build errors.</criterion>
+    <criterion testable="true">The shell renders header chrome (logo, ThemeToggle, user menu) + light nav using @spaarke/ui-components; no hand-rolled chrome.</criterion>
+    <criterion testable="true">When Teams-embedded (detectTeamsHost true), redundant chrome is hidden; outside Teams the adapter is a no-op and full chrome shows.</criterion>
+    <criterion testable="true">CIAM sign-in still uses sessionStorage per-tab isolation (bootstrapStandalone path unchanged) — NFR-05 preserved.</criterion>
+    <criterion testable="true">LegalWorkspaceApp is NOT forked or imported; the frame is the extended external-spa.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Shell renders"><steps><step>Load the shell in a browser (non-Teams)</step><step>Verify header + nav + empty module outlet render</step></steps><expected>no console errors; full chrome visible</expected></test>
+    <test name="Teams-embedded chrome"><steps><step>Simulate Teams host (detectTeamsHost true)</step><step>Verify redundant chrome hidden</step></steps><expected>reduced chrome; no console errors</expected></test>
+    <test name="Dark Mode + Teams theme (ADR-021)"><steps><step>Toggle dark mode + Teams dark theme</step><step>Verify semantic tokens adapt</step></steps><expected>zero hardcoded hex; chrome adapts in light/dark/Teams</expected></test>
+  </ui-tests>
+
+  <notes>
+    Build target is the approved P0 prototype (dep 004) + ux-brief §3. This is the shell base — keep the frame
+    stable so 012 (registry/launcher), 013 (auth bootstrap), 014 (Teams packaging), 016 (OC module), 017 (cleanup)
+    plug in without re-touching it. FR-06 cleanup of dead Power Pages config is a separate task (017) — do not do it here.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>
