@@ -425,12 +425,15 @@ public sealed class ComposeTrackedChangesSeamTests
         wrappers[1].Author!.Value.Should().Be("Carol");
         wrappers[1].Date.Should().BeNull("a TryParse-able but non-xsd date is still schema-invalid @w:date — omitted (F3)");
 
+        // Task 012 (revision-author fallback): an EMPTY author now falls back to the SAVE-TIME author
+        // param before the sanitizer's "Unknown" floor — the client mapper deliberately omits the author
+        // on user-edit revision facts so the server attributes the authenticated saving user.
         var del = body.Descendants<DeletedRun>().Single();
-        del.Author!.Value.Should().Be("Unknown", "@w:author is schema-required — empty-after-sanitize falls back");
+        del.Author!.Value.Should().Be("seam-test", "@w:author is schema-required — an empty author falls back to the save-time author");
         del.Descendants<DeletedText>().Single().Text.Should().Be("anonymous delete");
 
         var markDel = body.Descendants<ParagraphMarkRunProperties>().SelectMany(m => m.Elements<Deleted>()).Single();
-        markDel.Author!.Value.Should().Be("Unknown");
+        markDel.Author!.Value.Should().Be("seam-test");
         markDel.Date.Should().BeNull();
 
         body.Descendants<ParagraphPropertiesChange>().Should().BeEmpty("malformed previous-pPr XML drops the record");

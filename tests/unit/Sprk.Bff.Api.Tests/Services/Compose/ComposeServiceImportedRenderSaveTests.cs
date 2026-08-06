@@ -332,4 +332,179 @@ public sealed class ComposeServiceImportedRenderSaveTests
 
         result.DegradationWarnings.Should().BeNull("a clean render reports no warnings");
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // Task 012 — the client cutover: post-save model return, comments-through-the-model (carrier
+    // append), the retired engine comment-bake (separate comments now ignored LOUDLY), and the
+    // user-edit revision-author fallback.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task SaveAsync_RenderPathSave_ReturnsPostSaveContentModel()
+    {
+        ArrangeReplaceExisting(out _);
+        var sut = CreateSut();
+        var request = ReplaceRequest(EditedModel(), content: BuildCarrierBytes());
+
+        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+
+        result.ContentModel.Should().NotBeNull(
+            "a render-path save returns the post-save canonical model — the client's new merge base");
+        result.ContentModel!.Blocks.Should().NotBeEmpty();
+        string.Join(" ", result.ContentModel.Blocks.SelectMany(b => b.Runs).Select(r => r.Text))
+            .Should().Contain("Edited body text.", "the returned model reflects the persisted document state");
+    }
+
+    [Fact]
+    public async Task SaveAsync_CleanReplaceSaveWithoutModel_ReturnsNoPostSaveModel()
+    {
+        ArrangeReplaceExisting(out _);
+        var sut = CreateSut();
+        var request = new SaveComposeDocumentRequest
+        {
+            DocumentSpeId = ExistingSpeItemId,
+            DriveId = ExistingDriveId,
+            Content = BuildCarrierBytes(),
+            SessionId = Guid.NewGuid().ToString(),
+            TenantId = Tenant,
+        };
+
+        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+
+        result.ContentModel.Should().BeNull("only render-path saves project a post-save model");
+    }
+
+    [Fact]
+    public async Task SaveAsync_ContentModelWithSeparateComments_IgnoresThemLoudly_NoEngineBake()
+    {
+        ArrangeReplaceExisting(out var capturedBytes);
+        var sut = CreateSut();
+        var request = ReplaceRequest(EditedModel(), content: BuildCarrierBytes()) with
+        {
+            // The pre-cutover shape: separate (paraId, run-range)-anchored comments alongside the model.
+            // The engine bake that consumed these was the LAST ComposeShadowPatchEngine caller reachable
+            // with a ContentModel — retired by this task; comments now ride the model itself.
+            Comments = new List<ComposeAnchoredComment>
+            {
+                new()
+                {
+                    ParaId = "7B00AA01",
+                    Range = new ComposeRunRange(new ComposeRunPoint(0, 0), new ComposeRunPoint(0, 4)),
+                    CommentText = "orphaned pre-cutover comment",
+                    Author = "Alice Reviewer",
+                    Date = DateTimeOffset.Parse("2026-08-06T00:00:00Z"),
+                },
+            },
+        };
+
+        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+
+        result.VersionId.Should().NotBeNullOrEmpty("ignoring the separate comments never fails the save");
+        result.DegradationWarnings.Should().NotBeNull();
+        result.DegradationWarnings!.Should().Contain(w => w.Code == "comments-ignored" && w.Count == 1,
+            "the drop is wire-visible, never silent");
+
+        using var doc = WordprocessingDocument.Open(new MemoryStream(capturedBytes(), writable: false), isEditable: false);
+        doc.MainDocumentPart!.WordprocessingCommentsPart.Should().BeNull(
+            "the engine bake is retired — a separate anchored comment no longer reaches the package");
+    }
+
+    /// <summary>A carrier whose comments part already holds ONE comment (id 1) — the append oracle.</summary>
+    private static byte[] BuildCarrierBytesWithComment()
+    {
+        using var stream = new MemoryStream();
+        using (var doc = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document))
+        {
+            var main = doc.AddMainDocumentPart();
+            var commentsPart = main.AddNewPart<WordprocessingCommentsPart>();
+            commentsPart.Comments = new Comments(
+                new Comment(new Paragraph(new Run(new Text("Original carrier comment"))))
+                {
+                    Id = "1",
+                    Author = "Carrier Author",
+                });
+            commentsPart.Comments.Save();
+
+            main.Document = new Document(new Body(
+                new Paragraph(new Run(new Text("Original imported prose."))),
+                new SectionProperties(new PageSize { Width = 12240, Height = 15840 })));
+            main.Document.Save();
+        }
+        return stream.ToArray();
+    }
+
+    [Fact]
+    public async Task SaveAsync_ModelWithNewComment_AppendsToCarrierCommentsPart_PreservingExisting()
+    {
+        ArrangeReplaceExisting(out var capturedBytes);
+        var sut = CreateSut();
+
+        // The model the client posts: the LOADED comment (id 1, preserved verbatim) + a NEW session
+        // comment (id 2) folded in by the client mapper, with Start/End anchor runs around body text.
+        var model = new ComposeContentModel
+        {
+            Blocks = new[]
+            {
+                new ComposeBlock
+                {
+                    Kind = ComposeBlockKind.Paragraph,
+                    Runs = new[]
+                    {
+                        new ComposeInlineRun { Text = string.Empty, CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.Start, Id = 2 } },
+                        new ComposeInlineRun { Text = "Annotated edited text." },
+                        new ComposeInlineRun { Text = string.Empty, CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.End, Id = 2 } },
+                    },
+                },
+            },
+            Comments = new[]
+            {
+                new ComposeComment { Id = 1, Author = "Carrier Author", Text = "Original carrier comment" },
+                new ComposeComment { Id = 2, Author = "Session Reviewer", Date = "2026-08-06T09:30:00Z", Text = "New session comment" },
+            },
+        };
+
+        var request = ReplaceRequest(model, content: BuildCarrierBytesWithComment());
+        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+
+        result.VersionId.Should().NotBeNullOrEmpty();
+
+        using var doc = WordprocessingDocument.Open(new MemoryStream(capturedBytes(), writable: false), isEditable: false);
+        var comments = doc.MainDocumentPart!.WordprocessingCommentsPart!.Comments!.Elements<Comment>().ToList();
+        comments.Should().HaveCount(2, "the new session comment is APPENDED; the carrier's own comment is preserved");
+        comments.Select(c => c.Id!.Value).Should().BeEquivalentTo(new[] { "1", "2" });
+        comments.Single(c => c.Id!.Value == "1").InnerText.Should().Contain("Original carrier comment",
+            "existing carrier comment content is never edited");
+        comments.Single(c => c.Id!.Value == "2").InnerText.Should().Contain("New session comment");
+
+        var body = doc.MainDocumentPart.Document!.Body!;
+        body.Descendants<CommentRangeStart>().Should().ContainSingle(a => a.Id!.Value == "2",
+            "the new comment's anchor survives the anchor-validity filter (carrier ids ∪ appended ids)");
+        body.Descendants<CommentReference>().Should().ContainSingle(r => r.Id!.Value == "2");
+    }
+
+    [Fact]
+    public async Task SaveAsync_RevisionFactWithoutAuthor_AttributedToSaveAuthor()
+    {
+        ArrangeReplaceExisting(out var capturedBytes);
+        var sut = CreateSut();
+
+        // The client mapper deliberately OMITS the author on user-edit revision facts (the server, not
+        // the client, attributes the saving user); an imported revision fact CARRIES its true author.
+        var model = EditedModel(
+            new ComposeInlineRun { Text = "kept text " },
+            new ComposeInlineRun { Text = "user insert", Revision = new ComposeRevision { Kind = ComposeRevisionKind.Inserted } },
+            new ComposeInlineRun { Text = " imported insert", Revision = new ComposeRevision { Kind = ComposeRevisionKind.Inserted, Author = "Jane Q. Author" } });
+
+        var request = ReplaceRequest(model, content: BuildCarrierBytes());
+        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+
+        using var doc = WordprocessingDocument.Open(new MemoryStream(capturedBytes(), writable: false), isEditable: false);
+        var insertions = doc.MainDocumentPart!.Document!.Body!.Descendants<InsertedRun>().ToList();
+        insertions.Should().HaveCount(2);
+        insertions.Select(i => i.Author!.Value).Should().Contain("Spaarke Compose",
+            "an author-less revision fact falls back to the save-time author (DefaultHttpContext has no name claim → the service's own fallback)");
+        insertions.Select(i => i.Author!.Value).Should().Contain("Jane Q. Author",
+            "a fact that carries an author keeps it — imported revisions round-trip their true authors");
+    }
+
 }

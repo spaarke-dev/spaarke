@@ -1495,7 +1495,10 @@ public static class ComposeEndpoints
                 // crosses the wire).
                 DegradationWarnings: result.DegradationWarnings?
                     .Select(w => new ComposeProjectionWarningResponse(w.Code, w.Count))
-                    .ToList()));
+                    .ToList(),
+                // Task 012: the post-save canonical model (render-path saves only) — the client adopts it
+                // as its new retained loaded model + re-baselines its snapshot. Additive (ADR-040).
+                ContentModel: result.ContentModel));
         }
         catch (ArgumentException ex)
         {
@@ -2290,7 +2293,10 @@ public sealed record SaveComposeDocumentResponse(
     // the authoring engine simplified/dropped on this save (success-with-warnings; NEVER a 422 for a
     // hard-tier construct). Null/absent when nothing degraded. Optional/trailing so existing callers
     // deserializing this response are unaffected.
-    [property: JsonPropertyName("degradationWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? DegradationWarnings = null);
+    [property: JsonPropertyName("degradationWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? DegradationWarnings = null,
+    // Task 012 (the client cutover): the post-save canonical model (render-path saves only) — null on
+    // op-log/clean saves or when the post-save projection failed. Optional/trailing (ADR-040 additive).
+    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null);
 
 /// <summary>Response shape for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
 public sealed record PromoteComposeDocumentResponse(

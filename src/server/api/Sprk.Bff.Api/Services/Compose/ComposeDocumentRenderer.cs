@@ -120,6 +120,8 @@ public sealed partial class ComposeDocumentRenderer
             // counted and surfaced through the optional `degradations` out-collection.
             var plan = new NumberingPlan();
             var state = new ListRenderState(plan);
+            // Task 012: user-edit revision facts arrive author-less by design — attribute the saving user.
+            state.DefaultRevisionAuthor = author;
 
             // Step-9.5 F2: anchors may only reference ids the AUTHORED part will contain (deduped model
             // ids) — unmatched/out-of-range anchors drop rather than dangle as corrupting references.
@@ -464,18 +466,26 @@ public sealed partial class ComposeDocumentRenderer
                 plan = new NumberingPlan(Math.Max(FirstListNumInstanceId, carrierNumbering.MaxNumId + 1));
                 state = new ListRenderState(plan, carrierNumbering, revisionIdSeed);
             }
+            // Task 012: user-edit revision facts arrive author-less by design — attribute the saving user.
+            state.DefaultRevisionAuthor = author;
 
-            // Step-9.5 F2: anchors may only reference ids the target actually anchors — the carrier
-            // part's own ids (scanned READ-ONLY from the bytes; the part stays untouched/byte-identical),
-            // or the deduped model ids when the carrier has no part (EnsureCommentsPart authors it).
-            // Unmatched/out-of-range anchors drop rather than dangle as corrupting references.
+            // Step-9.5 F2 + task 012: anchors may only reference ids the target will actually contain —
+            // the carrier part's own ids (scanned READ-ONLY from the bytes) PLUS any NEW model comments
+            // (ids the carrier part lacks — session/advisory comments the client mapper folded into the
+            // model), which are APPENDED to the part after the body render below. When the carrier has no
+            // part at all, EnsureCommentsPart authors it from the model (every model comment is "new").
+            // Unmatched/out-of-range anchors still drop rather than dangle as corrupting references.
             var renderBlocks = model.Blocks;
+            var carrierCommentIds = model.Comments.Count > 0 || ModelContainsCommentAnchor(renderBlocks)
+                ? ScanCarrierCommentIds(carrierBytes)
+                : new HashSet<int>();
+            var newComments = model.Comments.Where(c => !carrierCommentIds.Contains(c.Id)).ToList();
             if (ModelContainsCommentAnchor(renderBlocks))
             {
-                var validCommentIds = ScanCarrierCommentIds(carrierBytes);
-                if (validCommentIds.Count == 0)
+                var validCommentIds = new HashSet<int>(carrierCommentIds);
+                foreach (var newComment in newComments)
                 {
-                    validCommentIds = new HashSet<int>(model.Comments.Select(c => c.Id));
+                    validCommentIds.Add(newComment.Id);
                 }
                 renderBlocks = FilterCommentAnchors(renderBlocks, validCommentIds, state);
             }
@@ -509,10 +519,22 @@ public sealed partial class ComposeDocumentRenderer
                 }
             }
 
-            // Task 024: the CARRIER's comments part is authoritative and preserved untouched (byte-identical
-            // — the anchors above reference its ids); the part is authored from the model only when the
-            // carrier has none at all.
-            EnsureCommentsPart(mainPart, model.Comments, state);
+            // Task 024 + task 012: the CARRIER's comments part is authoritative for the comments it
+            // already contains; NEW model comments (session/advisory, folded in by the client mapper) are
+            // APPENDED to it (append-only — existing comment elements are never edited or removed; note
+            // whole-part byte-identity therefore narrows to saves that add no new comments). A carrier
+            // with no part at all gets one authored from the model (the original task-024 behavior).
+            if (mainPart.WordprocessingCommentsPart is { } carrierCommentsPart)
+            {
+                if (newComments.Count > 0)
+                {
+                    AppendCommentsToPart(carrierCommentsPart, newComments, carrierCommentIds, state);
+                }
+            }
+            else
+            {
+                EnsureCommentsPart(mainPart, model.Comments, state);
+            }
 
             if (trailingSectPr is not null)
             {
@@ -572,31 +594,73 @@ public sealed partial class ComposeDocumentRenderer
                 state?.Warn("comment-duplicate-dropped");
                 continue;
             }
-            var comment = new Comment
-            {
-                Id = model.Id.ToString(CultureInfo.InvariantCulture),
-                Author = SanitizeText(model.Author),
-            };
-            if (!string.IsNullOrEmpty(model.Initials))
-            {
-                comment.Initials = SanitizeText(model.Initials);
-            }
-            // Task 026 (025-F3 same-class fix): the xsd:dateTime LEXICAL gate — a TryParse-able culture
-            // date ("08/01/2026") is still a schema-invalid @w:date and must be omitted, exactly like the
-            // revision-date gate.
-            if (NormalizeXsdDateTime(model.Date) is { } validCommentDate)
-            {
-                comment.Date = new DateTimeValue { InnerText = validCommentDate };
-            }
-            var text = model.Text.Replace("\r\n", "\n").Replace('\r', '\n'); // F10: normalize client CRLF
-            foreach (var line in text.Split('\n'))
-            {
-                comment.AppendChild(new Paragraph(new Run(new Text(SanitizeText(line)) { Space = SpaceProcessingModeValues.Preserve })));
-            }
-            container.AppendChild(comment);
+            container.AppendChild(BuildCommentElement(model));
         }
         part.Comments = container;
         part.Comments.Save();
+    }
+
+    /// <summary>Task 012 (extracted from <see cref="EnsureCommentsPart"/> for the carrier-append seam):
+    /// authors ONE sanitized <c>w:comment</c> element from a model comment. Step-9.5 F1 (the recurring
+    /// client-input class): every client-controlled string is SANITIZED like body text — XML-illegal
+    /// control chars would make the part unserializable and throw out of the live save path; a Date that
+    /// does not pass the xsd:dateTime LEXICAL gate is OMITTED (a TryParse-able culture date like
+    /// "08/01/2026" is still a schema-invalid <c>@w:date</c> — 025-F3 same-class posture; only client
+    /// junk is dropped, projection-sourced dates parse).</summary>
+    private static Comment BuildCommentElement(ComposeComment model)
+    {
+        var comment = new Comment
+        {
+            Id = model.Id.ToString(CultureInfo.InvariantCulture),
+            Author = SanitizeText(model.Author),
+        };
+        if (!string.IsNullOrEmpty(model.Initials))
+        {
+            comment.Initials = SanitizeText(model.Initials);
+        }
+        if (NormalizeXsdDateTime(model.Date) is { } validCommentDate)
+        {
+            comment.Date = new DateTimeValue { InnerText = validCommentDate };
+        }
+        var text = model.Text.Replace("\r\n", "\n").Replace('\r', '\n'); // F10: normalize client CRLF
+        foreach (var line in text.Split('\n'))
+        {
+            comment.AppendChild(new Paragraph(new Run(new Text(SanitizeText(line)) { Space = SpaceProcessingModeValues.Preserve })));
+        }
+        return comment;
+    }
+
+    /// <summary>
+    /// Task 012 (the client cutover): APPENDS model comments the carrier part does not already contain —
+    /// NEW session/advisory comments the client folded into the model — to the EXISTING carrier comments
+    /// part. Append-only: the carrier's own comment elements are never edited or removed (the task-024
+    /// byte-identity contract narrows to no-new-comments saves, since an append necessarily
+    /// re-serializes the part; existing comment CONTENT is preserved either way). Duplicate ids in the
+    /// new set collapse first-wins onto the degradation sink, mirroring <see cref="EnsureCommentsPart"/>.
+    /// </summary>
+    private static void AppendCommentsToPart(
+        WordprocessingCommentsPart part,
+        IReadOnlyList<ComposeComment> newComments,
+        IReadOnlySet<int> existingIds,
+        ListRenderState? state = null)
+    {
+        var container = part.Comments ??= new Comments();
+        var emittedIds = new HashSet<int>(existingIds);
+        var appended = false;
+        foreach (var model in newComments)
+        {
+            if (!emittedIds.Add(model.Id))
+            {
+                state?.Warn("comment-duplicate-dropped");
+                continue;
+            }
+            container.AppendChild(BuildCommentElement(model));
+            appended = true;
+        }
+        if (appended)
+        {
+            container.Save();
+        }
     }
 
     /// <summary>
@@ -954,8 +1018,8 @@ public sealed partial class ComposeDocumentRenderer
         if (block.MarkRevision is { } markRev)
         {
             OpenXmlElement markChange = markRev.Kind == ComposeRevisionKind.Inserted
-                ? new Inserted { Id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture), Author = SanitizeRevisionAuthor(markRev.Author), Date = TryValidRevisionDate(markRev.Date) }
-                : new Deleted { Id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture), Author = SanitizeRevisionAuthor(markRev.Author), Date = TryValidRevisionDate(markRev.Date) };
+                ? new Inserted { Id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture), Author = ResolveRevisionAuthorValue(markRev.Author, state), Date = TryValidRevisionDate(markRev.Date) }
+                : new Deleted { Id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture), Author = ResolveRevisionAuthorValue(markRev.Author, state), Date = TryValidRevisionDate(markRev.Date) };
             pPr.AppendChild(new ParagraphMarkRunProperties(markChange));
         }
 
@@ -970,7 +1034,7 @@ public sealed partial class ComposeDocumentRenderer
                 pPr.AppendChild(new ParagraphPropertiesChange(previousPPr)
                 {
                     Id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture),
-                    Author = SanitizeRevisionAuthor(propsChange.Author),
+                    Author = ResolveRevisionAuthorValue(propsChange.Author, state),
                     Date = TryValidRevisionDate(propsChange.Date),
                 });
             }
@@ -1058,10 +1122,23 @@ public sealed partial class ComposeDocumentRenderer
         return paragraph;
     }
 
+    /// <summary>Task 012: revision-author resolution — a fact that carries an author keeps it
+    /// (imported revisions round-trip their true authors); an EMPTY author falls back to the save-time
+    /// authenticated author (<see cref="ListRenderState.DefaultRevisionAuthor"/> — the client mapper
+    /// omits the author on user-edit revisions), then to the sanitizer's "Unknown" floor.</summary>
+    private static string ResolveRevisionAuthorValue(string? factAuthor, ListRenderState state)
+    {
+        // Sanitize FIRST, then decide: a control-chars-only author (hostile client input) must take the
+        // fallback exactly like an absent one — checking IsNullOrWhiteSpace on the RAW value would let
+        // it bypass the fallback and land on the "Unknown" floor instead of the saving user.
+        var sanitized = SanitizeText(factAuthor ?? string.Empty).Trim();
+        return SanitizeRevisionAuthor(sanitized.Length > 0 ? sanitized : state.DefaultRevisionAuthor);
+    }
+
     private static OpenXmlElement NewRevisionWrapper(ComposeRevision revision, ListRenderState state)
     {
         var id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture);
-        var author = SanitizeRevisionAuthor(revision.Author);
+        var author = ResolveRevisionAuthorValue(revision.Author, state);
         var date = TryValidRevisionDate(revision.Date);
         return revision.Kind == ComposeRevisionKind.Inserted
             ? new InsertedRun { Id = id, Author = author, Date = date }
@@ -1108,7 +1185,7 @@ public sealed partial class ComposeDocumentRenderer
                 rPr.AppendChild(new RunPropertiesChange(previousRPr)
                 {
                     Id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture),
-                    Author = SanitizeRevisionAuthor(fc.Change.Author),
+                    Author = ResolveRevisionAuthorValue(fc.Change.Author, state),
                     Date = TryValidRevisionDate(fc.Change.Date),
                 });
             }
@@ -1934,6 +2011,13 @@ public sealed partial class ComposeDocumentRenderer
         }
 
         public NumberingPlan Plan { get; }
+
+        /// <summary>Task 012: the save-time authenticated author — the FALLBACK identity for any
+        /// revision/format-change fact whose Author is empty. The client mapper deliberately OMITS the
+        /// author on user-edit revision facts so the server (never the client) attributes the saving
+        /// user; a fact that CARRIES an author (imported revisions) keeps it. Raw — sanitized at the
+        /// emission sites via <see cref="ResolveRevisionAuthorValue"/>.</summary>
+        public string? DefaultRevisionAuthor { get; set; }
 
         /// <summary>Task 025: mints the next revision <c>w:id</c> — monotonic per render, seeded above the
         /// carrier's existing revision ids (<see cref="ScanCarrierRevisionIdSeed"/>) so re-authored body

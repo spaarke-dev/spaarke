@@ -873,9 +873,14 @@ public class ComposeService : IComposeService
                 contentToPersist = _baselineParaIdStamper.Stamp(contentToPersist, request.ParaIdMap);
             }
 
-            _logger.LogInformation(
-                "Compose save: applying operation log ({OpCount} op(s)) + {CommentCount} comment(s) via the Patch Engine onto the retained baseline (session={SessionId}).",
-                request.OperationLog?.Operations.Count ?? 0, request.Comments?.Count ?? 0, request.SessionId);
+            // Task 012: this op-log/engine path is the TRANSITIONAL save shape — the ADR-049 R6
+            // amendment's sole permitted ComposeShadowPatchEngine caller (reopened-authored clean-apply
+            // + pre-cutover clients / legacy in-flight sessions). Post-cutover clients send a
+            // ContentModel + baseline source for every imported dirty save and never reach this block.
+            // Logged at Warning for retirement telemetry (tasks 013/090 own the eventual removal).
+            _logger.LogWarning(
+                "Compose save: TRANSITIONAL op-log save shape — applying {OpCount} op(s) + {CommentCount} comment(s) via the Patch Engine onto the retained baseline (cleanApply={CleanApply}, session={SessionId}).",
+                request.OperationLog?.Operations.Count ?? 0, request.Comments?.Count ?? 0, cleanApply, request.SessionId);
 
             // Pure/in-memory BEFORE any SPE write: a refusal (unresolved paraId/anchor, unsupported schema
             // version, opaque-atom/structural refusal) throws ComposePatchException here — mapped to a
@@ -933,43 +938,26 @@ public class ComposeService : IComposeService
                     partial.AppliedCount, partial.Total, partial.UnresolvedCount, request.SessionId);
             }
         }
-        // UAT round-3 (2026-07-27) — advisory comments on the CREATE-ON-SAVE / ContentModel path.
-        // The block above only bakes comments when ContentModel is null (a loaded-doc delta save). But a
-        // DIRTY transient save (the reviewer's session goes dirty the moment the AI places comment marks)
-        // sends a rendered ContentModel instead — App Insights showed the NDA saving as
-        // transientCreate=True with a ContentModel, so its advisory comments were silently dropped (no
-        // native w:comment reached Word). The renderer (ComposeDocumentRenderer.SynthesizeDocument) stamps
-        // each block's CLIENT paraId into the rendered .docx (CarryClientParaId/AssignParaIds), and the
-        // comment anchors reference those SAME client-minted paraIds — so a comments-only patch resolves
-        // cleanly. Empty op-log + comments is a first-class ComposeShadowPatchEngine.Apply case; pass a
-        // fresh ComposeOperationLog() so its SchemaVersion matches. Runs BEFORE the SummaryPage append +
-        // SPE write, mirroring the loaded-doc block's ordering.
-        // FAIL-SOFT: a create-on-save currently succeeds WITHOUT comments; baking must never regress that
-        // to a hard failure. If a comment's paraId can't resolve (e.g. a non-hex editor id the renderer
-        // re-minted, or a range shifted by pending-insert exclusion), log it and persist the rendered
-        // bytes uncommented rather than throwing — the save still lands; the drop is visible in telemetry.
+        // Task 012 (the cutover — retires the UAT round-3 comment BAKE, the LAST ComposeShadowPatchEngine
+        // caller reachable with a ContentModel; 010 adr-check residual): on the render path comments ride
+        // the MODEL itself (ComposeContentModel.Comments + Start/End anchor marker runs, folded in by the
+        // client mapper per the task-024 shapes) — the renderer authors them into the blank package or
+        // APPENDS the new ones to the carrier's comments part. The server never anchors a (paraId,
+        // run-range) comment against rendered bytes again (that was anchor reconciliation — the retired
+        // bug class). A request that still carries the SEPARATE comments field alongside a ContentModel is
+        // a pre-cutover client shape: the comments are ignored LOUDLY (server log + wire-visible
+        // degradation warning), never half-anchored and never silently dropped.
         else if (request.ContentModel is not null && hasComments)
         {
-            try
+            _logger.LogWarning(
+                "Compose save: request carries BOTH a ContentModel and {CommentCount} separate anchored comment(s) — the render-on-save path ignores the separate comments field (comments ride the model itself; pre-cutover client shape). session={SessionId}",
+                request.Comments!.Count, request.SessionId);
+            var combinedCommentWarnings = new List<ComposeProjectionWarning>(
+                renderDegradationWarnings ?? (IReadOnlyList<ComposeProjectionWarning>)Array.Empty<ComposeProjectionWarning>())
             {
-                var withComments = _patchEngine.Apply(
-                    contentToPersist,
-                    new ComposeOperationLog(),
-                    request.Comments,
-                    ResolveRevisionAuthor(httpContext),
-                    observedAt);
-                contentToPersist = withComments;
-
-                _logger.LogInformation(
-                    "Compose save: baked {CommentCount} advisory comment(s) as native w:comment onto the rendered ContentModel (create-on-save path) (session={SessionId}).",
-                    request.Comments?.Count ?? 0, request.SessionId);
-            }
-            catch (ComposePatchException ex)
-            {
-                _logger.LogWarning(ex,
-                    "Compose save: could not bake {CommentCount} advisory comment(s) onto the rendered ContentModel ({Kind}) — persisting the document WITHOUT them so the save still succeeds (session={SessionId}).",
-                    request.Comments?.Count ?? 0, ex.Kind, request.SessionId);
-            }
+                new("comments-ignored", request.Comments!.Count),
+            };
+            renderDegradationWarnings = combinedCommentWarnings;
         }
 
         // Task 041 (Phase 4, NDA-REVIEW Summary Page): when the caller supplies the ledgered NDA-REVIEW
@@ -986,6 +974,22 @@ public class ComposeService : IComposeService
             _logger.LogInformation(
                 "Compose save: appended NDA-REVIEW Summary Page ({FindingCount} flagged section(s), overallRisk={OverallRisk}) to the document (session={SessionId}).",
                 request.SummaryPage.FlaggedSections.Count, request.SummaryPage.OverallRisk, request.SessionId);
+        }
+
+        // Task 012 (the client cutover): on a render-path save, project the FINAL persisted bytes back
+        // into the canonical model and return it — the client adopts it as its new retained loaded model
+        // and re-baselines its edit snapshot, so the NEXT dirty save merges against the just-persisted
+        // state (without this, the next save would re-diff against the stale load-time baseline and
+        // re-emit the same revisions). Includes any Summary Page appended above. Best-effort: a failed
+        // projection returns null and the client keeps the model it posted as its merge base.
+        ComposeContentModel? savedContentModel = null;
+        if (request.ContentModel is not null)
+        {
+            var savedProjection = _projectionBuilder.BuildContentModel(contentToPersist, cancellationToken);
+            if (savedProjection.Status != ComposeProjectionStatus.Failed)
+            {
+                savedContentModel = savedProjection.Model;
+            }
         }
 
         _logger.LogInformation(
@@ -1243,6 +1247,8 @@ public class ComposeService : IComposeService
             Origin = origin,
             // Task 026 (FR-04): success-with-warnings — render-side degradations surfaced, never a 422.
             DegradationWarnings = renderDegradationWarnings,
+            // Task 012: the post-save canonical model (render-path saves only) — the client's new merge base.
+            ContentModel = savedContentModel,
         };
     }
 

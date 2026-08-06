@@ -804,6 +804,13 @@ public sealed record SaveComposeDocumentResult : ComposeDocumentResult
     /// </summary>
     public IReadOnlyList<ComposeProjectionWarning>? DegradationWarnings { get; init; }
 
+    /// <summary>Task 012 (the client cutover): the canonical model projected from the FINAL persisted
+    /// bytes — populated ONLY on render-path saves (the request carried a ContentModel). The client
+    /// adopts it as its new retained loaded model and re-baselines its edit snapshot so the next dirty
+    /// save merges against the just-persisted state. Null on op-log/clean saves or when the post-save
+    /// projection failed (the client then keeps the model it posted as its merge base).</summary>
+    public ComposeContentModel? ContentModel { get; init; }
+
     /// <summary>
     /// Prong 1 (task 055 — keep-edits graceful degradation). Populated ONLY when the loaded-doc apply
     /// hit an op-level anchoring refusal and the service fell back to best-effort per-paragraph recovery:
