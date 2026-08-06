@@ -238,6 +238,48 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
         }
     }
 
+    /// <inheritdoc/>
+    public async Task<Guid?> TryResolveContactByWorkforceIdentityAsync(
+        Guid aadObjectId,
+        string? verifiedEmail,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        // 1. Primary: reuse the existing AAD-oid→contact cross-reference
+        //    (contact.azureactivedirectoryobjectid == oid). Same path the systemuser
+        //    branch uses; failure-isolated (returns null, never throws).
+        if (aadObjectId != Guid.Empty)
+        {
+            var byOid = await TryResolveContactIdAsync(aadObjectId, ct).ConfigureAwait(false);
+            if (byOid is { } cidByOid)
+            {
+                _logger.LogDebug(
+                    "Workforce contact resolution: matched contact {ContactId} by AAD oid",
+                    cidByOid);
+                return cidByOid;
+            }
+        }
+
+        // 2. Fallback: verified-email match on contact.emailaddress1. The email is
+        //    tenant-verified by Entra (present on the already-validated workforce token),
+        //    so it is safe as a fallback when contact.azureactivedirectoryobjectid is
+        //    unpopulated for this caller (teams-app-r1 FR-04 / design §5).
+        if (!string.IsNullOrWhiteSpace(verifiedEmail))
+        {
+            var byEmail = await TryResolveContactIdByEmailAsync(verifiedEmail, ct).ConfigureAwait(false);
+            if (byEmail is { } cidByEmail)
+            {
+                _logger.LogDebug(
+                    "Workforce contact resolution: matched contact {ContactId} by verified email",
+                    cidByEmail);
+                return cidByEmail;
+            }
+        }
+
+        return null;
+    }
+
     // ── Path 2: contact cross-ref via azureactivedirectoryobjectid ─────────
     // Per ADR-028 — the single source of truth for SystemUser↔Contact mapping.
     private async Task<Guid?> TryResolveContactIdAsync(
@@ -280,6 +322,51 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
                 "IdentityNormalizationService failed to cross-reference contact for " +
                 "azureActiveDirectoryObjectId={AadObjectId}; ContactId will be null",
                 aadObjectId);
+            return null;
+        }
+    }
+
+    // ── Contact-only fallback: contact by verified email (workforce plane) ──
+    // teams-app-r1 FR-04: only consulted when the AAD-oid cross-ref returns no contact.
+    private async Task<Guid?> TryResolveContactIdByEmailAsync(
+        string email,
+        CancellationToken ct)
+    {
+        try
+        {
+            var query = new QueryExpression("contact")
+            {
+                ColumnSet = new ColumnSet("contactid"),
+                TopCount = 1,
+                NoLock = true
+            };
+            query.Criteria.AddCondition(
+                "emailaddress1",
+                ConditionOperator.Equal,
+                email);
+
+            var results = await _dataverse
+                .RetrieveMultipleAsync(query, ct)
+                .ConfigureAwait(false);
+
+            if (results.Entities.Count == 0)
+            {
+                return null;
+            }
+
+            var contactId = results.Entities[0].Id;
+            return contactId == Guid.Empty ? null : contactId;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "IdentityNormalizationService failed to resolve contact by verified email; " +
+                "ContactId will be null");
             return null;
         }
     }

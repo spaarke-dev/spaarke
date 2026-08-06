@@ -26,10 +26,28 @@
  * `as React.ComponentType` cast (NFR-05) — a plain `React.FC` using only
  * `useMemo`-free, React-16-safe primitives, so it renders under the PCF's
  * platform React 16/17 AND the code page's React 19.
+ *
+ * Row 3 (opt-in, task 040 / teams-app-r1) — a governance toolbar with a
+ * person icon (opens the access-grant modal, task 041) and an email icon
+ * (opens email-members, task 042). Each icon renders only when the caller
+ * supplies the corresponding callback (`onOpenGrantModal` /
+ * `onOpenEmailMembers`), so existing consumers see no change. This
+ * component builds ONLY the toolbar shell + click affordances — the modal
+ * and email-dialog contents are implemented by the caller in tasks 041/042.
  */
 
 import * as React from 'react';
-import { makeStyles, tokens, Switch, Text, Button, shorthands, mergeClasses } from '@fluentui/react-components';
+import {
+  makeStyles,
+  tokens,
+  Switch,
+  Text,
+  Button,
+  Tooltip,
+  shorthands,
+  mergeClasses,
+} from '@fluentui/react-components';
+import { PersonRegular, MailRegular } from '@fluentui/react-icons';
 import type { IAccessPermissionOption, ITrackingFieldTrioProps } from './types';
 
 /**
@@ -145,6 +163,24 @@ const useStyles = makeStyles({
     textAlign: 'right',
     marginTop: tokens.spacingVerticalXS,
   },
+  // Governance toolbar (person + email icons — task 040). Spans the full
+  // grid width and sits below the existing Monitor/High-Priority/
+  // Access-Permission row. Icons resolve color via Fluent's default
+  // `currentColor` fill (ADR-021) — no hardcoded colors here.
+  toolbar: {
+    gridColumn: '1 / -1',
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalXS,
+    marginTop: tokens.spacingVerticalXS,
+  },
+  toolbarIconButton: {
+    minWidth: 'auto',
+    paddingLeft: 0,
+    paddingRight: 0,
+  },
 });
 
 export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
@@ -161,8 +197,14 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
   onMonitorChange,
   onHighPriorityChange,
   onAccessPermissionChange,
+  onOpenGrantModal,
+  onOpenEmailMembers,
+  canGrantAccess,
 }) => {
   const styles = useStyles();
+  // Fail-open only when the caller hasn't wired an access decision at all
+  // (canGrantAccess omitted); an explicit `false` disables the icon.
+  const grantEnabled = canGrantAccess !== false;
 
   return (
     <div className={styles.container}>
@@ -223,6 +265,46 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
           );
         })}
       </div>
+
+      {/* Governance toolbar (task 040) — person icon opens the access-grant
+          modal (task 041), email icon opens email-members (task 042). Each
+          icon is opt-in: it renders only when the caller supplies the
+          corresponding callback, so consumers that haven't wired the
+          toolbar see no visual change. */}
+      {(onOpenGrantModal || onOpenEmailMembers) && (
+        <div className={styles.toolbar}>
+          {onOpenGrantModal && (
+            <Tooltip
+              content={grantEnabled ? 'Grant access' : 'You do not have permission to grant access'}
+              relationship="label"
+            >
+              <Button
+                className={styles.toolbarIconButton}
+                appearance="subtle"
+                size="small"
+                icon={<PersonRegular />}
+                aria-label="Grant access"
+                disabled={!grantEnabled}
+                // No handler at all when disabled — a genuinely disabled
+                // Fluent Button (not merely dimmed) with no dead click.
+                onClick={grantEnabled ? onOpenGrantModal : undefined}
+              />
+            </Tooltip>
+          )}
+          {onOpenEmailMembers && (
+            <Tooltip content="Email members" relationship="label">
+              <Button
+                className={styles.toolbarIconButton}
+                appearance="subtle"
+                size="small"
+                icon={<MailRegular />}
+                aria-label="Email members"
+                onClick={onOpenEmailMembers}
+              />
+            </Tooltip>
+          )}
+        </div>
+      )}
 
       {showVersion && versionText && <span className={styles.versionFooter}>{versionText}</span>}
     </div>

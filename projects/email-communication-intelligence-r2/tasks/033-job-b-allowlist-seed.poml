@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Job B allow-list seed — starter sprk_emailupdatefield rows into spaarkedev1</title>
+    <phase>3 Pillar D — R1 carry-overs</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Data seed into an EXISTING entity (no schema change, no BFF code); constrained deployment task.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deterministic seed of a small allow-list; no code, no architectural judgment.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>pillar-d-independent</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Dataverse data-only change (seed rows) in spaarkedev1 — disjoint from BFF .cs edits in 030/031 and tests in 032.</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse,seed</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Seed a starter allow-list into the existing (empty) sprk_emailupdatefield entity in spaarkedev1 so Job B can propose at least the seeded field updates. Populate sprk_targetentity (record-type ref), sprk_targetfieldlogicalname, sprk_fieldtype, sprk_enabled per row via the dataverse-deploy skill.</prompt>
+  <role>SPAARKE platform developer. Dataverse solution/data management (ADR-027), Job B allow-list contract. Follow ADRs strictly.</role>
+  <goal>A documented, repeatable starter set of enabled sprk_emailupdatefield rows exists in spaarkedev1, each mapping (target entity record-type, target field logical name, field type, enabled=true). Job B can propose the seeded updates; the seed script/manifest is checked in for repeatability.</goal>
+
+  <context>
+    <background>FR-D4. R1 shipped the sprk_emailupdatefield entity + the Job B propose/apply path but shipped the allow-list EMPTY, so Job B proposes nothing. The apply endpoint (CommunicationProposalApplyService) re-validates each proposal against an ENABLED allow-list row and refuses non-listed fields (403). Seeding a starter set lights up Job B in spaarkedev1.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationProposalApplyService.cs</file>
+      <file role="new">projects/email-communication-intelligence-r2/notes/033-allowlist-seed.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">sprk_emailupdatefield entity + sprk_recordtype_ref catalog already exist (R1).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-027">SCOPE = the seed: rows land in spaarkedev1 via dataverse-deploy; the entity is already in the managed solution — seed data (not schema). Keep the seed manifest checked in for repeatability across environments.</constraint>
+    <constraint source="project">SCOPE = allow-list correctness: sprk_targetentity is the sprk_recordtype_ref lookup (matching the apply service's ResolveEnabledAllowListFieldTypeAsync); sprk_fieldtype MUST match a valid EmailUpdateFieldTypes option (Text/DateTime/Number/etc.); NO Lookup-type rows in the starter set (apply refuses Lookup with 422). Set sprk_enabled=true only on intended rows.</constraint>
+    <constraint source="project">SCOPE = starter scope: choose a small, safe, defensible set of core fields (e.g. matter/project safe scalar dates + status/text fields) — each row must name a concrete Job B use; no speculative bulk allow-listing (§11).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Job B allow-list seed</topic>
+    <files>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+    </files>
+    <patterns>
+      <pattern name="allow-list-revalidation" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationProposalApplyService.cs">ResolveEnabledAllowListFieldTypeAsync shows the exact columns + option-set contract the seed must satisfy (recordtype ref, field logical name, enabled, field type).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML, spec FR-D4, and the apply service's allow-list re-validation. Declare RIGOR LEVEL: STANDARD with reason.</step>
+    <step order="1">Enumerate the starter allow-list: for each core record type, pick the safe scalar fields Job B should be able to propose (name entity record-type ref + field logical name + field type). Record the rationale per row in notes/033-allowlist-seed.md.</step>
+    <step order="2">Resolve each target entity's sprk_recordtype_ref id (the lookup value sprk_targetentity expects) + the correct sprk_fieldtype option-set integer per EmailUpdateFieldTypes.</step>
+    <step order="3">Author the seed as a checked-in manifest/script; deploy the rows to spaarkedev1 via the dataverse-deploy skill with sprk_enabled=true.</step>
+    <step order="4">Verify each row landed enabled and that ResolveEnabledAllowListFieldTypeAsync would resolve it (spot-check via a read query for one entity/field pair).</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a candidate starter field is a Lookup, privilege-adjacent, or otherwise unsafe to allow-list without policy sign-off, STOP and escalate per CLAUDE.md §6 rather than seeding it (ADR-015 — nothing privilege/deadline-bearing is auto-enabled).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>sprk_emailupdatefield entity exists (R1) but ships empty — grep of Services/Communication confirms the apply path reads it; no seed data exists.</existing>
+    <extension>Yes — this is data into an existing entity, not a new component. No new surface.</extension>
+    <cost-of-doing-nothing>With an empty allow-list, Job B proposes nothing and the Fields reconcile tab (FR-E4) has no proposals to render — the whole Job B path is inert in spaarkedev1.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dataverse-deploy">Seed rows into spaarkedev1.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/email-communication-intelligence-r2/notes/033-allowlist-seed.md</output>
+    <output type="config">projects/email-communication-intelligence-r2/notes/033-allowlist-seed-manifest.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the seeded spaarkedev1, Job B can propose at least the seeded field updates (each seeded (entity,field) resolves to an ENABLED allow-list row).</criterion>
+    <criterion testable="true">Each seeded row has a valid sprk_recordtype_ref sprk_targetentity, a real sprk_targetfieldlogicalname, a valid EmailUpdateFieldTypes sprk_fieldtype, and sprk_enabled=true.</criterion>
+    <criterion testable="true">Negative: no Lookup-type field is seeded (apply refuses Lookup with 422); no speculative/unjustified field is enabled.</criterion>
+    <criterion testable="true">The seed is captured as a checked-in, repeatable manifest with per-row rationale in notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-D4. The apply service (task 034's sibling reference) is the source of truth for the allow-list column contract. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

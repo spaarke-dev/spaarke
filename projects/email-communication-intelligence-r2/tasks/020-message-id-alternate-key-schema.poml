@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Alternate/unique key on sprk_communication.sprk_internetmessageid</title>
+    <phase>2 Pillar C — De-duplication</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New Dataverse schema surface (alternate key) via dataverse-create-schema; no .cs/.ts code change. Schema-only, packed to managed solution — STANDARD per task-create Step 3.5.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified, single schema artifact (one alternate key) with a known recipe (dataverse-create-schema). No architectural blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>schema-c</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Schema-only; touches Dataverse metadata + solution package, disjoint from task 023's column on sprk_document. No shared source files with any active worktree.</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse, schema, dedup</tags>
+    <estimated-effort>1.5-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create a Dataverse alternate (unique) key on `sprk_communication.sprk_internetmessageid` so message-level de-duplication is enforced structurally by the platform (NFR-02), not by an app-level check-then-insert alone. Pack the key into the managed solution (ADR-027). This key is the structural precondition for task 021's race-proof dedup create.</prompt>
+  <role>SPAARKE platform developer with Dataverse schema expertise. Use the `dataverse-create-schema` skill (Web API + PowerShell — there is NO `pac column create` / `pac key create` equivalent path). Follow ADR-027 strictly.</role>
+  <goal>An active `EntityKey` named for internet-message-id exists on `sprk_communication` over the single attribute `sprk_internetmessageid`, published, and carried in the managed solution export so it deploys to every subscription. The key is verified queryable/active in `spaarkedev1`.</goal>
+
+  <context>
+    <background>Today capture dedup keys only on per-mailbox `sprk_graphmessageid` (IncomingCommunicationProcessor Step-1 `ExistsByGraphMessageIdAsync`). `sprk_internetmessageid` is already WRITTEN (IncomingCommunicationProcessor L572) but is NOT a key — so the same internet message delivered to N mailboxes / saved by M users produces N/M duplicate rows, and concurrent inserts race. FR-C1 makes internet-message-id the canonical dedup key; NFR-02 requires the enforcement be structural (a Dataverse alternate/unique key), which the platform rejects on duplicate insert. This task creates ONLY the key; task 021 wires the race-proof create + upsert logic against it.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</file>
+      <file role="modify">Dataverse solution (managed) — the sprk_communication entity metadata</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No task prerequisite; needs the sprk_communication entity to already carry sprk_internetmessageid (it does — shipped in R1).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-027">SCOPE: this alternate key. New schema (the key) MUST be authored into the managed solution and exported so it lands in every subscription; do NOT create it as an unmanaged one-off in a single environment.</constraint>
+    <constraint source="project">SCOPE: key creation mechanism. Use the `dataverse-create-schema` skill (Web API + PowerShell); PAC CLI has no key-create path. Do NOT hand-edit customizations.xml outside the skill's recipe.</constraint>
+    <constraint source="NFR-02">SCOPE: dedup enforcement. The key MUST be a UNIQUE alternate key over exactly one attribute (`sprk_internetmessageid`) so the platform rejects a duplicate insert structurally; an index-only / non-unique key does not satisfy NFR-02.</constraint>
+    <constraint source="project">SCOPE: existing-data safety. Before activating the unique key, verify no existing active `sprk_communication` rows violate uniqueness on `sprk_internetmessageid` (null/blank values are the common failure). If violations exist, STOP and escalate — do not silently delete or mutate production rows.</constraint>
+    <constraint source="project">SCOPE: coordination. `Services/Communication/**` is a contended surface (r5 / messaging worktrees). This task does NOT touch that source, but note the `/conflict-check` obligation for the downstream code tasks (021/022/025) in `notes/`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse alternate keys + managed solution packaging for structural de-duplication</topic>
+    <files>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-create-schema" location=".claude/skills/dataverse-create-schema/SKILL.md">Use for the EntityKey create + activation via Web API + PowerShell; PAC CLI cannot create keys.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML + project CLAUDE.md + spec FR-C1/NFR-02 + ADR-027. Declare RIGOR LEVEL: STANDARD. Invoke `dataverse-create-schema`.</step>
+    <step order="1">Confirm `sprk_internetmessageid` exists on `sprk_communication` and its type/length supports an alternate key (string, keyable length). Record the logical + schema names.</step>
+    <step order="2">Pre-flight uniqueness scan: query active `sprk_communication` rows grouped by `sprk_internetmessageid`; confirm zero duplicate non-null values and note the null/blank count. If duplicates exist, STOP and escalate (do not mutate data).</step>
+    <step order="3">Create the UNIQUE alternate `EntityKey` over the single attribute `sprk_internetmessageid` via the skill's Web API recipe; poll for the async key-index job to reach Active.</step>
+    <step order="4">Add the entity + key to the managed solution and export; verify the exported solution contains the key definition.</step>
+    <step order="5">Verify in `spaarkedev1`: the key is Active; a duplicate-insert attempt of an existing internet-message-id is rejected by the platform (record the error class for task 021 to catch).</step>
+    <step order="6">Update `notes/` with the key logical name, the null-value handling decision, and the `/conflict-check` reminder for tasks 021/022/025.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the pre-flight scan finds existing rows that violate uniqueness (duplicate or blank `sprk_internetmessageid` blocking activation), STOP and escalate per CLAUDE.md §6 — do NOT delete/mutate production rows or fall back to a non-unique key to force activation.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Only the per-mailbox `sprk_graphmessageid` dedup path exists (IncomingCommunicationProcessor L126 `ExistsByGraphMessageIdAsync`); no key on `sprk_internetmessageid`. Grep of the sprk_communication metadata shows the attribute written (L572) but not keyed.</existing>
+    <extension>No — `sprk_graphmessageid` is per-mailbox by design and cannot be widened to the cross-mailbox/cross-user canonical identity; internet-message-id is the RFC-stable identity that survives across mailboxes and the upload path. A new key is the minimum structural surface.</extension>
+    <cost-of-doing-nothing>Without the unique key, the same email in N mailboxes / saved by M users creates N/M duplicate `sprk_communication` rows, and concurrent inserts race with no platform backstop — the exact failure FR-C1/NFR-02 exist to prevent. App-level check-then-insert alone cannot close the race window.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dataverse-create-schema">Create + activate the EntityKey via Web API + PowerShell</tool>
+    <tool name="pwsh">Solution export + verification scripts</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">Active UNIQUE alternate EntityKey on sprk_communication over sprk_internetmessageid</output>
+    <output type="solution">Managed solution export containing the key definition</output>
+    <output type="notes">projects/email-communication-intelligence-r2/notes/ — key name + null-handling + conflict-check reminder</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the deployed schema, when the EntityKey status is queried, then it is Active and unique over exactly `sprk_internetmessageid`.</criterion>
+    <criterion testable="true">Given an existing `sprk_communication` with internet-message-id M, when a second insert with the same M is attempted, then Dataverse rejects it with a duplicate-key error (structural, not an app pre-check).</criterion>
+    <criterion testable="true">Given the managed solution export, when its contents are inspected, then the key definition is present (deploys to every subscription per ADR-027).</criterion>
+    <criterion testable="true">Negative: the pre-flight uniqueness scan is recorded; if any duplicate/blank internet-message-id would block activation, the task escalates rather than mutating data.</criterion>
+    <criterion testable="true">The key logical name + null-handling decision are recorded in notes/ for task 021.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-C1 + NFR-02; plan Phase 2 C1 (schema half). Feeds task 021 (race-proof create + SB idempotency). Pairs with task 023 (canonicalhash column) in parallel-group schema-c. Record the exact duplicate-key error class so task 021's catch-and-reconcile is precise.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

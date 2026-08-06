@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="059" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Deploy Pillar E — reconciliation-grid code page + SpaarkeAi widget (code-page-deploy + Deploy-AllDataGridConsumers)</title>
+    <phase>5 Pillar E — Reconciliation UI</phase>
+    <gate>deps 050-057 complete (grid + tabs + routing built)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment task using an established deploy skill; no new architecture; STANDARD per §8 (deploy tag; sequence prescriptive).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runs an established deploy skill + seeds config records; fully specified — sonnet default, medium effort.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>P5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploys the shared reconciliation surfaces + touches DataGrid consumers (co-owned with r5 / dataset-grid-framework-r2); serialize; /conflict-check before deploy.</parallel-reason>
+    <deps>050,051,052,053,054,055,056,057</deps>
+    <tags>deploy, code-page, spaarkeai, datagrid, pillar-e</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Deploy the Pillar E reconciliation surface: build + deploy the reconciliation-grid code page and the SpaarkeAi
+    widget via the `code-page-deploy` skill, and run Deploy-AllDataGridConsumers so all DataGrid consumers pick up the
+    additive framework enhancement from task 050. Seed the "Needs-review" + per-team `sprk_gridconfiguration` records
+    (from tasks 050/057) into the target environment. Verify the grid renders and a row opens the browse shell on both
+    the code page and the widget.
+  </prompt>
+  <role>SPAARKE platform developer. Code Page / SpaarkeAi widget deployment + Dataverse sprk_gridconfiguration seeding. Follow ADRs strictly.</role>
+  <goal>The reconciliation-grid code page + SpaarkeAi widget are deployed and functional in the target environment; DataGrid consumers pick up the additive enhancement; the Needs-review + per-team grid configs are seeded.</goal>
+
+  <context>
+    <background>
+      Pillar E surfaces live in shared libs (tasks 050-057) and mount on a code page + a SpaarkeAi widget. Deploy via
+      `code-page-deploy`; run Deploy-AllDataGridConsumers so the additive DataGrid enhancement (task 050) reaches all
+      consumers. Seed the `sprk_gridconfiguration` records authored in 050 (Needs-review) + 057 (per-team views).
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/ReconciliationGrid.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/needs-review.gridconfiguration.json</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/per-team.gridconfiguration.json</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Reconciliation grid + Needs-review config.</dependency>
+      <dependency task="057" status="pending">Per-team grid views + routing config.</dependency>
+      <dependency task="056" status="pending">All reconcile tabs built (the deployed surface hosts them).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: deploy sequence. Use the `code-page-deploy` skill + Deploy-AllDataGridConsumers; do NOT hand-roll a bespoke deploy. Run /conflict-check against dataset-grid-framework-r2 + r5 before deploying shared surfaces.</constraint>
+    <constraint source="ADR-027">SCOPE: schema/config. Seed sprk_gridconfiguration records into the managed solution / target environment per the solution-management convention.</constraint>
+    <constraint source="ADR-012">SCOPE: deployment. The deployed grid consumes the shared DataGrid framework; do NOT ship a forked copy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Code page + widget deploy</topic>
+    <files>
+      <file>.claude/adr/ADR-027-subscription-isolation.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="code-page-deploy" location=".claude/skills/code-page-deploy/SKILL.md">Build + deploy the reconciliation-grid code page + SpaarkeAi widget web resources to Dataverse.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare RIGOR: STANDARD. Confirm 050-057 are complete + built green.</step>
+    <step order="1">/conflict-check against dataset-grid-framework-r2 + r5; confirm clean before deploying shared surfaces.</step>
+    <step order="2">Seed the Needs-review (050) + per-team (057) sprk_gridconfiguration records into the target environment.</step>
+    <step order="3">Invoke `code-page-deploy` for the reconciliation-grid code page + the SpaarkeAi widget.</step>
+    <step order="4">Run Deploy-AllDataGridConsumers so all DataGrid consumers pick up the additive enhancement.</step>
+    <step order="5">Verify: grid renders + a row opens the browse shell on BOTH the code page and the widget.</step>
+    <step order="6">Update TASK-INDEX.md: set 059 status to ✅.</step>
+    <step order="7">Document the deploy result + any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Deploy-AllDataGridConsumers surfaces a broken consumer from the task-050 enhancement, STOP — that means the enhancement was not additive; escalate per CLAUDE.md §6.5 (coordinate with dataset-grid-framework-r2) rather than force-deploying.</trigger>
+  </escalation>
+
+  <tools><tool name="npm">Build the code page + widget (build:prod).</tool></tools>
+
+  <outputs>
+    <output type="deploy">Reconciliation-grid code page + SpaarkeAi widget deployed to the target environment.</output>
+    <output type="config">Seeded Needs-review + per-team sprk_gridconfiguration records.</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The reconciliation-grid code page + SpaarkeAi widget are deployed and load in the target environment.</criterion>
+    <criterion testable="true">Deploy-AllDataGridConsumers completes with all existing DataGrid consumers still functional (enhancement was additive).</criterion>
+    <criterion testable="true">The Needs-review + per-team sprk_gridconfiguration records are seeded and the grid resolves them.</criterion>
+    <criterion testable="true">On both the code page and the widget, the grid renders and opening a row launches the browse shell.</criterion>
+    <criterion testable="true">Negative: /conflict-check was run + clean before deploy (cited); a broken consumer halts the deploy rather than shipping a regression.</criterion>
+  </acceptance-criteria>
+
+  <notes>Deploys the Pillar E surfaces from tasks 050-057. Uses code-page-deploy + Deploy-AllDataGridConsumers per plan Phase 5.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

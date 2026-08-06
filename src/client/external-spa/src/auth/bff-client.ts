@@ -35,13 +35,21 @@
  * `bffApiCall`, which calls `executeFetch`. There is no other place in the
  * external SPA where a Bearer header is set.
  *
+ * HOST-DETECTION WIRING (task 012 — Teams host adapter)
+ * ------------------------------------------------------
+ * `bffApiCall` acquires its token via `acquireActiveBffToken()`, a pluggable seam in msal-auth.ts
+ * that defaults to the CIAM strategy (`acquireBffToken`) — byte-for-byte unchanged behavior for the
+ * standalone SPA (FR-15). The Teams host adapter re-points this seam at the Teams workforce
+ * strategy (task 011) once at bootstrap, so this SAME module — no fork — serves BFF calls correctly
+ * for both hosts. See `src/client/external-spa/src/host/TeamsHostAdapter.ts`.
+ *
  * See: docs/architecture/power-pages-spa-guide.md — Authentication section
  * See: notes/auth-migration-b2b-msal.md
  * See: .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md — external SPA out-of-scope rationale
  */
 
 import { BFF_API_URL } from '../config';
-import { acquireBffToken } from './msal-auth';
+import { acquireActiveBffToken } from './msal-auth';
 import { ApiError } from '../types';
 import { getMockResponse } from '../mocks/mock-service';
 
@@ -117,7 +125,7 @@ export interface ExternalUserContextResponse {
   }>;
 }
 
-// Token acquisition is delegated to msal-auth.ts (acquireBffToken)
+// Token acquisition is delegated to msal-auth.ts (acquireActiveBffToken — host-selected strategy)
 
 // ---------------------------------------------------------------------------
 // Core fetch wrapper
@@ -140,12 +148,12 @@ export async function bffApiCall<T>(path: string, options: RequestInit = {}): Pr
     return getMockResponse<T>(path, options);
   }
 
-  const token = await acquireBffToken();
+  const token = await acquireActiveBffToken();
   const response = await executeFetch(path, options, token);
 
   // On 401, acquire a fresh token (MSAL will refresh silently or redirect) and retry once
   if (response.status === 401) {
-    const freshToken = await acquireBffToken();
+    const freshToken = await acquireActiveBffToken();
     const retryResponse = await executeFetch(path, options, freshToken);
     return parseResponse<T>(retryResponse);
   }

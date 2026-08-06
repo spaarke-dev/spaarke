@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Related-to card-picker — reuse EmailConnectionsReview for association + new-vs-related intent (no second write path)</title>
+    <phase>5 Pillar E — Reconciliation UI</phase>
+    <gate>deps 050 complete (grid + row cell seam)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>User-facing association-write surface (.tsx) on shared lib; regarding writes are correctness-critical (ADR-024 single write path); §8 FULL (frontend + write-path + shared-lib blast radius).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reuse of the shipped EmailConnectionsReview card (Confirm/Change/Link/Create-new already implemented); wiring a cell to an existing component — sonnet default.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes shared Spaarke.Communication.Components (EmailConnectionsReview is r5-owned). Serialize main-session; /conflict-check + coordination-contract review before the PR.</parallel-reason>
+    <deps>050</deps>
+    <tags>frontend, fluent-ui, communication, regarding, pillar-e</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Wire the grid's Related-to reconcile cell: render blank + "Requires review" + an icon until the association is
+    confirmed; clicking the icon opens the EXISTING `EmailConnectionsReview` card picker (the same candidate cards +
+    Confirm the email form uses) showing the engine's top candidates + a manual lookup, plus the new-vs-related choice
+    (Create-new-and-link / File-onto-X / Link-as-related — NewRecordIntentDetector output renders inside the same
+    picker). Confirming writes the association THROUGH `EmailConnectionsReview`'s existing `applyRegardingSelection`
+    /RegardingFieldMap path — with `writeContext.hostRecordId` === the communicationId. Do NOT fork the picker and do
+    NOT add a second regarding-write path.
+  </prompt>
+  <role>SPAARKE platform developer. Reuse of the r5 EmailConnectionsReview association card + the polymorphic RegardingFieldMap write path. Follow ADRs strictly.</role>
+  <goal>The Related-to cell opens EmailConnectionsReview with the engine's candidates + manual lookup + new-vs-related choice; Confirm writes regarding via the existing applyRegardingSelection with hostRecordId===communicationId; no forked picker, no second write path.</goal>
+
+  <context>
+    <background>
+      FR-E3 (spec §103): the Related-to cell reuses the existing `EmailConnectionsReview` card component — it OWNS
+      `applyRegardingSelection`/`unlinkRegarding` via `RegardingFieldMap`, and `writeContext.hostRecordId` MUST ===
+      the communicationId; `onCreateNewRecord` wires the create-new intent. There is NO second write path (ADR-024). The
+      new-vs-related choice (Create-new-and-link / File-onto-X / Link-as-related) is `NewRecordIntentDetector` output
+      rendered INSIDE the same picker (subsumes the former standalone FR-E5 intent card). This confirmed association is
+      the NFR-10 precondition: Fields (055) and Tasks (056) are gated until it exists and re-scope on override.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/shared/Spaarke.Communication.Components/src/components/EmailAssociationsAndTracking/EmailConnectionsReview.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/ReconciliationGrid.tsx</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/RelatedToCell.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Reconciliation grid + row-cell seam the Related-to cell mounts into.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">SCOPE: association writes. Write regarding ONLY through EmailConnectionsReview's existing `applyRegardingSelection`/RegardingFieldMap; `writeContext.hostRecordId` === communicationId. Do NOT add a second write path or a bespoke regarding setter.</constraint>
+    <constraint source="ADR-045">SCOPE: the picker. Reuse EmailConnectionsReview — do NOT fork a second card-picker component. NewRecordIntentDetector renders inside it.</constraint>
+    <constraint source="ADR-021">SCOPE: the cell + picker chrome. Fluent v9 tokens; light + dark themes.</constraint>
+    <constraint source="ADR-022">SCOPE: the cell. React-version-agnostic (dual-use on the email record form); deep-import from @spaarke/communication-components/logic where host-version-sensitive.</constraint>
+    <constraint source="project">SCOPE: NFR-10. A confirmed association here is the precondition the Fields/Tasks tabs (055/056) require; emit the confirmed record so those tabs can scope + re-scope on override.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Association reuse + polymorphic regarding write</topic>
+    <files>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+    <patterns>
+      <pattern name="EmailConnectionsReview" location="src/client/shared/Spaarke.Communication.Components/src/components/EmailAssociationsAndTracking/EmailConnectionsReview.tsx">Mount it as the picker; pass writeContext.hostRecordId=communicationId; use its applyRegardingSelection/unlinkRegarding + onCreateNewRecord — do not re-implement.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; declare RIGOR: FULL (write-path + shared-lib). Read EmailConnectionsReview to confirm its applyRegardingSelection/unlinkRegarding/onCreateNewRecord contract + writeContext shape.</step>
+    <step order="1">Author RelatedToCell.tsx: unconfirmed state = blank + "Requires review" + icon; confirmed state = the linked record chip.</step>
+    <step order="2">On icon click, open EmailConnectionsReview with the engine's top candidates + manual lookup + new-vs-related choice; pass writeContext.hostRecordId=communicationId.</step>
+    <step order="3">Confirm routes through the existing applyRegardingSelection (NO new write path); Create-new routes through onCreateNewRecord.</step>
+    <step order="4">Emit the confirmed record up so the Fields/Tasks tabs can scope on it (NFR-10 handshake) and re-scope on override.</step>
+    <step order="5">Add ui-tests (icon→cards→Confirm parity with the email-form review; manual lookup; create-new; ADR-021 dark-mode) and run them.</step>
+    <step order="6">Update TASK-INDEX.md: set 052 status to ✅.</step>
+    <step order="7">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If EmailConnectionsReview cannot accept `writeContext.hostRecordId=communicationId` or lacks a manual-lookup/create-new seam for this mount, STOP and escalate per CLAUDE.md §6.5 — extending the shared component is an r5-coordinated change, NOT a forked second picker or a second regarding-write path.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>EmailConnectionsReview.tsx already implements the candidate cards + Confirm/Change/Link-another/Create-new + applyRegardingSelection/unlinkRegarding via RegardingFieldMap. The only genuinely-new file is the grid cell that mounts it.</existing>
+    <extension>Yes — reuse EmailConnectionsReview wholesale; the new RelatedToCell.tsx is a thin grid-cell wrapper (unconfirmed/confirmed states + open-picker), not a new picker. Needed only because the grid cell surface does not exist yet.</extension>
+    <cost-of-doing-nothing>Without the cell there is no in-grid way to confirm which record an email belongs to, so the NFR-10 precondition is never met and the Fields/Tasks tabs can never become actionable.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Requires-review until confirmed">
+      <steps><step>Render the cell for an unassociated email.</step></steps>
+      <expected>Cell shows blank + "Requires review" + an icon; no record chip.</expected>
+    </test>
+    <test name="Icon opens the same picker the form uses">
+      <steps><step>Click the icon.</step></steps>
+      <expected>EmailConnectionsReview opens with the engine's top candidates + manual lookup + new-vs-related choice; Confirm is identical to the email-form review.</expected>
+    </test>
+    <test name="Confirm writes via the single path">
+      <steps><step>Confirm a candidate.</step></steps>
+      <expected>The association is written via applyRegardingSelection/RegardingFieldMap (writeContext.hostRecordId===communicationId); the cell shows the linked record; no second write path invoked.</expected>
+    </test>
+    <test name="ADR-021 dark-mode">
+      <steps><step>Render cell + picker under the dark Fluent theme.</step></steps>
+      <expected>Both render with correct contrast via Fluent tokens.</expected>
+    </test>
+  </ui-tests>
+  <tools><tool name="npm">Build/test the shared lib.</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/RelatedToCell.tsx</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/__tests__/RelatedToCell.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an unassociated email, when the cell renders, then it shows blank + "Requires review" + an icon.</criterion>
+    <criterion testable="true">Given the icon is clicked, when the picker opens, then it is EmailConnectionsReview with the engine's candidates + manual lookup + new-vs-related choice (Confirm identical to the email-form review).</criterion>
+    <criterion testable="true">Given a candidate is confirmed, when the write occurs, then it goes through applyRegardingSelection/RegardingFieldMap with writeContext.hostRecordId===communicationId — asserted single write path (no bespoke regarding setter).</criterion>
+    <criterion testable="true">Given Create-new is chosen, when confirmed, then onCreateNewRecord fires the create-new intent (no forked picker).</criterion>
+    <criterion testable="true">Negative: no picker component is forked and no second regarding-write path is introduced (grep-asserted; RegardingFieldMap is the only writer).</criterion>
+    <criterion testable="true">ADR-021: cell + picker render correctly in light AND dark themes; all unit/ui tests pass; shared-lib build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-E3 (§103); subsumes the former FR-E5 intent card (NewRecordIntentDetector renders inside the picker). The confirmed record emitted here is the NFR-10 precondition consumed by 055/056.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

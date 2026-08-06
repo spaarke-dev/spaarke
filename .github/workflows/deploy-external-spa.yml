@@ -45,6 +45,11 @@ jobs:
           VITE_MSAL_CLIENT_ID: bd57e54e-b339-4500-b55c-e451009fd907
           VITE_MSAL_TENANT_ID: 7052feba-bfc4-43e0-b09e-65014b429131
           VITE_MSAL_BFF_SCOPE: api://4a4d5126-91b0-4865-8e3a-134b7209013e/SDAP.Access
+          # Teams collaboration host (teams-app-r1, ADR-028 A2) — workforce multitenant app (task 061).
+          # Non-secret identifiers; override the #{...}# placeholders in .env.production at build time so
+          # the Teams host's getTeamsWorkforceEnvConfig() resolves instead of throwing when run in Teams.
+          VITE_TEAMS_MSAL_CLIENT_ID: 1e40baad-e065-4aea-a8d4-4b7ab273458c
+          VITE_TEAMS_MSAL_BFF_SCOPE: api://1e40baad-e065-4aea-a8d4-4b7ab273458c/access_as_user
         run: npm run build
 
       # staticwebapp.config.json lives at the project root (source of truth) but the SWA

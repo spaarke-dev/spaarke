@@ -2517,6 +2517,48 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return results.Entities;
     }
 
+    public async Task<IReadOnlyList<Entity>> QueryRecordsByNumberFieldValuesAsync(
+        string entityLogicalName, string numberFieldLogicalName, IReadOnlyCollection<string> values, CancellationToken ct = default)
+    {
+        // Defensive (NFR-04): a dirty/typo'd catalog row (null/blank field) or an empty value set degrades to
+        // no-match, never a wrong-field query. Filter out blank values; if none remain, do zero Dataverse work.
+        if (string.IsNullOrWhiteSpace(entityLogicalName)
+            || string.IsNullOrWhiteSpace(numberFieldLogicalName)
+            || values is null)
+        {
+            return Array.Empty<Entity>();
+        }
+
+        var distinctValues = values
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (distinctValues.Length == 0)
+        {
+            return Array.Empty<Entity>();
+        }
+
+        _logger.LogDebug(
+            "Reverse-lookup (batched) {Entity}.{Field} In [{ValueCount} values]",
+            entityLogicalName, numberFieldLogicalName, distinctValues.Length);
+
+        var query = new QueryExpression(entityLogicalName)
+        {
+            // Return the number field so the caller re-associates each match to the value it matched. Headroom
+            // of 5 per value preserves the single-value path's same-field-duplicate detection (2+ → Ambiguous)
+            // while capping cost; unique-by-design record numbers never approach it.
+            ColumnSet = new ColumnSet(numberFieldLogicalName),
+            TopCount = Math.Min(distinctValues.Length * 5, 250),
+        };
+        query.Criteria.Conditions.Add(
+            new ConditionExpression(numberFieldLogicalName, ConditionOperator.In, distinctValues));
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("statecode", ConditionOperator.Equal, 0)); // Active only
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        return results.Entities;
+    }
+
     public async Task<Guid?> QuerySystemUserByAzureAdOidAsync(string azureAdObjectId, CancellationToken ct = default)
     {
         _logger.LogDebug("Querying systemuser by Azure AD OID: {AzureAdOid}", azureAdObjectId);

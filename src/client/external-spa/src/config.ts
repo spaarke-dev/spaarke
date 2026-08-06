@@ -91,3 +91,46 @@ export const MSAL_BFF_SCOPE: string = requireEnvVar('VITE_MSAL_BFF_SCOPE', 'CIAM
 
 /** App version — update on each release */
 export const APP_VERSION = '1.0.0';
+
+// ---------------------------------------------------------------------------
+// Teams collaboration host — workforce app-registration values (task 012)
+// ---------------------------------------------------------------------------
+
+/**
+ * MSAL client id + BFF scope for the Teams collaboration host (ADR-028 Amendment A2). Read LAZILY
+ * (not via `requireEnvVar` at module load like the CIAM constants above) because these are OPTIONAL
+ * for a CIAM-only build/deploy — a standalone SPA build must still succeed even before CI/CD wires
+ * Teams-specific substitution (task 071). `TeamsHostAdapter` calls this only after confirming the
+ * app is actually running inside Teams; a missing/placeholder value at that point is a fail-loud
+ * `TeamsWorkforceAuthError` (see host/TeamsHostAdapter.ts), not a build-time throw.
+ */
+export interface TeamsWorkforceEnvConfig {
+  /** Workforce (multitenant) SPA app-registration client id — reused `1e40baad-…` app (task 061). */
+  clientId: string;
+  /** BFF API OAuth scope for the workforce plane, e.g. `api://{app-id}/access_as_user`. */
+  bffScope: string;
+}
+
+function isUnsetOrPlaceholder(value: string | undefined): boolean {
+  return !value || /^#\{.+\}#$/.test(value);
+}
+
+/**
+ * Read + validate the Teams workforce env values. Throws a clear, fail-loud error if missing or
+ * still an un-substituted CI/CD placeholder — callers (the Teams host adapter) MUST only invoke
+ * this after confirming the app is actually running inside Teams (see `detectTeamsHost()`).
+ */
+export function getTeamsWorkforceEnvConfig(): TeamsWorkforceEnvConfig {
+  const clientId = import.meta.env.VITE_TEAMS_MSAL_CLIENT_ID;
+  const bffScope = import.meta.env.VITE_TEAMS_MSAL_BFF_SCOPE;
+
+  if (isUnsetOrPlaceholder(clientId) || isUnsetOrPlaceholder(bffScope)) {
+    throw new Error(
+      '[ExternalSPA] Missing or unsubstituted Teams workforce environment variables ' +
+        '(VITE_TEAMS_MSAL_CLIENT_ID / VITE_TEAMS_MSAL_BFF_SCOPE). Required only when running ' +
+        'inside a Teams host — see .env.example.'
+    );
+  }
+
+  return { clientId: clientId as string, bffScope: bffScope as string };
+}

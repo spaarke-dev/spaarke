@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Reconciliation grid — enhance DataGrid + "Needs review" sprk_gridconfiguration over sprk_communication (Email)</title>
+    <phase>5 Pillar E — Reconciliation UI</phase>
+    <gate>startable (Phase 5 entry; backend enablers D5/034 land before the tabs, not the grid shell)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Net-new frontend surface (.tsx) enhancing a shared framework consumed by other worktrees; user-facing; §8 FULL (frontend/fluent-ui + NEW-surface + shared-lib blast radius).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reuse-first composition of the shipped DataGrid framework via documented extension seams (columnRenderers + onRecordAction); fully specified, not architectural — sonnet default.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes shared Spaarke.UI.Components/DataGrid + Spaarke.Communication.Components — co-owned with email-communication-solution-r5 and spaarke-dataset-grid-framework-r2. Run sequentially, main-session; /conflict-check against dataset-grid-framework-r2 before the shared-lib PR (FR-E2 acceptance).</parallel-reason>
+    <deps>none</deps>
+    <tags>frontend, fluent-ui, datagrid, spaarkeai, communication, pillar-e</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build the Pillar E reconciliation grid as a `sprk_gridconfiguration`-driven view over `sprk_communication`
+    (filtered type = Email) by ENHANCING the shared `DataGrid` — not forking it. Add the two documented extension
+    seams the grid needs: per-field `overrides.columnRenderers[field] = (value, record) => node` for custom cells and
+    an `onRecordAction`/per-row action column, and OVERRIDE `onRecordOpen` so opening a row launches the browse shell
+    (task 053) instead of the default `Xrm.Navigation.navigateTo`. Author the "Needs-review" `sprk_gridconfiguration`
+    record (columns: reviewed-status, date, from, to, subject+body-preview) ranked by triage priority. The same
+    component must render on the code-page AND a SpaarkeAi widget. This task ships the grid shell + config + override
+    seams; the triage columns (051), Related-to cell (052), browse shell (053), and tabs (055/056) plug into it.
+  </prompt>
+  <role>SPAARKE platform developer. Expert in Fluent UI v9, the Spaarke DataGrid framework (`&lt;DataGrid configId=… />` + `sprk_gridconfiguration` + `IDataverseClient`), and the WorkspaceWidgetRegistry mount model. Follow ADRs strictly.</role>
+  <goal>A reconciliation `DataGrid` renders unreconciled Emails from one `sprk_gridconfiguration`, ranked by triage priority, with additive `columnRenderers` + row-action seams and an `onRecordOpen` override that launches the browse shell; mounts identically on code-page and SpaarkeAi widget; DataGrid framework is NOT forked.</goal>
+
+  <context>
+    <background>
+      FR-E2 (spec §102): the reconciliation surface is ONE dataset grid over `sprk_communication` (type = Email), built
+      by enhancing the existing `DataGrid` framework with custom `columnRenderers` + row actions — additive, no fork;
+      the enhancement benefits other grids per §11. Opening a row launches the browse shell (task 053, the doc-preview
+      "N of M" pattern), so the grid's `onRecordOpen` MUST be overridable (the default routes to
+      `Xrm.Navigation.navigateTo`). The overrides type lives in `components/DataGrid/configResolution.ts`; the config
+      schema is `types/DataGridConfiguration.ts` (`sprk_gridconfiguration`); data access is `services/IDataverseClient.ts`;
+      `behavior.membershipFilter` (used by FR-E7 / task 057) is a first-class config behavior. This is heavily-contended
+      shared code (r5 + dataset-grid-framework-r2) — /conflict-check before the PR.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/services/IDataverseClient.ts</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/ReconciliationGrid.tsx</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/needs-review.gridconfiguration.json</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="053" status="pending">Browse shell — the target of the onRecordOpen override; wired in 053, but the override seam ships here (accepts an injected onRecordOpen).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">SCOPE: the grid. Consume the shared DataGrid framework via `&lt;DataGrid configId=… />` + the documented `overrides` seam; do NOT hand-roll a bespoke table or fork the component. Any framework-level change is additive (new optional override field), never a breaking edit.</constraint>
+    <constraint source="ADR-021">SCOPE: this grid's Fluent v9 cells. Use Fluent UI v9 semantic tokens (no hard-coded colors); grid + custom cells MUST render correctly in light AND dark themes (verify via ui-tests dark-mode check).</constraint>
+    <constraint source="ADR-022">SCOPE: the reconciliation component. Keep it React-version-agnostic (it is dual-use — mounts on the grid AND, via 052/055/056, the email record form on a PCF host). No React-16/17-incompatible APIs; deep-import from @spaarke/communication-components/logic where host-version-sensitive.</constraint>
+    <constraint source="ADR-045">SCOPE: reconciliation model. The reconciliation unit stays `sprk_communication` — do NOT introduce a `sprk_reconciliation`-style entity. Extend, never fork.</constraint>
+    <constraint source="project">SCOPE: shared-lib PR. Run `/conflict-check` against `spaarke-dataset-grid-framework-r2` (DataGrid) AND `email-communication-solution-r5` (Communication.Components) BEFORE opening the PR; cite the result in the PR description.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>DataGrid framework enhancement + reconciliation grid</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="DataGrid override seam" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts">Extend the overrides shape with optional `columnRenderers[field]` + an `onRecordOpen` override; additive — existing consumers unaffected.</pattern>
+      <pattern name="sprk_gridconfiguration" location="src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts">Author the "Needs-review" config record (columns + default sort by priority + type=Email filter); seed via Web API at deploy (task 059).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare RIGOR LEVEL: FULL (frontend NEW-surface + shared-lib). Study DataGrid.tsx + configResolution.ts to confirm the exact override extension points and how onRecordOpen currently routes to Xrm.Navigation.navigateTo.</step>
+    <step order="1">/conflict-check against dataset-grid-framework-r2 + email-communication-solution-r5; record the result for the PR.</step>
+    <step order="2">Add the additive framework seams to configResolution.ts / DataGrid.tsx: optional `overrides.columnRenderers[field]` and an overridable `onRecordOpen` (defaulting to the existing navigateTo behavior when not supplied).</step>
+    <step order="3">Author ReconciliationGrid.tsx wrapping `&lt;DataGrid configId=… />` with the Needs-review config; inject `onRecordOpen` = launch browse shell (task 053 handle; accept as prop so 053 wires the concrete shell).</step>
+    <step order="4">Author the needs-review sprk_gridconfiguration JSON: type=Email filter, columns reviewed-status/date/from/to/subject+body-preview, default sort by triage priority.</step>
+    <step order="5">Prove dual-mount: the same component renders on the code-page host and a SpaarkeAi widget wrapper.</step>
+    <step order="6">Add ui-tests (render on code-page host + SpaarkeAi widget; ADR-021 dark-mode) and run them.</step>
+    <step order="7">Update TASK-INDEX.md: set 050 status to ✅.</step>
+    <step order="8">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If enhancing DataGrid for `columnRenderers`/`onRecordOpen` cannot be done additively (would break an existing consumer's config contract), STOP and escalate per CLAUDE.md §6.5 — a breaking DataGrid change is an ADR-012 decision coordinated with dataset-grid-framework-r2, not a silent edit.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbors: the shared DataGrid (`components/DataGrid/DataGrid.tsx`) + its `overrides` in `configResolution.ts`, and the r5 EmailWorkspace shell in Spaarke.Communication.Components. No reconciliation grid + no `columnRenderers`/`onRecordOpen` override seam exist today (grep: DataGrid renders default cells + routes open to navigateTo).</existing>
+    <extension>Yes — extend DataGrid additively (new optional override fields) and add ONE thin wrapper (ReconciliationGrid) + a config record; no new framework, no fork. The wrapper is new surface only because no reconciliation-over-sprk_communication grid exists yet.</extension>
+    <cost-of-doing-nothing>Without it, Job B/C proposals + triage are stored-but-invisible — there is no ranked "Needs review" queue over `sprk_communication`, so the entire Pillar E intelligence layer has no host and reviewers cannot open or step through unreconciled emails.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Grid renders on code-page host">
+      <steps><step>Mount ReconciliationGrid on the code-page host with seeded Email sprk_communication rows.</step></steps>
+      <expected>The DataGrid lists unreconciled Emails via configId (framework grid, not a bespoke table), ranked by triage priority.</expected>
+    </test>
+    <test name="Grid renders on SpaarkeAi widget">
+      <steps><step>Mount the same component through the SpaarkeAi widget wrapper.</step></steps>
+      <expected>Identical grid renders from ONE component (no divergent second implementation).</expected>
+    </test>
+    <test name="onRecordOpen launches browse shell (not navigateTo)">
+      <steps><step>Click/open a row with an injected onRecordOpen.</step></steps>
+      <expected>The injected handler fires (browse-shell launch); the default Xrm.Navigation.navigateTo does NOT run.</expected>
+    </test>
+    <test name="ADR-021 dark-mode">
+      <steps><step>Render the grid under the dark Fluent theme.</step></steps>
+      <expected>Grid + custom cells render with correct contrast via Fluent v9 tokens; no hard-coded colors, nothing unreadable.</expected>
+    </test>
+  </ui-tests>
+  <tools><tool name="npm">Build/test the shared libs (build:prod for production output).</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/ReconciliationGrid.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/needs-review.gridconfiguration.json</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts (additive override seam)</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/__tests__/ReconciliationGrid.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given seeded Email `sprk_communication` rows, when the reconciliation grid renders, then it lists the unreconciled emails via `&lt;DataGrid configId=… />` + the Needs-review `sprk_gridconfiguration`, ranked by triage priority (framework grid, not a bespoke table).</criterion>
+    <criterion testable="true">Given the same component, when mounted on the code-page host and on a SpaarkeAi widget, then both render identically from one implementation.</criterion>
+    <criterion testable="true">Given an injected `onRecordOpen`, when a row is opened, then the injected handler runs and the default `Xrm.Navigation.navigateTo` does NOT.</criterion>
+    <criterion testable="true">The DataGrid enhancement is additive: existing DataGrid consumers compile + behave unchanged (no config-contract break).</criterion>
+    <criterion testable="true">Negative: with no Email rows the grid shows an empty "Needs review" state (no crash, no error).</criterion>
+    <criterion testable="true">ADR-021: grid + custom cells render correctly in light AND dark themes (dark-mode ui-test passes).</criterion>
+    <criterion testable="true">`/conflict-check` was run vs dataset-grid-framework-r2 + r5 and cited; all unit/ui tests pass; shared-lib build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-E2 (§102), UI model §99. Reuse-first per §11 — enhance DataGrid, do not fork. The concrete browse-shell wiring for onRecordOpen is task 053; this task ships the override seam + accepts the handler as a prop. `behavior.membershipFilter` is consumed by task 057 (FR-E7) — leave it configurable here.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
