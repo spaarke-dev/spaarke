@@ -96,7 +96,8 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _driveItemOps.DownloadFileAsync(driveId, itemId, ct);
 
-    public Task<bool> DeleteFileAsync(
+    // `virtual` enables module-boundary test doubles (Moq) of this concrete facade (see UploadSmallAsync).
+    public virtual Task<bool> DeleteFileAsync(
         string driveId,
         string itemId,
         CancellationToken ct = default)

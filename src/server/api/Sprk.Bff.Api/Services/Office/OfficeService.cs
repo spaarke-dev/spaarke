@@ -299,7 +299,7 @@ public class OfficeService : IOfficeService
                 };
 
                 // Create Document record with SPE pointers
-                var documentId = await _documentPersistence.CreateDocumentWithSpePointersAsync(
+                var (documentId, wasContentDuplicate) = await _documentPersistence.CreateDocumentWithSpePointersAsync(
                     request,
                     driveId,
                     itemId,
@@ -308,6 +308,41 @@ public class OfficeService : IOfficeService
                     fileSize,
                     userId,
                     cancellationToken);
+
+                // FR-C3 (email-communication-intelligence-r2, R-3): the content is byte-identical to an existing
+                // canonical document (returned as `documentId`). No second document was created — and there is
+                // nothing new to finalize: the canonical already carries its Email/Attachment artifacts + AI, so
+                // re-running finalization would only duplicate them and re-spend AI on identical bytes. Skip the
+                // whole downstream pipeline, CLEAN UP the transient upload blob (gate-after-write; it is now truly
+                // unreferenced — this is the item THIS request just uploaded, never the canonical's own), and
+                // complete the job. The detector already NOTIFIED the user of the canonical. Blob cleanup is
+                // best-effort (never fails the save). The `finally` below still disposes the content stream.
+                if (wasContentDuplicate)
+                {
+                    await _storageUploader.DeleteFromSpeAsync(driveId, itemId, cancellationToken);
+
+                    await _documentPersistence.UpdateJobStatusInDataverseAsync(jobId, JobStatus.Completed, "DeduplicatedToExisting", 100, null, cancellationToken);
+                    _jobStore[jobId] = _jobStore[jobId] with
+                    {
+                        Status = JobStatus.Completed,
+                        Progress = 100,
+                        CurrentPhase = "DeduplicatedToExisting",
+                        CompletedAt = DateTimeOffset.UtcNow
+                    };
+
+                    _logger.LogInformation(
+                        "ProcessingJob {JobId} completed: content duplicate of canonical document {DocumentId}; finalization skipped, transient blob cleaned up.",
+                        jobId, documentId);
+
+                    return new SaveResponse
+                    {
+                        Success = true,
+                        Duplicate = false, // NOT an idempotent job replay — this is a content dedup (user notified via the canonical notification)
+                        JobId = jobId,
+                        StatusUrl = $"/office/jobs/{jobId}",
+                        StreamUrl = $"/office/jobs/{jobId}/stream"
+                    };
+                }
 
                 // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event.
                 // Per event-source-inventory §3B (line 64), POST /office/save

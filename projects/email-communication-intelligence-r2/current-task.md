@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **R-2 ✅ code-complete (2026-08-06).** SPE content-dedup **graduate-on-divergence** (FR-C3, Compose path). Owner chose the full graduate model over stamp-only/suppress. Uncommitted — commit pending. |
-| **Step** | R-2 code done + gates clean. **Next: commit R-2, then R-3 → R-1.** |
+| **Task** | **R-2 ✅ (83f2496d9) + R-3 ✅ code-complete (2026-08-06).** FR-C3 content-dedup: R-2 = Compose graduate-on-divergence; R-3 = office-path full pipeline suppression + transient-blob cleanup. **Next: commit R-3, then R-1.** |
+| **Step** | R-3 code done + gates clean (uncommitted). **Next: commit R-3, then R-1 (affinity confirmation-write hook).** |
 | **Status** | **R-2 ✅ (code)**: editable Compose save that is byte-identical to a canonical is recorded as a hash-linked COPY (`sprk_canonicaldocument` set + notified), NOT suppressed (no data loss / session cross-wiring); GRADUATES to its own canonical on content divergence (link cleared via a new `DBNull` clear-sentinel on `IGenericEntityService.UpdateAsync`). `FindCanonicalByHashAsync` excludes linked copies. N+1 avoided (alt-key lookup widened). Build 0-err/0-warn; **854 Compose+ContentDedup green** (18 new); publish 48.30 MB (+0.01); CVE clean; ADR/code-review/conflict-check clean. Notes: `notes/R-2-compose-content-dedup-graduate-complete.md`. **GATED tail = task 027** (`sprk_canonicaldocument` self-lookup schema — operator go-ahead; code ships safely behind it, non-fatal until column exists). Prior session: **021 ✅** (84912c9cd), **016 ✅** (2bd7d905e), **024 ✅** (7bd7c2108). |
-| **Next Action** | **Commit R-2**, then **R-3** (orphan transient-blob cleanup on duplicate hit — `SpeFileStore` delete) → **R-1** (affinity confirmation-write hook, after confirm-path investigation) per `notes/deferred-items-remediation-plan.md`. Then pending code tasks: **010 HMAC signer** (KV `footer-hmac-key` ready → 012/013), **034 Job C**. Gated: **task 027** schema (operator). |
+| **Next Action** | **Commit R-3** (office content-dup pipeline suppression + blob cleanup — `notes/R-3-content-dup-pipeline-suppression-complete.md`), then **R-1** (affinity confirmation-write hook, after confirm-path investigation) per `notes/deferred-items-remediation-plan.md`. Then pending code tasks: **010 HMAC signer** (KV `footer-hmac-key` ready → 012/013), **034 Job C**. Gated: **task 027** schema (operator). **FR-C2 context-merge on dup = task 022** (additive on R-3; today a suppressed office dup records no context on the canonical). |
 
 ### Completed this session (all committed)
 - **Task 003 ✅** — `notes/fixtures/r1-golden-emails.md`.

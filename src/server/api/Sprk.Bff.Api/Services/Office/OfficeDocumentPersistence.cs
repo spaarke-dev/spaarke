@@ -30,9 +30,12 @@ public class OfficeDocumentPersistence
     }
 
     /// <summary>
-    /// Creates a Document record in Dataverse with SPE pointers.
+    /// Creates a Document record in Dataverse with SPE pointers. Returns the document id AND whether the content
+    /// was a byte-identical DUPLICATE (FR-C3): when <c>WasContentDuplicate</c> is true the returned
+    /// <c>DocumentId</c> is the existing CANONICAL (no second document was created) — the caller MUST skip
+    /// finalization (no redundant artifacts / AI) and clean up the transient upload blob.
     /// </summary>
-    public async Task<Guid> CreateDocumentWithSpePointersAsync(
+    public async Task<(Guid DocumentId, bool WasContentDuplicate)> CreateDocumentWithSpePointersAsync(
         SaveRequest request,
         string driveId,
         string itemId,
@@ -56,9 +59,9 @@ public class OfficeDocumentPersistence
         if (dedup.IsDuplicate && dedup.CanonicalDocumentId is { } canonicalId)
         {
             _logger.LogInformation(
-                "Skipping duplicate document create for {FileName} (DriveId={DriveId}, ItemId={ItemId}); content matches canonical sprk_document {CanonicalId}.",
+                "Skipping duplicate document create for {FileName} (DriveId={DriveId}, ItemId={ItemId}); content matches canonical sprk_document {CanonicalId}. Caller skips finalization + cleans up the transient blob.",
                 fileName, driveId, itemId, canonicalId);
-            return canonicalId;
+            return (canonicalId, true);
         }
 
         // Create base document record
@@ -137,7 +140,7 @@ public class OfficeDocumentPersistence
             "Document record created: DocumentId={DocumentId}, DriveId={DriveId}, ItemId={ItemId}",
             documentId, driveId, itemId);
 
-        return documentId;
+        return (documentId, false);
     }
 
     /// <summary>

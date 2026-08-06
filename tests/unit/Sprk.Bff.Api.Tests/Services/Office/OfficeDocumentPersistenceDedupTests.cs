@@ -40,7 +40,8 @@ public class OfficeDocumentPersistenceDedupTests
         var result = await sut.CreateDocumentWithSpePointersAsync(
             AttachmentSave(), "drive1", "item2", "https://spe/web", "invoice.pdf", 1024, "owner-oid", CancellationToken.None);
 
-        result.Should().Be(canonical, "a byte-identical upload resolves to the existing canonical document");
+        result.DocumentId.Should().Be(canonical, "a byte-identical upload resolves to the existing canonical document");
+        result.WasContentDuplicate.Should().BeTrue("the caller must skip finalization + clean up the transient blob (R-3)");
         docSvc.Verify(d => d.CreateDocumentAsync(It.IsAny<CreateDocumentRequest>(), It.IsAny<CancellationToken>()), Times.Never,
             "no second canonical sprk_document may be created for duplicate content (FR-C3)");
     }
@@ -63,7 +64,8 @@ public class OfficeDocumentPersistenceDedupTests
         var result = await sut.CreateDocumentWithSpePointersAsync(
             AttachmentSave(), "drive1", "item2", "https://spe/web", "invoice.pdf", 1024, "owner-oid", CancellationToken.None);
 
-        result.Should().Be(newDocId);
+        result.DocumentId.Should().Be(newDocId);
+        result.WasContentDuplicate.Should().BeFalse("a first upload is not a duplicate — finalization proceeds normally");
         docSvc.Verify(d => d.CreateDocumentAsync(It.IsAny<CreateDocumentRequest>(), It.IsAny<CancellationToken>()), Times.Once);
         update.Should().NotBeNull();
         update!.CanonicalHash.Should().Be("hash-xyz", "the first writer stamps the content hash so future uploads dedup against it");
