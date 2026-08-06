@@ -7,33 +7,30 @@
 
 ## 1. Key Vault — unblocks task 010 (HMAC footer/token signer) → then 012/013
 
-**What the code needs**: the HMAC signing **key material** lives in Key Vault (ADR-028 / NFR-07). The config
-carries only the secret **NAME** (`Communication:TrackingFooter:SigningKeySecretName`, already shipped in task
-011's `TrackingFooterOptions`); task 010's signer resolves the key from Key Vault via `DefaultAzureCredential`.
+**Status: DONE for dev (agent-executed 2026-08-05).** Verified the real wiring (the earlier
+`spe-kv-dev-67e2xz` name was stale):
 
-**Your steps (dev):**
+- Dev BFF = **`spaarke-bff-dev`** (rg-spaarke-dev), using **user-assigned MI `mi-bff-api-dev`**
+  (principalId `9fd47efb-7962-492b-ac44-e5ccd0268ebb`, clientId `5967251e-171c-46fe-a6c2-ef843c90309d`).
+- Canonical BFF secrets vault = **`spaarke-spekvcert`** (`https://spaarke-spekvcert.vault.azure.net/`, RBAC
+  mode) — the vault the BFF already reads via its `KeyVaultUri` app setting + `@Microsoft.KeyVault(...)` refs.
+- ✅ Secret **`footer-hmac-key`** created there (256-bit random, `openssl rand -base64 32`, value never logged).
+- ✅ `mi-bff-api-dev` already holds **`Key Vault Secrets User`** on `spaarke-spekvcert` → the task-010 signer
+  reads it via `DefaultAzureCredential` with **no new grant**.
 
-1. **Generate a strong HMAC key** (256-bit, base64) — e.g.:
-   ```bash
-   openssl rand -base64 32
-   ```
-2. **Store it as a Key Vault secret** in `spe-kv-dev-67e2xz` under a name you choose (suggest `footer-hmac-key`):
-   ```bash
-   az keyvault secret set --vault-name spe-kv-dev-67e2xz --name footer-hmac-key --value "<base64-from-step-1>"
-   ```
-3. **Confirm the BFF managed identity can read it.** The BFF App Service MI already holds **`Key Vault Secrets
-   User`** on `spe-kv-dev-67e2xz` (per docs/architecture/auth-azure-resources.md), so **no new grant is needed**
-   as long as the signer reads from THIS vault. (If task 010 is pointed at a different vault, grant
-   `Key Vault Secrets User` there.)
-4. **Set the app settings** (App Service configuration — no redeploy needed, ADR-018):
-   - `Communication__TrackingFooter__SigningKeySecretName = footer-hmac-key`
-   - `Communication__TrackingFooter__Enabled = true`  *(leave `false` until you actually want outbound mail stamped)*
+**Remaining (one live App Service change, do when convenient — restarts the dev BFF):**
+```bash
+az webapp config appsettings set --name spaarke-bff-dev --resource-group rg-spaarke-dev --settings \
+  Communication__TrackingFooter__SigningKeySecretName=footer-hmac-key \
+  Communication__TrackingFooter__Enabled=false
+```
+Nothing reads these until task 010 ships (and 010 needs a deploy anyway), so there's no urgency — they can also
+be set as part of 010's deploy. Leave `Enabled=false` until you actually want outbound mail stamped (task 012
+does the injection). Task 010's signer resolves the key from the existing `KeyVaultUri` vault
+(`spaarke-spekvcert`) by the secret name `footer-hmac-key`.
 
-**That's the whole KV prerequisite.** Nothing else is required from you for 010. When 010 runs, its signer
-reads `footer-hmac-key` from `spe-kv-dev-67e2xz` via MI and signs/verifies the tracking token. Rotation later =
-`az keyvault secret set` a new version (the signer reads current).
-
-> Note: prod uses a different vault; repeat steps 1–4 there at deploy time with a prod-specific key value.
+**Prod**: repeat at prod deploy — create `footer-hmac-key` in **`sprk-platform-prod-kv`** (or the prod BFF's
+configured vault) with a prod-specific value; grant the prod BFF MI `Key Vault Secrets User` there.
 
 ---
 
