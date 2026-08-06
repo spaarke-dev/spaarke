@@ -47,7 +47,7 @@
 | 055 | Field-update reconcile tab (Job B, editable, apply-under-audit) | 5·E | 🔲 | 052,053 | sonnet·high | ❌ false |
 | 056 | Task/deadline reconcile tab (Job C, create-and-complete + ad-hoc) | 5·E | 🔲 | 034,052,053 | sonnet·high | ❌ false |
 | 057 | Reconciliation routing (category→team + per-team views) | 5·E | 🔲 | 050 | sonnet·high | ❌ false |
-| 058 | r5 coordination contract (record R2 ownership D/E/F) | 5·E | 🔲 | — | sonnet·med | ❌ false |
+| 058 | r5 coordination contract (record R2 ownership D/E/F) | 5·E | ✅ | — | sonnet·med | ❌ false |
 | 059 | Deploy Pillar E — code page + SpaarkeAi widget | 5·E | 🔲 | 050–057 | sonnet·med | ❌ false |
 | 090 | Project wrap-up (test-diet, lessons, doc-drift, size) | 6 | 🔲 | all | sonnet·high | ❌ false |
 
