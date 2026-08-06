@@ -1,8 +1,9 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-03
+> **Last Updated**: 2026-08-05 (by context-handoff — pre-compaction checkpoint)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+> **RESUME**: read the Quick Recovery table + "Live deploy + integration state" below, then execute `tasks/025-principal-agnostic-collab-endpoints.poml` via task-execute.
 
 ---
 
