@@ -1780,6 +1780,24 @@ public sealed class ComposeDocxProjectionBuilder
                 // round-trip is proven by ComposeNumberingRoundTripSeamTests.)
                 var numbering = BuildNumberingModel(mainPart);
                 var ctx = new ModelWalkContext(mainPart, numbering, cancellationToken);
+
+                // Task 024 Step-9.5 F5/F6: PRE-SCAN comment range markers so (a) a bare w:commentReference
+                // occurring BEFORE its range (non-canonical order) still folds instead of duplicating
+                // anchors, and (b) an id with a BLOCK-level range element (unrepresentable) is suppressed
+                // ATOMICALLY — its inline partner must not emit an orphan start/end.
+                foreach (var rangeStart in body.Descendants<CommentRangeStart>())
+                {
+                    if (!TryParseCommentId(rangeStart.Id, out var rangeStartId)) continue;
+                    ctx.CommentRangesSeen.Add(rangeStartId);
+                    if (rangeStart.Parent is not Paragraph) ctx.SuppressedCommentIds.Add(rangeStartId);
+                }
+                foreach (var rangeEnd in body.Descendants<CommentRangeEnd>())
+                {
+                    if (!TryParseCommentId(rangeEnd.Id, out var rangeEndId)) continue;
+                    ctx.CommentRangesSeen.Add(rangeEndId);
+                    if (rangeEnd.Parent is not Paragraph) ctx.SuppressedCommentIds.Add(rangeEndId);
+                }
+
                 var blocks = new List<ComposeBlock>();
                 ProjectBlockChildren(body, blocks, new ListContinuity(), ctx);
 
@@ -2031,6 +2049,9 @@ public sealed class ComposeDocxProjectionBuilder
         var result = new List<ComposeComment>();
         foreach (var comment in comments.Elements<Comment>())
         {
+            // Step-9.5 F8: same resource discipline as the body walk — cancellable per comment, text
+            // through the shared output budget (a comment-heavy part must not project unbounded).
+            ctx.CancellationToken.ThrowIfCancellationRequested();
             if (!TryParseCommentId(comment.Id, out var id))
             {
                 ctx.AddWarning("comment-flattened", 1);
@@ -2042,7 +2063,7 @@ public sealed class ComposeDocxProjectionBuilder
                 Author = comment.Author?.Value ?? string.Empty,
                 Initials = comment.Initials?.Value,
                 Date = comment.Date?.InnerText,
-                Text = string.Join("\n", comment.Elements<Paragraph>().Select(p => p.InnerText)),
+                Text = ctx.ClampText(string.Join("\n", comment.Elements<Paragraph>().Select(p => p.InnerText))),
             });
         }
         return result;
@@ -2352,19 +2373,19 @@ public sealed class ComposeDocxProjectionBuilder
                         ctx.AddWarning("internal-link-flattened", 1);
                         resolved = null;
                     }
-                    else if (resolved is null && h.Id?.Value is { Length: > 0 })
+                    else if (resolved is null && (h.Id?.Value is { Length: > 0 } || h.DocLocation?.Value is { Length: > 0 }))
                     {
-                        // Unresolvable relationship or protocol-neutralized target (GPT §13 allowlist):
-                        // text kept, link dropped LOUDLY (task 024 — was silent).
+                        // Unresolvable relationship, protocol-neutralized target (GPT §13 allowlist), or a
+                        // docLocation-only link (Step-9.5 F9): text kept, link dropped LOUDLY (was silent).
                         ctx.AddWarning("hyperlink-target-dropped", 1);
                     }
                     ProjectInline(h, sink, resolved ?? href, ctx);
                     break;
                 case CommentRangeStart commentStart:
                     // Task 024: comment range anchors are MODEL data (marker runs at exact positions).
-                    if (TryParseCommentId(commentStart.Id, out var startId))
+                    // A suppressed id (block-level partner, F6) flattens atomically — counted, no orphan.
+                    if (TryParseCommentId(commentStart.Id, out var startId) && !ctx.SuppressedCommentIds.Contains(startId))
                     {
-                        ctx.CommentRangesSeen.Add(startId);
                         sink.Add(new ComposeInlineRun { CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.Start, Id = startId } });
                     }
                     else
@@ -2373,9 +2394,8 @@ public sealed class ComposeDocxProjectionBuilder
                     }
                     break;
                 case CommentRangeEnd commentEnd:
-                    if (TryParseCommentId(commentEnd.Id, out var endId))
+                    if (TryParseCommentId(commentEnd.Id, out var endId) && !ctx.SuppressedCommentIds.Contains(endId))
                     {
-                        ctx.CommentRangesSeen.Add(endId);
                         // The w:commentReference run is FOLDED into this End marker (the renderer authors
                         // rangeEnd + reference together — Word's canonical adjacency).
                         sink.Add(new ComposeInlineRun { CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.End, Id = endId } });
@@ -2517,14 +2537,22 @@ public sealed class ComposeDocxProjectionBuilder
                     ctx.AddWarning("ruby-phonetic-guide-dropped", 1);
                     break;
                 case CommentReference commentRef:
-                    // Task 024: a reference whose range was seen is FOLDED into the End marker (the
-                    // renderer re-authors it there). A BARE reference (point comment, no range) projects
-                    // as an adjacent Start+End pair at this exact position.
-                    if (TryParseCommentId(commentRef.Id, out var pointId) && !ctx.CommentRangesSeen.Contains(pointId))
+                    // Task 024: a reference whose range exists in the body (pre-scanned — F5, order-
+                    // independent) is FOLDED into the End marker (the renderer re-authors it there). A
+                    // BARE reference (point comment, no range) projects as an adjacent Start+End pair at
+                    // this exact position. A SUPPRESSED id (F6) flattens with its range — counted.
+                    if (TryParseCommentId(commentRef.Id, out var pointId))
                     {
-                        FlushText();
-                        sink.Add(new ComposeInlineRun { CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.Start, Id = pointId } });
-                        sink.Add(new ComposeInlineRun { CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.End, Id = pointId } });
+                        if (ctx.SuppressedCommentIds.Contains(pointId))
+                        {
+                            ctx.AddWarning("comment-anchor-flattened", 1);
+                        }
+                        else if (!ctx.CommentRangesSeen.Contains(pointId))
+                        {
+                            FlushText();
+                            sink.Add(new ComposeInlineRun { CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.Start, Id = pointId } });
+                            sink.Add(new ComposeInlineRun { CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.End, Id = pointId } });
+                        }
                     }
                     break;
                 case FootnoteReference:
@@ -2592,10 +2620,15 @@ public sealed class ComposeDocxProjectionBuilder
         /// <c>Descendants&lt;Paragraph&gt;()</c> count for the unrendered-paragraphs guard (F-03 parity).</summary>
         public int VisitedParagraphs { get; set; }
 
-        /// <summary>Task 024: comment ids whose range markers (start/end) were seen — a
-        /// <c>w:commentReference</c> for a seen id is folded into the End marker; an UNSEEN id is a POINT
-        /// comment and projects its own adjacent Start+End pair.</summary>
+        /// <summary>Task 024: comment ids with range markers in the body (PRE-SCANNED before the walk,
+        /// Step-9.5 F5 — order-independent) — a <c>w:commentReference</c> for a seen id is folded into the
+        /// End marker; an UNSEEN id is a POINT comment and projects its own adjacent Start+End pair.</summary>
         public HashSet<int> CommentRangesSeen { get; } = new();
+
+        /// <summary>Task 024 Step-9.5 F6: comment ids suppressed ATOMICALLY because one of their range
+        /// elements is BLOCK-level (unrepresentable) — the inline partner flattens too (counted), never an
+        /// orphan start/end.</summary>
+        public HashSet<int> SuppressedCommentIds { get; } = new();
 
         public IReadOnlyList<ComposeProjectionWarning> Warnings =>
             _warnings.OrderBy(kv => kv.Key, StringComparer.Ordinal)

@@ -438,4 +438,51 @@ representation fits the established marker-run + carrier-identity patterns).
 
 ---
 
+### §14.1 Task 024 Step 9.5 triage (2026-08-06, commit `a5a979d29` + fix commit)
+
+**adr-check: PASS 8/8** — scrutinized the anchor mechanism directly (markers are model data by id, no
+positional coupling to retained bytes — NOT inherited-XML anchoring); confirmed the POML itself
+pre-authorized the FULL escalation ("may escalate to FULL if a silent-loss risk is found" — it was).
+Two forward-looking tension candidates recorded: comment EDITING would collide with the
+byte-identical-part rule (future resolution: identity-diff part re-authoring per the numbering
+precedent); dangling-anchor robustness (026-shaped) — the latter fixed outright below.
+
+**code-review: REQUEST-CHANGES → all findings resolved. The recurring client-input class (021-F1,
+022-F1) bit a THIRD time — now Critical:**
+- **F1 (Critical) FIXED** — `EnsureCommentsPart` wrote client-controlled Author/Initials/Text UNSANITIZED
+  (XML-illegal control chars ⇒ part unserializable ⇒ save throws on the live path) and arbitrary Date
+  InnerText into an xsd:dateTime attribute. Fix: `SanitizeText` on every string; Date emitted only when
+  it parses round-trip; seam fact feeds REAL control bytes and asserts them stripped.
+- **F2 (Major) FIXED** — orphan anchors: renderer now computes the valid-id set (carrier part ids scanned
+  READ-ONLY from the bytes / deduped model ids for blank-package) and `FilterCommentAnchors` DROPS
+  unmatched or out-of-range-Kind markers (text always kept); duplicate `ComposeComment.Id`s collapse
+  first-wins; `AppendSection` strips all anchors (manages no part).
+- **F3 (Major, routed)** — the client mapper still drops every 021-024 server-set field on rebuild:
+  explicitly recorded as a **010/012 CUTOVER OBLIGATION** (was implicit) — comments/anchors/numId/table
+  facts/page breaks all silently vanish on an edited re-post until the mapper preserves them.
+- **F4 (documented)** — id normalization: OOXML `w:id` is ST_DecimalNumber (integer VALUE semantics;
+  "01" == "1") — canonical emission is value-correct; noted in `ScanCarrierCommentIds` docs.
+- **F5 (Minor) FIXED** — range ids PRE-SCANNED before the walk (order-independent fold; a bare reference
+  before its range no longer duplicates anchors).
+- **F6 (Minor) FIXED** — block-level range elements suppress their id ATOMICALLY (`SuppressedCommentIds`)
+  — the inline partner flattens counted, never an orphan start/end.
+- **F7 (Minor) FIXED** — positive tests added: dangling r:id + neutralized `javascript:` target
+  (hyperlink-target-dropped ×2) and a cross-paragraph range round-trip.
+- **F8 (Minor) FIXED** — `ProjectComments` joins the walk's resource discipline (cancellation per
+  comment; Text through the shared output budget).
+- **F9 (Minor) FIXED** — docLocation-only hyperlinks join the loudness guard.
+- **F10 (Minor) FIXED** — CRLF normalized before the part split.
+- **F11 (Info)** — Word's cosmetic rStyle/annotationRef omitted (tolerated, default styling); out-of-range
+  enum Kind folded into the F2 filter.
+
+**Post-fix:** suite 735/738 (same 3 pre-existing). Publish clean-worktree: **46.90 MB incl PDBs, task
+delta +0.01**.
+
+**Pattern note for 025/026:** three consecutive tasks had their top finding in the same class —
+CLIENT-SUPPLIED MODEL DATA REACHING OOXML AUTHORING UNVALIDATED (021-F1 border tokens, 022-F1 repeat,
+024-F1 comment strings). 025 (tracked-changes: client-posted authors/dates!) must sanitize at the point
+of authoring FROM THE START, not wait for review.
+
+---
+
 *Steps 1–3 artifact + gates + tasks 020/011/021/022/023/024 records. Checkpoint in `current-task.md`.*

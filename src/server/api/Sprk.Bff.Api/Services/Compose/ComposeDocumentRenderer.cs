@@ -111,11 +111,19 @@ public sealed partial class ComposeDocumentRenderer
             mainPart.Document = new Document();
             var body = mainPart.Document.AppendChild(new Body());
 
+            // Step-9.5 F2: anchors may only reference ids the AUTHORED part will contain (deduped model
+            // ids) — unmatched/out-of-range anchors drop rather than dangle as corrupting references.
+            var renderBlocks = model.Blocks;
+            if (ModelContainsCommentAnchor(renderBlocks))
+            {
+                renderBlocks = FilterCommentAnchors(renderBlocks, new HashSet<int>(model.Comments.Select(c => c.Id)));
+            }
+
             // A NumberingPlan accumulates the ordered/bullet num instances the body render allocates, so the
             // numbering part authored afterwards references exactly the ids the body used. (Blank package —
             // no carrier numbering exists, so source NumIds map to allocated instances; see ListRenderState.)
             var plan = new NumberingPlan();
-            RenderBlocks(body, model.Blocks, new ListRenderState(plan));
+            RenderBlocks(body, renderBlocks, new ListRenderState(plan));
 
             // G5 (FR-05, task 033): swap each BuildRun href-sentinel for a real EXTERNAL hyperlink
             // relationship on the main part (the part is in scope here; BuildRun was not). Before save.
@@ -252,7 +260,12 @@ public sealed partial class ComposeDocumentRenderer
                 state = new ListRenderState(plan, targetNumbering);
             }
 
-            RenderBlocks(body, blocks, state);
+            // Step-9.5 F2: AppendSection manages no comments part — anchor marker runs (never sent by its
+            // callers) are stripped rather than emitted as dangling references.
+            var appendBlocks = ModelContainsCommentAnchor(blocks)
+                ? FilterCommentAnchors(blocks, new HashSet<int>())
+                : blocks;
+            RenderBlocks(body, appendBlocks, state);
 
             // G5 (FR-05, task 033): resolve any href-sentinels in the appended section too (parity with
             // SynthesizeDocument; the Summary Page generator emits none today, so this is a no-op there).
@@ -436,7 +449,22 @@ public sealed partial class ComposeDocumentRenderer
                 state = new ListRenderState(plan, carrierNumbering);
             }
 
-            RenderBlocks(body, model.Blocks, state);
+            // Step-9.5 F2: anchors may only reference ids the target actually anchors — the carrier
+            // part's own ids (scanned READ-ONLY from the bytes; the part stays untouched/byte-identical),
+            // or the deduped model ids when the carrier has no part (EnsureCommentsPart authors it).
+            // Unmatched/out-of-range anchors drop rather than dangle as corrupting references.
+            var renderBlocks = model.Blocks;
+            if (ModelContainsCommentAnchor(renderBlocks))
+            {
+                var validCommentIds = ScanCarrierCommentIds(carrierBytes);
+                if (validCommentIds.Count == 0)
+                {
+                    validCommentIds = new HashSet<int>(model.Comments.Select(c => c.Id));
+                }
+                renderBlocks = FilterCommentAnchors(renderBlocks, validCommentIds);
+            }
+
+            RenderBlocks(body, renderBlocks, state);
             ResolveHyperlinkRelationships(body, mainPart);
 
             if (mainPart.StyleDefinitionsPart is null)
@@ -511,29 +539,137 @@ public sealed partial class ComposeDocumentRenderer
 
         var part = mainPart.AddNewPart<WordprocessingCommentsPart>();
         var container = new Comments();
+        var emittedIds = new HashSet<int>();
         foreach (var model in comments)
         {
+            // Step-9.5 F2: duplicate ids collapse to first-wins (a duplicate would make every anchor for
+            // the id ambiguous). Step-9.5 F1 (the recurring client-input class): every client-controlled
+            // string is SANITIZED like body text — XML-illegal control chars would make the part
+            // unserializable and throw out of the live save path; a Date that does not parse as
+            // xsd:dateTime is OMITTED (projection-sourced dates parse; only client junk is dropped).
+            if (!emittedIds.Add(model.Id))
+            {
+                continue;
+            }
             var comment = new Comment
             {
                 Id = model.Id.ToString(CultureInfo.InvariantCulture),
-                Author = model.Author,
+                Author = SanitizeText(model.Author),
             };
             if (!string.IsNullOrEmpty(model.Initials))
             {
-                comment.Initials = model.Initials;
+                comment.Initials = SanitizeText(model.Initials);
             }
-            if (!string.IsNullOrEmpty(model.Date))
+            if (!string.IsNullOrEmpty(model.Date)
+                && DateTime.TryParse(model.Date, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out _))
             {
                 comment.Date = new DateTimeValue { InnerText = model.Date };
             }
-            foreach (var line in model.Text.Split('\n'))
+            var text = model.Text.Replace("\r\n", "\n").Replace('\r', '\n'); // F10: normalize client CRLF
+            foreach (var line in text.Split('\n'))
             {
-                comment.AppendChild(new Paragraph(new Run(new Text(line) { Space = SpaceProcessingModeValues.Preserve })));
+                comment.AppendChild(new Paragraph(new Run(new Text(SanitizeText(line)) { Space = SpaceProcessingModeValues.Preserve })));
             }
             container.AppendChild(comment);
         }
         part.Comments = container;
         part.Comments.Save();
+    }
+
+    /// <summary>
+    /// Step-9.5 F2: the set of comment ids a render may legitimately ANCHOR — the target's own part ids
+    /// (carrier mode; scanned READ-ONLY from the carrier bytes, never the editable package) or the
+    /// deduped model ids (blank-package mode, where <see cref="EnsureCommentsPart"/> authors the part).
+    /// Anchors outside this set are DROPPED by <see cref="FilterCommentAnchors"/> — an orphan
+    /// <c>w:commentReference</c> would corrupt the document (Word repair prompt). Comparison is by
+    /// PARSED value (OOXML <c>w:id</c> is ST_DecimalNumber — integer value semantics; "01" == "1").
+    /// </summary>
+    private static HashSet<int> ScanCarrierCommentIds(byte[] carrierBytes)
+    {
+        try
+        {
+            using var stream = new MemoryStream(carrierBytes, writable: false);
+            using var doc = WordprocessingDocument.Open(stream, isEditable: false);
+            var ids = new HashSet<int>();
+            var comments = doc.MainDocumentPart?.WordprocessingCommentsPart?.Comments;
+            if (comments is not null)
+            {
+                foreach (var comment in comments.Elements<Comment>())
+                {
+                    if (int.TryParse(comment.Id?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
+                    {
+                        ids.Add(id);
+                    }
+                }
+            }
+            return ids;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return new HashSet<int>(); // unreadable part → no anchorable ids; anchors drop rather than dangle
+        }
+    }
+
+    private static bool ModelContainsCommentAnchor(IReadOnlyList<ComposeBlock> blocks) =>
+        blocks.Any(b => b.Runs.Any(r => r.CommentAnchor is not null)
+            || (b.Table?.Rows.Any(row => row.Cells.Any(c => ModelContainsCommentAnchor(c.Blocks))) ?? false));
+
+    /// <summary>Step-9.5 F2: drops anchor marker runs whose id is not in <paramref name="validIds"/> or
+    /// whose Kind is out of range (JsonStringEnumConverter accepts raw integers). Returns the SAME
+    /// instances when nothing needs filtering.</summary>
+    private static IReadOnlyList<ComposeBlock> FilterCommentAnchors(IReadOnlyList<ComposeBlock> blocks, IReadOnlySet<int> validIds)
+    {
+        static bool IsInvalid(ComposeInlineRun run, IReadOnlySet<int> valid) =>
+            run.CommentAnchor is { } anchor
+            && (anchor.Kind is not (ComposeCommentAnchorKind.Start or ComposeCommentAnchorKind.End)
+                || !valid.Contains(anchor.Id));
+
+        List<ComposeBlock>? rebuilt = null;
+        for (var i = 0; i < blocks.Count; i++)
+        {
+            var block = blocks[i];
+            var filtered = block;
+            if (block.Runs.Any(r => IsInvalid(r, validIds)))
+            {
+                filtered = block with { Runs = block.Runs.Where(r => !IsInvalid(r, validIds)).ToList() };
+            }
+            if (block.Table is { } table)
+            {
+                List<ComposeTableRow>? newRows = null;
+                for (var rowIndex = 0; rowIndex < table.Rows.Count; rowIndex++)
+                {
+                    var row = table.Rows[rowIndex];
+                    List<ComposeTableCell>? newCells = null;
+                    for (var cellIndex = 0; cellIndex < row.Cells.Count; cellIndex++)
+                    {
+                        var cell = row.Cells[cellIndex];
+                        var newBlocks = FilterCommentAnchors(cell.Blocks, validIds);
+                        var newCell = ReferenceEquals(newBlocks, cell.Blocks) ? cell : cell with { Blocks = newBlocks };
+                        if (!ReferenceEquals(newCell, cell) && newCells is null)
+                        {
+                            newCells = new List<ComposeTableCell>(row.Cells.Take(cellIndex));
+                        }
+                        newCells?.Add(newCell);
+                    }
+                    var newRow = newCells is null ? row : row with { Cells = newCells };
+                    if (!ReferenceEquals(newRow, row) && newRows is null)
+                    {
+                        newRows = new List<ComposeTableRow>(table.Rows.Take(rowIndex));
+                    }
+                    newRows?.Add(newRow);
+                }
+                if (newRows is not null)
+                {
+                    filtered = filtered with { Table = table with { Rows = newRows } };
+                }
+            }
+            if (!ReferenceEquals(filtered, block) && rebuilt is null)
+            {
+                rebuilt = new List<ComposeBlock>(blocks.Take(i));
+            }
+            rebuilt?.Add(filtered);
+        }
+        return rebuilt ?? blocks;
     }
 
     /// <summary>Whether <paramref name="blocks"/> contains any list item (recursing into table cells) —

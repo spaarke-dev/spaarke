@@ -252,6 +252,142 @@ public sealed class ComposeHyperlinkCommentSeamTests
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 4b. Step-9.5 F7 — the loudness paths have POSITIVE coverage: dangling rel id + neutralized
+    //     protocol both count hyperlink-target-dropped; a cross-paragraph range round-trips.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void BuildContentModel_DanglingAndNeutralizedLinkTargets_CountHyperlinkTargetDropped()
+    {
+        byte[] source;
+        using (var stream = new MemoryStream())
+        {
+            using (var doc = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document))
+            {
+                var main = doc.AddMainDocumentPart();
+                var evil = main.AddHyperlinkRelationship(new Uri("javascript:alert(1)"), isExternal: true);
+                main.Document = new Document(new Body(
+                    new Paragraph(
+                        new Hyperlink(new Run(new Text("dangling"))) { Id = "rIdDoesNotExist" },
+                        new Hyperlink(new Run(new Text("neutralized"))) { Id = evil.Id }),
+                    new SectionProperties(new PageSize { Width = 12240, Height = 15840 })));
+                main.Document.Save();
+            }
+            source = stream.ToArray();
+        }
+
+        var projection = _builder.BuildContentModel(source);
+
+        projection.Warnings.Should().ContainSingle(w => w.Code == "hyperlink-target-dropped")
+            .Which.Count.Should().Be(2, "a dangling r:id and a protocol-neutralized target each count");
+        var runs = projection.Model.Blocks[0].Runs;
+        runs.Should().HaveCount(2);
+        runs.Should().OnlyContain(r => r.Href == null, "both links drop; the TEXT survives");
+        runs.Select(r => r.Text).Should().Equal("dangling", "neutralized");
+    }
+
+    [Fact]
+    public void CarrierRoundTrip_CrossParagraphCommentRange_KeepsBothMarkersAndStaysValid()
+    {
+        byte[] source;
+        using (var stream = new MemoryStream())
+        {
+            using (var doc = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document))
+            {
+                var main = doc.AddMainDocumentPart();
+                var commentsPart = main.AddNewPart<WordprocessingCommentsPart>();
+                commentsPart.Comments = new Comments(
+                    new Comment(new Paragraph(new Run(new Text("Spans two paragraphs."))))
+                    { Id = "5", Author = "Reviewer" });
+                commentsPart.Comments.Save();
+                main.Document = new Document(new Body(
+                    new Paragraph(
+                        new Run(new Text("Range opens ") { Space = SpaceProcessingModeValues.Preserve }),
+                        new CommentRangeStart { Id = "5" },
+                        new Run(new Text("here") { Space = SpaceProcessingModeValues.Preserve })),
+                    new Paragraph(
+                        new Run(new Text("and closes ") { Space = SpaceProcessingModeValues.Preserve }),
+                        new CommentRangeEnd { Id = "5" },
+                        new Run(new CommentReference { Id = "5" }),
+                        new Run(new Text(" here.") { Space = SpaceProcessingModeValues.Preserve })),
+                    new SectionProperties(new PageSize { Width = 12240, Height = 15840 })));
+                main.Document.Save();
+            }
+            source = stream.ToArray();
+        }
+
+        var projection = _builder.BuildContentModel(source);
+        AnchorFacts(projection.Model).Should().Equal(
+            "Range opens |<Start:5>|here",
+            "and closes |<End:5>| here.");
+
+        var rendered = _renderer.RenderIntoCarrier(source, projection.Model, author: "seam-test");
+        using var renderedDoc = WordprocessingDocument.Open(new MemoryStream(rendered, writable: false), isEditable: false);
+        var body = renderedDoc.MainDocumentPart!.Document!.Body!;
+        body.Elements<Paragraph>().ElementAt(0).Elements<CommentRangeStart>().Single().Id!.Value.Should().Be("5");
+        body.Elements<Paragraph>().ElementAt(1).Elements<CommentRangeEnd>().Single().Id!.Value.Should().Be("5");
+        body.Elements<Paragraph>().ElementAt(1).Descendants<CommentReference>().Single().Id!.Value.Should().Be("5");
+
+        var sourceErrors = ValidationErrorCounts(source);
+        ValidationErrorCounts(rendered)
+            .Where(kv => kv.Value > (sourceErrors.TryGetValue(kv.Key, out var had) ? had : 0))
+            .Should().BeEmpty();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 4c. Step-9.5 F1/F2 — client-input hardening: junk anchors drop instead of dangling; comment
+    //     strings are sanitized so the part always serializes; duplicates collapse; junk dates drop.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void SynthesizeDocument_ClientJunkCommentsAndAnchors_RendersSafelyWithoutDanglingReferences()
+    {
+        var model = new ComposeContentModel
+        {
+            Blocks = new[]
+            {
+                new ComposeBlock
+                {
+                    Kind = ComposeBlockKind.Paragraph,
+                    Runs = new[]
+                    {
+                        new ComposeInlineRun { CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.Start, Id = 99 } }, // no matching comment
+                        new ComposeInlineRun { Text = "annotated" },
+                        new ComposeInlineRun { CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.End, Id = 99 } },
+                        new ComposeInlineRun { CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.Start, Id = 7 } },
+                        new ComposeInlineRun { Text = "valid range" },
+                        new ComposeInlineRun { CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.End, Id = 7 } },
+                    },
+                },
+            },
+            Comments = new[]
+            {
+                new ComposeComment { Id = 7, Author = "AB", Date = "not-a-date", Text = "badtext\r\nline2" },
+                new ComposeComment { Id = 7, Author = "Duplicate", Text = "must be ignored" },
+            },
+        };
+
+        var rendered = _renderer.SynthesizeDocument(model, author: "seam-test");
+
+        using var doc = WordprocessingDocument.Open(new MemoryStream(rendered, writable: false), isEditable: false);
+        var main = doc.MainDocumentPart!;
+        var body = main.Document!.Body!;
+
+        // The unmatched anchor (id 99) was DROPPED — no dangling reference anywhere.
+        body.Descendants<CommentReference>().Select(r => r.Id!.Value).Should().Equal(new[] { "7" });
+        body.Descendants<CommentRangeStart>().Select(r => r.Id!.Value).Should().Equal(new[] { "7" });
+        body.InnerText.Should().Contain("annotated", "dropping the anchor never drops the text");
+
+        // The part: single deduped entry, sanitized strings, CRLF normalized, junk date omitted.
+        var comments = main.WordprocessingCommentsPart!.Comments!;
+        var comment = comments.Elements<Comment>().Single();
+        comment.Id!.Value.Should().Be("7");
+        comment.Author!.Value.Should().Be("AB", "XML-illegal control chars are sanitized out");
+        comment.Date.Should().BeNull("a date that is not xsd:dateTime is omitted, not emitted");
+        comment.Elements<Paragraph>().Select(p => p.InnerText).Should().Equal("badtext", "line2");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
     // 5. Corpus-wide: comments parts byte-identical + anchor counts and external link targets stable.
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
