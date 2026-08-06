@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Validation;
 using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace Sprk.Bff.Api.Services.Compose;
@@ -438,15 +439,18 @@ public sealed partial class ComposeDocumentRenderer
             // the carrier's numId set, so a model item whose ComposeBlock.NumId exists in the carrier
             // REFERENCES it directly (golden-label parity by construction) — a fully carrier-referencing
             // render allocates nothing and the numbering part is never touched at all.
+            // Task 025: revision ids in the re-authored body seed ABOVE the carrier's existing ids
+            // (read-only scan; skipped entirely for a revision-free model).
+            var revisionIdSeed = ModelContainsRevision(model.Blocks) ? ScanCarrierRevisionIdSeed(carrierBytes) : 0;
             var plan = new NumberingPlan();
-            var state = new ListRenderState(plan);
+            var state = new ListRenderState(plan, revisionIdSeed: revisionIdSeed);
             var maxExistingAbstractId = 0;
             if (ModelContainsListItem(model.Blocks))
             {
                 var carrierNumbering = ScanCarrierNumbering(carrierBytes);
                 maxExistingAbstractId = carrierNumbering.MaxAbstractNumId;
                 plan = new NumberingPlan(Math.Max(FirstListNumInstanceId, carrierNumbering.MaxNumId + 1));
-                state = new ListRenderState(plan, carrierNumbering);
+                state = new ListRenderState(plan, carrierNumbering, revisionIdSeed);
             }
 
             // Step-9.5 F2: anchors may only reference ids the target actually anchors — the carrier
@@ -802,7 +806,7 @@ public sealed partial class ComposeDocumentRenderer
             {
                 case ComposeBlockKind.Heading:
                     CloseRunsDeeperThan(0);
-                    container.AppendChild(BuildHeading(block));
+                    container.AppendChild(BuildHeading(block, state));
                     break;
 
                 case ComposeBlockKind.ListItem when block.Ordered:
@@ -828,14 +832,14 @@ public sealed partial class ComposeDocumentRenderer
                     // editing: the user adds an item to an imported list and it numbers with it).
                     orderedRunByLevel[level] = effectiveNumId;
                     CloseRunsDeeperThan(level);
-                    container.AppendChild(BuildListItem(block, effectiveNumId));
+                    container.AppendChild(BuildListItem(block, effectiveNumId, state));
                     break;
 
                 case ComposeBlockKind.ListItem: // bullet
                     var bulletLevel = Math.Clamp(block.Level, 0, 8);
                     orderedRunByLevel.Remove(bulletLevel);
                     CloseRunsDeeperThan(bulletLevel);
-                    container.AppendChild(BuildListItem(block, state.ResolveBullet(block.NumId, bulletLevel)));
+                    container.AppendChild(BuildListItem(block, state.ResolveBullet(block.NumId, bulletLevel), state));
                     break;
 
                 case ComposeBlockKind.Table:
@@ -849,7 +853,7 @@ public sealed partial class ComposeDocumentRenderer
                 case ComposeBlockKind.Paragraph:
                 default:
                     CloseRunsDeeperThan(0);
-                    container.AppendChild(BuildParagraph(block));
+                    container.AppendChild(BuildParagraph(block, state));
                     break;
             }
         }
@@ -870,15 +874,15 @@ public sealed partial class ComposeDocumentRenderer
         return false;
     }
 
-    private static Paragraph BuildParagraph(ComposeBlock block)
+    private static Paragraph BuildParagraph(ComposeBlock block, ListRenderState state)
     {
         var pPr = new ParagraphProperties();
         ApplyPageBreakBefore(pPr, block);
         ApplyAlignment(pPr, block.Alignment);
-        return AssembleParagraph(pPr, block);
+        return AssembleParagraph(pPr, block, state);
     }
 
-    private static Paragraph BuildHeading(ComposeBlock block)
+    private static Paragraph BuildHeading(ComposeBlock block, ListRenderState state)
     {
         var level = Math.Clamp(block.Level <= 0 ? 1 : block.Level, 1, MaxHeadingLevel);
         var pPr = new ParagraphProperties(new ParagraphStyleId { Val = HeadingStyleId(level) });
@@ -886,10 +890,10 @@ public sealed partial class ComposeDocumentRenderer
         // direct numId here would double-number (FR-27).
         ApplyPageBreakBefore(pPr, block);
         ApplyAlignment(pPr, block.Alignment);
-        return AssembleParagraph(pPr, block);
+        return AssembleParagraph(pPr, block, state);
     }
 
-    private static Paragraph BuildListItem(ComposeBlock block, int numInstanceId)
+    private static Paragraph BuildListItem(ComposeBlock block, int numInstanceId, ListRenderState state)
     {
         var ilvl = Math.Clamp(block.Level, 0, 8);
         // CT_PPr order: pStyle < pageBreakBefore < numPr < jc — built sequentially in that order.
@@ -900,7 +904,7 @@ public sealed partial class ComposeDocumentRenderer
             new NumberingLevelReference { Val = ilvl },
             new NumberingId { Val = numInstanceId }));
         ApplyAlignment(pPr, block.Alignment);
-        return AssembleParagraph(pPr, block);
+        return AssembleParagraph(pPr, block, state);
     }
 
     /// <summary>Task 023: <c>w:pageBreakBefore</c> — appended in CT_PPr order (after <c>pStyle</c>, before
@@ -914,9 +918,38 @@ public sealed partial class ComposeDocumentRenderer
     }
 
     /// <summary>Assembles a paragraph from its <paramref name="pPr"/> + the block's inline runs, carrying a
-    /// client paraId when the model supplied a valid one (else left for <see cref="AssignParaIds"/>).</summary>
-    private static Paragraph AssembleParagraph(ParagraphProperties pPr, ComposeBlock block)
+    /// client paraId when the model supplied a valid one (else left for <see cref="AssignParaIds"/>).
+    /// Task 025: also authors the paragraph's tracked-change markup — the MARK revision
+    /// (<c>w:pPr/w:rPr/w:ins|w:del</c>), the paragraph-formatting change (<c>w:pPrChange</c>, appended
+    /// LAST in CT_PPr order), and run-level <c>w:ins</c>/<c>w:del</c> wrappers GROUPING consecutive runs
+    /// with the same revision identity (one wrapper, one server-minted id). Comment anchors always emit
+    /// at paragraph level, closing any open wrapper.</summary>
+    private static Paragraph AssembleParagraph(ParagraphProperties pPr, ComposeBlock block, ListRenderState state)
     {
+        // Mark revision: w:pPr/w:rPr/w:ins|w:del — CT_PPr puts rPr after jc and before sectPr/pPrChange,
+        // which is exactly this append position (every builder appended its jc already).
+        if (block.MarkRevision is { } markRev)
+        {
+            OpenXmlElement markChange = markRev.Kind == ComposeRevisionKind.Inserted
+                ? new Inserted { Id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture), Author = SanitizeRevisionAuthor(markRev.Author), Date = TryValidRevisionDate(markRev.Date) }
+                : new Deleted { Id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture), Author = SanitizeRevisionAuthor(markRev.Author), Date = TryValidRevisionDate(markRev.Date) };
+            pPr.AppendChild(new ParagraphMarkRunProperties(markChange));
+        }
+
+        // Paragraph-formatting change: w:pPrChange (LAST in CT_PPr). Schema requires the previous-pPr
+        // child, so the whole record is dropped when the opaque carry is missing or fails the SDK parse
+        // gate (client junk never reaches the package; the current formatting simply stands).
+        if (block.PropertiesChange is { } propsChange
+            && TryParsePreviousProperties<ParagraphPropertiesExtended>(propsChange.PreviousPropertiesXml, "pPr") is { } previousPPr)
+        {
+            pPr.AppendChild(new ParagraphPropertiesChange(previousPPr)
+            {
+                Id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture),
+                Author = SanitizeRevisionAuthor(propsChange.Author),
+                Date = TryValidRevisionDate(propsChange.Date),
+            });
+        }
+
         var paragraph = new Paragraph();
         CarryClientParaId(paragraph, block.ParaId);
         paragraph.AppendChild(pPr);
@@ -927,13 +960,27 @@ public sealed partial class ComposeDocumentRenderer
             return paragraph;
         }
 
+        // Task 025 revision grouping: consecutive runs with the same revision identity share ONE
+        // w:ins/w:del wrapper (record value equality on kind+author+date — adjacent same-identity source
+        // wrappers legitimately merge; Word renders them identically).
+        OpenXmlElement? wrapper = null;
+        ComposeRevision? wrapperRevision = null;
+
+        void CloseWrapper()
+        {
+            wrapper = null;
+            wrapperRevision = null;
+        }
+
         foreach (var run in block.Runs)
         {
             // Task 024: a comment-anchor marker run emits the anchor markup instead of a text run —
             // rangeStart, or rangeEnd IMMEDIATELY followed by the folded commentReference run (Word's
-            // canonical adjacency; the reference is what makes the comment visible).
+            // canonical adjacency; the reference is what makes the comment visible). Anchors never join a
+            // revision wrapper (they are emitted at paragraph level; ComposeInlineRun.Revision contract).
             if (run.CommentAnchor is { } anchor)
             {
+                CloseWrapper();
                 var anchorId = anchor.Id.ToString(CultureInfo.InvariantCulture);
                 if (anchor.Kind == ComposeCommentAnchorKind.Start)
                 {
@@ -946,7 +993,28 @@ public sealed partial class ComposeDocumentRenderer
                 }
                 continue;
             }
-            paragraph.AppendChild(BuildRun(run));
+
+            if (run.Revision is not { } revision)
+            {
+                CloseWrapper();
+                paragraph.AppendChild(BuildRun(run, state));
+                continue;
+            }
+
+            if (wrapper is null || wrapperRevision != revision)
+            {
+                var id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture);
+                var author = SanitizeRevisionAuthor(revision.Author);
+                var date = TryValidRevisionDate(revision.Date);
+                wrapper = revision.Kind == ComposeRevisionKind.Inserted
+                    ? new InsertedRun { Id = id, Author = author, Date = date }
+                    : new DeletedRun { Id = id, Author = author, Date = date };
+                wrapperRevision = revision;
+                paragraph.AppendChild(wrapper);
+            }
+
+            // A Deleted run's text authors as w:delText (Word's requirement for pending-deleted content).
+            wrapper.AppendChild(BuildRun(run, state, deleted: revision.Kind == ComposeRevisionKind.Deleted));
         }
 
         return paragraph;
@@ -958,26 +1026,47 @@ public sealed partial class ComposeDocumentRenderer
     // persists. A prefix that can never collide with a real OOXML relationship id (rId…).
     private const string HyperlinkPendingIdPrefix = "COMPOSE_PENDING_HREF:";
 
-    private static OpenXmlElement BuildRun(ComposeInlineRun run)
+    private static OpenXmlElement BuildRun(ComposeInlineRun run, ListRenderState state, bool deleted = false)
     {
         // Task 023: a page-break run IS the break — every other field is ignored by contract
         // (ComposeInlineRun.IsPageBreak). Same markup AppendSection's page-broken section uses.
+        // (Inside a w:ins/w:del wrapper the bare break run is schema-legal — no delText involved.)
         if (run.IsPageBreak)
         {
             return new Run(new Break { Type = BreakValues.Page });
         }
 
         var element = new Run();
-        if (run.Bold || run.Italic || run.Underline)
+        // Task 025: a tracked run-formatting change (w:rPrChange) forces an rPr even on an unmarked run —
+        // the change record lives inside it (LAST in CT_RPr order).
+        var formatChange = run.FormatChange is { } change
+            ? (Change: change, Previous: TryParsePreviousProperties<PreviousRunProperties>(change.PreviousPropertiesXml, "rPr"))
+            : ((ComposeFormatChange Change, PreviousRunProperties? Previous)?)null;
+        if (run.Bold || run.Italic || run.Underline || formatChange?.Previous is not null)
         {
             var rPr = new RunProperties();
             if (run.Bold) rPr.AppendChild(new Bold());
             if (run.Italic) rPr.AppendChild(new Italic());
             if (run.Underline) rPr.AppendChild(new Underline { Val = UnderlineValues.Single });
+            if (formatChange is { Previous: { } previousRPr } fc)
+            {
+                // Same drop-on-parse-failure posture as pPrChange: schema requires the previous-rPr
+                // child, so an invalid opaque carry drops the whole record (formatting stands as-is).
+                rPr.AppendChild(new RunPropertiesChange(previousRPr)
+                {
+                    Id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture),
+                    Author = SanitizeRevisionAuthor(fc.Change.Author),
+                    Date = TryValidRevisionDate(fc.Change.Date),
+                });
+            }
             element.AppendChild(rPr);
         }
 
-        element.AppendChild(new Text(SanitizeText(run.Text)) { Space = SpaceProcessingModeValues.Preserve });
+        // Pending-deleted content authors as w:delText (Word rejects w:t inside w:del).
+        OpenXmlElement textElement = deleted
+            ? new DeletedText(SanitizeText(run.Text)) { Space = SpaceProcessingModeValues.Preserve }
+            : new Text(SanitizeText(run.Text)) { Space = SpaceProcessingModeValues.Preserve };
+        element.AppendChild(textElement);
 
         // G5: a run carrying an href renders as a clean w:hyperlink wrapping the run. The real external
         // relationship id can only be minted once the MainDocumentPart is in scope, so stash the href on a
@@ -1607,6 +1696,135 @@ public sealed partial class ComposeDocumentRenderer
     private static string SanitizeText(string value) =>
         string.IsNullOrEmpty(value) ? string.Empty : XmlInvalidCharPattern().Replace(value, string.Empty);
 
+    // ── task 025: tracked-change authoring hardening ─────────────────────────────────────────────
+    // Client-posted revision attribution is CLIENT INPUT reaching OOXML authoring — the recurring
+    // review-finding class (021-F1 / 022-F1 / 024-F1). Everything below is gated AT AUTHORING:
+    // author sanitized + clamped (never empty — @w:author is schema-required), date parse-gated
+    // (@w:date is optional; junk is omitted), previous-properties XML parsed through the typed SDK and
+    // schema-validated (never string-injected), revision ids ALWAYS server-minted.
+
+    private const int MaxRevisionAuthorChars = 255;
+    private const int MaxPreviousPropertiesXmlChars = 32 * 1024;
+    private const string WNamespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+
+    private static readonly OpenXmlValidator PreviousPropertiesValidator = new(FileFormatVersions.Office2019);
+
+    private static string SanitizeRevisionAuthor(string? author)
+    {
+        var sanitized = SanitizeText(author ?? string.Empty).Trim();
+        if (sanitized.Length == 0)
+        {
+            return "Unknown";
+        }
+        return sanitized.Length <= MaxRevisionAuthorChars ? sanitized : sanitized[..MaxRevisionAuthorChars];
+    }
+
+    /// <summary>Emits the revision date only when the raw string parses as a round-trip timestamp (the
+    /// comments-part gate from task 024, F1) — projection-sourced dates pass; client junk is omitted
+    /// (<c>@w:date</c> is schema-optional). The RAW string is kept for byte-faithful re-authoring.</summary>
+    private static DateTimeValue? TryValidRevisionDate(string? date) =>
+        !string.IsNullOrEmpty(date)
+            && DateTime.TryParse(date, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out _)
+            ? new DateTimeValue { InnerText = date }
+            : null;
+
+    /// <summary>
+    /// The <see cref="ComposeFormatChange.PreviousPropertiesXml"/> gate: parses the opaque carry through
+    /// the TYPED SDK class (never string-injection into the package), verifies element identity
+    /// (<paramref name="expectedLocalName"/> in the WordprocessingML namespace), and schema-validates the
+    /// parsed subtree — any failure drops the whole change record (the current formatting simply stands;
+    /// equivalent to accepting the formatting change). Size-clamped against hostile payloads.
+    /// </summary>
+    private static T? TryParsePreviousProperties<T>(string? xml, string expectedLocalName) where T : OpenXmlElement
+    {
+        if (string.IsNullOrWhiteSpace(xml) || xml.Length > MaxPreviousPropertiesXmlChars)
+        {
+            return null;
+        }
+        try
+        {
+            var element = (T)Activator.CreateInstance(typeof(T), xml)!;
+            if (element.LocalName != expectedLocalName || element.NamespaceUri != WNamespace)
+            {
+                return null;
+            }
+            _ = element.OuterXml; // force the lazy parse before validation
+            return PreviousPropertiesValidator.Validate(element).Any() ? null : element;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Whether any block carries task-025 revision facts (triggers the carrier revision-id seed
+    /// scan — a revision-free render skips it entirely).</summary>
+    private static bool ModelContainsRevision(IReadOnlyList<ComposeBlock> blocks) =>
+        blocks.Any(b => b.MarkRevision is not null || b.PropertiesChange is not null
+            || b.Runs.Any(r => r.Revision is not null || r.FormatChange is not null)
+            || (b.Table?.Rows.Any(row => row.Cells.Any(c => ModelContainsRevision(c.Blocks))) ?? false));
+
+    /// <summary>
+    /// Task 025: the collision base for re-authored revision ids — the max revision <c>w:id</c> across the
+    /// carrier's parts (body included: preserved headers/footers/notes may carry revisions, and seeding
+    /// above the old body's ids costs nothing). READ-ONLY side open of the bytes, same discipline as
+    /// <see cref="ScanCarrierNumbering"/> / <see cref="ScanCarrierCommentIds"/>. Mirrors the R5 engine's
+    /// <c>SeedRevisionId</c>. Unreadable carrier → 0 (blank-package posture).
+    /// </summary>
+    private static int ScanCarrierRevisionIdSeed(byte[] carrierBytes)
+    {
+        try
+        {
+            using var stream = new MemoryStream(carrierBytes, writable: false);
+            using var doc = WordprocessingDocument.Open(stream, isEditable: false);
+            var main = doc.MainDocumentPart;
+            if (main is null)
+            {
+                return 0;
+            }
+
+            var max = 0;
+            void Scan(OpenXmlElement? root)
+            {
+                if (root is null) return;
+                foreach (var element in root.Descendants())
+                {
+                    var id = element switch
+                    {
+                        InsertedRun ins => ins.Id?.Value,
+                        DeletedRun del => del.Id?.Value,
+                        MoveFromRun mf => mf.Id?.Value,
+                        MoveToRun mt => mt.Id?.Value,
+                        Inserted i => i.Id?.Value,
+                        Deleted d => d.Id?.Value,
+                        RunPropertiesChange rc => rc.Id?.Value,
+                        ParagraphPropertiesChange pc => pc.Id?.Value,
+                        CellInsertion ci => ci.Id?.Value,
+                        CellDeletion cd => cd.Id?.Value,
+                        _ => null,
+                    };
+                    if (id is not null
+                        && int.TryParse(id, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
+                        && value > max)
+                    {
+                        max = value;
+                    }
+                }
+            }
+
+            Scan(main.Document);
+            foreach (var header in main.HeaderParts) Scan(header.Header);
+            foreach (var footer in main.FooterParts) Scan(footer.Footer);
+            Scan(main.FootnotesPart?.Footnotes);
+            Scan(main.EndnotesPart?.Endnotes);
+            return max;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return 0;
+        }
+    }
+
     [GeneratedRegex(@"^[0-9A-Fa-f]{1,8}$")]
     private static partial Regex ParaIdHexPattern();
 
@@ -1629,14 +1847,22 @@ public sealed partial class ComposeDocumentRenderer
     {
         private readonly CarrierNumberingScan? _carrier;
         private readonly Dictionary<int, int> _orderedBySourceId = new();
+        private int _revisionId;
 
-        public ListRenderState(NumberingPlan plan, CarrierNumberingScan? carrier = null)
+        public ListRenderState(NumberingPlan plan, CarrierNumberingScan? carrier = null, int revisionIdSeed = 0)
         {
             Plan = plan;
             _carrier = carrier;
+            _revisionId = revisionIdSeed;
         }
 
         public NumberingPlan Plan { get; }
+
+        /// <summary>Task 025: mints the next revision <c>w:id</c> — monotonic per render, seeded above the
+        /// carrier's existing revision ids (<see cref="ScanCarrierRevisionIdSeed"/>) so re-authored body
+        /// revisions never collide with ids in preserved parts (headers/footers). ALWAYS server-minted —
+        /// the model deliberately carries no revision id (client input never reaches <c>w:id</c>).</summary>
+        public int NextRevisionId() => ++_revisionId;
 
         /// <summary>Effective instance id for an ordered item carrying <paramref name="sourceNumId"/> at
         /// <paramref name="level"/>: carrier-direct when the id exists there AND its level classifies as

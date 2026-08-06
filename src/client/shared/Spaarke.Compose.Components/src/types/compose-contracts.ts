@@ -462,6 +462,24 @@ export type ComposeBlockKind = 'Paragraph' | 'Heading' | 'ListItem' | 'Table';
 /** Paragraph alignment — mirrors the server `ComposeParagraphAlignment` (string enum). */
 export type ComposeAlignment = 'Default' | 'Left' | 'Center' | 'Right' | 'Justify';
 
+/** A tracked-change identity (server task 025 — mirrors the server `ComposeRevision`): the WHO/WHEN of a
+ * `w:ins`/`w:del` revision. The revision `w:id` is deliberately NOT here — the server always mints it. */
+export interface ComposeRevisionFact {
+  kind: 'Inserted' | 'Deleted';
+  author?: string;
+  /** Revision timestamp as authored (`xsd:dateTime`), raw. */
+  date?: string;
+}
+
+/** A tracked FORMATTING-change record (server task 025 — mirrors the server `ComposeFormatChange`):
+ * `w:pPrChange` / `w:rPrChange` identity + the previous properties as opaque server-set XML (SDK-parse
+ * validated server-side; never inspect or edit it client-side). */
+export interface ComposeFormatChangeFact {
+  author?: string;
+  date?: string;
+  previousPropertiesXml?: string;
+}
+
 /** One inline run — a span of text with optional formatting (mirrors the server `ComposeInlineRun`). */
 export interface ComposeInlineRun {
   /** Run text (Tier 3 — document content). */
@@ -476,6 +494,12 @@ export interface ComposeInlineRun {
    * `w:commentRangeEnd` + the folded `w:commentReference` run); every other field is ignored when set.
    * Server-set; preserve untouched on re-post. */
   commentAnchor?: { kind: 'Start' | 'End'; id: number };
+  /** Server task 025: the tracked revision this run belongs to (`w:ins`/`w:del` — pending-deleted text is
+   * carried as ordinary `text` and re-authored as `w:delText`). Server-set; preserve untouched on
+   * re-post — dropping it silently SETTLES the redline (data loss for a legal document). */
+  revision?: ComposeRevisionFact;
+  /** Server task 025: a tracked run-formatting change (`w:rPrChange`). Server-set; preserve untouched. */
+  formatChange?: ComposeFormatChangeFact;
 }
 
 /** A table cell — nested block content (mirrors the server `ComposeTableCell`).
@@ -564,6 +588,12 @@ export interface ComposeContentBlock {
   /** Server task 023: `w:pPr/w:pageBreakBefore` — the paragraph starts on a new page. Server-set by the
    * docx→model projection; preserve untouched on re-post. */
   pageBreakBefore?: boolean;
+  /** Server task 025: a tracked revision on this paragraph's MARK (`w:pPr/w:rPr/w:ins|w:del` —
+   * `Deleted` = accepting merges this paragraph with the next). Server-set; preserve untouched. */
+  markRevision?: ComposeRevisionFact;
+  /** Server task 025: a tracked paragraph-formatting change (`w:pPrChange`). Server-set; preserve
+   * untouched. */
+  propertiesChange?: ComposeFormatChangeFact;
 }
 
 /**

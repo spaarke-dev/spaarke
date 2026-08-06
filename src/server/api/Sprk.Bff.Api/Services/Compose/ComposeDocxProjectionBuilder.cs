@@ -1924,12 +1924,40 @@ public sealed class ComposeDocxProjectionBuilder
         var paraId = p.ParagraphId?.Value?.ToUpperInvariant(); // renderer dedups/mints (AssignParaIds)
         var alignment = MapAlignment(p);
 
-        // Uncounted-flatten closures (review finding 020-R3): the model has no indentation field (the read
+        // Uncounted-flatten closure (review finding 020-R3): the model has no indentation field (the read
         // walk renders w:ind via AppendIndentDeclarations — re-lost on save until a widening task carries
-        // it), and a paragraph whose MARK is deleted (pPr/rPr/w:del) is kept as a separate settled block
-        // (rejecting the mark deletion — no merge; task 025 models revisions first-class, finding 020-R11).
+        // it).
         if (p.ParagraphProperties?.Indentation is not null) ctx.AddWarning("indentation-dropped", 1);
-        if (p.ParagraphProperties?.ParagraphMarkRunProperties?.Deleted is not null) ctx.AddWarning("tracked-paragraph-mark-flattened", 1);
+
+        // Task 025 (020-R11): paragraph-MARK revisions are MODEL data — w:pPr/w:rPr/w:del (mark pending-
+        // deleted; accepting merges with the next paragraph) or w:ins (paragraph created while tracking).
+        // Retires `tracked-paragraph-mark-flattened`. Both present (invalid stacking) → Deleted wins.
+        // A tracked change OF the mark's formatting (w:pPr/w:rPr/w:rPrChange) stays out of the thin tier —
+        // counted, never silent.
+        var markRpr = p.ParagraphProperties?.ParagraphMarkRunProperties;
+        ComposeRevision? markRevision = markRpr switch
+        {
+            { Deleted: { } markDel } => new ComposeRevision { Kind = ComposeRevisionKind.Deleted, Author = markDel.Author?.Value ?? string.Empty, Date = markDel.Date?.InnerText },
+            { Inserted: { } markIns } => new ComposeRevision { Kind = ComposeRevisionKind.Inserted, Author = markIns.Author?.Value ?? string.Empty, Date = markIns.Date?.InnerText },
+            _ => null,
+        };
+        if (markRpr?.Elements().Any(e => e.LocalName == "rPrChange") == true)
+        {
+            ctx.AddWarning("tracked-format-change-flattened", 1);
+        }
+
+        // Task 025: a tracked paragraph-FORMATTING change (w:pPr/w:pPrChange) — identity + the previous
+        // pPr carried opaquely (SDK-parse-gated at render; see ComposeFormatChange).
+        ComposeFormatChange? propertiesChange = null;
+        if (p.ParagraphProperties?.GetFirstChild<ParagraphPropertiesChange>() is { } pPrChange)
+        {
+            propertiesChange = new ComposeFormatChange
+            {
+                Author = pPrChange.Author?.Value ?? string.Empty,
+                Date = pPrChange.Date?.InnerText,
+                PreviousPropertiesXml = pPrChange.GetFirstChild<ParagraphPropertiesExtended>()?.OuterXml,
+            };
+        }
 
         // Task 023: an INTERIOR section break (pPr-nested w:sectPr — this paragraph ends a section) is not
         // model data; on render its content joins the FINAL section's page setup — a real pagination/
@@ -1966,6 +1994,8 @@ public sealed class ComposeDocxProjectionBuilder
                 Runs = runs,
                 Alignment = alignment,
                 PageBreakBefore = pageBreakBefore,
+                MarkRevision = markRevision,
+                PropertiesChange = propertiesChange,
             };
         }
 
@@ -1990,6 +2020,8 @@ public sealed class ComposeDocxProjectionBuilder
                 Runs = runs,
                 Alignment = alignment,
                 PageBreakBefore = pageBreakBefore,
+                MarkRevision = markRevision,
+                PropertiesChange = propertiesChange,
             };
         }
 
@@ -2023,6 +2055,8 @@ public sealed class ComposeDocxProjectionBuilder
             Runs = runs,
             Alignment = alignment,
             PageBreakBefore = pageBreakBefore,
+            MarkRevision = markRevision,
+            PropertiesChange = propertiesChange,
         };
     }
 
@@ -2327,7 +2361,7 @@ public sealed class ComposeDocxProjectionBuilder
         return "top";
     }
 
-    private void ProjectInline(OpenXmlElement container, List<ComposeInlineRun> sink, string? href, ModelWalkContext ctx)
+    private void ProjectInline(OpenXmlElement container, List<ComposeInlineRun> sink, string? href, ModelWalkContext ctx, ComposeRevision? revision = null)
     {
         // Mirrors RenderInline's field-scan exactly (own FieldScanState instance — the established
         // parallel-walk pattern, see FieldScanState remarks).
@@ -2343,7 +2377,7 @@ public sealed class ComposeDocxProjectionBuilder
                         {
                             // Field flattens to its cached RESULT text as plain prose (the field's dynamic
                             // behavior does not survive; its visible value does). 026 refines the surface.
-                            AddPlainRun(sink, ExtractRunsDisplayText(field.ResultRuns), href, ctx);
+                            AddPlainRun(sink, ExtractRunsDisplayText(field.ResultRuns), href, ctx, revision);
                             ctx.AddWarning("field-flattened-to-text", 1);
                             field.Reset();
                         }
@@ -2357,10 +2391,10 @@ public sealed class ComposeDocxProjectionBuilder
                         ctx.AddWarning("complex-object-dropped", 1);
                         break;
                     }
-                    ProjectRun(r, sink, href, ctx);
+                    ProjectRun(r, sink, href, ctx, revision);
                     break;
                 case SimpleField sf:
-                    AddPlainRun(sink, ExtractAtomDisplayText(sf), href, ctx);
+                    AddPlainRun(sink, ExtractAtomDisplayText(sf), href, ctx, revision);
                     ctx.AddWarning("field-flattened-to-text", 1);
                     break;
                 case Hyperlink h:
@@ -2379,7 +2413,7 @@ public sealed class ComposeDocxProjectionBuilder
                         // docLocation-only link (Step-9.5 F9): text kept, link dropped LOUDLY (was silent).
                         ctx.AddWarning("hyperlink-target-dropped", 1);
                     }
-                    ProjectInline(h, sink, resolved ?? href, ctx);
+                    ProjectInline(h, sink, resolved ?? href, ctx, revision);
                     break;
                 case CommentRangeStart commentStart:
                     // Task 024: comment range anchors are MODEL data (marker runs at exact positions).
@@ -2406,29 +2440,42 @@ public sealed class ComposeDocxProjectionBuilder
                     }
                     break;
                 case InsertedRun ins:
-                    // Settled prose: inserted text kept, revision wrapper flattened (tracked-changes as
-                    // MODEL data is task 025; until then a render-from-model save settles the revision).
-                    ctx.AddWarning("tracked-insert-flattened", 1);
-                    ProjectInline(ins, sink, href, ctx);
+                    // Task 025: a tracked INSERTION is MODEL data — the nested runs carry the revision
+                    // identity (kind/author/date) and the renderer re-authors a Word-valid w:ins wrapper
+                    // (server-minted id) on the render-on-save path. Retires `tracked-insert-flattened`.
+                    ProjectInline(ins, sink, href, ctx,
+                        NestRevision(ComposeRevisionKind.Inserted, ins.Author?.Value, ins.Date?.InnerText, revision, ctx));
                     break;
                 case DeletedRun del:
-                    // No-text-loss default: pending-deleted text is KEPT as plain prose (flattening
-                    // resolves the revision by REJECTING the deletion — the conservative direction for a
-                    // legal document; accepting it would silently destroy text). Task 025 models the
-                    // revision first-class and retires this.
-                    ctx.AddWarning("tracked-delete-flattened-kept", 1);
-                    ProjectInline(del, sink, href, ctx);
+                    // Task 025: a tracked DELETION is MODEL data — pending-deleted text is carried as run
+                    // TEXT tagged Deleted (the renderer authors w:del/w:delText), so the redline survives
+                    // with real accept/reject in Word. Retires `tracked-delete-flattened-kept`.
+                    ProjectInline(del, sink, href, ctx,
+                        NestRevision(ComposeRevisionKind.Deleted, del.Author?.Value, del.Date?.InnerText, revision, ctx));
+                    break;
+                case MoveFromRun moveFrom:
+                    // Task 025: MOVE markup downgrades to plain ins/del (moveFrom = the deletion half;
+                    // accepting/rejecting both halves reproduces accept/reject of the move — the move
+                    // IDENTITY is lost, counted LOUDLY; typed move carry is 026-shaped if it surfaces).
+                    ctx.AddWarning("tracked-move-downgraded", 1);
+                    ProjectInline(moveFrom, sink, href, ctx,
+                        NestRevision(ComposeRevisionKind.Deleted, moveFrom.Author?.Value, moveFrom.Date?.InnerText, revision, ctx));
+                    break;
+                case MoveToRun moveTo:
+                    ctx.AddWarning("tracked-move-downgraded", 1);
+                    ProjectInline(moveTo, sink, href, ctx,
+                        NestRevision(ComposeRevisionKind.Inserted, moveTo.Author?.Value, moveTo.Date?.InnerText, revision, ctx));
                     break;
                 case SdtRun sdtRun:
                     if (IsSpecialSdtControl(sdtRun.SdtProperties))
                     {
-                        AddPlainRun(sink, ExtractAtomDisplayText(sdtRun), href, ctx);
+                        AddPlainRun(sink, ExtractAtomDisplayText(sdtRun), href, ctx, revision);
                         ctx.AddWarning("hard-tier-sdt-flattened", 1);
                     }
                     else
                     {
                         var sdtContent = sdtRun.GetFirstChild<SdtContentRun>();
-                        if (sdtContent is not null) ProjectInline(sdtContent, sink, href, ctx);
+                        if (sdtContent is not null) ProjectInline(sdtContent, sink, href, ctx, revision);
                     }
                     break;
                 case AlternateContent:
@@ -2441,10 +2488,11 @@ public sealed class ComposeDocxProjectionBuilder
                 case CustomXmlRun cxr:
                     // w:customXml inline wrapper: transparent — nested runs are ordinary editable prose;
                     // recursing keeps the text (review finding 020-R10).
-                    ProjectInline(cxr, sink, href, ctx);
+                    ProjectInline(cxr, sink, href, ctx, revision);
                     break;
                 default:
-                    // ParagraphProperties, bookmarks, proofErr, etc. — no inline content.
+                    // ParagraphProperties, bookmarks, proofErr, move-range markers (covered by the
+                    // per-container `tracked-move-downgraded` count), etc. — no inline content.
                     break;
             }
         }
@@ -2455,17 +2503,37 @@ public sealed class ComposeDocxProjectionBuilder
             // FieldScanState's documented per-container simplification): flush the accumulated RESULT text
             // rather than discarding it, and count the anomaly (review finding 020-R6 — this walk's
             // never-silent contract is stronger than the read walk's).
-            AddPlainRun(sink, ExtractRunsDisplayText(field.ResultRuns), href, ctx);
+            AddPlainRun(sink, ExtractRunsDisplayText(field.ResultRuns), href, ctx, revision);
             ctx.AddWarning("field-unterminated", 1);
         }
     }
 
-    private void ProjectRun(Run run, List<ComposeInlineRun> sink, string? href, ModelWalkContext ctx)
+    /// <summary>Task 025: builds the revision context a tracked container's children project under. When
+    /// containers STACK (e.g. a <c>w:del</c> inside a <c>w:ins</c> — text inserted then deleted, both
+    /// tracked), the model's single per-run revision cannot represent both layers: the INNERMOST wins
+    /// (for the common ins⊃del the surviving Deleted layer keeps accept-the-deletion working; rejecting
+    /// it settles the text instead of restoring the pending-insert state) — counted LOUDLY, never silent.
+    /// This is the R4 "barfoo" warned-flatten baseline pending operator sign-off.</summary>
+    private static ComposeRevision NestRevision(ComposeRevisionKind kind, string? author, string? date, ComposeRevision? outer, ModelWalkContext ctx)
+    {
+        if (outer is not null)
+        {
+            ctx.AddWarning("tracked-nested-revision-simplified", 1);
+        }
+        return new ComposeRevision { Kind = kind, Author = author ?? string.Empty, Date = date };
+    }
+
+    private void ProjectRun(Run run, List<ComposeInlineRun> sink, string? href, ModelWalkContext ctx, ComposeRevision? revision = null)
     {
         var rPr = run.RunProperties;
         var bold = IsOn(rPr?.Bold);
         var italic = IsOn(rPr?.Italic);
         var underline = rPr?.Underline is { Val: not null } u && u.Val!.Value != UnderlineValues.None;
+
+        // Task 025: a tracked run-formatting change (w:rPr/w:rPrChange) — identity + the previous rPr
+        // carried opaquely (SDK-parse-gated at render). Attached to the FIRST flushed model run only, so a
+        // page-break split does not duplicate the change record.
+        var formatChange = CaptureRunFormatChange(rPr);
 
         var sb = new StringBuilder();
         var strikeWarned = false;
@@ -2486,7 +2554,8 @@ public sealed class ComposeDocxProjectionBuilder
             var text = ctx.ClampText(sb.ToString());
             sb.Clear();
             if (text.Length == 0) return;
-            sink.Add(new ComposeInlineRun { Text = text, Bold = bold, Italic = italic, Underline = underline, Href = href });
+            sink.Add(new ComposeInlineRun { Text = text, Bold = bold, Italic = italic, Underline = underline, Href = href, Revision = revision, FormatChange = formatChange });
+            formatChange = null; // first-flush-only (see capture above)
         }
 
         foreach (var child in run.Elements())
@@ -2514,7 +2583,10 @@ public sealed class ComposeDocxProjectionBuilder
                     FlushText();
                     if (ctx.HasOutputBudget)
                     {
-                        sink.Add(new ComposeInlineRun { IsPageBreak = true });
+                        // Task 025: the break carries the run's revision context (a page break can itself
+                        // be part of a tracked insertion/deletion — the renderer groups it into the
+                        // wrapper like any other run).
+                        sink.Add(new ComposeInlineRun { IsPageBreak = true, Revision = revision });
                     }
                     break;
                 case Break:
@@ -2575,12 +2647,27 @@ public sealed class ComposeDocxProjectionBuilder
         FlushText(); // trailing text after the last break (or the whole run when no break split it)
     }
 
-    private static void AddPlainRun(List<ComposeInlineRun> sink, string text, string? href, ModelWalkContext ctx)
+    private static void AddPlainRun(List<ComposeInlineRun> sink, string text, string? href, ModelWalkContext ctx, ComposeRevision? revision = null)
     {
         if (text.Length == 0) return;
         var clamped = ctx.ClampText(text);
         if (clamped.Length == 0) return;
-        sink.Add(new ComposeInlineRun { Text = clamped, Href = href });
+        sink.Add(new ComposeInlineRun { Text = clamped, Href = href, Revision = revision });
+    }
+
+    /// <summary>Task 025: captures a run's <c>w:rPrChange</c> (tracked formatting change) — identity plus
+    /// the previous-<c>rPr</c> child carried as OuterXml (see <see cref="ComposeFormatChange"/>). Null when
+    /// the run carries no change record.</summary>
+    private static ComposeFormatChange? CaptureRunFormatChange(RunProperties? rPr)
+    {
+        var change = rPr?.GetFirstChild<RunPropertiesChange>();
+        if (change is null) return null;
+        return new ComposeFormatChange
+        {
+            Author = change.Author?.Value ?? string.Empty,
+            Date = change.Date?.InnerText,
+            PreviousPropertiesXml = change.GetFirstChild<PreviousRunProperties>()?.OuterXml,
+        };
     }
 
     private static ComposeParagraphAlignment MapAlignment(Paragraph p)

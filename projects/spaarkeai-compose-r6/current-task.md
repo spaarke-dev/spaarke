@@ -7,10 +7,17 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | NONE ACTIVE — clean boundary. 020/011/021/022/023/024 ALL ✅ complete + pushed |
-| **Next task** | **025 tracked-changes** (`projects/spaarkeai-compose-r6/tasks/` — grep `^025`) via task-execute |
-| **Status** | between tasks; branch `work/spaarkeai-compose-r6` pushed through `60e9ef105`; working tree CLEAN |
-| **Next Action** | On "continue": invoke task-execute for task 025 — declare FULL rigor (Step 0.5 override UP if POML says STANDARD; adr-check validated this reading twice), then Step 1 code map of tracked-changes handling (ins/del flatten sites in ComposeDocxProjectionBuilder ProjectInline + R5 tracked markup in ComposeShadowPatchEngine) |
+| **Task** | **025 tracked-changes — IN PROGRESS (FULL rigor, POML-authored)** |
+| **Step** | Implementation done for model+projector+renderer (builds clean); NEXT: client contract mirrors → seam tests → gates → Step 9.5 |
+| **Status** | in-progress; uncommitted edits in ComposeContentModel.cs / ComposeDocxProjectionBuilder.cs / ComposeDocumentRenderer.cs |
+| **Next Action** | Add additive mirrors to Spaarke.Compose.Components/src/types/compose-contracts.ts (revision/formatChange/markRevision/propertiesChange — server-set, preserve on re-post), then write tests/integration/seam/Compose/ComposeTrackedChangesSeamTests.cs |
+
+### 025 design decisions (locked)
+- `ComposeInlineRun.Revision {Kind Inserted|Deleted, Author, Date-raw}` — renderer GROUPS consecutive same-identity runs into ONE w:ins/w:del wrapper; Deleted text → w:delText; ids ALWAYS server-minted via ListRenderState.NextRevisionId(), carrier-seeded by ScanCarrierRevisionIdSeed (read-only side open).
+- `ComposeBlock.MarkRevision` (pPr/rPr/ins|del — retires tracked-paragraph-mark-flattened) + `PropertiesChange`; `ComposeInlineRun.FormatChange` — pPrChange/rPrChange carried as identity + OPAQUE previous-props XML, gated at render by TryParsePreviousProperties (typed SDK parse + LocalName/ns check + OpenXmlValidator subtree validate + 32KB clamp; failure → whole record dropped).
+- Sanitized FROM START (021-F1/022-F1/024-F1 class): SanitizeRevisionAuthor (never empty — "Unknown", 255 clamp), TryValidRevisionDate (parse-gate, raw kept).
+- moveFrom/moveTo → downgraded del/ins + counted `tracked-move-downgraded`; nested ins⊃del → innermost wins + counted `tracked-nested-revision-simplified` (R4 "barfoo" warned baseline — surface to operator); mark-rPrChange → counted `tracked-format-change-flattened`. Retired: tracked-insert-flattened / tracked-delete-flattened-kept / tracked-paragraph-mark-flattened. Table revisions stay in 022 catch-all (026 owes typed carry).
+- Comment anchors NEVER carry Revision (emit outside wrappers); page-break markers DO.
 
 ### Critical Context (3 sentences)
 Phase-2 fidelity wideners 021–024 are done SERIALLY on the shared Compose surface, each with the same

@@ -86,6 +86,62 @@ public enum ComposeCommentAnchorKind
     End,
 }
 
+/// <summary>Revision kind for <see cref="ComposeRevision"/> (task 025). Serialized as its STRING name.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ComposeRevisionKind
+{
+    /// <summary>A tracked INSERTION (<c>w:ins</c> at run level; <c>w:rPr/w:ins</c> on a paragraph mark).</summary>
+    Inserted,
+
+    /// <summary>A tracked DELETION (<c>w:del</c> at run level — content authored as <c>w:delText</c>;
+    /// <c>w:rPr/w:del</c> on a paragraph mark — the mark is pending-deleted, accepting merges the
+    /// paragraph with its successor).</summary>
+    Deleted,
+}
+
+/// <summary>
+/// One tracked-change identity (task 025) — the WHO/WHEN of a <c>w:ins</c>/<c>w:del</c> revision. The model
+/// carries attribution only; the revision <c>w:id</c> is ALWAYS server-minted at render (monotonic, seeded
+/// above the carrier's existing ids) and never client-controlled. The renderer SANITIZES <see cref="Author"/>
+/// (XML-illegal control chars stripped, length-clamped, empty → <c>"Unknown"</c> — <c>@w:author</c> is
+/// schema-required) and emits <see cref="Date"/> only when it parses as a round-trip timestamp
+/// (client junk is dropped; <c>@w:date</c> is schema-optional).
+/// </summary>
+public sealed record ComposeRevision
+{
+    public required ComposeRevisionKind Kind { get; init; }
+
+    /// <summary>Revision author as captured from the source (<c>@w:author</c>).</summary>
+    public string Author { get; init; } = string.Empty;
+
+    /// <summary>Revision timestamp as authored (<c>@w:date</c>, xsd:dateTime), or null.</summary>
+    public string? Date { get; init; }
+}
+
+/// <summary>
+/// A tracked FORMATTING-change record (task 025) — <c>w:pPrChange</c> (paragraph) / <c>w:rPrChange</c>
+/// (run): the revision identity plus the PREVIOUS properties Word restores on reject.
+/// <see cref="PreviousPropertiesXml"/> is a SERVER-SET opaque carry of the change's child element
+/// (<c>w:pPr</c> / <c>w:rPr</c>) exactly as captured by the projection — the previous formatting can
+/// contain properties far outside the thin model (indentation, spacing, tabs …), so a typed carry would
+/// mis-state the reject target. The renderer NEVER string-injects it: the XML is parsed through the typed
+/// OpenXML SDK class, validated for element name + namespace, and the whole change record is dropped when
+/// parsing fails (client junk cannot reach the package). Clients preserve this untouched on re-post.
+/// </summary>
+public sealed record ComposeFormatChange
+{
+    /// <summary>Revision author (<c>@w:author</c>; sanitized at render like <see cref="ComposeRevision.Author"/>).</summary>
+    public string Author { get; init; } = string.Empty;
+
+    /// <summary>Revision timestamp as authored, or null.</summary>
+    public string? Date { get; init; }
+
+    /// <summary>The change's previous-properties child (<c>w:pPr</c> for a paragraph change, <c>w:rPr</c>
+    /// for a run change) as OuterXml. Server-set; SDK-parse-gated at render; null/invalid → the change
+    /// record is not emitted (the CURRENT formatting stands — equivalent to accepting the change).</summary>
+    public string? PreviousPropertiesXml { get; init; }
+}
+
 /// <summary>The block kinds the renderer materializes into body content. Serialized as its STRING name
 /// over the wire (the client posts <c>"heading"</c> etc.; the BFF has no global string-enum converter).</summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -195,6 +251,21 @@ public sealed record ComposeBlock
 
     /// <summary><see cref="ComposeBlockKind.Table"/> only: the table's rows/cells. Null for other kinds.</summary>
     public ComposeTable? Table { get; init; }
+
+    /// <summary>
+    /// Task 025: a tracked revision on this paragraph's MARK (<c>w:pPr/w:rPr/w:ins</c> or <c>w:del</c>).
+    /// Kind Deleted = the paragraph mark is pending-deleted (accepting merges this paragraph with the
+    /// next); Kind Inserted = the paragraph was created while tracking. Carried for Paragraph / Heading /
+    /// ListItem; ignored for Table. Server-set; preserve untouched on re-post.
+    /// </summary>
+    public ComposeRevision? MarkRevision { get; init; }
+
+    /// <summary>
+    /// Task 025: a tracked paragraph-FORMATTING change (<c>w:pPr/w:pPrChange</c> — rejecting restores the
+    /// previous paragraph properties). See <see cref="ComposeFormatChange"/> for the opaque-carry +
+    /// SDK-parse-gate contract. Server-set; preserve untouched on re-post.
+    /// </summary>
+    public ComposeFormatChange? PropertiesChange { get; init; }
 }
 
 /// <summary>
@@ -240,6 +311,24 @@ public sealed record ComposeInlineRun
     /// construction. Server-set; preserve untouched on re-post.
     /// </summary>
     public ComposeCommentAnchor? CommentAnchor { get; init; }
+
+    /// <summary>
+    /// Task 025: the tracked revision this run belongs to (<c>w:ins</c> / <c>w:del</c>). The renderer
+    /// GROUPS consecutive runs carrying the same revision identity (kind + author + date, after
+    /// normalization) into ONE wrapper element with a freshly minted <c>w:id</c>; a Deleted run's text is
+    /// authored as <c>w:delText</c>. Page-break marker runs participate (a break can be part of an
+    /// insertion/deletion); comment-anchor marker runs never carry this (anchors are emitted at paragraph
+    /// level outside revision wrappers). Null = settled prose. Server-set; preserve untouched on re-post.
+    /// </summary>
+    public ComposeRevision? Revision { get; init; }
+
+    /// <summary>
+    /// Task 025: a tracked run-FORMATTING change (<c>w:rPr/w:rPrChange</c> — rejecting restores the
+    /// previous run properties). Attached to the FIRST model run projected from the source run when a
+    /// source run splits (page-break markers). See <see cref="ComposeFormatChange"/> for the opaque-carry +
+    /// SDK-parse-gate contract. Server-set; preserve untouched on re-post.
+    /// </summary>
+    public ComposeFormatChange? FormatChange { get; init; }
 }
 
 /// <summary>A native table (<c>w:tbl</c>): an ordered list of rows plus the STRUCTURAL facts the render-on-save
