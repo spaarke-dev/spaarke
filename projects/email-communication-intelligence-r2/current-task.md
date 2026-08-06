@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 014 ✅ COMPLETE — RecipientAliasRung + Bcc plumbing (FR-A2). Safe code-only lane now exhausted. |
+| **Task** | 014 ✅ + 058 ✅ this session. 041 STOPPED at investigation (§11 reuse finding — escalated, no code). |
 | **Step** | — |
-| **Status** | 014 ✅ (build 0 err; 77/77 targeted; 876 pass/0 fail Communication+seam; publish 50.91 MB ≤60). Committing. |
-| **Next Action** | GATE. Remaining Pillar-A rungs 013 (deps 010 Key Vault) + 016 (needs `sprk_affinity` schema + opus) are gated. All other startable tasks are cloud/security/schema/seed (004/010/020/023/033/034) or sequential shared-lib (Pillar E). Need operator go-ahead. |
+| **Status** | 014 ✅ (dad2d610a) · 058 ✅ (a5740b60d). 041 → escalation: implementing as authored builds duplicate infra (mechanism-1 = existing config; mechanism-2 = planned task 043). See notes/041-intake-folder-scope-finding.md. |
+| **Next Action** | OPERATOR DECISION on 041 scope (A re-scope→043 [recommended] / B thin slice / C build-as-authored). Otherwise all remaining startable tasks are gated (Key Vault/Entra/schema/seed) or sequential shared-lib (Pillar E). Safe autonomous lane exhausted. |
 
 ### Completed this session (all committed)
 - **Task 003 ✅** — `notes/fixtures/r1-golden-emails.md`.
