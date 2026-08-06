@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-06 (036 + 034 escalated → owner chose robust paths → both re-scoped + re-dispatched in parallel; running)
+> **Last Updated**: 2026-08-06 (036 ✅ + 034 ✅ committed; Phase D impl 030–037 all done; 038 running; 039 deploy next)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,9 +10,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **036 + 034 RE-SCOPED + RUNNING** (parallel, disjoint files). Both escalated (plan under-scoped them); owner chose the robust path for each 2026-08-06. **18 tasks committed** (033 + D3). |
-| **Step** | 036 (FR-D5) + 034 (FR-D9) re-dispatched to the escalated agents with owner-chosen scope. Awaiting completion → verify + independent review + commit. |
-| **Status** | in-progress (036 + 034 executing) |
+| **Task** | **Phase D implementation nearly COMPLETE**: 030 ✅ 031 ✅ 032 ✅ 033 ✅ 034 ✅ 035 ✅ 036 ✅ 037 ✅. **038 (Reanalyze chip) RUNNING**; then **039** (deploy+verify D) closes Phase D. **20 tasks committed.** |
+| **Step** | 034 (FR-D9 Path B) + 036 (FR-D5) committed (3402b4f02, 0278396b6). 038 dispatched. |
+| **Status** | in-progress (038 executing) |
+| **Commits this stretch** | 833561809 (033 FR-D10) · dd491b021 (035+037 wave D3) · 2f787e452 (escalation-decision checkpoint) · 0278396b6 (036 FR-D5) · 3402b4f02 (034 FR-D9 Path B). All pushed. |
+| **034/036 done** | **036 FR-D5** (owner: full paired slice): BFF restore-DTO `uploadedFiles` projection + display-only chip rehydrate through host-owned `FilesAttachedIndicator` (SprkChat seam AVOIDED — the initialAttachments seam's side-effect cascade was verified real; shared lib untouched). **034 FR-D9** (owner: Path B): server-side ADR-024 regarding write on `sprk_analysis` (runtime DataverseServiceClientImpl, pure unit-tested StageAnalysisRegardingFields) + relaxed doc-anchor + self-contained HistoryOverlay picker. Independent ADR-024 review PASSed the core write; W1-W5 fixed (dropped non-deployed `sprk_regardingrecordurl` → reduced set §6.5 Path A; 7 domain tests; resolver-dup Path A doc'd in deviations.md; parity fail-fast). |
+| **090 merge note** | master `c700d1b0b` (communication FR-D2 perf) touched a shared Dataverse/Analysis file that 034 also edited → reconcile at merge-to-master. |
 | **036 (FR-D5) — owner: DO FULL PAIRED SLICE NOW** | Escalation: `UploadedFiles` manifest is server-persisted but exposed on NO client restore GET, AND SprkChat has no restore seam. Owner chose full slice: (1) BFF — project a minimal `uploadedFiles:{fileId,fileName,contentType,sizeBytes}[]` onto the restore DTO the History flow lands on (`RestoredSession`/`SessionRestoreResponse`; restore svc already loads full StoredSession); (2) shared-lib — add optional `initialAttachments` prop to SprkChat (`@spaarke/ui-components`) seeding `useChatFileAttachment` (fallback: parallel `FilesAttachedIndicator` render); (3) client — ConvPane passes restored uploadedFiles → SprkChat. Files: BFF restore DTO + SessionPersistenceService + @spaarke/ui-components SprkChat + ConversationPane.tsx. See DI-03. |
 | **034 (FR-D9) — owner: PATH B (server-side regarding write)** | Escalation: Matter Analyses tab is driven by ADR-024 `sprk_regardingmatter`; promote endpoint can't write regarding & 400s on doc-less sessions. Owner chose Path B: extend `AnalysisPromoteRequest` + `PromoteSession` + `DataverseWebApiService.CreateAnalysisAsync` to write the ADR-024 regarding 5-field-set (build/reuse a server-side analysis regarding resolver — no hand-rolled single-field write) + relax the document-anchor when a regarding target is supplied; client — self-contained matter/project picker in HistoryOverlay (escalate only if a picker truly needs ConvPane/NavigationService). Files: AnalysisEndpoints.cs + Spaarke.Dataverse + HistoryOverlay.tsx. See DI-04. |
 | **Next Action** | On both agents' completion: consolidated build (BFF + shared-lib) + typecheck + tests; independent review of each (034 = ADR-024 compliance; 036 = SprkChat seam blast-radius); commit each. Then **038** (Reanalyze chip on document context, FR-D11, dep 021/022 done — 036 dep was spine-order, now moot since 036's ConvPane edits are FR-D5 attachment-only; verify 038 scope before dispatch), then **039** (deploy+verify D + land DI-01 FR-D7 sessions-projection). |
