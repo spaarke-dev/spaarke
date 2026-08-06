@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="029" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>sprk_document.sprk_linkedcommunication lookup (FR-C4 cross-path reconciliation) — GATED schema</title>
+    <phase>2 Pillar C — De-duplication</phase>
+    <gate>operator-go-ahead</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>One new lookup column via dataverse-create-schema; no .cs change (the consuming code shipped in task 025). STANDARD per task-create Step 3.5.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One lookup column with a known recipe (mirror task 023/027/028). No architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>schema-c</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Schema-only on `sprk_document` (a new lookup to `sprk_communication`); no shared source with any active worktree.</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse, schema, dedup</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create one new lookup column on `sprk_document` — `sprk_linkedcommunication` (target entity `sprk_communication`, N:1) — packed into the managed solution (ADR-027). It is the cross-path bridge the task-025 FR-C4 code (already merged — `CrossPathLink` + `OfficeDocumentPersistence` + `IncomingCommunicationProcessor`) reads + writes: a captured `sprk_communication` and a user-saved `sprk_document` archive of the SAME email are linked so the reconciliation surface (Pillar E) shows ONE email.</prompt>
+  <role>SPAARKE platform developer with Dataverse schema expertise. Use `dataverse-create-schema` (Web API + PowerShell — no `pac column create`). Follow ADR-027 strictly.</role>
+  <goal>The lookup `sprk_document.sprk_linkedcommunication` (→ `sprk_communication`) exists, published, carried in the managed solution; verified in `spaarkedev1` (a document can be linked to a communication and the reference round-trips). The task-025 code then links capture ↔ upload representations end-to-end.</goal>
+
+  <context>
+    <background>Task 025 (FR-C4) implemented the cross-path link in CODE (merged): on an email save whose message was also captured inbound, the archive document is linked to the canonical communication (office side); and when capture creates the communication after an archive was uploaded, that archive is linked (capture side). ALL that code ships behind this one lookup: every link goes through the non-fatal `CrossPathLink` helper via the generic `IGenericEntityService.UpdateAsync` seam (NOT the atomic document build), so capture/upload never fails on the column being absent before this gated deploy — this is the ENABLEMENT step, not a blocker to the code merge. See `notes/025-cross-path-reconciliation-complete.md`. Mechanism mirrors task 023/027/028 exactly.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/email-communication-intelligence-r2/tasks/027-canonicaldocument-selflookup-schema.poml (sibling gated self-lookup task — same recipe)</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Communication/CrossPathLink.cs (the reader/writer + the `sprk_linkedcommunication` attribute-name constant)</file>
+      <file role="modify">Dataverse managed solution — sprk_document entity metadata</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: one Lookup column — `sprk_document.sprk_linkedcommunication`, target entity `sprk_communication` (N:1). Nullable (empty until the first cross-path link).</constraint>
+    <constraint source="ADR-027">Author into the managed solution + export so it deploys to every subscription; do NOT create unmanaged in one environment.</constraint>
+    <constraint source="project">SCOPE: schema mechanism. Use `dataverse-create-schema` (Web API + PowerShell); PAC CLI has no column-create path here.</constraint>
+    <constraint source="project">SCOPE: GATED on operator go-ahead (mutates live Dataverse schema in `spaarkedev1`). Do NOT run autonomously.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse lookup column bridging a document to its captured communication (cross-path reconciliation)</topic>
+    <files>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>projects/email-communication-intelligence-r2/notes/025-cross-path-reconciliation-complete.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-create-schema" location=".claude/skills/dataverse-create-schema/SKILL.md">Create the lookup via Web API; pack to solution.</pattern>
+      <pattern name="sibling schema task" location="projects/email-communication-intelligence-r2/tasks/027-canonicaldocument-selflookup-schema.poml">Same gated recipe (a self-lookup on sprk_document; this one targets sprk_communication).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load POML + task-025 completion note + ADR-027. Declare RIGOR LEVEL: STANDARD. Confirm operator go-ahead. Invoke dataverse-create-schema.</step>
+    <step order="1">Create the lookup column (`sprk_document` → `sprk_communication`, N:1) via the skill; poll to Active.</step>
+    <step order="2">Add it to the managed solution; export; verify the lookup + its relationship are in the export.</step>
+    <step order="3">Verify in `spaarkedev1`: a `sprk_document` row's `sprk_linkedcommunication` can be set to a `sprk_communication` and the reference round-trips; the task-025 code links a captured communication ↔ its uploaded `.eml` archive end-to-end (both arrival orders).</step>
+    <step order="4">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="5">Document any deviation in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>No lookup on `sprk_document` targets `sprk_communication`: `sprk_email` → the Dataverse email ACTIVITY (different entity + semantics); `sprk_parentdocument` → document; `sprk_matter`/`sprk_project`/`sprk_invoice` → regarding records. None bridge document ↔ communication.</existing>
+    <extension>No — a Dataverse lookup is single-target-typed; none of the existing lookups can be re-pointed at `sprk_communication` without corrupting their meaning. A child entity is discouraged (ADR-045 extend-not-fork; the communication stays the reconciliation unit). One additive lookup IS the extension.</extension>
+    <cost-of-doing-nothing>Without this lookup the task-025 code has nowhere to record the bridge: a mailbox-captured `sprk_communication` and a user-saved `sprk_document` archive of the SAME email surface as TWO separate rows in the Pillar E reconciliation grid (FR-C4's core failure — "shows two, not one"). No queryable relationship exists to fold them.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dataverse-create-schema">Create the lookup column via Web API + PowerShell</tool>
+    <tool name="pwsh">Solution export</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">One lookup column sprk_document.sprk_linkedcommunication → sprk_communication</output>
+    <output type="solution">Managed solution export containing the lookup + relationship</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the deployed schema, when queried, then `sprk_document.sprk_linkedcommunication` exists as a Lookup to `sprk_communication` (N:1) and is nullable.</criterion>
+    <criterion testable="true">Given the managed solution export, when inspected, then the lookup + its relationship definition are present (deploy to every subscription per ADR-027).</criterion>
+    <criterion testable="true">Given a `sprk_document` row in `spaarkedev1`, when `sprk_linkedcommunication` is set to a `sprk_communication` and read back, then the reference round-trips.</criterion>
+    <criterion testable="true">End-to-end: capture an email + user-save its `.eml` archive (either order) → the archive document's `sprk_linkedcommunication` points at the captured communication (task-025 code + this lookup).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-C4 "the review surface resolves to one email". Enables the task-025 code (merged) end-to-end. Sibling of task 023/027/028 (schema-c). GATED on operator go-ahead. Forward-only (pre-existing rows stay null until their next cross-path touch).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

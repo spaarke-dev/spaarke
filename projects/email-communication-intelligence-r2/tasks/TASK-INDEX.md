@@ -25,10 +25,11 @@
 | 022 | Context-merge on duplicate | 2·C | ✅ | 021 | sonnet·high | ❌ false |
 | 023 | Indexed `sprk_document.sprk_canonicalhash` column (forward-only) | 2·C | ✅ | — | sonnet·high | ✅ true (schema-c) |
 | 024 | SPE content dedup Tier-1 — **gate-after-write** (quickXorHash detector) | 2·C | ✅ | 023 | **opus·high** | ❌ false |
-| 025 | Cross-path reconciliation (comm ↔ document via message-id) | 2·C | 🔲 | 021 | sonnet·high | ❌ false |
+| 025 | Cross-path reconciliation (comm ↔ document via message-id) | 2·C | ✅ | 021 | sonnet·high | ❌ false |
 | 027 | `sprk_document.sprk_canonicaldocument` self-lookup (FR-C3 graduate-on-divergence) — **GATED schema** | 2·C | 🔲 | — | sonnet·high | ✅ true (schema-c) |
 | 028 | `sprk_communication.sprk_deliveredmailboxes` + `sprk_savedbyusers` memo (FR-C2 context-merge) — **GATED schema** | 2·C | 🔲 | — | sonnet·high | ✅ true (schema-c) |
-| 026 | Pillar C BFF deploy (size/CVE) | 2·C | 🔲 | 021,022,023,024,025,027,028 | sonnet·med | ❌ false |
+| 029 | `sprk_document.sprk_linkedcommunication` lookup (FR-C4 cross-path reconciliation) — **GATED schema** | 2·C | 🔲 | — | sonnet·high | ✅ true (schema-c) |
+| 026 | Pillar C BFF deploy (size/CVE) | 2·C | 🔲 | 021,022,023,024,025,027,028,029 | sonnet·med | ❌ false |
 | 030 | Fix FR-06 RAG grounding — ParentEntity tagging (both sites) | 3·D | ✅ | — | sonnet·high | ✅ true (D-indep) |
 | 031 | Batched identifier query (≈175→≤7) | 3·D | ✅ | — | sonnet·high | ✅ true (D-indep) |
 | 032 | Golden regression suite (+ absorbs A3 test) | 3·D | ✅ | 015 | sonnet·high | ✅ true (D-indep) |

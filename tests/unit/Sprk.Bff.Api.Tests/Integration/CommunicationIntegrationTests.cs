@@ -1621,6 +1621,66 @@ public class CommunicationIntegrationTests
             "the cross-mailbox duplicate short-circuits before any create");
     }
 
+    [Fact]
+    public async Task InboundPipeline_UploadThenCapture_LinksExistingArchiveDocumentToCommunication()
+    {
+        // FR-C4 (task 025), upload-then-capture order: the user "Save to Spaarke"-d this email's .eml archive
+        // (a sprk_document with the same internet-message-id) BEFORE the mailbox capture ran. When capture creates
+        // the canonical sprk_communication, that pre-existing archive document is LINKED to it (its
+        // sprk_linkedcommunication lookup is set) — so the reconciliation surface shows ONE email, not two rows.
+        const string internetMessageId = "<msg-fr-c4-capture@partner.com>";
+        const string recipientEmail = "mailbox-central@spaarke.com";
+        const string graphMessageId = "AAMkAGE1-fr-c4-capture";
+        var communicationId = Guid.NewGuid();
+        var archiveDocId = Guid.NewGuid();
+
+        var (graphFactoryMock, _) = CreateInboundGraphMock(
+            recipientEmail: recipientEmail, graphMessageId: graphMessageId, internetMessageId: internetMessageId);
+
+        var dataverseMock = new Mock<IDataverseService>();
+        var acct = new DataverseEntity("sprk_communicationaccount") { Id = Guid.NewGuid() };
+        acct["sprk_emailaddress"] = recipientEmail;
+        acct["sprk_receiveenabled"] = true;
+        acct["sprk_autocreaterecords"] = false; // skip attachment processing
+        acct["sprk_accounttype"] = new OptionSetValue(100000000);
+        dataverseMock
+            .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { acct });
+
+        // Not a cross-mailbox duplicate → the canonical is created here (upload happened first, capture second).
+        dataverseMock
+            .Setup(d => d.GetCommunicationByInternetMessageIdAsync(internetMessageId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DataverseEntity?)null);
+        dataverseMock
+            .Setup(d => d.CreateCommunicationRaceProofAsync(
+                It.Is<DataverseEntity>(e => e.LogicalName == "sprk_communication"),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((communicationId, false));
+
+        // FR-C4: the archive document was uploaded earlier — the cross-path query finds it by message-id.
+        dataverseMock
+            .Setup(d => d.RetrieveMultipleAsync(
+                It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_document"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<DataverseEntity> { new("sprk_document", archiveDocId) }));
+
+        Guid? linkedDoc = null;
+        Dictionary<string, object>? docWrite = null;
+        dataverseMock
+            .Setup(d => d.UpdateAsync("sprk_document", archiveDocId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, id, f, _) => { linkedDoc = id; docWrite = f; })
+            .Returns(Task.CompletedTask);
+
+        var processor = BuildIncomingProcessor(graphFactoryMock, dataverseMock);
+        await processor.ProcessAsync(recipientEmail, graphMessageId, ct: CancellationToken.None);
+
+        linkedDoc.Should().Be(archiveDocId, "the pre-existing .eml archive document is linked to the newly-captured communication (FR-C4)");
+        docWrite.Should().NotBeNull();
+        ((EntityReference)docWrite![CrossPathLink.LinkedCommunicationAttribute]).Id.Should().Be(
+            communicationId, "the two representations resolve to ONE email — the document points at the canonical communication");
+    }
+
     [Fact(Skip = "Requires fully mocked Graph SDK subscriptions and Communication services")]
     public async Task InboundPipeline_SubscriptionAutoCreated_ForReceiveEnabledAccount()
     {

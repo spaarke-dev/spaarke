@@ -60,11 +60,14 @@ public class OfficeDocumentPersistence
             "Creating Document record with SPE pointers: DriveId={DriveId}, ItemId={ItemId}",
             driveId, itemId);
 
-        // ── FR-C2 (task 022): record the SAVING USER on the canonical communication ──────────
-        // If this is an email save AND the same email was captured inbound (a canonical sprk_communication
-        // exists for its internet-message-id), record THIS user as a saver on that canonical row — so the
-        // "M uploaders" delivery fact is not lost. Runs regardless of the document content-dedup outcome below.
-        await MergeUploaderOntoCanonicalCommunicationAsync(request, userId, cancellationToken);
+        // ── FR-C2 (task 022) + FR-C4 (task 025): resolve the canonical communication ONCE ────
+        // If this is an email save AND the same email was captured inbound, a canonical sprk_communication exists
+        // for its internet-message-id. Resolve it once here and reuse it for BOTH: (a) FR-C2 — record THIS user as
+        // a saver on the canonical row (the "M uploaders" fact); and (b) FR-C4 — link the document created below to
+        // that canonical so capture + upload resolve to ONE email (done after the create, when the document id is
+        // known). Null when this is not an email, there is no message-id, or the email was never captured.
+        var canonicalCommunicationId =
+            await MergeUploaderAndResolveCanonicalAsync(request, userId, cancellationToken);
 
         // ── FR-C3 content de-dup (gate-after-write, Tier-1 exact quickXorHash) ──────────────
         // The blob is already in SPE (upload happened upstream). Read its content identity and reconcile
@@ -153,6 +156,14 @@ public class OfficeDocumentPersistence
 
         await _documentService.UpdateDocumentAsync(documentIdString, updateRequest, cancellationToken);
 
+        // ── FR-C4 (task 025): link this email-archive document to its captured communication ──
+        // Capture-then-upload order: the canonical communication was resolved above; link the just-created document
+        // to it so the reconciliation surface shows ONE email (not the captured communication + this archive as two
+        // rows). Non-fatal / contract-first (NFR-04): the link is written via the generic seam, degrading until the
+        // gated sprk_linkedcommunication column exists — it never fails the save. The reverse order (upload-then-
+        // capture) is linked from IncomingCommunicationProcessor when the communication is later created.
+        await LinkDocumentToCanonicalCommunicationAsync(documentId, canonicalCommunicationId, cancellationToken);
+
         _logger.LogInformation(
             "Document record created: DocumentId={DocumentId}, DriveId={DriveId}, ItemId={ItemId}",
             documentId, driveId, itemId);
@@ -161,41 +172,66 @@ public class OfficeDocumentPersistence
     }
 
     /// <summary>
-    /// FR-C2 (task 022) office-upload half: when an email is saved and the SAME email was also captured inbound
-    /// (a canonical <c>sprk_communication</c> exists for its internet-message-id), record the saving user on that
-    /// canonical row's <see cref="DeliveryContextMerge.SavedByUsersAttribute"/> set — so no "who saved it" fact is
-    /// lost. No-op when the seams are unavailable (bare test ctor), the save is not an email, there is no
-    /// internet-message-id, or no canonical communication exists (the email was never captured). Best-effort /
-    /// non-fatal (NFR-04): never throws out of the save.
+    /// FR-C2 (task 022) office-upload half + FR-C4 (task 025) resolve: when an email is saved and the SAME email was
+    /// also captured inbound (a canonical <c>sprk_communication</c> exists for its internet-message-id), record the
+    /// saving user on that canonical row's <see cref="DeliveryContextMerge.SavedByUsersAttribute"/> set — so no "who
+    /// saved it" fact is lost — AND return the canonical's id so the caller can cross-path-link the document it
+    /// creates (FR-C4). Returns <c>null</c> when the seams are unavailable (bare test ctor), the save is not an email,
+    /// there is no internet-message-id, or no canonical communication exists (the email was never captured).
+    /// Best-effort / non-fatal (NFR-04): never throws out of the save.
     /// </summary>
-    private async Task MergeUploaderOntoCanonicalCommunicationAsync(
+    private async Task<Guid?> MergeUploaderAndResolveCanonicalAsync(
         SaveRequest request, string userId, CancellationToken ct)
     {
         if (_communicationService is null || _genericEntityService is null)
-            return;
+            return null;
         if (request.ContentType != SaveContentType.Email)
-            return;
+            return null;
 
         var internetMessageId = request.Email?.InternetMessageId;
-        if (string.IsNullOrWhiteSpace(internetMessageId) || string.IsNullOrWhiteSpace(userId))
-            return;
+        if (string.IsNullOrWhiteSpace(internetMessageId))
+            return null;
 
         try
         {
             var canonical = await _communicationService
                 .GetCommunicationByInternetMessageIdAsync(internetMessageId, ct);
             if (canonical is null)
-                return; // email not captured inbound → no canonical communication to record the saver on
+                return null; // email not captured inbound → no canonical communication
 
-            await DeliveryContextMerge.MergeAsync(
-                _genericEntityService, canonical.Id,
-                DeliveryContextMerge.SavedByUsersAttribute, userId, _logger, ct);
+            // FR-C2: record the saver (skipped when userId is absent, e.g. a system save).
+            if (!string.IsNullOrWhiteSpace(userId))
+            {
+                await DeliveryContextMerge.MergeAsync(
+                    _genericEntityService, canonical.Id,
+                    DeliveryContextMerge.SavedByUsersAttribute, userId, _logger, ct);
+            }
+
+            return canonical.Id; // FR-C4: the caller links the document it creates to this canonical.
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "FR-C2 uploader-context merge failed (non-fatal) for message {MessageId}.", internetMessageId);
+                "FR-C2/C4 canonical resolve failed (non-fatal) for message {MessageId}.", internetMessageId);
+            return null;
         }
+    }
+
+    /// <summary>
+    /// FR-C4 (task 025): links a just-created email-archive document to the canonical <c>sprk_communication</c> that
+    /// captured the same email (resolved by <see cref="MergeUploaderAndResolveCanonicalAsync"/>). No-op when the
+    /// generic seam is unavailable (bare test ctor) or no canonical was found (upload-then-capture — the reverse path
+    /// links later from capture). Best-effort / non-fatal (NFR-04): the link is written via the generic seam so it
+    /// degrades until the gated <c>sprk_linkedcommunication</c> column exists; it never fails the save.
+    /// </summary>
+    private async Task LinkDocumentToCanonicalCommunicationAsync(
+        Guid documentId, Guid? canonicalCommunicationId, CancellationToken ct)
+    {
+        if (_genericEntityService is null || canonicalCommunicationId is not { } communicationId)
+            return;
+
+        await CrossPathLink.LinkDocumentToCommunicationAsync(
+            _genericEntityService, documentId, communicationId, _logger, ct);
     }
 
     /// <summary>

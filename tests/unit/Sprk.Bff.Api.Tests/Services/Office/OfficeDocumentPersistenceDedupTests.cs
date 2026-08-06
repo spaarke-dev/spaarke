@@ -117,4 +117,88 @@ public class OfficeDocumentPersistenceDedupTests
         written.Should().NotBeNull("an email save whose message was captured inbound records the saver on the canonical communication (FR-C2)");
         written![DeliveryContextMerge.SavedByUsersAttribute].Should().Be("user-oid-42");
     }
+
+    [Fact]
+    public async Task CreateDocumentWithSpePointers_EmailSaveWithCapturedCommunication_LinksDocumentToCommunication()
+    {
+        // FR-C4 (task 025), capture-then-upload: an email save whose message was ALSO captured inbound (a canonical
+        // sprk_communication exists) links the just-created archive DOCUMENT to that communication — so the review
+        // surface shows ONE email, not the communication + this archive as two rows.
+        const string messageId = "<msg-fr-c4-office@x.com>";
+        var canonicalCommId = Guid.NewGuid();
+        var newDocId = Guid.NewGuid();
+        var detector = DetectorReturning(new DedupDecision("h", IsDuplicate: false, CanonicalDocumentId: null));
+
+        var docSvc = new Mock<IDocumentDataverseService>();
+        docSvc.Setup(d => d.CreateDocumentAsync(It.IsAny<CreateDocumentRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(newDocId.ToString());
+        docSvc.Setup(d => d.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var comm = new Mock<ICommunicationDataverseService>();
+        comm.Setup(c => c.GetCommunicationByInternetMessageIdAsync(messageId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_communication", canonicalCommId));
+
+        var generic = new Mock<IGenericEntityService>();
+        // canonical-communication reads/writes (FR-C2) are unset → loose defaults; capture the FR-C4 document link.
+        generic.Setup(g => g.RetrieveAsync("sprk_document", newDocId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_document", newDocId));
+        Dictionary<string, object>? docWrite = null;
+        generic.Setup(g => g.UpdateAsync("sprk_document", newDocId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, f, _) => docWrite = f)
+            .Returns(Task.CompletedTask);
+
+        var sut = new OfficeDocumentPersistence(
+            docSvc.Object, Mock.Of<IProcessingJobService>(), detector.Object,
+            NullLogger<OfficeDocumentPersistence>.Instance, comm.Object, generic.Object);
+
+        var request = new SaveRequest
+        {
+            ContentType = SaveContentType.Email,
+            Email = new EmailMetadata { Subject = "FR-C4 office test", SenderEmail = "sender@x.com", InternetMessageId = messageId },
+        };
+
+        await sut.CreateDocumentWithSpePointersAsync(
+            request, "drive1", "item2", "https://spe/web", "email.eml", 100, "user-oid", CancellationToken.None);
+
+        docWrite.Should().NotBeNull("the new archive document is cross-path-linked to its captured communication (FR-C4)");
+        ((Microsoft.Xrm.Sdk.EntityReference)docWrite![CrossPathLink.LinkedCommunicationAttribute]).Id.Should().Be(canonicalCommId);
+    }
+
+    [Fact]
+    public async Task CreateDocumentWithSpePointers_EmailSaveNeverCaptured_DoesNotAttemptCrossPathLink()
+    {
+        // FR-C4 (task 025), upload-then-capture: the email was NOT captured inbound (no canonical communication) →
+        // the office side links nothing; the capture side links later when the communication is created.
+        const string messageId = "<msg-fr-c4-uncaptured@x.com>";
+        var newDocId = Guid.NewGuid();
+        var detector = DetectorReturning(new DedupDecision("h", IsDuplicate: false, CanonicalDocumentId: null));
+
+        var docSvc = new Mock<IDocumentDataverseService>();
+        docSvc.Setup(d => d.CreateDocumentAsync(It.IsAny<CreateDocumentRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(newDocId.ToString());
+        docSvc.Setup(d => d.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var comm = new Mock<ICommunicationDataverseService>();
+        comm.Setup(c => c.GetCommunicationByInternetMessageIdAsync(messageId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity?)null); // never captured
+
+        var generic = new Mock<IGenericEntityService>(MockBehavior.Strict); // strict → any sprk_document link call fails the test
+
+        var sut = new OfficeDocumentPersistence(
+            docSvc.Object, Mock.Of<IProcessingJobService>(), detector.Object,
+            NullLogger<OfficeDocumentPersistence>.Instance, comm.Object, generic.Object);
+
+        var request = new SaveRequest
+        {
+            ContentType = SaveContentType.Email,
+            Email = new EmailMetadata { Subject = "FR-C4 uncaptured", SenderEmail = "sender@x.com", InternetMessageId = messageId },
+        };
+
+        var act = async () => await sut.CreateDocumentWithSpePointersAsync(
+            request, "drive1", "item2", "https://spe/web", "email.eml", 100, "user-oid", CancellationToken.None);
+
+        await act.Should().NotThrowAsync("no canonical communication → no cross-path link attempted (and the save still succeeds)");
+    }
 }
