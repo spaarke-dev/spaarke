@@ -26,8 +26,8 @@ Tier: `sonnet` (default) · `opus` (high-blast/judgment) — effort: `high` (def
 | 025 | Deploy + verify B | 3 B | ✅* | 022,023,024 | sonnet / high | STANDARD | none (deploy) |
 | 030 | Awaited messages[0] Cosmos write (FR-D2) | 4 D | ✅ | 001 | sonnet / **xhigh** | FULL | Group D-srv-a (persistence) |
 | 031 | 404-on-missing history contract (FR-D3) | 4 D | ✅ | 001 | sonnet / high | FULL | Group D-srv-a (ChatEndpoints) |
-| 032 | Stored title + rename endpoint + title-gen (FR-D4) | 4 D | 🔲 | 031 | sonnet / high | FULL | none (ChatEndpoints, after 031) |
-| 033 | Retention TTL spike + implement (FR-D10) | 4 D | 🔲 | 030 | **opus / xhigh** | FULL | none (persistence, after 030) |
+| 032 | Stored title + rename endpoint + title-gen (FR-D4) | 4 D | ✅ | 031 | sonnet / high | FULL | none (ChatEndpoints, after 031) |
+| 033 | Retention TTL spike + implement (FR-D10) | 4 D | 🔄 spike done (per-doc TTL feasible; awaiting owner go-ahead to implement) | 030 | **opus / xhigh** | FULL | none (persistence, after 030) |
 | 034 | "Set related record" rename + prompt (FR-D9) | 4 D | 🔲 | 037 | **opus / high** | FULL | none (HistoryOverlay, after 037) |
 | 035 | Route History through rich restore + clear/remount (FR-D1) | 4 D | 🔲 | 031 | **opus / xhigh** | FULL | none (ConvPane spine) |
 | 036 | Rehydrate attachment chip on restore (FR-D5) | 4 D | 🔲 | 035 | sonnet / high | FULL | none (ConvPane spine) |

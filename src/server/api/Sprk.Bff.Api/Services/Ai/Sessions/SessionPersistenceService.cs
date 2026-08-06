@@ -778,11 +778,12 @@ public class SessionPersistenceService : ISessionPersistenceService
             var container = GetContainer();
 
             // Project ONLY the fields the History list needs (never the full messages array) — the
-            // first message's content is the title seed. ORDER BY lastActivity DESC uses the default
-            // range index; ISO-8601 timestamps sort chronologically as strings.
+            // first message's content is the title seed (pre-FR-D4 fallback). FR-D4 (task 032) adds
+            // c.title: the persisted, writable session title. ORDER BY lastActivity DESC uses the
+            // default range index; ISO-8601 timestamps sort chronologically as strings.
             var query = new QueryDefinition(
                 "SELECT TOP @limit c.id, c.sessionId, c.lastActivity, c.conversationSummary, " +
-                "c.entityRefs, c.messages[0].content AS firstMessage " +
+                "c.entityRefs, c.messages[0].content AS firstMessage, c.title " +
                 "FROM c WHERE c.tenantId = @tenantId ORDER BY c.lastActivity DESC")
                 .WithParameter("@limit", capped)
                 .WithParameter("@tenantId", tenantId);
@@ -810,7 +811,7 @@ public class SessionPersistenceService : ISessionPersistenceService
                     var entity = p.EntityRefs is { Count: > 0 } ? p.EntityRefs[0] : null;
                     results.Add(new RecentSessionInfo(
                         SessionId: sessionId,
-                        Title: BuildSessionTitle(p, entity),
+                        Title: !string.IsNullOrWhiteSpace(p.Title) ? p.Title : BuildSessionTitle(p, entity),
                         EntityType: entity?.EntityType,
                         EntityName: entity?.DisplayName,
                         PlaybookName: null,
@@ -829,7 +830,14 @@ public class SessionPersistenceService : ISessionPersistenceService
         }
     }
 
-    /// <summary>Derive a short, single-line display title for the History list from the cheapest signal.</summary>
+    /// <summary>
+    /// FALLBACK ONLY (FR-D4, task 032): derives a short, single-line display title for the
+    /// History list from the cheapest available signal when the session has no persisted
+    /// <see cref="RecentSessionProjection.Title"/> yet (pre-FR-D4 sessions, or a session that has
+    /// not exchanged its first message). Once <c>StoredSession.Title</c> is set,
+    /// <see cref="ListRecentSessionsAsync"/> uses it directly and this method is not consulted —
+    /// the persisted title is the ONE source of truth (no double-sourcing).
+    /// </summary>
     private static string BuildSessionTitle(RecentSessionProjection p, SessionEntityRef? entity)
     {
         var seed = FirstNonWhitespace(p.FirstMessage, p.ConversationSummary, entity?.DisplayName);
@@ -874,6 +882,10 @@ public class SessionPersistenceService : ISessionPersistenceService
 
         [System.Text.Json.Serialization.JsonPropertyName("firstMessage")]
         public string? FirstMessage { get; set; }
+
+        /// <summary>FR-D4 (task 032) — the persisted, writable session title. Null for sessions that pre-date the field.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("title")]
+        public string? Title { get; set; }
     }
 
     /// <summary>

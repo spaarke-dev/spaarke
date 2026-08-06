@@ -23,6 +23,22 @@ public class StoredSession
     public string SessionId { get; set; } = string.Empty;
 
     /// <summary>
+    /// FR-D4 (task 032) — stored, writable, human-readable session title. Seeded from a cheap
+    /// grounded label (or a deterministic fallback derived from the first user message — see
+    /// <see cref="Chat.ChatHistoryManager.AddMessageAsync"/>) at the session's first substantive
+    /// exchange, and rewritable via <c>PATCH /api/ai/chat/sessions/{sessionId}</c>
+    /// (<see cref="Api.Ai.ChatEndpoints"/>). Never a bare timestamp once set.
+    ///
+    /// Null for sessions that pre-date this field or that have not yet exchanged a first message
+    /// (additive schema evolution per ADR-015; partition key unchanged) — the History list
+    /// (<see cref="SessionPersistenceService.ListRecentSessionsAsync"/>) falls back to its prior
+    /// read-computed heuristic (<c>BuildSessionTitle</c>) only in that case, so the persisted title
+    /// is the ONE source of truth once it exists (no double-sourcing).
+    /// </summary>
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
+
+    /// <summary>
     /// Tenant identifier. Used as the partition key (/tenantId) for all Cosmos DB operations.
     /// Required — every document must be scoped to a tenant (ADR-015, NFR-09).
     /// </summary>

@@ -1,6 +1,8 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai.Chat;
@@ -106,6 +108,47 @@ public class ChatHistoryManagerTests
             _fakeSessionManager,
             _repoMock.Object,
             histLoggerMock.Object);
+    }
+
+    // =========================================================================
+    // FR-D4 (task 032) — asymmetric-registration regression guard
+    // =========================================================================
+    //
+    // bff-extensions.md §F.1 / §F.1-runtime: ChatHistoryManager is registered UNCONDITIONALLY
+    // (AnalysisServicesModule.AddUnconditionalChatAndNotificationServices, plain
+    // `services.AddScoped<ChatHistoryManager>();` — no factory), but IOpenAiClient is registered
+    // CONDITIONALLY (only when the DocumentIntelligence compound gate is ON —
+    // AnalysisServicesModule.cs:137). If the new title-gen ctor param made IOpenAiClient a
+    // REQUIRED dependency, resolving ChatHistoryManager via the real DI container with the AI
+    // gate OFF would throw at first use — breaking message-adding entirely, not just title-gen.
+    // This test proves the container-level (not just C#-default-param-level) resolution survives
+    // an unregistered IOpenAiClient, mirroring the runtime-verifiable pattern bff-extensions.md
+    // §F.1-runtime recommends for exactly this failure class.
+
+    [Fact]
+    public void ChatHistoryManager_ResolvesViaRealDiContainer_WhenIOpenAiClientIsUnregistered()
+    {
+        // Arrange — a minimal real ServiceCollection wired the same way
+        // AddUnconditionalChatAndNotificationServices registers these types (plain AddScoped<T>,
+        // no factory lambda) — deliberately WITHOUT registering IOpenAiClient, simulating the
+        // DocumentIntelligence compound gate OFF.
+        var services = new ServiceCollection();
+        services.AddSingleton<ITenantCache>(new InMemoryTenantCache());
+        services.AddSingleton(new Mock<IChatDataverseRepository>().Object);
+        services.AddLogging(builder => builder.AddProvider(NullLoggerProvider.Instance));
+        services.AddScoped<ChatSessionManager>();
+        services.AddScoped<ChatHistoryManager>();
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        // Act
+        var act = () => scope.ServiceProvider.GetRequiredService<ChatHistoryManager>();
+
+        // Assert
+        act.Should().NotThrow(
+            "ChatHistoryManager is registered unconditionally (§F.1) — an unregistered " +
+            "IOpenAiClient (AI gate OFF) must resolve the optional ctor param to null, not throw");
     }
 
     // =========================================================================

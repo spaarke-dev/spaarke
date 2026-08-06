@@ -144,6 +144,18 @@ public static class ChatEndpoints
             .ProducesProblem(403)
             .ProducesProblem(404);
 
+        // PATCH /api/ai/chat/sessions/{sessionId} — rename a session (FR-D4, task 032)
+        group.MapMethods("/sessions/{sessionId}", ["PATCH"], RenameSessionAsync)
+            .AddAiAuthorizationFilter()
+            .WithName("RenameChatSession")
+            .WithSummary("Rename a chat session (FR-D4)")
+            .WithDescription("Updates the session's stored, human-readable title. Persists across reloads (StoredSession.Title, ADR-040 — no new store). Returns 404 for a genuinely-missing session (same existence-check pattern as GetHistoryAsync/SwitchContextAsync).")
+            .Produces(204)
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(404);
+
         // DELETE /api/ai/chat/sessions/{sessionId} — delete a session
         group.MapDelete("/sessions/{sessionId}", DeleteSessionAsync)
             .AddAiAuthorizationFilter()
@@ -1271,6 +1283,71 @@ public static class ChatEndpoints
         await sessionManager.UpdateSessionCacheAsync(updatedSession, cancellationToken);
 
         logger.LogInformation("Context switched for session {SessionId}", sessionId);
+        return Results.NoContent();
+    }
+
+    /// <summary>
+    /// Rename a chat session's stored title (FR-D4, task 032).
+    /// PATCH /api/ai/chat/sessions/{sessionId}
+    ///
+    /// Mirrors the 404-on-missing pattern used by GetHistoryAsync/SwitchContextAsync/
+    /// DeleteSessionAsync (<see cref="ChatSessionManager.GetSessionAsync"/> — Redis hot ->
+    /// Cosmos warm -> Dataverse cold). The new title persists via the same
+    /// <see cref="ChatSessionManager.UpdateSessionCacheAsync"/> write-through
+    /// <see cref="SwitchContextAsync"/> uses (StoredSession.Title, ADR-040 — no new store).
+    /// </summary>
+    private static async Task<IResult> RenameSessionAsync(
+        string sessionId,
+        ChatRenameSessionRequest request,
+        ChatSessionManager sessionManager,
+        HttpContext httpContext,
+        ILogger<ChatSessionManager> logger,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Title))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Validation Error",
+                detail: "Title must not be empty.");
+        }
+
+        var trimmedTitle = request.Title.Trim();
+        if (trimmedTitle.Length > ChatRenameSessionRequest.MaxTitleLength)
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Validation Error",
+                detail: $"Title cannot exceed {ChatRenameSessionRequest.MaxTitleLength} characters. Received {trimmedTitle.Length}.");
+        }
+
+        var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
+        if (session is null)
+        {
+            return Results.Problem(
+                statusCode: 404,
+                title: "Not Found",
+                detail: $"Session '{sessionId}' not found.");
+        }
+
+        var updatedSession = session with
+        {
+            Title = trimmedTitle,
+            LastActivity = DateTimeOffset.UtcNow
+        };
+
+        await sessionManager.UpdateSessionCacheAsync(updatedSession, cancellationToken);
+
+        logger.LogInformation("Session {SessionId} renamed (tenant={TenantId})", sessionId, tenantId);
         return Results.NoContent();
     }
 
@@ -3426,6 +3503,20 @@ public record ChatSwitchContextRequest(
     Guid? PlaybookId,
     ChatHostContext? HostContext = null,
     IReadOnlyList<string>? AdditionalDocumentIds = null);
+
+/// <summary>Request body for PATCH /sessions/{id} (FR-D4, task 032 — rename).</summary>
+/// <param name="Title">The new session title. Required, non-empty after trim, capped at <see cref="MaxTitleLength"/> characters.</param>
+public record ChatRenameSessionRequest(string Title)
+{
+    /// <summary>
+    /// Safety ceiling for a user-supplied rename. Deliberately more generous than
+    /// <c>ChatHistoryManager.TitleMaxLength</c> (60) — that constant caps the CHEAP
+    /// auto-generated/fallback title (3-6 words), whereas a user manually renaming a session
+    /// may reasonably want a longer descriptive label. This cap exists only to bound storage/
+    /// display, not to enforce the auto-gen word-count target.
+    /// </summary>
+    public const int MaxTitleLength = 200;
+}
 
 // The R2-052 per-action confirm request/response records were DELETED by D12 / FR-P2-02
 // (task 031) together with their endpoint — the second confirmation store.

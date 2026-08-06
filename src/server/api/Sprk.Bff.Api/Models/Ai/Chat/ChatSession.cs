@@ -92,6 +92,28 @@ public record ChatSession(
     public const int MaxUploadedFiles = 20;
 
     // =========================================================================
+    // FR-D4 (task 032) — stored, writable session title.
+    //
+    // Like the ledger/Compose-domain collections below, this is an INIT-property addition
+    // (not a positional constructor parameter) so existing `new ChatSession(...)` call sites
+    // at every arity keep compiling unchanged (Component Justification §11 — extend, don't
+    // reshape). Null means "no title yet" (a brand-new session before its first message) —
+    // <see cref="Services.Ai.Chat.ChatHistoryManager.AddMessageAsync"/> seeds it at the first
+    // user message via a cheap grounded label (or the deterministic first-message fallback,
+    // per the FR-D4 fallback chain: generated -> first user message -> NEVER a bare
+    // timestamp). Rewritable via PATCH /api/ai/chat/sessions/{sessionId}
+    // (<see cref="Api.Ai.ChatEndpoints"/>). Persisted on <see cref="Sessions.StoredSession.Title"/>
+    // (ADR-040 — no new store).
+    // =========================================================================
+
+    /// <summary>
+    /// FR-D4 — stored, human-readable session title. Null until the session's first
+    /// substantive exchange seeds it; never a bare timestamp once set. See the class-level
+    /// remarks above for the seeding + rename contract.
+    /// </summary>
+    public string? Title { get; init; }
+
+    // =========================================================================
     // Session ledger (ADR-040 / FR-P0-01) — append-only typed entries.
     //
     // DARK LANDING (P0): these collections are persisted through the Redis +

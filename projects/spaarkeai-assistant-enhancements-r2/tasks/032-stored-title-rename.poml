@@ -4,7 +4,7 @@
     <title>Add a writable stored session title + rename endpoint + grounded title generation (FR-D4)</title>
     <phase>4 D — History &amp; true resume</phase>
     <gate>blocked until 031</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF: new persisted field + endpoint + a cheap grounded label</rigor-reason>
     <model-tier>sonnet</model-tier>

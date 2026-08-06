@@ -673,6 +673,9 @@ public class ChatSessionManager
             CreatedAt = session.CreatedAt,
             LastActivity = session.LastActivity,
 
+            // FR-D4 (task 032) — stored session title round-trips through the warm tier.
+            Title = session.Title,
+
             // Document references (ADR-040 fix — file refs survive the warm store)
             DocumentId = session.DocumentId,
             AdditionalDocumentIds = session.AdditionalDocumentIds?.ToList() ?? [],
@@ -763,6 +766,9 @@ public class ChatSessionManager
                 ? SessionPersistenceService.MapFromStored(stored.UploadedFiles)
                 : null)
         {
+            // FR-D4 (task 032) — restore the stored session title from the warm tier.
+            Title = stored.Title,
+
             // Session ledger (ADR-040 / FR-P0-01 — restored DARK at P0, zero readers).
             // Empty stored lists map to null ("no ledger entries yet").
             Outputs = SessionPersistenceService.MapOutputsFromStored(stored.Outputs),
