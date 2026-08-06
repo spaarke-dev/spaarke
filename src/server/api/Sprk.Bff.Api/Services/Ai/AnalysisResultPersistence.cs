@@ -127,7 +127,7 @@ public class AnalysisResultPersistence
                     documentId,
                     $"Document Profile - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
                     playbookId: null,
-                    cancellationToken);
+                    ct: cancellationToken);
             }
 
             // Step 2: Store outputs in sprk_analysisoutput (critical path)

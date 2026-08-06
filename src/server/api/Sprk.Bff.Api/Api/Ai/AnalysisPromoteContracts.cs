@@ -21,11 +21,26 @@ namespace Sprk.Bff.Api.Api.Ai;
 /// Optional playbook GUID applied to the new Analysis. When omitted, the session's own
 /// <see cref="Models.Ai.Chat.ChatSession.PlaybookId"/> is used.
 /// </param>
+/// <param name="RegardingEntityType">
+/// Optional ADR-024 <c>regarding</c> target entity logical name for the FR-D9 "Set related record"
+/// flow — associate the new Analysis to an EXISTING matter or project so it surfaces on that record's
+/// Analyses tab. Closed set: <c>sprk_matter</c> | <c>sprk_project</c>. When supplied (with
+/// <see cref="RegardingEntityId"/>), <see cref="DocumentId"/> becomes optional (a document-less,
+/// regarding-anchored analysis). A DOCUMENT association is NOT expressed here — anchor to a document
+/// via <see cref="DocumentId"/> instead (the "regarding = document" path).
+/// </param>
+/// <param name="RegardingEntityId">GUID of the target matter/project. Required when
+/// <see cref="RegardingEntityType"/> is supplied.</param>
+/// <param name="RegardingEntityName">Optional picker-provided display name of the target record; the
+/// server resolves the authoritative name + reference number from the record itself (SRFR-052).</param>
 public record AnalysisPromoteRequest(
     string SessionId,
     string Name,
     Guid? DocumentId = null,
-    Guid? PlaybookId = null);
+    Guid? PlaybookId = null,
+    string? RegardingEntityType = null,
+    Guid? RegardingEntityId = null,
+    string? RegardingEntityName = null);
 
 /// <summary>
 /// Response body for <c>POST /api/ai/analysis/promote</c> (201 Created). The client keeps using

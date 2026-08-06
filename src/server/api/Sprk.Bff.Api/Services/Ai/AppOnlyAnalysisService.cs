@@ -287,7 +287,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                     documentId,
                     $"Document Profile - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
                     playbookId,
-                    cancellationToken);
+                    ct: cancellationToken);
 
                 _logger.LogInformation(
                     "Created Analysis record {AnalysisId} for document {DocumentId} with playbook {PlaybookId}",
@@ -1261,7 +1261,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                     mainDocumentId,
                     $"Email Analysis - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
                     playbookId: null,
-                    cancellationToken);
+                    ct: cancellationToken);
 
                 _logger.LogInformation(
                     "Created Analysis record {AnalysisId} for email document {DocumentId}",

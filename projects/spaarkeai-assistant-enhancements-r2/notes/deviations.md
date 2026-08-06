@@ -1,5 +1,21 @@
 # Deviations Log — spaarkeai-assistant-enhancements-r2
 
+## Task 034 (FR-D9) — ADR-024 MUST-NOT #5 exception: server-side regarding-resolver logic duplicated in the Dataverse layer — §6.5 Path A
+
+**Date**: 2026-08-06 (owner-approved Path B for FR-D9; this is the resulting resolver-placement exception)
+**ADR rule challenged**: ADR-024 MUST-NOT — "MUST NOT duplicate resolver logic in individual services — use the shared `PolymorphicResolverService`."
+**Conflict**: FR-D9's server-side `sprk_analysis` regarding write needs an ADR-024 resolver. The canonical shared resolvers are (a) `PolymorphicResolverService.ts` — CLIENT-only (TypeScript), unusable server-side; and (b) `IncomingAssociationResolver` — which lives in **`Sprk.Bff.Api.Services.Communication`** (the BFF layer). The write itself must live in `Spaarke.Dataverse.DataverseServiceClientImpl.CreateAnalysisAsync` (the runtime `IAnalysisDataverseService` binding). Per the layering rule (`src/server/shared/CLAUDE.md`: "Spaarke.Dataverse can depend on Spaarke.Core; Sprk.Bff.Api depends on both — never the reverse"), `Spaarke.Dataverse` **cannot** reference `IncomingAssociationResolver`. So the ~20-line field-population sequence is necessarily duplicated (SDK `Entity` staging in `DataverseServiceClientImpl.StageAnalysisRegardingFields` vs the SDK `Entity` staging in `IncomingAssociationResolver.PopulateResolverFieldsAsync`).
+**Decision (§6.5 Path A — project-scoped exception)**: accept the duplication. Mitigations applied to bound the drift risk: (1) the field-NAME maps are centralized ONCE in `Spaarke.Dataverse.RegardingRecordType` (`GetRegardingLookupFieldByEntity` / `GetPrimaryNameField` / `GetReferenceNumberField`) rather than re-inlined; (2) recordtype-ref resolution reuses the existing `QueryRecordTypeRefAsync`; (3) the pure staging logic is extracted to `public static StageAnalysisRegardingFields` and unit-tested (`tests/unit/domain/Dataverse/AnalysisRegardingWriteTests.cs`) so a field-name/target regression is caught in CI, not on deploy.
+**Concrete drift risk being accepted**: if a future ADR-024 change adds/renames a resolver field, BOTH `IncomingAssociationResolver.PopulateResolverFieldsAsync` (Communication) AND `DataverseServiceClientImpl.StageAnalysisRegardingFields` (Analysis) must be updated. Note the two are NOT identical by design — see the next deviation (W1).
+**Preferred future consolidation**: a shared `RegardingFieldWriter` in `Spaarke.Dataverse` consumed by both the Communication resolver (via a thin BFF adapter) and the Analysis path. Out of scope for FR-D9.
+
+## Task 034 (FR-D9) — `sprk_analysis` carries a REDUCED ADR-024 resolver set (no `sprk_regardingrecordurl`)
+
+**Date**: 2026-08-06
+**ADR rule challenged**: ADR-024 MUST — "MUST populate ALL 5 resolver fields when an association is made" (the 5th being `sprk_regardingrecordurl`).
+**Finding**: `sprk_regardingrecordurl` is **not a deployed attribute on `sprk_analysis`**. Evidence: (a) the MCP-verified canonical projection `sprkAnalysis.ts` `ISprkAnalysisRecord` / `SPRK_ANALYSIS_SELECT` includes the other 4 resolver fields (`_sprk_regardingrecordtype_value`, `sprk_regardingrecordid`, `sprk_regardingrecordname`, `sprk_regardingrecordnumber`) but OMITS `sprk_regardingrecordurl`; (b) a repo-wide grep finds `sprk_regardingrecordurl` on `sprk_todo`/`sprk_event`/`sprk_communication`/`sprk_workassignment`/`sprk_memo` (all documented in `docs/data-model/`) but on `sprk_analysis` ONLY in this task's own new code — no schema/solution/data-model declaration for `sprk_analysis`.
+**Decision**: DROP `sprk_regardingrecordurl` from the `sprk_analysis` regarding write. Staging a non-existent attribute makes `ServiceClient.CreateAsync` throw → a 500 on **every** regarding promotion (feature-dead). The written set is therefore the entity-specific lookup + the 4 resolver fields that DO exist on `sprk_analysis`. Documented in `StageAnalysisRegardingFields` remarks. (If a URL resolver is later wanted on `sprk_analysis`, adding `sprk_regardingrecordurl` is a schema-deploy prerequisite — flag before re-enabling the write.)
+
 ## Task 001 (FR-E1) — retained `SuggestionCard.tsx`
 
 **Date**: 2026-08-05

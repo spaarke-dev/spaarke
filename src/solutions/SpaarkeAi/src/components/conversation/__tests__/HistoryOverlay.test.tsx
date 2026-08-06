@@ -46,6 +46,7 @@ interface FetchScript {
   sessions?: unknown[];
   onDelete?: (url: string) => { ok: boolean; status: number };
   onPatch?: (url: string, body: string) => { ok: boolean; status: number };
+  onPost?: (url: string, body: string) => { ok: boolean; status: number; detail?: string };
 }
 
 function makeAuthenticatedFetch(script: FetchScript): jest.MockedFunction<AuthenticatedFetchFn> {
@@ -67,14 +68,42 @@ function makeAuthenticatedFetch(script: FetchScript): jest.MockedFunction<Authen
       const result = script.onPatch?.(url, body) ?? { ok: true, status: 204 };
       return { ok: result.ok, status: result.status, json: async () => ({}) } as Response;
     }
+    if (method === "POST") {
+      const body = typeof init?.body === "string" ? init.body : "";
+      const result = script.onPost?.(url, body) ?? { ok: true, status: 201 };
+      return {
+        ok: result.ok,
+        status: result.status,
+        json: async () => (result.detail ? { detail: result.detail } : {}),
+      } as Response;
+    }
     return { ok: false, status: 404, json: async () => ({}) } as Response;
   }) as unknown as jest.MockedFunction<AuthenticatedFetchFn>;
+}
+
+/** Build a full IDataService mock for the "Set related record" picker (task 034). */
+function makeDataService(entities: Record<string, unknown>[]): {
+  createRecord: jest.Mock;
+  retrieveRecord: jest.Mock;
+  retrieveMultipleRecords: jest.Mock;
+  updateRecord: jest.Mock;
+  deleteRecord: jest.Mock;
+} {
+  return {
+    createRecord: jest.fn(),
+    retrieveRecord: jest.fn(),
+    retrieveMultipleRecords: jest.fn().mockResolvedValue({ entities }),
+    updateRecord: jest.fn(),
+    deleteRecord: jest.fn(),
+  };
 }
 
 function renderMenu(options: {
   onSelectSession?: (sessionId: string) => void;
   fetchScript?: FetchScript;
   theme?: typeof webLightTheme;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  dataService?: any;
 }): { onSelectSession: jest.Mock; fetchMock: jest.MockedFunction<AuthenticatedFetchFn> } {
   const onSelectSession = jest.fn();
   const fetchMock = makeAuthenticatedFetch(options.fetchScript ?? { sessions: [] });
@@ -84,6 +113,7 @@ function renderMenu(options: {
         onSelectSession={options.onSelectSession ?? onSelectSession}
         bffBaseUrl={BFF_BASE_URL}
         authenticatedFetch={fetchMock}
+        dataService={options.dataService}
       />
     </FluentProvider>
   );
@@ -207,17 +237,83 @@ describe("HistoryMenu (task 037, FR-D6/D7/D8)", () => {
     expect(screen.getByTestId("history-menu-overflow-delete-s1")).toBeInTheDocument();
   });
 
-  it("'Set related record' is a no-op placeholder — does not open the session or throw", async () => {
+  // -------------------------------------------------------------------------
+  // FR-D9 (task 034) — "Set related record" association action
+  // -------------------------------------------------------------------------
+
+  it("'Set related record' opens the association dialog and does not open the session", async () => {
     const { onSelectSession } = renderMenu({ fetchScript: { sessions } });
     const user = await openHistoryMenu();
     await screen.findByText("Review the Acme NDA");
     await user.click(screen.getByTestId("history-menu-overflow-s1"));
 
-    await expect(
-      user.click(await screen.findByTestId("history-menu-overflow-set-related-s1"))
-    ).resolves.not.toThrow();
+    await user.click(await screen.findByTestId("history-menu-overflow-set-related-s1"));
 
+    // The Save/Confirm control proves the association dialog opened.
+    expect(await screen.findByTestId("set-related-confirm")).toBeInTheDocument();
     expect(onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it("files to an EXISTING matter via the extended promote endpoint (FR-D9 regarding)", async () => {
+    const onPost = jest.fn().mockReturnValue({ ok: true, status: 201 });
+    const dataService = makeDataService([
+      { sprk_matterid: "m-1", sprk_mattername: "Acme Holdings", sprk_matternumber: "MAT-100" },
+    ]);
+    renderMenu({ fetchScript: { sessions, onPost }, dataService });
+    const user = await openHistoryMenu();
+    await screen.findByText("Review the Acme NDA");
+
+    await user.click(screen.getByTestId("history-menu-overflow-s1"));
+    await user.click(await screen.findByTestId("history-menu-overflow-set-related-s1"));
+
+    // Record path is the default when a dataService is present. Search → pick → save.
+    await user.type(await screen.findByTestId("set-related-search"), "Acme");
+    await user.click(await screen.findByTestId("set-related-result-m-1"));
+    await user.click(screen.getByTestId("set-related-confirm"));
+
+    await waitFor(() => expect(onPost).toHaveBeenCalledTimes(1));
+    const [url, body] = onPost.mock.calls[0];
+    expect(url).toContain("/api/ai/analysis/promote");
+    expect(JSON.parse(body)).toMatchObject({
+      sessionId: "s1",
+      regardingEntityType: "sprk_matter",
+      regardingEntityId: "m-1",
+      regardingEntityName: "Acme Holdings",
+    });
+  });
+
+  it("files using the conversation's document when no dataService is available (FR-D9 document path)", async () => {
+    const onPost = jest.fn().mockReturnValue({ ok: true, status: 201 });
+    // No dataService → the dialog defaults to the document path (server resolves session.DocumentId).
+    renderMenu({ fetchScript: { sessions, onPost } });
+    const user = await openHistoryMenu();
+    await screen.findByText("Review the Acme NDA");
+
+    await user.click(screen.getByTestId("history-menu-overflow-s1"));
+    await user.click(await screen.findByTestId("history-menu-overflow-set-related-s1"));
+    await user.click(await screen.findByTestId("set-related-confirm"));
+
+    await waitFor(() => expect(onPost).toHaveBeenCalledTimes(1));
+    const [url, body] = onPost.mock.calls[0];
+    expect(url).toContain("/api/ai/analysis/promote");
+    const parsed = JSON.parse(body);
+    expect(parsed.sessionId).toBe("s1");
+    expect(parsed).not.toHaveProperty("regardingEntityType");
+  });
+
+  it("surfaces the server's friendly message when promotion is rejected (already-associated guard)", async () => {
+    const onPost = jest
+      .fn()
+      .mockReturnValue({ ok: false, status: 400, detail: "This session is already bound to an Analysis and cannot be promoted again." });
+    renderMenu({ fetchScript: { sessions, onPost } });
+    const user = await openHistoryMenu();
+    await screen.findByText("Review the Acme NDA");
+
+    await user.click(screen.getByTestId("history-menu-overflow-s1"));
+    await user.click(await screen.findByTestId("history-menu-overflow-set-related-s1"));
+    await user.click(await screen.findByTestId("set-related-confirm"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/already bound to an Analysis/i);
   });
 
   it("the overflow 'Open' item also opens the session", async () => {

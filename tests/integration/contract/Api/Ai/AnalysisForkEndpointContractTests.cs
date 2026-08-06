@@ -135,7 +135,7 @@ public class AnalysisForkEndpointContractTests : IClassFixture<AnalysisForkEndpo
 
         // No Dataverse writes occurred (401 fires at the auth boundary, before the handler).
         _fx.AnalysisServiceMock.Verify(
-            s => s.CreateAnalysisAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            s => s.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _fx.ChatRepo.Created.Should().BeEmpty();
     }
@@ -161,7 +161,7 @@ public class AnalysisForkEndpointContractTests : IClassFixture<AnalysisForkEndpo
 
         // The existence check runs BEFORE any write, so nothing is orphaned.
         _fx.AnalysisServiceMock.Verify(
-            s => s.CreateAnalysisAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            s => s.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _fx.ChatRepo.Created.Should().BeEmpty();
     }
@@ -194,7 +194,7 @@ public class AnalysisForkEndpointContractTests : IClassFixture<AnalysisForkEndpo
 
         // The Analysis was created then COMPENSATED (deleted) — no dangling anchor.
         _fx.AnalysisServiceMock.Verify(
-            s => s.CreateAnalysisAsync(documentId, "Compensating Fork", It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            s => s.CreateAnalysisAsync(documentId, "Compensating Fork", It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<CancellationToken>()),
             Times.Once);
         _fx.EntityServiceMock.Verify(
             e => e.DeleteAsync("sprk_analysis", AnalysisForkEndpointTestFixture.AnalysisId, It.IsAny<CancellationToken>()),
@@ -334,7 +334,7 @@ public sealed class AnalysisForkEndpointTestFixture : IAsyncLifetime, IDisposabl
     {
         AnalysisServiceMock
             .Setup(s => s.CreateAnalysisAsync(
-                It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(AnalysisId);
     }
 

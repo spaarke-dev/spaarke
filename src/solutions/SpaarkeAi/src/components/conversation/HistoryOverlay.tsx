@@ -145,8 +145,23 @@
  * @see ContextPaneMenu.tsx — sibling pattern this mirrors (task 095)
  * @see AssistantToolMenu.tsx — sibling that already uses `MenuGroupHeader` inside a `MenuList`
  * @see errorTelemetry.ts — TELEMETRY_HISTORY_LOAD_FAILURE constant
- * @see agreementTypeLookupWrite.ts — the task 023 write helper task 034's "Set related record" is
- *      expected to call again once it replaces this task's no-op placeholder.
+ *
+ * Task 034 (FR-D9) — what changed:
+ *   - The task-037 "Set related record" NO-OP placeholder is now the REAL association action. Its
+ *     overflow button opens a `<Dialog>` (sibling of Rename/Delete) that files an otherwise-
+ *     unassociated session via the EXISTING `POST /api/ai/analysis/promote` endpoint (task 034
+ *     extended that contract with an optional ADR-024 regarding target + relaxed document anchor):
+ *       (a) associate to an EXISTING matter/project — the filed analysis gets `sprk_regarding{matter|
+ *           project}` (ADR-024 5-field write, server-side) so it surfaces on that record's Analyses
+ *           tab; the picker is SELF-CONTAINED (queries Dataverse via the `dataService` prop / Xrm.WebApi
+ *           — no NavigationService, no ConversationPane edit), OR
+ *       (b) anchor to this conversation's own document (server resolves `session.DocumentId`).
+ *   - An already-associated session is guarded SERVER-side (promote 400s "already bound to an
+ *     Analysis"); the history-list projection does not expose analysis-ownership, so the client relies
+ *     on that 400 + a friendly inline message rather than hiding the menu item (the projection gap is
+ *     tracked separately as DI-01 / FR-D7).
+ *   - The `dataService` prop (already supplied by ConversationPane, previously dormant) is now
+ *     consumed for the picker; `resolveClassifiedSubDomain` remains dormant (unused here).
  */
 
 import * as React from "react";
@@ -173,6 +188,8 @@ import {
   Popover,
   PopoverSurface,
   PopoverTrigger,
+  RadioGroup,
+  Radio,
   makeStyles,
   tokens,
 } from "@fluentui/react-components";
@@ -372,6 +389,30 @@ const useStyles = makeStyles({
   dialogError: {
     color: tokens.colorPaletteRedForeground1,
   },
+  /** Vertical field stack for the "Set related record" dialog (task 034). */
+  relatedFieldGap: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalS,
+  },
+  /** Scrollable results list for the matter/project picker (task 034). */
+  relatedResults: {
+    display: "flex",
+    flexDirection: "column",
+    maxHeight: "160px",
+    overflowY: "auto",
+    borderRadius: tokens.borderRadiusMedium,
+    border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
+  },
+  /** Individual picker result — full width, left-aligned (task 034). */
+  relatedResultItem: {
+    justifyContent: "flex-start",
+    width: "100%",
+  },
+  /** Muted helper / selected-record line in the picker (task 034). */
+  relatedNote: {
+    color: tokens.colorNeutralForeground2,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -489,6 +530,45 @@ function groupSessionsByRecency(
 export { resolveGroupLabel, groupSessionsByRecency };
 
 // ---------------------------------------------------------------------------
+// "Set related record" (task 034, FR-D9) — regarding-target metadata
+// ---------------------------------------------------------------------------
+
+/** Closed set of ADR-024 regarding targets offered by "Set related record" (matter | project). */
+type RelatedEntityType = "sprk_matter" | "sprk_project";
+
+/** A picked matter/project: `id` + server display `name` + list `label` (name + number). */
+interface RelatedPick {
+  id: string;
+  name: string;
+  label: string;
+}
+
+/**
+ * Dataverse field metadata per regarding target. Drives the SELF-CONTAINED picker
+ * query (via the `dataService` prop / Xrm.WebApi) — no NavigationService, no
+ * ConversationPane wiring. Restricted to matter + project (the parents whose forms
+ * carry an Analyses tab); a document association uses the analysis's own document
+ * anchor server-side, not this picker.
+ */
+const RELATED_ENTITY_META: Record<
+  RelatedEntityType,
+  { idField: string; nameField: string; numberField: string; label: string }
+> = {
+  sprk_matter: {
+    idField: "sprk_matterid",
+    nameField: "sprk_mattername",
+    numberField: "sprk_matternumber",
+    label: "Matter",
+  },
+  sprk_project: {
+    idField: "sprk_projectid",
+    nameField: "sprk_projectname",
+    numberField: "sprk_projectnumber",
+    label: "Project",
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -508,6 +588,7 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
   onSelectSession,
   bffBaseUrl,
   authenticatedFetch,
+  dataService,
 }) => {
   const styles = useStyles();
 
@@ -661,18 +742,154 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
     setReloadKey((k) => k + 1);
   }, []);
 
-  // ── "Set related record" placeholder (task 037, FR-D6 slot for task 034) ─
+  // ── "Set related record" (task 034, FR-D9) ─────────────────────────────
   //
-  // Deliberately a no-op — see the file header "Task 037" note. Task 034
-  // (FR-D9) replaces this handler with the real association action.
-  const handleSetRelatedRecordPlaceholder = React.useCallback(
-    (event: React.MouseEvent): void => {
+  // Files an otherwise-unassociated session by (a) associating it to an EXISTING
+  // matter/project (ADR-024 regarding → the filed analysis surfaces on that
+  // record's Analyses tab), or (b) anchoring it to this conversation's document.
+  // Both reuse the EXISTING POST /api/ai/analysis/promote endpoint (task 034
+  // extended its request contract with an optional regarding target + relaxed the
+  // document anchor). The matter/project picker is SELF-CONTAINED: it queries
+  // Dataverse via the `dataService` prop (Xrm.WebApi) — no NavigationService, no
+  // ConversationPane edit. An already-associated session is guarded server-side
+  // (promote 400s); the client surfaces that friendly message.
+  const [relatedTarget, setRelatedTarget] = React.useState<{ sessionId: string; title: string } | null>(null);
+  const [relatedMode, setRelatedMode] = React.useState<"record" | "document">("record");
+  const [relatedName, setRelatedName] = React.useState<string>("");
+  const [relatedEntityType, setRelatedEntityType] = React.useState<RelatedEntityType>("sprk_matter");
+  const [relatedQuery, setRelatedQuery] = React.useState<string>("");
+  const [relatedResults, setRelatedResults] = React.useState<RelatedPick[]>([]);
+  const [relatedSearching, setRelatedSearching] = React.useState<boolean>(false);
+  const [relatedPick, setRelatedPick] = React.useState<RelatedPick | null>(null);
+  const [relatedSubmitting, setRelatedSubmitting] = React.useState<boolean>(false);
+  const [relatedError, setRelatedError] = React.useState<string | null>(null);
+
+  const handleOpenSetRelated = React.useCallback(
+    (event: React.MouseEvent, sessionId: string, title: string): void => {
       event.preventDefault();
       event.stopPropagation();
       setOverflowOpenId(null);
+      // Default to the record path when a data service is available; otherwise the
+      // self-contained picker can't run, so fall back to the document path.
+      setRelatedMode(dataService ? "record" : "document");
+      setRelatedName(title);
+      setRelatedEntityType("sprk_matter");
+      setRelatedQuery("");
+      setRelatedResults([]);
+      setRelatedPick(null);
+      setRelatedError(null);
+      setRelatedSubmitting(false);
+      setRelatedTarget({ sessionId, title });
     },
-    []
+    [dataService]
   );
+
+  const handleCloseSetRelated = React.useCallback((): void => {
+    setRelatedTarget(null);
+    setRelatedError(null);
+    setRelatedSubmitting(false);
+  }, []);
+
+  // Debounced Dataverse search for the matter/project picker (self-contained via
+  // dataService). Fires only in "record" mode with a ≥2-char query.
+  React.useEffect(() => {
+    if (relatedTarget === null || relatedMode !== "record" || !dataService) {
+      return;
+    }
+    const q = relatedQuery.trim();
+    if (q.length < 2) {
+      setRelatedResults([]);
+      setRelatedSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setRelatedSearching(true);
+    const meta = RELATED_ENTITY_META[relatedEntityType];
+    const safe = q.replace(/'/g, "''");
+    const options =
+      `?$select=${meta.idField},${meta.nameField},${meta.numberField}` +
+      `&$filter=statecode eq 0 and (contains(${meta.nameField},'${safe}') or contains(${meta.numberField},'${safe}'))` +
+      `&$top=20`;
+    const handle = setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await dataService.retrieveMultipleRecords(relatedEntityType, options);
+          if (cancelled) return;
+          const rows: RelatedPick[] = (res.entities ?? [])
+            .map((e) => {
+              // retrieveMultipleRecords returns bare GUIDs, but strip any braces defensively so the
+              // server's Guid parse (regardingEntityId) never 400s on a `{guid}` form.
+              const id = String(e[meta.idField] ?? "").replace(/[{}]/g, "");
+              const nm = typeof e[meta.nameField] === "string" ? (e[meta.nameField] as string) : "";
+              const num = typeof e[meta.numberField] === "string" ? (e[meta.numberField] as string) : "";
+              const label = num ? `${nm || num} (${num})` : nm || id;
+              return { id, name: nm || num || id, label };
+            })
+            .filter((r) => r.id.length > 0);
+          setRelatedResults(rows);
+        } catch {
+          if (!cancelled) setRelatedResults([]);
+        } finally {
+          if (!cancelled) setRelatedSearching(false);
+        }
+      })();
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [relatedTarget, relatedMode, relatedEntityType, relatedQuery, dataService]);
+
+  const handleConfirmSetRelated = React.useCallback(async (): Promise<void> => {
+    if (!relatedTarget || !bffBaseUrl || !relatedName.trim()) {
+      return;
+    }
+    if (relatedMode === "record" && !relatedPick) {
+      setRelatedError("Pick a matter or project first.");
+      return;
+    }
+    setRelatedSubmitting(true);
+    setRelatedError(null);
+    try {
+      const url = buildBffApiUrl(bffBaseUrl, "/api/ai/analysis/promote");
+      const body: Record<string, unknown> = {
+        sessionId: relatedTarget.sessionId,
+        name: relatedName.trim(),
+      };
+      if (relatedMode === "record" && relatedPick) {
+        body.regardingEntityType = relatedEntityType;
+        body.regardingEntityId = relatedPick.id;
+        body.regardingEntityName = relatedPick.name;
+      }
+      const response = await authenticatedFetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let detail: any = null;
+        try {
+          detail = await response.json();
+        } catch {
+          // non-JSON error body — fall through to the generic message below
+        }
+        // 400 already-associated (or missing anchor) → surface the server's friendly detail.
+        setRelatedError(
+          (detail && typeof detail.detail === "string" && detail.detail) ||
+            "Couldn't set the related record. Try again."
+        );
+        setRelatedSubmitting(false);
+        return;
+      }
+      setRelatedSubmitting(false);
+      setRelatedTarget(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setRelatedError(message || "Couldn't set the related record. Try again.");
+      setRelatedSubmitting(false);
+    }
+  }, [relatedTarget, bffBaseUrl, relatedName, relatedMode, relatedPick, relatedEntityType, authenticatedFetch]);
 
   // ── Rename (task 037, FR-D6 — PATCH /api/ai/chat/sessions/{id}, task 032) ─
   const [renameTarget, setRenameTarget] = React.useState<{
@@ -911,7 +1128,7 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
                 appearance="subtle"
                 className={styles.overflowAction}
                 icon={<LinkRegular />}
-                onClick={handleSetRelatedRecordPlaceholder}
+                onClick={(e) => handleOpenSetRelated(e, s.sessionId, s.title)}
                 data-testid={`history-menu-overflow-set-related-${s.sessionId}`}
               >
                 Set related record
@@ -947,7 +1164,7 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
           // and would otherwise be treated as an outside-click dismissal. Ignore close
           // requests for as long as one of these dialogs is open so the row list
           // survives the round trip.
-          if (!data.open && (renameTarget !== null || deleteTarget !== null)) {
+          if (!data.open && (renameTarget !== null || deleteTarget !== null || relatedTarget !== null)) {
             return;
           }
           setOpen(data.open);
@@ -1115,6 +1332,138 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
                 data-testid="delete-session-confirm"
               >
                 {deleting ? <Spinner size="tiny" /> : "Delete"}
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
+      {/* task 034 (FR-D9) — "Set related record": associate to an existing matter/project (ADR-024
+          regarding → surfaces on that record's Analyses tab) OR anchor to this conversation's document.
+          Both reuse POST /api/ai/analysis/promote. */}
+      <Dialog
+        open={relatedTarget !== null}
+        onOpenChange={(_, data) => {
+          if (!data.open) handleCloseSetRelated();
+        }}
+      >
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Set related record</DialogTitle>
+            <DialogContent>
+              <div className={styles.relatedFieldGap}>
+                <Field label="Analysis name" required>
+                  <Input
+                    value={relatedName}
+                    onChange={(_, data) => setRelatedName(data.value)}
+                    disabled={relatedSubmitting}
+                    data-testid="set-related-name-input"
+                  />
+                </Field>
+
+                <RadioGroup
+                  value={relatedMode}
+                  onChange={(_, data) => setRelatedMode(data.value as "record" | "document")}
+                  aria-label="Association type"
+                >
+                  <Radio
+                    value="record"
+                    label="Associate to an existing matter or project"
+                    disabled={!dataService || relatedSubmitting}
+                  />
+                  <Radio
+                    value="document"
+                    label="Attach to this conversation's document"
+                    disabled={relatedSubmitting}
+                  />
+                </RadioGroup>
+
+                {relatedMode === "record" && (
+                  <div className={styles.relatedFieldGap}>
+                    <RadioGroup
+                      layout="horizontal"
+                      value={relatedEntityType}
+                      onChange={(_, data) => {
+                        setRelatedEntityType(data.value as RelatedEntityType);
+                        setRelatedPick(null);
+                        setRelatedResults([]);
+                      }}
+                      aria-label="Record type"
+                    >
+                      <Radio value="sprk_matter" label="Matter" disabled={relatedSubmitting} />
+                      <Radio value="sprk_project" label="Project" disabled={relatedSubmitting} />
+                    </RadioGroup>
+
+                    <Field label={`Search ${RELATED_ENTITY_META[relatedEntityType].label.toLowerCase()}s`}>
+                      <SearchBox
+                        value={relatedQuery}
+                        onChange={(_, data) => {
+                          setRelatedQuery(data.value);
+                          setRelatedPick(null);
+                        }}
+                        placeholder="Type at least 2 characters"
+                        disabled={relatedSubmitting}
+                        data-testid="set-related-search"
+                      />
+                    </Field>
+
+                    {relatedSearching ? (
+                      <Spinner size="tiny" label="Searching…" labelPosition="after" />
+                    ) : relatedResults.length > 0 && !relatedPick ? (
+                      <div className={styles.relatedResults} role="listbox" aria-label="Matching records">
+                        {relatedResults.map((r) => (
+                          <Button
+                            key={r.id}
+                            appearance="subtle"
+                            className={styles.relatedResultItem}
+                            onClick={() => {
+                              setRelatedPick(r);
+                              setRelatedResults([]);
+                            }}
+                            data-testid={`set-related-result-${r.id}`}
+                          >
+                            {r.label}
+                          </Button>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {relatedPick && (
+                      <Text size={200} className={styles.relatedNote}>
+                        Selected: {relatedPick.label}
+                      </Text>
+                    )}
+                  </div>
+                )}
+
+                {relatedMode === "document" && (
+                  <Text size={200} className={styles.relatedNote}>
+                    Files this conversation as an analysis anchored to its document.
+                  </Text>
+                )}
+
+                {relatedError && (
+                  <Text size={200} className={styles.dialogError} role="alert">
+                    {relatedError}
+                  </Text>
+                )}
+              </div>
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="secondary" onClick={handleCloseSetRelated} disabled={relatedSubmitting}>
+                Cancel
+              </Button>
+              <Button
+                appearance="primary"
+                onClick={() => void handleConfirmSetRelated()}
+                disabled={
+                  relatedSubmitting ||
+                  !relatedName.trim() ||
+                  (relatedMode === "record" && !relatedPick)
+                }
+                data-testid="set-related-confirm"
+              >
+                {relatedSubmitting ? <Spinner size="tiny" /> : "Save"}
               </Button>
             </DialogActions>
           </DialogBody>

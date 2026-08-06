@@ -4,7 +4,7 @@
     <title>Rename Promote → 'Set related record' with a prompted existing-vs-create-document flow (FR-D9)</title>
     <phase>4 D — History &amp; true resume</phase>
     <gate>blocked until 037</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF + frontend behavior change on the association action</rigor-reason>
     <model-tier>opus</model-tier>
