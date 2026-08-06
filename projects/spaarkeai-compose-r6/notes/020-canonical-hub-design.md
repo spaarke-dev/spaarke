@@ -251,4 +251,50 @@ the entire delta), not commit payload; CI/deploy build from clean checkouts. Bas
 
 ---
 
-*Steps 1–3 artifact + gates + tasks 020/011/021 records. Checkpoint in `current-task.md`.*
+## 12. Task 022 — tables through the canonical model (2026-08-06)
+
+**R5-reuse interpretation (directional):** the R5 tracked-table work (`ComposeShadowPatchEngine.ApplyTableOperation`
+— tracked InsertRow/DeleteRow/InsertColumn/DeleteColumn/SetCellContent/SetTableProps) is an EDIT-OPERATION layer
+on the op-log path; it is REUSED AS-IS there (untouched by this task; its representation continues to serve
+tracked edits until 025 models revisions). What render-on-save needs — and what FR-04 "tables round-trip
+without hard-fail" actually requires — is the MODEL carrying table structure, since tables live in the body
+being replaced (unlike numbering, no carrier part to reference). Table handling was NOT re-built: the existing
+`ComposeTable`/`ProjectTable`/`BuildTable` surfaces were extended in place.
+
+**Closed structural set (task-022 widening):**
+- `ComposeTable`: `StyleId` (tblStyle — carrier styles keep the styled look), `Width` (tblW), **`Borders`
+  (TRI-STATE: null = born-in-editor → legacy single-border/100% chrome bit-stable for the live client;
+  non-null = source-faithful, only present edges emitted; all-edges-null = BORDERLESS — a legal
+  signature-block layout table no longer grows borders on save, the biggest visible table-fidelity bug)**,
+  `GridColumnWidthsTwips` (tblGrid), `LookHex` (tblLook).
+- `ComposeTableRow`: `RepeatAsHeaderRow` (trPr/tblHeader — distinct from the cosmetic cell `IsHeader`).
+- `ComposeTableCell`: `GridSpan`, `VMerge` (None/Restart/Continue), `Width` (tcW), `VerticalAlignment`
+  (projector always explicit — source value else Word-default "top"; null keeps the legacy center chrome).
+- Out-of-set chrome flattens LOUDLY: one counted `table-formatting-flattened` per dropped construct
+  (tblpPr floating, jc, shading table+cell, tblInd, tblCellMar, tblCellSpacing, trHeight, tcBorders,
+  tcMar, textDirection). Widening = 026/follow-up.
+- Grid computation fix: width-less grids now size to the widest row's TOTAL SPAN (gridSpan-aware), not
+  the raw cell count.
+- SDK 3.x gotcha: the OOXML enum STRUCTS' `ToString()` is NOT the XML token — capture via
+  `IEnumValue.Value` ("single"/"pct"), re-mint via the struct's string ctor.
+
+**Seam slice** — `ComposeTableCanonicalModelSeamTests.cs`: SDK-authored rich source (borderless
+signature table w/ explicit grid + gridSpan row; styled table w/ partial borders, tblLook, repeat-header
+row, vMerge restart/continue, tcW, bottom vAlign) → capture facts → carrier round-trip reproduces the
+structure in rendered OOXML → **OpenXmlValidator: no NEW schema errors** (the "Word-valid markup"
+acceptance made mechanical) → corpus-wide table-shape fixed point (rows/cells/span/merge survive
+model→docx→model for every corpus doc with tables) → loud-degradation count pin (5 constructs = 5) →
+born-in-editor legacy-chrome pin (live client look unchanged).
+
+**Gates:** suite 705/708 (same 3 pre-existing NDA-class reds). ADR-013 facade green. No package/DI/endpoint
+change (CVE surface unchanged; publish measured post-commit in a clean worktree per §11.1's measurement note).
+Client contract: additive optional fields on the table types (server-set; preserve-on-repost documented).
+
+**Placement Justification (root §10):** modify/extend of existing `Services/Compose` files only — no new
+service/endpoint/DI/package. §11: existing = ComposeTable model + ProjectTable + BuildTable (extended in
+place); cost-of-doing-nothing = imported tables lose merges/widths and grow borders on save (Word-visible
+structural corruption of legal signature/schedule tables).
+
+---
+
+*Steps 1–3 artifact + gates + tasks 020/011/021/022 records. Checkpoint in `current-task.md`.*

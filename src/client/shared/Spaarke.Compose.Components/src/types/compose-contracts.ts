@@ -471,20 +471,63 @@ export interface ComposeInlineRun {
   underline?: boolean;
 }
 
-/** A table cell — nested block content (mirrors the server `ComposeTableCell`). */
+/** A table cell — nested block content (mirrors the server `ComposeTableCell`).
+ *
+ * The optional structural-fact fields (server task 022 — `gridSpan`, `vMerge`, `width`,
+ * `verticalAlignment`) are SERVER-set by the docx→model projection for imported documents; the client
+ * mapper never sets them. Preserve untouched on edit-and-repost. */
 export interface ComposeTableCell {
   blocks: ComposeContentBlock[];
   isHeader?: boolean;
+  gridSpan?: number;
+  vMerge?: 'None' | 'Restart' | 'Continue';
+  width?: ComposeTableWidth;
+  verticalAlignment?: 'top' | 'center' | 'bottom';
 }
 
-/** A table row (mirrors the server `ComposeTableRow`). */
+/** A table row (mirrors the server `ComposeTableRow`). `repeatAsHeaderRow` = `w:trPr/w:tblHeader`
+ * (row repeats at the top of every page — server task 022; distinct from the cosmetic cell `isHeader`). */
 export interface ComposeTableRow {
   cells: ComposeTableCell[];
+  repeatAsHeaderRow?: boolean;
 }
 
-/** A native table (mirrors the server `ComposeTable`). */
+/** A native table (mirrors the server `ComposeTable`).
+ *
+ * The optional structural-fact fields (server task 022) are SERVER-set by the docx→model projection for
+ * imported documents: style identity, width, borders (tri-state: absent = born-in-editor renderer chrome;
+ * present-but-all-edges-omitted = borderless), explicit grid widths, and `tblLook` hex. The client mapper
+ * never sets them; preserve untouched on edit-and-repost. */
 export interface ComposeTable {
   rows: ComposeTableRow[];
+  styleId?: string;
+  width?: ComposeTableWidth;
+  borders?: ComposeTableBorders;
+  gridColumnWidthsTwips?: string[];
+  lookHex?: string;
+}
+
+/** A table/cell width (`w:tblW` / `w:tcW`): OOXML `ST_TblWidth` type + raw numeric string (server task 022). */
+export interface ComposeTableWidth {
+  type: 'auto' | 'dxa' | 'pct' | 'nil';
+  value: string;
+}
+
+/** The six table border edges (each omitted edge is not emitted; all-omitted = borderless — server task 022). */
+export interface ComposeTableBorders {
+  top?: ComposeTableBorderEdge;
+  left?: ComposeTableBorderEdge;
+  bottom?: ComposeTableBorderEdge;
+  right?: ComposeTableBorderEdge;
+  insideHorizontal?: ComposeTableBorderEdge;
+  insideVertical?: ComposeTableBorderEdge;
+}
+
+/** One border edge: OOXML `ST_Border` name + size (eighths of a point) + color (hex or `auto`). */
+export interface ComposeTableBorderEdge {
+  val: string;
+  size?: number;
+  color?: string;
 }
 
 /**

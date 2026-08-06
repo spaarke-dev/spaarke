@@ -818,31 +818,37 @@ public sealed partial class ComposeDocumentRenderer
     private Table BuildTable(ComposeTable model, ListRenderState state)
     {
         var table = new Table();
-        table.AppendChild(new TableProperties(
-            new TableWidth { Width = "5000", Type = TableWidthUnitValues.Pct },
-            // CT_TblBorders order: top, left, bottom, right, insideH, insideV.
-            new TableBorders(
-                new TopBorder { Val = BorderValues.Single, Size = 4, Color = "auto" },
-                new LeftBorder { Val = BorderValues.Single, Size = 4, Color = "auto" },
-                new BottomBorder { Val = BorderValues.Single, Size = 4, Color = "auto" },
-                new RightBorder { Val = BorderValues.Single, Size = 4, Color = "auto" },
-                new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4, Color = "auto" },
-                new InsideVerticalBorder { Val = BorderValues.Single, Size = 4, Color = "auto" }),
-            new TableLook { Val = "04A0", FirstRow = true, LastRow = false, FirstColumn = true, LastColumn = false, NoHorizontalBand = false, NoVerticalBand = true }));
+        table.AppendChild(BuildTableProperties(model));
 
-        // A w:tblGrid (column definitions) MUST follow tblPr and precede the rows (schema order). Width the
-        // grid to the widest row so every column is defined.
-        var columnCount = model.Rows.Max(r => r.Cells.Count);
+        // A w:tblGrid (column definitions) MUST follow tblPr and precede the rows (schema order). Task 022:
+        // explicit source widths when the model carries them; else width the grid to the widest row's TOTAL
+        // SPAN (a gridSpan cell occupies multiple columns) so every column is defined.
         var grid = new TableGrid();
-        for (var c = 0; c < columnCount; c++)
+        if (model.GridColumnWidthsTwips is { Count: > 0 } gridWidths)
         {
-            grid.AppendChild(new GridColumn());
+            foreach (var width in gridWidths)
+            {
+                grid.AppendChild(new GridColumn { Width = width });
+            }
+        }
+        else
+        {
+            var columnCount = model.Rows.Max(r => r.Cells.Sum(c => Math.Max(1, c.GridSpan)));
+            for (var c = 0; c < columnCount; c++)
+            {
+                grid.AppendChild(new GridColumn());
+            }
         }
         table.AppendChild(grid);
 
         foreach (var row in model.Rows)
         {
             var tableRow = new TableRow();
+            if (row.RepeatAsHeaderRow)
+            {
+                // CT_Row order: trPr precedes the cells.
+                tableRow.AppendChild(new TableRowProperties(new TableHeader()));
+            }
             foreach (var cell in row.Cells)
             {
                 tableRow.AppendChild(BuildTableCell(cell, state));
@@ -853,11 +859,95 @@ public sealed partial class ComposeDocumentRenderer
         return table;
     }
 
+    /// <summary>
+    /// Task 022 — the tri-state chrome contract (<see cref="ComposeTable.Borders"/>): a NULL Borders means
+    /// born-in-editor → the legacy single-border/100% chrome, BIT-STABLE for the live client; non-null means
+    /// source-faithful → ONLY the carried facts are emitted (an all-null-edge Borders reproduces a
+    /// BORDERLESS table — legal signature-block layout tables must not grow borders on save).
+    /// </summary>
+    private static TableProperties BuildTableProperties(ComposeTable model)
+    {
+        if (model.Borders is null)
+        {
+            return new TableProperties(
+                new TableWidth { Width = "5000", Type = TableWidthUnitValues.Pct },
+                // CT_TblBorders order: top, left, bottom, right, insideH, insideV.
+                new TableBorders(
+                    new TopBorder { Val = BorderValues.Single, Size = 4, Color = "auto" },
+                    new LeftBorder { Val = BorderValues.Single, Size = 4, Color = "auto" },
+                    new BottomBorder { Val = BorderValues.Single, Size = 4, Color = "auto" },
+                    new RightBorder { Val = BorderValues.Single, Size = 4, Color = "auto" },
+                    new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4, Color = "auto" },
+                    new InsideVerticalBorder { Val = BorderValues.Single, Size = 4, Color = "auto" }),
+                new TableLook { Val = "04A0", FirstRow = true, LastRow = false, FirstColumn = true, LastColumn = false, NoHorizontalBand = false, NoVerticalBand = true });
+        }
+
+        // Source-faithful — CT_TblPr schema order: tblStyle, tblW, tblBorders, tblLook.
+        var tblPr = new TableProperties();
+        if (!string.IsNullOrEmpty(model.StyleId))
+        {
+            tblPr.AppendChild(new TableStyle { Val = model.StyleId });
+        }
+        if (model.Width is { } width)
+        {
+            tblPr.AppendChild(new TableWidth { Width = width.Value, Type = MapWidthType(width.Type) });
+        }
+        if (BuildTableBorders(model.Borders) is { } borders)
+        {
+            tblPr.AppendChild(borders);
+        }
+        if (!string.IsNullOrEmpty(model.LookHex))
+        {
+            tblPr.AppendChild(new TableLook { Val = model.LookHex });
+        }
+        return tblPr;
+    }
+
+    /// <summary>Null when every edge is null — a borderless table omits <c>w:tblBorders</c> entirely.</summary>
+    private static TableBorders? BuildTableBorders(ComposeTableBorders borders)
+    {
+        // CT_TblBorders order: top, left, bottom, right, insideH, insideV.
+        var result = new TableBorders();
+        AppendEdge<TopBorder>(result, borders.Top);
+        AppendEdge<LeftBorder>(result, borders.Left);
+        AppendEdge<BottomBorder>(result, borders.Bottom);
+        AppendEdge<RightBorder>(result, borders.Right);
+        AppendEdge<InsideHorizontalBorder>(result, borders.InsideHorizontal);
+        AppendEdge<InsideVerticalBorder>(result, borders.InsideVertical);
+        return result.HasChildren ? result : null;
+    }
+
+    private static void AppendEdge<TEdge>(TableBorders borders, ComposeTableBorderEdge? edge)
+        where TEdge : BorderType, new()
+    {
+        if (edge is null)
+        {
+            return;
+        }
+        var element = new TEdge { Val = new BorderValues(edge.Val) };
+        if (edge.Size is { } size)
+        {
+            element.Size = size;
+        }
+        if (!string.IsNullOrEmpty(edge.Color))
+        {
+            element.Color = edge.Color;
+        }
+        borders.AppendChild(element);
+    }
+
+    private static TableWidthUnitValues MapWidthType(string type) => type switch
+    {
+        "dxa" => TableWidthUnitValues.Dxa,
+        "pct" => TableWidthUnitValues.Pct,
+        "nil" => TableWidthUnitValues.Nil,
+        _ => TableWidthUnitValues.Auto,
+    };
+
     private TableCell BuildTableCell(ComposeTableCell cell, ListRenderState state)
     {
         var tableCell = new TableCell();
-        tableCell.AppendChild(new TableCellProperties(
-            new TableCellVerticalAlignment { Val = TableVerticalAlignmentValues.Center }));
+        tableCell.AppendChild(BuildCellProperties(cell));
 
         if (cell.Blocks.Count == 0)
         {
@@ -871,6 +961,40 @@ public sealed partial class ComposeDocumentRenderer
         var blocks = cell.IsHeader ? cell.Blocks.Select(EmphasizeBlock).ToList() : cell.Blocks;
         RenderBlocks(tableCell, blocks, state);
         return tableCell;
+    }
+
+    /// <summary>Task 022 — CT_TcPr schema order: tcW, gridSpan, vMerge, vAlign. A null
+    /// <see cref="ComposeTableCell.VerticalAlignment"/> keeps the legacy born-in-editor <c>center</c>;
+    /// projected cells always carry an explicit value (source, else Word's default <c>top</c>).</summary>
+    private static TableCellProperties BuildCellProperties(ComposeTableCell cell)
+    {
+        var tcPr = new TableCellProperties();
+        if (cell.Width is { } width)
+        {
+            tcPr.AppendChild(new TableCellWidth { Width = width.Value, Type = MapWidthType(width.Type) });
+        }
+        if (cell.GridSpan > 1)
+        {
+            tcPr.AppendChild(new GridSpan { Val = cell.GridSpan });
+        }
+        if (cell.VMerge == ComposeVerticalMerge.Restart)
+        {
+            tcPr.AppendChild(new VerticalMerge { Val = MergedCellValues.Restart });
+        }
+        else if (cell.VMerge == ComposeVerticalMerge.Continue)
+        {
+            tcPr.AppendChild(new VerticalMerge()); // no @w:val = continue (ECMA-376 default)
+        }
+        tcPr.AppendChild(new TableCellVerticalAlignment
+        {
+            Val = cell.VerticalAlignment switch
+            {
+                null or "center" => TableVerticalAlignmentValues.Center,
+                "bottom" => TableVerticalAlignmentValues.Bottom,
+                _ => TableVerticalAlignmentValues.Top,
+            },
+        });
+        return tcPr;
     }
 
     private static ComposeBlock EmphasizeBlock(ComposeBlock block) =>

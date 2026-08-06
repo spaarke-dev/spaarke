@@ -163,11 +163,87 @@ public sealed record ComposeInlineRun
     public string? Href { get; init; }
 }
 
-/// <summary>A native table (<c>w:tbl</c>): an ordered list of rows.</summary>
+/// <summary>A native table (<c>w:tbl</c>): an ordered list of rows plus the STRUCTURAL facts the render-on-save
+/// path must reproduce (task 022 widening — spans/merges/widths/borders/style identity; visual chrome beyond
+/// this closed set flattens LOUDLY via the <c>table-formatting-flattened</c> projection warning).</summary>
 public sealed record ComposeTable
 {
     /// <summary>The table rows in order. An empty table is not rendered (Word requires ≥1 row).</summary>
     public IReadOnlyList<ComposeTableRow> Rows { get; init; } = Array.Empty<ComposeTableRow>();
+
+    /// <summary>Task 022: the source table STYLE identity (<c>w:tblPr/w:tblStyle</c>). In carrier mode the
+    /// preserved styles part keeps the definition, so a styled table keeps its look; a dangling reference
+    /// (blank-package synthesize) falls back to Normal Table — the same accepted posture as <c>pStyle</c>.
+    /// Null for born-in-editor tables.</summary>
+    public string? StyleId { get; init; }
+
+    /// <summary>Task 022: the table width (<c>w:tblPr/w:tblW</c>). Null = not specified (Word auto layout)
+    /// for source-faithful tables; born-in-editor tables get the renderer's 100%-pct default.</summary>
+    public ComposeTableWidth? Width { get; init; }
+
+    /// <summary>
+    /// Task 022: the table borders (<c>w:tblPr/w:tblBorders</c>). SEMANTICS ARE TRI-STATE and load-bearing:
+    /// <c>null</c> = born-in-editor table → the renderer applies its own single-border chrome (bit-stable
+    /// legacy look); NON-null = source-faithful mode — only the edges present are emitted, and an instance
+    /// with ALL edges null reproduces a BORDERLESS table (legal signature-block layout tables must not grow
+    /// borders on save). The PROJECTOR always sets this (possibly empty) for projected tables.
+    /// </summary>
+    public ComposeTableBorders? Borders { get; init; }
+
+    /// <summary>Task 022: explicit column widths in twips (<c>w:tblGrid/w:gridCol/@w:w</c>, document order).
+    /// Null when the source grid carries no explicit widths — the renderer then emits width-less columns
+    /// sized to the widest row's total span.</summary>
+    public IReadOnlyList<string>? GridColumnWidthsTwips { get; init; }
+
+    /// <summary>Task 022: the <c>w:tblLook/@w:val</c> hex (conditional-formatting flags consumed by
+    /// <see cref="StyleId"/>'s banding). Null for born-in-editor tables (renderer default "04A0").</summary>
+    public string? LookHex { get; init; }
+}
+
+/// <summary>A width value (<c>w:tblW</c> / <c>w:tcW</c>): <see cref="Type"/> is the OOXML
+/// <c>ST_TblWidth</c> name (<c>auto</c> / <c>dxa</c> / <c>pct</c> / <c>nil</c>), <see cref="Value"/> the
+/// numeric string exactly as authored.</summary>
+public sealed record ComposeTableWidth
+{
+    public string Type { get; init; } = "auto";
+    public string Value { get; init; } = "0";
+}
+
+/// <summary>The six table border edges (task 022). Each null edge is simply not emitted — see
+/// <see cref="ComposeTable.Borders"/> for the tri-state contract.</summary>
+public sealed record ComposeTableBorders
+{
+    public ComposeTableBorderEdge? Top { get; init; }
+    public ComposeTableBorderEdge? Left { get; init; }
+    public ComposeTableBorderEdge? Bottom { get; init; }
+    public ComposeTableBorderEdge? Right { get; init; }
+    public ComposeTableBorderEdge? InsideHorizontal { get; init; }
+    public ComposeTableBorderEdge? InsideVertical { get; init; }
+}
+
+/// <summary>One border edge: <see cref="Val"/> is the OOXML <c>ST_Border</c> name (<c>single</c>,
+/// <c>none</c>, <c>dotted</c>, …), <see cref="Size"/> eighths-of-a-point, <see cref="Color"/> hex or
+/// <c>auto</c>.</summary>
+public sealed record ComposeTableBorderEdge
+{
+    public string Val { get; init; } = "single";
+    public uint? Size { get; init; }
+    public string? Color { get; init; }
+}
+
+/// <summary>Vertical-merge state of a cell (<c>w:tcPr/w:vMerge</c>, task 022). Serialized as its STRING
+/// name over the wire.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ComposeVerticalMerge
+{
+    /// <summary>Not merged vertically.</summary>
+    None,
+
+    /// <summary>Starts a vertical merge (<c>w:vMerge w:val="restart"</c>).</summary>
+    Restart,
+
+    /// <summary>Continues the merge from the cell above (<c>w:vMerge</c> with no/continue val).</summary>
+    Continue,
 }
 
 /// <summary>A table row (<c>w:tr</c>): an ordered list of cells.</summary>
@@ -175,6 +251,10 @@ public sealed record ComposeTableRow
 {
     /// <summary>The row cells in order.</summary>
     public IReadOnlyList<ComposeTableCell> Cells { get; init; } = Array.Empty<ComposeTableCell>();
+
+    /// <summary>Task 022: <c>w:trPr/w:tblHeader</c> — the row repeats as a header at the top of every page
+    /// the table spans. Distinct from <see cref="ComposeTableCell.IsHeader"/> (a cosmetic bolding hint).</summary>
+    public bool RepeatAsHeaderRow { get; init; }
 }
 
 /// <summary>
@@ -187,6 +267,23 @@ public sealed record ComposeTableCell
     /// <summary>The cell's block content (each paragraph gets its own minted/carried <c>w14:paraId</c>).</summary>
     public IReadOnlyList<ComposeBlock> Blocks { get; init; } = Array.Empty<ComposeBlock>();
 
-    /// <summary>Header cell — the renderer bolds its text (cosmetic; no <c>tblHeader</c> row property).</summary>
+    /// <summary>Header cell — the renderer bolds its text (cosmetic; no <c>tblHeader</c> row property —
+    /// that is <see cref="ComposeTableRow.RepeatAsHeaderRow"/>).</summary>
     public bool IsHeader { get; init; }
+
+    /// <summary>Task 022: horizontal span (<c>w:tcPr/w:gridSpan</c>) — how many grid columns this cell
+    /// occupies. Values &lt; 1 are treated as 1.</summary>
+    public int GridSpan { get; init; } = 1;
+
+    /// <summary>Task 022: vertical-merge state (<c>w:tcPr/w:vMerge</c>).</summary>
+    public ComposeVerticalMerge VMerge { get; init; } = ComposeVerticalMerge.None;
+
+    /// <summary>Task 022: the cell width (<c>w:tcPr/w:tcW</c>). Null = not specified.</summary>
+    public ComposeTableWidth? Width { get; init; }
+
+    /// <summary>Task 022: vertical alignment (<c>w:tcPr/w:vAlign</c>: <c>top</c> / <c>center</c> /
+    /// <c>bottom</c>). The PROJECTOR always sets an explicit value (source value, else Word's default
+    /// <c>top</c>) so a projected cell never inherits the renderer's born-in-editor <c>center</c> chrome;
+    /// null (client-authored) keeps that legacy center default.</summary>
+    public string? VerticalAlignment { get; init; }
 }

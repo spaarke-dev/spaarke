@@ -2015,9 +2015,17 @@ public sealed class ComposeDocxProjectionBuilder
                 // Fresh ListContinuity: a list never continues across a cell boundary (read walk's
                 // CloseOpenList at cell edges).
                 ProjectBlockChildren(cell, cellBlocks, new ListContinuity(), ctx);
-                cells.Add(new ComposeTableCell { Blocks = cellBlocks });
+                cells.Add(ProjectCellFacts(cell, cellBlocks, ctx));
             }
-            rows.Add(new ComposeTableRow { Cells = cells });
+            rows.Add(new ComposeTableRow
+            {
+                Cells = cells,
+                RepeatAsHeaderRow = row.TableRowProperties?.GetFirstChild<TableHeader>() is not null,
+            });
+            if (row.TableRowProperties?.GetFirstChild<TableRowHeight>() is not null)
+            {
+                ctx.AddWarning("table-formatting-flattened", 1); // trHeight — row height not model data
+            }
         }
         if (rows.Count == 0)
         {
@@ -2030,8 +2038,136 @@ public sealed class ComposeDocxProjectionBuilder
         return new ComposeBlock
         {
             Kind = ComposeBlockKind.Table,
-            Table = new ComposeTable { Rows = rows },
+            Table = ProjectTableFacts(table, rows, ctx),
         };
+    }
+
+    // ── task 022: table structural-fact capture (spans/merges/widths/borders/style identity) ───────
+    // The CLOSED near-term set the renderer reproduces; everything else in tblPr/trPr/tcPr flattens
+    // LOUDLY (one `table-formatting-flattened` count per dropped construct — F-1, never silent).
+
+    private static ComposeTable ProjectTableFacts(Table table, List<ComposeTableRow> rows, ModelWalkContext ctx)
+    {
+        var tblPr = table.GetFirstChild<TableProperties>();
+
+        // Explicit grid widths (document order); null when any gridCol lacks @w:w (renderer then emits a
+        // width-less grid sized to the widest row's span total).
+        IReadOnlyList<string>? gridWidths = null;
+        var grid = table.GetFirstChild<TableGrid>();
+        if (grid is not null)
+        {
+            var widths = grid.Elements<GridColumn>().Select(g => g.Width?.Value).ToList();
+            if (widths.Count > 0 && widths.All(w => !string.IsNullOrEmpty(w)))
+            {
+                gridWidths = widths!;
+            }
+        }
+
+        // Loud flattens for the chrome outside the closed set (one count each).
+        if (tblPr is not null)
+        {
+            if (tblPr.GetFirstChild<TableJustification>() is not null) ctx.AddWarning("table-formatting-flattened", 1);
+            if (tblPr.GetFirstChild<Shading>() is not null) ctx.AddWarning("table-formatting-flattened", 1);
+            if (tblPr.GetFirstChild<TableIndentation>() is not null) ctx.AddWarning("table-formatting-flattened", 1);
+            if (tblPr.GetFirstChild<TableCellMarginDefault>() is not null) ctx.AddWarning("table-formatting-flattened", 1);
+            if (tblPr.GetFirstChild<TableCellSpacing>() is not null) ctx.AddWarning("table-formatting-flattened", 1);
+            if (tblPr.GetFirstChild<TablePositionProperties>() is not null) ctx.AddWarning("table-formatting-flattened", 1); // floating table → flows inline
+        }
+
+        return new ComposeTable
+        {
+            Rows = rows,
+            StyleId = tblPr?.TableStyle?.Val?.Value,
+            Width = ProjectWidth(tblPr?.GetFirstChild<TableWidth>()),
+            // ALWAYS non-null for a projected table (tri-state contract): an empty instance = borderless —
+            // the renderer must NOT apply its born-in-editor border chrome to a source table.
+            Borders = ProjectTableBorders(tblPr?.GetFirstChild<TableBorders>()),
+            GridColumnWidthsTwips = gridWidths,
+            LookHex = tblPr?.GetFirstChild<TableLook>()?.Val?.Value,
+        };
+    }
+
+    private ComposeTableCell ProjectCellFacts(TableCell cell, List<ComposeBlock> blocks, ModelWalkContext ctx)
+    {
+        var tcPr = cell.TableCellProperties;
+
+        var vMerge = ComposeVerticalMerge.None;
+        if (tcPr?.GetFirstChild<VerticalMerge>() is { } merge)
+        {
+            // Per ECMA-376 a w:vMerge with no @w:val (or val="continue") CONTINUES; val="restart" starts.
+            vMerge = merge.Val is not null && merge.Val.Value == MergedCellValues.Restart
+                ? ComposeVerticalMerge.Restart
+                : ComposeVerticalMerge.Continue;
+        }
+
+        if (tcPr is not null)
+        {
+            if (tcPr.GetFirstChild<Shading>() is not null) ctx.AddWarning("table-formatting-flattened", 1);
+            if (tcPr.GetFirstChild<TableCellBorders>() is not null) ctx.AddWarning("table-formatting-flattened", 1);
+            if (tcPr.GetFirstChild<TableCellMargin>() is not null) ctx.AddWarning("table-formatting-flattened", 1);
+            if (tcPr.GetFirstChild<TextDirection>() is not null) ctx.AddWarning("table-formatting-flattened", 1);
+        }
+
+        return new ComposeTableCell
+        {
+            Blocks = blocks,
+            GridSpan = Math.Max(1, tcPr?.GetFirstChild<GridSpan>()?.Val?.Value ?? 1),
+            VMerge = vMerge,
+            Width = ProjectWidth(tcPr?.GetFirstChild<TableCellWidth>()),
+            // Explicit source value, else Word's default "top" — a projected cell must never inherit the
+            // renderer's born-in-editor "center" chrome (see ComposeTableCell.VerticalAlignment).
+            VerticalAlignment = MapVerticalAlignment(tcPr?.GetFirstChild<TableCellVerticalAlignment>()) ?? "top",
+        };
+    }
+
+    private static ComposeTableWidth? ProjectWidth(TableWidthType? width)
+    {
+        if (width?.Type is null)
+        {
+            return null;
+        }
+        var type = width.Type.Value;
+        return new ComposeTableWidth
+        {
+            Type = type == TableWidthUnitValues.Dxa ? "dxa"
+                : type == TableWidthUnitValues.Pct ? "pct"
+                : type == TableWidthUnitValues.Nil ? "nil"
+                : "auto",
+            Value = width.Width?.Value ?? "0",
+        };
+    }
+
+    private static ComposeTableBorders ProjectTableBorders(TableBorders? borders) => new()
+    {
+        Top = ProjectBorderEdge(borders?.TopBorder),
+        Left = ProjectBorderEdge(borders?.LeftBorder),
+        Bottom = ProjectBorderEdge(borders?.BottomBorder),
+        Right = ProjectBorderEdge(borders?.RightBorder),
+        InsideHorizontal = ProjectBorderEdge(borders?.InsideHorizontalBorder),
+        InsideVertical = ProjectBorderEdge(borders?.InsideVerticalBorder),
+    };
+
+    private static ComposeTableBorderEdge? ProjectBorderEdge(BorderType? edge) =>
+        edge?.Val is null
+            ? null
+            : new ComposeTableBorderEdge
+            {
+                // IEnumValue.Value is the raw XML token ("single", "double", …) — the 3.x enum structs'
+                // ToString() is NOT the token; the renderer re-mints the struct from this token.
+                Val = ((DocumentFormat.OpenXml.IEnumValue)edge.Val.Value).Value,
+                Size = edge.Size?.Value,
+                Color = edge.Color?.Value,
+            };
+
+    private static string? MapVerticalAlignment(TableCellVerticalAlignment? vAlign)
+    {
+        if (vAlign?.Val is null)
+        {
+            return null;
+        }
+        if (vAlign.Val.Value == TableVerticalAlignmentValues.Center) return "center";
+        if (vAlign.Val.Value == TableVerticalAlignmentValues.Bottom) return "bottom";
+        return "top";
     }
 
     private void ProjectInline(OpenXmlElement container, List<ComposeInlineRun> sink, string? href, ModelWalkContext ctx)
