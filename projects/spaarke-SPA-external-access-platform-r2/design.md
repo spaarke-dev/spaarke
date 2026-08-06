@@ -73,7 +73,7 @@ The module-host is assembled from **two donor sources + net-new**, verified agai
 
 **Do NOT fork `LegalWorkspaceApp`** (the "dashboard engine") — it hard-requires `Xrm.WebApi` + a Dataverse user GUID and cannot serve external users. It is a component/pattern donor, not a shell to adopt.
 
-> **FR-22 status (2026-08-06)**: teams-app-r1 shipped the principal-agnostic collaboration endpoints (Option A) built to R2's guardrails — see `notes/r2-coordination-response.md`. R2 no longer *builds* FR-22; it **lifts + generalizes** it into the module framework. Open R2 follow-ups from the delivery: graded workforce per-project levels (D1, F3/F5 decision), and cleanup of the transitional `/api/v1/collab` + inert `ExternalCallerAuthorizationFilter` (D2). Operator-gated: BFF redeploy + live Teams E2E.
+> **FR-22 status (2026-08-06)**: teams-app-r1 shipped the principal-agnostic collaboration endpoints (Option A) built to R2's guardrails — see `notes/r2-coordination-response.md`. R2 no longer *builds* FR-22; it **lifts + generalizes** it into the module framework. Follow-ups from the delivery: **D1 RESOLVED** (owner 2026-08-06) — grade workforce within-project rights by **ADR-034 role → level** (owner→FullAccess, collaborator→Collaborate, view-only→ViewOnly) for CIAM parity, implemented in F3/F5 via `WorkforcePrincipalStrategy` (P1 keeps flat Collaborate); and **D2** cleanup of the transitional `/api/v1/collab` + inert `ExternalCallerAuthorizationFilter`. Operator-gated: BFF redeploy + live Teams E2E.
 
 ---
 
