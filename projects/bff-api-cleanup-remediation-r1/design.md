@@ -1,11 +1,11 @@
 # BFF API Cleanup & Remediation — Design Document
 
-> **Project slug**: `bff-api-cleanup-remediation-r1`
+> **Slug**: `bff-api-cleanup-remediation-r1` (a **surface workstream**, not a standalone project)
 > **Status**: DRAFT — for owner review before `/design-to-spec`
 > **Author**: Assessment run 2026-08-05/06 (read-only audit, 6 parallel investigations + Fable verification pass). No code modified during assessment.
 > **Scope target**: `src/server/api/Sprk.Bff.Api/` (+ the `Spaarke.Dataverse` / `Spaarke.Core` shared assemblies it consumes)
 > **Governance**: BINDING — this project adds/removes code to the BFF, so root [`CLAUDE.md` §10 (BFF Hygiene)](../../CLAUDE.md) + [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) apply. Hot-path declaration + Placement Justification below.
-> **Program**: Surface-child **#1** of the [`code-quality-and-assurance-r3`](../code-quality-and-assurance-r3/design.md) quality program (umbrella owns the rubric, re-baseline, and forcing-functions; this project is the BFF surface's deep remediation).
+> **Program**: The **BFF surface workstream** (#1) of the [`code-quality-and-assurance-r3`](../code-quality-and-assurance-r3/design.md) quality program. Per the owner's single-worktree decision (r3 §4/§4A), this executes **in the r3 worktree on the `work/code-quality-and-assurance-r3` branch** — NOT as a separate project/worktree. This folder is a semantic home for the BFF surface's design + findings. The A/B tranche split below still applies, as small PRs off the r3 branch (`/conflict-check` each).
 
 ---
 
