@@ -2422,17 +2422,20 @@ public sealed class ComposeDocxProjectionBuilder
                         // NDA's signature blocks) ACCEPT-FLATTENS: its visible text is preserved as a
                         // degraded plain run at the anchor position, only the box chrome is lost —
                         // counted `text-box-flattened`. A text-free object (image/OLE/shape) keeps the
-                        // established loud drop.
+                        // established loud drop. Step-9.5 F3: a transitional MIXED run (own w:t text
+                        // ALONGSIDE the object) keeps its direct text too — ExtractRunsDisplayText walks
+                        // only the run's DIRECT text children (Picture/Drawing fall through), so the box
+                        // text is never doubled here.
                         var runBoxText = ExtractTextBoxDisplayText(r, ctx);
-                        if (runBoxText.Length > 0)
+                        var directRunText = ExtractRunsDisplayText(new[] { r });
+                        var combined = directRunText.Length > 0 && runBoxText.Length > 0
+                            ? directRunText + " " + runBoxText
+                            : directRunText.Length > 0 ? directRunText : runBoxText;
+                        if (combined.Length > 0)
                         {
-                            AddPlainRun(sink, runBoxText, href, ctx, revision);
-                            ctx.AddWarning("text-box-flattened", 1);
+                            AddPlainRun(sink, combined, href, ctx, revision);
                         }
-                        else
-                        {
-                            ctx.AddWarning("complex-object-dropped", 1);
-                        }
+                        ctx.AddWarning(runBoxText.Length > 0 ? "text-box-flattened" : "complex-object-dropped", 1);
                         break;
                     }
                     ProjectRun(r, sink, href, ctx, revision);
@@ -2613,11 +2616,24 @@ public sealed class ComposeDocxProjectionBuilder
             return string.Empty; // not a text-carrying construct (pure image/shape/OLE)
         }
 
+        // Step-9.5 F2 (026): the UNCHOSEN AlternateContent branches duplicate the chosen one — their
+        // paragraphs are REPRESENTED (via the chosen branch's extraction), so they count as visited too,
+        // or the unrendered-paragraphs guard would falsely report the dedup'd Fallback as lost content
+        // (the NDA fired ×3 exactly this way).
+        if (!ReferenceEquals(scope, construct))
+        {
+            ctx.VisitedParagraphs += construct.Descendants<Paragraph>().Count() - scope.Descendants<Paragraph>().Count();
+        }
+
         var sb = new StringBuilder();
         foreach (var paragraph in scope.Descendants<Paragraph>())
         {
             ctx.VisitedParagraphs++;
-            var text = ExtractRunsDisplayText(paragraph.Descendants<Run>());
+            // Step-9.5 F1 (026): each run belongs to its NEAREST paragraph — a nested paragraph
+            // (box-inside-box; a branch wrapping the box run in its own w:p) would otherwise emit its
+            // runs twice (once via the outer paragraph's deep walk, once via its own).
+            var text = ExtractRunsDisplayText(
+                paragraph.Descendants<Run>().Where(r => ReferenceEquals(r.Ancestors<Paragraph>().First(), paragraph)));
             if (text.Length == 0) continue;
             if (sb.Length > 0) sb.Append(' ');
             sb.Append(text);

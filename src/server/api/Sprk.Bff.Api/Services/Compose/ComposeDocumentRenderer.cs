@@ -142,7 +142,7 @@ public sealed partial class ComposeDocumentRenderer
 
             AddStyleDefinitions(mainPart);
             AddNumberingDefinitions(mainPart, plan);
-            EnsureCommentsPart(mainPart, model.Comments);
+            EnsureCommentsPart(mainPart, model.Comments, state);
 
             // Mint a unique w14:paraId on every paragraph lacking a valid one — AFTER the body is fully built
             // so the dedup pass sees every client-carried id (mirrors ParaIdPreParser's collect-then-mint).
@@ -512,7 +512,7 @@ public sealed partial class ComposeDocumentRenderer
             // Task 024: the CARRIER's comments part is authoritative and preserved untouched (byte-identical
             // — the anchors above reference its ids); the part is authored from the model only when the
             // carrier has none at all.
-            EnsureCommentsPart(mainPart, model.Comments);
+            EnsureCommentsPart(mainPart, model.Comments, state);
 
             if (trailingSectPr is not null)
             {
@@ -548,7 +548,7 @@ public sealed partial class ComposeDocumentRenderer
     /// synthesize authors it fresh). Ids match the body anchors' <see cref="ComposeCommentAnchor.Id"/>;
     /// the raw authored Date string is re-emitted verbatim.
     /// </summary>
-    private static void EnsureCommentsPart(MainDocumentPart mainPart, IReadOnlyList<ComposeComment> comments)
+    private static void EnsureCommentsPart(MainDocumentPart mainPart, IReadOnlyList<ComposeComment> comments, ListRenderState? state = null)
     {
         if (comments.Count == 0 || mainPart.WordprocessingCommentsPart is not null)
         {
@@ -567,6 +567,9 @@ public sealed partial class ComposeDocumentRenderer
             // xsd:dateTime is OMITTED (projection-sourced dates parse; only client junk is dropped).
             if (!emittedIds.Add(model.Id))
             {
+                // Task 026 (review F7): a duplicate-id comment is user-visible content collapsing
+                // first-wins — counted on the degradation sink (was render-silent since 024).
+                state?.Warn("comment-duplicate-dropped");
                 continue;
             }
             var comment = new Comment

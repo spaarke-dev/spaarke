@@ -133,6 +133,47 @@ public sealed class ComposeHardTierDegradationSeamTests
         }
     }
 
+    [Fact]
+    public void Projection_NestedAndMixedShapes_NoDuplication_NoSilentDirectTextLoss()
+    {
+        // Step-9.5 F1/F3 pins: (a) a branch that wraps its box runs in paragraphs (paragraph-in-scope
+        // nesting) must not double any line; (b) a transitional MIXED run (own w:t + a text-carrying
+        // pict) must keep BOTH its direct text and the box text.
+        byte[] source;
+        using (var stream = new MemoryStream())
+        {
+            using (var doc = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document))
+            {
+                var main = doc.AddMainDocumentPart();
+                // Box-in-box: outer txbxContent paragraph hosts a run carrying ANOTHER textbox.
+                var innerBoxRun = new Run(new Picture(new V.Shape(new V.TextBox(new TextBoxContent(
+                    new Paragraph(new Run(new Text("INNER-LINE"))))))));
+                var outerBox = new Run(new Picture(new V.Shape(new V.TextBox(new TextBoxContent(
+                    new Paragraph(new Run(new Text("OUTER-LINE ") { Space = SpaceProcessingModeValues.Preserve }), innerBoxRun))))));
+                // Mixed run: direct w:t + a text-carrying pict in the SAME run.
+                var mixedRun = new Run(
+                    new Text("DIRECT-TEXT ") { Space = SpaceProcessingModeValues.Preserve },
+                    new Picture(new V.Shape(new V.TextBox(new TextBoxContent(
+                        new Paragraph(new Run(new Text("MIXED-BOX-TEXT"))))))));
+
+                main.Document = new Document(new Body(
+                    new Paragraph(outerBox),
+                    new Paragraph(mixedRun),
+                    new SectionProperties(new PageSize { Width = 12240, Height = 15840 })));
+                main.Document.Save();
+            }
+            source = stream.ToArray();
+        }
+
+        var projection = _builder.BuildContentModel(source);
+        var text = AllModelText(projection.Model);
+
+        (text.Split("INNER-LINE").Length - 1).Should().Be(1, "a nested box's line must not be extracted twice (F1)");
+        (text.Split("OUTER-LINE").Length - 1).Should().Be(1);
+        text.Should().Contain("DIRECT-TEXT", "a mixed run's own text must survive alongside the box text (F3)");
+        (text.Split("MIXED-BOX-TEXT").Length - 1).Should().Be(1);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
     // 2. THE NDA — the exact document whose hard-tier constructs produced the 422. Its signature-box
     //    text must survive as degraded prose, project → render → re-project must never hard-fail, and
@@ -163,6 +204,12 @@ public sealed class ComposeHardTierDegradationSeamTests
         // One branch only: the AlternateContent Choice/Fallback duplication must not double the text.
         (text.Split("For: Appligent, Inc.").Length - 1).Should().Be(1,
             "the box text must appear exactly once — Choice/Fallback are the same box");
+
+        // Step-9.5 F2 pin: the UNCHOSEN Fallback branch's paragraphs are represented via the chosen
+        // branch — they must not fire a false unrendered-paragraphs loss report (the guard fired ×3 on
+        // exactly the NDA's Fallback paragraphs before the fix).
+        projection.Warnings.Should().NotContain(w => w.Code == "unrendered-paragraphs",
+            "the dedup'd Fallback branch is preserved content, not lost content");
 
         // Render both paths; reopen; re-project. No exception anywhere = no hard-fail on the save path.
         var carrier = _renderer.RenderIntoCarrier(original, projection.Model, author: "seam-test");

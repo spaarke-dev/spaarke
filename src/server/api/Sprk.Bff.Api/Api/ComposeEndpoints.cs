@@ -1465,8 +1465,12 @@ public static class ComposeEndpoints
                 Origin: result.Origin,
                 // Prong 1 (task 055): best-effort partial-apply outcome (null on the clean path).
                 PartialApply: result.PartialApply,
-                // Task 026 (FR-04): success-with-warnings degradation surface.
-                DegradationWarnings: result.DegradationWarnings));
+                // Task 026 (FR-04): success-with-warnings degradation surface — mapped to the same
+                // wire DTO the load path uses (code + count only; the service record's Detail never
+                // crosses the wire).
+                DegradationWarnings: result.DegradationWarnings?
+                    .Select(w => new ComposeProjectionWarningResponse(w.Code, w.Count))
+                    .ToList()));
         }
         catch (ArgumentException ex)
         {
@@ -2245,7 +2249,7 @@ public sealed record SaveComposeDocumentResponse(
     // the authoring engine simplified/dropped on this save (success-with-warnings; NEVER a 422 for a
     // hard-tier construct). Null/absent when nothing degraded. Optional/trailing so existing callers
     // deserializing this response are unaffected.
-    [property: JsonPropertyName("degradationWarnings")] IReadOnlyList<ComposeProjectionWarning>? DegradationWarnings = null);
+    [property: JsonPropertyName("degradationWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? DegradationWarnings = null);
 
 /// <summary>Response shape for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
 public sealed record PromoteComposeDocumentResponse(
