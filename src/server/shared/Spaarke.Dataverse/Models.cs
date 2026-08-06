@@ -35,6 +35,13 @@ public class UpdateDocumentRequest
     public bool? HasFile { get; set; }
     public DocumentStatus? Status { get; set; }
 
+    /// <summary>
+    /// SPE <c>quickXorHash</c> content-identity fingerprint (FR-C3 Tier-1 exact-dedup key). Maps to the
+    /// indexed <c>sprk_canonicalhash</c> column (task 023). Written on document create so a later byte-identical
+    /// upload (any path) can be detected as a duplicate. Null when the hash was unavailable at persist time.
+    /// </summary>
+    public string? CanonicalHash { get; set; }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // AI Analysis Fields
     // ═══════════════════════════════════════════════════════════════════════════

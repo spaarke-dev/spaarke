@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Documents;
 using Sprk.Bff.Api.Services.Office;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -38,6 +39,10 @@ public static class OfficeModule
         services.AddScoped<OfficeDocumentPersistence>();
         services.AddScoped<OfficeJobQueue>();
         services.AddScoped<OfficeStorageUploader>();
+
+        // FR-C3 content de-dup detector (Tier-1 exact quickXorHash). Concrete, scoped (ADR-010); reused by
+        // every document-creating upload path (email-attachment today; Compose next). Non-fatal by design.
+        services.AddScoped<ContentDedupDetector>();
 
         // ============================================================================
         // Office Add-in Orchestrator Service

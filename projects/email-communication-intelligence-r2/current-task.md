@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 021 — race-proof internet-message-id dedup. **✅ COMPLETE (2026-08-06).** FR-C1/NFR-02 capture-path dedup shipped. |
-| **Step** | DONE. Capture-path wired + fast-path + race-proof create seam + classifier test. Step 9.5 clean (0 violations). |
-| **Status** | 021 ✅: `IncomingCommunicationProcessor` routes create through `CreateCommunicationRaceProofAsync` + Step-3.5 internet-message-id fast-path + wasDuplicate short-circuit; `IsAlternateKeyDuplicate` → public static + 8 classifier tests (762/762 comm suite green). Build 0 err · CVE clean · publish 48.28 MB. **2 documented deviations**: (a) SB idempotency NOT re-keyed — canonical id unavailable pre-fetch, correctly kept graph-id + pushed canonical dedup to Dataverse layer; (b) live N-mailbox seam test deferred to real-tenant run (ServiceClient/Graph un-fakeable per ADR-038 B2/B7/B8). See notes/021-implementation-plan.md. |
-| **Next Action** | Commit 021. Then next pending: **016 AffinityRung** (schema created; opus-tier code) OR **024 SPE detector** (deps 023 ✅) OR **010 HMAC signer** (KV `footer-hmac-key` ready) → 012/013. Scope guard: upload→communication dedup = task 043. Optional: `/merge-to-master` (branch ahead of master). |
+| **Task** | **021 ✅ + 016 ✅ + 024 ✅ done (2026-08-06).** Three tasks landed this session (all committed). |
+| **Step** | DONE. Idle — awaiting next instruction (or `/merge-to-master`; branch is several commits ahead of master + origin). |
+| **Status** | **021 ✅** (84912c9cd): race-proof internet-message-id dedup. **016 ✅** (2bd7d905e): AffinityRung + sprk_affinity (FR-A4), never-auto-files; 🔔 write-hook r5-owned (FR-E6 deferred). **024 ✅**: SPE content dedup Tier-1 — `ContentDedupDetector` (gate-after-write, quickXorHash via SpeFileStore facade ADR-007, notify-never-silent, non-fatal) + email-attachment path (`OfficeDocumentPersistence`) hooked + `sprk_canonicalhash` mapping + 9 tests. All acceptance criteria met. **2 tracked deferrals** (need `/defer`): (a) Compose-path content-dedup hook (contended `ComposeService` — coordinated follow-on; detector built + DI-registered); (b) orphan transient-blob cleanup. Assistant-persist safe by construction (no Dataverse doc). All 3 tasks: build 0 err, CVE clean, publish ~48.3 MB, Step 9.5 clean. |
+| **Next Action** | Commit 024. Then: run **`/defer`** for the 2 tracked 024 deferrals (Compose hook + orphan-blob cleanup) + the 016 FR-E6 affinity-write r5 wiring. Optional **`/merge-to-master`** (branch well ahead). Next pending code tasks: **010 HMAC signer** (KV `footer-hmac-key` ready → 012/013 footer chain), **034 Job C** (deps), or the Compose-hook follow-on. |
 
 ### Completed this session (all committed)
 - **Task 003 ✅** — `notes/fixtures/r1-golden-emails.md`.

@@ -458,6 +458,9 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         if (request.FileType != null)
             document["sprk_filetype"] = request.FileType;
 
+        if (request.CanonicalHash != null)
+            document["sprk_canonicalhash"] = request.CanonicalHash; // FR-C3 content-dedup identity (task 023 column)
+
         if (request.Status.HasValue)
             document["statuscode"] = new OptionSetValue((int)request.Status.Value);
 

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Documents;
 
 namespace Sprk.Bff.Api.Services.Office;
 
@@ -13,15 +14,18 @@ public class OfficeDocumentPersistence
 {
     private readonly IDocumentDataverseService _documentService;
     private readonly IProcessingJobService _jobService;
+    private readonly ContentDedupDetector _dedupDetector;
     private readonly ILogger<OfficeDocumentPersistence> _logger;
 
     public OfficeDocumentPersistence(
         IDocumentDataverseService documentService,
         IProcessingJobService jobService,
+        ContentDedupDetector dedupDetector,
         ILogger<OfficeDocumentPersistence> logger)
     {
         _documentService = documentService;
         _jobService = jobService;
+        _dedupDetector = dedupDetector;
         _logger = logger;
     }
 
@@ -41,6 +45,21 @@ public class OfficeDocumentPersistence
         _logger.LogDebug(
             "Creating Document record with SPE pointers: DriveId={DriveId}, ItemId={ItemId}",
             driveId, itemId);
+
+        // ── FR-C3 content de-dup (gate-after-write, Tier-1 exact quickXorHash) ──────────────
+        // The blob is already in SPE (upload happened upstream). Read its content identity and reconcile
+        // against the sprk_canonicalhash index: on a byte-identical hit, DO NOT create a second canonical
+        // document — the detector has already NOTIFIED the uploader; return the existing canonical id so the
+        // caller opens/links it. Non-fatal (NFR-04): a null/no-dup decision proceeds to a normal create, and
+        // its hash (when known) is stamped so future uploads dedup against THIS document.
+        var dedup = await _dedupDetector.ReconcileAsync(driveId, itemId, userId, fileName, cancellationToken);
+        if (dedup.IsDuplicate && dedup.CanonicalDocumentId is { } canonicalId)
+        {
+            _logger.LogInformation(
+                "Skipping duplicate document create for {FileName} (DriveId={DriveId}, ItemId={ItemId}); content matches canonical sprk_document {CanonicalId}.",
+                fileName, driveId, itemId, canonicalId);
+            return canonicalId;
+        }
 
         // Create base document record
         var createRequest = new CreateDocumentRequest
@@ -68,7 +87,8 @@ public class OfficeDocumentPersistence
             FileSize = fileSize,
             MimeType = OfficeJobQueue.GetMimeType(request),
             HasFile = true,
-            FilePath = webUrl  // SharePoint Embedded web URL (maps to sprk_filepath in Dataverse)
+            FilePath = webUrl,  // SharePoint Embedded web URL (maps to sprk_filepath in Dataverse)
+            CanonicalHash = dedup.CanonicalHash  // FR-C3: stamp the content identity (null when unavailable)
         };
 
         // Set entity association lookup based on target entity

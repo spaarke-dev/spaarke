@@ -615,6 +615,7 @@ public class DataverseWebApiService : IDataverseService
         if (request.GraphDriveId != null) payload["sprk_graphdriveid"] = request.GraphDriveId;
         if (request.FileType != null) payload["sprk_filetype"] = request.FileType;
         if (request.HasFile.HasValue) payload["sprk_hasfile"] = request.HasFile.Value;
+        if (request.CanonicalHash != null) payload["sprk_canonicalhash"] = request.CanonicalHash; // FR-C3 content-dedup identity
         if (request.Status.HasValue) payload["statuscode"] = (int)request.Status.Value;
 
         // AI Analysis fields

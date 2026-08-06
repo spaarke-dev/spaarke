@@ -59,6 +59,15 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _uploadManager.UploadSmallAsync(driveId, path, content, ct);
 
+    /// <summary>
+    /// Reads the SPE <c>quickXorHash</c> content identity for a persisted drive item (app-only), for the
+    /// FR-C3 content-dedup detector. <c>virtual</c> so the concrete facade can be substituted at the module
+    /// boundary in tests (the established idiom — cf. <see cref="UploadSmallAsync"/>). Best-effort: returns
+    /// null (never throws) when the hash is unavailable.
+    /// </summary>
+    public virtual Task<string?> GetQuickXorHashAsync(string driveId, string itemId, CancellationToken ct = default)
+        => _driveItemOps.GetQuickXorHashAsync(driveId, itemId, ct);
+
     public Task<UploadSessionDto?> CreateUploadSessionAsync(
         string containerId,
         string path,
