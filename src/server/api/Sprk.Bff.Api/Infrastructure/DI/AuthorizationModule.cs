@@ -261,6 +261,22 @@ public static class AuthorizationModule
                 p.RequireAuthenticatedUser();
             });
 
+            // Principal-agnostic collaboration policy for /api/v1/external (teams-app-r1 task 025 ·
+            // R2 FR-22). Accepts BOTH the CIAM scheme AND the workforce default JwtBearer scheme so a
+            // CIAM external contact AND a workforce (Teams-host) user authenticate on ONE endpoint set;
+            // the CallerPrincipalAuthorizationFilter resolves either to a plane-agnostic principal. A
+            // token validates against exactly one authority (only one scheme succeeds per request), so
+            // the CIAM path is unchanged (FR-15) while the workforce plane is now served here.
+            options.AddPolicy(AuthPolicies.ExternalCollaboration, p =>
+            {
+                p.AuthenticationSchemes = new[]
+                {
+                    AuthSchemes.Ciam,
+                    JwtBearerDefaults.AuthenticationScheme
+                };
+                p.RequireAuthenticatedUser();
+            });
+
             // Admin Policies
             options.AddPolicy("SystemAdmin", p =>
             {

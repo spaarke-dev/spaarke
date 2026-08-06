@@ -11,10 +11,17 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | ▶ **NEXT: execute task 025** (principal-agnostic collab endpoints — Option A). 22/25 core done; both deploys live; live Teams E2E blocked on 025. |
-| **Step** | Live Teams integration reached auth-complete but 401s on data. R2 decided Option A (dual-scheme /external). Task 025 spec written. Phase 0 verified (no audience blocker). |
-| **Status** | 🟢 Auth chain PROVEN live in Teams (NAA workforce token acquired). ❌ Data 401: SPA calls CIAM-only /api/v1/external/*; workforce plane (/collab) has only /me+download. Fix = task 025. |
-| **Next Action (post-compact)** | **Execute `tasks/025-principal-agnostic-collab-endpoints.poml`** via task-execute (opus@xhigh, main-session/opus-subagent). It has the full binding R2 guardrails. Then rebuild+redeploy BFF (065 mechanism), operator re-runs live Teams E2E (080), then 090 wrap-up. |
+| **Task** | 🔄 **025 IN PROGRESS** (principal-agnostic collab endpoints — Option A dual-scheme /external). FULL rigor, opus@xhigh. |
+| **Step** | ✅ Code + tests DONE & GREEN (176/176 ExternalAccess+CallerPrincipal incl. 27 new). Next: full-suite regression check → Step 9.5 gates → publish-size → /conflict-check → deploy BFF → r2-coordination-response.md → set 025 ✅. |
+| **Status** | 🟢 Design locked. Plan: new `CallerPrincipalResolver.cs` (ICallerPrincipalResolver + 2 ICallerPrincipalStrategy: CIAM/workforce, plane-selected by issuer/tid) → unified `CallerPrincipal` (ProjectAccess + rights) on HttpContext.Items via `AddCallerPrincipalAuthorizationFilter`. Group `/api/v1/external` policy → new `ExternalCollaboration` (schemes {Ciam, JwtBearerDefaults}). Handlers read CallerPrincipal. Workforce projects→Collaborate rights. /collab marked transitional. CIAM byte-for-byte preserved. |
+| **Next Action** | Finish code + tests (CIAM regression, workforce scope, plane-selection), build+test, publish-size, /conflict-check, deploy BFF, write r2-coordination-response.md, set 025 ✅. |
+
+### Task 025 design decisions (locked 2026-08-05)
+- **Plane selection**: CIAM iff token `iss` contains `ciamlogin.com` OR `tid`==Ciam:TenantId; else workforce. Deterministic, config-light.
+- **Unified type** `CallerPrincipal` (Plane, ContactId, SystemUserId?, Email, Oid, ProjectAccess[]) replaces per-plane context in the /external handlers. CIAM strategy reuses ExternalParticipationService (Resolve+GetParticipations) → byte-for-byte /me + list output. Workforce strategy wraps IWorkforcePrincipalResolver + IAccessibleRecordSetService(sprk_project) → Tier-2 record scope; NOT all-projects.
+- **Workforce rights** = ExternalAccessLevel.Collaborate (Read|Create|Write, no Delete) for records in the accessible set — DOCUMENTED DECISION (coordination note); R2 F3/F5 may refine per-project levels.
+- **/collab** kept but marked TRANSITIONAL (removal note) — guardrail #5. SPA already calls /external/*.
+- **No AzureAd audience change** (Phase-0 GREEN): workforce scheme accepts api://1e40baad v1 token.
 
 ### Live deploy + integration state (2026-08-05)
 - **BFF (065) ✅ deployed** → `spaarke-bff-dev` (hash-verified, health-passed). Workforce scheme = the `1e40baad` app; `AzureAd__Audience = api://1e40baad-…` **accepts the Teams token — no config change (Phase 0 GREEN)**.

@@ -7,18 +7,21 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <summary>
 /// Maps all external access API endpoints.
 ///
-/// Three route groups (distinct authentication schemes / planes):
-///   /api/v1/external        — external user endpoints. CIAM-only: pinned to the "Ciam" JwtBearer
-///                             scheme via <see cref="AuthPolicies.CiamExternal"/> (task 021), plus the
-///                             per-endpoint <c>ExternalCallerAuthorizationFilter</c> (ADR-028 A1).
+/// Three route groups:
+///   /api/v1/external        — PRINCIPAL-AGNOSTIC collaboration endpoints (teams-app-r1 task 025 ·
+///                             R2 FR-22 · Option A). Dual-scheme: accepts BOTH the CIAM "Ciam" scheme
+///                             AND the workforce default scheme via <see cref="AuthPolicies.ExternalCollaboration"/>,
+///                             plus the group-level <c>CallerPrincipalAuthorizationFilter</c> which
+///                             resolves either token to a plane-agnostic <c>CallerPrincipal</c> + its
+///                             Tier-2 record scope. Serves the standalone external SPA (CIAM) AND the
+///                             Teams workforce host through ONE endpoint set. CIAM behavior is
+///                             unchanged (FR-15 — the CIAM strategy reproduces the old filter exactly).
 ///   /api/v1/external-access — internal management endpoints. Workforce default scheme (Azure AD JWT).
-///   /api/v1/collab          — WORKFORCE collaboration endpoints (ADR-028 Amendment A2 · teams-app-r1
-///                             FR-04). Workforce default scheme + the per-endpoint
-///                             <c>WorkforceCallerAuthorizationFilter</c> which resolves the caller to a
-///                             systemuser / contact-only principal (or denies). This is the
-///                             collaboration surface generalized from CIAM-contact-only to the
-///                             workforce plane; it does NOT touch the CIAM /api/v1/external group
-///                             (FR-15 — the standalone SPA is unchanged).
+///   /api/v1/collab          — TRANSITIONAL workforce collaboration group (ADR-028 A2 · task 020/030).
+///                             Its /me + download are now also served principal-agnostically under
+///                             /api/v1/external (task 025 consolidation, R2 guardrail #5); the SPA +
+///                             Teams host call /api/v1/external/*. Kept for one release for any direct
+///                             caller and SLATED FOR REMOVAL — do not add new endpoints here.
 ///
 /// ADR-001: Minimal API — no controllers.
 /// ADR-008: Authorization applied per-endpoint or via route group — no global middleware; the
@@ -38,35 +41,39 @@ public static class ExternalAccessEndpoints
     }
 
     // =========================================================================
-    // External user endpoints — Entra External ID (CIAM) authentication
+    // Collaboration endpoints — PRINCIPAL-AGNOSTIC (CIAM external contact + workforce user)
+    // teams-app-r1 task 025 · R2 FR-22 · Option A
     // =========================================================================
 
     private static void MapExternalUserEndpoints(WebApplication app)
     {
-        // CiamExternal policy pins the "Ciam" JwtBearer scheme (task 020) so ONLY CIAM tokens
-        // authenticate here — a workforce (default-scheme) token is rejected (ADR-028 A1).
-        // ExternalCallerAuthorizationFilter (per-endpoint) then resolves Contact + participation
-        // data from claims — the scheme pin is additive to the filter, not a replacement.
+        // ExternalCollaboration policy accepts BOTH the CIAM "Ciam" scheme AND the workforce default
+        // scheme (task 025), so a CIAM external contact AND a workforce (Teams-host) user authenticate
+        // here. The group-level CallerPrincipalAuthorizationFilter then resolves either token to a
+        // plane-agnostic CallerPrincipal (with its Tier-2 record scope) on HttpContext.Items — the CIAM
+        // strategy reproduces the old ExternalCallerAuthorizationFilter byte-for-byte (FR-15). Every
+        // handler in this group is principal-agnostic (no if(ciam)…else…).
         var externalGroup = app.MapGroup("/api/v1/external")
             .WithTags("External Access")
-            .RequireAuthorization(AuthPolicies.CiamExternal);
+            .RequireAuthorization(AuthPolicies.ExternalCollaboration)
+            .AddCallerPrincipalAuthorizationFilter();
 
-        // GET /api/v1/external/me — Returns external user's project access context
+        // GET /api/v1/external/me — Returns the caller's project access context (either plane)
         externalGroup.MapGet("/me", ExternalUserContextEndpoint.Handle)
             .WithName("GetExternalUserContext")
-            .WithSummary("Get authenticated external user's project access context")
+            .WithSummary("Get the authenticated collaboration caller's project access context")
             .WithDescription(
-                "Returns the Contact's project access list with access levels. " +
-                "Called by the external Secure Project Workspace SPA on startup to initialize navigation. " +
-                "Requires a valid Entra External ID (CIAM) JWT (the 'Ciam' scheme).")
+                "Returns the caller's project access list with access levels. Called by the external " +
+                "Secure Project Workspace SPA (CIAM) AND the Teams workforce host on startup to " +
+                "initialize navigation. Accepts a valid Entra External ID (CIAM) JWT OR a workforce " +
+                "Entra JWT; the caller is resolved to a plane-agnostic principal with its record scope.")
             .Produces<ExternalUserContextResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status500InternalServerError)
-            .AddExternalCallerAuthorizationFilter();
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
 
-        // Project data endpoints — list/read projects, documents, events, contacts, organizations.
-        // Write endpoints — create/update events.
+        // Project data endpoints — list/read projects, documents, todos, contacts, organizations,
+        // document download. All principal-agnostic (filter the CallerPrincipal's accessible-record set).
         externalGroup.MapExternalProjectDataEndpoints();
     }
 
@@ -114,6 +121,13 @@ public static class ExternalAccessEndpoints
     // =========================================================================
     // Workforce collaboration endpoints — workforce Entra (Teams host) authentication
     // (ADR-028 Amendment A2 · teams-app-r1 FR-04)
+    //
+    // TRANSITIONAL (teams-app-r1 task 025 · R2 guardrail #5): /me + document download are now ALSO
+    // served principal-agnostically under /api/v1/external (task 025). The external SPA and the Teams
+    // host both call /api/v1/external/*, so this group has no remaining first-party caller. Kept for
+    // one release for any direct caller; SLATED FOR REMOVAL — do NOT add new endpoints here. Removal
+    // note: delete this method + WorkforcePrincipalContextEndpoint + WorkforceCollaborationDownloadEndpoint
+    // once no client calls /api/v1/collab/* (tracked in notes/r2-coordination-response.md §7).
     // =========================================================================
 
     private static void MapWorkforceCollaborationEndpoints(WebApplication app)

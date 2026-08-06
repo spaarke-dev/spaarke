@@ -66,6 +66,19 @@ public static class ExternalAccessModule
         // Interface is the ADR-010 testing seam. Singleton is safe (IDataverseService is a singleton).
         services.AddSingleton<IContactStandingGrantReader, ContactStandingGrantReader>();
 
+        // Principal-agnostic caller resolution (teams-app-r1 task 025 · R2 FR-22 · Option A). The
+        // reusable abstraction that lets the /api/v1/external collaboration endpoints serve BOTH the
+        // CIAM external contact AND the workforce (Teams-host) user through ONE endpoint set. The two
+        // strategies are registered as ICallerPrincipalStrategy; the resolver selects by token issuer.
+        // A THIRD plane plugs in by adding one more ICallerPrincipalStrategy registration (R2 lifts
+        // this into its module framework unchanged). Scoped: CiamContactPrincipalStrategy depends on
+        // the scoped typed-HttpClient ExternalParticipationService; WorkforcePrincipalStrategy depends
+        // on the scoped IAccessibleRecordSetService — so the strategies + resolver are scoped too.
+        // Broker-only (NFR-02): app-only reads, no OBO, no Graph SDK / AI-internal types.
+        services.AddScoped<ICallerPrincipalStrategy, CiamContactPrincipalStrategy>();
+        services.AddScoped<ICallerPrincipalStrategy, WorkforcePrincipalStrategy>();
+        services.AddScoped<ICallerPrincipalResolver, CallerPrincipalResolver>();
+
         // Accessible-record-set composition + enforcement gate (teams-app-r1 task 022, spec FR-06 /
         // design §5). Composes accessible(principal) = systemuser→ADR-034 membership (auto) ∪
         // contact→sprk_externalrecordaccess grants ∪ contact→standing-grant runtime membership, and is
