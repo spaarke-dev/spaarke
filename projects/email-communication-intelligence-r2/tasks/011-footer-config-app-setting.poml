@@ -4,7 +4,7 @@
     <title>Tracking-footer config (operator app setting, per-tenant)</title>
     <phase>1 Pillar A: Trusted threading &amp; external matching</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF config surface consumed by the send path + rung; tags include bff-api; modifies .cs + DI — Step 3.5.5 FULL.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -102,7 +102,9 @@
     <criterion testable="true">All unit tests pass; build is green; publish-size delta reported and ≤60 MB; no new HIGH CVE.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-A1, NFR-07, ADR-018. Mirror AutoFileOptions/AutoFileGate exactly — do not invent a new config mechanism. Completion summary appended here when done.</notes>
+  <notes>spec.md FR-A1, NFR-07, ADR-018. Mirror AutoFileOptions/AutoFileGate exactly — do not invent a new config mechanism.
+
+**COMPLETED 2026-08-05.** Cloned the AutoFileOptions/AutoFileGate IOptionsMonitor pattern field-for-field: new `Configuration/TrackingFooterOptions.cs` (SectionName `Communication:TrackingFooter`; Enabled=false default, MessageTemplate with `{record-ref}`/`{signed-token}` placeholders, SigningKeySecretName, Tenants dict of TrackingFooterTenantOverride) + `Services/Communication/Engine/TrackingFooterGate.cs` (Resolve(tenantKey) reads CurrentValue fresh, per-tenant field-by-field override, returns `TrackingFooterSettings` readonly record struct). Registered both unconditionally in `Infrastructure/DI/CommunicationModule.cs` beside AutoFileOptions/AutoFileGate (ADR-010). Config carries only the Key Vault secret NAME — no key material (ADR-028/NFR-07). `TrackingFooterGateTests` (8 tests: global / per-tenant replace / unset-inherits-global / unknown-tenant→global / disabled global + per-tenant / CurrentValue freshness / secret-name-not-key) 8/8 green. Build 0 err; 0 new packages → publish 46.88 MB (Δ≈0); no new CVE. adr-check + code-review clean. **Consumed by 012 (send-path injection) + 013 (TrackingTokenRung), both gated behind 010 (Key Vault signer).** /conflict-check clean on CommunicationModule.cs at execution; re-run before the PR.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

@@ -24,6 +24,7 @@
 
 - **DEFER-030-01 ✅ CLOSED** (`e0650bcac`) — service-request RAG grounding added (core type); residual edge types intentional non-support. No open deferrals.
 - **Task 032 ✅** — FR-D3 golden regression suite (`GoldenMisfileRegressionTests`, 3 golden scenarios drive the REAL spine → Ambiguous/Resolved/contact-not-filed verdicts reproduced; 149/149 Communication suite green). FR-A3 absorbed via co-located 015 file (no duplicate). Pillar D test coverage complete.
+- **Task 011 ✅** — Tracking-footer config (`TrackingFooterOptions` + `TrackingFooterGate`, cloned from AutoFileOptions/AutoFileGate; unconditional DI in CommunicationModule; only KV secret name, no key material). 8/8 tests green. **Unblocks nothing new autonomously** — 012 (send-path inject) + 013 (TrackingTokenRung) both need 010 (Key Vault signer, gated). 014 (RecipientAliasRung+Bcc, deps 011) is now the next code-only candidate.
 
 ### Gates ahead (need operator go-ahead — NOT autonomous)
 004 (Entra/security), 020/023 (Dataverse schema mutation), 033 (Dataverse seed), 010 (Key Vault), all deploys, all Pillar E (contended shared-lib, sequential).
