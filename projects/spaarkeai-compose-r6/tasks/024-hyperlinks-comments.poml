@@ -4,7 +4,31 @@
     <title>Hyperlinks + comments through the canonical model</title>
     <phase>2 Canonical model + fidelity widening</phase>
     <gate>dep:020</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-note>COMPLETED 2026-08-06 (commits a5a979d29 + 938c1cff4, pushed). Executed at FULL rigor —
+      the POML's own escalation clause fired (a silent-loss risk WAS found: comments were silently lost on
+      render-on-save; body anchors fell through default cases while the part survived unanchored).
+      HYPERLINKS: R5 representation REUSED (external links already round-trip via Href → sentinel →
+      relationship); silent-loss gaps closed — internal "#anchor" links flatten LOUDLY
+      (internal-link-flattened; bookmarks → 026), unresolvable/neutralized/docLocation targets count
+      hyperlink-target-dropped. COMMENTS now MODEL data: ComposeContentModel.Comments (id/author/initials/
+      raw-date/plain text) + CommentAnchor Start/End MARKER runs at exact inline positions (End folds the
+      w:commentReference; point comments = adjacent pair; range ids PRE-SCANNED so capture is
+      order-independent; block-level partners suppress atomically). CARRIER mode: comments part
+      authoritative + BYTE-IDENTICAL, anchors re-authored against its ids (numbering identity pattern);
+      blank-package synthesize authors the part (EnsureCommentsPart — SANITIZED: control chars stripped,
+      CRLF normalized, junk dates omitted, duplicate ids first-wins). Anchors validated against the
+      target's anchorable id set (carrier ids scanned READ-ONLY / model ids); unmatched anchors DROP, text
+      kept; AppendSection strips anchors. SEAM: ComposeHyperlinkCommentSeamTests (16) — capture facts,
+      part byte-identity + bracket-order re-authoring, link-target resolution, fixed point, synthesize
+      part authoring, dangling/neutralized-link loudness, cross-paragraph range, client-junk hardening
+      (REAL control bytes), corpus stability, multiset validator. Step 9.5: adr-check PASS 8/8 (anchor
+      mechanism explicitly cleared of inherited-XML anchoring; 2 forward tensions recorded); code-review
+      REQUEST-CHANGES → F1(Critical sanitization)/F2/F5-F10 fixed, F3 routed as EXPLICIT 010/012 cutover
+      obligation (client mapper preservation of ALL 021-024 server-set fields), F4/F11 documented. Gates:
+      suite 735/738 (3 pre-existing); ADR-013 green; publish 46.90 MB incl PDBs clean-worktree (+0.01).
+      PATTERN NOTE: third consecutive task whose top finding was unvalidated client input reaching OOXML
+      authoring — 025 must sanitize tracked-change authors/dates FROM THE START. Record: notes §14 + §14.1.</completion-note>
     <rigor>STANDARD</rigor>
     <rigor-reason>Per plan.md §5 Phase 2 — feature-adapter task routing hyperlinks + comments through the canonical model. Modifies shared Services/Compose (BFF hot-path) so BFF task obligations (publish-size, conflict-check, seam DoD) apply; narrower construct set than 020/021/022 with an R5 hyperlink precedent. Step 9.5 gates skipped at STANDARD; task-execute may escalate to FULL if a silent-loss round-trip risk is found.</rigor-reason>
     <model-tier>sonnet</model-tier>

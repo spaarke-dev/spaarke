@@ -2,28 +2,33 @@
 
 > Active-task tracker for context recovery. Reset per root `CLAUDE.md` §7 as tasks complete.
 
-## Status: 020 ✅ · 011 ✅ · 021 ✅ · 022 ✅ · **023 ✅ COMPLETE** · Next → **024 hyperlinks + comments** (then 025 → 026, SERIAL)
+## Status: 020 ✅ · 011 ✅ · 021 ✅ · 022 ✅ · 023 ✅ · **024 ✅ COMPLETE** · Next → **025 tracked-changes** (then 026, SERIAL)
 
-- **Project**: `spaarkeai-compose-r6` · **Branch**: `work/spaarkeai-compose-r6` (pushed through the 023 close-out)
-- **✅ 023 COMPLETE** (`5951f173b` + `b9f15df02`, FULL rigor via Step 0.5 override UP): headers/footers ride the
-  CARRIER (parts byte-identical; references PROVEN to resolve); page breaks are MODEL data (IsPageBreak at exact
-  inline position via ProjectRun flush-split + PageBreakBefore; both re-authored); interior section breaks flatten
-  LOUDLY (section-break-flattened) EXCEPT the 011-P1 promotion shape (no-warn, renderer promotes losslessly).
-  Step 9.5: adr-check PASS 8/8; review APPROVE-WITH-MINORS → F1/F3/F4 fixed, F2 documented. Notes §13 + §13.1.
-- **✅ 022** tables (notes §12/§12.1) · **✅ 021** numbering (notes §11/§11.1) · **✅ 020/011** hub + carrier author.
-- **NEXT: 024** — hyperlinks + comments widener (read `tasks/TASK-INDEX.md` for the POML filename). Note G5
-  hyperlinks (Href) ALREADY flow through the model on the clean path — 024's likely real scope is comments +
-  hyperlink fidelity gaps (anchors/internal links). Then 025 tracked-changes → 026 hard-tier. SERIAL.
-- **026 owes**: custom-style-linked numbering (020-R7) · localized heading ids (011-P8) · typed hMerge/tblLayout
-  (022-F2) · pageBreakBefore val=false tri-state IF it surfaces (023-F2) · field/atom page-break surface (023-F3)
-  · AlternateContent surface · dup-paraId I-4 · U+FFFD R5 sign-off.
-- **010/012 owe**: client mapper preservation of server-set numId (021-F3), table facts (022-F12), page-break
-  fields (023-F7) on re-post — EDITED imported saves lose 021–023 fidelity without it; P-10 audit carve-out; P-2.
-- **⚠️ Operator sign-off pending:** R4 ins+del→"barfoo" (→025) · R5 U+FFFD persisted (→026).
+- **Project**: `spaarkeai-compose-r6` · **Branch**: `work/spaarkeai-compose-r6` (pushed through the 024 close-out)
+- **✅ 024 COMPLETE** (`a5a979d29` + `938c1cff4`, FULL — the POML's own silent-loss escalation clause fired):
+  COMMENTS are model data (Comments list + CommentAnchor Start/End marker runs; End folds the reference; point
+  comments = adjacent pair; pre-scanned order-independent capture; atomic block-level suppression). Carrier
+  comments part authoritative + BYTE-IDENTICAL; anchors validated against the target's anchorable id set
+  (unmatched DROP, text kept); EnsureCommentsPart SANITIZED (F1 Critical fix). Hyperlinks: R5 reused; internal/
+  unresolvable/neutralized/docLocation link drops now LOUD. Notes §14 + §14.1.
+- **Phase-2 fidelity progression:** 021 numbering ✅ · 022 tables ✅ · 023 headers/footers+page-breaks ✅ ·
+  024 hyperlinks+comments ✅ → **025 tracked-changes** → 026 hard-tier. All SERIAL (shared Compose surface).
+- **NEXT: 025** (`tasks/025-*.poml` — read TASK-INDEX for filename). OWES: tracked-changes as MODEL data
+  (retire ins/del flattens: tracked-insert-flattened / tracked-delete-flattened-kept / tracked-paragraph-mark-
+  flattened; 020-R11); R4 operator sign-off (ins+del "barfoo") resolution; ⚠️ **SANITIZE CLIENT-POSTED
+  AUTHORS/DATES AT AUTHORING FROM THE START** — three consecutive tasks' top finding was unvalidated client
+  input reaching OOXML authoring (021-F1/022-F1/024-F1; notes §14.1 pattern note).
+- **026 owes**: custom-style-linked numbering (020-R7) · localized heading ids (011-P8) · hMerge/tblLayout
+  typed carry (022-F2) · bookmarks + internal links (024) · dangling-anchor loud counter (024 adr-check T2) ·
+  AlternateContent surface · dup-paraId I-4 · U+FFFD R5 sign-off · pageBreakBefore tri-state if surfaced (023-F2).
+- **010/012 owe (EXPLICIT CUTOVER OBLIGATION — 024-F3):** client mapper must preserve ALL server-set fields on
+  re-post (numId 021 · table facts 022 · page breaks 023 · comments/anchors 024) or edited imported saves lose
+  the entire Phase-2 fidelity; P-10 audit carve-out; P-2 preamble extraction. Comment EDITING (future) collides
+  with byte-identical-part rule — resolution recorded in notes §14.1 (identity-diff re-authoring).
+- **⚠️ Operator sign-off pending:** R4 ins+del→"barfoo" (→025 NOW) · R5 U+FFFD persisted (→026).
 - **Pre-existing reds (§F.3-verified, routed 026/027):** 2 NDA seam + stamper unit. ArchTests: 4 pre-existing
-  master fails (ADR-007/010 Communication).
-- **Publish convention:** clean-worktree fresh publish ONLY (local pdb artifact inflates ~4 MB). Current:
-  46.89 MB incl PDBs — 021/022/023 all delta ≈ 0.
+  master fails.
+- **Publish convention:** clean-worktree ONLY. Current 46.90 MB incl PDBs (cumulative Phase-2 delta ≈ +0.01).
 - **Master delta:** ~26 behind origin/master (no Compose overlap). Merge before PR.
 
 ### 🧭 Task 020 design (locked this session — key decisions)
