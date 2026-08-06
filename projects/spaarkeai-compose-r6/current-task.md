@@ -20,8 +20,14 @@ ZERO reds; publish 46.91 MB flat; zero production-code changes. The adr-check ag
 limit mid-run — its axes were verified inline with evidence and recorded transparently in the POML note.
 
 ### 014 PRE-DEPLOY OBLIGATIONS (from the standing items + notes §20)
-1. **Merge origin/master first** (~67 behind; Crypto.Xml HIGH patched there) + re-run /conflict-check
-   (Services/Compose most-contested; last check clean 2026-08-06).
+1. ✅ **DONE 2026-08-06** (worktree-sync Update Only, merge commit `11fe9cfd8` pushed): origin/master
+   (67 commits) merged in — conflicts keep-both in `.claude/CHANGELOG.md` + `projects/INDEX.md` only;
+   BFF build 0 errors; Compose suite 1024/1024 green (one first-run flake in master-side
+   `ComposeServiceCreateOnSaveTests.SaveAsync_WhenBackgroundProfileThrows…` — passes isolated + on
+   re-run, NOT ours); CVE scan CLEAN (Crypto.Xml HIGHs resolved by the merge). /conflict-check re-run:
+   one live overlap — **PR #743** (`assistant-enhancements-r2`) touches `ComposeWorkspace.tsx`
+   (DI-02 flush-on-unmount via the same `triggerSave` path — semantically compatible; whichever
+   merges second resolves a textual conflict there + trivial `projects/INDEX.md`).
 2. **BFF + `sprk_spaarkeai` deploy TOGETHER** (atomic window): an old client on the new server drops
    separate-comments LOUDLY (`comments-ignored`) — acceptable only within the window.
 3. Ops notes (notes §20): dashboards should chart the `TRANSITIONAL op-log save shape` Warning decay
