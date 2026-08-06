@@ -51,11 +51,23 @@ public sealed class ComposeCarrierRenderSeamTests
 
         var rendered = new ComposeDocumentRenderer().RenderIntoCarrier(original, projection.Model, author: "seam-test");
 
-        // 1. Preserve-parts: every original part except document.xml (replaced body) and numbering.xml
-        //    (legitimately merged when the model carries lists) must be present AND byte-identical.
+        // Did the render actually allocate list instances? Only then is numbering.xml legitimately merged
+        // (review finding 011-T2 — for list-free docs it must be byte-identical like every other part).
+        bool renderedHasLists;
+        using (var check = WordprocessingDocument.Open(new MemoryStream(rendered, writable: false), isEditable: false))
+        {
+            renderedHasLists = check.MainDocumentPart!.Document!.Body!
+                .Descendants<Paragraph>()
+                .Any(p => p.ParagraphProperties?.NumberingProperties?.NumberingId is not null);
+        }
+
+        // 1. Preserve-parts: every original part except document.xml (replaced body) — and numbering.xml
+        //    ONLY when the render merged list instances — must be present AND byte-identical.
         var originalParts = ReadPartBytes(original);
         var renderedParts = ReadPartBytes(rendered);
-        var replaceable = new[] { "/word/document.xml", "/word/numbering.xml" };
+        var replaceable = renderedHasLists
+            ? new[] { "/word/document.xml", "/word/numbering.xml" }
+            : new[] { "/word/document.xml" };
         foreach (var (uri, bytes) in originalParts)
         {
             renderedParts.Should().ContainKey(uri, $"'{docName}' part '{uri}' must survive the body swap");
@@ -67,20 +79,23 @@ public sealed class ComposeCarrierRenderSeamTests
         }
 
         // 2. Round-trip fixed point (carrier edition): the rendered body re-projects with the same
-        //    top-level block-kind sequence as the rendered model.
+        //    top-level block-kind sequence AND the same concatenated visible text as the rendered model
+        //    (review finding 011-T5 — kinds alone would let a text-corrupting render pass).
         var reprojection = builder.BuildContentModel(rendered);
         reprojection.Status.Should().NotBe(ComposeProjectionStatus.Failed, $"'{docName}' carrier render must re-project");
         reprojection.Model.Blocks.Select(b => b.Kind).Should().Equal(
             projection.Model.Blocks.Select(b => b.Kind),
             $"'{docName}' block-kind sequence must survive the carrier model→docx→model cycle");
+        ConcatText(reprojection.Model.Blocks).Should().Be(ConcatText(projection.Model.Blocks),
+            $"'{docName}' visible text must survive the carrier model→docx→model cycle verbatim");
 
         // 3. Final-section fidelity: the trailing body sectPr survives the swap outer-XML-identical.
+        //    Word-authored corpus docs always carry one (011-T3: assert, so a future corpus doc without
+        //    one fails loudly here instead of silently skipping the oracle).
         var originalSectPr = TrailingSectPrXml(original);
-        if (originalSectPr is not null)
-        {
-            TrailingSectPrXml(rendered).Should().Be(originalSectPr,
-                $"'{docName}' final-section page setup (incl. header/footer references) must survive the body swap");
-        }
+        originalSectPr.Should().NotBeNull($"'{docName}' — Word-authored corpus docs carry a trailing body sectPr");
+        TrailingSectPrXml(rendered).Should().Be(originalSectPr,
+            $"'{docName}' final-section page setup (incl. header/footer references) must survive the body swap");
 
         // 5. Unique paraIds on every rendered paragraph.
         using var doc = WordprocessingDocument.Open(new MemoryStream(rendered, writable: false), isEditable: false);
@@ -180,28 +195,29 @@ public sealed class ComposeCarrierRenderSeamTests
         Runs = new[] { new ComposeInlineRun { Text = text } },
     };
 
+    /// <summary>Reads every package part's bytes keyed by URI. Reuses the task-004 comparer's CYCLE-SAFE
+    /// enumerator (review finding 011-T1 — a hand-rolled recursion without a visited set would loop forever
+    /// on a cyclic OPC part reference; root §11 default-to-reuse).</summary>
     private static Dictionary<string, byte[]> ReadPartBytes(byte[] package)
     {
         using var doc = WordprocessingDocument.Open(new MemoryStream(package, writable: false), isEditable: false);
         var parts = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
-        foreach (var part in doc.Parts.SelectMany(p => Flatten(p.OpenXmlPart)).DistinctBy(p => p.Uri.ToString()))
+        foreach (var part in ComposeOoxmlPackagePartComparer.EnumerateAllParts(doc))
         {
-            using var stream = part.GetStream(FileMode.Open, FileAccess.Read);
-            using var ms = new MemoryStream();
-            stream.CopyTo(ms);
-            parts[part.Uri.ToString()] = ms.ToArray();
+            parts[part.Uri.ToString()] = ComposeOoxmlPackagePartComparer.ReadPartBytes(part);
         }
         return parts;
     }
 
-    private static IEnumerable<OpenXmlPart> Flatten(OpenXmlPart part)
-    {
-        yield return part;
-        foreach (var child in part.Parts.SelectMany(p => Flatten(p.OpenXmlPart)))
-        {
-            yield return child;
-        }
-    }
+    /// <summary>Concatenated visible text of <paramref name="blocks"/>, recursing into table cells — the
+    /// 011-T5 round-trip text oracle (run merging/splitting is irrelevant; total visible text is not).</summary>
+    private static string ConcatText(IEnumerable<ComposeBlock> blocks) =>
+        string.Concat(blocks.SelectMany(FlattenRuns).Select(r => r.Text));
+
+    private static IEnumerable<ComposeInlineRun> FlattenRuns(ComposeBlock block) =>
+        block.Kind == ComposeBlockKind.Table && block.Table is not null
+            ? block.Table.Rows.SelectMany(r => r.Cells).SelectMany(c => c.Blocks).SelectMany(FlattenRuns)
+            : block.Runs;
 
     private static string? TrailingSectPrXml(byte[] package)
     {
@@ -219,9 +235,11 @@ public sealed class ComposeCarrierRenderSeamTests
     {
         using var doc = WordprocessingDocument.Open(new MemoryStream(package, writable: false), isEditable: false);
         var numbering = doc.MainDocumentPart!.NumberingDefinitionsPart!.Numbering!;
+        // Null-safe (011-T4): an id-less instance in a future corpus doc contributes nothing to the max
+        // instead of NRE-ing the whole test.
         return (
-            numbering.Elements<NumberingInstance>().Max(n => n.NumberID!.Value),
-            numbering.Elements<AbstractNum>().Max(a => a.AbstractNumberId!.Value),
+            numbering.Elements<NumberingInstance>().Max(n => n.NumberID?.Value) ?? 0,
+            numbering.Elements<AbstractNum>().Max(a => a.AbstractNumberId?.Value) ?? 0,
             numbering.Elements<NumberingInstance>().Count(),
             numbering.Elements<AbstractNum>().Count());
     }

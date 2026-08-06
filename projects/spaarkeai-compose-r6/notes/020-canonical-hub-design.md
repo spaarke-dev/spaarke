@@ -119,6 +119,18 @@
 
 **Accepted as-is (documented):** R9 row/cell-level wrappers (pre-existing shape parity with `RenderTable`; caught by unrendered-paragraphs guard) → 026 inventory · R17 kind-only stability assertion (Ordered/Level/interior = 021/027 oracles) · R18 comment framing · R19/R20/R21/R22 clean · R23 staged dead code until 010/011 · R24 pre-existing disposal pattern (harmless).
 
+## 10. Task 011 — RenderIntoCarrier (2026-08-05, commits `e24ceefbc` + Step-9.5 fix commit)
+
+**Delivered:** `ComposeDocumentRenderer.RenderIntoCarrier(carrier, model, author)` — the imported-doc render-on-save author (replace-body-preserve-parts, generalizing `AppendSection`); collision-safe numbering merge (`NumberingPlan(firstNumId)` above carrier max + `MergeNumberingDefinitions` remapped abstracts); carrier styles win; trailing sectPr + metadata preserved. Seam slice `ComposeCarrierRenderSeamTests`: non-body parts BYTE-IDENTICAL across the swap on every corpus doc; block-kind + **visible-text** fixed point; collision-free merge proven; unique paraIds; degenerate cases.
+
+**Step 9.5 (independent agents on `e24ceefbc`):** adr-check **PASS** (11/11, 0 violations). code-review **APPROVE-WITH-MINORS** — triage:
+
+*Fixed:* **M-1** heading style-linked numPr in the no-styles-carrier branch could dangle or capture carrier numId 1 → catalog now authored WITHOUT heading numbering in carrier mode (`AddStyleDefinitions(includeHeadingNumbering:false)`) · **P-1** pPr-nested final sectPr promoted (clone) when body-level absent — kills a UAT-#1A shape on third-party generators · **P-3** `numIdMacAtCleanup` stays last in the merge (CT_Numbering order) · **P-8** localized/custom paragraph-style identity loss now a counted projector flatten (`paragraph-style-flattened`; localized heading-id mapping → 021/026) · **T-1** cycle-unsafe part recursion replaced with the task-004 comparer's cycle-safe enumerator (widened to internal; §11 reuse) · **T-2** numbering.xml byte-identity exempted ONLY when the render allocates lists — **this hardening immediately caught a real bug**: merely READING the carrier's Numbering DOM for max ids caused autoSave to re-serialize an untouched numbering.xml on 4 list-free corpus docs → fixed by gating the inspection on `ModelContainsListItem(model.Blocks)` · **T-3** sectPr oracle asserts (no silent skip) · **T-4** null-safe stats · **T-5** visible-text concat round-trip oracle added corpus-wide · **P-4/P-7/P-9** documented degradations added to remarks (dangling-abstract capture; styles-present-but-missing-Heading/ListParagraph → Normal-look; header REF fields/bookmark links orphaned by the body swap).
+
+*Deferred/accepted:* **P-2** triple-duplicated open-package preamble → extract when 012 touches this area · **P-5** int-overflow ids (theoretical) · **P-6** `mc:Ignorable` w14 on pre-2010 carriers (strict-validator only) · **P-10** the write-path text-search audit needs a scoped sentinel carve-out AT the 010 cutover (noted for 010) · **T-6** OpenXmlValidator pass (real Word carriers carry pre-existing validation noise — flaky) · file-length (pre-existing).
+
+**Suite:** 333/335 (same 2 pre-existing NDA reds). Publish 46.88 MB (unchanged). ADR-013 ArchTest unchanged-green.
+
 ---
 
-*Steps 1–3 artifact + gates. Checkpoint in `current-task.md`.*
+*Steps 1–3 artifact + gates + tasks 020/011 records. Checkpoint in `current-task.md`.*

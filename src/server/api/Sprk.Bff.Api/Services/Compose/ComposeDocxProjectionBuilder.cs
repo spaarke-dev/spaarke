@@ -1973,6 +1973,18 @@ public sealed class ComposeDocxProjectionBuilder
             ctx.AddWarning("style-linked-numbering-dropped", 1);
         }
 
+        // Custom/localized paragraph-style identity (review finding 011-P8 — e.g. German "Überschrift1"
+        // headings, which HeadingLevel's "Heading" prefix cannot classify) cannot be carried by the thin
+        // model: the render path emits Normal, so heading-ness/outline/custom look flattens — counted,
+        // never silent. Localized heading-id mapping is a 021/026-shaped follow-up.
+        var flattenedStyleId = p.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+        if (!string.IsNullOrEmpty(flattenedStyleId)
+            && !string.Equals(flattenedStyleId, "Normal", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(flattenedStyleId, "ListParagraph", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.AddWarning("paragraph-style-flattened", 1);
+        }
+
         lists.PrevOrderedNumId = null; // plain paragraph interrupts an ordered run on render
         return new ComposeBlock
         {

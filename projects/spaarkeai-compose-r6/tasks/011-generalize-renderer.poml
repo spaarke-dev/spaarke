@@ -4,7 +4,21 @@
     <title>Generalize ComposeDocumentRenderer.SynthesizeDocument for imported/canonical model input</title>
     <phase>1 Render-on-save core</phase>
     <gate>blocked — requires 001 (ADR-049 Path-B amendment, committed on branch) + 020 (canonical model hub + docx→model projection in place). RE-SEQUENCED 2026-08-05: 011 pairs with 020 (renderer generalization for the widened model) and PRECEDES 010; was gated on 010 — inversion fixed. Run /conflict-check before the BFF PR.</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-note>COMPLETED 2026-08-05 (commit e24ceefbc + Step-9.5 fix commit). Directional interpretation: with
+      task 020 done, SynthesizeDocument already accepts the canonical model — the real renderer gap was the CARRIER
+      render for imported docs. Delivered ComposeDocumentRenderer.RenderIntoCarrier(carrier, model, author):
+      replace-body-preserve-parts (generalizes AppendSection; third authoring mode), collision-safe numbering merge
+      (NumberingPlan firstNumId above carrier max + MergeNumberingDefinitions remapped abstracts; numIdMacAtCleanup
+      order kept), carrier styles win (catalog authored only when absent, WITHOUT heading numPr in carrier mode),
+      trailing sectPr preserved incl. pPr-nested promotion, carrier metadata preserved, list-free renders never touch
+      the numbering part (autoSave rewrite bug caught by the hardened seam oracle and fixed). Seam slice
+      ComposeCarrierRenderSeamTests: non-body parts BYTE-IDENTICAL on every corpus doc; block-kind + visible-text
+      fixed point; collision-free merge proven; unique paraIds. Step 9.5: adr-check PASS (11/11); code-review
+      APPROVE-WITH-MINORS (M-1/P-1/P-3/P-8/T-1..T-5 fixed; P-2/P-5/P-6/P-10/T-6 deferred-documented). Gates: publish
+      46.88 MB (≤60); no new HIGH CVE; suite 333/335 (2 pre-existing NDA reds). DEVIATION: strict golden-label
+      numbering parity through the round-trip → task 021 (labels derive from the scheme the thin model cannot yet
+      carry). Full record: notes/020-canonical-hub-design.md §10.</completion-note>
     <rigor>FULL</rigor>
     <rigor-reason>Core BFF renderer change (tags bff/compose) on the render-from-model path; governed by the ADR amendment — FULL per root §8.</rigor-reason>
     <model-tier>opus</model-tier>

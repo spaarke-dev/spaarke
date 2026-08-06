@@ -289,8 +289,14 @@ public sealed partial class ComposeDocumentRenderer
     /// <b>Carrier styles WIN (the fidelity point)</b>: when the carrier has a StyleDefinitionsPart, its
     /// Heading1..6 / ListParagraph / Normal definitions govern the rendered look (a firm template's heading
     /// scheme survives the save). The renderer's own catalog is authored ONLY when the carrier has no styles
-    /// part at all — the same defensive rule as <see cref="AppendSection"/>. A carrier whose Heading styles
-    /// carry no style-linked numbering yields unnumbered headings: faithful to the carrier's own look.
+    /// part at all — the same defensive rule as <see cref="AppendSection"/> — and in that carrier case the
+    /// catalog is authored WITHOUT the heading style-linked numPr (review 011-M1; the heading num instance
+    /// is never merged, so a numbered Heading style would dangle or capture a carrier num definition). A
+    /// carrier whose Heading styles carry no style-linked numbering yields unnumbered headings, and a
+    /// carrier styles part that simply LACKS <c>Heading{n}</c> / <c>ListParagraph</c> leaves the rendered
+    /// <c>pStyle</c> references dangling — Word falls back to Normal formatting (headings visually
+    /// indistinct; list indent lost though direct-numPr numbering still works). All are the documented
+    /// carrier-faithful degradation (review 011-P7).
     /// </para>
     /// <para>
     /// <b>Collision-safe numbering merge</b>: list instances allocate ABOVE the carrier's max <c>numId</c> and
@@ -311,7 +317,12 @@ public sealed partial class ComposeDocumentRenderer
     /// <b>Carrier metadata preserved</b>: core properties (creator etc.) are left untouched when present;
     /// <paramref name="author"/> is used only when the carrier lacks a core-properties part entirely.
     /// Orphaned parts (images/footnotes referenced only by the replaced body) remain in the package as inert
-    /// weight — harmless, and version history retains the original anyway (ADR-049 safety net).
+    /// weight — harmless, and version history retains the original anyway (ADR-049 safety net). Two further
+    /// documented degradations (review 011-P4/P9): a preserved header/footer whose <c>REF</c> field or
+    /// anchor hyperlink targets a BODY bookmark loses its target with the body swap (the model does not
+    /// carry bookmarks — Word shows its standard broken-reference text on field update); and a carrier
+    /// instance referencing an UNDEFINED abstractNumId that happens to equal a remapped renderer abstract id
+    /// would resolve to it — only observable from numbered paragraphs inside preserved parts, accepted.
     /// </para>
     /// </remarks>
     /// <param name="carrierBytes">The retained source package (a valid WordprocessingML OPC package).</param>
@@ -355,23 +366,50 @@ public sealed partial class ComposeDocumentRenderer
 
             // Detach the FINAL section's sectPr before the swap; re-attached below (see remarks).
             var trailingSectPr = body.Elements<SectionProperties>().LastOrDefault();
-            trailingSectPr?.Remove();
+            if (trailingSectPr is not null)
+            {
+                trailingSectPr.Remove();
+            }
+            else
+            {
+                // Review finding 011-P1: some third-party generators park the final section's sectPr
+                // inside the LAST PARAGRAPH's pPr with no body-level sectPr (schema-nonconforming).
+                // Promote a clone so the carrier's page setup + header/footer REFERENCES survive the
+                // swap instead of being silently replaced by the default Letter setup (the UAT #1A
+                // headers-vanish symptom, on this one shape).
+                trailingSectPr = body.Elements<Paragraph>().LastOrDefault()
+                    ?.ParagraphProperties?.SectionProperties?.CloneNode(true) as SectionProperties;
+            }
 
             body.RemoveAllChildren();
 
-            // Collision-safe allocation base (see remarks). Computed BEFORE the render so the plan's ids
-            // are correct in the paragraphs' direct numPr as they are built.
-            var existingNumbering = mainPart.NumberingDefinitionsPart?.Numbering;
-            var maxExistingNumId = existingNumbering?.Elements<NumberingInstance>().Max(n => n.NumberID?.Value) ?? 0;
-            var maxExistingAbstractId = existingNumbering?.Elements<AbstractNum>().Max(a => a.AbstractNumberId?.Value) ?? 0;
-            var plan = new NumberingPlan(Math.Max(FirstListNumInstanceId, maxExistingNumId + 1));
+            // Collision-safe allocation base (see remarks), computed BEFORE the render so the plan's ids
+            // are correct in the paragraphs' direct numPr as they are built — but ONLY when the model
+            // actually carries list items: merely READING the carrier's Numbering root loads its DOM, and
+            // autoSave re-serializes (normalizes) the part on dispose — rewriting an otherwise-untouched
+            // numbering.xml and breaking the preserve-parts byte-identity contract for list-free renders
+            // (caught by the 011-T2 hardened seam oracle).
+            var plan = new NumberingPlan();
+            var maxExistingAbstractId = 0;
+            if (ModelContainsListItem(model.Blocks))
+            {
+                var existingNumbering = mainPart.NumberingDefinitionsPart?.Numbering;
+                var maxExistingNumId = existingNumbering?.Elements<NumberingInstance>().Max(n => n.NumberID?.Value) ?? 0;
+                maxExistingAbstractId = existingNumbering?.Elements<AbstractNum>().Max(a => a.AbstractNumberId?.Value) ?? 0;
+                plan = new NumberingPlan(Math.Max(FirstListNumInstanceId, maxExistingNumId + 1));
+            }
 
             RenderBlocks(body, model.Blocks, plan);
             ResolveHyperlinkRelationships(body, mainPart);
 
             if (mainPart.StyleDefinitionsPart is null)
             {
-                AddStyleDefinitions(mainPart); // carrier has no styles at all — author the catalog
+                // Carrier has no styles at all — author the catalog WITHOUT the heading style-linked
+                // numPr (review finding 011-M1): the heading abstract/instance is never merged in
+                // carrier mode, so a numbered Heading style would either dangle (no numbering part) or
+                // CAPTURE a carrier num instance at numId 1 — the exact collision class the merge
+                // exists to prevent. Unnumbered headings are the documented carrier-faithful stance.
+                AddStyleDefinitions(mainPart, includeHeadingNumbering: false);
             }
 
             if (plan.OrderedInstanceIds.Count > 0 || plan.BulletInstanceId is not null)
@@ -416,6 +454,26 @@ public sealed partial class ComposeDocumentRenderer
         return buffer.ToArray();
     }
 
+    /// <summary>Whether <paramref name="blocks"/> contains any list item (recursing into table cells) —
+    /// gates the carrier numbering inspection/merge so a list-free render never touches (and therefore
+    /// never rewrites) the carrier's numbering part (011-T2 preserve-parts contract).</summary>
+    private static bool ModelContainsListItem(IReadOnlyList<ComposeBlock> blocks)
+    {
+        foreach (var block in blocks)
+        {
+            if (block.Kind == ComposeBlockKind.ListItem)
+            {
+                return true;
+            }
+            if (block.Kind == ComposeBlockKind.Table && block.Table is not null
+                && block.Table.Rows.Any(r => r.Cells.Any(c => ModelContainsListItem(c.Blocks))))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// <summary>
     /// Task 011: merges the plan's list instances into an EXISTING carrier numbering part. Renderer abstracts
     /// are inserted with REMAPPED ids above the carrier's own (schema order: AbstractNum before Num — inserted
@@ -427,17 +485,36 @@ public sealed partial class ComposeDocumentRenderer
         NumberingDefinitionsPart numberingPart, NumberingPlan plan, int orderedAbstractId, int bulletAbstractId)
     {
         var numbering = numberingPart.Numbering ??= new Numbering();
+
+        // CT_Numbering order edges (review finding 011-P3): all abstractNum precede all num, and a
+        // trailing w:numIdMacAtCleanup (Mac Word artifact) must stay LAST — new instances insert before
+        // it, and new abstracts insert before the first existing instance (or before the cleanup marker
+        // when the part has abstracts but no instances).
         var firstInstance = numbering.Elements<NumberingInstance>().FirstOrDefault();
+        var macCleanup = numbering.GetFirstChild<NumberingIdMacAtCleanup>();
 
         void InsertAbstract(AbstractNum abstractNum)
         {
-            if (firstInstance is not null)
+            var anchor = (OpenXmlElement?)firstInstance ?? macCleanup;
+            if (anchor is not null)
             {
-                numbering.InsertBefore(abstractNum, firstInstance);
+                numbering.InsertBefore(abstractNum, anchor);
             }
             else
             {
                 numbering.AppendChild(abstractNum);
+            }
+        }
+
+        void AppendInstance(NumberingInstance instance)
+        {
+            if (macCleanup is not null)
+            {
+                numbering.InsertBefore(instance, macCleanup);
+            }
+            else
+            {
+                numbering.AppendChild(instance);
             }
         }
 
@@ -448,14 +525,14 @@ public sealed partial class ComposeDocumentRenderer
             {
                 var instance = new NumberingInstance(new AbstractNumId { Val = orderedAbstractId }) { NumberID = orderedId };
                 instance.AppendChild(new LevelOverride(new StartOverrideNumberingValue { Val = 1 }) { LevelIndex = 0 });
-                numbering.AppendChild(instance);
+                AppendInstance(instance);
             }
         }
 
         if (plan.BulletInstanceId is { } bulletId)
         {
             InsertAbstract(BuildBulletAbstractNum(bulletAbstractId));
-            numbering.AppendChild(new NumberingInstance(new AbstractNumId { Val = bulletAbstractId }) { NumberID = bulletId });
+            AppendInstance(new NumberingInstance(new AbstractNumId { Val = bulletAbstractId }) { NumberID = bulletId });
         }
 
         numberingPart.Numbering.Save();
@@ -705,7 +782,7 @@ public sealed partial class ComposeDocumentRenderer
     // Style catalog (StyleDefinitionsPart)
     // ────────────────────────────────────────────────────────────────────────────────────────────
 
-    private static void AddStyleDefinitions(MainDocumentPart mainPart)
+    private static void AddStyleDefinitions(MainDocumentPart mainPart, bool includeHeadingNumbering = true)
     {
         var stylesPart = mainPart.AddNewPart<StyleDefinitionsPart>();
         var styles = new Styles();
@@ -722,11 +799,13 @@ public sealed partial class ComposeDocumentRenderer
 
         // Heading1..6 — each carries a w:numPr referencing the ONE heading num instance at its own ilvl
         // (the STYLE side of the style-link) + an outlineLvl so the doc has a navigable outline. Descending
-        // sizes; all bold; keepNext so a heading stays with its following paragraph.
+        // sizes; all bold; keepNext so a heading stays with its following paragraph. Carrier mode (task 011)
+        // passes includeHeadingNumbering=false — the heading num instance is never authored there, so a
+        // style-linked numPr would dangle or capture a carrier num definition (review finding 011-M1).
         var headingSizes = new[] { "32", "28", "26", "24", "22", "22" }; // half-points: 16pt..11pt
         for (var level = 1; level <= MaxHeadingLevel; level++)
         {
-            styles.AppendChild(BuildHeadingStyle(level, headingSizes[level - 1]));
+            styles.AppendChild(BuildHeadingStyle(level, headingSizes[level - 1], includeHeadingNumbering));
         }
 
         // ListParagraph — indent only; NO numbering (list items supply a direct numPr).
@@ -747,22 +826,28 @@ public sealed partial class ComposeDocumentRenderer
         stylesPart.Styles.Save();
     }
 
-    private static Style BuildHeadingStyle(int level, string sizeHalfPoints)
+    private static Style BuildHeadingStyle(int level, string sizeHalfPoints, bool includeNumbering = true)
     {
         var ilvl = level - 1;
+
+        // CT_PPrBase child order: keepNext precedes numPr precedes spacing precedes outlineLvl.
+        var pPr = new StyleParagraphProperties();
+        pPr.AppendChild(new KeepNext());
+        if (includeNumbering)
+        {
+            pPr.AppendChild(new NumberingProperties(
+                new NumberingLevelReference { Val = ilvl },
+                new NumberingId { Val = HeadingNumInstanceId }));
+        }
+        pPr.AppendChild(new SpacingBetweenLines { Before = "240", After = "120" });
+        pPr.AppendChild(new OutlineLevel { Val = ilvl });
+
         return new Style(
             new StyleName { Val = $"heading {level}" },
             new BasedOn { Val = NormalStyleId },
             new UIPriority { Val = 9 },
             new PrimaryStyle(),
-            // CT_PPrBase child order: keepNext precedes numPr precedes spacing precedes outlineLvl.
-            new StyleParagraphProperties(
-                new KeepNext(),
-                new NumberingProperties(
-                    new NumberingLevelReference { Val = ilvl },
-                    new NumberingId { Val = HeadingNumInstanceId }),
-                new SpacingBetweenLines { Before = "240", After = "120" },
-                new OutlineLevel { Val = ilvl }),
+            pPr,
             new StyleRunProperties(
                 new Bold(),
                 new FontSize { Val = sizeHalfPoints },
