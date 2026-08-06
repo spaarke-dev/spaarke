@@ -1,87 +1,59 @@
 # Current Task — Spaarke Compose R6
 
-> **Last Updated**: 2026-08-06 (task-execute Step 2 — task 012 STARTED)
+> **Last Updated**: 2026-08-06 (task 012 close-out — clean boundary)
 > **Recovery**: Read "Quick Recovery" first; full state below.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **012 — Retire ComposeShadowPatchEngine + ComposeBaselineParaIdStamper from the save path** (`tasks/012-retire-surgical-save-path.poml`) |
-| **Rigor** | FULL · sonnet@high (running Fable main-session) · directional |
-| **Status** | in-progress — ALL implementation COMMITTED: A=70be80006 · C=2fc8ff530 · P-2/FR-08=3e4a9f456 · CLIENT CUTOVER=09b79eaae (66 client tests green, tsc baseline-identical 28; server Compose 979/982 floor). Step 9 criteria verified (types retained, docxBridge exists, no deletions/new usings, NDA no-422 pinned). CVE: no new HIGH (only pre-existing Crypto.Xml). Step 9.5 IN FLIGHT: code-review + adr-check agents on 09b79eaae + clean-worktree publish |
-| **Next Action** | On reviewer completion: triage findings → fix commit if needed → close-out (POML completed, TASK-INDEX ✅, current-task reset for 013, push) |
+| **Task** | NONE ACTIVE — clean boundary. **012 COMPLETE**: the surgical save path is retired end-to-end (server + THE CLIENT CUTOVER). Post-cutover clients never reach ComposeShadowPatchEngine or the count-gate on ANY save. |
+| **Next task** | **013 — Seam + regression tests: NDA saves (no 422), edits land, new version** (`tasks/013-*.poml`; deps 004 ✅ + 012 ✅ satisfied). 027 (fidelity corpus seams) also unblocked but SERIAL — 013 first (critical path 013 → 014 deploy/UAT). |
+| **Status** | 012 closed at `7e4cd1822` (+ this close-out commit); working tree to be pushed |
+| **Next Action** | On "continue": invoke task-execute for task 013 — FULL rigor, sonnet/high. Read the 013 OBLIGATIONS below FIRST (routed from 012's Step 9.5). |
 
-### Conflict-check (Step 0.5) — done 2026-08-06
-No open PR touches Services/Compose (PR 690 = CI LFS only). Sibling branches: architecture-redesign-r2 =
-merge-commit only (empty Compose diff); compose-r1 = stale Prettier on ComposeToolbar.tsx/index.ts (files
-not touched by 012). SOFT-warn only → proceed. Re-run before the eventual BFF PR.
+### Critical Context (3 sentences)
+012 commits: 70be80006 (canonical model on all mount doors, one-mint-two-walks id agreement) ·
+2fc8ff530 (comment-bake retired — comments ride the model incl. carrier-part APPEND; author fallback;
+post-save model return; transitional op-log Warning telemetry) · 3e4a9f456 (P-2 + ADR-049 FR-08 note) ·
+09b79eaae (CLIENT CUTOVER: buildImportedContentModel merge mapper + diffTokens redlining; routing flip;
+026-F5 warning separation) · 7e4cd1822 (review fixes F1-F5 + ADR-049 point-4 Path-B micro-amendment).
+Step 9.5: adr-check PASS 8/8; code-review REQUEST-CHANGES → all fixed same-task. Suites: server Compose
+979/982 (3 pre-existing NDA reds — 013/027 OWN THEM), client 78/78, tsc 28-error pre-existing baseline;
+publish 46.91 MB clean-worktree (+0.01); no new HIGH CVE.
 
-### 012 ARCHITECTURE (locked this session)
-
-**Why the client cutover is IN 012**: without it, the current client's imported dirty saves still post
-op-log → engine, so the POML goal ("no reachable path for a normal save invokes engine/count-gate")
-cannot hold in practice. 010 was server-side only; the client shapes were verified unchanged.
-
-**Mapper design (Design A — merge-with-loaded-model + diff)**:
-- Server Load (and browse /project) responses gain ADDITIVE `contentModel` (from the 020
-  `ComposeDocxProjectionBuilder.BuildContentModel`) — ADR-040 additive JSON.
-- Client retains `loadedContentModel`; new `buildImportedContentModel(editor, loadedModel, baselineSnapshot)`:
-  - Untouched paragraph (text+editable-props unchanged) → loaded block passed through VERBATIM
-    (preserves ALL server-set facts trivially — the common case, exact fidelity).
-  - Edited paragraph → runs rebuilt from editor (b/i/u/link/comment/ins-del marks → facts) + user edits
-    redlined via `diffTokens(baselineText, currentText)` → Revision Inserted/Deleted facts (author=user);
-    block-level server-set facts (numId, table facts, pageBreakBefore, propertiesChange, markRevision)
-    merged from the loaded block; editable props (alignment, level) from the editor.
-  - New paragraph → fresh block, runs+mark Revision Inserted. Deleted paragraph → loaded block retained
-    with runs wrapped Deleted + markRevision Deleted (merge by paraId anchor order).
-  - Authored docs (clean semantics REQ-1): NO diff-derived revision facts — needs origin known client-side
-    at load (verify/add on load response).
-- Save routing flip: imported dirty (transient + replace) → `{ contentModel, content?/baselineVersionId }`;
-  drop op-log/paraIdMap/separate-comments on that shape. Comments fold INTO the model (024 Comments list +
-  anchor marker runs) — replaces the server comments-bake.
-
-**Server retirement (Phase C)**: remove the comments-baking `_patchEngine.Apply` (ComposeService ~:901-923,
-the last ContentModel-reachable engine caller — 010 adr-check residual); replace with loud wire-visible
-warning when request.Comments arrive WITH ContentModel. Op-log path stays as THE transitional path
-(amendment §4) with a deprecation warning log on imported tracked op-log saves. Count-gate: unreachable
-from all post-cutover shapes (proof by request-shape trace in notes).
-
-**Phases**: A server load-model exposure → B client mapper + routing flip → C server retirement →
-D warning-family separation (026-F5) → E tests (mapper unit + server seam/unit) → F docs (FR-08 note in
-ADR-049/design notes; P-10 carve-out + P-2 preamble verify; notes §18; publish + CVE) → Step 9.5 → close.
-
-### 012 OBLIGATIONS (accumulated — BINDING; all covered by phases above)
-1. CLIENT CUTOVER preserving every server-set field (numId 021 · tables 022 · pageBreak 023 · comments+
-   anchors 024 · revision/formatChange/markRevision/propertiesChange 025) + baseline source; born-in-editor
-   branch keeps omitting baselineVersionId (drive-item id would 404).
-2. Retire stamper+engine from save path + the comments-baking Apply at ~:901 (route comments through model).
-3. Client warning-family separation (026-F5).
-4. Record FR-08 imported-coverage change in ADR-049/design notes.
-5. P-10 audit carve-out + P-2 preamble extraction verification.
+### 013 OBLIGATIONS (routed from 012 Step 9.5 — read notes §18 triage)
+1. The 3 pre-existing NDA suite reds are 013/027's to re-baseline or retire:
+   ComposeSummaryPageSeamTests.AppendSection · ComposeBaselineParaIdStamperTests.MintAndPersist ·
+   ComposeReadFidelityHarnessSeamTests.TextExactness (all NDA-fixture).
+2. F6 (review minor): comment-id collision — session-allocated id can match a carrier comment id absent
+   from the loaded model (projection-flattened) → server `comment-id-collision` warn or server-echoed
+   allocation floor.
+3. F7 (review minor): load-time canonical-projection flatten warnings are server-log-only; return them on
+   the mount doors + fold into the FIRST model-path save's saveDegradationWarnings (pairs with FR-08 harness).
+4. adr-check residuals: R4.5 T-2 narrative refresh (/project now mints + echoes mutated bytes — still
+   stateless); FR-08 harness case for carrier-with-comments + new-comment append; transitional-telemetry
+   dashboards note; post-save re-projection perf watch on large docs.
+5. 027 additionally owes the REAL multi-author redlined corpus fixture (corpus has ZERO revision markup —
+   025-F6).
 
 ### Standing items
+- **014 deploy note**: BFF + `sprk_spaarkeai` MUST deploy together (old client on new server drops
+  separate-comments LOUDLY via `comments-ignored` — acceptable only within the atomic-deploy window).
 - Operator principle: best fidelity on common cases; rare shapes degrade LOUDLY, never silently.
-- Execution shape: implement → seam/unit slice → commit → Step 9.5 (TWO parallel background agents on the
-  committed SHA) + clean-worktree publish (46.90 MB ±0.00 baseline) → fix commit → close-out.
+- Execution shape per task: implement → seam/unit slice → commit → Step 9.5 (TWO parallel background
+  agents on the committed SHA) + clean-worktree publish (46.91 MB baseline now) → fix commit → close-out.
 - NEVER delete docxBridge.ts. Commit --no-verify + Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>.
-- Suite floor: 3 pre-existing reds (surgical/read-path artifacts owned by 012/013/027).
-- Before eventual PR: merge origin/master (~67 behind; Crypto.Xml HIGH patched there) + re-run /conflict-check.
+- /conflict-check before every BFF PR (Services/Compose most-contested; 012's check: clean window).
+- Before the eventual PR: merge origin/master (~67 behind; Crypto.Xml HIGH patched there) + re-run
+  /conflict-check.
+- Fidelity-widener backlog in notes §16; sign-offs R4/R5 RESOLVED to warned baselines (2026-08-06).
 
 ## Steps completed this task
-- [x] Step 0.5: rigor FULL declared; /conflict-check soft-pass
-- [x] Step 1: POML + obligations loaded; ADR-049 amendment §4 re-read (transitional clean-apply = sole
-      permitted engine caller); save-path code map (engine callers :837 op-log, :905 comments-bake,
-      :1669/:1901 = re-anchor + best-effort, all inside the op-log family)
-- [x] Step 2: architecture locked (Design A above); current-task.md initialized
+(none — no active task)
 
 ## Files modified this task
-(none yet)
+(none)
 
 ## Decisions
-- 2026-08-06: Client mapper = Design A (merge-with-loaded-model + diffTokens redlining). Reason: block-level
-  server-set facts cannot round-trip through TipTap; verbatim pass-through of untouched blocks gives exact
-  fidelity on the common case per the operator principle. Pure-editor rebuild (Design B) rejected — cannot
-  represent numId/table facts/propertiesChange.
-- 2026-08-06: Op-log path RETAINED whole as the transitional path (amendment §4 wording + pre-cutover
-  client compatibility); reachability criterion satisfied by post-cutover request-shape trace, not deletion.
+(none — see notes §18 for 012's record incl. the Step-9.5 triage)

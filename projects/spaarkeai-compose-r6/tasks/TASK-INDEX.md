@@ -23,7 +23,7 @@ Overlapping worktrees: `spaarkeai-compose-r5` (active on `ComposeService.cs`/`Co
 | 004 | Move AppligentNDA_Signed.docx → tests/fixtures/compose-corpus/ (LFS) + manifest row | 0 | none | phase0-foundations | true | STANDARD | sonnet/high | ✅ |
 | 010 | Finalize Imported save-path cutover through render-from-model; drop count-gate | 1 | 011, 026 | none | false | FULL | opus/xhigh | ✅ |
 | 011 | Generalize ComposeDocumentRenderer.SynthesizeDocument for canonical-model input | 1 | 001, 020 | none | false | FULL | opus/high | ✅ |
-| 012 | Retire ComposeShadowPatchEngine + ComposeBaselineParaIdStamper from save path | 1 | 010 | none | false | FULL | sonnet/high | 🔲 |
+| 012 | Retire ComposeShadowPatchEngine + ComposeBaselineParaIdStamper from save path | 1 | 010 | none | false | FULL | sonnet/high | ✅ |
 | 013 | Seam + regression tests: NDA saves (no 422), edits land, new version | 1 | 004, 012 | none | false | FULL | sonnet/high | 🔲 |
 | 014 | Deploy + UAT gate (render-on-save + fidelity) — BFF + sprk_spaarkeai together | 1 | 013, 027 | none | false | STANDARD | sonnet/high | 🔲 |
 | 020 | Canonical document model — generalize ComposeContentModel/projection as the hub | 2 | 001, 004 | none | false | FULL | opus/high | ✅ |

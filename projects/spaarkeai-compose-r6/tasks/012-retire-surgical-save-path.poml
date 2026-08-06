@@ -4,7 +4,7 @@
     <title>Retire ComposeShadowPatchEngine + ComposeBaselineParaIdStamper from the save path</title>
     <phase>1 Render-on-save core</phase>
     <gate>blocked — requires 010 (Imported cutover finalized: render-from-model is the default save path + count-gate dropped) [transitively 011 renderer + 020 model + 001 amendment]. RE-SEQUENCED 2026-08-05: retire surgical from the save path only AFTER the cutover (010) makes render-from-model the default. Run /conflict-check before the BFF PR.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Core BFF save-path change (tags bff/compose) removing the surgical patcher/count-gate; governed by the ADR amendment — FULL per root §8.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -83,7 +83,15 @@
     <criterion testable="true">Publish size ≤60 MB with absolute + delta reported; no new HIGH CVE; BFF builds green.</criterion>
   </acceptance-criteria>
 
-  <notes>Critical path 001→010→011→012→013→014. Completes the save-path pivot; 013 then proves no-422 + edits-land + new-version by tests. spec FR-02.</notes>
+  <notes>Critical path 001→010→011→012→013→014. Completes the save-path pivot; 013 then proves no-422 + edits-land + new-version by tests. spec FR-02.
+
+COMPLETED 2026-08-06 — commits 70be80006 (Phase A: canonical model on load/upload/project mounts, one-mint-two-walks id agreement) · 2fc8ff530 (Phase C: comment-bake retired — the last ContentModel-reachable engine caller; comments ride the model incl. carrier part APPEND; revision-author fallback; post-save model return; transitional op-log Warning telemetry) · 3e4a9f456 (P-2 ScanCarrierBytes extraction + ADR-049 FR-08 coverage note) · 09b79eaae (THE CLIENT CUTOVER: buildImportedContentModel merge-with-loaded-model mapper + diffTokens redlining; save-routing flip {contentModel, content|baselineVersionId}; 026-F5 warning-family separation) · 7e4cd1822 (Step-9.5 fixes F1-F5 + ADR-049 point-4 Path-B micro-amendment).
+
+SCOPE NOTE (directional): the POML's server-only framing was insufficient — without the client cutover, the current client's imported dirty saves still posted op-log → engine, so criterion 1 could not hold in practice. The accumulated 010/026-review obligations (client cutover, comment-bake retirement, warning separation, FR-08 note, P-10/P-2) were executed as part of this task per current-task.md.
+
+ACCEPTANCE: (1) static reachability — every engine/count-gate site reachable from SaveAsync is inside the ContentModel-null TRANSITIONAL shape (notes §18 table); post-cutover shapes never enter it; comments-bake removed. (2) Both types retained (stamper actively used for load-side MintAndPersist ingest); docxBridge.ts exists (extended, never deleted). (3) NDA w14:paraId/count mismatch saves without refusal (ComposeServiceImportedRenderSaveTests, real projector+renderer). (4) No Services/Compose type deleted; no Graph/AI-internal using added. (5) Publish 46.91 MB clean-worktree (+0.01 vs baseline, ceiling 60); no new HIGH CVE (pre-existing Crypto.Xml only); BFF green.
+
+STEP 9.5: adr-check PASS 8/8 (its one §6.5 finding — amendment point-4 wording narrower than the reachable transitional set — resolved same-task as its recommended Path-B micro-amendment). code-review REQUEST-CHANGES → all findings fixed same-task (F1 formatting-signature untouched-predicate; F2 imported-thread anchor id shape; F3 editorIsDirty gate — clean saves keep FR-06a byte-identity; F4 build-time snapshot adoption; F5 dirty-on-failure). F6/F7 minors + residuals routed to 013 (notes §18). Suites: server Compose 979/982 (3 pre-existing NDA reds — 013/027 own); client 78/78; tsc 28-error pre-existing baseline.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
