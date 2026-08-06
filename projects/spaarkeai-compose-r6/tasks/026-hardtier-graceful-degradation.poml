@@ -4,7 +4,7 @@
     <title>Hard-tier graceful degradation — text boxes / drawings / fields / content controls accept-flatten + warning (the exact NDA breakers; MUST NOT 422)</title>
     <phase>2 Canonical model + fidelity widening</phase>
     <gate>dep:020</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>This is the graceful-degradation guarantee that makes the render-on-save pivot safe: the hard-tier constructs (text boxes/drawings/fields/content controls) are exactly what hard-failed the surgical patcher on the NDA (the 422). A wrong degradation path either 422s (regression) or silently loses content (data loss). Modifies shared Services/Compose on the most-contested BFF surface; ADR-038 seam DoD. code-review + adr-check run at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -108,6 +108,23 @@
     <criterion testable="true">Given a flattened construct, then the prior (pre-flatten) version remains retrievable via version history (FR-07 safety net).</criterion>
     <criterion testable="true">Negative / no-regression: no code path produces a 422 for a hard-tier construct; no visible content is silently lost; Tier-1 NetArchTest passes; docxBridge.ts not deleted; BFF publish ≤60 MB with delta reported vs ~49.63 MB; seam slice uses no banned mock/DI/ctor shapes.</criterion>
   </acceptance-criteria>
+
+  <completion-note>
+    COMPLETED 2026-08-06 (commits 0d1a78a9c + Step-9.5 fixes 3857ce542). Text-box visible text ACCEPT-
+    FLATTENS (ExtractTextBoxDisplayText, 4 projector sites; ONE AlternateContent branch — dedups the NDA
+    text AND its duplicate-paraId class; text-box-flattened counted; nearest-paragraph run assignment;
+    unchosen-branch visited accounting; mixed-run direct text kept). Render-side degradation sink
+    (ListRenderState.Warn) -> SaveComposeDocumentResult.DegradationWarnings -> response degradationWarnings
+    (wire DTO) -> client dismissible banner: SUCCESS-WITH-WARNINGS, never a 422. Comments date gate -> xsd
+    lexical. Seam: ComposeHardTierDegradationSeamTests (16 facts + corpus no-hard-fail theory; NDA oracle
+    "For: Appligent, Inc." x1; unique rendered paraIds — the 422 dup-id trigger unreachable). adr-check
+    PASS 8/8 (FR-04 warning clause compliant today via the LOAD-path banner for imported docs; save-side
+    joins at 010 cutover — 010 MUST wire the degradations collection into RenderIntoCarrier). code-review
+    APPROVE-WITH-MINORS; 3 Mediums fixed + pinned. Suite 9787/9891 + Compose 968/971 (same 3 pre-existing
+    NDA reds — routed 027/010). Publish clean-worktree 46.90 MB (delta +-0.00). ROUTED: 012 owes client
+    warning-family separation (F5); fidelity wideners recorded in notes §16 backlog. Full record: notes
+    020-canonical-hub-design.md §16.
+  </completion-note>
 
   <notes>Spec FR-04 (graceful-degradation guarantee); plan.md §5 Phase 2. The exact NDA breakers — MUST NOT 422. Builds on 020; the no-422 behavior is asserted broadly in 027. Version history (FR-07) is the safety net for flattened content. parallel-safe=false. Run /conflict-check before the BFF PR.</notes>
 

@@ -577,4 +577,55 @@ blocked by the validator gate.
 
 ---
 
-*Steps 1–3 artifact + gates + tasks 020/011/021/022/023/024/025 records. Checkpoint in `current-task.md`.*
+## 16. Task 026 — hard-tier graceful degradation (2026-08-06)
+
+**Commits `0d1a78a9c` + Step-9.5 fixes `3857ce542`.** Spec FR-04's graceful-degradation GUARANTEE — the
+NDA breakers (text boxes / drawings / fields / content controls) accept-flatten with a surfaced warning,
+NEVER a 422. Much of the loud-flatten machinery already existed from 020-025; 026 closed the CONTENT gap
+and built the warning SURFACE:
+
+- **Text-box visible text is extracted** (`ExtractTextBoxDisplayText` + 4 projector sites: complex run /
+  inline AC / run-nested AC / block-level AC). The NDA's signature blocks ("For: Appligent, Inc.",
+  "signature", "______________") land as degraded runs/paragraphs. `mc:AlternateContent` extracts exactly
+  ONE branch (Choice preferred) — dedups both the text AND the NDA's duplicate-paraId class (the dup ids
+  ARE the Choice/Fallback duplication). Per-run nearest-paragraph assignment (F1) prevents nested-shape
+  doubling; unchosen-branch paragraphs count as visited (F2 — no false unrendered-paragraphs); mixed
+  transitional runs keep their direct w:t text (F3). Text-free objects keep `complex-object-dropped`.
+- **Render-side degradation sink**: `ListRenderState.Warn` → optional out-collection on
+  `SynthesizeDocument`/`RenderIntoCarrier`. Counts: `comment-anchor-dropped` (024-routed),
+  `tracked-format-change-dropped` (025-F4/F7-routed), `hyperlink-target-dropped`,
+  `comment-duplicate-dropped` (F7). SaveAsync surfaces them as SUCCESS-WITH-WARNINGS:
+  `SaveComposeDocumentResult.DegradationWarnings` → response `degradationWarnings` (optional trailing,
+  mapped to the `ComposeProjectionWarningResponse` wire DTO — F6) → the client's existing dismissible
+  banner (`ComposeWorkspace`).
+- **Comments date gate → xsd lexical** (025-F3 same-class hole closed; carrier parts unaffected).
+- **No-422 proof**: seam slice `ComposeHardTierDegradationSeamTests` (16 facts + corpus theory) — NDA
+  projects/renders/re-projects without hard-fail, exact one-branch oracle ("For: Appligent, Inc." ×1),
+  UNIQUE rendered paraIds (the 422's dup-id trigger is unreachable on this path), sink counts, corpus
+  no-hard-fail floor. `ComposeCanonicalModelRoundTripSeamTests` NDA expectation updated to 026 posture.
+
+**Step 9.5**: adr-check **PASS 8/8** — notably: FR-04's "user-visible warning" clause judged COMPLIANT for
+imported docs TODAY via the load-path projection-warning banner (text-box-flattened reaches the user at
+open); the save-side surface joins at the 010 cutover. code-review **APPROVE-WITH-MINORS**, 3 empirically-
+proven Mediums (F1/F2/F3 above) all FIXED + pinned; F6/F7 fixed; F5 routed.
+
+**Gates**: suite 9787/9891 full + 968/971 Compose (same 3 pre-existing NDA reds; one unrelated flaky
+passed on re-run) · ArchTests same 4 pre-existing · client tsc 28 before/after · BannerStack jest 18/18
+(14 ComposeWorkspace suites fail PRE-EXISTING @spaarke/auth worktree resolution) · publish clean-worktree
+**46.90 MB incl PDBs, delta ±0.00** · CVE: no package changes.
+
+**ROUTED / REMAINING:**
+- **010 (CUTOVER OBLIGATIONS, extended)**: wire the `degradations` out-collection into `RenderIntoCarrier`
+  from `SaveAsync` at the imported-save cutover (adr-check recommendation — otherwise the imported half of
+  FR-04's warning clause silently regresses); + the standing client-mapper preservation list (021-025).
+- **012**: client warning-family separation (F5 — save degradations vs load import warnings share one
+  reducer slot; clean-save doesn't clear; raw codes need friendly copy).
+- **Notes/backlog (fidelity wideners beyond FR-04's closed criteria — post-R6 or 027-adjacent)**:
+  custom-style-linked numbering (020-R7) · localized heading ids (011-P8) · hMerge/tblLayout typed carry
+  (022-F2) · bookmarks + internal links (024) · typed move + table-revision carry (025) · pageBreakBefore
+  tri-state (023-F2) · field-result box text + SmartArt doc note (026-F4).
+- **Operator sign-offs still pending**: R4 "barfoo" (025 warned baseline) · R5 U+FFFD.
+
+---
+
+*Steps 1–3 artifact + gates + tasks 020/011/021/022/023/024/025/026 records. Checkpoint in `current-task.md`.*

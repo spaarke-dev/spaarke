@@ -32,7 +32,7 @@ Overlapping worktrees: `spaarkeai-compose-r5` (active on `ComposeService.cs`/`Co
 | 023 | Headers/footers + page breaks through the model | 2 | 020 | none | false | STANDARD | sonnet/high | ✅ |
 | 024 | Hyperlinks + comments through the model | 2 | 020 | none | false | STANDARD | sonnet/high | ✅ |
 | 025 | Tracked-changes (redlines) through the model | 2 | 020 | none | false | FULL | sonnet/high | ✅ |
-| 026 | Hard-tier graceful degradation (text boxes/drawings/fields/content controls → accept-flatten + warning) | 2 | 020 | none | false | FULL | sonnet/high | 🔲 |
+| 026 | Hard-tier graceful degradation (text boxes/drawings/fields/content controls → accept-flatten + warning) | 2 | 020 | none | false | FULL | sonnet/high | ✅ |
 | 027 | Fidelity seam tests across the corpus | 2 | 021,022,023,024,025,026,012 | none | false | FULL | sonnet/high | 🔲 |
 | 030 | Part-merge engine in Services/Compose (body → firm/matter .dotx) | 3 | 020 | P3 | false | FULL | opus/high | 🔲 |
 | 031 | Template storage/variable rendering reuse (template entity + ITemplateEngine) | 3 | 030 | P3 | false | STANDARD | sonnet/high | 🔲 |

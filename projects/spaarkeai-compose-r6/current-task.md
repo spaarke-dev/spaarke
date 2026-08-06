@@ -7,41 +7,46 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | NONE ACTIVE — clean boundary. 020/011/021/022/023/024/**025** ALL COMPLETE + pushed |
-| **Next task** | **026 hard-tier graceful degradation** (`tasks/026-hardtier-graceful-degradation.poml`) via task-execute |
-| **Status** | between tasks; branch `work/spaarkeai-compose-r6`; 025 closed at `ea2cdce2a` + close-out commit |
-| **Next Action** | On "continue": invoke task-execute for task 026 — declare FULL rigor (override UP if authored STANDARD), Step 1 code map of the hard-tier drop sites (AlternateContent/complex-object/field/sdt paths in ComposeDocxProjectionBuilder) + the accumulated 026 routing ledger below |
+| **Task** | NONE ACTIVE — clean boundary. **PHASE 2 COMPLETE**: 020/011/021/022/023/024/025/026 ALL DONE + pushed |
+| **Next task** | **010 — Imported save-path cutover through render-from-model; drop count-gate** (`tasks/010-*.poml`; deps 011+026 satisfied) |
+| **Status** | 026 closed at `3857ce542`; branch `work/spaarkeai-compose-r6` pushed; working tree clean |
+| **Next Action** | On "continue": invoke task-execute for task 010 — ⚠️ POML declares **opus/xhigh** model tier (Step 0.5: verify session model ≥ opus before executing; Fable OK, Sonnet must escalate). FULL rigor. Read the 010 CUTOVER OBLIGATIONS below FIRST. |
 
 ### Critical Context (3 sentences)
-Phase-2 wideners 021-025 are ALL DONE serially on the shared Compose surface with the same execution
-shape (model widening → projector LOUD capture → renderer emission → seam slice → two-agent Step 9.5 on
-the committed SHA → fix commit → §7 close-out). 025 landed tracked-changes as MODEL data (w:ins/w:del
-grouped wrappers + delText, mark revisions incl. moves, pPrChange/rPrChange opaque-validated carry,
-xsd-date gate at BOTH capture and render, ids server-minted carrier-seeded) — client-input hardening was
-applied FROM THE START and the review still found 3 empirically-proven Majors (hyperlink nesting, mark
-moves, date lexical gate), all fixed in `ea2cdce2a`. Publish gate convention: CLEAN WORKTREE only
-(46.90 MB incl PDBs, ±0.00 across 021-025); suite floor: 3 pre-existing NDA reds (026/027 own them).
+Phase-2 fidelity widening is COMPLETE (021 numbering · 022 tables · 023 headers/page-breaks · 024
+hyperlinks/comments · 025 tracked-changes · 026 hard-tier degradation) — the canonical model +
+render-on-save engine is ready for the 010 cutover of IMPORTED saves. Established execution shape per
+task: model widening → projector LOUD capture → renderer emission → seam slice → commit → Step 9.5
+two-agent review on the SHA + clean-worktree publish (46.90 MB, ±0.00 across the whole phase) → fix
+commit → close-out. Suite floor: 3 pre-existing NDA reds (read-harness TextExactness + Summary-Page
+AppendSection + Stamper dup-paraId — the SURGICAL-path artifacts 010/012 retire; 013/027 re-baseline).
 
-### 026 ROUTING LEDGER (owes)
-custom-style-linked numbering (020-R7) · localized heading ids (011-P8) · hMerge/tblLayout typed carry
-(022-F2) · bookmarks + internal links (024) · dangling-anchor loud counter (024) · **renderer-side loud
-counters for dropped format-change records (025-F4/F7 posture)** · **024 comments-part date gate →
-xsd lexical (025-F3 same-class hole)** · typed move + table-revision carry (025 downgrades) ·
-AlternateContent surface · dup-paraId I-4 · U+FFFD R5 operator sign-off · pageBreakBefore tri-state
-(023-F2). **027 owes:** REAL multi-author redlined corpus fixture (corpus has ZERO revision markup —
-025-F6). **010/012 owe (CUTOVER OBLIGATION):** client mapper preserves ALL server-set fields on re-post —
-numId (021) · table facts (022) · page breaks (023) · comments/anchors (024) · **revision/formatChange/
-markRevision/propertiesChange (025 — dropping them silently SETTLES every redline)**. ⚠️ OPERATOR
-SIGN-OFFS PENDING: R4 "barfoo" (shipped as warned innermost-wins baseline — tracked-nested-revision-
-simplified) · R5 U+FFFD (026).
+### 010 CUTOVER OBLIGATIONS (accumulated — BINDING)
+1. Route imported saves through RenderIntoCarrier (render-from-model); retire the
+   ComposeBaselineParaIdStamper count-gate (the 422 root) from the save path.
+2. **Wire the `degradations` out-collection into RenderIntoCarrier from SaveAsync** and surface via
+   DegradationWarnings (026 adr-check obligation — otherwise imported-save warnings silently regress).
+3. Client mapper MUST preserve ALL server-set model fields on re-post or fidelity silently regresses:
+   numId (021) · table facts (022) · pageBreakBefore/isPageBreak (023) · comments+commentAnchor (024) ·
+   revision/formatChange/markRevision/propertiesChange (025 — dropping = silently SETTLES redlines) ·
+   P-10 audit carve-out · P-2 preamble extraction.
+4. 012 additionally owes: client warning-family separation (026-F5: save degradations vs load import
+   warnings share one reducer slot; clean save doesn't clear; friendly copy).
 
-### Files Modified (025 — all committed + pushed)
-- `Services/Compose/ComposeContentModel.cs` — ComposeRevision/ComposeFormatChange + run/block fields
-- `Services/Compose/ComposeDocxProjectionBuilder.cs` — revision context threading + capture + normalization
-- `Services/Compose/ComposeDocumentRenderer.cs` — wrapper grouping/delText/link nesting + hardening gates + seed scan
-- `Spaarke.Compose.Components/src/types/compose-contracts.ts` — additive mirrors (server-set)
-- `tests/integration/seam/Compose/ComposeTrackedChangesSeamTests.cs` — 17 green
-- `projects/spaarkeai-compose-r6/` — notes §15/§15.1, POML ✅, TASK-INDEX, this file
+### Standing items
+- Operator sign-offs PENDING: R4 "barfoo" (025 nested-revision warned baseline) · R5 U+FFFD.
+- Fidelity-widener backlog recorded in notes §16 (style identity, bookmarks, typed move/table-revision
+  carry, hMerge/tblLayout, pageBreakBefore tri-state, field-result box text) — post-R6 or 027-adjacent.
+- Before the eventual PR: merge origin/master (~67 behind; Crypto.Xml HIGH patched there) + /conflict-check.
+- Publish convention: CLEAN WORKTREE only (local pdb inflates ~4 MB).
+
+### Files Modified (026 — all committed + pushed)
+- `Services/Compose/ComposeDocxProjectionBuilder.cs` — ExtractTextBoxDisplayText + 4 accept-flatten sites
+- `Services/Compose/ComposeDocumentRenderer.cs` — degradation sink + comments xsd date gate
+- `Services/Compose/{ComposeService,IComposeService}.cs` + `Api/ComposeEndpoints.cs` — success-with-warnings
+- `Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx` — banner feed
+- `tests/integration/seam/Compose/ComposeHardTierDegradationSeamTests.cs` (16+corpus) + RoundTrip NDA update
+- `projects/spaarkeai-compose-r6/` — notes §16, POML ✅, TASK-INDEX, this file
 
 ---
 
