@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-20 (040 parity GREEN + 041 repo-half + 042 docs in-progress = 22 tasks ✅/🔄; owner live-verified CIAM sign-in + scoping + new-grant propagation; REMAINING: owner Power-Pages SITE teardown [041 irreversible], 042 docs [subagent running], 090 wrap-up)
+> **Last Updated**: 2026-08-06 (task 090 — PROJECT COMPLETE. All 25 tasks ✅; owner retired the Power Pages site (041); wrap-up done.)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,33 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 041 in-progress (repo half done) + 042 docs (subagent running). 21 ✅ + 040 ✅ = 22 done. Phase 0/1/2 complete; BFF + SPA live + owner-verified. |
-| **Step** | 040 ✅ parity GREEN (owner: CIAM sign-in + correct scoping + new-grant propagation; agent: headers/routing/CORS/build). 041 repo half ✅ (script deleted, refs cleaned). 042 docs rewrite dispatched to subagent. |
-| **Status** | 22 ✅/🔄 (001-004, 010-014, 020-031, 040 ✅; 041 🔄 repo-done; 042 🔄 in progress) |
-| **Next Action** | **REMAINING**: **(1) OWNER — retire the `sprk_externalworkspace` Power Pages SITE / web resource in the maker portal** (041 irreversible half; agent can't do headlessly — OR agent can deactivate the web resource via Dataverse API on confirmation). **(2) 042 docs** — subagent rewriting the 3 external-access docs (SWA+CIAM); main session reviews + commits on completion. **(3) 090 wrap-up** (deps 040,041,042; runs `/test-diet` gate) — the final task. Branch pushed; 0 behind master. **OPEN (defer-issues.md)**: DI-030-01 (live-E2E 2 sub-criteria — invalid-issuer/real-oid-logic), DI-025-01, DI-029-01. ⚠️ master's `deploy-external-spa.yml` DOES now have the CIAM env fix (merged @ 4774c893c). |
+| **Task** | **none — PROJECT COMPLETE** (External Access Platform R1). |
+| **Step** | All 25 tasks ✅. R1 code shipped to master mid-project; docs/status on branch `work/spaarke-SPA-external-access-platform-r1` (836 behind master — the admin-guide Section 5.0 improvement + close-out are the only branch-only content). |
+| **Status** | **COMPLETE** (2026-08-06). SWA + CIAM broker-only external portal live + owner-verified; Power Pages retired; docs rewritten; ADR-028 A1 applied. |
+| **Next Action** | Project done. Optional: PR the branch-only doc (admin-guide Section 5.0) to master. Active successor work is **`spaarke-SPA-external-access-platform-r2`** (its own worktree/session). |
+
+### Critical Context (for continuation)
+R1 shipped: external Secure Project Workspace migrated Power Pages + Entra B2B → **Azure Static Web Apps + Entra External ID (CIAM), broker-only** (ADR-028 Amendment A1). Successor = R2 (module-host platform + Legal Front Door), scoped + spec'd + in its own worktree.
+
+---
+
+## 🔜 POST-COMPACT CONTINUATION PLAN (user-requested 2026-07-20)
+
+### (A) Admin-guide new-user-setup clarity
+Root cause of owner's "I'm not clear on this process": onboarding is **API-only, no UI** (DI-029-01). Rewrite/augment the `EXTERNAL-ACCESS-ADMIN-SETUP.md` "onboard a new user" section to be step-by-step + explicit that a ribbon/MDA button doesn't exist yet. Include: the exact `invite-and-grant` request (curl example), access-level integers, what the BFF does, the user's SSPR password-set step, and where they sign in. Verify against code (`InviteAndGrantExternalUserEndpoint.cs`, `CiamUserProvisioningService.cs`, `ExternalCallerAuthorizationFilter.cs`).
+
+### (B) external-access-platform-r2 scoping (enhancement backlog)
+Run `/design-to-spec` for a new project `external-access-platform-r2`. Candidate scope (from `notes/defer-issues.md` + gaps found this session):
+1. **DI-029-01 — "Invite to Secure Workspace" UI**: MDA/ribbon command button on the Matter/Project form that collects Project + attorney Contact + access level and calls `invite-and-grant` (the missing UX that makes onboarding unclear today). Dark-mode ADR-021.
+2. **DI-025-01 — provisioner partial-failure hardening**: self-heal the create-CIAM-ok / persist-oid-fail window (on POST /users 409, look up existing CIAM user by email → recover oid → continue); optional "resend onboarding" on the idempotent path.
+3. **DI-030-01 — live-E2E test coverage**: invalid-*issuer* real-JWT rejection + real oid-resolution logic (bound-oid not hijacked by mismatched email) — needs a CIAM test user.
+4. **Self-service sign-up / Legal Front Door**: currently `isSignUpAllowed=false` (admin-initiated only). R2 could add a gated self-service path.
+5. **SSPR verification**: confirm Email OTP is enabled in the CIAM tenant (Entra > Protection > Authentication methods) — pending item in config/environments.json dev.ciam.
+6. **Cleanup**: remove the dead Power Pages dev-proxy block in `src/client/external-spa/vite.config.ts` (`/_api`,`/_layout`,`/_services` → `sprk-external-workspace.powerappsportals.com` — vestigial post-SWA); optionally enable push-to-master auto-deploy on `deploy-external-spa.yml` (currently workflow_dispatch only).
+7. Consider: per-document deep-link, richer participation UI, revoke/close-project flows exercised E2E.
+
+### (C) Close R1
+Owner retires Power Pages site `sprk-external-workspace` → 041 ✅ → run 090 wrap-up (`/test-diet` reconciles the 030 tests vs ADR-038; close-out PR). Then merge-to-master (already current).
 
 ### Completed this session (2026-07-19)
 - **004** — `contact.sprk_externalobjectid` (String/100) created live on `spaarkedev1`, in SpaarkeCore + SpaarkeMaster, published, queryable. Doc: `notes/data-model-sprk_externalobjectid.md`. MetadataId `b28603f2-bd83-f111-8076-7ced8ddc4cc6`.

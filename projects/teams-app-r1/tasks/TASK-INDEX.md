@@ -8,13 +8,15 @@
 Status: 🔲 not-started · 🔄 in-progress · ✅ completed · ⛔ blocked · 🔁 needs-retry
 Tier: model-tier @ effort (dispatch each subagent at these per root CLAUDE.md §8.5)
 
+> **✅ PROJECT COMPLETE (2026-08-06)**: All 26 tasks ✅. Code shipped + deployed to `spaarke-bff-dev` + live-verified in Teams; merged to master (PR #723). Graduation criteria: 6/7 fully verified, criterion 6-live = accepted go-live item (Path A) — evidence `notes/integration-verification-report.md`; wrap-up gates + `notes/test-diet-report.md` + `notes/lessons-learned.md` done. Historical Wave 0 note below.
+>
 > **Wave 0 status (2026-08-03)**: Task **002 ✅ COMPLETE** — ADR-028 Amendment A2 applied to the canonical concise `.claude/adr/ADR-028` (workforce-plane MUST/MUST NOT + generalized pluggable-authority exemption; all A1 invariants preserved; internal Xrm surfaces unaffected; ADR-034 Path-C cross-ref). Deviation: `docs/adr/` full copy does not exist → applied concise-only, mirroring A1 (documented in the ADR note + CHANGELOG + draft). The governing rule is now in place for Phase-1 auth code. Task **001** autonomous portion complete — code-path verification of both membership planes done (findings: `notes/spikes/foundation-spike-findings.md`); systemuser plane code-GO, contact plane code-CONDITIONAL-GO (no architectural blocker; = tasks 020/021), SPA no-regression. **Live Teams desktop/web SSO go/no-go remains OPERATOR-GATED** (spike scaffold at `notes/spikes/teams-tab-spike/`). 001 stays 🔄 until the operator records an overall GO in findings §5. **🚦 GATE: Do NOT start Wave 1 until findings §5 records an overall GO.**
 
 ## Task Registry
 
 | ID | Title | Phase | Status | Deps | Tier | Rigor | Parallel-safe | Group |
 |----|-------|-------|--------|------|------|-------|---------------|-------|
-| 001 | Foundation spike — workforce SSO → membership (both planes) + SPA unchanged | 0 | 🔄 | none | opus@xhigh | FULL | ❌ (foundation gate, main-session) | — |
+| 001 | Foundation spike — workforce SSO → membership (both planes) + SPA unchanged | 0 | ✅ | none | opus@xhigh | FULL | ❌ (foundation gate, main-session) | — |
 | 002 | Apply ADR-028 Amendment A2 (workforce auth) — Path B | 0 | ✅ | none | opus@high | FULL | ❌ (.claude/ + docs/adr, main-session) | — |
 | 010 | Shared standalone-MSAL module, pluggable authority | 1 | ✅ | 001,002 | opus@xhigh | FULL | ❌ (serial client-auth chain) | A |
 | 011 | Teams SSO/NAA client strategy | 1 | ✅ | 010 | opus@high | FULL | ❌ (serial; shared auth files) | A |
@@ -38,8 +40,8 @@ Tier: model-tier @ effort (dispatch each subagent at these per root CLAUDE.md §
 | 070 | Teams manifest v1.29 + M365 Agents Toolkit packaging | 7 | ✅ | 061,062 | sonnet@high | STANDARD | ✅ | F |
 | 071 | New Teams-app CI deploy workflow | 7 | ✅ | 070 | sonnet@high | FULL | ✅ (⚠️ ci-workflows hot-path — /conflict-check) | F |
 | 072 | Org-catalog distribution + Publisher Attestation prep | 7 | ✅ | 070 | sonnet@high | MINIMAL | ✅ | F |
-| 080 | End-to-end integration verification (graduation criteria) | 8 | 🔲 | 045,065,072,051 | opus@high | FULL | ❌ (needs all phases) | G |
-| 090 | Project wrap-up (gates, cleanup, docs, test-diet) | 8 | 🔲 | 080 | sonnet@high | FULL | ❌ (final; edits README/plan + .claude gates) | G |
+| 080 | End-to-end integration verification (graduation criteria) | 8 | ✅ | 045,065,072,051 | opus@high | FULL | ❌ (needs all phases) | G |
+| 090 | Project wrap-up (gates, cleanup, docs, test-diet) | 8 | ✅ | 080 | sonnet@high | FULL | ❌ (final; edits README/plan + .claude gates) | G |
 
 ## Critical Path (longest dependency chain)
 

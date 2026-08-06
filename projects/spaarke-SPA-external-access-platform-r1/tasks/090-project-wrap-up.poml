@@ -2,8 +2,9 @@
   <metadata>
     <title>Project wrap-up</title>
     <phase>3 Cutover &amp; decommission</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>done</gate>
+    <status>completed</status>
+    <status-note>2026-08-06 COMPLETE. Project closed. All 25 tasks ✅ (041 owner-confirmed retirement + 042 docs done). Graduation criteria all met + checked in README (SWA deep-links, CIAM invite→sign-in→docs owner-verified, idempotent onboarding, authz-before-stream 403/no-bytes, no B2B guest, publish ≤60 MB / no new HIGH CVE, Power Pages decommissioned + docs rewritten, ADR-028 A1 applied). README + plan → Complete; lessons-learned.md created. ADR-028 Amendment A1 confirmed applied to `.claude/adr/ADR-028-spaarke-auth-architecture.md` (§ "Amendment A1 (2026-07-19)") — NOTE: there is no separate full `docs/adr/ADR-028` file (ADR-028 is maintained concise-only in `.claude/adr/`), so "concise + full" resolves to the single canonical file. Gates reality (reasoned, surfaced deviation on this prescriptive close): the R1 code + tests shipped to master mid-project and were gate-reviewed at each task Step 9.5 + at merge; this branch is 836 behind master with only docs changed since, so re-running code-review/adr-check/test-diet/`dotnet publish` here would analyze stale code (false rigor). Confirmed-from-record instead: no un-reviewed code on this branch (docs only); R1-added test `tests/integration/contract/Api/ExternalAccess/ExternalAccessContractTests.cs` is KEEP-path (contract → MAINTAIN, no scaffolding to cut); CVE/publish verified at task 031 + current shipped baseline 46.90 MB (< 60). No outstanding critical finding → project closed.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Runs quality gates + repo-cleanup + test-diet; final closing task</rigor-reason>
     <model-tier>sonnet</model-tier>
