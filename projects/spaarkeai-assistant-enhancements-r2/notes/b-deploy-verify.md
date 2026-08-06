@@ -69,3 +69,8 @@ Success Criterion 2 names an **email tab**. Email content-visibility is **Workst
 ## Result
 
 Workstream B is **deployed and programmatically verified**. Marking 025 `✅*` (deployed + smoke/automated-verified; owner E2E of the live-UI proactive behavior pending, tracked in this doc). Phase B complete pending that owner confirmation.
+
+---
+
+## ✅ OWNER VERIFICATION CLEARED — 2026-08-06
+Owner confirmed Phase B E2E verification. Task 025 moves `✅*` → `✅`. Live-UI proactive-chip behavior (≤3 content-specific chips, once-per-tab, manual refresh) accepted. Email-tab chips stay context-type-generic until Workstream C (tasks 040–043) emits compact email content server-side — re-verify email-tab chips after task 043.

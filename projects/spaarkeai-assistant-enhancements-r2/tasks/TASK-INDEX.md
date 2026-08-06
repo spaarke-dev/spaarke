@@ -5,7 +5,7 @@
 > **Phasing**: E → A → B → D → C (owner-accepted)
 
 ## Legend
-Status: 🔲 not-started · 🔄 in-progress/needs-retry · ✅ completed · ✅* deployed + smoke-verified, owner E2E verification pending (see notes/a-deploy-verify.md)
+Status: 🔲 not-started · 🔄 in-progress/needs-retry · ✅ completed (owner E2E for A+B cleared 2026-08-06) · ✅* deployed + smoke-verified, owner E2E verification pending (see notes/a-deploy-verify.md)
 Tier: `sonnet` (default) · `opus` (high-blast/judgment) — effort: `high` (default) · `xhigh` (hard-but-specified)
 
 ## Tasks
@@ -17,13 +17,13 @@ Tier: `sonnet` (default) · `opus` (high-blast/judgment) — effort: `high` (def
 | 010 | active_widget_changed subscriber + focus ref (FR-A1) | 2 A | ✅ | 001 | sonnet / high | FULL | none (ConvPane spine) |
 | 011 | activeContext focus-stamp decorate (FR-A2) | 2 A | ✅ | 010 | sonnet / high | FULL | none (ConvPane spine) |
 | 012 | Server: thread activeContext + prefer focus-stamp (FR-A3/A4) | 2 A | ✅ | 001 | **opus / xhigh** | FULL | Group A (BFF) |
-| 013 | Deploy + verify A | 2 A | ✅* | 011,012 | sonnet / high | STANDARD | none (deploy) |
+| 013 | Deploy + verify A | 2 A | ✅ | 011,012 | sonnet / high | STANDARD | none (deploy) |
 | 020 | Closed contextType set on widget metadata (FR-B1/C3) | 3 B | ✅ | 001 | sonnet / high | FULL | Group B1 (shared-lib) |
 | 021 | Context-type tag column + BFF contract + seed + Reanalyze binding (FR-B2/D11) — **Option C** | 3 B | ✅ | 020 | sonnet / high | **FULL** | none (live schema + BFF deploy) |
 | 022 | Grounded suggest turn (BFF suggest path + client), ≤3 content-specific chips per tab (FR-B3/B5) — **Option B** | 3 B | ✅ | 020,021 | **opus / xhigh** | FULL | none (BFF + ConvPane spine) |
 | 023 | Manual refresh-suggestions affordance (FR-B4) | 3 B | ✅ | 022 | sonnet / high | FULL | none (ConvPane spine) |
 | 024 | Dev-visible proactive-selection trace (FR-B6) | 3 B | ✅ | 022 | sonnet / high | STANDARD | none (ConvPane spine) |
-| 025 | Deploy + verify B | 3 B | ✅* | 022,023,024 | sonnet / high | STANDARD | none (deploy) |
+| 025 | Deploy + verify B | 3 B | ✅ | 022,023,024 | sonnet / high | STANDARD | none (deploy) |
 | 030 | Awaited messages[0] Cosmos write (FR-D2) | 4 D | ✅ | 001 | sonnet / **xhigh** | FULL | Group D-srv-a (persistence) |
 | 031 | 404-on-missing history contract (FR-D3) | 4 D | ✅ | 001 | sonnet / high | FULL | Group D-srv-a (ChatEndpoints) |
 | 032 | Stored title + rename endpoint + title-gen (FR-D4) | 4 D | ✅ | 031 | sonnet / high | FULL | none (ChatEndpoints, after 031) |
