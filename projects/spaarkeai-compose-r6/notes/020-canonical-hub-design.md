@@ -396,4 +396,46 @@ delta 0.00**.
 
 ---
 
-*Steps 1–3 artifact + gates + tasks 020/011/021/022/023 records. Checkpoint in `current-task.md`.*
+## 14. Task 024 — hyperlinks + comments through the canonical model (2026-08-06)
+
+**Rigor:** FULL (Step 0.5 override UP from authored STANDARD — same reading adr-check confirmed for 023).
+
+**Hyperlinks — R5 representation REUSED, silent-loss gaps closed:** external http/https/mailto links
+already flowed through the model (Href → BuildRun sentinel → external relationship). 024 adds loudness:
+INTERNAL bookmark links ("#anchor") flatten with counted `internal-link-flattened` (bookmark targets are
+not model data — bookmarks + internal links routed to **026**; the renderer previously unwrapped them
+SILENTLY on the absolute-Uri check); unresolvable/protocol-neutralized rel targets count
+`hyperlink-target-dropped` (was silent). Read path (#anchor HTML links) untouched.
+
+**Comments — were SILENTLY LOST, now model data (the 024 core):** body anchors fell through default
+cases; the comments part survived the carrier byte-copy but nothing anchored it. Now:
+- `ComposeContentModel.Comments` — the part's projection (id/author/initials/RAW date InnerText/plain
+  text, paragraphs joined 
+; rich comment content flattens per the near-term tier).
+- ANCHOR MARKER runs (`ComposeInlineRun.CommentAnchor` Start/End — the IsPageBreak mechanism) at exact
+  inline positions; the End marker FOLDS the `w:commentReference` (Word's canonical adjacency); a bare
+  reference (point comment) projects as an adjacent Start+End pair (`ctx.CommentRangesSeen` discriminates).
+- Renderer: `AssembleParagraph` emits rangeStart / rangeEnd+reference from markers;
+  `EnsureCommentsPart` authors `word/comments.xml` ONLY when the target has none — CARRIER mode leaves
+  the source part authoritative + BYTE-IDENTICAL and re-authors only the anchors against its ids (the
+  numbering identity pattern); blank-package synthesize authors the part from the model.
+- Loud degradations: block-level range anchors (rare shape) + non-decimal comment ids →
+  `comment-anchor-flattened` / `comment-flattened`.
+
+**Seam** — `ComposeHyperlinkCommentSeamTests` (13): capture facts (anchors at exact positions incl.
+fold + point-pair; raw date; internal-link loudness) · carrier round-trip (part byte-identical; full
+range markup re-authored in bracket order; external link resolves to the same URI through a real
+relationship; multiset validator) · fixed point (anchors/comments/hrefs) · synthesize-mode part
+authoring · corpus-wide stability theory (part bytes + anchor multiset + link-target sequence).
+
+**Gates:** suite 732/735 (same 3 pre-existing). ADR-013 green. No package/DI/endpoint change. Publish:
+clean-worktree post-commit.
+
+**Placement Justification (root §10):** modify/extend of existing Services/Compose only. §11:
+cost-of-doing-nothing = reviewer comments on an imported agreement VANISH on first save (silent
+data-loss — the POML's escalation class, resolved by modeling rather than escalation since the
+representation fits the established marker-run + carrier-identity patterns).
+
+---
+
+*Steps 1–3 artifact + gates + tasks 020/011/021/022/023/024 records. Checkpoint in `current-task.md`.*

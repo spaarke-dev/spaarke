@@ -31,6 +31,59 @@ public sealed record ComposeContentModel
 {
     /// <summary>The document body in document order. Empty renders a valid, empty <c>.docx</c>.</summary>
     public IReadOnlyList<ComposeBlock> Blocks { get; init; } = Array.Empty<ComposeBlock>();
+
+    /// <summary>
+    /// Task 024: the document's COMMENTS (from <c>word/comments.xml</c>), keyed by <see cref="ComposeComment.Id"/>
+    /// — the same ids the body's <see cref="ComposeInlineRun.CommentAnchor"/> markers reference. In CARRIER
+    /// mode the source comments part is preserved byte-identically and only the body ANCHORS are re-authored
+    /// (this list is projection output / read model there); in blank-package synthesize the renderer authors
+    /// a comments part from this list. Server-set; the client mapper never sets it.
+    /// </summary>
+    public IReadOnlyList<ComposeComment> Comments { get; init; } = Array.Empty<ComposeComment>();
+}
+
+/// <summary>One document comment (task 024) — the near-term-tier projection of a <c>w:comment</c>: identity,
+/// attribution, and plain text (paragraphs joined by <c>\n</c>; rich comment content flattens).</summary>
+public sealed record ComposeComment
+{
+    /// <summary>The OOXML comment id (decimal, matches the body anchors' <see cref="ComposeCommentAnchor.Id"/>).</summary>
+    public required int Id { get; init; }
+
+    public string Author { get; init; } = string.Empty;
+
+    public string? Initials { get; init; }
+
+    /// <summary>ISO-8601 timestamp as authored, or null.</summary>
+    public string? Date { get; init; }
+
+    /// <summary>The comment's plain text (paragraphs joined by <c>\n</c>).</summary>
+    public string Text { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// A comment range anchor carried as a dedicated marker run (task 024 — same mechanism as
+/// <see cref="ComposeInlineRun.IsPageBreak"/>): <see cref="Kind"/> Start emits <c>w:commentRangeStart</c>;
+/// Kind End emits <c>w:commentRangeEnd</c> IMMEDIATELY followed by the <c>w:commentReference</c> run (the
+/// reference is folded into the End marker — Word's canonical adjacency). A POINT comment (bare reference,
+/// no range) projects as an adjacent Start+End pair.
+/// </summary>
+public sealed record ComposeCommentAnchor
+{
+    public required ComposeCommentAnchorKind Kind { get; init; }
+
+    /// <summary>The comment id this anchor belongs to (see <see cref="ComposeComment.Id"/>).</summary>
+    public required int Id { get; init; }
+}
+
+/// <summary>Anchor kind for <see cref="ComposeCommentAnchor"/>. Serialized as its STRING name.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ComposeCommentAnchorKind
+{
+    /// <summary>Range start (<c>w:commentRangeStart</c>).</summary>
+    Start,
+
+    /// <summary>Range end (<c>w:commentRangeEnd</c> + the folded <c>w:commentReference</c> run).</summary>
+    End,
 }
 
 /// <summary>The block kinds the renderer materializes into body content. Serialized as its STRING name
@@ -179,6 +232,14 @@ public sealed record ComposeInlineRun
     /// counted <c>line-break-flattened</c> degradation.
     /// </summary>
     public bool IsPageBreak { get; init; }
+
+    /// <summary>
+    /// Task 024: this run IS a comment range anchor (see <see cref="ComposeCommentAnchor"/>). When non-null
+    /// the renderer emits the anchor markup and every other field on this run is ignored (marker-run
+    /// contract, like <see cref="IsPageBreak"/>). Mutually exclusive with <see cref="IsPageBreak"/> by
+    /// construction. Server-set; preserve untouched on re-post.
+    /// </summary>
+    public ComposeCommentAnchor? CommentAnchor { get; init; }
 }
 
 /// <summary>A native table (<c>w:tbl</c>): an ordered list of rows plus the STRUCTURAL facts the render-on-save

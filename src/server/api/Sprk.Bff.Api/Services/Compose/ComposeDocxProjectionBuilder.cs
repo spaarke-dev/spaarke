@@ -1791,11 +1791,13 @@ public sealed class ComposeDocxProjectionBuilder
                     ctx.AddWarning("unrendered-paragraphs", Math.Abs(totalParagraphs - ctx.VisitedParagraphs));
                 }
 
+                var comments = ProjectComments(mainPart, ctx);
+
                 var warnings = ctx.Warnings;
                 return new ComposeCanonicalModelProjection
                 {
                     Status = warnings.Count == 0 ? ComposeProjectionStatus.Success : ComposeProjectionStatus.Partial,
-                    Model = new ComposeContentModel { Blocks = blocks },
+                    Model = new ComposeContentModel { Blocks = blocks, Comments = comments },
                     Warnings = warnings,
                 };
             }
@@ -1873,6 +1875,12 @@ public sealed class ComposeDocxProjectionBuilder
                         var sdtContent = sdt.GetFirstChild<SdtContentBlock>();
                         if (sdtContent is not null) ProjectBlockChildren(sdtContent, sink, lists, ctx);
                     }
+                    break;
+                case CommentRangeStart or CommentRangeEnd:
+                    // Task 024: a BLOCK-level comment range anchor (between paragraphs — rare authoring
+                    // shape): the model's anchor surface is inline-only, so this anchor flattens LOUDLY
+                    // (the comment itself stays in ComposeContentModel.Comments; 026-shaped if it surfaces).
+                    ctx.AddWarning("comment-anchor-flattened", 1);
                     break;
                 case AlternateContent:
                     // A block-level mc:AlternateContent (markup-compatibility wrapper — floating shapes,
@@ -1998,6 +2006,46 @@ public sealed class ComposeDocxProjectionBuilder
             Alignment = alignment,
             PageBreakBefore = pageBreakBefore,
         };
+    }
+
+    /// <summary>Task 024: parses an OOXML comment id attribute (decimal string per Word's convention) —
+    /// a non-decimal id is outside the model's id contract and its construct flattens with a counted
+    /// warning at the call site.</summary>
+    private static bool TryParseCommentId(StringValue? id, out int value) =>
+        int.TryParse(id?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+
+    /// <summary>
+    /// Task 024: projects <c>word/comments.xml</c> into the model's <see cref="ComposeContentModel.Comments"/>
+    /// — identity + attribution + plain text (paragraphs joined by <c>\n</c>; rich content flattens by the
+    /// near-term-tier contract). The <c>Date</c> keeps the RAW authored string (InnerText) for byte-faithful
+    /// re-authoring. A non-decimal id cannot join the anchor id contract — counted, skipped.
+    /// </summary>
+    private static IReadOnlyList<ComposeComment> ProjectComments(MainDocumentPart mainPart, ModelWalkContext ctx)
+    {
+        var comments = mainPart.WordprocessingCommentsPart?.Comments;
+        if (comments is null)
+        {
+            return Array.Empty<ComposeComment>();
+        }
+
+        var result = new List<ComposeComment>();
+        foreach (var comment in comments.Elements<Comment>())
+        {
+            if (!TryParseCommentId(comment.Id, out var id))
+            {
+                ctx.AddWarning("comment-flattened", 1);
+                continue;
+            }
+            result.Add(new ComposeComment
+            {
+                Id = id,
+                Author = comment.Author?.Value ?? string.Empty,
+                Initials = comment.Initials?.Value,
+                Date = comment.Date?.InnerText,
+                Text = string.Join("\n", comment.Elements<Paragraph>().Select(p => p.InnerText)),
+            });
+        }
+        return result;
     }
 
     /// <summary>Review 023-F1: whether <paramref name="p"/> is the LAST direct body paragraph of a body
@@ -2295,7 +2343,47 @@ public sealed class ComposeDocxProjectionBuilder
                     ctx.AddWarning("field-flattened-to-text", 1);
                     break;
                 case Hyperlink h:
-                    ProjectInline(h, sink, ResolveHyperlinkHref(h, ctx.MainPart) ?? href, ctx);
+                    var resolved = ResolveHyperlinkHref(h, ctx.MainPart);
+                    if (resolved is not null && resolved.StartsWith('#'))
+                    {
+                        // Task 024: an INTERNAL bookmark link — bookmark targets are not model data (026
+                        // owns bookmarks), so carrying the anchor would dangle. TEXT kept, link dropped
+                        // LOUDLY (the read walk still renders it as a live #anchor href — read-path only).
+                        ctx.AddWarning("internal-link-flattened", 1);
+                        resolved = null;
+                    }
+                    else if (resolved is null && h.Id?.Value is { Length: > 0 })
+                    {
+                        // Unresolvable relationship or protocol-neutralized target (GPT §13 allowlist):
+                        // text kept, link dropped LOUDLY (task 024 — was silent).
+                        ctx.AddWarning("hyperlink-target-dropped", 1);
+                    }
+                    ProjectInline(h, sink, resolved ?? href, ctx);
+                    break;
+                case CommentRangeStart commentStart:
+                    // Task 024: comment range anchors are MODEL data (marker runs at exact positions).
+                    if (TryParseCommentId(commentStart.Id, out var startId))
+                    {
+                        ctx.CommentRangesSeen.Add(startId);
+                        sink.Add(new ComposeInlineRun { CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.Start, Id = startId } });
+                    }
+                    else
+                    {
+                        ctx.AddWarning("comment-anchor-flattened", 1);
+                    }
+                    break;
+                case CommentRangeEnd commentEnd:
+                    if (TryParseCommentId(commentEnd.Id, out var endId))
+                    {
+                        ctx.CommentRangesSeen.Add(endId);
+                        // The w:commentReference run is FOLDED into this End marker (the renderer authors
+                        // rangeEnd + reference together — Word's canonical adjacency).
+                        sink.Add(new ComposeInlineRun { CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.End, Id = endId } });
+                    }
+                    else
+                    {
+                        ctx.AddWarning("comment-anchor-flattened", 1);
+                    }
                     break;
                 case InsertedRun ins:
                     // Settled prose: inserted text kept, revision wrapper flattened (tracked-changes as
@@ -2428,6 +2516,17 @@ public sealed class ComposeDocxProjectionBuilder
                     sb.Append(ExtractRunsDisplayText(RubyBaseRuns(ruby)));
                     ctx.AddWarning("ruby-phonetic-guide-dropped", 1);
                     break;
+                case CommentReference commentRef:
+                    // Task 024: a reference whose range was seen is FOLDED into the End marker (the
+                    // renderer re-authors it there). A BARE reference (point comment, no range) projects
+                    // as an adjacent Start+End pair at this exact position.
+                    if (TryParseCommentId(commentRef.Id, out var pointId) && !ctx.CommentRangesSeen.Contains(pointId))
+                    {
+                        FlushText();
+                        sink.Add(new ComposeInlineRun { CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.Start, Id = pointId } });
+                        sink.Add(new ComposeInlineRun { CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.End, Id = pointId } });
+                    }
+                    break;
                 case FootnoteReference:
                     ctx.AddWarning("unrepresented-footnote-reference", 1);
                     break;
@@ -2492,6 +2591,11 @@ public sealed class ComposeDocxProjectionBuilder
         /// <summary>Paragraphs the structural walk actually visited — compared against the body's total
         /// <c>Descendants&lt;Paragraph&gt;()</c> count for the unrendered-paragraphs guard (F-03 parity).</summary>
         public int VisitedParagraphs { get; set; }
+
+        /// <summary>Task 024: comment ids whose range markers (start/end) were seen — a
+        /// <c>w:commentReference</c> for a seen id is folded into the End marker; an UNSEEN id is a POINT
+        /// comment and projects its own adjacent Start+End pair.</summary>
+        public HashSet<int> CommentRangesSeen { get; } = new();
 
         public IReadOnlyList<ComposeProjectionWarning> Warnings =>
             _warnings.OrderBy(kv => kv.Key, StringComparer.Ordinal)

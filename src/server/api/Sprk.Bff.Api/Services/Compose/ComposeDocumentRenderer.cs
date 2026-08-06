@@ -128,6 +128,7 @@ public sealed partial class ComposeDocumentRenderer
 
             AddStyleDefinitions(mainPart);
             AddNumberingDefinitions(mainPart, plan);
+            EnsureCommentsPart(mainPart, model.Comments);
 
             // Mint a unique w14:paraId on every paragraph lacking a valid one — AFTER the body is fully built
             // so the dedup pass sees every client-carried id (mirrors ParaIdPreParser's collect-then-mint).
@@ -464,6 +465,11 @@ public sealed partial class ComposeDocumentRenderer
                 }
             }
 
+            // Task 024: the CARRIER's comments part is authoritative and preserved untouched (byte-identical
+            // — the anchors above reference its ids); the part is authored from the model only when the
+            // carrier has none at all.
+            EnsureCommentsPart(mainPart, model.Comments);
+
             if (trailingSectPr is not null)
             {
                 body.AppendChild(trailingSectPr);
@@ -488,6 +494,46 @@ public sealed partial class ComposeDocumentRenderer
         }
 
         return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// Task 024: authors <c>word/comments.xml</c> from the model's comments — ONLY when the target has no
+    /// comments part (the carrier's part is authoritative and preserved byte-identically; blank-package
+    /// synthesize authors it fresh). Ids match the body anchors' <see cref="ComposeCommentAnchor.Id"/>;
+    /// the raw authored Date string is re-emitted verbatim.
+    /// </summary>
+    private static void EnsureCommentsPart(MainDocumentPart mainPart, IReadOnlyList<ComposeComment> comments)
+    {
+        if (comments.Count == 0 || mainPart.WordprocessingCommentsPart is not null)
+        {
+            return;
+        }
+
+        var part = mainPart.AddNewPart<WordprocessingCommentsPart>();
+        var container = new Comments();
+        foreach (var model in comments)
+        {
+            var comment = new Comment
+            {
+                Id = model.Id.ToString(CultureInfo.InvariantCulture),
+                Author = model.Author,
+            };
+            if (!string.IsNullOrEmpty(model.Initials))
+            {
+                comment.Initials = model.Initials;
+            }
+            if (!string.IsNullOrEmpty(model.Date))
+            {
+                comment.Date = new DateTimeValue { InnerText = model.Date };
+            }
+            foreach (var line in model.Text.Split('\n'))
+            {
+                comment.AppendChild(new Paragraph(new Run(new Text(line) { Space = SpaceProcessingModeValues.Preserve })));
+            }
+            container.AppendChild(comment);
+        }
+        part.Comments = container;
+        part.Comments.Save();
     }
 
     /// <summary>Whether <paramref name="blocks"/> contains any list item (recursing into table cells) —
@@ -747,6 +793,23 @@ public sealed partial class ComposeDocumentRenderer
 
         foreach (var run in block.Runs)
         {
+            // Task 024: a comment-anchor marker run emits the anchor markup instead of a text run —
+            // rangeStart, or rangeEnd IMMEDIATELY followed by the folded commentReference run (Word's
+            // canonical adjacency; the reference is what makes the comment visible).
+            if (run.CommentAnchor is { } anchor)
+            {
+                var anchorId = anchor.Id.ToString(CultureInfo.InvariantCulture);
+                if (anchor.Kind == ComposeCommentAnchorKind.Start)
+                {
+                    paragraph.AppendChild(new CommentRangeStart { Id = anchorId });
+                }
+                else
+                {
+                    paragraph.AppendChild(new CommentRangeEnd { Id = anchorId });
+                    paragraph.AppendChild(new Run(new CommentReference { Id = anchorId }));
+                }
+                continue;
+            }
             paragraph.AppendChild(BuildRun(run));
         }
 

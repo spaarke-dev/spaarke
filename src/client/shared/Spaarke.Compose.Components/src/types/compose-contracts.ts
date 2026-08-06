@@ -472,6 +472,10 @@ export interface ComposeInlineRun {
   /** Server task 023: this run IS a manual page break (`w:br w:type="page"`); every other field is
    * ignored when true. Server-set by the docx→model projection; preserve untouched on re-post. */
   isPageBreak?: boolean;
+  /** Server task 024: this run IS a comment range anchor (`Start` → `w:commentRangeStart`; `End` →
+   * `w:commentRangeEnd` + the folded `w:commentReference` run); every other field is ignored when set.
+   * Server-set; preserve untouched on re-post. */
+  commentAnchor?: { kind: 'Start' | 'End'; id: number };
 }
 
 /** A table cell — nested block content (mirrors the server `ComposeTableCell`).
@@ -569,6 +573,21 @@ export interface ComposeContentBlock {
  */
 export interface ComposeContentModel {
   blocks: ComposeContentBlock[];
+  /** Server task 024: the document's comments (`word/comments.xml` projection) — ids match the body's
+   * `commentAnchor` markers. Server-set; preserve untouched on re-post (in carrier mode the source
+   * comments part is authoritative; this list re-authors the part only for blank-package renders). */
+  comments?: ComposeComment[];
+}
+
+/** One document comment (mirrors the server `ComposeComment` — server task 024). */
+export interface ComposeComment {
+  id: number;
+  author?: string;
+  initials?: string;
+  /** ISO-8601 timestamp as authored. */
+  date?: string;
+  /** Plain text (paragraphs joined by `\n`). */
+  text?: string;
 }
 
 // ---------------------------------------------------------------------------
