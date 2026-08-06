@@ -152,16 +152,29 @@ predicted) ✅ · #3 (re-save dedup — inherits FR-C1 server-side; unchanged) �
 no auto-file) ✅ · #5 (Fluent v9 dark tokens — EntityPicker + hint use semantic tokens) ✅ · #6 (add-in builds; ribbon
 imports cleanly — **ribbon is the gated tail, see below**).
 
-**Known limitation (surfaced for reviewer)**: the persisted provenance schema (`CandidateTrace`) carries **no record
-name**, so the pre-selected chip shows the record's GUID as its name with the record number as secondary info — this
-is **identical to the code-page candidate model** (the escalation trigger required reproducing `derivePrimaryReview`
-exactly). A follow-up could resolve display names via entity search; out of scope here (would diverge from the code
-page / add a lookup).
+**Candidate display names — RESOLVED (operator follow-up 2026-08-06)**: the persisted provenance schema
+(`CandidateTrace`) carries **no record name** (it stores IDs; `derivePrimaryReview`'s `targetName` is documented as
+"catalog-resolved in production"). Initially the pre-select showed the record GUID as its name — identical to the code
+page, which also only resolves the *filed* primary's name (via `sprk_regardingrecordname` denorm at file time), not
+un-filed candidates. Per operator request, the new endpoint now **resolves candidate display names server-side**:
+`ResolveCandidateNamesAsync` retrieves each distinct candidate record's primary-name attribute via the shared
+`RegardingNameFields.PrimaryNameField` map (extracted from `IncomingAssociationResolver`, which now delegates to it —
+single source of truth, §11), returned as a `Names` dict keyed by targetId; the client folds them into the shared
+model's `targetName`. This **fills the field the model was designed to receive — not a fork** (the candidate set /
+confidences / ordering / states are unchanged). Best-effort: an unknown entity / bad id / retrieve miss falls back to
+the id (the prior behavior). NOTE: this makes the add-in show real names where the code page still shows GUIDs for
+un-filed candidates — the code page could later adopt the same resolution (out of scope here).
 
-**GATED TAIL — ribbon quick-save button (criterion #6, live env)**: adding the ribbon button points at the finished
-`quickSave` command via the `ribbon-edit` skill (export the Communication ribbon solution → add the button → import
-to `spaarkedev1`). The **import touches a live Dataverse environment** — held for operator go-ahead per the
-"no silent live-env mutation" rule. The command code is complete and built; only the solution import remains.
+**Ribbon quick-save button (criterion #6) — DONE via the add-in manifest (correction to the POML)**: the POML step 4
+said "add the ribbon button via `ribbon-edit` (export the Communication ribbon solution → import to spaarkedev1)".
+That was a **mis-reference** — `ribbon-edit` is the **Dataverse MDA** ribbon skill (RibbonDiffXml → live-env solution
+import), but `quickSave` is an **Outlook add-in function command**, and its ribbon button is defined in the **add-in
+manifest** (`outlook/manifest.json`), not a Dataverse solution. So there is **no live-env gate** here — the button is a
+code/config change deployed with the add-in via **task 044 (Azure SWA)**, exactly like the existing `SaveToSpaarke`/
+`CreateTodo` buttons. Added: a `quickSave` `executeFunction` action + a **`QuickSaveButton`** in the `mailRead`
+`SpaarkeReadGroup` (→ `actionId: quickSave`), plus `Office.actions.associate('quickSave', quickSave)` registration
+(the unified-manifest pattern) in `outlook/commands/index.ts`. Manifest validates; add-in builds green. Criterion #6
+fully met (deploys with 044).
 
 **Coverage note**: the Office.js command *glue* (`readEmailContext`/`ensureBootstrapped`/notifications/
 `showAsTaskpane`) has no unit test (the add-in has no Office-command test harness); the *testable* logic (request

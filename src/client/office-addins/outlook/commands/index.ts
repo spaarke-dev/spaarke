@@ -147,6 +147,10 @@ Office.onReady(() => {
   // Register global functions
   window.showTaskPane = showTaskPane;
   window.quickSave = quickSave;
+
+  // Unified (JSON) manifest executeFunction registration — the manifest's
+  // `quickSave` action (QuickSaveButton, mailRead ribbon) invokes this function.
+  Office.actions?.associate?.('quickSave', quickSave);
 });
 
 // Export for module systems

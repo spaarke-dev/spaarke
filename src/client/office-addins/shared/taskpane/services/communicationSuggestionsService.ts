@@ -64,6 +64,8 @@ interface CommunicationSuggestionsWire {
   communicationId: string;
   subject: string;
   suggestions: SuggestAssociationsWire;
+  /** Server-resolved display names keyed by candidate targetId (the provenance stores only ids). */
+  names?: Record<string, string>;
 }
 
 /**
@@ -101,7 +103,7 @@ function buildEndpoint(internetMessageId: string): string {
  * to the SHARED `derivePrimaryReview` verbatim (no client-side recompute; ADR-045).
  * Only the fields `derivePrimaryReview` consumes are populated.
  */
-function toProvenanceDoc(suggestions: SuggestAssociationsWire): ProvenanceDoc {
+function toProvenanceDoc(suggestions: SuggestAssociationsWire, names?: Record<string, string>): ProvenanceDoc {
   return {
     version: 1,
     direction: '',
@@ -120,6 +122,9 @@ function toProvenanceDoc(suggestions: SuggestAssociationsWire): ProvenanceDoc {
       field: c.field,
       targetEntity: c.targetEntity,
       targetId: c.targetId,
+      // Server-resolved display name (the provenance stores only ids); when absent, the
+      // shared model falls back to the id — identical to the code page's un-resolved case.
+      ...(names?.[c.targetId] ? { targetName: names[c.targetId] } : {}),
       reinforcedConfidence: c.reinforcedConfidence,
       deterministicConfidence: c.deterministicConfidence,
       written: c.written,
@@ -190,8 +195,13 @@ export async function fetchEnginePreSelection(
 
   if (!response?.suggestions) return null;
 
-  // SAME candidate model as the code page (no fork; ADR-045).
-  const model = derivePrimaryReview(JSON.stringify(toProvenanceDoc(response.suggestions)), null, []);
+  // SAME candidate model as the code page (no fork; ADR-045). Server-resolved display
+  // names are folded into the model's `targetName` (the field it is designed to receive).
+  const model = derivePrimaryReview(
+    JSON.stringify(toProvenanceDoc(response.suggestions, response.names)),
+    null,
+    []
+  );
   const predictedCandidate = model.primary ?? model.candidates[0];
   if (!predictedCandidate) return null;
 

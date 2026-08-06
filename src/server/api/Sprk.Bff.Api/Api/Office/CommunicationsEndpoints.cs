@@ -297,17 +297,25 @@ public static class OfficeCommunicationsEndpoints
             // SAME read-only evaluate path as the Communication-group suggest endpoint — reuse, not fork.
             var (message, associationContext) = await communicationService.ReconstructEnvelopeAsync(communicationId, ct);
             var decision = await associationResolver.EvaluateAsync(message, associationContext, ct);
+            var suggestions = SuggestAssociationsResponse.FromDecision(communicationId, decision);
+
+            // Resolve candidate DISPLAY NAMES (task 042 / FR-B2). The persisted provenance carries
+            // IDs, not names — so the client would otherwise show a GUID in the picker. We fill the
+            // `targetName` the shared candidate model (`derivePrimaryReview`) is DESIGNED to receive,
+            // reusing the same per-entity name-field map the denorm writer uses (RegardingNameFields).
+            var names = await ResolveCandidateNamesAsync(entityService, suggestions.Candidates, logger, ct);
 
             logger.LogInformation(
-                "Returning engine suggestions for sprk_communication {CommunicationId}, " +
+                "Returning engine suggestions for sprk_communication {CommunicationId} ({NameCount} names resolved), " +
                 "UserId={UserId}, CorrelationId={CorrelationId}",
-                communicationId, userId, traceId);
+                communicationId, names.Count, userId, traceId);
 
             return Results.Ok(new CommunicationSuggestionsResponse
             {
                 CommunicationId = communicationId,
                 Subject = subject,
-                Suggestions = SuggestAssociationsResponse.FromDecision(communicationId, decision)
+                Suggestions = suggestions,
+                Names = names
             });
         }
         catch (Exception ex)
@@ -326,6 +334,40 @@ public static class OfficeCommunicationsEndpoints
                     ["correlationId"] = traceId
                 });
         }
+    }
+
+    /// <summary>
+    /// Resolve display names for the suggested candidates (task 042). Retrieves each distinct
+    /// candidate record's primary-name attribute (via <see cref="RegardingNameFields"/>) so the add-in
+    /// picker shows a real name instead of a GUID. Best-effort: a miss (unknown entity, bad id, retrieve
+    /// failure) simply leaves that candidate to the client's id fallback. Keyed by candidate targetId.
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<string, string>> ResolveCandidateNamesAsync(
+        IGenericEntityService entityService,
+        IReadOnlyList<SuggestedCandidate> candidates,
+        ILogger<Program> logger,
+        CancellationToken ct)
+    {
+        var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in candidates)
+        {
+            if (!seen.Add($"{c.TargetEntity}:{c.TargetId}")) continue; // one retrieve per distinct record
+            var nameField = RegardingNameFields.PrimaryNameField(c.TargetEntity);
+            if (nameField is null) continue;
+            if (!Guid.TryParse(c.TargetId, out var recordId)) continue;
+            try
+            {
+                var record = await entityService.RetrieveAsync(c.TargetEntity, recordId, new[] { nameField }, ct);
+                var name = record.GetAttributeValue<string>(nameField);
+                if (!string.IsNullOrWhiteSpace(name)) names[c.TargetId] = name;
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Could not resolve display name for {Entity} {Id}", c.TargetEntity, c.TargetId);
+            }
+        }
+        return names;
     }
 
     /// <summary>
@@ -443,6 +485,13 @@ public sealed class CommunicationSuggestionsResponse
 
     /// <summary>The Association Engine's read-only regarding suggestions (candidates + signals + status).</summary>
     public required SuggestAssociationsResponse Suggestions { get; init; }
+
+    /// <summary>
+    /// Resolved display names keyed by candidate <c>targetId</c> (GUID string). The persisted provenance
+    /// carries IDs, not names, so the client folds these into the candidate model's <c>targetName</c>
+    /// (which is designed to be catalog-resolved). Absent keys fall back to the id (task 042).
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Names { get; init; } = new Dictionary<string, string>();
 }
 
 /// <summary>

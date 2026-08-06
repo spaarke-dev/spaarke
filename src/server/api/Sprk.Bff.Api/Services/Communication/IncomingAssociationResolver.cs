@@ -522,23 +522,11 @@ public sealed class IncomingAssociationResolver
     }
 
     /// <summary>
-    /// Map entity logical name to its primary name attribute.
+    /// Map entity logical name to its primary name attribute. Delegates to the shared
+    /// <see cref="RegardingNameFields"/> (single source of truth — task 042 reuse).
     /// </summary>
-    private static string? GetPrimaryNameField(string entityLogicalName) => entityLogicalName switch
-    {
-        "sprk_matter" => "sprk_mattername",
-        "sprk_project" => "sprk_projectname",
-        "sprk_invoice" => "sprk_name",
-        "sprk_event" => "sprk_eventname",
-        "sprk_workassignment" => "sprk_name",
-        "sprk_servicerequest" => "sprk_name",
-        "sprk_budget" => "sprk_name",
-        "sprk_analysis" => "sprk_name",
-        "sprk_organization" => "sprk_name",
-        "contact" => "fullname",
-        "account" => "name",
-        _ => null,
-    };
+    private static string? GetPrimaryNameField(string entityLogicalName) =>
+        RegardingNameFields.PrimaryNameField(entityLogicalName);
 
     /// <summary>
     /// Map entity logical name to its reference-number attribute (the human-facing record number that

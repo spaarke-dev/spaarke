@@ -22,10 +22,11 @@ jest.mock('@shared/services', () => {
 
 const mockGet = apiClient.get as jest.Mock;
 
-function matterSuggestion(overrides?: Record<string, unknown>) {
+function matterSuggestion(overrides?: Record<string, unknown>, names?: Record<string, string>) {
   return {
     communicationId: 'comm-1',
     subject: 'Re: Smith matter',
+    ...(names ? { names } : {}),
     suggestions: {
       communicationId: 'comm-1',
       status: 'Suggested',
@@ -59,6 +60,27 @@ describe('fetchEnginePreSelection', () => {
     const result = await fetchEnginePreSelection(undefined);
     expect(result).toBeNull();
     expect(mockGet).not.toHaveBeenCalled();
+  });
+
+  it('uses the server-resolved display name for the predicted record', async () => {
+    mockGet.mockResolvedValueOnce(
+      matterSuggestion(undefined, { '11111111-1111-1111-1111-111111111111': 'Smith v Jones' })
+    );
+
+    const result = await fetchEnginePreSelection('<abc@contoso.com>');
+
+    expect(result).not.toBeNull();
+    // The picker shows the resolved NAME (not the GUID) — folded into the shared model's targetName.
+    expect(result!.predicted.name).toBe('Smith v Jones');
+  });
+
+  it('falls back to the id for the name when the server resolved none (matches the code page)', async () => {
+    mockGet.mockResolvedValueOnce(matterSuggestion());
+
+    const result = await fetchEnginePreSelection('<abc@contoso.com>');
+
+    expect(result).not.toBeNull();
+    expect(result!.predicted.name).toBe('11111111-1111-1111-1111-111111111111');
   });
 
   it('maps the engine-predicted matter to a picker EntitySearchResult', async () => {
