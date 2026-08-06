@@ -101,7 +101,9 @@
     <criterion testable="true">BFF publish size ≤60 MB compressed with delta reported; no new HIGH CVE; tests in `tests/unit/Sprk.Bff.Api.Tests/` updated. All unit tests pass; build is green. TASK-INDEX.md ✅; deviations recorded under notes/.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec refs: FR-B3, FR-C1, FR-C3, NFR-02/04/09, Success Criterion 3 + 4. Depends on 021 (C1) + 024 (C3). `/conflict-check` before the PR (contended Services/Communication + Services/Office). Completion summary appended here when done.</notes>
+  <notes>Spec refs: FR-B3, FR-C1, FR-C3, NFR-02/04/09, Success Criterion 3 + 4. Depends on 021 (C1) + 024 (C3). `/conflict-check` before the PR (contended Services/Communication + Services/Office). Completion summary appended here when done.
+
+ABSORBS FR-B1 mechanism-2 (2026-08-05, from task 041 Option A re-scope): the add-in **drag target** → identical engine output is the SAME unification this task performs — routing the add-in/user-upload save (`/api/office/save` → `OfficeService`/`OfficeDocumentPersistence`, today a `sprk_document`-only path) through the Association Engine so a dragged/dropped email yields association + triage + provenance identical to mailbox capture, deduped on the same keys. Add the add-in drop wiring (`src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts` — keep the call on `authenticatedFetch` per task 040) as part of this task's client surface, and add a seam test proving add-in-drop → engine parity. (FR-B1 mechanism-1 — the shared monitored intake folder — is already delivered by existing receive-enabled-account config; see docs/guides/COMMUNICATION-ADMIN-GUIDE.md.)
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

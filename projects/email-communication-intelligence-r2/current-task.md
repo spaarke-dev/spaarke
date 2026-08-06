@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 014 ✅ + 058 ✅ this session. 041 STOPPED at investigation (§11 reuse finding — escalated, no code). |
+| **Task** | 014 ✅ + 058 ✅ + 041 ✅ (re-scoped, Option A) this session. Awaiting operator KV + schema to unblock more. |
 | **Step** | — |
-| **Status** | 014 ✅ (dad2d610a) · 058 ✅ (a5740b60d). 041 → escalation: implementing as authored builds duplicate infra (mechanism-1 = existing config; mechanism-2 = planned task 043). See notes/041-intake-folder-scope-finding.md. |
-| **Next Action** | OPERATOR DECISION on 041 scope (A re-scope→043 [recommended] / B thin slice / C build-as-authored). Otherwise all remaining startable tasks are gated (Key Vault/Entra/schema/seed) or sequential shared-lib (Pillar E). Safe autonomous lane exhausted. |
+| **Status** | 014 ✅ (dad2d610a) · 058 ✅ (a5740b60d) · 041 ✅ re-scoped Option A (mech-1 = config documented in COMMUNICATION-ADMIN-GUIDE; mech-2 → task 043). Operator-unblock guide written (notes/operator-unblock-guide.md). |
+| **Next Action** | OPERATOR: KV secret `footer-hmac-key` in spe-kv-dev-67e2xz (→010) + create schema 020/023/016 (034 confirm entity first). Then agent resumes: 010→012/013 chain, 021/024 dedup, 016 AffinityRung code. All per notes/operator-unblock-guide.md. |
 
 ### Completed this session (all committed)
 - **Task 003 ✅** — `notes/fixtures/r1-golden-emails.md`.
