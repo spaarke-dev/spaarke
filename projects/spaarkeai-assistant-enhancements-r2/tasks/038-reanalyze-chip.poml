@@ -4,7 +4,7 @@
     <title>'Reanalyze' follow-on chip on a document context (FR-D11)</title>
     <phase>4 D — History &amp; true resume</phase>
     <gate>blocked until 021,022</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend chip wiring reusing the reactive surface + Reanalyze binding</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -62,7 +62,29 @@
     <criterion testable="true">Reuses the reactive surface + Reanalyze binding.</criterion>
     <criterion testable="true">No new endpoint.</criterion>
   </acceptance-criteria>
-  <notes>FR-D11.</notes>
+  <notes>FR-D11. COMPLETED 2026-08-06.
+  Mechanism (approach b, deterministic push — see reasoning): the reactive proactive-suggest turn
+  (022) is a probabilistic LLM selection over ≤3 chips and would not reliably satisfy "the chip
+  appears for a loaded document"; instead the Reanalyze Binding id is resolved via the SAME
+  capability-discovery seam every other bindingId in ConversationPane uses (consumerType
+  `chat-summarize` + consumerCode `reanalyze`, disambiguated from the pre-existing Chat Summarize
+  Binding), then deterministically pushed onto the reactive `useConsumerChips` surface: (1)
+  immediately on a document-context tab focus if the bindingId is already resolved; (2) a catch-up
+  effect once the bindingId resolves later; (3) persisted across every subsequent chip carrier via
+  `getAppendedLocalChips`. Click routes through the existing `chips.acceptChips`/`dispatchBinding`
+  → `dispatchConsumer` Click path — no new endpoint, no new decider (ADR-039 clean).
+  `useConsumerChips.tsx` was edited additively: `acceptChips` now de-dupes `getAppendedLocalChips`
+  output against `parsed` by bindingId (prevents double-render when a caller seeds the same chip
+  both directly and via the append seam) — zero behavior change for any pre-existing caller.
+  Step 9.5 review caught and fixed a real bug pre-merge: the catch-up effect originally depended on
+  the whole (unstable) `chips` object and neither seed path guarded against an in-flight dispatch,
+  which could have re-populated the strip mid-dispatch. Fixed with stable deps + dispatching/hasChips
+  ref guards; locked in by a new regression test.
+  Tests: ConversationPane.reanalyze-chip.e2e.test.tsx (5 tests — appears deterministically even
+  with empty proactive-suggest result; absent for non-document context; click dispatches via
+  dispatchConsumer; dark mode; no mid-dispatch re-seed). Full conversation suite: 626/626 green.
+  typecheck: Surface-owned 0. Step 9.5 code-review + adr-check: PASS (no violations; ADR-039/021/028
+  compliant). No new endpoint/decider added.</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>

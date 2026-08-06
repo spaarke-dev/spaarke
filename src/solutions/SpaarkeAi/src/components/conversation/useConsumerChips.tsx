@@ -559,7 +559,13 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
       if (parsed.length > 0) {
         // R5-1: append client-only local chips (e.g. "Revise in Compose") to the delivered
         // card set so they sit in line with the post-attach cards, not as a separate button.
-        const appended = getAppendedLocalChips?.() ?? [];
+        // task 038 (FR-D11): de-duplicated by bindingId against `parsed` — a caller (e.g. a
+        // deterministic host-side seed) MAY legitimately include a chip in `parsed` that
+        // `getAppendedLocalChips` would ALSO contribute (e.g. Reanalyze); without the dedupe it
+        // would render twice.
+        const appended = (getAppendedLocalChips?.() ?? []).filter(
+          (c) => !parsed.some((p) => p.bindingId === c.bindingId)
+        );
         setConsumerChips(appended.length > 0 ? [...parsed, ...appended] : parsed);
       }
     },

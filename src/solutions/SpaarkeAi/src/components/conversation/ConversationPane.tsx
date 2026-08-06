@@ -41,6 +41,7 @@ import type {
   DispatchConsumerResult,
   INextStepChip,
   ResolvedLookup,
+  ConsumerChip,
 } from "@spaarke/ui-components";
 import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
@@ -319,6 +320,20 @@ function recordSuggestTrace(entry: SuggestTraceEntry): void {
   console.debug("[sprk:suggest-trace]", entry);
 }
 
+/**
+ * task 038 (FR-D11) — the "Reanalyze" follow-on chip for a document-context tab. Unlike the
+ * `local:*` chips in `localActionChips.ts`, this is a REAL dispatchable Binding chip: `bindingId`
+ * is the task-021-seeded Reanalyze Binding id (consumerType `chat-summarize`, consumerCode
+ * `reanalyze`, tagged `document`), resolved via capability discovery — never hardcoded (ADR-039).
+ * A click routes through the SAME Click-path `dispatchConsumer` every other consumer chip uses; the
+ * server resolves the target document from the current chat session's context with no slots
+ * required — mirrors the existing "compose-summarize" doc-action dispatch (`handleDocAction`'s
+ * "summarize" case), which also dispatches `{ slots: undefined }`.
+ */
+function buildReanalyzeChip(bindingId: string): ConsumerChip {
+  return { label: "Reanalyze", bindingId };
+}
+
 export function ConversationPane(): React.JSX.Element {
   const styles = useConversationPaneLayoutStyles();
 
@@ -514,11 +529,20 @@ export function ConversationPane(): React.JSX.Element {
   // bindingId, enabled the moment the review-intent text detector first fires (see the decorate
   // hook below) — well before classification actually needs to dispatch.
   const [agreementReviewGateNeeded, setAgreementReviewGateNeeded] = React.useState<boolean>(false);
+  // task 038 (FR-D11) — the SAME deferred capability-discovery seam resolves the "Reanalyze"
+  // Binding id (task 021 seed: consumerType `chat-summarize`, consumerCode `reanalyze`, tagged
+  // `document`) the moment a document-context tab is first focused (armed by the
+  // `active_widget_changed` branch below) — well before the chip needs to dispatch.
+  const [reanalyzeCapabilityNeeded, setReanalyzeCapabilityNeeded] = React.useState<boolean>(false);
   const { capabilities: launchableCapabilities } = useCapabilityDiscovery({
     bffBaseUrl,
     authenticatedFetch,
     enabled:
-      reviseCapabilityNeeded || draftCapabilityNeeded || ndaReviewCapabilityNeeded || agreementReviewGateNeeded,
+      reviseCapabilityNeeded ||
+      draftCapabilityNeeded ||
+      ndaReviewCapabilityNeeded ||
+      agreementReviewGateNeeded ||
+      reanalyzeCapabilityNeeded,
   });
   const reviseBindingId = React.useMemo<string | null>(
     () =>
@@ -565,6 +589,19 @@ export function ConversationPane(): React.JSX.Element {
   // detected (see `agreementReviewGateNeeded` below), so it is resolved by the time the gate needs it.
   const classifyBindingId = React.useMemo<string | null>(
     () => launchableCapabilities.find((c) => c.consumerType === "agreement-classify")?.bindingId ?? null,
+    [launchableCapabilities]
+  );
+
+  // task 038 (FR-D11) — the Reanalyze Binding id, resolved from the SAME closed capability catalog
+  // (ADR-039: bindingId only from discovery, never invented/hardcoded — portable across
+  // environments exactly like the bindingIds above). Disambiguated from the pre-existing "Chat
+  // Summarize" Binding — SAME consumerType `chat-summarize` — by `consumerCode` (task 021 seed:
+  // consumerCode `reanalyze`); `CapabilityDiscoveryItem` carries both fields.
+  const reanalyzeBindingId = React.useMemo<string | null>(
+    () =>
+      launchableCapabilities.find(
+        (c) => c.consumerType === "chat-summarize" && c.consumerCode === "reanalyze"
+      )?.bindingId ?? null,
     [launchableCapabilities]
   );
 
@@ -776,6 +813,11 @@ export function ConversationPane(): React.JSX.Element {
   ndaRunRef.current = ndaRun;
   const ndaReviewBindingIdRef = React.useRef<string | null>(null);
   ndaReviewBindingIdRef.current = ndaReviewBindingId;
+  // task 038 (FR-D11): ref mirror so the stable `[]`-deps `getAppendedLocalChips` callback (below)
+  // and the catch-up effect (after the `chips` controller is constructed) can read the current
+  // Reanalyze bindingId without re-subscribing.
+  const reanalyzeBindingIdRef = React.useRef<string | null>(null);
+  reanalyzeBindingIdRef.current = reanalyzeBindingId;
   // UAT round-3 (item #8): broadcast the progress modal's visibility on the PaneEventBus so
   // ReviewCompleteToast (shell/ReviewCompleteToast.tsx) can suppress a redundant completion toast
   // while the modal itself is STILL showing the outcome (no double-notification per the decided
@@ -873,6 +915,13 @@ export function ConversationPane(): React.JSX.Element {
         // "Review an NDA" for the NDA docType — unchanged behavior).
         ...(ndaReviewFileRef.current ? [buildNdaReviewChip(ndaReviewFileRef.current.cardLabel)] : []),
         ...(promotedFileIdsByNameRef.current.size > 0 ? [buildReviseInComposeChip()] : []),
+        // task 038 (FR-D11): "Reanalyze" persists across every subsequent chip carrier (proactive
+        // suggestions, dispatch re-arms) for as long as the active tab is a document context and
+        // the Binding id has resolved — a REAL Binding chip (not `local:*`), appended alongside
+        // whatever the carrier itself delivered rather than replacing it.
+        ...(activeTabFocusRef.current?.contextType === "document" && reanalyzeBindingIdRef.current
+          ? [buildReanalyzeChip(reanalyzeBindingIdRef.current)]
+          : []),
       ],
       []
     ),
@@ -913,6 +962,35 @@ export function ConversationPane(): React.JSX.Element {
     }, [dispatch]),
   });
   acceptChipsRef.current = chips.acceptChips;
+  // task 038 (FR-D11): ref mirrors so the catch-up effect below (and the workspace focus handler
+  // further down) can read the CURRENT hasChips/dispatching state without depending on the whole
+  // `chips` object — `chips` is recreated on every chip-strip change (its `consumerChipsSlot`
+  // member is memoized on `rankedConsumerChips`), so an effect depending on `chips` itself would
+  // re-fire on EVERY chip change, not just when `reanalyzeBindingId` resolves.
+  const chipsHasChipsRef = React.useRef(chips.hasChips);
+  chipsHasChipsRef.current = chips.hasChips;
+  const chipsDispatchingRef = React.useRef(chips.dispatching);
+  chipsDispatchingRef.current = chips.dispatching;
+
+  // task 038 (FR-D11): once capability discovery resolves the Reanalyze Binding id, ensure it's
+  // showing for a document-context tab even if the proactive-suggest turn (022) already settled
+  // with zero/errored suggestions before the binding resolved — `getAppendedLocalChips` above only
+  // folds Reanalyze in alongside ANOTHER non-empty chip carrier, so an all-empty carrier would
+  // otherwise never surface it. Guarded on `!hasChips` so this never clobbers chips a carrier
+  // already populated (those already include Reanalyze via getAppendedLocalChips) AND on
+  // `!dispatching` — the strip is ALSO briefly empty while a click-dispatch is in flight
+  // (`runBindingDispatch` clears it synchronously before the async call), and seeding here during
+  // that window would incorrectly re-populate the strip mid-dispatch. Deps are `[reanalyzeBindingId,
+  // chips.acceptChips]` — `acceptChips` is referentially stable, so this effect fires once, exactly
+  // when `reanalyzeBindingId` resolves (it never changes afterward).
+  React.useEffect(() => {
+    if (!reanalyzeBindingId) return;
+    if (activeTabFocusRef.current?.contextType !== "document") return;
+    if (chipsHasChipsRef.current || chipsDispatchingRef.current) return;
+    // De-duped against getAppendedLocalChips by bindingId (see the identical call above) — never
+    // double-renders.
+    chips.acceptChips([{ targetBindingId: reanalyzeBindingId, chipLabel: "Reanalyze" }]);
+  }, [reanalyzeBindingId, chips.acceptChips]);
 
   // task 022 (FR-B3/B5) — proactive suggestion turn. On a workspace tab's FIRST focus, fire ONE
   // grounded server call (POST /suggest); the BFF deterministically pre-filters candidate capabilities
@@ -2460,6 +2538,24 @@ export function ConversationPane(): React.JSX.Element {
     const focusStamp = deriveActiveTabFocusStamp(event);
     if (focusStamp) {
       activeTabFocusRef.current = focusStamp;
+      // task 038 (FR-D11) — a document-context tab needs the Reanalyze Binding id: arm capability
+      // discovery (idempotent) and, when it has already resolved (the common case after the first
+      // document tab focused this session), seed the chip immediately — deterministic, rather than
+      // waiting on the proactive-suggest turn's (022) probabilistic selection or the catch-up
+      // effect above.
+      if (focusStamp.contextType === "document") {
+        setReanalyzeCapabilityNeeded(true);
+        // Skip while a chip dispatch is in flight (`runBindingDispatch` clears the strip
+        // synchronously before its async call) — seeding here would re-populate it mid-dispatch.
+        // The catch-up effect / getAppendedLocalChips pick Reanalyze back up once the dispatch settles.
+        if (reanalyzeBindingIdRef.current && !chips.dispatching) {
+          // useConsumerChips.acceptChips de-dupes against getAppendedLocalChips by bindingId, so
+          // this direct seed never double-renders once getAppendedLocalChips ALSO contributes it.
+          chips.acceptChips([
+            { targetBindingId: reanalyzeBindingIdRef.current, chipLabel: "Reanalyze" },
+          ]);
+        }
+      }
       // task 022 (FR-B3/B5) — fire the proactive suggestion turn on this tab's FIRST focus
       // (once-per-tabId guarded inside; best-effort fire-and-forget).
       fireProactiveSuggestion(focusStamp);

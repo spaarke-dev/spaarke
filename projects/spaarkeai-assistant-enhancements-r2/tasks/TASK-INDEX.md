@@ -32,7 +32,7 @@ Tier: `sonnet` (default) · `opus` (high-blast/judgment) — effort: `high` (def
 | 035 | Route History through rich restore + clear/remount (FR-D1) | 4 D | ✅ (clear-before-restore in WorkspacePane; overwrite-hazard + marker-leak fixed; 2 indep reviews) | 031 | **opus / xhigh** | FULL | none (ConvPane spine) |
 | 036 | Rehydrate attachment chip on restore (FR-D5) — **re-scoped full paired slice** (owner 2026-08-06): BFF restore-DTO projection (`uploadedFiles`) + ConvPane host-owned rehydrate (SprkChat seam AVOIDED — parallel `FilesAttachedIndicator` render; shared lib untouched) | 4 D | ✅ done | 035 | sonnet / high | FULL | none (BFF restore DTO + ConvPane) |
 | 037 | HistoryOverlay rebuild: menu/preview/grouping/search (FR-D6/7/8) | 4 D | ✅ (UI complete; FR-D7 data needs BFF projection → DI-01, fold into 039) | 032 | sonnet / high | FULL | Group D-client-b (HistoryOverlay) |
-| 038 | Reanalyze chip on document context (FR-D11) | 4 D | 🔲 | 021,022 | sonnet / high | FULL | none (ConvPane spine) |
+| 038 | Reanalyze chip on document context (FR-D11) | 4 D | ✅ (deterministic seed on document-tab focus + `getAppendedLocalChips` persistence, dispatch via `chips.dispatchBinding`; found+fixed a mid-dispatch clobber bug in review) | 021,022 | sonnet / high | FULL | none (ConvPane spine) |
 | 039 | Deploy + verify D | 4 D | 🔲 | 030-038 | sonnet / high | STANDARD | none (deploy) |
 | 040 | Email variant in SerializedWidgetState + guard (FR-C2 client) | 5 C | 🔲 | 001 | sonnet / high | FULL | Group C1 (shared-lib) |
 | 041 | Email variant in WorkspaceTabVisibleState + derive/format (FR-C2 server) | 5 C | 🔲 | 001 | sonnet / high | FULL | Group C1 (BFF) |
