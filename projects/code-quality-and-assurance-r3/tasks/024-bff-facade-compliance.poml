@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>BFF: bring the 4 AI-facade violations into PublicContracts/ compliance (ADR-013)</title>
+    <phase>2 BFF Remediation</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Facade-boundary change on the BFF hot path affecting SSE/503 semantics; adds new PublicContracts surface — FULL.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Boundary refactor that must preserve SSE chunk + 503 semantics while relocating/adding facade methods across 4 sites; Opus for correctness-under-refactor.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>BFF hot-path contention (19 worktrees); Workspace + Ai files contested; /conflict-check before each PR; small sequential PRs.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff,ai-facade,adr-013</tags>
+  </metadata>
+
+  <prompt>Bring the 4 AI-facade boundary violations (bff design §3.4 table A-1..A-4) into Services/Ai/PublicContracts/ compliance: relocate IPlaybookLookupService into PublicContracts/ (clears A-4 + the A-2/A-3 extra injections); add IFileSummarizeAi for A-1 (mirror CommunicationTriageAi; preserve SSE chunk + 503 semantics); add IWorkspacePrefillAi.RunPrefillActionAsync for A-2/A-3; update the AnalysisServicesModule.cs:169 comment. After this, no non-AI file may inject IActionResolver/IActionRunner/IPlaybookLookupService.</prompt>
+  <role>SPAARKE platform developer with AI-facade (ADR-013 / BFF §10 bullet 3) expertise. Follow ADR-013 strictly. Preserve the SSE chunk contract byte-for-byte.</role>
+  <goal>The 4 violations are behind PublicContracts/: IPlaybookLookupService relocated, IFileSummarizeAi added (A-1), IWorkspacePrefillAi.RunPrefillActionAsync added (A-2/A-3); grep confirms no non-AI file injects IActionResolver/IActionRunner/IPlaybookLookupService; SSE chunk + 503 semantics preserved; AnalysisServicesModule.cs:169 comment updated; build + full test green; publish-size delta reported.</goal>
+
+  <context>
+    <background>spec.md FR-10 / bff design §3.4. Violations: A-1 WorkspaceFileEndpoints.cs:153-154,264-265 injects IActionResolver+IActionRunner; A-2 MatterPreFillService.cs:50-51,98-99 (+IPlaybookLookupService at 38,93); A-3 ProjectPreFillService.cs:41-42,89-90 (+IPlaybookLookupService at 32,84); A-4 WorkspaceAiService.cs:60,79 injects IPlaybookLookupService. Reference: CommunicationTriageAi legally wraps resolver+runner. IActionSeam covers only Layer-A writes (no resolve-Binding→run-Action), so A-1 genuinely needs a new facade method. This REDUCES CRUD→AI coupling (net-negative per §10).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IFileSummarizeAi.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (IWorkspacePrefillAi — add RunPrefillActionAsync)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (relocate IPlaybookLookupService here)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceFileEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Workspace/MatterPreFillService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Workspace/ProjectPreFillService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceAiService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (CommunicationTriageAi — pattern to mirror)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">BFF already assessed; facade violations verified.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Scope: CRUD/non-AI code uses Services/Ai/PublicContracts/ only; MUST NOT inject IActionResolver/IActionRunner/IPlaybookLookupService directly. This task enforces the rule (no tension — it is the point).</constraint>
+    <constraint source="project">Scope: A-1's IFileSummarizeAi MUST preserve the SSE chunk contract byte-for-byte and the 503 semantics; keep request validation in the endpoint. Do NOT change AI internals — only relocate/wrap.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 46.89 MB); report absolute + delta. No new NuGet packages. Run /conflict-check before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>AI facade compliance (PublicContracts)</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/bff-api-cleanup-remediation-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Legal resolver+runner wrap" location="CommunicationTriageAi">Mirror this facade for IFileSummarizeAi (A-1); it legally wraps IActionResolver+IActionRunner behind PublicContracts.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + reason). Read bff design §3.4 + §9 rows 2-4; run /conflict-check on Workspace/Ai files.</step>
+    <step order="1">Relocate IPlaybookLookupService into Services/Ai/PublicContracts/ (clears A-4 + the A-2/A-3 secondary injections); update all references.</step>
+    <step order="2">Add IWorkspacePrefillAi.RunPrefillActionAsync(...) and swap A-2 (MatterPreFillService) + A-3 (ProjectPreFillService) to use it instead of IActionResolver?/IActionRunner?.</step>
+    <step order="3">Add IFileSummarizeAi (mirror CommunicationTriageAi) and swap A-1 (WorkspaceFileEndpoints) to it, preserving SSE chunk + 503 semantics and keeping validation in the endpoint.</step>
+    <step order="4">Update the AnalysisServicesModule.cs:169 comment.</step>
+    <step order="5">grep-verify no non-AI file injects IActionResolver/IActionRunner/IPlaybookLookupService.</step>
+    <step order="6">dotnet build + full dotnet test green; run dotnet publish and record size delta vs 46.89 MB.</step>
+    <step order="7">Update TASK-INDEX.md: set task 024 status to ✅.</step>
+    <step order="8">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If wrapping A-1 behind IFileSummarizeAi would alter the SSE chunk contract or 503 semantics, STOP and escalate — the byte-compatible chunk contract is a hard acceptance criterion.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>IActionSeam (Layer-A writes only, no resolve-Binding→run-Action); IWorkspacePrefillAi (already injected by both prefill services, playbook SSE not linear actions); CommunicationTriageAi (the pattern to mirror). IPlaybookLookupService exists but in the wrong namespace.</existing>
+    <extension>Yes where possible — extend the already-injected IWorkspacePrefillAi with one method serving A-2+A-3, and MOVE IPlaybookLookupService (not new). Only A-1 needs a genuinely new facade (IFileSummarizeAi) because no existing facade exposes resolve-Binding→run-linear-Action for file summarize.</extension>
+    <cost-of-doing-nothing>Without these, A-1 keeps injecting IActionResolver/IActionRunner into a non-AI endpoint and A-2/A-3/A-4 keep injecting AI-internal types — the ADR-013 / §10 bullet-3 violation persists and the coupling count stays positive.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (IFileSummarizeAi, IWorkspacePrefillAi.RunPrefillActionAsync, relocated IPlaybookLookupService)</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/publish-size-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the change, grep confirms no non-AI file injects IActionResolver/IActionRunner/IPlaybookLookupService.</criterion>
+    <criterion testable="true">Given A-1, the SSE chunk contract + 503 semantics are byte-compatible with before (verified by test).</criterion>
+    <criterion testable="true">Given the change, IWorkspacePrefillAi.RunPrefillActionAsync serves both A-2 and A-3; IPlaybookLookupService lives under PublicContracts/; AnalysisServicesModule.cs:169 comment updated.</criterion>
+    <criterion testable="true">dotnet build + full test green; publish ≤ 60 MB with delta vs 46.89 MB; no new NuGet package.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-10 / bff design §3.4 + §9 rows 2-4, Phase 4.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

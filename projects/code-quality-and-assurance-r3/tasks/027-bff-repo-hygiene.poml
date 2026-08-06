@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>BFF: untrack 2 committed tarballs + delete 6 build artifacts (~127 MB)</title>
+    <phase>2 BFF Remediation</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Repo hygiene (git untrack + working-tree cleanup + .gitignore verification); no source behavior change — STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical git hygiene against an exact artifact list; Sonnet default.</model-tier-reason>
+    <effort>low</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>BFF hot-path repo state (19 worktrees); .gitignore/tracked-file changes; /conflict-check before each PR; small sequential PRs.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff,hygiene,git</tags>
+  </metadata>
+
+  <prompt>git rm --cached the 2 committed tarballs (deployment.tar.gz, spe-bff-api-deployment.tar.gz); delete all 6 build artifacts from the working tree (~127 MB: app.zip, deploy.zip, deployment.zip, bff-api-deploy.zip + the 2 tarballs); confirm .gitignore covers the patterns.</prompt>
+  <role>SPAARKE platform developer. Follow root CLAUDE.md §9 (never commit build artifacts) + §10. Pure repo hygiene.</role>
+  <goal>Both tarballs are git-untracked, all 6 build artifacts removed from the working tree, and .gitignore covers the patterns so they cannot re-enter; git ls-files shows no tarballs; build unaffected.</goal>
+
+  <context>
+    <background>spec.md FR-13 / bff design §3.6 (G8). 127 MB of build/deploy artifacts sit in the source dir: app.zip, deploy.zip, deployment.zip, bff-api-deploy.zip (gitignored, local clutter) PLUS deployment.tar.gz and spe-bff-api-deployment.tar.gz which are committed to git. Untrack the 2 tarballs, delete all 6 from the working tree, confirm .gitignore covers the patterns.</background>
+    <relevant-files>
+      <file role="modify">.gitignore (verify patterns)</file>
+      <file role="canonical-reference">projects/bff-api-cleanup-remediation-r1/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">BFF already assessed; artifact list verified.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (repo hygiene only): git rm --cached the 2 tracked tarballs; delete all 6 artifacts from the working tree; verify/extend .gitignore. Do NOT delete any source file.</constraint>
+    <constraint source="CLAUDE.md-§9">Scope: never commit build artifacts; the 2 tarballs MUST become untracked and the .gitignore patterns MUST prevent re-tracking.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: Run /conflict-check before the PR (shared repo state). No new NuGet packages; publish-size unaffected but confirm build still succeeds.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Repo hygiene / build-artifact untracking</topic>
+    <files>
+      <file>projects/bff-api-cleanup-remediation-r1/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Read bff design §3.6 (G8); run /conflict-check.</step>
+    <step order="1">git rm --cached deployment.tar.gz and spe-bff-api-deployment.tar.gz (untrack, keep-or-delete handled in step 2).</step>
+    <step order="2">Delete all 6 artifacts from the working tree: app.zip, deploy.zip, deployment.zip, bff-api-deploy.zip, deployment.tar.gz, spe-bff-api-deployment.tar.gz.</step>
+    <step order="3">Verify .gitignore covers all 6 patterns; add any missing patterns.</step>
+    <step order="4">Confirm git ls-files shows no tarballs and dotnet build still succeeds.</step>
+    <step order="5">Update TASK-INDEX.md: set task 027 status to ✅.</step>
+    <step order="6">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <outputs>
+    <output type="config">.gitignore (patterns verified/extended)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the change, git ls-files shows no tarballs (deployment.tar.gz + spe-bff-api-deployment.tar.gz untracked).</criterion>
+    <criterion testable="true">Given the working tree, all 6 build artifacts are removed and .gitignore covers their patterns.</criterion>
+    <criterion testable="true">Negative: no source file was deleted; dotnet build still succeeds.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-13 / bff design §3.6 (G8) + Phase 1e.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>Forcing-function: expand Spaarke.ArchTests into fitness functions</title>
+    <phase>4 Forcing-Functions</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds enforced architectural fitness tests (touches tests/**) — TEST-MODIFYING override → code-review + adr-check unconditionally.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Encoding architectural invariants as fitness functions (facade, downcast, layer-dependency, God-class thresholds) requires ADR-precise judgment; Opus.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>testing,archtests,fitness</tags>
+  </metadata>
+
+  <prompt>Expand Spaarke.ArchTests into real fitness functions: "no non-AI code injects AI-internal types" (ADR-013), "no IDataverseService as/is ServiceClient casts outside the shared extension", layer-dependency rules, and God-class LOC/ctor-dep thresholds. Each rule MUST fail on a seeded violation and pass on the current clean code.</prompt>
+  <role>SPAARKE platform developer with architecture-fitness-test expertise (ArchUnitNET or equivalent). Follow ADR-013 + ADR-010. These rules lock in the R3 remediations so the grade holds.</role>
+  <goal>Spaarke.ArchTests carries the new fitness functions; each rule demonstrably fails on a seeded violation and passes on current clean code; build + full test green.</goal>
+
+  <context>
+    <background>spec.md FR-14 / design.md §9. A+ is sustained, not achieved once — convert findings into enforced invariants. These rules make the BFF remediations (facade compliance task 024, downcast consolidation task 021) permanent, plus general layer + God-class guards. Extends the existing Spaarke.ArchTests project (archived-R3 item #8 God-class audit becomes the LOC/ctor-dep threshold rule).</background>
+    <relevant-files>
+      <file role="new">tests/**/Spaarke.ArchTests/ (new fitness-function tests + seeded-violation fixtures)</file>
+      <file role="canonical-reference">.claude/adr/ADR-013-ai-architecture.md</file>
+      <file role="canonical-reference">.claude/adr/ADR-010-di-minimalism.md</file>
+      <file role="canonical-reference">docs/standards/TEST-ARCHITECTURE.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Extends the existing Spaarke.ArchTests project.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: add fitness functions for (1) no non-AI code injects AI-internal types, (2) no IDataverseService as/is ServiceClient casts outside the shared extension, (3) layer-dependency rules, (4) God-class LOC/ctor-dep thresholds. Each rule MUST fail on a seeded violation AND pass on current clean code.</constraint>
+    <constraint source="ADR-038">Scope: these are fitness tests (KEEP category — architectural invariants), not scaffolding; behavior over mocks.</constraint>
+    <constraint source="project">Scope: extend Spaarke.ArchTests only; do not add a new test project.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Architecture fitness functions</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + TEST-MODIFYING reason). Load ADR-013/ADR-010 + TEST-ARCHITECTURE.</step>
+    <step order="1">Add the facade rule: no non-AI namespace may reference/inject IActionResolver/IActionRunner/IPlaybookLookupService (ADR-013).</step>
+    <step order="2">Add the downcast rule: no IDataverseService as/is ServiceClient cast outside the shared Spaarke.Dataverse extension.</step>
+    <step order="3">Add layer-dependency rules and God-class LOC/ctor-dep threshold rules.</step>
+    <step order="4">For each rule, add a seeded-violation fixture proving the rule fails, then confirm the rule passes on current clean code.</step>
+    <step order="5">dotnet build + full dotnet test green.</step>
+    <step order="6">Update TASK-INDEX.md: set task 040 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>Spaarke.ArchTests already exists (R1 forcing-function layer) but lacks the facade / downcast / layer / God-class rules.</existing>
+    <extension>Yes — this extends the existing ArchTests project with new rules; no new test project is created.</extension>
+    <cost-of-doing-nothing>Without these fitness functions, the R3 remediations (facade compliance, downcast collapse) silently re-drift as the codebase grows — exactly the grade-drift that made R3 necessary.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="test">tests/**/Spaarke.ArchTests/ (new fitness functions + seeded-violation fixtures)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given each new rule, it FAILS on its seeded violation and PASSES on current clean code.</criterion>
+    <criterion testable="true">Given the suite, dotnet build + full dotnet test are green with the new rules active.</criterion>
+    <criterion testable="true">Negative: no new test project was created (Spaarke.ArchTests extended in place).</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-14 / design.md §9 + archived-R3 item #8. Gate for task 042 (CI wiring).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

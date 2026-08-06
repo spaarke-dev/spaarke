@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>Forcing-function: wire CVE + publish/bundle-size + doc-drift CI gates (per-surface)</title>
+    <phase>4 Forcing-Functions</phase>
+    <gate>blocked until 040</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Edits .github/workflows to add gates into the existing R1 layers; coordinated, behavior-neutral to runtime — STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>CI workflow wiring into existing layers; Sonnet default at effort high (coordination + per-surface activation).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .github/workflows — ci-cd-unit-test-remediation-r1 owns existing-workflow edits; coordinate via /conflict-check before the PR.</parallel-reason>
+    <deps>040</deps>
+    <tags>ci,cve,doc-drift</tags>
+  </metadata>
+
+  <prompt>Wire CVE scan + publish/bundle-size budgets + doc-drift into the existing R1 PR/nightly CI layers, activated PER-SURFACE (no repo-wide big-bang). Coordinate every .github/workflows edit with ci-cd-unit-test-remediation-r1 (which owns existing-workflow edits) via /conflict-check before the PR.</prompt>
+  <role>SPAARKE platform developer with GitHub Actions CI expertise. Follow root CLAUDE.md §16 + design.md §9 + §4A. Coordinate with ci-cd-unit-test-remediation-r1.</role>
+  <goal>CVE scan, publish/bundle-size budgets, and doc-drift are wired into the existing R1 PR/nightly layers and activated per-surface; the ArchTests fitness functions (task 040) run in CI; every workflow edit is coordinated with ci-cd-unit-test-remediation-r1.</goal>
+
+  <context>
+    <background>spec.md FR-16 / design.md §9 + §4A. Wire the gates into the EXISTING R1 PR/nightly layers (do not create parallel workflows), activated per-surface (each surface flips its own gate on as its last step). ci-cd-unit-test-remediation-r1 owns existing-workflow edits — this is the standing external coordination risk (spec Dependencies).</background>
+    <relevant-files>
+      <file role="modify">.github/workflows/ (extend existing R1 PR/nightly layers)</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">The expanded ArchTests fitness functions that CI runs.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: wire CVE + publish/bundle-size + doc-drift into the EXISTING R1 layers (no parallel workflows); PER-SURFACE activation only (design §4A) — no gate enabled repo-wide while a surface is dirty.</constraint>
+    <constraint source="project">Scope: ci-cd-unit-test-remediation-r1 owns existing-workflow edits — every .github/workflows change MUST be coordinated via /conflict-check before the PR.</constraint>
+    <constraint source="CLAUDE.md-§16">Scope: keep gates fast + low-false-positive; publish-size budget is ≤60 MB compressed (BFF).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>CI gate wiring</topic>
+    <files>
+      <file>projects/code-quality-and-assurance-r3/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Load design §9/§4A.</step>
+    <step order="1">Run /conflict-check against projects/INDEX.md AND coordinate with ci-cd-unit-test-remediation-r1 before touching any .github/workflows file (invoke the escalation trigger).</step>
+    <step order="2">Wire the CVE scan into the existing PR/nightly layer.</step>
+    <step order="3">Wire the publish-size (≤60 MB compressed BFF) + bundle-size budgets.</step>
+    <step order="4">Wire the doc-drift gate + ensure the task-040 ArchTests fitness functions run in CI.</step>
+    <step order="5">Activate per-surface only; confirm no gate is on repo-wide while a surface is dirty.</step>
+    <step order="6">Update TASK-INDEX.md: set task 042 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Coordinate every .github/workflows edit with ci-cd-unit-test-remediation-r1 via /conflict-check before the PR; if the edit conflicts with their in-flight workflow changes, STOP and coordinate per CLAUDE.md §6 rather than editing over them.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="config">.github/workflows/ (CVE + size + doc-drift gates wired into existing layers)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the wiring, CVE scan + publish/bundle-size budgets + doc-drift run in the existing R1 PR/nightly layers (no parallel workflows).</criterion>
+    <criterion testable="true">Given task 040, the ArchTests fitness functions run in CI.</criterion>
+    <criterion testable="true">Negative: no gate is enabled repo-wide while a surface is still dirty (per-surface activation).</criterion>
+    <criterion testable="true">Every .github/workflows edit was coordinated with ci-cd-unit-test-remediation-r1 via /conflict-check.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-16 / design.md §9 + §4A. Depends on task 040.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

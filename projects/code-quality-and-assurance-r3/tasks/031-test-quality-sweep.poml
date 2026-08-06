@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>Horizontal: test-quality sweep (ADR-038 KEEP + /test-diet + 138-failing reconciliation)</title>
+    <phase>3 Horizontals</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies tests/** (TEST-MODIFYING override) → code-review + adr-check run unconditionally at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Test reconciliation against ADR-038 KEEP categories with the /test-diet classifier; Sonnet default at effort high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies tests/** — sequential; coordinate with ci-cd-unit-test-remediation-r1 (ADR-038 authority) via /conflict-check.</parallel-reason>
+    <deps>none</deps>
+    <tags>testing,test-diet,adr-038</tags>
+  </metadata>
+
+  <prompt>Reconcile tests against ADR-038 KEEP categories via /test-diet; resolve the 138-failing / KV-dependent integration-test situation (old R3 item #4); re-count. Scaffolding-class tests are removed; MAINTAIN-class tests are kept at their KEEP path.</prompt>
+  <role>SPAARKE platform developer with ADR-038 testing-strategy expertise. Follow ADR-038 (KEEP categories, behavior over mocks, coverage = observation). Coordinate with ci-cd-unit-test-remediation-r1.</role>
+  <goal>The suite is green + trustworthy: the 138-failing/KV-dependent integration tests are reconciled, scaffolding tests removed, MAINTAIN tests kept at KEEP paths, and a re-count is published; /test-diet report emitted.</goal>
+
+  <context>
+    <background>spec.md FR-18 / design.md §8 + archived-R3 item #4. There is a standing 138-failing / KV-dependent integration-test situation to reconcile against ADR-038's KEEP categories using the /test-diet classifier. ci-cd-unit-test-remediation-r1 owns ADR-038 authority + existing-workflow edits — coordinate.</background>
+    <relevant-files>
+      <file role="modify">tests/ (reconcile against ADR-038 KEEP categories)</file>
+      <file role="canonical-reference">docs/adr/ADR-038-testing-strategy.md</file>
+      <file role="canonical-reference">docs/standards/TEST-ARCHITECTURE.md</file>
+      <file role="output">projects/code-quality-and-assurance-r3/notes/test-diet-report.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Standing test debt; independent of other R3 tasks.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Scope: classify each modified/failing test against the 7 KEEP categories; MAINTAIN-class tests stay at their KEEP path, SCAFFOLDING-class tests are deleted, AMBIGUOUS require reviewer judgment. Coverage is observation, never a gate. Ban Mock&lt;HttpMessageHandler&gt; / DI-registration / ctor-null-check tests.</constraint>
+    <constraint source="project">Scope: coordinate with ci-cd-unit-test-remediation-r1 (ADR-038 authority + workflow owner) via /conflict-check before touching shared test infra.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Test-quality reconciliation</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + TEST-MODIFYING reason). Load ADR-038 + TEST-ARCHITECTURE; /conflict-check with ci-cd-unit-test-remediation-r1.</step>
+    <step order="1">Inventory the 138-failing / KV-dependent integration tests; classify each against ADR-038 KEEP categories with /test-diet.</step>
+    <step order="2">Delete SCAFFOLDING-class tests; keep MAINTAIN-class tests at their KEEP path; flag AMBIGUOUS for reviewer judgment.</step>
+    <step order="3">Resolve the KV-dependency (fixture/config-first inspection per bff-extensions §F.2) so the suite is green + trustworthy.</step>
+    <step order="4">Re-count the suite and publish notes/test-diet-report.md.</step>
+    <step order="5">dotnet test full run green.</step>
+    <step order="6">Update TASK-INDEX.md: set task 031 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If reconciling the 138-failing tests would require changing a shared workflow or fixture owned by ci-cd-unit-test-remediation-r1, STOP and coordinate per CLAUDE.md §6 before proceeding.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/test-diet-report.md</output>
+    <output type="test">tests/ (reconciled)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the reconciliation, the full test suite is green + trustworthy and a re-count is published.</criterion>
+    <criterion testable="true">Given /test-diet, SCAFFOLDING-class tests are deleted and MAINTAIN-class tests are kept at their KEEP paths.</criterion>
+    <criterion testable="true">Negative: no coverage threshold is used as a gate (ADR-038 — coverage is observation only).</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-18 / design.md §8 + archived-R3 item #4. TEST-MODIFYING rigor override.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

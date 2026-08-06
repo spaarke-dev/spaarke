@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>BFF: close Finance auth exposure via @spaarke/auth (ADR-028) + harden healthz + OBO/User</title>
+    <phase>2 BFF Remediation</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-sensitive auth change on the BFF hot path (closes an anonymous Dataverse-write endpoint); tags include auth — FULL unconditionally.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security/auth work with a known judgment boundary (web-resource @spaarke/auth feasibility) — Opus for high-blast-radius auth reasoning.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>BFF hot-path contention (19 worktrees); Finance + auth files are contested; /conflict-check before each PR; small sequential PRs.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff,auth,security</tags>
+  </metadata>
+
+  <prompt>Close the Finance auth exposure by the canonical @spaarke/auth / ADR-028 path (owner decision — NOT HMAC): add .RequireAuthorization() to both FinanceRollupEndpoints.cs:29,46 recalculate endpoints AND migrate the legacy sprk_subgrid_parent_rollup.js web-resource caller to @spaarke/auth. Harden /healthz/dataverse + /healthz/dataverse/crud (EndpointMappingExtensions.cs:64-65 — rate-limit like the hardened doc sibling + stop echoing ex.Message). Add explicit .RequireAuthorization() to OBOEndpoints (7) + UserEndpoints (2) (owner-APPROVED).</prompt>
+  <role>SPAARKE platform developer with auth v2 / @spaarke/auth (ADR-028) expertise. Follow ADR-028 strictly. This is a security fix — no anonymous Dataverse-write endpoint may remain.</role>
+  <goal>No anonymous Dataverse-write endpoint remains; the recalculate endpoints require authorization; the web-resource caller authenticates via @spaarke/auth; both healthz probes are rate-limited and stop echoing ex.Message; OBO (7) + User (2) endpoints have explicit .RequireAuthorization(); build + full test green; publish-size delta reported.</goal>
+
+  <context>
+    <background>spec.md FR-09 (owner directive overrides the BFF design's HMAC recommendation — use @spaarke/auth). FinanceRollupEndpoints.cs:29,46 are .AllowAnonymous() and WRITE derived financial fields to Dataverse under the BFF app identity (protected only by rate-limiting). The scorecard sibling ScorecardCalculatorEndpoints uses .RequireAuthorization(). /healthz/dataverse + /healthz/dataverse/crud (EndpointMappingExtensions.cs:64-65) have no auth/rate-limit and echo raw ex.Message; the sibling /healthz/dataverse/doc/{id} was hardened with .AllowAnonymous().RequireRateLimiting("anonymous"). The caller is the legacy web resource sprk_subgrid_parent_rollup.js. If migrating it surfaces a gap in @spaarke/auth web-resource support, that becomes a horizontal fix (task 030 / FR-17), not a reason to stay anonymous.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Finance/FinanceRollupEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/(EndpointMappingExtensions.cs:64-65 — healthz dataverse probes)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/OBOEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/UserEndpoints.cs</file>
+      <file role="modify">sprk_subgrid_parent_rollup.js (legacy web-resource caller → @spaarke/auth)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/(ScorecardCalculatorEndpoints — .RequireAuthorization() sibling)</file>
+      <file role="canonical-reference">.claude/patterns/auth/spaarke-sso-binding.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">BFF already assessed; auth exposure sites verified.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: all client→BFF auth routes through @spaarke/auth; the web-resource caller MUST authenticate via @spaarke/auth (NOT HMAC, NOT anonymous). Owner directive per spec.md FR-09.</constraint>
+    <constraint source="project">Scope (BFF auth only): add .RequireAuthorization() to FinanceRollupEndpoints.cs:29,46 + OBOEndpoints (7) + UserEndpoints (2); harden the 2 healthz dataverse probes (rate-limit like the doc sibling + stop echoing ex.Message). Do NOT change endpoint routes or response contracts beyond auth/rate-limit/error-detail.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 46.89 MB); report absolute + delta. No new NuGet packages. Run /conflict-check (Finance + auth files highly contested) before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF auth closure via @spaarke/auth</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>projects/bff-api-cleanup-remediation-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="RequireAuthorization sibling" location="ScorecardCalculatorEndpoints">Mirror the scorecard sibling's .RequireAuthorization() on the recalculate endpoints.</pattern>
+      <pattern name="Hardened healthz sibling" location="/healthz/dataverse/doc/{id}">Mirror .AllowAnonymous().RequireRateLimiting(\"anonymous\") + no ex.Message echo.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + security reason). Read bff design §3.5 + §6; run /conflict-check on Finance/auth files.</step>
+    <step order="1">Confirm the sprk_subgrid_parent_rollup.js caller can compute/attach a @spaarke/auth token; if it cannot, invoke the escalation trigger BEFORE changing the endpoint to RequireAuthorization (do not leave it anonymous, do not fall back to HMAC).</step>
+    <step order="2">Add .RequireAuthorization() to both FinanceRollupEndpoints.cs:29,46 recalculate endpoints.</step>
+    <step order="3">Migrate the sprk_subgrid_parent_rollup.js caller to authenticate via @spaarke/auth.</step>
+    <step order="4">Harden /healthz/dataverse + /healthz/dataverse/crud (EndpointMappingExtensions.cs:64-65): add .RequireRateLimiting("anonymous") like the doc sibling and stop echoing ex.Message.</step>
+    <step order="5">Add explicit .RequireAuthorization() to OBOEndpoints (7) + UserEndpoints (2).</step>
+    <step order="6">Add/adjust a negative test: an unauthenticated request to a recalculate endpoint returns 401.</step>
+    <step order="7">dotnet build + full dotnet test green; run dotnet publish and record size delta vs 46.89 MB.</step>
+    <step order="8">Update TASK-INDEX.md: set task 023 status to ✅.</step>
+    <step order="9">Document any deviation (and any @spaarke/auth web-resource gap surfaced → route to task 030 / FR-17) in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the sprk_subgrid_parent_rollup.js caller cannot compute/attach a @spaarke/auth token, STOP and escalate per CLAUDE.md §6 — this surfaces a @spaarke/auth web-resource gap to fix here and elsewhere (security horizontal FR-17), NOT a reason to fall back to anonymous or HMAC.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Finance/FinanceRollupEndpoints.cs + healthz + OBO/User endpoints</output>
+    <output type="code">sprk_subgrid_parent_rollup.js (migrated to @spaarke/auth)</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/publish-size-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the change, no anonymous Dataverse-write endpoint remains; both recalculate endpoints require authorization.</criterion>
+    <criterion testable="true">Negative: an unauthenticated request to a recalculate endpoint returns 401 (not 200, not an unhandled error).</criterion>
+    <criterion testable="true">Given the web-resource caller, it authenticates via @spaarke/auth (not HMAC, not anonymous).</criterion>
+    <criterion testable="true">Given the healthz probes, both are rate-limited like the doc sibling and no longer echo ex.Message; OBO (7) + User (2) have explicit .RequireAuthorization().</criterion>
+    <criterion testable="true">dotnet build + full test green; publish ≤ 60 MB with delta vs 46.89 MB; no new NuGet package.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-09 / bff design §3.5 + §6, Phase 3. Owner decision: @spaarke/auth, not HMAC. Any @spaarke/auth gap elevates to FR-17 (task 030).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

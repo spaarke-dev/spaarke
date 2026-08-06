@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>BFF: delete the 6 verified dead-code items (~2,701 prod + ~1,149 test LOC)</title>
+    <phase>2 BFF Remediation</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches tests/** (deletes + updates test files) → TEST-MODIFYING override → code-review + adr-check run unconditionally at Step 9.5; also BFF hot-path code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical deletion against a verified inventory with exact file paths; Sonnet default.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>BFF hot-path contention (19 worktrees touch BFF); /conflict-check before each PR; small sequential PRs.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff,dead-code,testing</tags>
+  </metadata>
+
+  <prompt>Delete the 6 verified dead-code items from Sprk.Bff.Api (bff design §3.1): the Scopes folder (3 files, 1,285 LOC), the Safety cluster (6 src + 2 test files, 840 prod / 831 test LOC — fix 2 stale &lt;see cref&gt; CS1574 warnings), orphaned RetryPolicies.cs (298 LOC), StubLiveFactResolver.cs (56 LOC, owner-APPROVED for deletion), both _archive/ folders, and the archived test. PRESERVE the explicit KEEPs. Verify against src/ AND tests/ before deleting.</prompt>
+  <role>SPAARKE platform developer with BFF cleanup expertise. Follow root CLAUDE.md §10 BFF Hygiene + ADR-032. Delete &gt; deprecate; behavior-preserving.</role>
+  <goal>All 6 dead-code items removed with zero dangling references (grep-verified against src/ and tests/), the 2 stale crefs fixed, dotnet build + full dotnet test green, and the publish-size delta vs 46.89 MB reported.</goal>
+
+  <context>
+    <background>spec.md FR-06. The BFF assessment (Fable-verified) confirmed these 6 items are provably dead in src/ AND tests/ (BFF exposes internals via InternalsVisibleTo to 3 test assemblies, so test refs were checked explicitly). The verification pass CORRECTED 2 first-pass false positives that are load-bearing and MUST be preserved: StubInsightGraph (wired InsightsModule.cs:53) and the Todo NullObject/ + Placeholder/ ADR-032 factory pair (TodoSyncModule.cs:84-98).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Scopes/ScopeInheritanceService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Scopes/ScopeCopyService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Scopes/OwnershipValidator.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/SafetyPipelineMiddleware.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/ConfidenceScoringService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Resilience/RetryPolicies.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Insights/LiveFacts/StubLiveFactResolver.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Insights/Graph/StubInsightGraph.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Todo/NullObject</file>
+      <file role="canonical-reference">projects/bff-api-cleanup-remediation-r1/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">BFF already assessed (workstream #1); this executes the verified inventory.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (BFF dead-code only): delete exactly the 6 items in bff design §3.1 — Scopes folder (3), Safety cluster (6 src + 2 test, fix 2 stale crefs), RetryPolicies.cs, StubLiveFactResolver.cs, both _archive/ folders, the archived test. Do NOT delete anything else.</constraint>
+    <constraint source="ADR-032">Scope: PRESERVE the KEEPs — StubInsightGraph.cs (wired InsightsModule.cs:53) and Todo NullObject/ + Placeholder/ factory pair (TodoSyncModule.cs:84-98). These are ADR-032 seams, verified load-bearing.</constraint>
+    <constraint source="project">Scope: verify dead code against src/ AND tests/ (InternalsVisibleTo to 3 test assemblies) before each deletion — grep both trees for references.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 46.89 MB); report absolute size + delta in notes. No new NuGet packages. Run /conflict-check against projects/INDEX.md before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF dead-code removal</topic>
+    <files>
+      <file>projects/bff-api-cleanup-remediation-r1/design.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + TEST-MODIFYING reason). Read bff design §3.1 dead-code table + the explicit KEEPs.</step>
+    <step order="1">Run /conflict-check against projects/INDEX.md; if the Scopes/Safety/Resilience/Insights files are contended, coordinate/sequence before proceeding.</step>
+    <step order="2">For each of the 6 items, grep src/ AND tests/ for references to confirm zero live consumers; abort an individual deletion if any live ref is found (the KEEPs prove first-pass audits can be wrong).</step>
+    <step order="3">Delete the Scopes folder (3 files) and the Safety cluster (6 src + 2 test files); fix the 2 stale &lt;see cref&gt; (CS1574) references left behind.</step>
+    <step order="4">Delete orphaned RetryPolicies.cs, StubLiveFactResolver.cs, both _archive/ folders (and remove the now-empty folders), and the archived test.</step>
+    <step order="5">Run dotnet build src/server/api/Sprk.Bff.Api/ + full dotnet test; confirm green.</step>
+    <step order="6">Run dotnet publish -c Release to deploy/api-publish/, measure compressed size, record absolute + delta vs 46.89 MB in notes/publish-size-report.md.</step>
+    <step order="7">Update TASK-INDEX.md: set task 020 status to ✅.</step>
+    <step order="8">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If grep finds ANY live consumer (src/ or tests/) of an item slated for deletion, STOP that deletion and escalate — the item is not dead (the BFF pass already found 2 such false positives).</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/ (6 dead-code items removed)</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/publish-size-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the deletions, grep of src/ AND tests/ returns zero dangling references to any removed type; both _archive/ folders are gone.</criterion>
+    <criterion testable="true">Given the build, dotnet build is clean (incl. the 2 CS1574 crefs fixed) and full dotnet test is green.</criterion>
+    <criterion testable="true">Given the KEEPs, StubInsightGraph.cs and the Todo NullObject/+Placeholder/ pair still exist and are still wired.</criterion>
+    <criterion testable="true">Publish size reported ≤ 60 MB compressed with delta vs 46.89 MB; no new NuGet package added.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-06 / bff design §3.1 + Phase 1. FULL rigor via TEST-MODIFYING override (deletes/updates test files).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

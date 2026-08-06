@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>BFF: decompose CommunicationModule + rename Finance handler after Dataverse pre-check</title>
+    <phase>2 BFF Remediation</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Behavior-neutral DI decomposition (registrations identical) + a rename gated by a Dataverse pre-check; not test-modifying — STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical helper-extraction keeping registrations identical + a gated rename; Sonnet default.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>BFF hot-path contention (19 worktrees); Communication + Finance files contested; /conflict-check before each PR; small sequential PRs.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff,di,dataverse-precheck</tags>
+  </metadata>
+
+  <prompt>Decompose CommunicationModule.cs (490 lines / 75 registrations / one method / zero helpers) into cohesive helpers AddChannelSenders / AddAssociationEngine / AddThreadResolution / AddMembershipReconciliation / AddCommunicationHostedServices (registrations identical). Rename Services/Finance/Tools/FinancialCalculationToolHandler → FinanceTotalsCalculator ONLY AFTER a mandatory Dataverse sprk_analysistool.sprk_handlerclass pre-check. Include the optional Phase-5 helpers (shared circuit-breaker-registry wiring + app-only HTTP boilerplate consolidation, owner-APPROVED).</prompt>
+  <role>SPAARKE platform developer with BFF DI (ADR-010) + data-driven-dispatch expertise. Follow ADR-010 (helpers only, no new abstractions). Never touch a HandlerId string.</role>
+  <goal>CommunicationModule.cs is decomposed into the 5 named helpers with an IDENTICAL registration set; the Finance handler is renamed to FinanceTotalsCalculator only after the Dataverse pre-check (recorded in notes/dataverse-precheck.md); the optional Phase-5 helpers are applied; build + full test green; publish-size delta reported.</goal>
+
+  <context>
+    <background>spec.md FR-12 / bff design §3.3 + §5 Phase 5. CommunicationModule.cs: 490 lines, 75 registrations, one method, zero helpers. The Finance/Tools handler name-collides with two distinct R6 Ai/Handlers handlers (KEEP both). IToolHandler dispatch is data-driven via sprk_analysistool.sprk_handlerclass rows — a rename is NOT grep-provable and MUST be gated by a Dataverse pre-check (NFR-08). AnalysisServicesModule is large but already decomposed (13 helpers) — leave it.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/(CommunicationModule.cs — decompose into 5 helpers)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Tools/FinancialCalculationToolHandler.cs (→ FinanceTotalsCalculator, gated)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ (the two R6 handlers — KEEP both, do not rename)</file>
+      <file role="canonical-reference">projects/bff-api-cleanup-remediation-r1/design.md</file>
+      <file role="output">projects/code-quality-and-assurance-r3/notes/dataverse-precheck.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">BFF already assessed; decomposition + rename scope verified.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Scope: CommunicationModule decomposition adds cohesive helpers ONLY — registrations MUST be identical post-decomposition; no new abstractions/interfaces.</constraint>
+    <constraint source="project">Scope (data-driven dispatch, NFR-08): before renaming any handler/tool, run the Dataverse sprk_analysistool.sprk_handlerclass pre-check (read-only) and record it in notes/dataverse-precheck.md. NEVER touch a HandlerId string. Do NOT rename either of the two R6 Ai/Handlers handlers.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 46.89 MB); report absolute + delta. No new NuGet packages. Run /conflict-check before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF DI decomposition + data-driven rename</topic>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>projects/bff-api-cleanup-remediation-r1/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Read bff design §3.3 + Phase 5; run /conflict-check on Communication/Finance files.</step>
+    <step order="1">Decompose CommunicationModule.cs into AddChannelSenders / AddAssociationEngine (11 IAssociationRung + 4 IStructuralDetector) / AddThreadResolution / AddMembershipReconciliation / AddCommunicationHostedServices; confirm the full registration set is byte-identical (diff the resolved service collection or the registration list).</step>
+    <step order="2">Run the Dataverse sprk_analysistool.sprk_handlerclass pre-check (read-only): query for any row whose sprk_handlerclass references Services/Finance/Tools/FinancialCalculationToolHandler; record the result in notes/dataverse-precheck.md.</step>
+    <step order="3">If any sprk_analysistool row references the class, invoke the escalation trigger and STOP the rename. Otherwise rename Services/Finance/Tools/FinancialCalculationToolHandler → FinanceTotalsCalculator (update DI + injection sites only; touch NO HandlerId string).</step>
+    <step order="4">Apply the optional Phase-5 helpers: shared circuit-breaker-registry wiring helper across OpenAiClient/ResilientSearchClient/GraphHttpMessageHandler + app-only HTTP boilerplate consolidation (behavior-neutral).</step>
+    <step order="5">dotnet build + full dotnet test green; run dotnet publish and record size delta vs 46.89 MB.</step>
+    <step order="6">Update TASK-INDEX.md: set task 026 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Before renaming any handler/tool, run the Dataverse sprk_analysistool.sprk_handlerclass pre-check and record it in notes/dataverse-precheck.md; if ANY sprk_analysistool row references the class, STOP — never touch a HandlerId string (NFR-08).</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/ (CommunicationModule decomposed; Finance handler renamed if pre-check clear; Phase-5 helpers)</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/dataverse-precheck.md</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/publish-size-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the decomposition, the CommunicationModule registration set is identical (diff shows no added/removed/changed registration).</criterion>
+    <criterion testable="true">Given the pre-check, notes/dataverse-precheck.md records the sprk_analysistool.sprk_handlerclass verification BEFORE any rename.</criterion>
+    <criterion testable="true">Negative: if a sprk_analysistool row references the Finance handler class, the rename was NOT performed and the escalation was raised; no HandlerId string was touched in any case.</criterion>
+    <criterion testable="true">dotnet build + full test green; publish ≤ 60 MB with delta vs 46.89 MB; no new NuGet package; the two R6 Ai/Handlers handlers unchanged.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-12 / bff design §3.3 + Phase 5a/5b/5d. Optional Phase-5 helpers owner-APPROVED.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

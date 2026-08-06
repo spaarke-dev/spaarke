@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>BFF: remove dead EmailToEmlConverter builder half + unify dual registration</title>
+    <phase>2 BFF Remediation</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Fixes a latent production bug (dead builder + conflicting dual DI registration) on the BFF hot path; behavior-sensitive — FULL.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded deletion + registration unification against a verified inventory with exact lines; Sonnet default.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>BFF hot-path contention (19 worktrees); Email files are contested; /conflict-check before each PR; small sequential PRs.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff,dead-code,email</tags>
+  </metadata>
+
+  <prompt>Remove the dead builder half of Services/Email/EmailToEmlConverter.cs (~450 LOC: ConvertToEmlAsync / GenerateEmlFileNameAsync / BuildMimeMessage / Fetch*), keeping the live parser half ExtractAttachments (line 681, live via UploadFinalizationWorker.cs:1047). Unify the conflicting dual registration (scoped EmailServicesModule.cs:44-46 vs singleton OfficeWorkersModule.cs:31) into a single correct registration. Share only the Windows-strict SanitizeFileName helper. Do NOT merge the two LIVE .eml builders (NG2).</prompt>
+  <role>SPAARKE platform developer with BFF email-pipeline expertise. Follow root CLAUDE.md §10. Behavior-preserving for the live parser path; fix the dual-registration conflict.</role>
+  <goal>The dead builder half is removed, ExtractAttachments preserved, a single correct DI registration for the converter, SanitizeFileName shared (Windows-strict), the two live builders untouched, build + full test green, publish-size delta reported.</goal>
+
+  <context>
+    <background>spec.md FR-07 (Bug-2). EmailToEmlConverter.cs (886 LOC) has a dead builder half (~450 LOC, zero production callers) and a live parser half (ExtractAttachments, line 681, used by UploadFinalizationWorker.cs:1047). It is registered twice with conflicting lifetimes: scoped in EmailServicesModule.cs:44-46 and singleton in OfficeWorkersModule.cs:31. The two live .eml builders (EmlGenerationService 133 LOC, GraphMessageToEmlConverter 229 LOC) diverge intentionally (NG2) — do NOT merge them.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Email/EmailToEmlConverter.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/(EmailServicesModule.cs — registration at 44-46)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/(OfficeWorkersModule.cs — registration at 31)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/(UploadFinalizationWorker.cs:1047 — live ExtractAttachments consumer)</file>
+      <file role="canonical-reference">projects/bff-api-cleanup-remediation-r1/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">BFF already assessed; dead-builder + dual-registration verified.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (BFF Bug-2 only): remove the dead builder methods; keep ExtractAttachments (line 681); unify the dual registration into ONE correct lifetime; share only SanitizeFileName. Do NOT merge EmlGenerationService or GraphMessageToEmlConverter (NG2).</constraint>
+    <constraint source="project">Scope: verify ExtractAttachments has no other consumers before touching its signature; the live path (UploadFinalizationWorker.cs:1047) MUST behave identically.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 46.89 MB); report absolute + delta. No new NuGet packages. Run /conflict-check before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF email .eml converter cleanup</topic>
+    <files>
+      <file>projects/bff-api-cleanup-remediation-r1/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + reason). Read bff design §3.3 (triple .eml builder) + Bug-2; run /conflict-check on Email files.</step>
+    <step order="1">Confirm ExtractAttachments (line 681) is the only live member (grep src/ + tests/); confirm the dead builder members have zero production callers.</step>
+    <step order="2">Delete ConvertToEmlAsync / GenerateEmlFileNameAsync / BuildMimeMessage / Fetch* (dead builder half); keep ExtractAttachments intact.</step>
+    <step order="3">Unify the dual registration: pick the correct single lifetime and remove the conflicting one (EmailServicesModule.cs:44-46 vs OfficeWorkersModule.cs:31).</step>
+    <step order="4">Share only the Windows-strict SanitizeFileName helper where the live builders need it; do NOT merge the two live builders.</step>
+    <step order="5">dotnet build + full dotnet test green; run dotnet publish and record size delta vs 46.89 MB.</step>
+    <step order="6">Update TASK-INDEX.md: set task 022 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ExtractAttachments turns out to have consumers beyond UploadFinalizationWorker.cs:1047, or removing the dead half changes the live parser behavior, STOP and escalate — the "dead" boundary was mis-drawn.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Email/EmailToEmlConverter.cs (builder half removed)</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/publish-size-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the change, only one DI registration for the converter remains (single correct lifetime); the dead builder members are gone.</criterion>
+    <criterion testable="true">Given the live path, UploadFinalizationWorker.cs:1047 → ExtractAttachments behaves identically (build + full test green).</criterion>
+    <criterion testable="true">Negative: the two live builders (EmlGenerationService, GraphMessageToEmlConverter) are unchanged (NG2 respected).</criterion>
+    <criterion testable="true">Publish ≤ 60 MB with delta vs 46.89 MB reported; no new NuGet package.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-07 (Bug-2) / bff design §3.3 + Phase 2b.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

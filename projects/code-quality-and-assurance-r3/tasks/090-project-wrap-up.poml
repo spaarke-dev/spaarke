@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>Project wrap-up: reconcile R3-draft, /test-diet gate, final SCORECARD, lessons-learned</title>
+    <phase>9 Wrap-up</phase>
+    <gate>blocked until all prior ✅</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Project-close wrap-up (reconciliation + /test-diet gate + final docs); runs /test-diet unconditionally per root CLAUDE.md §7 — STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Consolidation + gate invocation + doc finalization; Sonnet default.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Terminal task; depends on all prior tasks; runs the project-close /test-diet gate — sequential.</parallel-reason>
+    <deps>prior</deps>
+    <tags>wrapup,test-diet,docs</tags>
+  </metadata>
+
+  <prompt>Close the program: finalize the archived-12-item R3-draft reconciliation record (design.md §3 dispositions, each VERIFY'd); run /test-diet as the project-close gate (root CLAUDE.md §7); publish the final SCORECARD.md aggregate grade; write notes/lessons-learned.md; update README status → Complete.</prompt>
+  <role>SPAARKE platform developer closing a standing quality program. Follow root CLAUDE.md §7 (project-close test diet gate) + §3.</role>
+  <goal>The 12-item R3-draft reconciliation is complete (each item CARRY/ABSORB/UPGRADED + VERIFY'd), /test-diet has run with its report cited, the final SCORECARD.md aggregate grade is published, notes/lessons-learned.md exists, and README status is Complete.</goal>
+
+  <context>
+    <background>spec.md FR-22 + graduation criteria. design.md §3 holds the 12-item archived-R3 disposition table (no item dropped silently; each VERIFY'd during its surface's Phase 0). Root CLAUDE.md §7 mandates /test-diet at project close (090-wrapup task) before marking the project complete; skipping is a HARD WARNING — the wrap-up PR MUST cite the report.</background>
+    <relevant-files>
+      <file role="output">projects/code-quality-and-assurance-r3/notes/r3-draft-reconciliation.md</file>
+      <file role="output">projects/code-quality-and-assurance-r3/notes/lessons-learned.md</file>
+      <file role="output">projects/code-quality-and-assurance-r3/notes/SCORECARD.md (final aggregate)</file>
+      <file role="modify">projects/code-quality-and-assurance-r3/README.md (status → Complete)</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="prior" status="pending">All prior tasks (001–042) must be ✅ before wrap-up.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md-§7">Scope: run /test-diet BEFORE marking the project complete; the wrap-up PR MUST cite notes/test-diet-report.md or document the skip rationale (HARD WARNING otherwise).</constraint>
+    <constraint source="spec">Scope (FR-22): each of the 12 archived-R3 items MUST have a confirmed disposition (CARRY/ABSORB/UPGRADED) + VERIFY — no item dropped silently.</constraint>
+    <constraint source="spec">Scope: publish the final SCORECARD.md aggregate only after task 016's re-baseline + all remediation lands; README status → Complete only when graduation criteria met.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project close + reconciliation</topic>
+    <files>
+      <file>projects/code-quality-and-assurance-r3/design.md</file>
+      <file>projects/code-quality-and-assurance-r3/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Confirm all prior tasks are ✅.</step>
+    <step order="1">Finalize notes/r3-draft-reconciliation.md — each of the 12 design.md §3 items has a confirmed CARRY/ABSORB/UPGRADED disposition + VERIFY; no item dropped.</step>
+    <step order="2">Run /test-diet (project-close gate); save/refresh notes/test-diet-report.md; the wrap-up PR cites it.</step>
+    <step order="3">Publish the final SCORECARD.md aggregate grade (targets A+ senior-panel standard with live forcing-functions preventing re-drift).</step>
+    <step order="4">Write notes/lessons-learned.md.</step>
+    <step order="5">Update README status → Complete.</step>
+    <step order="6">Update TASK-INDEX.md: set task 090 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of the 12 R3-draft items cannot be VERIFY'd (its surface's disposition is unconfirmed), STOP and escalate — no item may be dropped silently (FR-22).</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/r3-draft-reconciliation.md</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/lessons-learned.md</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/SCORECARD.md (final aggregate)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the reconciliation, all 12 archived-R3 items have a confirmed disposition + VERIFY (none dropped).</criterion>
+    <criterion testable="true">Given the close, /test-diet has run and its report is cited in the wrap-up PR.</criterion>
+    <criterion testable="true">Given the program, SCORECARD.md publishes the final aggregate grade and README status is Complete.</criterion>
+    <criterion testable="true">Negative: the project is NOT marked complete if /test-diet was skipped without a documented rationale, or if any R3-draft item is unVERIFY'd.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-22 + graduation criteria. Project-close /test-diet gate per root CLAUDE.md §7.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
