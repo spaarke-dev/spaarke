@@ -10,10 +10,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — P0 ✅ complete; P1 not started |
+| **Task** | **011 — Workspace-shell scaffold** (not-started; next) |
 | **Step** | — |
-| **Status** | not-started (design phase closed; ready for implementation) |
-| **Next Action** | Begin **task 010 (ADR-028 Amendment A3)** — main-session-only, first, before P1 auth. Then P1 waves per TASK-INDEX. |
+| **Status** | not-started (010 ✅ complete) |
+| **Next Action** | `task-execute` on **011** (portal header + tab host + pane layout + dockable assistant). Deps 004,010 both ✅. Then Group B {012,014,017}. |
+
+### Task 010 — COMPLETE (2026-08-06)
+ADR-028 **Amendment A3** authored (concise-only, additive after A2). Ratifies the dual-plane module-host platform + shipped principal-agnostic endpoint pattern (`CallerPrincipalResolver`/`ExternalCollaboration` dual-scheme/plane-by-iss+tid/third-plane seam) as canonical, with Tier-1⟂Tier-2 invariant. CHANGELOG entry added; TASK-INDEX 010 ✅; POML status=completed. Quality gates skipped (documentation-only). **Escalation trigger did NOT fire** — A2 covers only the collaboration product line, not the platform generalization. Not yet committed (owner-gated).
 
 ### Files Modified This Session
 - `spec.md` (FR-01/02 reframed to workspace shell; FR-23–27 amendment; document architecture; assistant bounding + NFR-EXT-AI)

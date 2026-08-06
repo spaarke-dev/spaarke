@@ -4,7 +4,7 @@
     <title>Author ADR-028 Amendment A3 (dual-plane module framework + principal-agnostic endpoints)</title>
     <phase>P1 Module-host foundation</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Auth-architecture ADR amendment (tags include auth/adr); architecture change that all P1 auth code depends on; post-compaction recoverable.</rigor-reason>
     <model-tier>opus</model-tier>
