@@ -28,9 +28,9 @@ Tier: `sonnet` (default) · `opus` (high-blast/judgment) — effort: `high` (def
 | 031 | 404-on-missing history contract (FR-D3) | 4 D | ✅ | 001 | sonnet / high | FULL | Group D-srv-a (ChatEndpoints) |
 | 032 | Stored title + rename endpoint + title-gen (FR-D4) | 4 D | ✅ | 031 | sonnet / high | FULL | none (ChatEndpoints, after 031) |
 | 033 | Retention TTL spike + implement (FR-D10) | 4 D | ✅ (safe per-doc TTL path; filed→ttl=-1, warm-reload durability fix) | 030 | **opus / xhigh** | FULL | none (persistence, after 030) |
-| 034 | "Set related record" rename + prompt (FR-D9) | 4 D | 🔲 | 037 | **opus / high** | FULL | none (HistoryOverlay, after 037) |
+| 034 | "Set related record" rename + prompt (FR-D9) — **re-scoped Path B** (owner 2026-08-06): server-side ADR-024 regarding write on `sprk_analysis` + relax doc-anchor + client picker (escalated: promote endpoint can't write regarding & 400s doc-less) | 4 D | 🔄 in-progress | 037 | **opus / high** | FULL | none (AnalysisEndpoints + Spaarke.Dataverse + HistoryOverlay) |
 | 035 | Route History through rich restore + clear/remount (FR-D1) | 4 D | ✅ (clear-before-restore in WorkspacePane; overwrite-hazard + marker-leak fixed; 2 indep reviews) | 031 | **opus / xhigh** | FULL | none (ConvPane spine) |
-| 036 | Rehydrate attachment chip on restore (FR-D5) | 4 D | 🔲 | 035 | sonnet / high | FULL | none (ConvPane spine) |
+| 036 | Rehydrate attachment chip on restore (FR-D5) — **re-scoped full paired slice** (owner 2026-08-06): BFF restore-DTO projection (`uploadedFiles`) + SprkChat `initialAttachments` shared-lib seam + ConvPane wiring (escalated: manifest not client-exposed & no SprkChat restore seam) | 4 D | 🔄 in-progress | 035 | **sonnet→opus / high** | FULL | none (BFF restore DTO + @spaarke/ui-components + ConvPane) |
 | 037 | HistoryOverlay rebuild: menu/preview/grouping/search (FR-D6/7/8) | 4 D | ✅ (UI complete; FR-D7 data needs BFF projection → DI-01, fold into 039) | 032 | sonnet / high | FULL | Group D-client-b (HistoryOverlay) |
 | 038 | Reanalyze chip on document context (FR-D11) | 4 D | 🔲 | 021,022 | sonnet / high | FULL | none (ConvPane spine) |
 | 039 | Deploy + verify D | 4 D | 🔲 | 030-038 | sonnet / high | STANDARD | none (deploy) |
